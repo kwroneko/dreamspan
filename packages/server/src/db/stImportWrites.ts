@@ -1,13 +1,24 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
-import { currentForkSql, inFork, viewAt, reselectEverywhere, selectedInSql, writeOverride } from "./forkState.ts"
+import {
+  inFork,
+  viewAt,
+  selectedIn,
+  writeOverride,
+  writeSelect,
+  nextSeq,
+  insertFork,
+  effectiveOverride,
+  slotDeletedIn,
+  versionDeletedIn
+} from "./forkState.ts"
 import { forkImportSlot } from "./stImportFork.ts"
-import { onPath } from "./forks.ts"
+import type { ForkRow } from "./rows.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
 // thread resolved what the messages name.
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
@@ -21,9 +32,6 @@ import { ImportLeaseLost, NotFound, ST_CHAT_RECORD, ST_IMPORT_RUN, type StImport
 import { checkStateReferences } from "./stateRefs.ts"
 import { transaction } from "./tx.ts"
 import { DEFAULT_PRESET, newChatLcmSettings, ownedPreset } from "./generationSettings.ts"
-
-/** What a slot `s` shows in its chat's current fork: what an import matches against (unit 9 makes it per file's fork). */
-const shownSql = selectedInSql(currentForkSql("s.chat_id"), "s")
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
@@ -40,6 +48,7 @@ const Messages = Schema.fromJsonString(Schema.Array(Message))
 /** What a record's payload holds. */
 interface RecordPayload {
   readonly source: string
+  readonly forkId?: string
   readonly chatId: string
   readonly sha256?: string
   readonly state?: string
@@ -69,8 +78,6 @@ interface RecordPayload {
   readonly branchDeleted?: boolean
   /** A branch whose ST name the import has placed (or found a name where it would go). */
   readonly named?: boolean
-  /** Where that naming choice belongs; resolved again when a reimport forks earlier. */
-  readonly nameSlot?: string | null
   /** Last resolved parent, retained when a later header loses main_chat. */
   readonly parentRecordId?: string
 }
@@ -100,8 +107,38 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
       )
     )
 
+  /** Older records resolve by their recorded end; new files receive their own fork at start. */
+  const recordFork = Effect.fnUntraced(function* (payload: RecordPayload) {
+    const [existing] = yield* sql<ForkRow>`SELECT * FROM forks WHERE chat_id = ${payload.chatId}
+      AND (id = ${payload.forkId ?? ""} OR (${payload.forkId ?? null} IS NULL
+        AND tip_slot_id IS ${payload.end ?? payload.last ?? null}))
+      ORDER BY id = ${payload.forkId ?? ""} DESC, created_at, id LIMIT 1`
+    if (existing) return existing
+    if (payload.forkId !== undefined) return yield* new NotFound({ entity: "fork", id: payload.forkId })
+    const [parent] = yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.current_fork_id = f.id
+      WHERE c.id = ${payload.chatId}`
+    return yield* insertFork(sql, {
+      chatId: payload.chatId,
+      parent: parent!,
+      baseSlotId: null,
+      tipSlotId: payload.end ?? payload.last ?? null,
+      at: Date.now()
+    })
+  })
+
+  /** Deleting the recorded tail may have moved only this fork's tip up its path. */
+  const relocatedEnd = Effect.fnUntraced(function* (fork: ForkRow, end: string | null) {
+    const [row] = yield* sql<{ id: string }>`WITH RECURSIVE up(id, parent, deleted, depth) AS (
+      SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, s.depth FROM slots s WHERE s.id = ${end}
+      UNION ALL
+      SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, s.depth
+      FROM slots s JOIN up ON s.id = up.parent WHERE up.deleted
+    ) SELECT id FROM up WHERE NOT deleted ORDER BY depth DESC LIMIT 1`
+    return row?.id ?? null
+  })
+
   /** An imported state event, after checking everything it names belongs to the user. */
-  const insertEvent = (userId: UserId, chatId: string, slotId: string | null, data: StateEventData) =>
+  const insertEvent = (userId: UserId, chatId: string, slotId: string | null, data: StateEventData, forkId: string) =>
     Effect.gen(function* () {
       yield* checkStateReferences(sql, userId, chatId, data, null)
       const [next] = yield* sql<{ n: number }>`
@@ -115,6 +152,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         key: data.key,
         scope: null,
         value_json: JSON.stringify(data.value),
+        fork_id: forkId,
+        fork_seq: yield* nextSeq(sql, chatId),
         origin: "import",
         origin_ref: null,
         created_at: Date.now()
@@ -246,7 +285,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         }
       }).pipe(transaction(sql, "StImportBegin")),
 
-    StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease }) =>
+    StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease, parentRecordId }) =>
       Effect.gen(function* () {
         const recordId = uuidv7()
         yield* current(userId, lease, recordId)
@@ -283,7 +322,23 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         yield* sql`DELETE FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}
           AND json_extract(payload_json, '$.source') = ${source}
           AND NOT EXISTS (SELECT 1 FROM chats c WHERE c.id = json_extract(payload_json, '$.chatId'))`
-        const payload: RecordPayload = { source, chatId, merged: into !== null, title, lease }
+        const parentPayload = parentRecordId === undefined ? null : yield* record(userId, parentRecordId)
+        if (parentPayload !== null && parentPayload.chatId !== chatId)
+          return yield* new NotFound({ entity: "import record", id: parentRecordId! })
+        const [currentFork] =
+          yield* sql<ForkRow>`SELECT f.* FROM forks f JOIN chats c ON c.current_fork_id = f.id WHERE c.id = ${chatId}`
+        const parent = parentPayload === null ? currentFork : yield* recordFork(parentPayload)
+        const fork =
+          into === null
+            ? parent!
+            : yield* insertFork(sql, {
+                chatId,
+                parent: parent!,
+                baseSlotId: null,
+                tipSlotId: null,
+                at
+              })
+        const payload: RecordPayload = { source, chatId, forkId: fork.id, merged: into !== null, title, lease }
         yield* sql`INSERT INTO jobs ${sql.insert({
           id: recordId,
           owner_user_id: userId,
@@ -303,6 +358,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           const { userId, chatId, speakers } = input
           yield* ownedChat(userId, chatId)
           const payload = yield* leased(userId, input.recordId, chatId, input.lease)
+          const fileFork = yield* recordFork(payload)
+          const previousTip = yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? payload.last ?? null)
+          const shownSql = selectedIn(sql, fileFork.id, "s")
           // Every speaker must be one of the user's live cards.
           const named = [...new Set(Object.values(speakers).filter((id): id is EntityId => id !== null))]
           for (const entity of named) {
@@ -320,7 +378,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           // The slots on the path to where earlier imports of the file left it, by depth, from
           // the batch's first message down: walked once, and only if a message doesn't match exactly.
           let priorPath: Map<number, string> | null = null
-          let forkPrior = payload.forkPrior ?? null
+          const forkPrior = payload.forkPrior ?? null
           const firstDepth = parent === null ? 0 : parent.depth + 1
           const priorAt = (depth: number) =>
             Effect.gen(function* () {
@@ -349,45 +407,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
               }
               return priorPath.get(depth)
             })
-          // A slot can be on several imported files' paths. Its selection is global,
-          // so advancing it for one file would silently change the others. Walk the
-          // other records only when the imported selection differs from the slot's.
-          let sharedPath: Set<string> | null = null
-          const shared = (slotId: string) =>
-            Effect.gen(function* () {
-              if (sharedPath === null) {
-                const rows = yield* sql<{ id: string }>`
-                  WITH RECURSIVE paths(id, parent) AS (
-                    SELECT s.id, s.parent_slot_id FROM jobs j JOIN slots s
-                      ON s.id IN (json_extract(j.payload_json, '$.last'), json_extract(j.payload_json, '$.end'),
-                        json_extract(j.payload_json, '$.prior'), json_extract(j.payload_json, '$.forkPrior'))
-                    WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
-                      AND j.id <> ${input.recordId} AND s.chat_id = ${chatId}
-                    UNION
-                    SELECT s.id, s.parent_slot_id FROM slots s JOIN paths p ON s.id = p.parent
-                  ) SELECT id FROM paths`
-                sharedPath = new Set(rows.map((row) => row.id))
-              }
-              return sharedPath.has(slotId)
-            })
-          // This file's remembered naming choice, and whether it's on the path down to
-          // `parent`. Matching only walks down, so the path is walked once per batch and
-          // then follows each adopted slot: a long run of matches costs no ancestry scans.
-          let choice: { branch_name: string | null; branch_name_user: number; above: boolean } | null | undefined
-          const remembered = Effect.gen(function* () {
-            if (choice === undefined) {
-              const [row] = yield* sql<{ branch_name: string | null; branch_name_user: number; above: number }>`
-                WITH RECURSIVE prefix(id, parent) AS (
-                  SELECT id, parent_slot_id FROM slots WHERE id = ${parent?.id ?? null} AND chat_id = ${chatId}
-                  UNION ALL
-                  SELECT s.id, s.parent_slot_id FROM slots s JOIN prefix p ON s.id = p.parent
-                )
-                SELECT branch_name, branch_name_user, EXISTS (SELECT 1 FROM prefix WHERE id = choice.id) AS above
-                FROM slots choice WHERE choice.id = ${payload.nameSlot ?? null} AND choice.chat_id = ${chatId}`
-              choice = row === undefined ? null : { ...row, above: row.above === 1 }
-            }
-            return choice
-          })
           let matching = input.matching
           let added = 0
           let differing = 0
@@ -436,8 +455,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 slot_id: string
                 version_id: string
                 depth: number
-                branch_name: string | null
-                branch_name_user: number
                 hidden: number
                 selected: number
                 content: string
@@ -452,24 +469,25 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 version_deleted: number
                 locally_changed: number
               }>`
-                SELECT s.id AS slot_id, v.id AS version_id, s.depth, s.branch_name, s.branch_name_user,
-                  ${contextExcludedIn(sql, sql.literal(currentForkSql("s.chat_id")))} AS hidden,
-                  v.id = ${sql.literal(shownSql)} AS selected,
+                SELECT s.id AS slot_id, v.id AS version_id, s.depth,
+                  ${contextExcludedIn(sql, fileFork.id)} AS hidden,
+                  v.id = ${shownSql} AS selected,
                   v.content, v.created_at, v.writer, v.ordinal,
                   s.purged_at IS NOT NULL AS slot_purged, v.purged_at IS NOT NULL AS version_purged,
                   s.branch_deleted,
-                  s.deleted_at IS NOT NULL AS deleted, v.deleted_at IS NOT NULL AS version_deleted,
-                  s.row_version <> s.st_import_row_version OR EXISTS (
-                    SELECT 1 FROM version_history h WHERE h.version_id = ${sql.literal(shownSql)}
+                  ${slotDeletedIn(sql, fileFork.id, "s")} AS deleted, ${versionDeletedIn(sql, fileFork.id, "v")} AS version_deleted,
+                  EXISTS (
+                    SELECT 1 FROM version_history h WHERE h.version_id = ${shownSql}
                   ) OR EXISTS (
-                    SELECT 1 FROM fork_overrides o WHERE o.target_id = s.id AND o.kind = 'select' AND o.origin = 'user'
+                    SELECT 1 FROM fork_overrides o WHERE o.id IN (
+                      ${effectiveOverride(sql, "select", fileFork.id, "s.id")},
+                      ${effectiveOverride(sql, "hide", fileFork.id, "s.id")},
+                      ${effectiveOverride(sql, "delete_slot", fileFork.id, "s.id")}) AND o.origin = 'user'
                   ) OR EXISTS (
-                    SELECT 1 FROM versions r JOIN fork_overrides o ON o.target_id = r.id AND o.kind = 'replace'
-                    WHERE r.slot_id = s.id
-                  ) OR EXISTS (
-                    -- A hide or a deletion in a fork is the user's too (§2.4).
-                    SELECT 1 FROM fork_overrides o WHERE o.slot_id = s.id AND o.origin = 'user'
-                      AND o.kind IN ('hide', 'delete_slot', 'delete_version')
+                    SELECT 1 FROM versions r JOIN fork_overrides o ON o.id IN (
+                      ${effectiveOverride(sql, "replace", fileFork.id, "r.id")},
+                      ${effectiveOverride(sql, "delete_version", fileFork.id, "r.id")})
+                    WHERE r.slot_id = s.id AND o.origin = 'user'
                   ) AS locally_changed,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
@@ -521,63 +539,12 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
               // A branch merged into another file's chat is that file's only where it reads
               // the same: a branch from another swipe, or with messages hidden only in it,
               // diverges there, so its own path keeps what ST had on it.
-              let own = recorded ?? exact ?? (input.strict ? undefined : candidates[0])
-              let match = placeholder ?? own?.[0]
-              // A replacement may match another fork's path, including an unnamed one. If our old naming
-              // choice is no longer on that prefix, adopting its slot would strand our
-              // choice or overwrite theirs. Start an independent path at the collision.
-              // A parent extending after its own remembered slot may still share a
-              // child's named continuation; its existing placement remains reachable.
-              if (
-                match !== undefined &&
-                copied === null &&
-                placeholder === undefined &&
-                payload.nameSlot != null &&
-                match.slot_id !== payload.nameSlot &&
-                match.slot_id !== (yield* priorAt(match.depth))
-              ) {
-                const mine = yield* remembered
-                if (
-                  mine !== null &&
-                  !mine.above &&
-                  (mine.branch_name !== match.branch_name || mine.branch_name_user !== match.branch_name_user)
-                ) {
-                  own = undefined
-                  match = undefined
-                }
-              }
-              // A real change in one file's shared selection needs its own immutable
-              // path, as when the branch was first imported from a different swipe.
-              // Copy the recorded suffix one position at a time, keeping local choices,
-              // histories, deleted placeholders and state instead of replaying ST over them.
-              if (
-                own !== undefined &&
-                match !== undefined &&
-                !own.some((row) => row.selected === 1 && same(row, shown)) &&
-                match.locally_changed === 0 &&
-                match.deleted === 0 &&
-                match.slot_purged === 0 &&
-                !branchDeleted &&
-                (yield* shared(match.slot_id))
-              ) {
-                forkPrior ??= payload.prior ?? payload.end ?? payload.last ?? null
-                if (forkPrior !== null) {
-                  const original = own
-                  copied = yield* forkImportSlot(sql, match.slot_id, parent?.id ?? null)
-                  priorPath ??= new Map()
-                  priorPath.set(match.depth, copied)
-                  const ids = yield* sql<{
-                    id: string
-                    ordinal: number
-                  }>`SELECT id, ordinal FROM versions WHERE slot_id = ${copied}`
-                  own = original.map((row) => ({
-                    ...row,
-                    slot_id: copied!,
-                    version_id: ids.find((v) => v.ordinal === row.ordinal)!.id
-                  }))
-                  match = own[0]!
-                }
-              }
+              const own =
+                recorded ??
+                exact ??
+                candidates.find((rows) => rows[0]!.hidden === (message.hidden ? 1 : 0)) ??
+                (input.strict ? undefined : candidates[0])
+              const match = placeholder ?? own?.[0]
               if (match !== undefined) {
                 if (copied !== null) {
                   added++
@@ -598,21 +565,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                   }
                   // A local selection, edit, hide or deletion stays the user's. Import
                   // selections advance their baseline with the slot's optimistic revision.
-                  if (
-                    !showsSelected &&
-                    selected !== undefined &&
-                    match.locally_changed === 0 &&
-                    match.deleted === 0 &&
-                    !(yield* shared(match.slot_id))
-                  ) {
-                    yield* recordHistoryReduction(sql, match.slot_id, shown.content)
-                    // No fork chose here (locally_changed), so every fork shows what the
-                    // import chose last: each moves to the file's choice, as the import's.
-                    const before = own.find((row) => row.selected === 1)?.version_id
-                    if (before !== undefined)
-                      yield* reselectEverywhere(sql, chatId, match.slot_id, before, selected, "import")
-                    yield* sql`UPDATE slots SET row_version = row_version + 1,
-                      st_import_row_version = row_version + 1 WHERE id = ${match.slot_id}`
+                  if (!showsSelected && selected !== undefined && match.locally_changed === 0 && match.deleted === 0) {
+                    yield* recordHistoryReduction(sql, match.slot_id, shown.content, null, fileFork.id)
+                    yield* writeSelect(sql, { id: fileFork.id, chatId }, match.slot_id, selected, "import")
                     showsSelected = true
                     changed = true
                   }
@@ -621,7 +576,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 if (placeholder === undefined && (!showsSelected || match.hidden !== (message.hidden ? 1 : 0)))
                   differing++
                 parent = { id: match.slot_id, depth: match.depth, lane_id: laneId }
-                if (choice != null && match.slot_id === payload.nameSlot) choice.above = true
                 slotIds.push(match.slot_id as SlotId)
                 continue
               }
@@ -638,6 +592,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
               id: slotId,
               chat_id: chatId,
               lane_id: laneId,
+              fork_id: fileFork.id,
               parent_slot_id: parent?.id ?? null,
               depth,
               selected_version_id: selected,
@@ -654,19 +609,20 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           // A new chat's leaf follows its messages, so a chat whose import stops shows them,
           // unless the user moved it: only from unset, or where the import last put it.
           let advanced = payload.advanced ?? null
-          if (input.advanceLeaf && !branchDeleted && slotIds.length > 0) {
-            const moved = yield* sql<{
-              id: string
-            }>`UPDATE chats SET active_leaf_slot_id = ${slotIds.at(-1)!}
-              WHERE id = ${chatId} AND (active_leaf_slot_id IS NULL OR active_leaf_slot_id = ${advanced ?? ""})
-              AND EXISTS (SELECT 1 FROM slots WHERE id = ${slotIds.at(-1)!} AND deleted_at IS NULL)
-              RETURNING id`
-            // The leaf is the current fork's tip (schema/forks.ts), which takes the fork's
-            // composer along.
-            if (moved.length > 0) advanced = slotIds.at(-1)!
+          const tip = slotIds.length === 0 ? undefined : yield* relocatedEnd(fileFork, slotIds.at(-1)!)
+          if (
+            (input.advanceLeaf || payload.end == null || added > 0 || payload.advanced != null) &&
+            !branchDeleted &&
+            tip !== undefined &&
+            fileFork.deleted_at === null &&
+            (fileFork.tip_slot_id === null || fileFork.tip_slot_id === previousTip)
+          ) {
+            yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fileFork.id}`
+            advanced = tip
           }
           const progress: RecordPayload = {
             ...payload,
+            forkId: fileFork.id,
             firstAdded: payload.firstAdded ?? firstAdded,
             advanced,
             branchDeleted,
@@ -682,11 +638,12 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
     StImportFinishChat: (input) =>
       Effect.gen(function* () {
         const { userId, chatId } = input
-        const chat = yield* ownedChat(userId, chatId)
+        yield* ownedChat(userId, chatId)
         const payload = yield* leased(userId, input.recordId, chatId, input.lease)
+        const fileFork = yield* recordFork(payload)
         if (input.position !== null) yield* ownedSlot(chatId, input.position)
         const target = input.leaf === null ? null : yield* ownedSlot(chatId, input.leaf)
-        const end = input.end === null ? null : yield* ownedSlot(chatId, input.end)
+        if (input.end !== null) yield* ownedSlot(chatId, input.end)
         const notes: Record<string, EntityId> = {
           ...input.previousNotes,
           ...(payload.notes as Record<string, EntityId> | undefined)
@@ -695,14 +652,32 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           const replaced = notes[note.kind]
           const entity = yield* insertNote(userId, chatId, payload.source, note)
           if (replaced !== undefined) {
-            yield* insertEvent(userId, chatId, input.position, { key: "note.deactivate", value: { note: replaced } })
+            yield* insertEvent(
+              userId,
+              chatId,
+              input.position,
+              { key: "note.deactivate", value: { note: replaced } },
+              fileFork.id
+            )
           }
           if (note.activate) {
-            yield* insertEvent(userId, chatId, input.position, { key: "note.activate", value: { note: entity } })
+            yield* insertEvent(
+              userId,
+              chatId,
+              input.position,
+              { key: "note.activate", value: { note: entity } },
+              fileFork.id
+            )
           }
           // Which note is the chat's ST author's note (DATA-MODEL §5.3), sent or not.
           if (note.kind === "author_note") {
-            yield* insertEvent(userId, chatId, input.position, { key: "author_note.set", value: { note: entity } })
+            yield* insertEvent(
+              userId,
+              chatId,
+              input.position,
+              { key: "author_note.set", value: { note: entity } },
+              fileFork.id
+            )
           }
           notes[note.kind] = entity
         }
@@ -710,163 +685,40 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         for (const kind of input.removedNotes) {
           const gone = notes[kind]
           if (gone === undefined) continue
-          yield* insertEvent(userId, chatId, input.position, { key: "note.deactivate", value: { note: gone } })
+          yield* insertEvent(
+            userId,
+            chatId,
+            input.position,
+            { key: "note.deactivate", value: { note: gone } },
+            fileFork.id
+          )
           delete notes[kind]
         }
-        for (const event of input.events) yield* insertEvent(userId, chatId, input.position, event)
-        // Deleting the file's end moves the leaf to its nearest live ancestor. An import
-        // continues from there too, walking individual deletions without restoring them.
-        // A whole deleted branch stays a barrier, including when its root was purged.
-        let previousLeaf = payload.end ?? payload.advanced ?? null
-        let blocked = payload.branchDeleted ?? false
-        if (previousLeaf !== null) {
-          const [previous] = yield* sql<{ leaf: string | null; blocked: number }>`
-            WITH RECURSIVE up(id, parent, deleted, barrier, n) AS (
-              SELECT id, parent_slot_id, deleted_at IS NOT NULL, branch_deleted, 0
-              FROM slots WHERE id = ${previousLeaf} AND chat_id = ${chatId}
-              UNION ALL
-              SELECT s.id, s.parent_slot_id, s.deleted_at IS NOT NULL, s.branch_deleted, up.n + 1
-              FROM slots s JOIN up ON s.id = up.parent WHERE up.deleted AND NOT up.barrier
-            )
-            SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS leaf,
-              EXISTS (SELECT 1 FROM up WHERE barrier) AS blocked`
-          previousLeaf = previous?.leaf ?? null
-          blocked ||= previous?.blocked === 1
-        }
-        // Only from where this file left it (or deletion relocated it). A chat continued
-        // here keeps its own leaf and composer; an unchanged file has no leaf to move to.
-        const leaf = chat.active_leaf_slot_id
-        const moveLeaf =
-          !blocked &&
-          target?.deleted_at === null &&
-          (leaf === null || leaf === previousLeaf || leaf === (payload.advanced ?? null))
-        // A chat of the import's own loses its unfinished mark, unless the user renamed it.
-        if (!payload.merged && payload.title !== undefined) {
-          yield* sql`UPDATE chats SET title = ${payload.title}
-            WHERE id = ${chatId} AND title = ${unfinishedTitle(payload.title)}`
-        }
-        yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
-            active_leaf_slot_id = ${moveLeaf ? input.leaf : leaf},
-            last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)),
-            row_version = row_version + 1
-          WHERE id = ${chatId}`
-        // Other forks that ended where this file did follow what it appended, as the current
-        // fork's tip does above: otherwise those messages would be on no fork's path, where
-        // the switcher used to open the branch on them. A fork the user went on in has
-        // another tip, and a file that went another way leaves its forks where they were.
+        for (const event of input.events) yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+        // Advance only this file's fork, preserving a continuation made locally.
         if (
-          !blocked &&
-          end !== null &&
-          end.deleted_at === null &&
-          previousLeaf !== null &&
-          end.id !== previousLeaf &&
-          (yield* onPath(sql, chatId, end.id, previousLeaf))
+          fileFork.deleted_at === null &&
+          target?.deleted_at === null &&
+          (fileFork.tip_slot_id === null ||
+            fileFork.tip_slot_id === (yield* relocatedEnd(fileFork, payload.advanced ?? payload.end ?? null)))
         )
-          yield* sql`UPDATE forks SET tip_slot_id = ${end.id}, row_version = row_version + 1
-            WHERE chat_id = ${chatId} AND deleted_at IS NULL AND tip_slot_id = ${previousLeaf}`
-        // Naming invariant (also ARCHITECTURE.md §13): a recorded fork owns one naming
-        // choice (branch_name, branch_name_user), including (null, 1) for a local clear.
-        // Keep its remembered slot while reachable on this file's path, even if its
-        // parent adopts that slot or moves away. Otherwise place the choice at the new
-        // first divergence, respecting an existing local choice there. Remove only the
-        // redundant copy of this choice on a newly copied suffix. Relocation never
-        // clears or renames original choices on other recorded/abandoned paths; matching
-        // isolates a replacement that would collide with another choice (above).
-        // Automatic filenames need the same bookkeeping, with an initial (null, 0).
-        // If no divergence exists, retain the remembered slot for a later regrowth.
+          yield* sql`UPDATE forks SET tip_slot_id = ${input.leaf}, row_version = row_version + 1 WHERE id = ${fileFork.id} AND tip_slot_id IS NOT ${input.leaf}`
+        if (!payload.merged && payload.title !== undefined)
+          yield* sql`UPDATE chats SET title = ${payload.title} WHERE id = ${chatId} AND title = ${unfinishedTitle(payload.title)}`
+        yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+          last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)), row_version = row_version + 1
+          WHERE id = ${chatId}`
         let fork: "named" | "kept" | "same" | null = null
-        let named = payload.named ?? false
-        let nameSlot = payload.nameSlot ?? null
-        if ((input.fork !== null || payload.merged) && input.end !== null) {
-          const [parentRow] = yield* sql<{ payload_json: string }>`
-            SELECT payload_json FROM jobs WHERE id = ${input.fork?.parentRecordId ?? payload.parentRecordId ?? ""} AND owner_user_id = ${userId}
-              AND kind = ${ST_CHAT_RECORD}`
-          const parent = parentRow === undefined ? null : (JSON.parse(parentRow.payload_json) as RecordPayload)
-          const parentEnd = parent?.chatId === chatId ? (parent.end ?? parent.last ?? null) : null
-          // A renamed main file may now have a record in a different chat. It has
-          // no shared slots here, so use an empty parent path instead of skipping
-          // transfer of this file's remembered naming choice.
-          {
-            type NameSlot = { id: string; depth: number; branch_name: string | null; branch_name_user: number }
-            const divergence = (end: string | null, placement: string | null = null) => sql<
-              NameSlot & { keeps_placement: number }
-            >`
-              WITH RECURSIVE theirs(id, parent) AS (
-                SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${chatId}
-                UNION ALL
-                SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
-              ), mine(id, parent, depth) AS (
-                SELECT id, parent_slot_id, depth FROM slots WHERE id = ${end} AND chat_id = ${chatId}
-                UNION ALL
-                SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
-              )
-              SELECT s.id, s.depth, s.branch_name, s.branch_name_user,
-                EXISTS (SELECT 1 FROM mine WHERE id = ${placement}) AS keeps_placement
-              FROM mine m JOIN slots s ON s.id = m.id
-              WHERE m.id NOT IN (SELECT id FROM theirs)
-                -- A transferred choice must start on this run's independent suffix,
-                -- never on an older shared prefix outside the parent's current path.
-                AND (${placement} IS NULL OR EXISTS (SELECT 1 FROM mine WHERE id = ${placement})
-                  OR s.depth >= (SELECT depth FROM slots WHERE id = ${payload.firstAdded ?? null}))
-              ORDER BY m.depth LIMIT 1`
-            // Claim recovered older records' placement (StImportClaim, below); one it
-            // couldn't (an automatic name without a parent) falls back to the divergence
-            // of its prior path. `nameSlot` also survives an interrupted, batched suffix copy.
-            const [previous] =
-              nameSlot === null
-                ? yield* divergence(payload.end ?? null)
-                : yield* sql<NameSlot>`SELECT id, depth, branch_name, branch_name_user FROM slots
-                  WHERE id = ${nameSlot} AND chat_id = ${chatId}`
-            const [current] = yield* divergence(input.end, previous?.id ?? null)
-            if (current === undefined) fork = "same"
-            else {
-              // Parent-only changes cannot relocate a reachable naming choice. A
-              // replacement path (with or without a suffix copy) needs a new placement.
-              const own = current.keeps_placement === 1 && previous !== undefined ? previous : current
-              const moving = previous !== undefined && previous.id !== own.id
-              const canName =
-                own.branch_name_user === 0 &&
-                ((own.branch_name === null && !(named && previous?.id === own.id)) ||
-                  // A copied import label at the new divergence may belong to the parent.
-                  (moving && payload.forkPrior != null))
-              const name = moving ? previous.branch_name : (input.fork?.name ?? null)
-              const local = moving ? previous.branch_name_user : 0
-              fork = canName && name !== null ? "named" : "kept"
-              if (canName) {
-                // Import-only naming keeps the selection baseline aligned. Carrying a
-                // local naming choice keeps it local at its new switch point too.
-                if (own.branch_name !== name || own.branch_name_user !== local) {
-                  yield* sql`UPDATE slots SET branch_name = ${name}, branch_name_user = ${local}, row_version = row_version + 1,
-                    st_import_row_version = CASE WHEN ${local} = 0 AND st_import_row_version = row_version
-                      THEN row_version + 1 ELSE st_import_row_version END
-                    WHERE id = ${own.id}`
-                }
-                if (moving && payload.forkPrior != null && previous.depth > own.depth) {
-                  // Remove only this label's copy farther down the new suffix. The original
-                  // path and unrelated names on the copied suffix retain their choices.
-                  yield* sql`
-                    WITH RECURSIVE mine(id, parent, depth) AS (
-                      SELECT id, parent_slot_id, depth FROM slots WHERE id = ${input.end} AND chat_id = ${chatId}
-                      UNION ALL
-                      SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
-                        WHERE m.depth > ${previous.depth}
-                    )
-                    UPDATE slots SET branch_name = NULL, branch_name_user = 0, row_version = row_version + 1,
-                      st_import_row_version = CASE WHEN st_import_row_version = row_version
-                        THEN row_version + 1 ELSE st_import_row_version END
-                    WHERE id IN (SELECT id FROM mine WHERE depth = ${previous.depth}) AND id <> ${previous.id}
-                      AND branch_name IS ${previous.branch_name} AND branch_name_user = ${previous.branch_name_user}`
-                }
-              }
-              named = true
-              nameSlot = own.id
-            }
-          }
+        if (input.fork !== null || payload.merged) {
+          const name = input.fork?.name ?? null
+          fork = fileFork.name_user || payload.named || name === null ? "kept" : "named"
+          if (fork === "named")
+            yield* sql`UPDATE forks SET name = ${name}, row_version = row_version + 1 WHERE id = ${fileFork.id}`
         }
         const updated: RecordPayload = {
           ...payload,
-          named,
-          nameSlot,
+          forkId: fileFork.id,
+          named: payload.named || fork === "named",
           ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
           sha256: input.sha256,
           state: input.stateJson,
@@ -910,8 +762,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
     StImportClaim: ({ userId, recordId, lease, parentRecordId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<{ status: string; payload_json: string; deleted_at: number | null }>`
-          SELECT j.status, j.payload_json, c.deleted_at FROM jobs j
+          SELECT j.status, j.payload_json, coalesce(c.deleted_at, f.deleted_at) AS deleted_at FROM jobs j
           JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
+          LEFT JOIN forks f ON f.id = json_extract(j.payload_json, '$.forkId')
           WHERE j.id = ${recordId} AND j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}`
         if (!row) return yield* new NotFound({ entity: "import record", id: recordId })
         // A run that's over takes nothing; the current one takes its own lease, or one of a
@@ -919,68 +772,20 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         yield* current(userId, lease, recordId)
         const payload = JSON.parse(row.payload_json) as RecordPayload
         const prior = payload.last ?? payload.end ?? null
-        let nameSlot = payload.nameSlot ?? null
+        const fileFork = yield* recordFork(payload)
         const parentId = parentRecordId ?? payload.parentRecordId
-        let parentPayload: RecordPayload | undefined
-        if (parentId !== undefined) {
-          const [parent] = yield* sql<{ payload_json: string }>`SELECT payload_json FROM jobs
-            WHERE id = ${parentId} AND owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}`
-          if (!parent) return yield* new NotFound({ entity: "import record", id: parentId })
-          parentPayload = JSON.parse(parent.payload_json) as RecordPayload
-        }
-        // Legacy records must recover their choice before message matching can
-        // adopt another fork's occupied placement. Keep placeholders in the walk.
-        if (payload.merged && nameSlot === null && prior !== null && parentPayload !== undefined) {
-          // Automatic-name records have neither field, and their own choice is
-          // usually (null, 0): only the parent's path tells it from an ancestor's.
-          const parentEnd =
-            parentPayload.chatId === payload.chatId ? (parentPayload.end ?? parentPayload.last ?? null) : null
-          const [placement] = yield* sql<{ id: string; chosen: number }>`
-            WITH RECURSIVE theirs(id, parent) AS (
-              SELECT id, parent_slot_id FROM slots WHERE id = ${parentEnd} AND chat_id = ${payload.chatId}
-              UNION ALL
-              SELECT s.id, s.parent_slot_id FROM slots s JOIN theirs t ON s.id = t.parent
-            ), mine(id, parent, depth) AS (
-              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
-              UNION ALL
-              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
-            ) SELECT s.id, s.branch_name IS NOT NULL OR s.branch_name_user = 1 AS chosen
-            FROM mine m JOIN slots s ON s.id = m.id
-            WHERE m.id NOT IN (SELECT id FROM theirs) ORDER BY m.depth LIMIT 1`
-          // A custom-name record's divergence carries its choice, unless the parent's
-          // path has moved off the old shared prefix since (handled below).
-          if (placement !== undefined && (!payload.named || placement.chosen === 1)) nameSlot = placement.id
-        }
-        if (payload.merged && nameSlot === null && prior !== null && payload.named) {
-          // An older custom-name record put its name at its divergence (or found one
-          // there), and only a local choice, (name, 1) or (null, 1), replaced it since.
-          // Ancestors' choices lie above it on the path and children's below its end,
-          // so without a parent path to go by, the deepest choice no other record
-          // remembers is taken as its own: the parent may be gone, or its path may have
-          // moved off the old one. A deeper local choice on its path (a renamed fork
-          // point, or a revision mismatch migration 0043 marked) is taken instead then.
-          const [placement] = yield* sql<{ id: string }>`
-            WITH RECURSIVE mine(id, parent, depth) AS (
-              SELECT id, parent_slot_id, depth FROM slots WHERE id = ${prior} AND chat_id = ${payload.chatId}
-              UNION ALL
-              SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN mine m ON s.id = m.parent
-            ) SELECT s.id FROM mine m JOIN slots s ON s.id = m.id
-            WHERE (s.branch_name IS NOT NULL OR s.branch_name_user = 1)
-              AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
-                AND j.id <> ${recordId} AND json_extract(j.payload_json, '$.nameSlot') = s.id)
-            ORDER BY m.depth DESC LIMIT 1`
-          nameSlot = placement?.id ?? null
-        }
+        if (parentRecordId !== undefined) yield* record(userId, parentRecordId)
         yield* sql`UPDATE jobs SET payload_json = ${JSON.stringify({
           ...payload,
           lease,
           prior,
-          nameSlot,
+          forkId: fileFork.id,
           ...(parentId === undefined ? {} : { parentRecordId: parentId }),
           branchDeleted: false
         })}, updated_at = ${Date.now()}
           WHERE id = ${recordId}`
         return {
+          forkId: fileFork.id as ForkId,
           recordId,
           source: payload.source,
           chatId: payload.chatId as ChatId,

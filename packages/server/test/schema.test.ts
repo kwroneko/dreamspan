@@ -432,6 +432,16 @@ describe("edits are non-destructive (invariant 1)", () => {
     expect(() => run(`UPDATE entity_revisions SET doc_json = '{}' WHERE id = 'r1'`)).toThrow(/immutable/)
   })
 
+  it("keeps legacy slot labels frozen now that imports name forks", () => {
+    const message = slot(chat(user()), null)
+    expect(() => run("UPDATE slots SET branch_name = 'Imported road' WHERE id = ?", message.slotId)).toThrow(
+      /names belong to forks/
+    )
+    expect(() => run("UPDATE slots SET branch_name_user = 1 WHERE id = ?", message.slotId)).toThrow(
+      /names belong to forks/
+    )
+  })
+
   it("freezes a rollout's context snapshot (invariant 6)", () => {
     const c = chat(user())
     run(

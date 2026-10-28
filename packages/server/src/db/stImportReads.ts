@@ -1,6 +1,6 @@
 // Read handlers for the ST data folder import (ARCHITECTURE.md §13): what earlier imports
 // made, so a re-run updates it instead of importing it twice.
-import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -13,8 +13,9 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
     StImportSources: ({ userId }) =>
       Effect.gen(function* () {
         const records = yield* sql<{ id: string; status: string; payload_json: string; deleted_at: number | null }>`
-          SELECT j.id, j.status, j.payload_json, c.deleted_at FROM jobs j
+          SELECT j.id, j.status, j.payload_json, coalesce(c.deleted_at, f.deleted_at) AS deleted_at FROM jobs j
           JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
+          LEFT JOIN forks f ON f.id = json_extract(j.payload_json, '$.forkId')
           WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD}
           ORDER BY j.id`
         const library = yield* sql<{
@@ -34,6 +35,7 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
         return {
           chats: records.map((row) => {
             const payload = JSON.parse(row.payload_json) as {
+              forkId?: ForkId
               source: string
               chatId: ChatId
               state?: string
@@ -43,6 +45,7 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
               firstAdded?: SlotId | null
             }
             return {
+              forkId: payload.forkId ?? (String(payload.chatId) as ForkId),
               recordId: row.id,
               source: payload.source,
               chatId: payload.chatId,

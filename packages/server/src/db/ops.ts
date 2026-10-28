@@ -354,6 +354,7 @@ export type StImportNote = typeof StImportNote.Type
 
 /** A chat file an earlier import recorded, and the chat it went into. */
 const StChatRecord = Schema.Struct({
+  forkId: ForkId,
   recordId: Schema.String,
   source: Schema.String,
   chatId: ChatId,
@@ -1530,6 +1531,7 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("StImportStartChat", {
     payload: {
       userId: UserId,
+      parentRecordId: Schema.optionalKey(Schema.String),
       source: Schema.String,
       title: Schema.String,
       createdAt: Schema.Number,

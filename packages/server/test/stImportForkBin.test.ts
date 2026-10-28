@@ -8,9 +8,7 @@ import { serverLayer, testConfig } from "./support/config.ts"
 import { card, header, jsonl, message } from "./support/stFolder.ts"
 import { importStFolder } from "./support/stUpload.ts"
 
-// A re-import that forks a shared ST path (stImportSharedSelection.test.ts) copies the
-// suffix with whatever the user deleted in it. The copies share the original's bin item,
-// so restoring or deleting that item for good must handle every copy.
+// Re-importing a shared-prefix selection keeps the existing suffix and its bin items.
 
 type Api = Effect.Success<ReturnType<typeof importStFolder>>["api"]
 
@@ -42,10 +40,18 @@ const scenario = (dataDir: string, remove: (api: Api, child: PathWindow) => Effe
         .StImportSources({ userId: user.id })
         .pipe(Effect.map((s) => s.chats.find((r) => r.source === "chats/Alice/child.jsonl")!))
     const childPath = (end: string) =>
-      api.ReadPath({ chatId: chat.id, leafSlotId: end as never, range: { _tag: "Bottom" }, limit: 100 })
+      Effect.flatMap(record(), (r) =>
+        api.ReadPath({
+          chatId: chat.id,
+          forkId: r.forkId,
+          leafSlotId: end as never,
+          range: { _tag: "Bottom" },
+          limit: 100
+        })
+      )
     const before = yield* childPath((yield* record()).end!)
     const item = yield* remove(api, before)
-    // ST selects a new swipe on a message the two files share: the child gets its own path.
+    // ST selects a new swipe on a message the two files share: only the child's selection changes.
     const m = child[4]!
     const at = "2025-01-02T10:04:00.000Z"
     child[4] = {
@@ -86,11 +92,11 @@ const deleteChildFork = (api: Api, child: PathWindow) =>
 const deleteForGood = (name: string, remove: Parameters<typeof scenario>[1]) => {
   const config = testConfig()
   layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(name, (it) => {
-    it.effect("deleting it for good empties the original and the import's copy", () =>
+    it.effect("deleting it for good empties the retained versions without making copies", () =>
       Effect.gen(function* () {
         const { api, item, rows } = yield* scenario(config.dataDir, remove)
         const [copies] = yield* rows(modelText)
-        assert.strictEqual(new Set(copies!.map((row) => row.slot_id)).size, 2)
+        assert.strictEqual(new Set(copies!.map((row) => row.slot_id)).size, 1)
         yield* api.PurgeBinItem({ itemId: item.id })
         const [after] = yield* rows(modelText)
         assert.strictEqual(after!.length, copies!.length)
@@ -119,11 +125,11 @@ const config = testConfig()
 layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(
   "ST fork copies a deleted branch",
   (it) => {
-    it.effect("restoring it brings back the original and the import's copy", () =>
+    it.effect("restoring it brings back the retained path", () =>
       Effect.gen(function* () {
         const { api, item, record, childPath, rows } = yield* scenario(config.dataDir, deleteChildFork)
         const [roots] = yield* rows(`SELECT id FROM slots WHERE bin_item_id = ? AND branch_deleted = 1`)
-        assert.strictEqual(roots!.length, 2)
+        assert.strictEqual(roots!.length, 1)
         yield* api.RestoreBinItem({ itemId: item.id })
         const [marked] = yield* fixtureSql(
           config.dataDir,
@@ -134,9 +140,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         const after = yield* childPath((yield* record()).end!)
         assert.deepStrictEqual(
           after.entries.map((e) => e.version.content),
-          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) =>
-            i === 4 ? "Only the child chose this" : i < 5 ? `parent ${i}` : `child ${i}`
-          )
+          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (i < 5 ? `parent ${i}` : `child ${i}`))
         )
       })
     )

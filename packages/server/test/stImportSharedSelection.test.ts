@@ -38,6 +38,7 @@ for (const count of [10, 205]) {
           const root = (yield* stImportGraph(config.dataDir, chat.id))[0]!.id as SlotId
           const before = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: chat.currentForkId,
             leafSlotId: chat.activeLeafSlotId,
             range: { _tag: "Around", slot: root },
             limit: 100
@@ -47,18 +48,21 @@ for (const count of [10, 205]) {
           const childRecord = sources.find((r) => r.source === "chats/Alice/branch.jsonl")!
           const childBefore = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: childRecord.forkId,
             leafSlotId: childRecord.end,
             range: { _tag: "Around", slot: root },
             limit: 100
           })
           // A local suffix version and amendment must remain on the copied child path.
           const local = yield* api.EditVersion({
+            forkId: childRecord.forkId,
             sourceVersionId: childBefore.entries[8]!.version.id,
             slotId: childBefore.entries[8]!.slotId,
             content: "Local suffix version",
             expectedRowVersion: childBefore.entries[8]!.rowVersion
           })
           yield* api.AmendVersion({
+            forkId: childRecord.forkId,
             versionId: local.version.id,
             content: "Local suffix amended",
             expectedRowVersion: local.version.rowVersion
@@ -67,7 +71,7 @@ for (const count of [10, 205]) {
           yield* writer.AddStateEvent({
             userId: user.id,
             chatId: chat.id,
-            forkId: childBefore.forkId,
+            forkId: childRecord.forkId,
             slotId: local.slotId,
             versionId: local.version.id,
             scope: null,
@@ -104,6 +108,7 @@ for (const count of [10, 205]) {
           )
           const parentAfter = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: chat.currentForkId,
             leafSlotId: chat.activeLeafSlotId,
             range: { _tag: "Around", slot: root },
             limit: 100
@@ -113,22 +118,17 @@ for (const count of [10, 205]) {
           )!
           const branchAfter = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: record.forkId,
             leafSlotId: record.end,
             range: { _tag: "Around", slot: root },
             limit: 100
           })
-          console.log(
-            JSON.stringify({
-              parentBefore: before.entries[4]!.version.content,
-              parentAfter: parentAfter.entries[4]!.version.content,
-              branchAfter: branchAfter.entries[4]!.version.content,
-              report: second.report
-            })
-          )
           assert.strictEqual(parentAfter.entries[4]!.version.content, "parent 4")
           assert.strictEqual(branchAfter.entries[4]!.version.content, "Only the ST branch chose this")
-          assert.strictEqual(branchAfter.entries[4]!.branchName, "branch")
-          assert.isUndefined(branchAfter.entries[5]!.branchName)
+          assert.strictEqual(
+            (yield* api.ListForks({ chatId: chat.id })).find((f) => f.id === record.forkId)?.name,
+            "branch"
+          )
           assert.strictEqual(branchAfter.entries[8]!.version.content, "Local suffix amended")
           const suffixVersions = yield* api.ListVersions({ slotId: branchAfter.entries[8]!.slotId })
           assert.deepStrictEqual(
@@ -163,22 +163,35 @@ for (const count of [10, 205]) {
             branchAfter.entries.slice(0, 4).map((e) => e.slotId),
             childBefore.entries.slice(0, 4).map((e) => e.slotId)
           )
-          assert.notStrictEqual(branchAfter.entries[4]!.slotId, childBefore.entries[4]!.slotId)
+          assert.strictEqual(branchAfter.entries[4]!.slotId, childBefore.entries[4]!.slotId)
           const graphAfter = yield* stImportGraph(config.dataDir, chat.id)
-          const shape = (rows: typeof graphBefore) => [
-            ...new Map(rows.map((r) => [r.id, [r.id, r.parent, r.selected]])).values()
-          ]
+          const shape = (rows: typeof graphBefore) => [...new Map(rows.map((r) => [r.id, [r.id, r.parent]])).values()]
           assert.deepStrictEqual(
             shape(graphAfter.filter((r) => graphBefore.some((b) => b.id === r.id))),
             shape(graphBefore)
           )
-          assert.strictEqual(new Set(graphAfter.map((r) => r.id)).size, 3 * count - 9)
+          assert.strictEqual(new Set(graphAfter.map((r) => r.id)).size, 2 * count - 5)
+          const [overrides] = yield* fixtureSql(
+            config.dataDir,
+            [
+              {
+                sql: "SELECT o.fork_id, o.origin, s.selected_version_id = o.value_id AS base_changed FROM fork_overrides o JOIN slots s ON s.id = o.target_id WHERE o.kind = 'select' AND o.target_id = ?",
+                params: [branchAfter.entries[4]!.slotId]
+              }
+            ],
+            { readOnly: true }
+          )
+          assert.deepStrictEqual(overrides, [{ fork_id: record.forkId, origin: "import", base_changed: 0 }])
+
           assert.isFalse(second.report.issues.some((i) => i.code === "st.differing"))
           assert.deepStrictEqual(
             parentAfter.entries.map((e) => e.slotId),
             before.entries.map((e) => e.slotId)
           )
-          assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+          assert.strictEqual(
+            (yield* api.ListForks({ chatId: chat.id })).find((f) => f.id === chat.currentForkId)?.tipSlotId,
+            chat.activeLeafSlotId
+          )
           assert.deepStrictEqual(
             (yield* api.ListVersions({ slotId: branchAfter.entries[4]!.slotId })).map((v) => v.content),
             ["parent 4", "Only the ST branch chose this"]
@@ -195,6 +208,7 @@ for (const count of [10, 205]) {
           assert.deepStrictEqual(
             (yield* api.ReadPath({
               chatId: chat.id,
+              forkId: record.forkId,
               leafSlotId: record.end,
               range: { _tag: "Around", slot: root },
               limit: 100
@@ -211,6 +225,7 @@ for (const count of [10, 205]) {
           assert.strictEqual(parentUpdate.answers.get("chats/Alice/main.jsonl")?.outcome, "updated")
           const parentEdited = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: chat.currentForkId,
             leafSlotId: chat.activeLeafSlotId,
             range: { _tag: "Around", slot: root },
             limit: 100
@@ -219,7 +234,7 @@ for (const count of [10, 205]) {
           assert.strictEqual(parentEdited.entries[4]!.version.content, "Parent's later ST edit")
           assert.strictEqual(
             new Set((yield* stImportGraph(config.dataDir, chat.id)).map((r) => r.id)).size,
-            3 * count - 9
+            2 * count - 5
           )
           // A parent re-import that stopped after its first batch still owns its old end.
           const parentRecord = sources.find((r) => r.source === "chats/Alice/main.jsonl")!
@@ -256,6 +271,7 @@ for (const count of [10, 205]) {
           assert.strictEqual(changed.answers.get("chats/Alice/branch.jsonl")?.outcome, "updated")
           const parentStill = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: chat.currentForkId,
             leafSlotId: chat.activeLeafSlotId,
             range: { _tag: "Around", slot: root },
             limit: 100
@@ -264,6 +280,7 @@ for (const count of [10, 205]) {
           assert.strictEqual(parentStill.entries[6]!.version.content, "parent 6")
           const childStill = yield* api.ReadPath({
             chatId: chat.id,
+            forkId: record.forkId,
             leafSlotId: record.end,
             range: { _tag: "Around", slot: root },
             limit: 100

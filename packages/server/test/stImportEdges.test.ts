@@ -53,11 +53,12 @@ const textOf = (slotId: string | null) =>
 /** The path ending at the slot showing `text`: each slot's selected text and whether it's hidden. */
 const pathTo = (text: string) =>
   query(
-    `WITH RECURSIVE p(id, parent, depth) AS (
+    `WITH RECURSIVE view AS (SELECT f.id FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN versions v ON v.id = t.selected_version_id WHERE v.content = ?), p(id, parent, depth) AS (
        SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN versions v ON v.id = ${SHOWN} WHERE v.content = ?
        UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN p ON s.id = p.parent)
      SELECT v.content, s.context_excluded AS hidden FROM p JOIN slots s ON s.id = p.id
-       JOIN versions v ON v.id = ${SHOWN} ORDER BY p.depth`,
+       JOIN versions v ON v.id = ${selectedInSql("(SELECT id FROM view)", "s")} ORDER BY p.depth`,
+    text,
     text
   ) as Array<{ content: string; hidden: number }>
 const notesOf = (chatId: ChatId) =>

@@ -55,6 +55,7 @@ interface Party {
   /** The test server's port, for the HTTP routes. */
   readonly port: number
   readonly summary: Summary
+  readonly importRecordId: string
   readonly summaryJob: { readonly jobId: string; readonly rolloutId: string }
   readonly chat: OwnChat
   /** A card, in the persona folder, with a greeting. */
@@ -2391,8 +2392,19 @@ const seed = Effect.gen(function* () {
       )
       const [recovered] = yield* api.ListRecoveredTexts({ limit: 1, before: null })
       const composer = yield* typeInto(api, chat.id, null, "half typed")
+      // Import records create forks; seed them before the probes' no-mutation snapshots.
+      const { importId } = yield* api.StartStImport({ unsupported: [] })
+      const importRecord = yield* writer.StImportStartChat({
+        userId: user.id,
+        source: `chats/Isolation/${user.id}.jsonl`,
+        title: "Synthetic import",
+        createdAt: 1730000000000,
+        chatId: chat.id,
+        lease: importId
+      })
       const notices = yield* Notices
       return {
+        importRecordId: importRecord.recordId,
         binItemId: binItem.id,
         recoveredId: recovered!.id,
         composerId: composer.id,
@@ -2606,37 +2618,20 @@ const storage: Record<
     }),
   StImportClaim: (_reader, actor, owner, writer) =>
     Effect.gen(function* () {
-      const theirs = yield* owner.api.StartStImport({ unsupported: [] })
-      const parent = yield* writer.StImportStartChat({
-        userId: owner.user.id,
-        source: `chats/Isolation/parent-${actor.user.id}.jsonl`,
-        title: "Synthetic parent",
-        createdAt: 1730000000000,
-        chatId: owner.chat.chatId,
-        lease: theirs.importId
-      })
       const mine = yield* actor.api.StartStImport({ unsupported: [] })
-      const child = yield* writer.StImportStartChat({
-        userId: actor.user.id,
-        source: `chats/Isolation/child-${owner.user.id}.jsonl`,
-        title: "Synthetic child",
-        createdAt: 1730000000000,
-        chatId: actor.chat.chatId,
-        lease: mine.importId
-      })
       yield* refused(
         writer.StImportClaim({
           userId: actor.user.id,
-          recordId: child.recordId,
+          recordId: actor.importRecordId,
           lease: mine.importId,
-          parentRecordId: parent.recordId
+          parentRecordId: owner.importRecordId
         }),
         "NotFound"
       )
       yield* refused(
         writer.StImportClaim({
           userId: actor.user.id,
-          recordId: parent.recordId,
+          recordId: owner.importRecordId,
           lease: mine.importId
         }),
         "NotFound"

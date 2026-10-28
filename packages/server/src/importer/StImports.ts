@@ -565,6 +565,7 @@ export class StImports extends Context.Service<
           const target = yield* writer.StImportStartChat({
             userId: user.id,
             source: progress.path,
+            ...(progress.fork === null ? {} : { parentRecordId: progress.fork.parentRecordId }),
             title: progress.title,
             createdAt: progress.header?.createdAt ?? progress.lastAt ?? Date.now(),
             chatId: progress.into,
@@ -709,7 +710,7 @@ export class StImports extends Context.Service<
           // have written), else from where an unfinished run of it went its own way, else
           // from its first new message.
           const position = progress.isNew ? null : (progress.afterEnd ?? progress.resumeAt ?? progress.firstAdded)
-          const applies = progress.isNew || position !== null
+          const applies = progress.isNew || position !== null || (progress.branch && progress.prevEnd === null)
           if (!applies && JSON.stringify(change.state) !== JSON.stringify(progress.prevState)) {
             report.issue(
               progress.path,
