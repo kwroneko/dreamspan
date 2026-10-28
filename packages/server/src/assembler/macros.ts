@@ -48,6 +48,8 @@ export interface MacroEnvironment {
   /** Later variable readers may depend on an intermittent note, including when it is skipped. */
   readonly potentialVariableWrite: () => void
   readonly isVolatile: (piece: number) => boolean
+  /** A piece that comes and goes from turn to turn, such as a conditioned note's, whatever its text. */
+  readonly markVolatile: (piece: number) => void
   readonly text: (piece: number) => string
   /** The card fields preset and chat text read from now on: the joined fields, once composed. */
   readonly setCard: (card: CardFields) => void
@@ -252,6 +254,9 @@ export const makeMacroEnvironment = (
       variableBarrier = true
     },
     isVolatile,
+    markVolatile: (piece) => {
+      volatilePieces.add(piece)
+    },
     text: (piece) => assembly.pieces[piece]!.text,
     setCard: (card) => {
       base = { ...base, card }

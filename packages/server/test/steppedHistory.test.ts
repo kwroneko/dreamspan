@@ -162,7 +162,6 @@ describe("stepped history", () => {
                   {
                     entity: "interval",
                     revision: "nr",
-                    first: false,
                     doc: {
                       schema_version: 1,
                       title: "While Oren isn't muted",
@@ -311,7 +310,6 @@ describe("stepped history", () => {
           {
             entity: "summary",
             revision: "summary-rev",
-            first: false,
             doc: {
               schema_version: 1,
               title: "Summary",
@@ -421,7 +419,6 @@ describe("stepped history", () => {
           {
             entity: "author",
             revision: "author-rev",
-            first: false,
             doc: {
               schema_version: 1,
               title: "Author",
@@ -462,7 +459,6 @@ describe("stepped history", () => {
           {
             entity: "variable",
             revision: "variable-rev",
-            first: false,
             doc: {
               schema_version: 1,
               title: "Variable",
@@ -522,7 +518,6 @@ describe("stepped history", () => {
                 {
                   entity: "full",
                   revision: "nr",
-                  first: false,
                   doc: {
                     schema_version: 1,
                     title: "Full",
@@ -561,7 +556,6 @@ describe("stepped history", () => {
       const notes = Array.from({ length: 4 }, (_, i) => ({
         entity: `hello-${i}`,
         revision: "nr",
-        first: false,
         doc: {
           schema_version: 1 as const,
           title: "Hello",
@@ -598,7 +592,6 @@ describe("stepped history", () => {
         const notes: NonNullable<AssemblyFixture["notes"]> = Array.from({ length: 24 }, (_, i) => ({
           entity: `padding-${i}`,
           revision: "nr",
-          first: false,
           doc: {
             schema_version: 1,
             title: "Padding",
@@ -655,7 +648,6 @@ describe("stepped history", () => {
               {
                 entity: "periodic",
                 revision: "nr",
-                first: false,
                 doc: {
                   schema_version: 1,
                   title: "Periodic",
@@ -729,7 +721,6 @@ describe("stepped history", () => {
           {
             entity: "summary-full",
             revision: "nr",
-            first: false,
             doc: {
               schema_version: 1,
               title: "Summary",
@@ -771,7 +762,6 @@ describe("stepped history", () => {
             {
               entity: "oversized",
               revision: "nr",
-              first: false,
               doc: {
                 schema_version: 1,
                 title: "Oversized",

@@ -114,7 +114,6 @@ it.effect("a conditioned note preserves a held prefix until the maximum forces h
     const note: NoteInput = {
       entity: "note",
       revision: "note-rev",
-      first: false,
       doc: {
         schema_version: 1,
         title: "Mira's turn",

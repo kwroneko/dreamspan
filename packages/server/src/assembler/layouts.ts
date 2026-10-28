@@ -7,30 +7,35 @@ import type { CardInput } from "./types.ts"
 
 type CardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>) => Text
 
-const label = (name: string) => name.replace(/"/g, "'")
+/** Wraps a card's part in the preset's join prefix and suffix (`<Name>…</Name>` by default). */
+type Wrap = (card: CardInput, label: string, id: string, body: ReadonlyArray<Text>) => Text | null
 
-const block = (assembly: Assembly, tag: string, card: CardInput, parts: ReadonlyArray<Text>): Text => {
+/** A card's parts joined with blank lines, then wrapped like every cast card's part (DESIGN §5.0). */
+const block = (assembly: Assembly, card: CardInput, wrap: Wrap, parts: ReadonlyArray<Text>): Text | null => {
   const env = need(assembly, "macros")
   const present = parts.filter((part) => part.text)
-  const text = `<${tag} name="${label(modelName(card.doc))}">\n${present.map((part) => part.text).join("\n\n")}\n</${tag}>`
-  const piece = env.verbatim(
-    `layout:${tag}:${card.entity}`,
-    { kind: "assembler", what: `${tag} block` },
+  if (present.length === 0) return null
+  const text = present.map((part) => part.text).join("\n\n")
+  const body = env.verbatim(
+    `layout:definitions:${card.entity}`,
+    { kind: "assembler", what: `${modelName(card.doc)}'s definitions` },
     text,
-    present.map((part) => part.piece)
+    // A skipped conditioned note's empty part stays among the pieces: it keeps the block volatile.
+    parts.map((part) => part.piece)
   )
-  return { text, piece }
+  return wrap(card, "Definitions", "definitions", [{ text, piece: body }])
 }
 
-/** A character's description, personality and scenario, in that order, labelled with its name. */
+/** A character's notes placed with its definitions, then its description, personality and scenario. */
 export const cardBlock = (
   assembly: Assembly,
   card: CardInput,
   cardText: CardText,
+  wrap: Wrap,
   top: ReadonlyArray<Text> = []
-): Text => {
+): Text | null => {
   const own = { char: modelName(card.doc) }
-  return block(assembly, "character", card, [
+  return block(assembly, card, wrap, [
     ...top,
     cardText(assembly, card, "description", own),
     cardText(assembly, card, "personality", own),
@@ -38,18 +43,12 @@ export const cardBlock = (
   ])
 }
 
-/** A persona's notes and its description unless placed elsewhere, labelled with its name. */
+/** A persona's notes placed with its definitions, then its description. */
 export const personaBlock = (
   assembly: Assembly,
   card: CardInput,
   cardText: CardText,
+  wrap: Wrap,
   top: ReadonlyArray<Text> = []
-): Text | null => {
-  const parts = [
-    ...top,
-    ...(assembly.placedPersonas?.has(card.entity)
-      ? []
-      : [cardText(assembly, card, "description", { user: modelName(card.doc) })])
-  ]
-  return parts.some((part) => part.text) ? block(assembly, "persona", card, parts) : null
-}
+): Text | null =>
+  block(assembly, card, wrap, [...top, cardText(assembly, card, "description", { user: modelName(card.doc) })])

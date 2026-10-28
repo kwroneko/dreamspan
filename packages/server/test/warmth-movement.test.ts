@@ -32,7 +32,6 @@ it.effect("new note placement with roomy budget does not blame the history budge
       const note: NonNullable<AssemblyFixture["notes"]>[number] = {
         entity: "note",
         revision: "note-rev",
-        first: false,
         doc: {
           schema_version: 1,
           title: "Added note",

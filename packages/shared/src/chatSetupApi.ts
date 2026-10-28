@@ -202,6 +202,8 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   card: Schema.NullOr(EntityId),
   /** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
   onByDefault: Schema.Boolean,
+  /** It's the chat's author's note (`isAuthorNote`): notes and lore at its top or bottom join it. */
+  authorNote: Schema.Boolean,
   linked: Schema.NullOr(LinkedNote),
   active: Schema.Boolean
 }) {}

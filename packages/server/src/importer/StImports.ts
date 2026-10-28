@@ -192,6 +192,7 @@ interface Session extends FolderContext {
   held: number
   settingsHeld: number
   readonly personas: Map<string, EntityId>
+  readonly personaNotes: Map<string, EntityId>
   readonly cards: Map<string, CardInfo>
   readonly worlds: Map<string, RefId>
   /** Groups by each of their chats' ids. */
@@ -267,6 +268,7 @@ export class StImports extends Context.Service<
             held: 0,
             settingsHeld: 0,
             personas: new Map(),
+            personaNotes: new Map(),
             cards: new Map(),
             worlds: new Map(),
             groups: new Map(),
@@ -345,7 +347,7 @@ export class StImports extends Context.Service<
           if (library === null) {
             report.count(countAs, "failed")
             const error = parsed.report.issues.find((i) => i.level === "error")
-            return { outcome: result("failed", error?.message ?? ""), entity: null, created: false }
+            return { outcome: result("failed", error?.message ?? ""), entity: null, created: false, note: null }
           }
           const earlier = session.library.get(path)
           if (earlier?.binned) {
@@ -356,12 +358,12 @@ export class StImports extends Context.Service<
               "st.in_bin",
               "An earlier import of this file is in your recycle bin, so it wasn't imported again."
             )
-            return { outcome: result("skipped", "in the recycle bin"), entity: null, created: false }
+            return { outcome: result("skipped", "in the recycle bin"), entity: null, created: false, note: null }
           }
           const same = earlier ?? session.libraryByHash.get(`${library.kind}:${parsed.sha256}`)
           if (same !== undefined && same.kind === library.kind && same.sourceHash === parsed.sha256) {
             report.count(countAs, "unchanged")
-            return { outcome: result("unchanged"), entity: same, created: false }
+            return { outcome: result("unchanged"), entity: same, created: false, note: null }
           }
           const imported = yield* holding(
             parsed.media.map((file) => file.sha256),
@@ -392,7 +394,7 @@ export class StImports extends Context.Service<
           )
           if (imported === null) {
             report.count(countAs, "failed")
-            return { outcome: result("failed", "it couldn't be stored"), entity: null, created: false }
+            return { outcome: result("failed", "it couldn't be stored"), entity: null, created: false, note: null }
           }
           const entry: LibraryEntry = {
             refId: imported.ref.id,
@@ -413,7 +415,12 @@ export class StImports extends Context.Service<
               "Your edits conflict with this version; resolve them in the library."
             )
           }
-          return { outcome: result(imported.created ? "added" : "updated"), entity: entry, created: imported.created }
+          return {
+            outcome: result(imported.created ? "added" : "updated"),
+            entity: entry,
+            created: imported.created,
+            note: imported.note?.entityId ?? null
+          }
         })
 
       const personaFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array) =>
@@ -427,6 +434,9 @@ export class StImports extends Context.Service<
             yield* writer.SetEntityTags({ userId: user.id, entityId: imported.entity.entityId, tags: ["persona"] })
           }
           session.personas.set(file, imported.entity.entityId)
+          // At the author's note's top or bottom: switched off in chats whose author's note ST disabled.
+          if (persona !== null && (persona.position === 2 || persona.position === 3) && imported.note !== null)
+            session.personaNotes.set(imported.entity.entityId, imported.note)
           if (persona !== null && persona.position === 9) {
             session.report.issue(
               path,

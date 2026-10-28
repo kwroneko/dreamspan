@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 29
+export const ASSEMBLER_VERSION = 30
 
 export type Role = "system" | "user" | "assistant"
 
@@ -351,7 +351,6 @@ export interface SourcePins {
     readonly found: ReadonlyArray<{
       readonly entity: string
       readonly revision: string
-      readonly first: boolean
       readonly link?: { readonly entity: string; readonly revision: string | null }
     }>
   }>
@@ -471,11 +470,6 @@ export interface NoteInput {
   readonly revision: string
   /** The slot's document; a linked slot's `content` is its shared note's, read with it. */
   readonly doc: NoteDoc
-  /**
-   * The card's Character's Note: its first note that isn't a migrated module or a Character
-   * Author's Note, which ST's macros and lorebook matching read.
-   */
-  readonly first: boolean
   /** The shared note a linked slot showed, at its library head; null when it's gone (binned). */
   readonly link?: { readonly entity: string; readonly revision: string | null }
 }
@@ -484,13 +478,23 @@ export interface NoteInput {
 export const noteCard = (doc: NoteDoc) => ("card" in doc.owner ? doc.owner.card : null)
 
 /**
- * A persona's note that places its description (ARCHITECTURE §13): what an ST import makes of
- * a persona placed anywhere but the prompt's persona description. Imports before the note had
- * its `kind` titled it "Persona description" and made it the card's first note.
+ * What ST's macros and lorebook matching read as a card's Character's Note (`{{charDepthPrompt}}`,
+ * "Character's note" matching): the card's notes among these that are placed in the chat, at a
+ * depth or after the newest message, as ST's note is, joined with newlines in id order. Only
+ * what a note shows decides it, never its kind or where it came from (DESIGN §4.1).
  */
-export const placesDescription = (note: NoteInput) =>
-  note.doc.kind === "persona_description" ||
-  (note.doc.kind === undefined && note.first && note.doc.title === "Persona description")
+export const characterNoteText = (notes: ReadonlyArray<NoteInput> | undefined, card: string | undefined) =>
+  (notes ?? [])
+    .filter(
+      (note) =>
+        card !== undefined &&
+        noteCard(note.doc) === card &&
+        (note.doc.placement.mode === "depth" || note.doc.placement.mode === "tail")
+    )
+    .toSorted((a, b) => (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
+    .map((note) => note.doc.content.trim())
+    .filter((text) => text !== "")
+    .join("\n")
 
 /** Where the preset in effect comes from, in the scope chain (DATA-MODEL §5.4). */
 type PresetScope = "role" | "chat" | "connection" | "user" | "builtin"

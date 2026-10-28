@@ -7,6 +7,7 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
+import { isAuthorNote, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option } from "effect"
@@ -316,6 +317,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
               ...entry,
               ...resolved,
               onByDefault,
+              authorNote:
+                entry.card === null &&
+                isAuthorNote(resolved.doc as Pick<NoteDoc, "kind">, entry.ref.entityId, state.authorNote),
               active: switches.get(entry.ref.entityId) ?? onByDefault
             })
           })

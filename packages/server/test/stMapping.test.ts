@@ -1,10 +1,12 @@
-// Empty author's notes still govern attached personas and lore (ARCHITECTURE §13).
+// Empty author's notes still govern attached personas and lore; personas' notes (ARCHITECTURE §13).
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { ReportBuilder } from "@rp/shared/importReport.ts"
 import { parseStChatPart } from "../src/formats/stChat.ts"
 import { parseStSettings } from "../src/formats/stData.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { type CardInfo, chatStateChange, type FolderContext, type Link } from "../src/importer/stMapping.ts"
+import { buildPersona } from "../src/importer/stParse.ts"
 
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
 const settings = (note: object) => parseStSettings(json({ extension_settings: { note } }), new ReportBuilder())
@@ -180,6 +182,38 @@ describe("ST's notes on import (DESIGN §4.1)", () => {
     expect(single.events.filter((e) => e.key === "note.deactivate")).toEqual([])
   })
 
+  it("switches what rides on a disabled author's note off in that chat, as ST sends none of it", () => {
+    // ST 1.19.0 `setFloatingPrompt`: frequency 0 adds neither the persona nor the card's note;
+    // an empty note that is due still carries both (`addPersonaDescriptionExtensionPrompt`).
+    const folder = {
+      settings: settings({}),
+      cards,
+      personas: new Map([["sam.png", "persona-sam" as EntityId]]),
+      personaNotes: new Map([["persona-sam", "note-sam" as EntityId]]),
+      personaNames: new Map(),
+      worlds: new Map()
+    }
+    const chat = (metadata: object) =>
+      chatStateChange(
+        folder,
+        {
+          link: { card: cards.get("aria")!, group: null },
+          header: header(metadata),
+          spoke: new Set(["persona-sam" as EntityId]),
+          summaries: [],
+          messages: 2,
+          run: { length: 0, firstSlot: null, throughSlot: null }
+        },
+        null,
+        true
+      )
+    const off = chat(text(0))
+    expect(off.events).toContainEqual({ key: "note.deactivate", value: { note: "note-sam" } })
+    expect(off.events).toContainEqual({ key: "note.deactivate", value: { note: "note-aria" } })
+    for (const metadata of [text(1), { note_prompt: "", note_interval: 1 }])
+      expect(chat(metadata).events.filter((e) => e.key === "note.deactivate")).toEqual([])
+  })
+
   it("says when ST replaced the chat's own author's note with the character's", () => {
     const replacing = { chara: [{ name: "aria", prompt: "Aria hums.", useChara: true, position: 0 }] }
     const link = { card: cards.get("aria")!, group: null }
@@ -188,5 +222,46 @@ describe("ST's notes on import (DESIGN §4.1)", () => {
     expect(mapped({ note_prompt: "" }, replacing, { cards }, link).replacedAuthorNote).toBe(false)
     const before = { chara: [{ name: "aria", prompt: "Aria hums.", useChara: true, position: 1 }] }
     expect(mapped(text(1), before, { cards }, link).replacedAuthorNote).toBe(false)
+  })
+})
+
+describe("ST personas (DESIGN §4.1, owner 2026-10-28)", () => {
+  const persona = (position: number) =>
+    Effect.runSync(
+      buildPersona(new Uint8Array(), "sam.png", {
+        avatar: "sam.png",
+        name: "Sam",
+        description: "Sam is curious.",
+        position,
+        depth: 3,
+        role: 1
+      })
+    ).library!
+  const description = (library: ReturnType<typeof persona>) =>
+    (JSON.parse(library.docJson) as { description: string }).description
+
+  it("keeps a persona at the persona description in its card, with no note", () => {
+    expect(description(persona(0))).toBe("Sam is curious.")
+    expect(persona(0).noteDocJson).toBeNull()
+  })
+
+  it("puts one placed elsewhere in an ordinary note on its card, its only copy", () => {
+    for (const [position, placement] of [
+      [2, { mode: "section", section: "author_note_top" }],
+      [3, { mode: "section", section: "author_note_bottom" }],
+      [4, { mode: "depth", depth: 3, role: "user" }],
+      [9, { mode: "none" }]
+    ] as const) {
+      const library = persona(position)
+      expect(description(library)).toBe("")
+      expect(JSON.parse(library.noteDocJson!)).toEqual({
+        schema_version: 1,
+        title: "Persona description",
+        content: "Sam is curious.",
+        placement,
+        exportable: true,
+        on_by_default: true
+      })
+    }
   })
 })

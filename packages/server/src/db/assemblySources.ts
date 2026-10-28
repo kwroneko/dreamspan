@@ -523,7 +523,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             AND (json_extract(h.doc_json, '$.owner.chat') = ${chatId}
               OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(cards.length === 0 ? [""] : cards)})
           ORDER BY e.id`
-        const seen = new Set<string>()
         return yield* Effect.forEach(rows, (row) =>
           Effect.gen(function* () {
             const pinned = bound[row.entity]
@@ -532,16 +531,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(json)), "A note")
             const card = noteCard(doc)
             if (card === null ? "chat" in doc.owner && doc.owner.chat !== chatId : !cards.includes(card)) return []
-            // The card's Character's Note is its first that isn't a module or ST's Character Author's Note.
-            const first =
-              card !== null && !seen.has(card) && doc.module_id === undefined && doc.kind !== "character_author_note"
-            if (first) seen.add(card)
             const linked = doc.link === undefined ? null : yield* sharedHead(doc.link)
             const note: NoteInput = {
               entity: row.entity,
               revision: pinned ?? row.revision,
               doc: linked?.doc ? { ...doc, content: linked.doc.content } : doc,
-              first,
               ...(linked ? { link: { entity: linked.entity, revision: linked.revision } } : {})
             }
             return [note]
@@ -551,10 +545,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             const notes = lists.flat()
             pins.notes.push({
               key: keyOf(cards, bound),
-              found: notes.map(({ entity, revision, first, link }) => ({
+              found: notes.map(({ entity, revision, link }) => ({
                 entity,
                 revision,
-                first,
                 ...(link ? { link } : {})
               }))
             })
@@ -832,17 +825,17 @@ const replaySources = (
     notes: (cards, bound) =>
       Effect.gen(function* () {
         const { found } = yield* pinned(pins.notes, keyOf(cards, bound), "a note")
-        return yield* Effect.forEach(found, ({ entity, revision, first, link }) =>
+        return yield* Effect.forEach(found, ({ entity, revision, link }) =>
           Effect.gen(function* () {
             const row = yield* revisionDoc(revision, "note", entity)
             if (!row) return yield* unpinned("a note")
             const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A note")
-            if (!link) return { entity, revision, doc, first } satisfies NoteInput
-            if (link.revision === null) return { entity, revision, doc, first, link } satisfies NoteInput
+            if (!link) return { entity, revision, doc } satisfies NoteInput
+            if (link.revision === null) return { entity, revision, doc, link } satisfies NoteInput
             const shared = yield* revisionDoc(link.revision, "note", link.entity)
             if (!shared) return yield* unpinned("a shared note")
             const content = (yield* decoded<NoteDoc>(decodeNote(JSON.parse(shared.doc_json)), "A shared note")).content
-            return { entity, revision, doc: { ...doc, content }, first, link } satisfies NoteInput
+            return { entity, revision, doc: { ...doc, content }, link } satisfies NoteInput
           })
         )
       }),

@@ -99,7 +99,6 @@ const summary = (position: number, depth = 2, role = 0): Summary => ({
 const summaryNote = (s: Summary): NoteInput => ({
   entity: "summary",
   revision: "summary-rev",
-  first: false,
   doc: {
     schema_version: 1,
     title: "Summary",
@@ -189,7 +188,6 @@ const authorNoteInput = (
         input: {
           entity: "author-note",
           revision: "author-note-rev",
-          first: false,
           doc: {
             schema_version: 1,
             title: mapped.title,
@@ -221,7 +219,6 @@ const personaNoteInput = async (fixtures: FixtureSet, placement: PersonaPlacemen
     ? {
         entity: "persona-note",
         revision: "persona-note-rev",
-        first: true,
         doc: { ...(JSON.parse(note) as Omit<NoteDoc, "owner">), owner: { card: "persona" as never } }
       }
     : null
@@ -259,6 +256,8 @@ const ourRequest = async (
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
   const importedAuthorNote = config.authorNote ? authorNoteInput(config.authorNote, config.defaultAuthorNote) : null
   const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona) : null
+  // The import keeps one copy of the text: with a note, the persona card's description is empty.
+  const personaDoc = personaNote ? { ...persona, description: "" } : persona
   const lines: Array<FixtureMessage> = config.overMaximum
     ? Array.from({ length: 40 }, (_, i) => ({
         side: i % 2 ? "assistant" : "user",
@@ -285,7 +284,7 @@ const ourRequest = async (
       },
       cards: [
         { entity: "character", doc: card.doc },
-        { entity: "persona", doc: persona }
+        { entity: "persona", doc: personaDoc }
       ],
       participants: ["character"],
       persona: "persona",
@@ -295,7 +294,6 @@ const ourRequest = async (
               {
                 entity: "note",
                 revision: "note-rev",
-                first: true,
                 doc: { ...card.note, owner: { card: "character" as never } }
               }
             ]

@@ -6,7 +6,7 @@ import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
-import { type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
+import { characterNoteText, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
@@ -146,11 +146,7 @@ export const loreActivationStage: AssemblerStage = {
           character_personality: preview("personality", char?.doc.personality ?? ""),
           scenario: preview("scenario", char?.doc.scenario ?? ""),
           creator_notes: preview("creator_notes", char?.doc.creator_notes ?? ""),
-          character_depth_prompt: preview(
-            "depth_prompt",
-            assembly.notes?.find((n) => n.first && "card" in n.doc.owner && n.doc.owner.card === char?.entity)?.doc
-              .content ?? ""
-          )
+          character_depth_prompt: preview("depth_prompt", characterNoteText(assembly.notes, char?.entity))
         }
       }
       const beforeIssues = assembly.issues.length

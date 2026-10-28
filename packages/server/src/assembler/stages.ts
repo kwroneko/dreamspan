@@ -19,7 +19,7 @@ import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { type ChatState, foldState, noteSwitches } from "@rp/shared/state.ts"
-import { noteCondition } from "@rp/shared/docs/note.ts"
+import { isAuthorNote as isChatAuthorNote, noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -62,9 +62,9 @@ import {
   type CardInput,
   type GenerationType,
   type HistoryEntry,
+  characterNoteText,
   type NoteInput,
   noteCard,
-  placesDescription,
   type Target,
   type Role,
   type Source
@@ -253,9 +253,9 @@ const conditionText = (note: NoteInput, cast: Cast) => {
   return condition.when === "turn" ? `on ${name}'s turn` : `while ${name} isn't muted`
 }
 
-/** The chat's author's note, whose place ST's persona descriptions and lore at its top or bottom ride on. */
+/** The chat's author's note, whose place notes and lore at its top or bottom ride on (shown on the note). */
 const isAuthorNote = (state: ChatState, note: NoteInput) =>
-  note.doc.kind === "author_note" || note.entity === state.authorNote
+  noteCard(note.doc) === null && isChatAuthorNote(note.doc, note.entity, state.authorNote)
 
 /**
  * An imported summary as ST would send it on this path: the newest of its texts saved on a
@@ -288,18 +288,11 @@ const notesStage: AssemblerStage = {
       const state = need(assembly, "state")
       const cast = need(assembly, "cast")
       const target = need(assembly, "target")
-      const personas = cast.personas
       const notes = yield* sources.notes(
-        [...cast.characters, ...personas].map((c) => c.entity),
+        [...cast.characters, ...cast.personas].map((c) => c.entity),
         state.noteRevisions
       )
       const active = yield* summaryOnPath(activeNotes(need(assembly, "events"), notes), target)
-      assembly.placedPersonas = new Set(
-        notes.flatMap((note) => {
-          const card = noteCard(note.doc)
-          return card !== null && placesDescription(note) && personas.some((p) => p.entity === card) ? [card] : []
-        })
-      )
       const off = notes.find((note) => isAuthorNote(state, note) && !active.includes(note))
       if (off) assembly.offAuthorNote = off
       assembly.notes = active
@@ -379,12 +372,11 @@ const namesFor = (state: ChatState, cast: Cast): Names => {
  */
 /**
  * The card fields preset text reads: ST's character, or the first of the cast, which stays the
- * same from turn to turn, with its first note as ST's Character's Note.
+ * same from turn to turn, with its in-chat notes that are on as ST's Character's Note.
  */
 const macroCard = (cast: Cast, notes: ReadonlyArray<NoteInput> | undefined) => {
   const card = cast.characters[0]
-  const firstNote = notes?.find((n) => n.first && noteCard(n.doc) === card?.entity)
-  return cardFields(card, cast.personas[0], firstNote?.doc.content)
+  return cardFields(card, cast.personas[0], characterNoteText(notes, card?.entity))
 }
 
 const macrosStage = sync("macros", (assembly) => {
@@ -1047,6 +1039,8 @@ const placeOf = (note: NoteInput): NotePlace | null => {
           volatile: conditioned(note)
         }
       if (placement.section !== "before_main_prompt" && placement.section !== "after_main_prompt") return null
+      // A card's note "with the definitions" goes inside its card's part (`withDefinitions`).
+      if (withDefinitions(note)) return null
       return {
         at: placement.section === "before_main_prompt" ? "start" : "end",
         // A note that comes and goes with its condition changes the prefix it's in.
@@ -1086,27 +1080,50 @@ interface Attachments {
  */
 type AuthorState = "due" | "skipped" | "off" | "none"
 
-/** The notes placed with a card's definition, at its top (`section: card`), expanded, in id order. */
-const cardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | null): ReadonlyArray<Text> =>
-  need(assembly, "notes")
-    .filter(
-      (note) =>
-        noteCard(note.doc) === card.entity &&
-        note.doc.placement.mode === "section" &&
-        note.doc.placement.section === "card"
-    )
+/**
+ * Whether a card's note goes inside its card's part, at the top (DESIGN §4.1, owner 2026-10-28):
+ * placed "with the definitions" (`after_main_prompt`, which a chat's note keeps beside the main
+ * prompt) or, as older notes are, `section: card`.
+ */
+const withDefinitions = (note: NoteInput) =>
+  noteCard(note.doc) !== null &&
+  note.doc.placement.mode === "section" &&
+  (note.doc.placement.section === "card" || note.doc.placement.section === "after_main_prompt")
+
+/** The notes placed with a card's definition, at the top of its part, expanded, in id order. */
+const cardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | null): ReadonlyArray<Text> => {
+  const env = need(assembly, "macros")
+  const skipped = assembly.skippedNotes ?? []
+  return [...need(assembly, "notes"), ...skipped]
+    .filter((note) => noteCard(note.doc) === card.entity && withDefinitions(note))
     .toSorted((a, b) => (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
     .flatMap((note) => {
-      const text = noteText(assembly, note, owner)
-      return text?.text ? [text] : []
+      if (!conditioned(note)) {
+        const text = noteText(assembly, note, owner)
+        return text?.text ? [text] : []
+      }
+      // A conditioned note comes and goes with the turn, which changes its card's part: that
+      // part is volatile, due or not (allowed above the history; the editor warns, DESIGN §4.1).
+      env.potentialVariableWrite()
+      const text = skipped.includes(note)
+        ? { text: "", piece: env.verbatim(`note:${note.entity}`, noteSource(assembly, note), "") }
+        : noteText(assembly, note, owner)
+      if (!text) return []
+      env.markVolatile(text.piece)
+      return [text]
     })
+}
 
 /** A card's marker text with the notes placed with its definition above it. */
 const withCardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | null, field: Text | null) => {
   const top = cardNotes(assembly, card, owner)
   if (top.length === 0) return field
   const parts = field ? [...top, field] : top
-  const text = parts.map((part) => part.text).join("\n")
+  // A skipped conditioned note is an empty part: no text, but its piece keeps the part volatile.
+  const text = parts
+    .filter((part) => part.text)
+    .map((part) => part.text)
+    .join("\n")
   return {
     text,
     piece: need(assembly, "macros").verbatim(
@@ -1269,7 +1286,7 @@ const composeStage = sync("compose", (assembly) => {
   const prefix = utility.card_join_prefix ?? CARD_JOIN_PREFIX
   const suffix = utility.card_join_suffix ?? CARD_JOIN_SUFFIX
   const wrap = (card: CardInput, label: string, id: string, body: ReadonlyArray<Text>): Text | null => {
-    if (body.length === 0) return null
+    if (!body.some((part) => part.text)) return null
     const wrapper = (raw: string, which: string) => {
       const text = raw.replace(/<FIELDNAME>/gi, () => label)
       if (!text) return null
@@ -1284,7 +1301,10 @@ const composeStage = sync("compose", (assembly) => {
     }
     const before = wrapper(prefix, "prefix")
     const after = wrapper(suffix, "suffix")
-    const text = `${before?.text ?? ""}${body.map((part) => part.text).join("\n")}${after?.text ?? ""}`
+    const text = `${before?.text ?? ""}${body
+      .filter((part) => part.text)
+      .map((part) => part.text)
+      .join("\n")}${after?.text ?? ""}`
     const parts = [before, ...body, after].flatMap((part) => (part ? [part.piece] : []))
     return {
       text,
@@ -1353,8 +1373,8 @@ const composeStage = sync("compose", (assembly) => {
       definitions: joined(
         "definitions",
         [
-          ...characters.map((card) => cardBlock(assembly, card, memo, cardNotes(assembly, card, card))),
-          ...cast.personas.map((card) => personaBlock(assembly, card, memo, cardNotes(assembly, card, null)))
+          ...characters.map((card) => cardBlock(assembly, card, memo, wrap, cardNotes(assembly, card, card))),
+          ...cast.personas.map((card) => personaBlock(assembly, card, memo, wrap, cardNotes(assembly, card, null)))
         ],
         "\n\n"
       ),
@@ -1383,7 +1403,7 @@ const composeStage = sync("compose", (assembly) => {
         assembly,
         card,
         null,
-        card.doc.description && !assembly.placedPersonas?.has(card.entity)
+        card.doc.description
           ? (() => {
               const piece = env.piece(
                 `card:${card.entity}:description`,
@@ -1399,19 +1419,14 @@ const composeStage = sync("compose", (assembly) => {
       description: perField("description"),
       personality: formatted(perField("personality"), utility.personality_format, "utility.personality_format"),
       scenario: formatted(perField("scenario"), utility.scenario_format, "utility.scenario_format"),
-      // ST has one persona, sent as it is; several are wrapped and joined like the characters.
-      persona:
-        cast.personas.length > 1
-          ? joined(
-              "personas",
-              cast.personas.map((card) => {
-                const text = persona(card)
-                return text ? wrap(card, "Persona", "persona", [text]) : null
-              })
-            )
-          : cast.personas[0]
-            ? persona(cast.personas[0])
-            : null
+      // The persona is a cast card: each wrapped like the characters' parts, one or several (DESIGN §5.0).
+      persona: joined(
+        "personas",
+        cast.personas.map((card) => {
+          const text = persona(card)
+          return text ? wrap(card, "Persona", "persona", [text]) : null
+        })
+      )
     }
   }
   // Examples keep their own handling: parsed per card into example chats, named in a group.

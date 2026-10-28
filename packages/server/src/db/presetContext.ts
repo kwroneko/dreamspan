@@ -7,6 +7,12 @@ import type { Placement } from "@rp/shared/docs/note.ts"
 import type { ContextSnapshot, Piece } from "../assembler/types.ts"
 import { estimateTokens } from "../assembler/st.ts"
 
+/** The editor's slot for a note: a card's note "with the definitions" sits in its card's part (DESIGN §4.1). */
+const slotOf = (placement: Placement, card: boolean): Placement =>
+  card && placement.mode === "section" && placement.section === "after_main_prompt"
+    ? { ...placement, section: "card" }
+    : placement
+
 export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot: ContextSnapshot) =>
   Effect.gen(function* () {
     const sent = snapshot.pieces.filter((p) => p.messages.length > 0 && p.text.length > 0)
@@ -55,9 +61,15 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
       ])
     ]
     const rows = revisions.length
-      ? yield* sql<{ id: string; name: string | null; title: string | null; placement: string | null }>`
+      ? yield* sql<{
+          id: string
+          name: string | null
+          title: string | null
+          placement: string | null
+          card: string | null
+        }>`
     SELECT v.id, json_extract(v.doc_json, '$.name') AS name, json_extract(v.doc_json, '$.title') AS title,
-      json_extract(v.doc_json, '$.placement') AS placement
+      json_extract(v.doc_json, '$.placement') AS placement, json_extract(v.doc_json, '$.owner.card') AS card
     FROM entity_revisions v JOIN entities e ON e.id = v.entity_id
     WHERE v.id IN ${sql.in(revisions)} AND e.owner_user_id = ${userId}`
       : []
@@ -98,7 +110,7 @@ export const presetContext = (sql: SqlClient.SqlClient, userId: UserId, snapshot
           ? [
               {
                 title: r.title || "Untitled note",
-                placement: JSON.parse(r.placement) as Placement,
+                placement: slotOf(JSON.parse(r.placement) as Placement, r.card !== null),
                 due: activeNotes.get(r.id) ?? true
               }
             ]

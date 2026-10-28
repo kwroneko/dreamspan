@@ -61,7 +61,16 @@ describe("the request inspector", () => {
         run.messages.map((m) => [m.sources.map((s) => s.label), m.breakpoint]),
         [
           [["Preset prompt “Main Prompt”"], null],
-          [["Card “Tobin”: description"], null],
+          [
+            [
+              "Card “Tobin”: description",
+              "Preset: card join prefix",
+              "Preset: card join suffix",
+              "Tobin's persona",
+              "The characters' definitions"
+            ],
+            null
+          ],
           [
             [
               "Card “Mira”: description",
