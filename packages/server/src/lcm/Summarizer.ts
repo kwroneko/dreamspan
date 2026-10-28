@@ -1,3 +1,4 @@
+import { executionRegistry } from "../execution.ts"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -12,7 +13,7 @@ import type { SummaryJob } from "../db/lcmJobs.ts"
 import { ProviderError, Providers } from "../providers/Providers.ts"
 import { JudgeUnavailable } from "../decision/RefusalJudge.ts"
 import { SummaryChecks } from "./OutputChecks.ts"
-import { summaryDraft, summaryTool, clipSummary } from "./summaryTool.ts"
+import { clipSummary } from "./summaryTool.ts"
 
 /** A check refused the output; it is not saved, and the attempt fails. */
 class SummaryRefused {
@@ -74,6 +75,7 @@ export class Summarizer extends Context.Service<
 /** The summarizer; with `pool` false it has no background claiming, and the caller runs jobs itself (tests). */
 export function makeSummarizer(pool: boolean) {
   return Effect.gen(function* () {
+    const execution = yield* executionRegistry
     const reader = yield* Reader,
       writer = yield* Writer,
       providers = yield* Providers,
@@ -113,15 +115,16 @@ export function makeSummarizer(pool: boolean) {
             snapshot: assembled.snapshot
           })
           rolloutId = id
-          const wire = providerRequest(generation.request, model),
-            draft = summaryDraft(Math.ceil(job.target * 2.5))
-          let responseText = ""
-          candidate = () => (snapshot.summaryJob!.style === "tool" ? (draft.content() ?? "") : responseText)
-          let context = wire.context
-          if (snapshot.summaryJob!.style === "tool") context = { ...context, tools: [summaryTool] }
+          const strategy = execution.summaries.get(snapshot.summaryJob!.style)
+          if (!strategy)
+            return yield* Effect.fail(new Error(`Summary strategy ${snapshot.summaryJob!.style} is unavailable.`))
+          const output = yield* Effect.try(() => strategy.create({ job, snapshot }, execution.summaryTools))
+          const wire = providerRequest(generation.request, model)
+          candidate = output.candidate
+          let context = output.tools ? { ...wire.context, tools: output.tools } : wire.context
           const extras: Message[] = []
           for (let turn = 0; turn < 8; turn++) {
-            responseText = ""
+            output.beginTurn()
             let answer: AssistantMessage | undefined
             let payload = wire.payload
             if (extras.length && model.api === "openai-completions") {
@@ -177,40 +180,15 @@ export function makeSummarizer(pool: boolean) {
                 Stream.runForEach((event) =>
                   Effect.sync(() => {
                     if (event.type === "done") answer = event.message
-                    if (event.type === "text") responseText += event.delta
+                    if (event.type === "text") output.onText(event.delta)
                   })
                 )
               )
             if (!answer) return yield* Effect.fail(new Error("The provider returned no result."))
             const reply: AssistantMessage = answer
-            const calls = reply.content.filter((p) => p.type === "toolCall")
-            let done = snapshot.summaryJob!.style === "direct",
-              content = reply.content
-                .filter((p) => p.type === "text")
-                .map((p) => p.text)
-                .join("")
-            if (!done) {
-              const appended: Message[] = [reply]
-              for (const call of calls) {
-                const result =
-                  call.name === "summary_tool"
-                    ? draft.execute(call.arguments)
-                    : { text: "Error: Only summary_tool is available.", done: false, isError: true }
-                appended.push({
-                  role: "toolResult",
-                  toolCallId: call.id,
-                  toolName: call.name,
-                  content: [{ type: "text", text: result.text }],
-                  isError: result.isError,
-                  timestamp: Date.now()
-                })
-                done ||= result.done
-              }
-              extras.push(...appended)
-              context = { ...context, messages: [...context.messages, ...appended] }
-              content = draft.content() ?? ""
-              done ||= !calls.length
-            }
+            const { done, content, appended } = output.accept(reply)
+            extras.push(...appended)
+            if (appended.length) context = { ...context, messages: [...context.messages, ...appended] }
             if (!done && turn < 7) continue
             if (!content.trim()) return yield* Effect.fail(new Error("The summary is empty."))
             for (const check of checks.list()) {

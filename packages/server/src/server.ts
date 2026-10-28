@@ -1,3 +1,4 @@
+import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
 import { Summarizer } from "./lcm/Summarizer.ts"
@@ -434,6 +435,7 @@ export const serverWith = <E>(
         Layer.provideMerge(ChatHub.layer)
       )
     ),
+    Layer.provideMerge(ExecutionRegistry.layer),
     Layer.provideMerge(Notices.layer),
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
