@@ -1,3 +1,6 @@
+import { validateDoc } from "../src/editing.ts"
+import { mainPrompt, presetOrder, withMain } from "../src/presetOrder.ts"
+import { editedDoc } from "../src/presetConditions.ts"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { PresetDoc, type PresetPrompt } from "../src/docs/preset.ts"
@@ -85,5 +88,39 @@ describe("PresetDoc", () => {
     expect(decode({ ...doc, prompts: [{ ...prompt("main"), injection_depth: -1 }, prompt("style")] })._tag).toBe(
       "Failure"
     )
+  })
+})
+
+describe("Main's permanent slot", () => {
+  it("adds a missing order entry at the start, off, without changing the prompt", () => {
+    const missing = { ...doc, order: [doc.order[1]!] }
+    const result = withMain(missing)
+    expect(result.order).toEqual([{ identifier: "main", enabled: false }, doc.order[1]])
+    expect(result.prompts).toBe(missing.prompts)
+    expect(presetOrder(missing.prompts, missing.order)[0]).toEqual({ identifier: "main", enabled: false })
+  })
+
+  it("materializes a missing prompt on validation and editor reads of our older documents", () => {
+    const missing = { ...doc, prompts: [prompt("style")], order: [doc.order[1]!] }
+    const checked = validateDoc("preset", missing)
+    expect(checked.ok).toBe(true)
+    if (!checked.ok) return
+    expect(checked.doc.prompts).toEqual([mainPrompt, prompt("style")])
+    expect(checked.doc.order).toEqual([{ identifier: "main", enabled: false }, doc.order[1]])
+    const read = editedDoc("preset", missing)
+    expect(read.prompts[0]).toEqual(mainPrompt)
+    expect(read.order[0]).toEqual({ identifier: "main", enabled: false })
+  })
+
+  it("keeps Main's position and switch when reordered or reset", () => {
+    for (const enabled of [true, false]) {
+      const ordered = { ...doc, order: [doc.order[1]!, { identifier: "main", enabled }] }
+      expect(withMain(ordered)).toBe(ordered)
+      expect(presetOrder(ordered.prompts, ordered.order).slice(0, 2)).toEqual(ordered.order)
+    }
+    expect(withMain(withMain({ prompts: [], order: [] }))).toEqual({
+      prompts: [mainPrompt],
+      order: [{ identifier: "main", enabled: false }]
+    })
   })
 })

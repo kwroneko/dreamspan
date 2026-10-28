@@ -8,6 +8,7 @@ import { Result, Schema, SchemaIssue } from "effect"
 import { CARD_SCHEMA_VERSION, CardDoc } from "./docs/card.ts"
 import { LorebookDoc } from "./docs/lorebook.ts"
 import { NOTE_SCHEMA_VERSION, NoteDoc } from "./docs/note.ts"
+import { withMain } from "./presetOrder.ts"
 import { PresetDoc } from "./docs/preset.ts"
 import type { Doc, EntityKind } from "./library.ts"
 
@@ -257,7 +258,11 @@ export const validateDoc = (
   | { readonly ok: false; readonly problems: ReadonlyArray<string>; readonly paths: ReadonlyArray<FieldPath> } => {
   if (!hasSchema(kind)) return { ok: false, problems: [`A ${kind} can't be edited yet.`], paths: [] }
   const result = Schema.decodeUnknownResult(SCHEMAS[kind] as Schema.Codec<unknown, unknown>)(doc)
-  if (Result.isSuccess(result)) return { ok: true, doc: result.success as Doc }
+  if (Result.isSuccess(result))
+    return {
+      ok: true,
+      doc: (kind === "preset" ? withMain(result.success as PresetDoc) : result.success) as Doc
+    }
   const issues = formatIssues(result.failure.issue).issues.slice(0, 20)
   return {
     ok: false,

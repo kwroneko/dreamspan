@@ -222,7 +222,7 @@ function Block({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <SwitchField store={store} path={[...path, "forbid_overrides"]} label="A card can't replace it" />
             {/* Added on import, it would come back on the next read: it's turned off instead. */}
-            {!prompt.system_prompt && !prompt.added_on_import && (
+            {entry.identifier !== "main" && !prompt.system_prompt && !prompt.added_on_import && (
               <Button variant="ghost" onClick={remove}>
                 Delete the prompt
               </Button>
@@ -423,6 +423,7 @@ export function PromptDocument({
                     )
                   }
                   remove={() => {
+                    if (entry.identifier === "main") return
                     setOrder(order.filter((e) => e.identifier !== entry.identifier))
                     void store.removeItem(at(entry.identifier))
                   }}

@@ -295,7 +295,7 @@ export const compose = (input: {
   for (const id of ["nsfw", "jailbreak", ...userRelative]) relative(id)
   if (has("enhanceDefinitions")) relative("enhanceDefinitions")
   const main = slots.get(index("main"))
-  for (const { message, at } of main ? input.beside : []) {
+  for (const { message, at } of input.beside) {
     if (at === "start") main!.unshift(message)
     else main!.push(message)
     spend(tokensOf(message))

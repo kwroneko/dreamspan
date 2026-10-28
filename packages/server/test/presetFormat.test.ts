@@ -25,6 +25,18 @@ const prompt = (doc: PresetDoc, identifier: string) => doc.prompts.find((p) => p
 const preset = (fields: object) => ({ prompt_order: [{ character_id: 100001, order: [] }], ...fields })
 
 describe("importing an ST chat-completion preset", () => {
+  it("puts Main first and off when the ST order leaves it out, including on reimport", () => {
+    const imported = load({
+      prompts: [{ identifier: "main", name: "Custom Main", system_prompt: false, content: "KEEP ME" }],
+      prompt_order: [{ character_id: 100001, order: [{ identifier: "chatHistory", enabled: true }] }]
+    }).doc
+    expect(imported.order[0]).toEqual({ identifier: "main", enabled: false })
+    expect(prompt(imported, "main")).toMatchObject({ content: "KEEP ME", system_prompt: false })
+    const again = load(exportStPreset(imported)).doc
+    expect(again.order[0]).toEqual({ identifier: "main", enabled: false })
+    expect(prompt(again, "main")?.content).toBe("KEEP ME")
+  })
+
   it("reads a preset shaped like ST's default, using only the global prompt order", () => {
     const result = load(fixture("default"))
     const { doc } = result
@@ -250,7 +262,7 @@ describe("ST's prompt and order sanitizing", () => {
         { character_id: 100001, order: ["a", "b", "c", "d"].map((identifier) => ({ identifier, enabled: true })) }
       ]
     })
-    expect(result.doc.order.slice(0, 4).map((e) => e.enabled)).toEqual([false, false, false, true])
+    expect(result.doc.order.slice(1, 5).map((e) => e.enabled)).toEqual([false, false, false, true])
     expect(codes(result).filter((c) => c === "preset.prompt_never_sent")).toHaveLength(3)
   })
 
@@ -276,7 +288,7 @@ describe("ST's prompt and order sanitizing", () => {
     })
     expect(prompt(result.doc, "a")?.content).toBe("first")
     expect(prompt(result.doc, "imported-3")?.content).toBe("no identifier")
-    expect(result.doc.order.slice(0, 1)).toEqual([{ identifier: "a", enabled: true }])
+    expect(result.doc.order.slice(1, 2)).toEqual([{ identifier: "a", enabled: true }])
     expect(codes(result)).toEqual(
       expect.arrayContaining([
         "preset.prompt_duplicate",
@@ -644,7 +656,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
       ],
       prompt_order: order(["charDescription", true], ["chatHistory", true])
     })
-    expect(result.doc.order.slice(0, 2)).toEqual([
+    expect(result.doc.order.slice(1, 3)).toEqual([
       { identifier: "charDescription", enabled: true },
       { identifier: "chatHistory", enabled: false }
     ])
@@ -655,20 +667,20 @@ describe("cases where ST's behaviour is easy to miss", () => {
       { identifier: "x", system_prompt: false, role: "system", content: "n", injection_position: 1, injection_depth: 1 }
     ]
     const once = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
-    expect(once.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
+    expect(once.doc.order.slice(1, 2)).toEqual([{ identifier: "x", enabled: true }])
     expect(codes(once)).not.toContain("preset.order_repeated")
     const twice = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
-    expect(twice.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
+    expect(twice.doc.order.slice(1, 2)).toEqual([{ identifier: "x", enabled: true }])
     expect(issue(twice, "preset.order_repeated")?.message).toContain("2 times")
   })
 
   it("reads a relative prompt listed twice by its first entry, as ST does", () => {
     const prompts = [{ identifier: "x", system_prompt: false, role: "user", content: "rel" }]
     const off = load({ prompts, prompt_order: order(["x", false], ["x", true]) })
-    expect(off.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: false }])
+    expect(off.doc.order.slice(1, 2)).toEqual([{ identifier: "x", enabled: false }])
     // ST sends it once: the second copy overwrites the first's slot.
     const on = load({ prompts, prompt_order: order(["x", true], ["x", true]) })
-    expect(on.doc.order.slice(0, 1)).toEqual([{ identifier: "x", enabled: true }])
+    expect(on.doc.order.slice(1, 2)).toEqual([{ identifier: "x", enabled: true }])
     expect(codes(on)).not.toContain("preset.order_repeated")
   })
 
@@ -680,7 +692,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
       ],
       prompt_order: order(["a", true], ["b", true])
     })
-    expect(result.doc.order.slice(0, 2).map((e) => e.enabled)).toEqual([false, true])
+    expect(result.doc.order.slice(1, 3).map((e) => e.enabled)).toEqual([false, true])
     expect(prompt(result.doc, "b")?.injection_trigger).toEqual(["normal"])
     expect(issue(result, "preset.prompt_never_sent")?.message).toContain("generation types")
   })
