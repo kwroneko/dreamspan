@@ -37,7 +37,6 @@ type Sql<A> = Effect.Effect<A, SqlError.SqlError>
 
 /** The library's write steps the editors share (libraryWrites.ts). */
 export interface LibrarySteps {
-  readonly namedCardRevision: (ref: RefRow, label: string, subtitle: string) => Sql<string>
   readonly sql: SqlClient.SqlClient
   readonly lib: ReturnType<typeof makeLibraryQueries>
   readonly drafts: ReturnType<typeof makeDraftStore>
@@ -281,6 +280,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
     ForkWithDrafts: ({ userId, refId, label, subtitle, moveDrafts }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind === "card") return yield* refused(ref, "Cards use independent forks.")
         if (ref.ref_kind === "chat_override") {
           return yield* refused(ref, "A chat override can't be forked; promote it to a variant instead.")
         }
@@ -290,7 +290,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           id,
           entity_id: ref.entity_id,
           ref_kind: "variant",
-          head_revision_id: yield* steps.namedCardRevision(ref, label, subtitle),
+          head_revision_id: ref.head_revision_id,
           follows_ref_id: ref.id,
           merge_base_revision_id: ref.head_revision_id,
           label,
@@ -300,8 +300,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         })}`
         if (moveDrafts) {
           yield* sql`UPDATE drafts SET target_id = ${id}, row_version = row_version + 1, updated_at = ${at}
-            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active'
-              AND (${ref.kind !== "card" ? 1 : 0} OR field NOT IN ('["name"]', '["character_version"]', '=["name"]', '=["character_version"]'))`
+            WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active'`
         }
         return toLibraryRef(yield* steps.reload(id))
       }).pipe(transaction(sql, "ForkWithDrafts")),

@@ -58,7 +58,7 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
   usedByChats: Schema.Int,
   /** Every draft of this ref's fields, ended ones too: their row versions are needed to start again. */
   drafts: Schema.Array(Draft),
-  /** The entity's upstream and variants, this one included. */
+  /** Non-card upstream and variants, this one included; empty for cards. */
   variants: Schema.Array(LibraryRef)
 }) {}
 
@@ -187,7 +187,7 @@ export class EditorApi extends RpcGroup.make(
     error: Schema.Union([...Writes])
   }),
   // --- Edit scope (DESIGN §4).
-  /** A named variant following this ref, optionally taking this ref's unsaved drafts along. */
+  /** A non-card variant following this ref, optionally taking its unsaved drafts along. */
   Rpc.make("ForkVariant", {
     payload: { refId: RefId, label: Label, subtitle: Subtitle, moveDrafts: Schema.Boolean },
     success: LibraryRef,

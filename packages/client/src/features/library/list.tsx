@@ -59,7 +59,7 @@ function LibraryRow({ entry, persona }: { entry: LibraryRef; persona?: boolean |
           {entry.subtitle && (
             <span className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">{entry.subtitle}</span>
           )}
-          {entry.refKind === "variant" && <Badge>variant</Badge>}
+          {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
           {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
         </div>
         {error && (

@@ -237,18 +237,6 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         return yield* reader.ChatCards({ userId: id, chatId, entityIds, bindings: bindingsOf(state) })
       }).pipe(internal("ListChatCards")),
 
-    // "Only in this chat": the chat's own version, made on first use from the version the
-    // chat uses at `slotId`; if the chat bound another version there, its own is bound instead.
-    EditCardForChat: ({ chatId, slotId, entityId }) =>
-      Effect.gen(function* () {
-        const id = yield* userId
-        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId }))
-        const binding = bindingsOf(state)[entityId] ?? null
-        const opened = yield* writer.OpenCardOverride({ userId: id, chatId, slotId, entityId, binding })
-        if (opened.bound) hub.publish(chatId, { _tag: "State" })
-        return opened
-      }).pipe(internal("EditCardForChat")),
-
     ForkCardForChat: (input) =>
       Effect.gen(function* () {
         const id = yield* userId

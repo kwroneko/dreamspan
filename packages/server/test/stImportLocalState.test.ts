@@ -62,6 +62,46 @@ const setup = Effect.fnUntraced(function* (tag: string, count = 2) {
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seconds" })(
   "ST re-import preserves local fork state",
   (it) => {
+    it.effect("a changed card file merges only into its imported card, leaving its fork alone", () =>
+      Effect.gen(function* () {
+        const { api, userId, cardPath } = yield* setup("card-fork-reimport")
+        const reader = yield* Reader
+        const writer = yield* Writer
+        const original = (yield* reader.StImportSources({ userId })).library.find((r) => r.sourcePath === cardPath)!
+        const before = yield* api.OpenEditor({ refId: original.refId })
+        const fork = yield* api.ForkCard({
+          refId: original.refId,
+          name: "Independent Alice",
+          nickname: "",
+          characterVersion: "fork",
+          moveDrafts: false
+        })
+        const forkBefore = yield* api.OpenEditor({ refId: fork.id })
+        yield* writer.EditRef({
+          userId,
+          refId: original.refId,
+          doc: { ...before.doc, personality: "Local choice" },
+          expectedRowVersion: before.ref.rowVersion,
+          message: null,
+          commitDraft: null
+        })
+        yield* importStFolder(
+          new Map([[cardPath, card("Alice", "Synthetic greeting", {}, { description: "Changed file definition" })]])
+        )
+        const after = yield* api.OpenEditor({ refId: original.refId })
+        assert.strictEqual(after.doc.description, "Changed file definition")
+        assert.strictEqual(after.doc.personality, "Local choice")
+        assert.strictEqual(after.ref.followsRefId, null)
+        assert.isFalse(after.ref.updateAvailable)
+        assert.deepStrictEqual(yield* api.OpenEditor({ refId: fork.id }), forkBefore)
+        const matched = (yield* reader.StImportSources({ userId })).library.filter((r) => r.sourcePath === cardPath)
+        assert.deepStrictEqual(
+          matched.map((r) => r.refId),
+          [original.refId]
+        )
+      })
+    )
+
     for (const localInChild of [true, false])
       it.effect(`local variable choice in ${localInChild ? "file" : "other"} fork`, () =>
         Effect.gen(function* () {

@@ -143,7 +143,7 @@ export function ImportPage() {
           title={into ? `Update “${intoLabel ?? "this entry"}”` : "Files"}
           description={
             into
-              ? "Pick its new version. Your own edits and variants are merged with it; anything that conflicts is left as it was."
+              ? "Pick its new version. Your own edits are merged with it; anything that conflicts is left as it was."
               : "Character cards (PNG, JSON or CHARX), SillyTavern World Info files and prompt presets. Preset imports take prompt text, order, prefill and regex scripts. Import model settings on a model’s settings screen; import connection settings in Connections."
           }
         />

@@ -395,7 +395,7 @@ describe("edits are non-destructive (invariant 1)", () => {
     const c = chat(owner)
     const root = slot(c, null, { content: "Hello." })
     const reply = slot(c, root, { writer: "model", content: "Hi." })
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'preset', 1)`, owner)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('rev', 'card', '{}', 'h', 1, 'user', 1)`)
     run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
@@ -422,6 +422,33 @@ describe("edits are non-destructive (invariant 1)", () => {
       expect(get<{ n: number }>(`SELECT count(*) AS n FROM ${table}`).n).toBe(0)
     }
     expect(all<{ id: string }>(`SELECT id FROM entity_refs`).map((r) => r.id)).toEqual(["base"])
+  })
+
+  it("allows only one independent upstream ref for cards", () => {
+    const owner = user()
+    const c = chat(owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('card', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+      VALUES ('rev', 'card', '{}', 'h', 1, 'user', 1)`)
+    run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+      VALUES ('base', 'card', 'upstream', 'rev', 'Card', 1, 1)`)
+    for (const kind of ["upstream", "variant", "chat_override"]) {
+      expect(() =>
+        run(
+          `INSERT INTO entity_refs
+        (id, entity_id, ref_kind, head_revision_id, follows_ref_id, chat_id, label, created_at, updated_at)
+        VALUES ('extra', 'card', ?, 'rev', 'base', ?, 'Card', 1, 1)`,
+          kind,
+          kind === "chat_override" ? c.chatId : null
+        )
+      ).toThrow(/one independent upstream ref/)
+    }
+    expect(() => run(`UPDATE entity_refs SET ref_kind = 'variant', follows_ref_id = 'base' WHERE id = 'base'`)).toThrow(
+      /one independent upstream ref/
+    )
+    expect(() => run(`UPDATE entity_refs SET follows_ref_id = 'base' WHERE id = 'base'`)).toThrow(
+      /one independent upstream ref/
+    )
   })
 
   it("never changes an entity revision", () => {
@@ -672,7 +699,7 @@ describe("references across chats", () => {
     const owner = user()
     const stranger = user()
     const c = chat(owner)
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'card', 1)`, stranger)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('theirs', ?, 'preset', 1)`, stranger)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('rev', 'theirs', '{}', 'h', 1, 'user', 1)`)
     run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
@@ -686,7 +713,7 @@ describe("references across chats", () => {
     ).toThrow(/chat owner/)
     // An override stays with its chat, though it may stop being one.
     const own = chat(owner)
-    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', ?, 'card', 1)`, owner)
+    run(`INSERT INTO entities (id, owner_user_id, kind, created_at) VALUES ('mine', ?, 'preset', 1)`, owner)
     run(`INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
          VALUES ('rev2', 'mine', '{}', 'h', 1, 'user', 1)`)
     run(`INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)

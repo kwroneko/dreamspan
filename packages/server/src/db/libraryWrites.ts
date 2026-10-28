@@ -16,7 +16,6 @@ import {
   validateDoc,
   withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
-import { CardOverrideOpened } from "@rp/shared/chatSetupApi.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
@@ -24,7 +23,6 @@ import type { Bin } from "./bin.ts"
 import { docHash, searchText } from "./documents.ts"
 import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
-import { makeGraphWrites } from "./graphWrites.ts"
 import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { sharedNote } from "./sharedNotes.ts"
@@ -138,25 +136,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         return id
       })
 
-    // Card names are revision content; the legacy label RPC arguments map to standard fields.
-    const namedCardRevision = (ref: RefRow, label: string, subtitle: string) =>
-      Effect.gen(function* () {
-        if (ref.kind !== "card") return ref.head_revision_id
-        const doc = yield* lib.loadDoc(ref.head_revision_id)
-        const current = yield* revision(ref.head_revision_id)
-        const encoded = encode({ ...doc, name: label, character_version: subtitle })
-        if (encoded.hash === current.doc_hash) return ref.head_revision_id
-        return yield* insertRevision({
-          entityId: ref.entity_id,
-          schemaVersion: current.schema_version,
-          doc: encoded,
-          parents: [ref.head_revision_id],
-          origin: "user",
-          originRef: null,
-          message: "Changed card display name and version"
-        })
-      })
-
     const reload = (refId: string) => lib.refsWhere("r.id = ?", [refId]).pipe(Effect.map(([row]) => row!))
 
     const moveHead = (refId: string, head: string, mergeBase: string | null) =>
@@ -267,10 +246,11 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         return plan.outcome
       })
 
-    /** Merges every ref that follows `refId`, transitively, and reports each outcome. */
+    /** Non-card followers merge transitively. Cards only merge their own import line. */
     const flowToFollowers = (refId: string) =>
       Effect.gen(function* () {
         const outcomes: Array<FollowerMerge> = []
+        if ((yield* reload(refId)).kind === "card") return outcomes
         const queue = [refId]
         while (queue.length > 0) {
           const followers = yield* lib.refsWhere("r.follows_ref_id = ?", [queue.shift()!])
@@ -592,6 +572,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       ForkRef: ({ userId, refId, label, subtitle }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.kind === "card")
+            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
           if (ref.ref_kind === "chat_override") {
             return yield* new RefOperationRefused({
               refId,
@@ -604,7 +586,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             id,
             entity_id: ref.entity_id,
             ref_kind: "variant",
-            head_revision_id: yield* namedCardRevision(ref, label, subtitle),
+            head_revision_id: ref.head_revision_id,
             follows_ref_id: ref.id,
             merge_base_revision_id: ref.head_revision_id,
             label,
@@ -618,6 +600,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       CreateChatOverride: ({ userId, refId, chatId }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.kind === "card")
+            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
           if (ref.ref_kind === "chat_override") {
             return yield* new RefOperationRefused({ refId, reason: "This is already a chat override." })
           }
@@ -625,52 +609,16 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           return toLibraryRef(yield* insertOverride(ref, chatId))
         }).pipe(transaction(sql, "CreateChatOverride")),
 
-      OpenCardOverride: ({ userId, chatId, slotId, entityId, binding }) =>
-        Effect.gen(function* () {
-          yield* liveChat(userId, chatId)
-          const graph = makeGraphWrites(sql, drafts)
-          if (slotId !== null) {
-            yield* graph.found(
-              sql`SELECT count(*) AS n FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`,
-              "slot",
-              slotId
-            )
-          }
-          const library = yield* lib.cardLibraryRef(userId, entityId)
-          if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
-          const pinned =
-            binding === null || (binding.ref === null && binding.revision === null)
-              ? undefined
-              : { ref: binding.ref ?? undefined, revision: binding.revision ?? undefined }
-          let override = yield* lib.chatOverride(userId, chatId, entityId)
-          if (override === null) {
-            // Started from the version the chat reads here, as the assembler picks it: a bound
-            // variant or revision, else the library entry.
-            const used = yield* lib.cardInChat(userId, chatId, entityId, pinned)
-            const bound = used?.refId ? yield* lib.ownedRef(userId, used.refId) : null
-            const follows = bound !== null && bound.ref_kind !== "chat_override" ? bound : library
-            override = yield* insertOverride(follows, chatId, used?.revisionId ?? follows.head_revision_id)
-          }
-          // A chat that binds another version here would never read its own: bind it instead,
-          // from this position on, as any cast change is.
-          const rebind = pinned !== undefined && (pinned.revision !== undefined || pinned.ref !== override.id)
-          if (rebind) {
-            yield* graph.insertStateEvent(userId, chatId, slotId, null, null, {
-              key: "card.binding",
-              value: { entity: entityId as EntityId, ref: override.id as RefId }
-            })
-          }
-          return new CardOverrideOpened({ ref: toLibraryRef(override), bound: rebind })
-        }).pipe(transaction(sql, "OpenCardOverride")),
-
       PromoteOverride: ({ userId, refId, label, subtitle, expectedRowVersion }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.kind === "card")
+            return yield* new RefOperationRefused({ refId, reason: "Cards use independent forks." })
           if (ref.ref_kind !== "chat_override") {
             return yield* new RefOperationRefused({ refId, reason: "Only chat overrides can be promoted." })
           }
           yield* checkRowVersion(ref, expectedRowVersion)
-          const head = yield* namedCardRevision(ref, label, subtitle)
+          const head = ref.head_revision_id
           yield* sql`UPDATE entity_refs SET head_revision_id = ${head}, ref_kind = 'variant', chat_id = NULL, label = ${label}, subtitle = ${subtitle},
                      row_version = row_version + 1, updated_at = ${Date.now()}
                    WHERE id = ${refId}`
@@ -834,7 +782,6 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       revision,
       recordMedia,
       createUpstream,
-      namedCardRevision,
       checkReferences
     }
     return { ...handlers, ...makeEditorWriteHandlers(steps), ...makeCardForkWriteHandlers(steps) }

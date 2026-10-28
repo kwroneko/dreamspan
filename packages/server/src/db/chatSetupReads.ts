@@ -91,8 +91,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           json_extract(rev.doc_json, '$.avatar_media_id') AS avatar
         FROM entities e
         JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
-          ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
       const characters = new Map<string, Member>()
@@ -125,36 +125,21 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         events.push(event)
         eventsByChat.set(event.chatId, events)
       }
-      // Ordinary groups use the metadata already loaded above. Fetch overrides once,
-      // rather than looking up every card in every chat (thousands on a large library).
-      const overrides = yield* sql<{ chat_id: string; entity_id: string; doc_json: string }>`
-        SELECT r.chat_id, r.entity_id, v.doc_json FROM entity_refs r
-        JOIN entities e ON e.id = r.entity_id JOIN entity_revisions v ON v.id = r.head_revision_id
-        WHERE r.ref_kind = 'chat_override' AND e.kind = 'card' AND e.owner_user_id = ${userId} AND e.purged_at IS NULL`
-      const overrideDocs = new Map(overrides.map((row) => [`${row.chat_id}:${row.entity_id}`, row.doc_json]))
       // Chats come latest first, so a group's first chat is its latest.
       const groups = new Map<string, { name: string; members: Array<Member>; chats: Array<Chat> }>()
       for (const row of chats) {
         const state = foldState(eventsByChat.get(row.id) ?? [])
         const played = new Set(state.playedByMe)
         const baseMembers = state.participants.flatMap((id) => (played.has(id) ? [] : (characters.get(id) ?? [])))
-        const needsResolution = baseMembers.some(
-          (member) =>
-            state.cardBindings[member.entityId] !== undefined || overrideDocs.has(`${row.id}:${member.entityId}`)
-        )
+        const needsResolution = baseMembers.some((member) => state.cardBindings[member.entityId] !== undefined)
         const members = needsResolution
           ? yield* Effect.forEach(baseMembers, (member) =>
               Effect.gen(function* () {
                 const binding = state.cardBindings[member.entityId]
-                const overrideDoc = overrideDocs.get(`${row.id}:${member.entityId}`)
-                if (binding === undefined && overrideDoc === undefined) return member
-                const used =
-                  binding === undefined ? null : yield* lib.cardInChat(userId, row.id, member.entityId, binding)
-                if (binding !== undefined && used === null) return member
-                const doc =
-                  used === null
-                    ? (JSON.parse(overrideDoc!) as Record<string, unknown>)
-                    : yield* lib.loadDoc(used.revisionId)
+                if (binding === undefined) return member
+                const used = yield* lib.cardInChat(userId, row.id, member.entityId, binding)
+                if (used === null) return member
+                const doc = yield* lib.loadDoc(used.revisionId)
                 const names = cardNames(doc)
                 return {
                   ...member,
@@ -231,8 +216,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           SELECT e.id AS entity_id, r.id AS ref_id, r.head_revision_id, r.label, r.subtitle
           FROM entities e
           JOIN entity_refs r ON r.id = (
-            SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
-            ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+            SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+            LIMIT 1)
           WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
             AND e.deleted_at IS NULL AND e.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona')
@@ -326,20 +311,16 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           // Another user's card, or one in the bin, reads as a missing one.
           const library = yield* lib.cardLibraryRef(userId, entityId)
           if (library === null) return yield* new NotFound({ entity: "card", id: entityId })
-          const override = yield* lib.chatOverride(userId, chatId, entityId)
           const binding = bindingOf(bindings, entityId)
           // What the context assembler reads here; a card it can't resolve shows its library entry.
           const used = yield* lib.cardInChat(userId, chatId, entityId, binding)
-          const usesOverride = override !== null && used?.refId === override.id && !binding?.revision
           cards.push(
             new ChatCard({
               entityId,
               refId: library.id as RefId,
               usedByChats: yield* lib.usedByChats(userId, library),
-              overrideRefId: (override?.id ?? null) as RefId | null,
               // A binding to the library entry itself reads the library entry: not another version.
-              binding: binding?.revision ? "revision" : binding?.ref && binding.ref !== library.id ? "ref" : "default",
-              usesOverride,
+              binding: binding?.revision ? "revision" : "default",
               definition: definitionOf(yield* lib.loadDoc(used?.revisionId ?? library.head_revision_id))
             })
           )

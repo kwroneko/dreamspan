@@ -152,7 +152,7 @@ test("submission rechecks names even without a tab notification", async ({ page 
   expect(refs.filter((ref) => ref.label === "Unannounced import")).toHaveLength(1)
 })
 
-test("equal display names remain distinguishable in variant navigation", async ({ page }) => {
+test("forks with equal display names are separate library entries", async ({ page }) => {
   const ref = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const original = yield* api.CreateCard({
@@ -160,10 +160,11 @@ test("equal display names remain distinguishable in variant navigation", async (
         name: "Versioned variants",
         version: "original-version"
       })
-      yield* api.ForkVariant({
+      yield* api.ForkCard({
         refId: original.id,
-        label: original.label,
-        subtitle: "second-version",
+        name: original.label,
+        nickname: "",
+        characterVersion: "second-version",
         moveDrafts: false
       })
       return original
@@ -171,9 +172,14 @@ test("equal display names remain distinguishable in variant navigation", async (
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${ref.id}`)
-  const variants = page.getByRole("navigation", { name: "Variants" })
-  await expect(variants).toContainText("original-version")
-  await expect(variants.getByRole("link", { name: "Versioned variants · second-version" })).toBeVisible()
+  await expect(page.getByRole("navigation", { name: "Variants" })).toHaveCount(0)
+  const refs = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListLibrary({ kind: "card" }))
+  expect(
+    refs
+      .filter((card) => card.label === ref.label)
+      .map((card) => card.subtitle)
+      .sort()
+  ).toEqual(["original-version", "second-version"])
 })
 
 test("Save rechecks names and disables the action after an unannounced collision", async ({ page }) => {

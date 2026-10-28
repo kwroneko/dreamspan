@@ -155,7 +155,7 @@ export const makeEditorHandlers = Effect.gen(function* () {
           })
           .pipe(changed(id))
       ).pipe(
-        // A chat's note, or its own version of a card (whose name the chat shows), changed.
+        // A chat's note or a non-card chat override changed.
         Effect.tap((change) =>
           Effect.sync(() => {
             const chatId = chatNote?.chatId ?? change.ref.chatId

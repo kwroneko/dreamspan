@@ -108,16 +108,23 @@ describe("library import storage", () => {
     }).pipe(Effect.provide(layer))
   })
 
-  it.live("a re-import merges into the upstream and its variants, and into the note", () =>
+  it.live("a re-import merges own edits and its note without changing a fork", () =>
     Effect.gen(function* () {
       const { writer, reader, ana, importCard } = yield* setup
       const first = yield* importCard(ana, "A cartographer. She maps the coast.")
-      const variant = yield* writer.ForkRef({ userId: ana, refId: first.ref.id, label: "Mira", subtitle: "older" })
+      const variant = yield* writer.ForkCard({
+        userId: ana,
+        refId: first.ref.id,
+        name: "Mira",
+        nickname: "",
+        characterVersion: "older",
+        moveDrafts: false
+      })
       yield* writer.EditRef({
         userId: ana,
-        refId: variant.id,
+        refId: first.ref.id,
         doc: { ...card("A retired cartographer. She maps the coast."), avatar_media_id: "kept" },
-        expectedRowVersion: variant.rowVersion,
+        expectedRowVersion: first.ref.rowVersion,
         message: null,
         commitDraft: null
       })
@@ -141,18 +148,21 @@ describe("library import storage", () => {
         "A blue coat."
       )
       assert.isFalse(second.created)
-      assert.strictEqual(second.outcome, "fast_forward")
-      assert.deepStrictEqual(
-        second.followers.map((f) => [f.label, f.outcome]),
-        [["Mira", "merged"]]
+      assert.strictEqual(second.outcome, "merged")
+      assert.deepStrictEqual(second.followers, [])
+      const merged = yield* reader.GetRef({ userId: ana, refId: first.ref.id })
+      assert.strictEqual(
+        (yield* reader.GetRef({ userId: ana, refId: variant.id })).doc.description,
+        "A cartographer. She maps the coast."
       )
-      const merged = yield* reader.GetRef({ userId: ana, refId: variant.id })
       assert.strictEqual(merged.doc.description, "A retired cartographer. She maps the coast at night.")
+      const copiedNotes = yield* reader.ListCardNotes({ userId: ana, cardRefId: variant.id })
+      assert.strictEqual(copiedNotes[0]!.doc.content, "Wears a red coat.")
       // The same note was updated, with the user's own title kept.
       assert.strictEqual(second.note!.id, noteRef.id)
       const note = yield* reader.GetRef({ userId: ana, refId: noteRef.id })
       assert.deepStrictEqual([note.doc.title, note.doc.content], ["Outfit", "A blue coat."])
-      assert.lengthOf(yield* reader.ListLibrary({ userId: ana, kind: "note", tag: null, archived: false }), 1)
+      assert.lengthOf(yield* reader.ListLibrary({ userId: ana, kind: "note", tag: null, archived: false }), 2)
     }).pipe(Effect.provide(fresh().layer))
   )
 
@@ -161,8 +171,10 @@ describe("library import storage", () => {
       const { writer, ana, ben, importCard } = yield* setup
       const mine = yield* importCard(ana, "A cartographer.")
       assert.strictEqual(yield* tag(importCard(ben, "Hijacked.", mine.ref.id)), "NotFound")
-      const variant = yield* writer.ForkRef({ userId: ana, refId: mine.ref.id, label: "v", subtitle: "" })
-      assert.strictEqual(yield* tag(importCard(ana, "Again.", variant.id)), "RefOperationRefused")
+      assert.strictEqual(
+        yield* tag(writer.ForkRef({ userId: ana, refId: mine.ref.id, label: "v", subtitle: "" })),
+        "RefOperationRefused"
+      )
       const preset = writer.ImportFile({
         userId: ana,
         intoRefId: mine.ref.id,

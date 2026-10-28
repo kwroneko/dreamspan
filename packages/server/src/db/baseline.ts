@@ -124,6 +124,16 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
     CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
   ) STRICT`,
+  `CREATE TRIGGER card_ref_insert BEFORE INSERT ON entity_refs
+    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
+        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
+    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
+  `CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs
+    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+      AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL
+        OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id))
+    BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END`,
   `CREATE INDEX entity_refs_entity ON entity_refs(entity_id)`,
   `CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL`,
   `CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL`,

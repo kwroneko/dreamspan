@@ -156,9 +156,11 @@ export function Editor({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
           <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>
-          <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-            {ref.refKind === "variant" ? "variant" : ref.refKind === "upstream" ? "original" : "edited for this chat"}
-          </Badge>
+          {ref.kind !== "card" && (
+            <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
+              {ref.refKind === "variant" ? "variant" : ref.refKind === "upstream" ? "original" : "edited for this chat"}
+            </Badge>
+          )}
         </div>
         {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
         {ref.kind === "preset" ? (
@@ -177,10 +179,12 @@ export function Editor({
           <p className="text-sm">
             Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
             <strong>used by {plural(usedByChats, "chat", "chats")}</strong>.
-            {ref.kind !== "note" && " To change it for some chats only, make a variant."}
+            {ref.kind === "card"
+              ? " To change it for some chats only, fork it."
+              : ref.kind !== "note" && " To change it for some chats only, make a variant."}
           </p>
         )}
-        {variants.length > 1 && (
+        {ref.kind !== "card" && variants.length > 1 && (
           <nav aria-label="Variants" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <span className="text-muted">Variants:</span>
             {variants.map((variant) =>
@@ -216,7 +220,7 @@ export function Editor({
           {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
           <Button onClick={() => setOpen("history")}>History</Button>
           {ref.kind !== "note" && ref.refKind !== "chat_override" && (
-            <Button onClick={() => setOpen("fork")}>Make a variant</Button>
+            <Button onClick={() => setOpen("fork")}>{ref.kind === "card" ? "Fork" : "Make a variant"}</Button>
           )}
           {ref.kind !== "card" && (
             <Button variant="ghost" onClick={() => setOpen("rename")}>

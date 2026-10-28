@@ -1,8 +1,8 @@
 # Card forks: delta from the build
 
-**Status**: Proposed, 2026-10-26. Built: units 1–3 (ARCHITECTURE §3.8, §3.9, §12); these portions are obsolete as proposals. Unit 2 uses fork independence unit 6: swaps are fork-scoped at slot null, inherited by lineage, with no copy on branch or delete. Delta from master acb40f3 to the owner's decided card-fork model. **[D]** = traceable to an owner decision (cited); **[P]** = proposed here or in a proposal doc, not confirmed. Assumes unit C (branch `unit-c-card-names`) has landed: a card's display name, in-character name and subtitle are its document's `name`, `nickname` and `character_version`, and nothing below reads a ref's `label` or `subtitle`.
+**Status**: Proposed, 2026-10-26. Built: units 1–4 (ARCHITECTURE §3.8, §3.9, §12); these portions are obsolete as proposals. Unit 2 uses fork independence unit 6: swaps are fork-scoped at slot null, inherited by lineage, with no copy on branch or delete. Delta from master acb40f3 to the owner's decided card-fork model. **[D]** = traceable to an owner decision (cited); **[P]** = proposed here or in a proposal doc, not confirmed. Assumes unit C (branch `unit-c-card-names`) has landed: a card's display name, in-character name and subtitle are its document's `name`, `nickname` and `character_version`, and nothing below reads a ref's `label` or `subtitle`.
 
-**Unit 1 built** (§9, "Fork relationship and ForkCard"), 2026-10-27: migration `0056_card_forks`, `ForkCard`, `SetCardParent`, `cardFamily` and the `CardFamily` RPC, as ARCHITECTURE.md §3.9 "Card forks" now documents. Units 2 and 3 are also built; units 4 and 5 remain. Until unit 4, variants and chat overrides still exist beside forks.
+**Unit 1 built** (§9, "Fork relationship and ForkCard"), 2026-10-27: migration `0056_card_forks`, `ForkCard`, `SetCardParent`, `cardFamily` and the `CardFamily` RPC, as ARCHITECTURE.md §3.9 "Card forks" now documents. Units 2–4 are also built; unit 5 remains. Unit 4 removes card variants and chat overrides without migration; its implemented portions are obsolete as proposals (ARCHITECTURE §3.9, §11.1, §14).
 
 Scope is cards (personas included, since they are cards). Presets, lorebooks and notes keep today's ref model until the owner decides otherwise (§8, question 3).
 
@@ -66,6 +66,8 @@ Scope is cards (personas included, since they are cards). Presets, lorebooks and
 
 ## 5. Migration of existing data
 
+**Obsolete, rejected by owner Q4 (2026-10-28).** No migration and no card-specific startup refusal. Deployment starts fresh from the edited baseline. Shared ref tables/columns remain because non-card entities need them; card refs are constrained to one independent upstream. The original migration proposal below is retained only as a record.
+
 One migration (after unit C's), in the writer, cards only. Each step is user data moved, never dropped.
 
 - **Every `variant` ref V of a card E** becomes a new entity F, processed parents first (a variant of a variant forks from the parent's new entity):
@@ -122,7 +124,7 @@ Client:
 - Q1: no single answer. Messages keep the card that wrote them; renaming a card offers, as ST does, to replace its name in past chats, through wide-range history edits (DESIGN §10.3), which also cover a renamed fork used where the old name appears.
 - Q2: a card's own notes are forked with it. Named notes shared between things are likely later.
 - Q3: cards only. Presets, lorebooks and notes can't work the same way and get their own designs.
-- Q4: no migration. The app refuses to start on a database with card variants or chat overrides; unit 4 becomes that check plus removing the card paths of following.
+- Q4: no migration. Clarified by the owner’s unit-4 brief (2026-10-28): nobody uses the app yet; deployment starts fresh from the single edited baseline. Remove card variants/overrides and card following paths, without a card-specific startup refusal. Shared schema required by other kinds stays.
 - Q5: moot.
 
 The original questions, for the record:
@@ -150,7 +152,7 @@ Each is one implementer's work, ARCHITECTURE.md updated in the same commit, `npm
 1. **Fork relationship and ForkCard.** The `entities` columns and trigger, `cardFamily`, `ForkCard` (content, tags, notes, drafts), `SetCardParent` with cycle refusal, `CardFamily` RPC. Tests: copy contents (document, tags, notes, media ids, no `source_path`); the parent and its chats are untouched after editing either; family tree identical from every member, with binned members; cycles, self, other users' and other kinds' refused (isolation matrix probes); draft move.
 2. **`card.swap` and branch-owned events.** Built with fork independence unit 6 (ARCHITECTURE §3.8); obsolete as a proposal. The fork-lineage implementation supersedes §3 rules 2 and 3 (no copy-on-branch or copy-on-delete). Key, fold, id declarations, `StateEventsAt(leafSlotId)`, copy on branch in `insertSlot`, copy on delete, `ChangeCast` `Swap`, readers (`GetCast`, `ListChatCards`, `ListChats(entityId)`, `usedByChats`, the assembler). Tests: fold cases (position kept, presence, played-by-me, lorebook keys moved, binding dormant then restored); regenerating an earlier message uses the swapped card; a branch from earlier keeps it; an existing line doesn't get it; deleting the message carrying it and restoring it; swap outside the family refused; `stateKeys.test.ts` oracle extended.
 3. **Fork for this chat.** Built, 2026-10-28 (ARCHITECTURE §3.9, §12); obsolete as a proposal. `ForkCardForChat` and the Cast tab/right panel: the card named with "used by N chats", Edit, Fork for this chat (dialog with the clash check), Use another version. Tests: one transaction (a forced failure leaves nothing); note switches carried; queue and composer speaker moved; e2e: fork in a chat, go back three messages and branch, the branch still has the fork; the other existing branch keeps the parent; switch back.
-4. **Migration and removal of following for cards.** §5, then removing the override layer and the card paths of the follow/merge operations and RPCs. Tests: the migration test of §5 (assembler output equal on every leaf of every chat, drafts intact, ref ids kept, revision chains as specified, triggers restored); the realistic import migrates with zero changes; re-import of an original merges with no followers and doesn't touch a fork.
+4. **Removal of following for cards, without migration.** Built, 2026-10-28; obsolete as a proposal. Owner Q4 supersedes §5: fresh baseline, card refs restricted to one independent upstream; remove card override resolution and RPCs, refuse card variants in shared operations, retain the import-line merge. Tests cover baseline guards/equivalence, card re-import merging own edits with no followers and no fork changes, pinned revisions in assembly/cast/search, existing fork-and-swap behavior, draft movement and non-card following.
 5. **Library and editor surfaces.** Fork dialog, Forks tree, Compare with parent, Mark as a fork of… / Unlink, the provenance lines, badges. Tests: e2e for each surface; screenshots at 1440 and 390 px on the realistic data with forks made in the walkthrough.
 
 Message-following card changes (§6) are built with the agent's card rewriting, not here.

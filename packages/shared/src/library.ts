@@ -10,6 +10,7 @@ export type EntityKind = typeof EntityKind.Type
 
 /**
  * upstream: the base line (imported, or the original of something the user created).
+ * Cards have exactly one upstream ref. The other kinds also support:
  * variant: a named fork that follows another ref, so upstream updates flow into it.
  * chat_override: changes for one chat only; it can be promoted to a variant.
  */

@@ -1,3 +1,4 @@
+import { docHash } from "../src/db/documents.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 // The isolation matrix (spec/WORKFLOW.md §3, DESIGN §11): every RPC in AppApi has an
@@ -1363,23 +1364,6 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       })
   },
-  EditCardForChat: {
-    probe: (actor, owner) =>
-      Effect.gen(function* () {
-        const edit = (chatId: ChatId, slotId: SlotId | null, entityId: EntityId) =>
-          actor.api.EditCardForChat({ chatId, slotId, entityId })
-        yield* refused(edit(owner.chat.chatId, null, actor.cardId), "NotFound")
-        yield* refused(edit(actor.chat.chatId, null, owner.cardId), "NotFound")
-        yield* refused(edit(actor.chat.chatId, owner.chat.slotId, actor.cardId), "NotFound")
-        // Nothing of the owner's got an override.
-        const [card] = yield* owner.api.ListChatCards({
-          chatId: owner.chat.chatId,
-          slotId: null,
-          entityIds: [owner.cardId]
-        })
-        assert.isNull(card!.overrideRefId)
-      })
-  },
   ChangeCast: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -2469,7 +2453,42 @@ const seed = Effect.gen(function* () {
           }
           return variant.id
         })
-      const pendingCardRefId = yield* pending(editorCard.id, ["personality"])
+      // Cards merge only their own import line; notes still exercise ref following.
+      const cardSource = (yield* api.OpenEditor({ refId: editorCard.id })).doc
+      const importCard = (personality: string) =>
+        writer.ImportFile({
+          userId: user.id,
+          intoRefId: editorCard.id,
+          kind: "card",
+          label: "",
+          schemaVersion: 1,
+          docJson: JSON.stringify({ ...cardSource, personality }),
+          docHash: docHash({ ...cardSource, personality }),
+          searchText: "",
+          sourceName: "synthetic.json",
+          sourceHash: "0".repeat(64),
+          media: [],
+          noteDocJson: null
+        })
+      yield* importCard("")
+      const cardDraft = yield* api.SaveEditorDraft({
+        refId: editorCard.id,
+        field: textField(["personality"]),
+        draftId: null,
+        expectedSession: null,
+        content: "Mine.",
+        expectedRowVersion: null,
+        baseRevisionId: null
+      })
+      const cardRef = (yield* api.OpenEditor({ refId: editorCard.id })).ref
+      yield* api.CommitEditorDrafts({
+        refId: editorCard.id,
+        expectedRowVersion: cardRef.rowVersion,
+        fields: [{ field: cardDraft.key.field, draftId: cardDraft.id, expectedRowVersion: cardDraft.rowVersion }],
+        message: null
+      })
+      yield* importCard("Theirs.")
+      const pendingCardRefId = editorCard.id
       const pendingNoteRefId = yield* pending(note.id, ["content"])
       const queued = yield* api.SendMessage({
         chatId: chat.id,

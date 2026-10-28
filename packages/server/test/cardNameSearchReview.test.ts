@@ -70,7 +70,7 @@ it.live("search finds the display name and version shown by a pinned card revisi
       scope: null,
       data: { key: "card.binding", value: { entity: made.entityId } }
     })
-    const local = yield* writer.CreateChatOverride({ userId, chatId: started.chat.id, refId: made.ref.id })
+    const local = (yield* api.OpenEditor({ refId: made.ref.id })).ref
     yield* writer.EditRef({
       userId,
       refId: local.id,

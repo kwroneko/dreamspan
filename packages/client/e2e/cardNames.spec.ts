@@ -63,23 +63,22 @@ for (const width of [1440, 390]) {
         .filter({ has: page.getByRole("heading", { name: "Identity", exact: true }) })
         .screenshot({ path: join(screens, `editor-fields-${width}.png`) })
     // Fork pair checks; the chosen names become the fork revision, with parent unchanged.
-    await page.getByRole("button", { name: "Make a variant", exact: true }).click()
-    const fork = page.getByRole("dialog", { name: "Make a variant" })
+    await page.getByRole("button", { name: "Fork", exact: true }).click()
+    const fork = page.getByRole("dialog", { name: "Fork card" })
     await fork.getByRole("textbox", { name: "Display name", exact: true }).fill("Aria Vance")
     await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
     const clash = "Another card is already called Aria Vance · 1: change the display name or the version"
     await expect(fork.getByRole("status")).toHaveText(clash)
-    await expect(fork.getByRole("button", { name: "Make the variant" })).toBeDisabled()
+    await expect(fork.getByRole("button", { name: "Fork card" })).toBeDisabled()
     await shoot("fork-clash")
     await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(`fork-${width}`)
-    await expect(fork.getByRole("button", { name: "Make the variant" })).toBeEnabled()
-    await fork.getByRole("button", { name: "Make the variant" }).click()
+    await expect(fork.getByRole("button", { name: "Fork card" })).toBeEnabled()
+    await fork.getByRole("button", { name: "Fork card" }).click()
     await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue(
       `fork-${width}`
     )
-    const variants = page.getByRole("navigation", { name: "Variants" })
-    await expect(variants).toContainText(`fork-${width}`)
-    await shoot("variants")
+    await expect(page.getByRole("navigation", { name: "Variants" })).toHaveCount(0)
+    await shoot("fork")
     // Existing card rename also checks the pair before Save.
     await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
     await expect(page.getByRole("button", { name: /^Save(?: \(|$)/ })).toBeDisabled()

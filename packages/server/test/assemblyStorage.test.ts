@@ -1047,10 +1047,10 @@ describe("context assembly from the database", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("uses this chat's override of a card, and a pinned revision over it", () =>
+  it.live("uses a card's head and a pinned revision over it", () =>
     Effect.gen(function* () {
-      const { writer, userId, mira, chat, state, assemble } = yield* setup()
-      const override = yield* writer.CreateChatOverride({ userId, refId: mira.ref.id, chatId: chat.id })
+      const { writer, userId, mira, state, assemble } = yield* setup()
+      const override = mira.ref
       yield* writer.EditRef({
         userId,
         refId: override.id,

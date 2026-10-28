@@ -191,35 +191,22 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
             AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})))`.pipe(Effect.map(([row]) => row!.n))
 
   /**
-   * A live card's library entry, the one chats show it from (cards.ts): its upstream, or its
-   * oldest variant without one. Null when it isn't the user's live card.
+   * A live card's single upstream ref. Null when it isn't the user's live card.
    */
   const cardLibraryRef = (userId: UserId, entityId: string) =>
     sql<{ id: string }>`
       SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
-        AND e.deleted_at IS NULL AND r.ref_kind <> 'chat_override'
-      ORDER BY r.ref_kind = 'upstream' DESC, r.created_at, r.id LIMIT 1`.pipe(
-      Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null)))
-    )
-
-  /** The chat's own version of an entity, if it has one. */
-  const chatOverride = (userId: UserId, chatId: string, entityId: string) =>
-    sql<{ id: string }>`
-      SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-      WHERE r.entity_id = ${entityId} AND r.chat_id = ${chatId} AND r.ref_kind = 'chat_override'
-        AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL
-      ORDER BY r.created_at, r.id LIMIT 1`.pipe(
-      Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null)))
-    )
+        AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
+      LIMIT 1`.pipe(Effect.flatMap(([row]) => (row ? ownedRef(userId, row.id) : Effect.succeed(null))))
 
   /**
    * The version of a card a chat reads at a position, by the context assembler's rules
-   * (assemblySources.ts `card`): a revision the chat's state binds, else the head of a ref
-   * it binds, else the head of the chat's own version, else the upstream's. `binding` is
+   * (assemblySources.ts `card`): a revision the chat's state binds, else its upstream head.
+   * A ref binding can name only that same upstream. `binding` is
    * the folded `card.binding` there. Null when that isn't the user's live card.
    */
-  const cardInChat = (userId: UserId, chatId: string, entityId: string, binding: CardBinding | undefined) =>
+  const cardInChat = (userId: UserId, _chatId: string, entityId: string, binding: CardBinding | undefined) =>
     Effect.gen(function* () {
       if (binding?.revision) {
         const [row] = yield* sql<{ id: string }>`
@@ -228,14 +215,12 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
             AND e.kind = 'card' AND e.deleted_at IS NULL`
         return row ? { refId: binding.ref ?? null, revisionId: row.id } : null
       }
-      const which = binding?.ref
-        ? sql`r.id = ${binding.ref} AND (r.chat_id IS NULL OR r.chat_id = ${chatId})`
-        : sql`((r.ref_kind = 'chat_override' AND r.chat_id = ${chatId}) OR r.ref_kind = 'upstream')`
+      const which = binding?.ref ? sql`r.id = ${binding.ref} AND r.ref_kind = 'upstream'` : sql`r.ref_kind = 'upstream'`
       const [row] = yield* sql<{ id: string; head_revision_id: string }>`
         SELECT r.id, r.head_revision_id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
         WHERE r.entity_id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'card'
           AND e.deleted_at IS NULL AND ${which}
-        ORDER BY r.ref_kind = 'chat_override' DESC LIMIT 1`
+        LIMIT 1`
       return row ? { refId: row.id as string | null, revisionId: row.head_revision_id } : null
     })
 
@@ -298,8 +283,8 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM family JOIN entities e ON e.id = family.id
         LEFT JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
-          ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          LIMIT 1)
         ORDER BY e.id`
       if (rows.length === 0) return null
       const state = (row: (typeof rows)[number]): FamilyMemberState =>
@@ -342,7 +327,6 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
     cardNoteFrom,
     usedByChats,
     cardLibraryRef,
-    chatOverride,
     cardInChat
   }
 }

@@ -490,7 +490,14 @@ describe("library", () => {
         origin: "user",
         sourcePath: null
       })
-      const variant = yield* writer.ForkRef({ userId, refId: created.ref.id, label: "Mira", subtitle: "v" })
+      const variant = yield* writer.ForkCard({
+        userId,
+        refId: created.ref.id,
+        name: "Mira",
+        nickname: "",
+        characterVersion: "v",
+        moveDrafts: false
+      })
       const reimport = (d: Doc) => importInto(writer, userId, created.ref.id, "card", d)
 
       const same = yield* reimport(cardDoc("Mira"))
@@ -500,14 +507,14 @@ describe("library", () => {
       const origins = (refId: RefId) =>
         reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.origin)))
       assert.deepStrictEqual(yield* origins(created.ref.id), ["user"])
-      assert.deepStrictEqual(yield* origins(variant.id), ["user", "user"])
+      assert.deepStrictEqual(yield* origins(variant.id), ["user"])
 
       // That import is now the merge base, so the next one merges cleanly.
       const next = yield* reimport(cardDoc("Mira Vale"))
       assert.strictEqual(next.outcome, "merged")
       assert.deepStrictEqual(
         (yield* reader.GetRef({ userId, refId: variant.id })).doc,
-        cardDoc("Mira Vale", { character_version: "v" })
+        cardDoc("Mira", { nickname: "", character_version: "v" })
       )
     }).pipe(Effect.provide(database()))
   )

@@ -1,5 +1,5 @@
 // The Cast tab's view of a card is the version the next request reads (ListChatCards,
-// EditCardForChat, GetCast), checked against an actual assembled request. Synthetic cards,
+// GetCast), checked against an actual assembled request. Synthetic cards,
 // a real server and the database workers.
 import { assert, describe, it } from "@effect/vitest"
 import { NewVersion, type EntityId } from "@rp/shared/chat.ts"
@@ -103,33 +103,7 @@ const setup = Effect.gen(function* () {
 })
 
 describe("the Cast tab's cards are the versions the model reads", () => {
-  it.live(
-    "a name edited only in this chat is the chat's name for the card; the display name and subtitle follow that revision",
-    () =>
-      Effect.gen(function* () {
-        const s = yield* setup
-        const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-        yield* s.edit(opened.ref.id, { name: "Chat Mira", nickname: "Mira model", character_version: "chat version" })
-        assert.include(yield* s.assembled(), "Mira model")
-        const cast = yield* s.api.GetCast({ chatId: s.chatId, slotId: yield* s.leaf() })
-        const card = cast.cards.find((c) => c.entityId === s.entityId)!
-        assert.strictEqual(card.name, "Chat Mira")
-        assert.strictEqual(card.label, "Chat Mira")
-        assert.strictEqual(card.modelName, "Mira model")
-        assert.strictEqual(card.subtitle, "chat version")
-        // Another chat with the card still calls it Mira.
-        const other = yield* s.api.StartChat({
-          cards: [s.entityId],
-          persona: null,
-          greeting: 0,
-          first: { _tag: "Send", content: "Hi", speakerEntityId: null }
-        })
-        const elsewhere = yield* s.api.GetCast({ chatId: other.chat.id, slotId: null })
-        assert.strictEqual(elsewhere.cards.find((c) => c.entityId === s.entityId)!.name, "Mira")
-      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
-  )
-
-  it.live("a pinned revision is shown, an edit only here starts from it, and binds the chat's own version", () =>
+  it.live("a pinned revision is shown and sent while the library head changes", () =>
     Effect.gen(function* () {
       const s = yield* setup
       yield* s.bind({ revision: s.made.ref.headRevisionId })
@@ -148,58 +122,7 @@ describe("the Cast tab's cards are the versions the model reads", () => {
       const pinned = yield* s.shown()
       assert.strictEqual(pinned.definition.description, "Original harbor pilot.")
       assert.strictEqual(pinned.binding, "revision")
-      assert.isFalse(pinned.usesOverride)
       assert.include(yield* s.assembled(), "Original harbor pilot.")
-
-      const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-      assert.isTrue(opened.bound)
-      assert.strictEqual(opened.ref.headRevisionId, s.made.ref.headRevisionId)
-      yield* s.edit(opened.ref.id, { description: "Edited local pilot." })
-      const local = yield* s.shown()
-      assert.isTrue(local.usesOverride)
-      assert.strictEqual(local.binding, "ref")
-      assert.strictEqual(local.definition.description, "Edited local pilot.")
-      assert.include(yield* s.assembled(), "Edited local pilot.")
-      // Opened again, nothing more is bound.
-      const again = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-      assert.strictEqual(again.ref.id, opened.ref.id)
-      assert.isFalse(again.bound)
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
-  )
-
-  it.live("only in this chat starts from the card variant bound in the chat", () =>
-    Effect.gen(function* () {
-      const s = yield* setup
-      const variant = yield* s.writer.ForkRef({
-        userId: s.userId,
-        refId: s.made.ref.id,
-        label: "Forest Mira",
-        subtitle: ""
-      })
-      yield* s.edit(variant.id, { description: "Forest pilot." })
-      yield* s.bind({ ref: variant.id })
-      assert.strictEqual((yield* s.shown()).definition.description, "Forest pilot.")
-      const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-      assert.strictEqual(opened.ref.followsRefId, variant.id)
-      assert.isTrue(opened.bound)
-      const local = yield* s.shown()
-      assert.isTrue(local.usesOverride)
-      assert.strictEqual(local.definition.description, "Forest pilot.")
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
-  )
-
-  it.live("an existing override that a ref binding hides is bound when edited only here", () =>
-    Effect.gen(function* () {
-      const s = yield* setup
-      yield* s.bind({ ref: s.made.ref.id })
-      // Bound to the library entry itself: that's the library entry, not another version.
-      assert.strictEqual((yield* s.shown()).binding, "default")
-      const opened = yield* s.api.EditCardForChat({ chatId: s.chatId, slotId: yield* s.leaf(), entityId: s.entityId })
-      assert.isTrue(opened.bound)
-      yield* s.edit(opened.ref.id, { description: "Edited local pilot." })
-      const shown = yield* s.shown()
-      assert.strictEqual(shown.definition.description, "Edited local pilot.")
-      assert.include(yield* s.assembled(), shown.definition.description)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 

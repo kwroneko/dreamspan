@@ -3,7 +3,6 @@
 // Cross-user probes are in isolation.test.ts.
 import { readFileSync } from "node:fs"
 import { assert, layer } from "@effect/vitest"
-import type { ChatId } from "@rp/shared/chat.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { textField, validateDoc, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
@@ -146,7 +145,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const old = yield* api.GetRevision({ refId: card.id, revisionId: card.headRevisionId })
       assert.deepStrictEqual([old.name, old.nickname, old.character_version], ["Display", "Model", "1.0"])
       yield* draft(api, card.id, textField(["name"]), "Pending display")
-      const fork = yield* api.ForkVariant({ refId: card.id, label: "Fork display", subtitle: "3.0", moveDrafts: true })
+      const fork = yield* api.ForkCard({
+        refId: card.id,
+        name: "Fork display",
+        nickname: "Model",
+        characterVersion: "3.0",
+        moveDrafts: true
+      })
       const source = yield* api.OpenEditor({ refId: card.id })
       assert.strictEqual(source.drafts.find((d) => d.key.field === textField(["name"]))!.content, "Pending display")
       const forkDoc = yield* doc(api, fork.id)
@@ -179,7 +184,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a save names its draft: one that moved to a variant never takes over the new draft here", () =>
+  it.effect("a save names its draft: one that moved to a fork never takes over the new draft here", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Moved draft", name: "Moved draft" })
@@ -193,7 +198,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         expectedRowVersion: null,
         baseRevisionId: card.headRevisionId
       })
-      const variant = yield* api.ForkVariant({ refId: card.id, label: "Variant", subtitle: "", moveDrafts: true })
+      const variant = yield* api.ForkCard({
+        refId: card.id,
+        name: "Variant",
+        nickname: "",
+        characterVersion: "",
+        moveDrafts: true
+      })
       const b = yield* api.SaveEditorDraft({
         expectedSession: null,
         refId: card.id,
@@ -411,16 +422,19 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Upstream", name: "Wren" })
-      const variant = yield* api.ForkVariant({ refId: card.id, label: "Variant", subtitle: "", moveDrafts: false })
+      const variant = card
       yield* draft(api, variant.id, textField(["description"]), "Mine.")
       yield* draft(api, variant.id, textField(["personality"]), "Quiet.")
-      // The upstream changes the description; the variant merges it, keeping its own standard name.
-      yield* draft(api, card.id, textField(["description"]), "Theirs.")
-      const upstream = yield* commit(api, card.id)
-      assert.deepStrictEqual(
-        upstream.followers.map((f) => f.outcome),
-        ["merged"]
-      )
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      yield* writer.EditRef({
+        userId: me.id,
+        refId: card.id,
+        doc: { ...(yield* doc(api, card.id)), description: "Theirs." },
+        expectedRowVersion: card.rowVersion,
+        message: null,
+        commitDraft: null
+      })
       const conflict = yield* Effect.flip(commit(api, variant.id))
       assert.strictEqual(conflict._tag, "EditConflict")
       assert.deepStrictEqual(conflict._tag === "EditConflict" ? conflict.fields : [], [
@@ -481,7 +495,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a variant is one action, taking unsaved drafts along; used-by counts the chats a change reaches", () =>
+  it.effect("a fork is one action, taking unsaved drafts along; used-by counts the chats a change reaches", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const writer = yield* Writer
@@ -506,7 +520,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.strictEqual((yield* api.OpenEditor({ refId: card.id })).usedByChats, 1)
 
       yield* draft(api, card.id, textField(["description"]), "Unsaved.")
-      const variant = yield* api.ForkVariant({ refId: card.id, label: "Noir", subtitle: "rainy", moveDrafts: true })
+      const variant = yield* api.ForkCard({
+        refId: card.id,
+        name: "Noir",
+        nickname: "",
+        characterVersion: "rainy",
+        moveDrafts: true
+      })
       const opened = yield* api.OpenEditor({ refId: variant.id })
       assert.deepStrictEqual(
         opened.drafts.map((d) => [d.key.field, d.content]),
@@ -514,12 +534,16 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       )
       assert.deepStrictEqual(
         opened.variants.map((v) => v.label),
-        ["Noir", "Used"]
+        []
       )
       assert.strictEqual(opened.usedByChats, 0)
       assert.isEmpty((yield* api.OpenEditor({ refId: card.id })).drafts)
-      // A chat override following the variant puts it to use in that chat.
-      yield* writer.CreateChatOverride({ userId: me.id, refId: variant.id, chatId: chat.id as ChatId })
+      // Swapping the card puts the fork to use in that chat.
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "Swap", entityId: variant.entityId, replaces: card.entityId }
+      })
       assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).usedByChats, 1)
       const renamed = yield* api.RenameRef({
         refId: variant.id,
@@ -788,23 +812,37 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
   )
 })
 
-/** A card's variant with an update it can't take without help: both changed its personality. */
+/** A card with a conflicting new import. */
 const pendingVariant = (api: Api, name: string) =>
   Effect.gen(function* () {
     const card = yield* api.CreateCard({ label: name, name })
-    const variant = yield* api.ForkVariant({
-      refId: card.id,
-      label: `${name} variant`,
-      subtitle: "",
-      moveDrafts: false
-    })
-    yield* draft(api, variant.id, textField(["personality"]), "Quiet.")
-    yield* commit(api, variant.id)
-    yield* draft(api, card.id, textField(["personality"]), "Loud.")
+    const writer = yield* Writer
+    const userId = (yield* api.Whoami()).id
+    const source = yield* doc(api, card.id)
+    const imported = (personality: string) => {
+      const next = { ...source, personality }
+      return writer.ImportFile({
+        userId,
+        intoRefId: card.id,
+        kind: "card",
+        label: name,
+        schemaVersion: 1,
+        docJson: JSON.stringify(next),
+        docHash: docHash(next),
+        searchText: searchText(next),
+        sourceName: "synthetic.json",
+        sourceHash: "0".repeat(64),
+        media: [],
+        noteDocJson: null
+      })
+    }
+    yield* imported("")
+    yield* draft(api, card.id, textField(["personality"]), "Quiet.")
     yield* commit(api, card.id)
-    const preview = yield* api.PreviewUpdate({ refId: variant.id })
+    yield* imported("Loud.")
+    const preview = yield* api.PreviewUpdate({ refId: card.id })
     assert.strictEqual(preview.outcome, "conflicts")
-    const opened = yield* api.OpenEditor({ refId: variant.id })
+    const opened = yield* api.OpenEditor({ refId: card.id })
     return { card, variant: opened.ref, preview }
   })
 
@@ -814,12 +852,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const api = yield* client()
       // Nothing pending: there's nothing to resolve.
       const card = yield* api.CreateCard({ label: "Settled", name: "Settled" })
-      const settled = yield* api.ForkVariant({
-        refId: card.id,
-        label: "Settled variant",
-        subtitle: "",
-        moveDrafts: false
-      })
+      const settled = card
       const opened = yield* api.OpenEditor({ refId: settled.id })
       assert.strictEqual(
         yield* outcome(
@@ -1065,11 +1098,18 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const module = { id: "x", title: "X", content: "old", exportable: false }
       yield* draft(api, card.id, valueField(["modules", "id=x"]), JSON.stringify(module))
       yield* commit(api, card.id)
-      const variant = yield* api.ForkVariant({ refId: card.id, label: "V", subtitle: "", moveDrafts: false })
+      const variant = (yield* api.OpenEditor({ refId: card.id })).ref
       yield* draft(api, variant.id, textField(["modules", "id=x", "content"]), "valuable unsaved")
-      // The module goes upstream, and the variant follows.
-      yield* draft(api, card.id, valueField(["modules", "id=x"]), "null")
-      yield* commit(api, card.id)
+      // Another editor removes the module while the draft remains.
+      const writer = yield* Writer
+      yield* writer.EditRef({
+        userId: (yield* api.Whoami()).id,
+        refId: card.id,
+        doc: { ...(yield* doc(api, card.id)), modules: [] },
+        expectedRowVersion: variant.rowVersion,
+        message: null,
+        commitDraft: null
+      })
       yield* draft(api, variant.id, textField(["scenario"]), "unrelated edit")
       const saved = yield* commit(api, variant.id)
       assert.deepStrictEqual(saved.setAside, [textField(["modules", "id=x", "content"])])

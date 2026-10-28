@@ -108,7 +108,6 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
 import {
   CardForChat,
-  CardOverrideOpened,
   CardPromptUse,
   CardUsage,
   ChatCard,
@@ -905,25 +904,6 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, refId: RefId, chatId: ChatId },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
-  }),
-  /**
-   * The chat's own version of a card (DESIGN §4: "only in this chat"): its existing
-   * override, or a new one started from the version the chat uses after `slotId`, which
-   * `binding` (the chat's `card.binding` there) picks as the context assembler does: a bound
-   * revision or ref, else the card's library entry. Where `binding` names another version,
-   * the override is bound instead from `slotId` on (a `card.binding` event), so the
-   * assembler reads it. Another user's chat, slot or card, or one in the bin, is NotFound.
-   */
-  Rpc.make("OpenCardOverride", {
-    payload: {
-      userId: UserId,
-      chatId: ChatId,
-      slotId: Schema.NullOr(SlotId),
-      entityId: EntityId,
-      binding: Schema.NullOr(CardBinding)
-    },
-    success: CardOverrideOpened,
-    error: Schema.Union([NotFound, StorageError])
   }),
   /** Turns a chat override into a library variant (DESIGN §4). */
   Rpc.make("PromoteOverride", {

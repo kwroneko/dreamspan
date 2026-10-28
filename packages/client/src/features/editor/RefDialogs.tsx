@@ -19,8 +19,9 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
   const action = useAction()
   const navigate = useNavigate()
   const dirty = state.dirty > 0
-  const [label, setLabel] = useState(`${ref.label} (variant)`)
+  const [label, setLabel] = useState(`${ref.label} (${ref.kind === "card" ? "fork" : "variant"})`)
   const [subtitle, setSubtitle] = useState("")
+  const [nickname, setNickname] = useState(String(state.snapshot!.doc.nickname ?? ""))
   const nameCheck = useCardNameCheck(label.trim(), subtitle.trim())
   const clash = ref.kind === "card" ? nameCheck : null
   const [moveDrafts, setMoveDrafts] = useState(dirty)
@@ -33,6 +34,14 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       (client) =>
         Effect.gen(function* () {
           if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
+          if (ref.kind === "card")
+            return yield* client("ForkCard", {
+              refId: ref.id,
+              name: label.trim(),
+              nickname,
+              characterVersion: subtitle.trim(),
+              moveDrafts
+            })
           return yield* client("ForkVariant", {
             refId: ref.id,
             label: label.trim(),
@@ -49,8 +58,12 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
-      title="Make a variant"
-      description={`A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`}
+      title={ref.kind === "card" ? "Fork card" : "Make a variant"}
+      description={
+        ref.kind === "card"
+          ? `Creates an independent card from “${ref.label}”.`
+          : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
+      }
     >
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
@@ -59,9 +72,15 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         <Field label={ref.kind === "card" ? "Version (shown as subtitle)" : "Subtitle (optional)"}>
           <Input value={subtitle} onChange={(event) => setSubtitle(event.currentTarget.value)} />
         </Field>
+        {ref.kind === "card" && (
+          <Field label="In-character name">
+            <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
+          </Field>
+        )}
         {dirty && (
           <Checkbox checked={moveDrafts} onCheckedChange={setMoveDrafts}>
-            Take my unsaved changes to the variant{ref.kind === "card" ? " (name and version drafts stay here)" : ""}
+            Take my unsaved changes to the {ref.kind === "card" ? "fork" : "variant"}
+            {ref.kind === "card" ? " (name and version drafts stay here)" : ""}
           </Checkbox>
         )}
         {clash && (
@@ -78,7 +97,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
             pending={action.pending}
             disabled={label.trim() === "" || clash !== null}
           >
-            Make the variant
+            {ref.kind === "card" ? "Fork card" : "Make the variant"}
           </Button>
         </DialogActions>
       </form>

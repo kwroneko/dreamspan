@@ -79,6 +79,36 @@ const fork = (api: Api, refId: RefId, characterVersion: string, moveDrafts = fal
   })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("card forks", (it) => {
+  it.effect("cards refuse the shared variant and chat override operations", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = yield* me(api)
+      const parent = yield* card(api, "Independent")
+      const chat = yield* api.CreateChat({ title: "Synthetic" })
+      assert.strictEqual(
+        yield* outcome(api.ForkVariant({ refId: parent.ref.id, label: "Legacy", subtitle: "", moveDrafts: true })),
+        "EditRefused"
+      )
+      for (const operation of [
+        writer.ForkRef({ userId, refId: parent.ref.id, label: "Legacy", subtitle: "" }),
+        writer.CreateChatOverride({ userId, refId: parent.ref.id, chatId: chat.id }),
+        writer.PromoteOverride({
+          userId,
+          refId: parent.ref.id,
+          label: "Legacy",
+          subtitle: "",
+          expectedRowVersion: parent.ref.rowVersion
+        })
+      ])
+        assert.strictEqual(yield* outcome(operation), "RefOperationRefused:Cards use independent forks.")
+      assert.deepStrictEqual(
+        (yield* api.CardFamily({ entityId: parent.entityId })).members.map((m) => m.entityId),
+        [parent.entityId]
+      )
+    })
+  )
+
   it.effect("a fork copies its parent's document, tags and notes, and none of its history or source", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -129,7 +159,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual(opened.doc, { ...head.doc, nickname: "Captain Vey", character_version: "noir" })
       assert.deepStrictEqual(
         opened.variants.map((v) => v.id),
-        [forked.id]
+        []
       )
 
       // Its history starts at the fork, naming the revision it copied.

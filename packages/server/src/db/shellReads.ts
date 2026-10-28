@@ -53,7 +53,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }>`
         SELECT e.id, e.created_at, max(e.created_at, rev.created_at) AS recent, r.id AS ref,
           rev.id AS revision, CASE WHEN json_type(rev.doc_json, '$.character_version') = 'text' THEN json_extract(rev.doc_json, '$.character_version') ELSE '' END AS subtitle, EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
-        FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind <> 'chat_override' ORDER BY ref_kind = 'upstream' DESC, created_at, id LIMIT 1)
+        FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
         // The chat's current fork ends at its active leaf (schema/forks.ts), which is where the shell's current is.

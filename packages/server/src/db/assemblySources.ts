@@ -180,13 +180,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         AND (r.chat_id IS NULL OR r.chat_id = ${chatId})
         AND (${entity ?? null} IS NULL OR e.id = ${entity ?? null})`.pipe(Effect.map(([row]) => row))
 
-  /** The ref an entity follows in this chat when nothing binds it: its override here, else its upstream. */
+  /** A card's single upstream ref when no revision is pinned. */
   const defaultRef = (entity: string) =>
     sql<{ id: string }>`
       SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
       WHERE r.entity_id = ${entity} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL
-        AND ((r.ref_kind = 'chat_override' AND r.chat_id = ${chatId}) OR r.ref_kind = 'upstream')
-      ORDER BY r.ref_kind = 'chat_override' DESC LIMIT 1`.pipe(Effect.map(([row]) => row?.id ?? null))
+        AND r.ref_kind = 'upstream'
+      LIMIT 1`.pipe(Effect.map(([row]) => row?.id ?? null))
 
   const card = (entity: string, binding: { ref?: string | undefined; revision?: string | undefined } | undefined) =>
     Effect.gen(function* () {

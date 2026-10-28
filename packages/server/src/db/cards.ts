@@ -75,7 +75,7 @@ const parse = (row: CardRow): CardText => {
 
 /**
  * The user's cards: `ids` (binned ones included, so a chat can still name them), or every
- * live one. Each is read from its upstream ref, or its oldest variant without one; the
+ * live one. Each is read from its single upstream ref; the
  * chat's own `card.binding` isn't applied yet (the context assembler resolves that).
  * Purged cards and other users' are left out.
  */
@@ -87,8 +87,8 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
           EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e
         JOIN entity_refs r ON r.id = (
-          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind <> 'chat_override'
-          ORDER BY r2.ref_kind = 'upstream' DESC, r2.created_at, r2.id LIMIT 1)
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
           AND ${ids === null ? sql`e.deleted_at IS NULL AND e.archived_at IS NULL` : sql.in("e.id", ids)}

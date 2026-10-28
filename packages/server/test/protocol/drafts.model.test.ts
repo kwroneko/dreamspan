@@ -1303,12 +1303,18 @@ const OPS: ReadonlyArray<Op> = [
       if (store.snapshot === null) return null
       void store.flush().then(async () => {
         const result = await page.callEditor((c: never) =>
-          (c as (tag: string, p: unknown) => unknown)("ForkVariant", {
-            refId: page.ref,
-            label: "Variant",
-            subtitle: "",
-            moveDrafts: true
-          })
+          (c as (tag: string, p: unknown) => unknown)(
+            store.snapshot!.ref.kind === "card" ? "ForkCard" : "ForkVariant",
+            store.snapshot!.ref.kind === "card"
+              ? {
+                  refId: page.ref,
+                  name: `Fork ${w.refs.length}`,
+                  nickname: "",
+                  characterVersion: "",
+                  moveDrafts: true
+                }
+              : { refId: page.ref, label: "Variant", subtitle: "", moveDrafts: true }
+          )
         )
         if (!result.ok || !page.alive || page.editor !== store) return
         const ref = (result.value as { id: RefId }).id

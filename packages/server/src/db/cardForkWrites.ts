@@ -59,18 +59,12 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
       if (ref.kind !== "card") {
         return yield* new RefOperationRefused({ refId, reason: "Only cards fork into cards of their own." })
       }
-      if (ref.ref_kind === "chat_override" && sourceRevision === undefined) {
-        return yield* new RefOperationRefused({
-          refId,
-          reason: "A chat override can't be forked; promote it to a variant instead."
-        })
-      }
       // The pair tells cards apart (DESIGN §4), checked here in the same transaction as the
       // write, against the same cards the client checks (live and archived, not in the bin).
       const same = yield* sql<{ id: RefId; label: string; subtitle: string }>`
           SELECT r.id, r.label, r.subtitle FROM entity_refs r JOIN entities e ON e.id = r.entity_id
           WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL
-            AND r.ref_kind <> 'chat_override' AND r.label = ${name} AND r.subtitle = ${characterVersion}`
+            AND r.ref_kind = 'upstream' AND r.label = ${name} AND r.subtitle = ${characterVersion}`
       const clash = cardNameClash(same, name, characterVersion)
       if (clash !== null) return yield* new RefOperationRefused({ refId, reason: clash })
 

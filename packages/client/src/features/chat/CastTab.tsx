@@ -62,13 +62,9 @@ function DefinitionField({ label, text }: { label: string; text: string }) {
 
 /** Which version a chat reads, in words, when it isn't simply the library's latest. */
 const versionNote = (info: ChatCard) =>
-  info.usesOverride
-    ? "This chat's own version of the card."
-    : info.binding === "revision"
-      ? "This chat uses an earlier saved version of the card here, not the library's latest."
-      : info.binding === "ref"
-        ? "This chat uses another version of the card here (a variant), not the library entry."
-        : null
+  info.binding === "revision"
+    ? "This chat uses an earlier saved version of the card here, not the library's latest."
+    : null
 
 /** The card's definition as this chat uses it, read-only (ST's character panel). */
 function Definition({ name, info }: { name: string; info: ChatCard }) {

@@ -30,7 +30,10 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           FROM drafts d
           WHERE d.user_id = ${userId} AND d.target_kind = 'entity_field' AND d.target_id = ${refId}
           ORDER BY d.field`
-        const variants = yield* lib.refsWhere("r.entity_id = ? AND r.ref_kind <> 'chat_override'", [ref.entity_id])
+        const variants =
+          ref.kind === "card"
+            ? []
+            : yield* lib.refsWhere("r.entity_id = ? AND r.ref_kind <> 'chat_override'", [ref.entity_id])
         return new EditorSnapshot({
           ref: toLibraryRef(ref),
           doc: editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))),
