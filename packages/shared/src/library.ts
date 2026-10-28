@@ -39,6 +39,8 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   chatId: Schema.NullOr(ChatId),
   /** The ref it follows has moved on since the last merge. */
   updateAvailable: Schema.Boolean,
+  /** Whether this entry has an import line to update from a file. */
+  hasImport: Schema.optionalKey(Schema.Boolean),
   rowVersion: Schema.Int,
   updatedAt: Schema.Number
 }) {}

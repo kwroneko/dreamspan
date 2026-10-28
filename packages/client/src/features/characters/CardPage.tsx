@@ -1,3 +1,4 @@
+import { CardSurface } from "../cardForks/surfaces.tsx"
 // A card's page (DESIGN §2.1, §4): the card without entering a chat. Continue (its latest
 // chat), New chat and every chat it's in as peers, then its definition to read, each field
 // folded to a few lines. Its library label is the title; the in-chat name, what `{{char}}`
@@ -217,6 +218,7 @@ function Page({ card }: { card: CardUsage }) {
         />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{card.label}</h1>
+          <CardSurface placement="provenance" entityId={card.entityId} />
           {card.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
           {card.modelName && card.modelName !== card.label && (
             <p className="text-sm text-muted">
@@ -225,6 +227,7 @@ function Page({ card }: { card: CardUsage }) {
           )}
           <p className="text-sm text-muted">{usageLine(card)}</p>
           <div className="mt-2 flex flex-wrap gap-2">
+            <CardSurface placement="actions" entityId={card.entityId} />
             {used && <Button onClick={() => openCharacter(card.entityId)}>Continue</Button>}
             <Link
               to="/cards/$entityId/chat"
@@ -239,6 +242,7 @@ function Page({ card }: { card: CardUsage }) {
           </div>
         </div>
       </header>
+      <CardSurface placement="family" entityId={card.entityId} />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:items-start">
         <Card className="lg:order-2">
           <CardHeader
