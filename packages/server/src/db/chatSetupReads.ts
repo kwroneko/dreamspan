@@ -1,3 +1,4 @@
+import { eventAppliesSql, eventOrder } from "./forkState.ts"
 import { cardNames, modelName } from "@rp/shared/cardNames.ts"
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
@@ -69,13 +70,13 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             FROM state_events e
             LEFT JOIN path p ON p.id = e.slot_id
             LEFT JOIN slots s ON s.id = p.id
-            WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set', 'card.binding')
-              AND e.superseded_by_changeset IS NULL
+            WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set', 'card.binding', 'card.swap')
+              AND ${sql.literal(eventAppliesSql("c.current_fork_id", "e"))}
               AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND NOT ${sql.literal(slotDeletedInSql("c.current_fork_id", "s"))}))
               AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL
                 OR e.version_id = ${sql.literal(selectedInSql("c.current_fork_id", "s"))}
                 OR e.version_id = ${sql.literal(shownInSql("c.current_fork_id", "s"))})
-            ORDER BY coalesce(s.depth, -1), e.seq)) AS events
+            ORDER BY ${sql.literal(eventOrder("e"))})) AS events
         FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
         ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
       if (chats.length === 0) return []
@@ -243,7 +244,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
                 (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
             FROM state_events s JOIN chats c ON c.id = s.chat_id
             WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
-              AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+              AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM cards JOIN entity_revisions rev ON rev.id = cards.head_revision_id
         ORDER BY cards.label COLLATE NOCASE, cards.entity_id`.pipe(
@@ -269,8 +270,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         query("CardUsage")
       ),
 
-    // One indexed read per chat: the cast is everyone a participant.join names on any branch
-    // (the list doesn't walk paths), and the last message is the active leaf's.
+    // The current fork's cast and card bindings, and its tip's bounded excerpt.
     ChatSummaries: ({ userId, chatIds }) =>
       Effect.gen(function* () {
         const summaries: Array<ChatSummary> = []

@@ -1,3 +1,4 @@
+import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { pathEvents } from "./pathSegments.ts"
@@ -414,10 +415,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           ${pathEvents(sql, chatId, at)}
           SELECT e.id, e.key, e.scope, e.value_json, e.slot_depth AS depth
           FROM path_events e LEFT JOIN slots s ON s.id = e.slot_id
-          WHERE ${owned} AND e.superseded_by_changeset IS NULL
+          WHERE ${owned} AND ${eventApplies(sql, eventFork, "e")}
             AND (e.slot_id IS NULL OR NOT ${slotDeletedIn(sql, eventFork, "s")})
             AND ${applies}
-          ORDER BY coalesce(e.slot_depth, -1), e.seq`
+          ORDER BY ${sql.literal(eventOrder("e"))}`
         const events = yield* Effect.forEach(rows, (row) =>
           decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.map((event) => ({ ...event, depth: row.depth, id: row.id })),

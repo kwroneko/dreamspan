@@ -156,15 +156,16 @@ export function NotesTab({
   focusCard?: EntityId | null
 }) {
   const chatId = session.id
+  const view = useSyncExternalStore(session.subscribe, session.snapshot)
   // Library changes (a save, a delete, an undo from the bin) read the list again.
   const atom = useMemo(
     () =>
       AppClient.query(
         "ListChatNotes",
-        { chatId, slotId: leafSlotId },
+        { chatId, forkId: view.forkId, slotId: leafSlotId },
         { reactivityKeys: ["library", `chat-notes:${chatId}`] }
       ),
-    [chatId, leafSlotId]
+    [chatId, view.forkId, leafSlotId]
   )
   const refresh = useAtomRefresh(atom)
   const refs = useAtomValue(cardRefs)
@@ -174,7 +175,6 @@ export function NotesTab({
   const [open, setOpen] = useState<string | null>(null)
   const [picking, setPicking] = useState<Group | null>(null)
   const [error, setError] = useState<AppError | null>(null)
-  const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const summaryFill = view.history?.presetContext?.summary
   const summarizing = view.lcm?.enabled === true
   const sections = useRef(new Map<string, HTMLElement>())

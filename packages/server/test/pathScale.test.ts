@@ -347,7 +347,13 @@ describe("paths by chain segment", () => {
       // table; the lineage's overrides are found by index.
       assert.deepStrictEqual(
         plan.filter((step) => step.startsWith("SCAN")),
-        ["SCAN g", "SCAN g", "SCAN ev", ...Array<string>(3).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
+        [
+          "SCAN g",
+          "SCAN g",
+          "SCAN ev",
+          "SCAN vl VIRTUAL TABLE INDEX 1:",
+          ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")
+        ],
         plan.join("\n")
       )
       assert.includeMembers(

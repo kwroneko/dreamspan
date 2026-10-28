@@ -1,3 +1,4 @@
+import { inFork } from "./forkState.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
 // imported summary that could stand in for its hidden run, and the work the planner would do
@@ -60,7 +61,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
   return {
     // The settings panel (DESIGN §8): what the chat stores, what applies, and the fit, measured on
     // one assembly of the next context with LCM on, as the planner would see it.
-    LcmSettingsAt: ({ userId, chatId, leafSlotId }) =>
+    LcmSettingsAt: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         const [chat] =
           yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -110,6 +111,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         Effect.catchTag("AssemblyFailed", () =>
           Effect.fail(new NotFound({ entity: "slot", id: leafSlotId ?? chatId }))
         ),
+        inFork(sql, chatId, forkId, leafSlotId),
         query("LcmSettingsAt")
       ),
     ReadLcmImported: ({ userId, chatId, leafSlotId }) =>

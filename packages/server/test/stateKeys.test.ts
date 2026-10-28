@@ -40,6 +40,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "participant.leave": { value: (t) => ({ entity: t.card.entity }), removes: true },
   "presence.set": { value: (t) => ({ entity: t.card.entity, present: false }), removes: true },
   "played_by_me.set": { value: (t) => ({ entities: [t.card.entity] }) },
+  "card.swap": { value: (t) => ({ entity: t.card.entity, replaces: t.card.entity }) },
   "card.binding": {
     value: (t) => ({ entity: t.card.entity, ref: t.card.ref, revision: t.card.revision }),
     belongs: ["ref", "revision"]

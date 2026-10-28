@@ -1,3 +1,4 @@
+import { eventApplies, forkAt } from "./forkState.ts"
 // Enabling LCM on a chat and holding its backfill to what the user approved (spec/LCM.md §2.7,
 // §2.11). Bounded preparation precedes one publication transaction: the imported summary becomes the first level over the run
 // it covers (or the run is just shown), the switch is written, and the backfill is recorded. It
@@ -142,11 +143,11 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           return { runId, ready: updated!.phase === "ready" }
         }).pipe(transaction(sql, "StageLcmEnable")),
 
-      ChangeLcmSettings: ({ userId, chatId, change }) =>
+      ChangeLcmSettings: ({ userId, chatId, change, forkId }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, null)
-          const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events
-            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings'
+          const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events e
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, forkId ?? (yield* forkAt(sql, chatId, null)), "e")}
             ORDER BY seq DESC LIMIT 1`
           const settings: Record<string, unknown> = latest
             ? (JSON.parse(latest.value_json) as Record<string, unknown>)
@@ -158,13 +159,21 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           }
           const problem = orderProblem(settings)
           if (problem) return yield* new LcmSettingsInvalid({ message: problem })
-          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-            key: "lcm.settings",
-            value: settings as never
-          })
+          yield* graph.insertStateEvent(
+            userId,
+            chatId,
+            null,
+            null,
+            null,
+            {
+              key: "lcm.settings",
+              value: settings as never
+            },
+            forkId ?? null
+          )
         }).pipe(transaction(sql, "ChangeLcmSettings")),
 
-      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId, switchOff }) =>
+      EnableLcm: ({ userId, chatId, leafSlotId, choice, approved, runId, switchOff, forkId }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, leafSlotId)
           let unhidden = 0
@@ -190,20 +199,36 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           } else if (choice === "adopt") return yield* reject("EnableLcm", "Adoption needs a prepared range.")
           const now = Date.now()
           // The switch, keeping the chat's other settings.
-          const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events
-            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings'
+          const [latest] = yield* sql<{ value_json: string }>`SELECT value_json FROM state_events e
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, forkId ?? (yield* forkAt(sql, chatId, leafSlotId)), "e")}
             ORDER BY seq DESC LIMIT 1`
           const settings = latest ? (JSON.parse(latest.value_json) as Record<string, unknown>) : {}
-          yield* graph.insertStateEvent(userId, chatId, null, null, null, {
-            key: "lcm.settings",
-            value: { ...settings, enabled: true } as never
-          })
+          yield* graph.insertStateEvent(
+            userId,
+            chatId,
+            null,
+            null,
+            null,
+            {
+              key: "lcm.settings",
+              value: { ...settings, enabled: true } as never
+            },
+            forkId ?? (yield* forkAt(sql, chatId, leafSlotId))
+          )
           // The imported summary note goes off with it, visibly: an ordinary switch at the leaf (DESIGN §8 [P]).
           for (const note of switchOff ?? [])
-            yield* graph.insertStateEvent(userId, chatId, leafSlotId, null, null, {
-              key: "note.deactivate",
-              value: { note }
-            })
+            yield* graph.insertStateEvent(
+              userId,
+              chatId,
+              leafSlotId,
+              null,
+              null,
+              {
+                key: "note.deactivate",
+                value: { note }
+              },
+              forkId ?? null
+            )
           // A previous backfill of this chat is over once the user chooses again.
           yield* sql`UPDATE jobs SET status = 'complete', updated_at = ${now}
             WHERE kind = ${BACKFILL_KIND} AND status = 'processing' AND json_extract(payload_json, '$.chatId') = ${chatId}`

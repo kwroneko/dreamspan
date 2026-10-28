@@ -206,9 +206,10 @@ export const selectionIn = (sql: SqlClient.SqlClient, forkId: string | null, slo
 
 /** A row of what a fork changes, by kind: what it's about and its value (schema/forkOverrides.ts). */
 interface OverrideValue {
-  readonly kind: "select" | "replace" | "star" | "picker_hide" | "delete_slot" | "delete_version" | "hide"
+  readonly kind:
+    "select" | "replace" | "star" | "picker_hide" | "delete_slot" | "delete_version" | "hide" | "suppress_event"
   readonly targetId: string
-  readonly slotId: string
+  readonly slotId: string | null
   readonly valueId: string | null
   readonly flag: number | null
   /** The bin item of a deletion, which a restore names. */
@@ -241,9 +242,8 @@ export const writeOverride = (
     }
     yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag,
         bin_item_id, origin)
-      SELECT ${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, id, depth,
-        ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${origin}
-      FROM slots WHERE id = ${value.slotId}`
+      VALUES (${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, ${value.slotId},
+        (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${origin})`
     return seq
   })
 
@@ -305,6 +305,11 @@ export const insertFork = (
       VALUES (${id}, ${fork.chatId}, ${fork.parent.id}, ${branchedAt}, ${fork.baseSlotId}, ${fork.tipSlotId}, ${fork.at},
         ${JSON.stringify(lineage)})`
     if (fresh) {
+      // Keep immutable event identities: pinned assembly and suppression still name them.
+      yield* sql`INSERT INTO fork_event_snapshots(fork_id, event_id)
+        SELECT ${id}, e.id FROM state_events e WHERE e.chat_id = ${fork.chatId}
+          AND e.fork_id IS NOT NULL AND ${withFork(sql, fork.parent.id, (f) => eventVisibleSql(f, "e"))}`
+
       const rows = yield* sql<{
         kind: string
         target_id: string
@@ -363,3 +368,22 @@ export const versionAsShown = (sql: SqlClient.SqlClient, fork: string, versionId
       WHERE x.id = ${versionId}`,
     ([row]) => row ?? null
   )
+
+/** An event is shared legacy state, or was written within this fork's frozen lineage. */
+const eventVisibleSql = (fork: string, e: string) => `(${e}.fork_id IS NULL OR EXISTS (
+  SELECT 1 FROM forks vf CROSS JOIN json_each(vf.lineage_json) vl
+  WHERE vf.id = ${fork} AND ((${e}.fork_id = vl.value ->> 0
+    AND ${e}.fork_seq <= coalesce(vl.value ->> 1, 9223372036854775807))
+    OR EXISTS (SELECT 1 FROM fork_event_snapshots vs WHERE vs.fork_id = vl.value ->> 0 AND vs.event_id = ${e}.id))))`
+
+/** Visibility and per-fork undo apply in every state reader. */
+export const eventAppliesSql = (fork: string, e: string) => `(${eventVisibleSql(fork, e)}
+  AND ${e}.superseded_by_changeset IS NULL AND coalesce((SELECT flag FROM fork_overrides
+    WHERE id = ${effectiveOverrideSql("suppress_event", fork, `${e}.id`)}), 0) = 0)`
+
+export const eventApplies = (sql: SqlClient.SqlClient, fork: ForkRef, e: string) =>
+  withFork(sql, fork, (f) => eventAppliesSql(f, e))
+
+/** Positional events first; branch-owned swaps last, in chat sequence order. */
+export const eventOrder = (e: string) => `CASE WHEN ${e}.key = 'card.swap' THEN 1 ELSE 0 END,
+  coalesce(${e}.slot_depth, -1), CASE WHEN ${e}.key = 'card.swap' THEN coalesce(${e}.fork_seq, ${e}.seq) ELSE ${e}.seq END`

@@ -1,3 +1,4 @@
+import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
@@ -46,6 +47,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
       if (variables.length === 0) return
       const [next] = yield* sql<{ n: number }>`
         SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id = ${slotId}`
+      const [rollout] = yield* sql<{ fork_id: string | null }>`SELECT fork_id FROM rollouts WHERE id = ${rolloutId}`
+      const forkSeq = yield* nextSeq(sql, chatId)
       yield* Effect.forEach(
         variables,
         ({ name, value }, i) =>
@@ -55,6 +58,8 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             slot_id: slotId,
             version_id: versionId,
             seq: next!.n + i,
+            fork_id: rollout!.fork_id,
+            fork_seq: rollout!.fork_id ? forkSeq : null,
             key: "var.set",
             scope: null,
             value_json: JSON.stringify({ name, value }),
@@ -128,7 +133,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollouts ${sql.insert({
           id: rolloutId,
           chat_id: chatId,
-          fork_id: fork?.id ?? null,
+          fork_id: fork?.id ?? chat?.current_fork_id ?? null,
           kind: "generation",
           status: "running",
           slot_id: slotId,
@@ -160,7 +165,7 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
             Effect.gen(function* () {
               const [template] = yield* sql<{ slot_id: string; written: number }>`
                 SELECT v.slot_id, EXISTS (SELECT 1 FROM state_events w WHERE w.version_id = v.id
-                  AND w.key = 'var.set' AND w.origin = 'rollout') AS written
+                  AND w.key = 'var.set' AND w.origin = 'rollout' AND ${eventApplies(sql, fork?.id ?? chat?.current_fork_id ?? null, "w")}) AS written
                 FROM versions v JOIN slots s ON s.id = v.slot_id
                 WHERE v.id = ${id} AND v.macro_mode = 'template' AND s.chat_id = ${chatId}`
               if (!template) return

@@ -188,7 +188,14 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       participants: [card.entityId],
       greeting: null
     })
-    const call = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect)
+    const call = async <A, E>(effect: Effect.Effect<A, E>) => {
+      try {
+        return await Effect.runPromise(effect)
+      } catch (error) {
+        trace.push(`operation failed: ${JSON.stringify(error)}`)
+        throw error
+      }
+    }
     // A fanout of two and a small condensation target make every condensation path reachable in a short run.
     const knobs = { fanout: 2, condenseTarget: 100 }
     yield* writer.AddStateEvent({
@@ -215,6 +222,10 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     // parent's. Every step works in the current fork, whose tip is `leaf`.
     let current: string = chat.currentForkId!
     const choices = new Map<string, Map<SlotId, VersionId>>([[current, new Map()]])
+    // Settings, like selections, belong to each fork and are inherited at creation.
+    const enabledByFork = new Map<string, boolean>([[current, true]])
+    // Amending a shared version leaves the original intact and replaces it only here.
+    const replacements = new Map<string, Map<VersionId, VersionId>>([[current, new Map()]])
     // Deleting is per fork: each fork's deleted messages (slot to bin item), a branch's starting as its
     // parent's, and restoring in the fork that deleted a message leaves a fork made after it as it was.
     const deletions = new Map<string, Map<SlotId, string>>([[current, new Map()]])
@@ -227,7 +238,8 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         node.bin = bin
       }
     }
-    const shown = (node: Node) => choices.get(current)!.get(node.id) ?? node.selected
+    const selected = (node: Node) => choices.get(current)!.get(node.id) ?? node.selected
+    const shown = (node: Node) => replacements.get(current)!.get(selected(node)) ?? selected(node)
     const choose = (node: Node, versionId: VersionId) => choices.get(current)!.set(node.id, versionId)
     const path = (tip: SlotId | null) => {
       const result: Array<Node> = []
@@ -301,8 +313,11 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
         )!
         choices.set(result.forkId, new Map(choices.get(made.parentForkId!)!))
         deletions.set(result.forkId, new Map(deletions.get(made.parentForkId!) ?? []))
+        enabledByFork.set(result.forkId, enabledByFork.get(made.parentForkId!) ?? true)
+        replacements.set(result.forkId, new Map(replacements.get(made.parentForkId!) ?? []))
       }
       current = result.forkId
+      enabled = enabledByFork.get(current)!
       syncDeleted()
       accept(result, parent)
     }
@@ -691,7 +706,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
      */
     const cascade = async (target: Node | undefined) => {
       if (!enabled || !target || target.deleted || target.parent === null) return false
-      const position = { userId: user.id, chatId: chat.id, leafSlotId: target.parent }
+      const position = { userId: user.id, chatId: chat.id, forkId: current as ForkId, leafSlotId: target.parent }
       const before = [...artifacts.values()].map((a) => ({ a, fresh: fresh(a) }))
       const seen = new Set<string>()
       let reason: "reply" | "completion" = "reply"
@@ -788,15 +803,26 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           choose(node, selected)
         } else if (step.kind === "amend" && node && versions.get(shown(node))!.writer === "human") {
           const version = versions.get(shown(node))!
-          await call(
+          const amended = await call(
             api.AmendVersion({
               versionId: version.id,
+              forkId: current as ForkId,
               content: `amend-${index}`,
               expectedRowVersion: version.amends + 1
             })
           )
-          version.amends++
-          version.content = `amend-${index}`
+          if (amended.id !== version.id) {
+            replacements.get(current)!.set(selected(node), amended.id)
+            versions.set(amended.id, {
+              id: amended.id,
+              content: amended.content,
+              writer: amended.writer,
+              amends: amended.rowVersion - 1
+            })
+          } else {
+            version.amends++
+            version.content = `amend-${index}`
+          }
         } else if (step.kind === "delete" && node && node.id !== leaf && path(leaf).includes(node)) {
           // Only on the current fork's path, so that the fork a delete is made in is the current one.
           const bin = await call(writer.DeleteMessage({ userId: user.id, slotId: node.id }))
@@ -871,6 +897,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
               writer.EnqueueSummaries({
                 userId: user.id,
                 chatId: chat.id,
+                forkId: current as ForkId,
                 leafSlotId: leaf,
                 chunks,
                 requestClass: "idle"
@@ -882,6 +909,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
                 writer.EnqueueSummaries({
                   userId: user.id,
                   chatId: chat.id,
+                  forkId: current as ForkId,
                   leafSlotId: leaf,
                   chunks,
                   requestClass: "idle"
@@ -905,6 +933,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
                 writer.EnqueueSummaries({
                   userId: user.id,
                   chatId: chat.id,
+                  forkId: current as ForkId,
                   leafSlotId: leaf,
                   requestClass: "idle",
                   chunks: [
@@ -1005,10 +1034,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           }
         } else if (step.kind === "settings") {
           enabled = !enabled
+          enabledByFork.set(current, enabled)
           await call(
             writer.AddStateEvent({
               userId: user.id,
               chatId: chat.id,
+              forkId: current as ForkId,
               slotId: null,
               versionId: null,
               scope: null,
@@ -1038,10 +1069,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       // settle, and then no context on those paths holds a stale summary the planner could have replaced.
       if (!enabled) {
         enabled = true
+        enabledByFork.set(current, enabled)
         await call(
           writer.AddStateEvent({
             userId: user.id,
             chatId: chat.id,
+            forkId: current as ForkId,
             slotId: null,
             versionId: null,
             scope: null,

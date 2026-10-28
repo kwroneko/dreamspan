@@ -259,7 +259,9 @@ export class ChatSession {
     const read = ++this.lcmReads
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null || this.disposed) return
-    const result = await this.call((client) => client("GetLcmState", { chatId: this.chatId, leafSlotId }))
+    const result = await this.call((client) =>
+      client("GetLcmState", { chatId: this.chatId, forkId: this.view.forkId, leafSlotId })
+    )
     if (!result.ok || this.disposed || read < this.lcmApplied || leafSlotId !== this.view.leafSlotId) return
     this.lcmApplied = read
     for (const listener of this.lcmListeners) listener()
@@ -295,7 +297,9 @@ export class ChatSession {
   private async refreshCast() {
     const read = ++this.castReads
     const slotId = this.view.leafSlotId
-    const result = await this.call((client) => client("GetCast", { chatId: this.chatId, slotId }))
+    const result = await this.call((client) =>
+      client("GetCast", { chatId: this.chatId, slotId, forkId: this.view.forkId })
+    )
     if (!result.ok || read !== this.castReads || this.disposed) return
     // Unchanged, it stays the same object: every message row reads it.
     if (JSON.stringify(result.value) !== JSON.stringify(this.view.cast)) this.update({ cast: result.value })
@@ -320,12 +324,15 @@ export class ChatSession {
     const known = this.positionCasts.get(key)
     if (known !== undefined) return known === "loading" ? undefined : known
     this.positionCasts.set(key, "loading")
-    void this.call((client) => client("GetCast", { chatId: this.chatId, slotId })).then((result) => {
-      if (this.disposed) return
-      if (result.ok) this.positionCasts.set(key, result.value)
-      else this.positionCasts.delete(key)
-      for (const listener of this.positionListeners) listener()
-    })
+    const forkId = this.view.forkId
+    void this.call((client) => client("GetCast", { chatId: this.chatId, slotId, forkId: this.view.forkId })).then(
+      (result) => {
+        if (this.disposed || this.view.forkId !== forkId) return
+        if (result.ok) this.positionCasts.set(key, result.value)
+        else this.positionCasts.delete(key)
+        for (const listener of this.positionListeners) listener()
+      }
+    )
     return undefined
   }
 
@@ -710,6 +717,7 @@ export class ChatSession {
   /** Shows another fork (null: the chat's current one), at a message or at its bottom. */
   showFork(fork: ForkId | null, anchor: SlotId | null) {
     this.requestedFork = fork
+    this.forgetPositions()
     this.update({ forkId: fork, leafSlotId: null, entries: [], loading: true })
     void this.open(anchor)
   }
@@ -1126,7 +1134,7 @@ export class ChatSession {
   /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
   async changeCast(change: CastChange): Promise<Outcome<Cast>> {
     const result = await this.call((client) =>
-      client("ChangeCast", { chatId: this.chatId, slotId: this.view.leafSlotId, change })
+      client("ChangeCast", { chatId: this.chatId, slotId: this.view.leafSlotId, forkId: this.view.forkId, change })
     )
     if (result.ok) {
       this.castReads++

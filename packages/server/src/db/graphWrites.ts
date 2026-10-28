@@ -5,14 +5,14 @@ import { recordHistoryReduction } from "./historyChanges.ts"
 import type { ChatId, EntityId, ForkId, NewVersion, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import type { FoldableEvent, StateEventData } from "@rp/shared/state.ts"
+import { branchOwned, type FoldableEvent, type StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onPath } from "./forks.ts"
-import { insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
+import { forkAt, nextSeq, insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
 import { versionExtras, type ChatRow, type ForkRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences } from "./stateRefs.ts"
 
@@ -133,12 +133,41 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     slotId: string | null,
     versionId: string | null,
     scope: FoldableEvent["scope"],
-    data: StateEventData
+    data: StateEventData,
+    forkId: string | null = null
   ) =>
     Effect.gen(function* () {
       if (data.key === "lcm.settings" && (slotId !== null || versionId !== null || scope !== null))
         return yield* new NotFound({ entity: "chat-wide settings", id: chatId })
+      const fork = forkId ?? (yield* forkAt(sql, chatId, slotId))
+      if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
+      const [owned] = yield* sql<{
+        tip_slot_id: string | null
+      }>`SELECT tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId} AND deleted_at IS NULL`
+      if (!owned) return yield* new NotFound({ entity: "fork", id: fork })
+      if (slotId !== null && !(yield* onPath(sql, chatId, owned.tip_slot_id, slotId))) {
+        // Until import unit 9 gives every ST path a fork row, its reads return the
+        // current fork as a fallback. Preserve positional edits addressed by that ID too.
+        if (branchOwned.has(data.key) || fork !== (yield* forkAt(sql, chatId, slotId)))
+          return yield* new NotFound({ entity: "fork position", id: slotId })
+      }
+      if (branchOwned.has(data.key)) {
+        if (versionId !== null || scope !== null)
+          return yield* new NotFound({ entity: "branch-owned event", id: chatId })
+        slotId = null
+      }
       yield* checkStateReferences(sql, userId, chatId, data, scope)
+      if (data.key === "card.swap") {
+        const [family] = yield* sql`WITH RECURSIVE ancestors(id, parent) AS (
+          SELECT id, forked_from_entity_id FROM entities WHERE id = ${data.value.entity}
+          UNION SELECT e.id, e.forked_from_entity_id FROM entities e JOIN ancestors a ON e.id = a.parent
+        ), other(id, parent) AS (
+          SELECT id, forked_from_entity_id FROM entities WHERE id = ${data.value.replaces}
+          UNION SELECT e.id, e.forked_from_entity_id FROM entities e JOIN other a ON e.id = a.parent
+        ) SELECT 1 FROM ancestors a JOIN other b ON a.id = b.id LIMIT 1`
+        if (!family) return yield* new NotFound({ entity: "card family", id: data.value.entity })
+      }
+      const forkSeq = yield* nextSeq(sql, chatId)
       const [next] = yield* sql<{ n: number }>`
           SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`
       const id = uuidv7()
@@ -148,6 +177,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         slot_id: slotId,
         version_id: versionId,
         seq: next!.n,
+        fork_id: fork,
+        fork_seq: forkSeq,
         key: data.key,
         scope,
         value_json: JSON.stringify(data.value),

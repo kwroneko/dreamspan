@@ -95,7 +95,9 @@ function SummariesSetting({ session }: { session: ChatSession }) {
   useEffect(() => {
     let live = true
     void session
-      .call((client) => client("GetLcmSettings", { chatId: session.id, leafSlotId: view.leafSlotId }))
+      .call((client) =>
+        client("GetLcmSettings", { chatId: session.id, forkId: view.forkId, leafSlotId: view.leafSlotId })
+      )
       .then((result) => {
         if (!live) return
         if (result.ok) setSettings(result.value)
@@ -104,10 +106,12 @@ function SummariesSetting({ session }: { session: ChatSession }) {
     return () => {
       live = false
     }
-  }, [session, view.leafSlotId, view.lcmVersion, view.history, reads])
+  }, [session, view.forkId, view.leafSlotId, view.lcmVersion, view.history, reads])
   const enabled = settings?.resolved.enabled ?? view.lcm?.enabled ?? false
   const write: Write = async (change) => {
-    const result = await session.call((client) => client("ChangeLcmSettings", { chatId: session.id, change }))
+    const result = await session.call((client) =>
+      client("ChangeLcmSettings", { chatId: session.id, forkId: view.forkId, change })
+    )
     setReads((n) => n + 1)
     if (result.ok) return null
     return result.error.message
@@ -120,7 +124,9 @@ function SummariesSetting({ session }: { session: ChatSession }) {
         onCheckedChange={(on) => {
           if (on && view.leafSlotId !== null) return setEnabling(true)
           void session
-            .call((client) => client("ChangeLcmSettings", { chatId: session.id, change: { enabled: on } }))
+            .call((client) =>
+              client("ChangeLcmSettings", { chatId: session.id, forkId: view.forkId, change: { enabled: on } })
+            )
             .then((result) => {
               setError(result.ok ? null : result.error)
               setReads((n) => n + 1)

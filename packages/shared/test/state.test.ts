@@ -25,6 +25,32 @@ describe("foldState", () => {
     expect(foldState([e({ key: "participant.leave", value: { entity: mira } })], state).participants).toEqual([tomas])
   })
 
+  it("swaps a card in place, carrying presence, player and lore settings but keeping bindings dormant", () => {
+    const progressed = "progressed" as EntityId
+    const revision = "progression" as RevisionId
+    const before = foldState([
+      e({ key: "participant.join", value: { entity: tomas } }),
+      e({ key: "participant.join", value: { entity: mira } }),
+      e({ key: "presence.set", value: { entity: mira, present: false } }),
+      e({ key: "played_by_me.set", value: { entities: [mira] } }),
+      e({ key: "lorebook.binding", value: { entity: mira, ref: ref("lore") } }),
+      e({ key: "lorebook.embedded", value: { entity: mira, on: false } }),
+      e({ key: "card.binding", value: { entity: mira, revision } })
+    ])
+    const swapped = foldState([e({ key: "card.swap", value: { entity: progressed, replaces: mira } })], before)
+    expect(swapped.participants).toEqual([tomas, progressed])
+    expect(swapped.absent).toEqual([progressed])
+    expect(swapped.playedByMe).toEqual([progressed])
+    expect(swapped.lorebookBindings).toEqual({ [progressed]: "lore" })
+    expect(swapped.embeddedLorebooks).toEqual({ [progressed]: false })
+    expect(swapped.cardBindings[mira]?.revision).toBe(revision)
+    expect(swapped.cardBindings[progressed]).toBeUndefined()
+    const restored = foldState([e({ key: "card.swap", value: { entity: mira, replaces: progressed } })], swapped)
+    expect(restored).toEqual(before)
+    expect(foldState([e({ key: "card.swap", value: { entity: mira, replaces: progressed } })], before)).toBe(before)
+    expect(foldState([e({ key: "card.swap", value: { entity: mira, replaces: mira } })], before)).toBe(before)
+  })
+
   it("keeps scoped bindings apart, with later events replacing earlier ones", () => {
     const state = foldState([
       e({ key: "preset.binding", value: { ref: ref("chat-default") } }),

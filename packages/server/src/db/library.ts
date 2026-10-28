@@ -187,7 +187,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
           AND json_extract(s.value_json, '$.ref') = ${ref.id})
         OR EXISTS (SELECT 1 FROM entity_refs o WHERE o.chat_id = c.id AND o.follows_ref_id = ${ref.id})
         OR (${ref.ref_kind === "upstream" ? 1 : 0} AND EXISTS (SELECT 1 FROM state_events s
-          WHERE s.chat_id = c.id AND s.key = 'participant.join'
+          WHERE s.chat_id = c.id AND s.key IN ('participant.join', 'card.swap')
             AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})))`.pipe(Effect.map(([row]) => row!.n))
 
   /**
@@ -294,7 +294,7 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
           (SELECT json_object('chats', count(DISTINCT c.id), 'last', max(c.last_message_at))
             FROM state_events s JOIN chats c ON c.id = s.chat_id
             WHERE json_extract(s.value_json, '$.entity') = +e.id
-              AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+              AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM family JOIN entities e ON e.id = family.id
         LEFT JOIN entity_refs r ON r.id = (

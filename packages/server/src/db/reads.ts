@@ -1,3 +1,5 @@
+import { stateEventsOnPath } from "./stateRead.ts"
+export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
@@ -13,7 +15,6 @@ import { BinForkShown } from "@rp/shared/bin.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkColumns, forkRecency, forksShowing, forkThrough } from "./forks.ts"
 import {
-  attachedApplies,
   effectiveOverride,
   forkAt,
   shownIn,
@@ -24,7 +25,7 @@ import {
   versionDeletedInSql,
   withFork
 } from "./forkState.ts"
-import { pathEvents, pathSegments } from "./pathSegments.ts"
+import { pathSegments } from "./pathSegments.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
@@ -125,27 +126,6 @@ export const pathWindow = (
     FROM segments g CROSS JOIN slots s ON s.chain_id = g.chain_id AND s.depth BETWEEN max(g.lo, g.floor) AND g.hi
     ${viewJoin(sql, fork)}
     ORDER BY s.depth`
-
-/**
- * The state events that apply at `slotId` (StateEventsAt) in fork `fork` (null: by the
- * selections slots were inserted with), in fold order: chat-wide ones, then by depth. An
- * event attached to a version applies while the fork shows it. Its cost is the path's
- * segments and events, not its length.
- */
-export const stateEventsOnPath = (
-  sql: SqlClient.SqlClient,
-  chatId: ChatId,
-  slotId: SlotId,
-  fork: string | null = null
-) =>
-  sql<{ key: string; scope: string | null; value_json: string }>`
-    ${pathEvents(sql, chatId, slotId)}
-    SELECT ev.key, ev.scope, ev.value_json
-    FROM path_events ev LEFT JOIN slots s ON s.id = ev.slot_id
-    WHERE ev.superseded_by_changeset IS NULL
-      AND (ev.slot_id IS NULL OR NOT ${slotDeletedIn(sql, fork, "s")})
-      AND ${attachedApplies(sql, fork, "s", "ev.version_id")}
-    ORDER BY coalesce(ev.slot_depth, -1), ev.seq`
 
 interface SlotPosition {
   readonly id: SlotId
@@ -316,18 +296,13 @@ export const makeReadHandlers = Effect.gen(function* () {
         return rows.map(toVersion)
       }).pipe(query("ListVersions")),
 
-    StateEventsAt: ({ userId, chatId, slotId, forkId }) =>
+    StateEventsAt: ({ userId, chatId, slotId, forkId, leafSlotId }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         if (slotId !== null) yield* liveSlot(chatId, slotId)
-        const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, slotId)
-        const rows =
-          slotId === null
-            ? yield* sql<{ key: string; scope: string | null; value_json: string }>`
-                SELECT key, scope, value_json FROM state_events
-                WHERE chat_id = ${chatId} AND slot_id IS NULL AND superseded_by_changeset IS NULL
-                ORDER BY seq`
-            : yield* stateEventsOnPath(sql, chatId, slotId, fork)
+        if (leafSlotId != null) yield* liveSlot(chatId, leafSlotId)
+        const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, leafSlotId ?? slotId)
+        const rows = yield* stateEventsOnPath(sql, chatId, slotId, fork)
         const events = yield* Effect.forEach(rows, (row) =>
           decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.mapError(
@@ -557,10 +532,10 @@ export const makeReadHandlers = Effect.gen(function* () {
                 < (${ranked * (before?.empty === true ? 0 : 1)}, ${before?.at ?? null}, ${before?.id ?? null}))
             AND (${entityId ?? null} IS NULL OR id IN (
               SELECT s.chat_id FROM state_events s WHERE json_extract(s.value_json, '$.entity') = ${entityId ?? null}
-                AND s.key = 'participant.join' AND s.superseded_by_changeset IS NULL))
+                AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL))
             AND (${pattern} IS NULL OR title LIKE ${pattern} ESCAPE '\\' OR id IN (
               SELECT s.chat_id FROM state_events s
-              WHERE s.key = 'participant.join' AND s.superseded_by_changeset IS NULL
+              WHERE s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
                 AND json_extract(s.value_json, '$.entity') IN (
                   SELECT r.entity_id FROM entity_refs r
                   JOIN entities e ON e.id = r.entity_id

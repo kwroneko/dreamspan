@@ -1,3 +1,4 @@
+import { eventApplies, inFork, viewAt } from "./forkState.ts"
 // What the summary UI reads (ARCHITECTURE §16): the layer in use with the failures and
 // unfinished work on the path, a window of coverage for the rail, and a summary's revisions.
 import type { UserId } from "@rp/shared/domain.ts"
@@ -147,13 +148,13 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }))
       }).pipe(query("ListSummaryRevisions")),
 
-    GetLcmState: ({ userId, chatId, leafSlotId }) =>
+    GetLcmState: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
         const [settings] = yield* sql<{
           enabled: number | null
-        }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events
-          WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' ORDER BY seq DESC LIMIT 1`
+        }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
+          WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* viewAt(sql, chatId, leafSlotId), "e")} ORDER BY seq DESC LIMIT 1`
         const enabled = settings?.enabled === 1
         if (!enabled)
           return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
@@ -242,7 +243,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           })),
           cursorDepth: layer.cursorDepth
         })
-      }).pipe(atLeaf(sql, chatId, leafSlotId), query("GetLcmState")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 
     GetLcmCoverage: ({ userId, chatId, leafSlotId, fromDepth, toDepth, includeResolved }) =>
       Effect.gen(function* () {
