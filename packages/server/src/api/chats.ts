@@ -392,11 +392,11 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // Hiding is an edit (DESIGN §8): it changes what's sent next and starts nothing. The
     // slot's event also has the cache estimate read again (CacheWarmth listens).
-    SetMessageHidden: ({ slotId, hidden }) =>
+    SetMessageHidden: ({ slotId, forkId, hidden }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        yield* writer.SetSlotHidden({ userId: id, slotId, hidden })
-        return yield* publishSlot(id, slotId)
+        yield* writer.SetSlotHidden({ userId: id, slotId, forkId: forkId ?? null, hidden })
+        return yield* publishSlot(id, slotId, forkId ?? null)
       }).pipe(Effect.uninterruptible, internal("SetMessageHidden")),
 
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
@@ -508,26 +508,26 @@ export const makeChatHandlers = Effect.gen(function* () {
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteChat")),
 
-    DeleteMessage: ({ slotId }) =>
+    DeleteMessage: ({ slotId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const item = yield* writer.DeleteMessage({ userId: id, slotId })
+        const item = yield* writer.DeleteMessage({ userId: id, slotId, forkId: forkId ?? null })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteMessage")),
 
-    DeleteBranch: ({ slotId }) =>
+    DeleteFork: ({ forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const item = yield* writer.DeleteBranch({ userId: id, slotId })
+        const item = yield* writer.DeleteFork({ userId: id, forkId })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
-      }).pipe(Effect.uninterruptible, internal("DeleteBranch")),
+      }).pipe(Effect.uninterruptible, internal("DeleteFork")),
 
-    DeleteVersion: ({ versionId }) =>
+    DeleteVersion: ({ versionId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const item = yield* writer.DeleteVersion({ userId: id, versionId })
+        const item = yield* writer.DeleteVersion({ userId: id, versionId, forkId: forkId ?? null })
         yield* afterDelete(id, item.origin.chatId as ChatId)
         return item
       }).pipe(Effect.uninterruptible, internal("DeleteVersion")),

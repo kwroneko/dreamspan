@@ -102,25 +102,16 @@ function BranchMenu({
     const listed = read.flatMap(([slotId, result]) => (result.ok ? [[slotId, result.value] as const] : []))
     setBranches(new Map(listed))
   }
-  const remove = async (fork: PathEntry) => {
-    const listed = await session.listBranches(fork.slotId)
-    if (!listed.ok) return showToast({ title: "Couldn't read the branches", description: listed.error.message })
-    const survivors = listed.value.filter((branch) => branch.slotId !== fork.slotId)
-    const index = Math.max(0, fork.branchIndex - 1)
-    const sibling = survivors[index]
-    const result = await session.deleteBranch(fork.slotId)
-    if (!result.ok) return showToast({ title: "Couldn't delete the branch", description: result.error.message })
+  // The fork shown is the one deleted, and only it (owner, 2026-10-27): forks made from it keep
+  // their history, the chat opens on the one chatted in last, and Undo brings it back.
+  const shownFork = view.forkId ?? view.chat?.currentForkId ?? null
+  const remove = async () => {
+    if (shownFork === null) return
+    const result = await session.deleteFork(shownFork)
+    if (!result.ok) return showToast({ title: "Couldn't delete the fork", description: result.error.message })
     deleted(result.value)
-    const keep = search.panel ? { panel: search.panel } : {}
-    if (sibling) {
-      // The fork through the alternate left at that place opens, unless it's the current one.
-      const switched = await session.switchBranch({ ...fork, slotId: sibling.slotId } as PathEntry, index)
-      if (!switched.ok) showToast({ title: "Couldn't switch branches", description: switched.error.message })
-      else if (switched.value.fork.id !== switched.value.chat.currentForkId)
-        return void navigate({ to: ".", search: { ...keep, fork: switched.value.fork.id }, replace: true })
-    }
-    // The old URL may name a fork that went with it. Keep the panel, follow the current fork.
-    void navigate({ to: ".", search: keep, replace: true })
+    // The old URL names the fork that went. Keep the panel, follow the current fork.
+    void navigate({ to: ".", search: search.panel ? { panel: search.panel } : {}, replace: true })
   }
   return (
     <>
@@ -208,15 +199,23 @@ function BranchMenu({
                   {shownName === undefined ? `Name ${shownLabel}…` : `Rename “${shownLabel}”…`}
                 </MenuItem>
               )}
-              <MenuItem icon="trash" tone="danger" onClick={() => void remove(fork)}>
-                Delete this branch: {shownName === undefined ? shownLabel : `“${shownLabel}”`}
-              </MenuItem>
               <MenuItem icon="right" onClick={() => onJump(fork.slotId)}>
                 Go to message #{fork.depth + 1}
               </MenuItem>
             </MenuGroup>
           )
         })}
+        {shownFork !== null && (
+          <>
+            {(forks.length > 0 || off) && <MenuSeparator />}
+            <MenuItem icon="trash" tone="danger" onClick={() => void remove()}>
+              Delete this fork
+              {last !== undefined
+                ? `: ${named === undefined ? branchLabel(last.branchIndex, undefined) : `“${named}”`}`
+                : ""}
+            </MenuItem>
+          </>
+        )}
         {!complete && (
           <p className="px-2.5 py-1.5 text-xs text-muted">
             Looked for branches in the last {FORK_SCAN_LIMIT.toLocaleString()} messages.

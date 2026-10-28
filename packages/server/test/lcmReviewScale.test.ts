@@ -62,6 +62,9 @@ for (const absent of ["hidden", "deleted", "empty"] as const)
             params: [h.chat.id, h.chat.id]
           },
           { sql: "UPDATE chats SET active_leaf_slot_id='hidden-s-99999' WHERE id=?", params: [h.chat.id] },
+          // Marks as the code before forks wrote them, which the database freezes now.
+          { sql: "DROP TRIGGER slots_hide_frozen" },
+          { sql: "DROP TRIGGER slots_deletion_per_fork" },
           ...(absent === "deleted"
             ? [
                 {

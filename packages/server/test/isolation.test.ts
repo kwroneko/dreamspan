@@ -1113,8 +1113,8 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   PinFork: {
     probe: (actor, owner) => refused(actor.api.PinFork({ forkId: owner.chat.forkId, pinned: true }), "NotFound")
   },
-  DeleteBranch: {
-    probe: (actor, owner) => refused(actor.api.DeleteBranch({ slotId: owner.chat.slotId }), "NotFound")
+  DeleteFork: {
+    probe: (actor, owner) => refused(actor.api.DeleteFork({ forkId: owner.chat.forkId }), "NotFound")
   },
   DeleteVersion: {
     probe: (actor, owner) => refused(actor.api.DeleteVersion({ versionId: owner.chat.versionId }), "NotFound")
@@ -1816,6 +1816,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
+      })
+  },
+  // Another user's items name no forks, even ones that show them.
+  BinItemForks: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.BinItemForks({ itemIds: [owner.binItemId] }), [])
       })
   },
   ListBin: {

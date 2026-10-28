@@ -1,6 +1,6 @@
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcluded, contextExcludedIn } from "./lcmVisibility.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
-import { currentForkSql, reselectEverywhere, selectedInSql } from "./forkState.ts"
+import { currentForkSql, forkAt, reselectEverywhere, selectedInSql, writeOverride } from "./forkState.ts"
 import { forkImportSlot } from "./stImportFork.ts"
 import { onPath } from "./forks.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
@@ -466,6 +466,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                   ) OR EXISTS (
                     SELECT 1 FROM versions r JOIN fork_overrides o ON o.target_id = r.id AND o.kind = 'replace'
                     WHERE r.slot_id = s.id
+                  ) OR EXISTS (
+                    -- A hide or a deletion in a fork is the user's too (§2.4).
+                    SELECT 1 FROM fork_overrides o WHERE o.slot_id = s.id AND o.origin = 'user'
+                      AND o.kind IN ('hide', 'delete_slot', 'delete_version')
                   ) AS locally_changed,
                   coalesce((SELECT h.content FROM version_history h WHERE h.version_id = v.id ORDER BY h.id LIMIT 1),
                     v.content) AS original
@@ -879,18 +883,27 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         return { notes, fork }
       }).pipe(transaction(sql, "StImportFinishChat")),
 
+    // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`
+    // row of its own, spec/FORK-INDEPENDENCE-DELTA.md §2.4): other forks keep their hides.
     StImportUnhide: ({ userId, chatId, throughSlotId }) =>
       Effect.gen(function* () {
         yield* ownedChat(userId, chatId)
         yield* ownedSlot(chatId, throughSlotId)
+        const fork = yield* forkAt(sql, chatId, throughSlotId)
+        if (fork === null) return { unhidden: 0 }
         const rows = yield* sql<{ id: string }>`
           WITH RECURSIVE path(id, parent) AS (
             SELECT id, parent_slot_id FROM slots WHERE id = ${throughSlotId}
             UNION ALL
             SELECT s.id, s.parent_slot_id FROM slots s JOIN path p ON s.id = p.parent
           )
-          UPDATE slots SET context_excluded = 0, hidden_by_user = 0, row_version = row_version + 1
-          WHERE id IN (SELECT id FROM path) AND context_excluded = 1 RETURNING id`
+          SELECT s.id FROM path p JOIN slots s ON s.id = p.id WHERE ${contextExcludedIn(sql, fork)} = 1`
+        for (const row of rows)
+          yield* writeOverride(
+            sql,
+            { id: fork, chatId },
+            { kind: "hide", targetId: row.id, slotId: row.id, valueId: null, flag: 0 }
+          )
         return { unhidden: rows.length }
       }).pipe(transaction(sql, "StImportUnhide")),
 

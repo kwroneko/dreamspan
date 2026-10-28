@@ -164,7 +164,7 @@ describe("recycle bin", () => {
       })
       // Another fork, made at b, is the one chatted in last.
       const d = yield* append(b.slotId, "d", true)
-      const item = yield* writer.DeleteBranch({ userId, slotId: c.slotId })
+      const item = yield* writer.DeleteFork({ userId, forkId: chat.currentForkId! })
       assert.strictEqual((yield* reader.GetDraft({ userId, key }))?.content, "Important unsent paragraph")
       // The first fork went with the branch; the chat stays on the other.
       assert.deepStrictEqual(
@@ -203,16 +203,15 @@ describe("recycle bin", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("deleting a chat's last fork's branch keeps that fork, which Restore brings back down", () =>
+  it.live("a chat's last fork isn't deleted", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, chat, b, c, path } = yield* setup()
-      const item = yield* writer.DeleteBranch({ userId, slotId: c.slotId })
+      const { writer, reader, userId, chat, c, path } = yield* setup()
+      const refused = yield* writer.DeleteFork({ userId, forkId: chat.currentForkId! }).pipe(Effect.flip)
+      assert.strictEqual(refused._tag, "CannotDeleteLastFork")
       const after = yield* reader.GetChat({ userId, chatId: chat.id })
-      assert.deepStrictEqual([after.currentForkId, after.activeLeafSlotId], [chat.currentForkId, b.slotId])
-      assert.deepStrictEqual(yield* path(), ["root", "a", "b"])
-      yield* writer.RestoreBinItem({ userId, itemId: item.id })
-      assert.strictEqual((yield* reader.GetChat({ userId, chatId: chat.id })).activeLeafSlotId, c.slotId)
+      assert.deepStrictEqual([after.currentForkId, after.activeLeafSlotId], [chat.currentForkId, c.slotId])
       assert.deepStrictEqual(yield* path(), ["root", "a", "b", "c"])
+      assert.deepStrictEqual(yield* reader.ListBin({ userId, limit: 10, before: null }), [])
     }).pipe(Effect.provide(database()))
   )
 
@@ -257,10 +256,10 @@ describe("recycle bin", () => {
 
   it.live("a branch goes as one item and comes back whole", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, chat, a, b, c, path, append } = yield* setup()
+      const { writer, reader, userId, chat, a, c, path, append } = yield* setup()
       const other = yield* append(a.slotId, "other branch", true) // the active leaf is now on the other branch
-      const item = yield* writer.DeleteBranch({ userId, slotId: b.slotId })
-      assert.strictEqual(item.title, 'Branch of 2 messages in "Harbor"')
+      const item = yield* writer.DeleteFork({ userId, forkId: chat.currentForkId! })
+      assert.strictEqual(item.title, 'Fork of 2 messages in "Harbor"')
       assert.deepStrictEqual(yield* path(c.slotId), ["root", "a"])
       assert.deepStrictEqual(yield* path(other.slotId), ["root", "a", "other branch"])
 
@@ -536,7 +535,7 @@ describe("recycle bin", () => {
 
   it.live("sizes count bytes of everything a purge frees, and nothing already in the bin twice", () =>
     Effect.gen(function* () {
-      const { writer, userId, chat, card, a, b } = yield* setup()
+      const { writer, userId, chat, card, root, b, append } = yield* setup()
       const cat = "猫".repeat(1000) // 1,000 characters, 3,000 bytes
       const swipe = yield* writer.AddVersion({
         userId,
@@ -556,12 +555,14 @@ describe("recycle bin", () => {
       assert.strictEqual((yield* writer.DeleteVersion({ userId, versionId: swipe.id })).byteSize, 3005)
       // Each later item leaves out what's already in the bin under an earlier one.
       assert.strictEqual((yield* writer.DeleteMessage({ userId, slotId: b.slotId })).byteSize, 1) // "b"
-      assert.strictEqual((yield* writer.DeleteBranch({ userId, slotId: a.slotId })).byteSize, 2) // "a", "c"
-      // "root", the participant join and the initial LCM setting (a copy of the default settings)
+      // The fork's messages that no other fork shows: "a" and "c", not "root".
+      yield* append(root.slotId, "z", true)
+      assert.strictEqual((yield* writer.DeleteFork({ userId, forkId: chat.currentForkId! })).byteSize, 2)
+      // "root" and "z", the participant join and the initial LCM setting (a copy of the default settings)
       const joined = JSON.stringify({ entity: card.entityId }).length
       assert.strictEqual(
         (yield* writer.DeleteChat({ userId, chatId: chat.id })).byteSize,
-        4 + joined + JSON.stringify(newChatLcm(null)).length
+        5 + joined + JSON.stringify(newChatLcm(null)).length
       )
     }).pipe(Effect.provide(database()))
   )

@@ -67,7 +67,7 @@ describe("forks", () => {
       assert.deepStrictEqual(yield* texts(api, chat.id, main), ["m0", "m1", "m2"])
       // Its branch deleted, the current fork goes with it: the most recently current live
       // one opens instead.
-      yield* api.DeleteBranch({ slotId: b.slotId })
+      yield* api.DeleteFork({ forkId: made.fork.id })
       assert.strictEqual(yield* current(api, chat.id), main)
       assert.deepStrictEqual(
         (yield* api.ListForks({ chatId: chat.id })).map((f) => f.id),

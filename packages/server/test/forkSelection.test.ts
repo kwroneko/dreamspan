@@ -278,7 +278,7 @@ describe("per-fork selection", () => {
     }).pipe(Effect.provide(serverLayer(config)))
   )
 
-  it.live("deleting a swipe moves every fork that showed it, and only those", () =>
+  it.live("deleting a swipe moves the fork that deleted it, and no other (unit 5)", () =>
     Effect.gen(function* () {
       const { writer, userId, m1, main, one, two, texts, select, fork } = yield* setup
       const three = yield* writer.AddVersion({
@@ -293,14 +293,15 @@ describe("per-fork selection", () => {
       yield* select(m1.slotId, main, three.id as VersionId)
       yield* select(m1.slotId, g, three.id as VersionId)
       yield* select(m1.slotId, h, two)
-      yield* writer.DeleteVersion({ userId, versionId: three.id })
-      // The previous swipe, as ST does, in each fork that showed it; H keeps its own.
+      yield* writer.DeleteVersion({ userId, versionId: three.id, forkId: main })
+      // The previous swipe, as ST does, in the fork that deleted it; the others keep theirs.
       assert.deepStrictEqual(yield* texts(main), ["m0", "two"])
-      assert.deepStrictEqual(yield* texts(g), ["m0", "two"])
+      assert.deepStrictEqual(yield* texts(g), ["m0", "three"])
       assert.deepStrictEqual(yield* texts(h), ["m0", "two"])
-      yield* writer.DeleteVersion({ userId, versionId: two })
+      yield* writer.DeleteVersion({ userId, versionId: two, forkId: main })
       assert.deepStrictEqual(yield* texts(main), ["m0", "one"])
-      assert.deepStrictEqual(yield* texts(h), ["m0", "one"])
+      assert.deepStrictEqual(yield* texts(g), ["m0", "three"])
+      assert.deepStrictEqual(yield* texts(h), ["m0", "two"])
       assert.strictEqual(one, m1.version.id)
     }).pipe(Effect.provide(serverLayer(config)))
   )

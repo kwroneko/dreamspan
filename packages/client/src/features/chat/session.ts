@@ -1250,7 +1250,9 @@ export class ChatSession {
 
   /** Hides the message from the model, or shows it to the model again (ST's ghost toggle). */
   setHidden(entry: PathEntry, hidden: boolean): Promise<Outcome<PathEntry>> {
-    return this.slotWrite(entry.slotId, (client) => client("SetMessageHidden", { slotId: entry.slotId, hidden }))
+    return this.slotWrite(entry.slotId, (client) =>
+      client("SetMessageHidden", { slotId: entry.slotId, forkId: this.view.forkId, hidden })
+    )
   }
 
   /** A finished version the user wrote changes in place; anything else gets a new version. */
@@ -1304,12 +1306,14 @@ export class ChatSession {
     return result
   }
 
+  /** Deletes the message in the fork shown only: another fork that has it keeps it. */
   deleteMessage(slotId: SlotId) {
-    return this.call((client) => client("DeleteMessage", { slotId }))
+    return this.call((client) => client("DeleteMessage", { slotId, forkId: this.view.forkId }))
   }
 
+  /** Deletes the swipe in the fork shown only. */
   deleteVersion(versionId: VersionId) {
-    return this.call((client) => client("DeleteVersion", { versionId }))
+    return this.call((client) => client("DeleteVersion", { versionId, forkId: this.view.forkId }))
   }
 
   /** Stars a version or hides it from the arrows (the version picker), or undoes either. */
@@ -1324,9 +1328,9 @@ export class ChatSession {
     return result
   }
 
-  /** Deletes the branch a message starts (it and everything below it) to the bin. */
-  async deleteBranch(slotId: SlotId) {
-    const result = await this.call((client) => client("DeleteBranch", { slotId }))
+  /** Deletes the fork to the bin: only that fork goes, and forks made from it keep their history. */
+  async deleteFork(forkId: ForkId) {
+    const result = await this.call((client) => client("DeleteFork", { forkId }))
     // The fork shown may have gone with it. Follow the chat's current fork, fencing every
     // earlier window read.
     if (result.ok) this.showFork(null, null)

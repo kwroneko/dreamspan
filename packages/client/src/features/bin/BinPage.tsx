@@ -1,9 +1,9 @@
 // The recycle bin (DESIGN §6.2): what the user deleted, newest first, to restore where it was
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { RegistryContext } from "@effect/atom-react"
-import type { BinItem, RecoveredText } from "@rp/shared/bin.ts"
+import type { BinForkShown, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Link, useSearch } from "@tanstack/react-router"
-import { useContext, useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -29,7 +29,7 @@ const kindLabel = (item: BinItem) => {
     case "message":
       return "Message"
     case "branch":
-      return "Branch"
+      return typeof item.origin.forkId === "string" ? "Fork" : "Branch"
     case "version":
       return "Version"
     case "chat":
@@ -47,9 +47,14 @@ const kindLabel = (item: BinItem) => {
 const purgeEffect = (item: BinItem) => {
   switch (item.kind) {
     case "message":
-    case "branch":
     case "version":
-      return "Its text goes for good. An empty placeholder keeps its place in the chat."
+      return typeof item.origin.forkId === "string"
+        ? "Its text is erased for good in every fork, the ones that still show it included. An empty placeholder keeps its place in the chat."
+        : "Its text goes for good. An empty placeholder keeps its place in the chat."
+    case "branch":
+      return typeof item.origin.forkId === "string"
+        ? "The fork goes for good, with the messages no other fork shows. Forks made from it keep their history."
+        : "Its text goes for good. An empty placeholder keeps its place in the chat."
     case "chat":
       return "The chat goes for good, with everything in it."
     case "entity":
@@ -57,6 +62,52 @@ const purgeEffect = (item: BinItem) => {
     case "connection":
       return "The connection goes for good, with the key typed into it. Usage records keep its name."
   }
+}
+
+/**
+ * The forks that still show what deleting the items for good erases (`BinItemForks`): the
+ * warning's list, which the user reads before confirming (owner, 2026-10-27). Reads when the
+ * dialog opens, and says nothing while it has nobody to name.
+ */
+function ForksShowing({ itemIds, open }: { itemIds: ReadonlyArray<string>; open: boolean }) {
+  const read = useAction()
+  // What was read for which items: a list for other items isn't this dialog's.
+  const [loaded, setRead] = useState<{ key: string; forks: ReadonlyArray<BinForkShown> } | null>(null)
+  const key = itemIds.join(",")
+  useEffect(() => {
+    if (!open || itemIds.length === 0) return
+    void read
+      .run((client) => client("BinItemForks", { itemIds }))
+      .then((result) => {
+        if (result.ok) setRead({ key, forks: result.value })
+      })
+    // `read` is a new function each render; the items are what the list is for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, key])
+  const shown = loaded !== null && loaded.key === key ? loaded.forks : null
+  if (shown === null) return read.error ? <ErrorAlert error={read.error} /> : null
+  const forks = [...new Map(shown.map((fork) => [fork.forkId, fork])).values()]
+  if (forks.length === 0) return null
+  return (
+    <div role="alert" className="rounded-md border border-warning/60 bg-warning/10 p-3 text-sm">
+      <p className="font-medium">
+        {forks.length === 1
+          ? "A fork still shows this text, and loses it too:"
+          : `${forks.length} forks still show this text, and lose it too:`}
+      </p>
+      <ul className="mt-1 list-disc pl-5">
+        {forks.slice(0, 8).map((fork) => (
+          <li key={fork.forkId} className="[overflow-wrap:anywhere]">
+            {fork.name !== null && fork.name !== "" ? `“${fork.name}”` : "Unnamed fork"}
+            {fork.tipExcerpt !== "" ? <span className="text-muted"> ending “{fork.tipExcerpt}”</span> : null}
+            {fork.deleted ? <span className="text-muted"> (in the bin)</span> : null}
+            <span className="text-muted"> in “{readableChatTitle(fork.chatTitle)}”</span>
+          </li>
+        ))}
+      </ul>
+      {forks.length > 8 && <p className="mt-1 text-muted">and {forks.length - 8} more</p>}
+    </div>
+  )
 }
 
 /** Where a restored item is now, for a link to it. */
@@ -146,6 +197,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           }
         }}
       >
+        <ForksShowing itemIds={[item.id]} open={confirming} />
         <ErrorAlert error={purge.error} />
       </ConfirmDialog>
     </li>
@@ -214,6 +266,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
           if (result.ok) setEmptying(null)
         }}
       >
+        <ForksShowing itemIds={emptying ?? []} open={emptying !== null} />
         <ErrorAlert error={action.error} />
       </ConfirmDialog>
     </div>

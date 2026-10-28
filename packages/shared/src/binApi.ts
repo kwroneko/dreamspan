@@ -2,7 +2,7 @@
 // deleted, to restore in place or delete for good, and the text recovered from drafts.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { BinChanged, BinItem, RecoveredText } from "./bin.ts"
+import { BinChanged, BinForkShown, BinItem, RecoveredText } from "./bin.ts"
 import { NotFound, ServerError } from "./errors.ts"
 
 const Errors = [NotFound, ServerError] as const
@@ -29,6 +29,15 @@ export class BinApi extends RpcGroup.make(
     payload: { itemId: Schema.String },
     success: Schema.Void,
     error: Schema.Union([...Errors])
+  }),
+  /**
+   * The forks, other than the one that deleted it, that still show what a message or swipe in
+   * the bin holds, so the warning before deleting it for good can name them.
+   */
+  Rpc.make("BinItemForks", {
+    payload: { itemIds: Schema.Array(Schema.String) },
+    success: Schema.Array(BinForkShown),
+    error: ServerError
   }),
   Rpc.make("EmptyBin", {
     payload: { itemIds: Schema.Array(Schema.String) },

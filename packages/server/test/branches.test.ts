@@ -36,6 +36,10 @@ const path = (api: Api, chatId: ChatId, forkId: ForkId | null = null) =>
 const shape = (entries: ReadonlyArray<PathEntry>) =>
   entries.map((e) => `${e.version.content}:${e.branchIndex + 1}/${e.branchCount}`)
 
+/** The fork whose tip is `slotId`. */
+const forkWithTip = (api: Api, chatId: ChatId, slotId: SlotId) =>
+  Effect.map(api.ListForks({ chatId }), (forks) => forks.find((fork) => fork.tipSlotId === slotId)!.id)
+
 describe("branches", () => {
   for (const purge of [false, true]) {
     it.live(
@@ -49,7 +53,7 @@ describe("branches", () => {
           const b = yield* send(api, chat.id, a, "older deletion")
           const inner = yield* api.DeleteMessage({ slotId: b })
           const other = yield* send(api, chat.id, root, "other", true)
-          const subtree = yield* api.DeleteBranch({ slotId: a })
+          const subtree = yield* api.DeleteFork({ forkId: yield* forkWithTip(api, chat.id, a) })
           if (purge) yield* api.PurgeBinItem({ itemId: subtree.id })
           yield* api.RestoreBinItem({ itemId: inner.id })
           assert.deepStrictEqual(shape(yield* path(api, chat.id)), ["root:1/1", "other:1/1"])
@@ -61,7 +65,7 @@ describe("branches", () => {
     )
   }
 
-  for (const change of ["restore", "delete message", "delete branch"] as const) {
+  for (const change of ["restore", "delete message"] as const) {
     it.live(`opens the fork an alternate is on after a ${change} there`, () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -72,8 +76,7 @@ describe("branches", () => {
         const b = yield* sendIn(api, chat.id, null, root, "other", true)
         const item = change === "restore" ? yield* api.DeleteMessage({ slotId: child }) : null
         if (item) yield* api.RestoreBinItem({ itemId: item.id })
-        else if (change === "delete message") yield* api.DeleteMessage({ slotId: child })
-        else yield* api.DeleteBranch({ slotId: child })
+        else yield* api.DeleteMessage({ slotId: child })
         const opened = yield* api.SwitchBranch({ chatId: chat.id, slotId: b.slotId, index: 0, forkId: b.forkId })
         assert.strictEqual(opened.slotId, a)
         assert.strictEqual(opened.fork.tipSlotId, change === "restore" ? child : a)
@@ -109,7 +112,7 @@ describe("branches", () => {
         assert.strictEqual(around.leafSlotId, c)
         assert.strictEqual(around.forkId, switched.fork.id)
       }
-      yield* api.DeleteBranch({ slotId: c })
+      yield* api.DeleteFork({ forkId: yield* forkWithTip(api, chat.id, c) })
       const left = yield* api.SwitchBranch({ chatId: chat.id, slotId: other, index: 0 })
       assert.deepStrictEqual(shape(yield* path(api, chat.id, left.fork.id)), ["root:1/1", "other:1/1"])
     }).pipe(Effect.scoped, withServer(testConfig()))
@@ -154,7 +157,7 @@ describe("branches", () => {
       const b1 = yield* send(api, chat.id, m0, "b1", true)
       const b2 = yield* send(api, chat.id, m0, "b2", true)
       yield* api.DeleteMessage({ slotId: m1 })
-      yield* api.DeleteBranch({ slotId: b1 })
+      yield* api.DeleteFork({ forkId: yield* forkWithTip(api, chat.id, b1) })
       assert.deepStrictEqual(shape(yield* path(api, chat.id)), ["m0:1/1", "b2:2/2"])
       // Switching to the deleted message's branch shows its reply.
       const switched = yield* api.SwitchBranch({ chatId: chat.id, slotId: b2, index: 0 })

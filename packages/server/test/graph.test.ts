@@ -718,12 +718,13 @@ describe("window reads", () => {
           const rows = yield* sql.unsafe<{ detail: string }>(`EXPLAIN QUERY PLAN ${text}`, params)
           return rows.map((row) => row.detail)
         }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
-        // Each slot's selection, the replacement shown for it and the two flags on it each
-        // read the fork's lineage (its own JSON, a few entries) and look each entry's override
-        // up by index (forkState.ts).
+        // Each slot's selection, the replacement shown for it, the two flags on it, its
+        // deletion and hide, and the deletion of each of its swipes (in the count) each read the
+        // fork's lineage (its own JSON, a few entries) and look each entry's override up by
+        // index (forkState.ts).
         assert.deepStrictEqual(
           plan.filter((step) => step.startsWith("SCAN") && !["SCAN d", "SCAN deleted_chain"].includes(step)),
-          ["SCAN g", "SCAN g", ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
+          ["SCAN g", "SCAN g", ...Array<string>(7).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
           plan.join("\n")
         )
         assert.lengthOf(
@@ -731,7 +732,7 @@ describe("window reads", () => {
             (step) =>
               step === "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=? AND target_id=? AND seq<?)"
           ),
-          4,
+          7,
           plan.join("\n")
         )
         assert.includeMembers(

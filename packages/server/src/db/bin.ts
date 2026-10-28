@@ -2,15 +2,30 @@
 // bin_item_id) instead of removing them, so restoring puts things back exactly where
 // they were. Two sections with independent capacities: deleted items and recovered text.
 import { Buffer } from "node:buffer"
-import { BinChanged, BinItem, type BinLimits, RecoveredText } from "@rp/shared/bin.ts"
+import { BinChanged, BinItem, type BinLimits, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { composerKey, type DraftKey, excerpt } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkRecency } from "./forks.ts"
-import { originalSql, reselectEverywhere, shownInSql } from "./forkState.ts"
+import { forkRecency, forksShowing, onPath, sharedDepth } from "./forks.ts"
+import {
+  forkAt,
+  insertFork,
+  originalSql,
+  reselectEverywhere,
+  selectedIn,
+  shownInSql,
+  shownIn,
+  slotDeletedIn,
+  versionDeletedIn,
+  writeOverride,
+  writeSelect
+} from "./forkState.ts"
+import { recordReduction } from "./historyChanges.ts"
+import { pathSegments } from "./pathSegments.ts"
+import type { ForkRow } from "./rows.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { NotFound } from "./ops.ts"
 import type { QueuedRow } from "./queueRows.ts"
@@ -133,20 +148,20 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
     )
 
   /**
-   * Every live fork of the chat whose tip was deleted moves it to the nearest ancestor
-   * that wasn't (each fork's composer is its own, so nothing moves with it).
+   * Every live fork of the chat whose tip is deleted in its own view moves it to the nearest
+   * ancestor that isn't (each fork's composer is its own, so nothing moves with it).
    */
   const relocateLeaf = (chatId: string) =>
     Effect.gen(function* () {
       const forks = yield* sql<{ id: string; tip_slot_id: string }>`
         SELECT f.id, f.tip_slot_id FROM forks f JOIN slots t ON t.id = f.tip_slot_id
-        WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND t.deleted_at IS NOT NULL`
+        WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND ${slotDeletedIn(sql, sql.literal("f.id"), "t")}`
       for (const fork of forks) {
         const [target] = yield* sql<{ id: string | null }>`
           WITH RECURSIVE up(id, parent, deleted, n) AS (
-            SELECT id, parent_slot_id, deleted_at IS NOT NULL, 0 FROM slots WHERE id = ${fork.tip_slot_id}
+            SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, 0 FROM slots s WHERE s.id = ${fork.tip_slot_id}
             UNION ALL
-            SELECT s.id, s.parent_slot_id, s.deleted_at IS NOT NULL, up.n + 1 FROM slots s JOIN up ON s.id = up.parent
+            SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, up.n + 1 FROM slots s JOIN up ON s.id = up.parent
             WHERE up.deleted
           )
           SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS id`
@@ -158,7 +173,8 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
   /**
    * The live forks of the chat whose tip nothing continues below: no child that's live, or
    * deleted alone with replies left (what a path follows). Includes one before the first
-   * message, which a restored first message continues.
+   * message, which a restored first message continues. For restoring what was deleted
+   * before forks kept their own deletions.
    */
   const tipForks = (chatId: string) =>
     sql<{ id: string; tip_slot_id: string | null }>`
@@ -166,16 +182,12 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
         AND NOT EXISTS (SELECT 1 FROM slots x WHERE x.chat_id = f.chat_id AND x.parent_slot_id IS f.tip_slot_id
           AND ${sql.literal(reachableSlot("x"))})`
 
-  /**
-   * After a restore: a fork whose tip was a tip follows what came back below it, on the
-   * newest reply at each step, so a message deleted from the end of a fork is at its end again.
-   */
-  const followRestored = (chatId: string, fork: { id: string; tip_slot_id: string | null }) =>
-    Effect.gen(function* () {
-      const leaf = fork.tip_slot_id
-      const [tip] = yield* sql<{ id: string }>`
+  /** The end of the line below `slotId` (itself if nothing continues it): its newest reply at each step. */
+  const latestBelow = (chatId: string, slotId: string | null) =>
+    Effect.map(
+      sql<{ id: string }>`
         WITH RECURSIVE down(id, n) AS (
-          SELECT ${leaf}, 0
+          SELECT ${slotId}, 0
           UNION ALL
           SELECT (SELECT c.id FROM slots c WHERE c.chat_id = ${chatId} AND c.parent_slot_id IS d.id
               AND ${sql.literal(reachableSlot("c"))}
@@ -183,32 +195,24 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
             d.n + 1
           FROM down d WHERE d.id IS NOT NULL OR d.n = 0
         )
-        SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`
-      if (tip && tip.id !== leaf)
-        yield* sql`UPDATE forks SET tip_slot_id = ${tip.id}, row_version = row_version + 1 WHERE id = ${fork.id}`
-    })
+        SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`,
+      ([row]) => row?.id ?? null
+    )
 
   /**
-   * The forks whose tip is in a branch that went to the bin go with it, under its item: their
-   * tips stay, so Restore brings them back as they were. A current fork that went is
-   * replaced by the most recent live one (§2.1). When none would be left, the current fork
-   * stays instead, its tip going up out of the branch (`relocateLeaf`), as the chat's leaf
-   * did before forks, and Restore brings it back down (`followRestored`).
+   * After a restore: a fork whose tip was a tip follows what came back below it, on the
+   * newest reply at each step, so a message deleted from the end of a fork is at its end again.
    */
-  const binForks = (chatId: string, itemId: string) =>
+  const followRestored = (chatId: string, fork: { id: string; tip_slot_id: string | null }) =>
     Effect.gen(function* () {
-      const inBranch = `chat_id = ? AND deleted_at IS NULL AND tip_slot_id IN (SELECT id FROM slots WHERE bin_item_id = ?)`
-      const [row] = yield* sql.unsafe<{ kept: string | null }>(
-        `SELECT CASE WHEN EXISTS (SELECT 1 FROM forks WHERE chat_id = ? AND deleted_at IS NULL AND NOT (${inBranch}))
-           THEN NULL ELSE (SELECT current_fork_id FROM chats WHERE id = ?) END AS kept`,
-        [chatId, chatId, itemId, chatId]
-      )
-      const kept = row?.kept ?? null
-      yield* sql.unsafe(
-        `UPDATE forks SET deleted_at = ?, bin_item_id = ?, row_version = row_version + 1
-         WHERE ${inBranch} AND id IS NOT ?`,
-        [Date.now(), itemId, chatId, itemId, kept]
-      )
+      const tip = yield* latestBelow(chatId, fork.tip_slot_id)
+      if (tip !== null && tip !== fork.tip_slot_id)
+        yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fork.id}`
+    })
+
+  /** A current fork that's in the bin is replaced by the live one most recently current. */
+  const replaceCurrentFork = (chatId: string) =>
+    Effect.gen(function* () {
       const [next] = yield* sql<{ id: string }>`
         SELECT f.id FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE c.id = ${chatId} AND f.deleted_at IS NULL
@@ -218,18 +222,49 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
     })
 
   // --- Deleting -----------------------------------------------------------------------
+  // What a user deletes is deleted in a fork: an override of that fork's own (spec/FORK-INDEPENDENCE-
+  // DELTA.md §2.4), so another fork still shows it. Only when no live fork shows it does the
+  // slot or version carry the mark too (`slots.deleted_at` under the item), which keeps what reads
+  // the marks (alternates in the switcher, tips following restores) as it was before forks.
 
-  const ownedLiveSlot = (userId: UserId, slotId: string) =>
-    sql<{ id: string; chat_id: string; depth: number; parent_slot_id: string | null; title: string; content: string }>`
-      SELECT s.id, s.chat_id, s.depth, s.parent_slot_id, c.title, v.content
-      FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = ${sql.literal(shownInSql("c.current_fork_id", "s"))}
-      WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
-      Effect.flatMap(([row]) => (row ? Effect.succeed(row) : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
-    )
-
-  const deleteMessage = (userId: UserId, slotId: string) =>
+  /** The fork a delete is in: `forkId`, else the one through the slot; a live fork of the chat. */
+  const deletingFork = (chatId: string, slotId: string, forkId: string | null | undefined) =>
     Effect.gen(function* () {
-      const slot = yield* ownedLiveSlot(userId, slotId)
+      const id = forkId ?? (yield* forkAt(sql, chatId, slotId))
+      const [fork] = yield* sql<ForkRow>`
+        SELECT * FROM forks WHERE id = ${id} AND chat_id = ${chatId} AND deleted_at IS NULL`
+      if (!fork) return yield* new NotFound({ entity: "fork", id: id ?? chatId })
+      return fork
+    })
+
+  const ownedLiveSlot = (userId: UserId, slotId: string, forkId: string | null | undefined) =>
+    Effect.gen(function* () {
+      const [owned] = yield* sql<{ chat_id: string }>`
+        SELECT s.chat_id FROM slots s JOIN chats c ON c.id = s.chat_id
+        WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND s.purged_at IS NULL
+          AND c.deleted_at IS NULL`
+      if (!owned) return yield* new NotFound({ entity: "slot", id: slotId })
+      const fork = yield* deletingFork(owned.chat_id, slotId, forkId)
+      const [row] = yield* sql<{
+        id: string
+        chat_id: string
+        depth: number
+        parent_slot_id: string | null
+        title: string
+        content: string
+      }>`
+        SELECT s.id, s.chat_id, s.depth, s.parent_slot_id, c.title, v.content
+        FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = ${shownIn(sql, fork.id, "s")}
+        WHERE s.id = ${slotId} AND NOT ${slotDeletedIn(sql, fork.id, "s")}`
+      if (!row) return yield* new NotFound({ entity: "slot", id: slotId })
+      return { ...row, fork }
+    })
+
+  const forkOrigin = (fork: ForkRow) => ({ forkId: fork.id, forkName: fork.name })
+
+  const deleteMessage = (userId: UserId, slotId: string, forkId?: string | null) =>
+    Effect.gen(function* () {
+      const slot = yield* ownedLiveSlot(userId, slotId, forkId)
       const [size] = yield* sql<{ n: number }>`
         SELECT coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS n FROM versions v
         WHERE v.slot_id = ${slotId} AND v.deleted_at IS NULL`
@@ -245,66 +280,113 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           chatTitle: slot.title,
           slotId,
           depth: slot.depth,
-          parentSlotId: slot.parent_slot_id
+          parentSlotId: slot.parent_slot_id,
+          ...forkOrigin(slot.fork)
         },
         byteSize: size!.n
       })
-      yield* sql`UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${slotId}`
+      yield* writeOverride(
+        sql,
+        { id: slot.fork.id, chatId: slot.chat_id },
+        { kind: "delete_slot", targetId: slotId, slotId, valueId: null, flag: 1, binItemId: itemId }
+      )
+      yield* recordReduction(sql, slotId, slot.fork.id)
+      const shown = yield* forksShowing(sql, slot.chat_id, slotId, null, slot.fork.id, true)
+      if (shown.length === 0)
+        yield* sql`UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${slotId}`
       yield* relocateLeaf(slot.chat_id)
       yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${slot.chat_id}`
       return itemId
     })
 
-  const deleteBranch = (userId: UserId, slotId: string) =>
+  /**
+   * Deletes one fork (owner, 2026-10-27): only that fork goes, and forks made from it keep
+   * their shared history. The fork is marked and its bin item names it. The messages of its
+   * path that no other live fork shows are marked under the item (so they leave the
+   * switcher and a purge can empty them); the rest stay, shown by the forks that have them.
+   */
+  const deleteFork = (userId: UserId, forkId: string) =>
     Effect.gen(function* () {
-      const slot = yield* ownedLiveSlot(userId, slotId)
-      const [stats] = yield* sql<{ slots: number; bytes: number }>`
-        WITH RECURSIVE sub(id) AS (SELECT ${slotId} UNION ALL SELECT s.id FROM slots s JOIN sub ON s.parent_slot_id = sub.id)
-        SELECT (SELECT count(*) FROM slots WHERE id IN sub AND deleted_at IS NULL) AS slots,
-               (SELECT coalesce(sum(${sql.literal(versionBytes("v"))}), 0) FROM versions v JOIN slots s ON s.id = v.slot_id
-                WHERE s.id IN sub AND s.deleted_at IS NULL AND v.deleted_at IS NULL) AS bytes`
+      const [fork] = yield* sql<ForkRow & { chat_title: string }>`
+        SELECT f.*, c.title AS chat_title FROM forks f JOIN chats c ON c.id = f.chat_id
+        WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
+      if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
+      const others = yield* sql<{ tip_slot_id: string | null }>`
+        SELECT tip_slot_id FROM forks WHERE chat_id = ${fork.chat_id} AND deleted_at IS NULL AND id <> ${forkId}`
+      if (others.length === 0) return yield* new CannotDeleteLastFork()
+      const below =
+        fork.tip_slot_id === null
+          ? Number.MAX_SAFE_INTEGER
+          : (yield* sharedDepth(
+              sql,
+              fork.chat_id,
+              fork.tip_slot_id,
+              others.flatMap((other) => (other.tip_slot_id === null ? [] : [other.tip_slot_id]))
+            )) + 1
+      const unseen = (statement: "count" | "mark", itemId = "") =>
+        fork.tip_slot_id === null
+          ? Effect.succeed([{ slots: 0, bytes: 0 }])
+          : statement === "count"
+            ? sql<{ slots: number; bytes: number }>`
+                ${pathSegments(sql, fork.chat_id, fork.tip_slot_id, null)}
+                SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS bytes
+                FROM segments g JOIN slots s ON s.chain_id = g.chain_id AND s.depth BETWEEN max(g.lo, ${below}) AND g.hi
+                  LEFT JOIN versions v ON v.slot_id = s.id AND v.deleted_at IS NULL
+                WHERE s.deleted_at IS NULL`
+            : sql<{ slots: number; bytes: number }>`
+                ${pathSegments(sql, fork.chat_id, fork.tip_slot_id, null)}
+                UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId}
+                WHERE deleted_at IS NULL AND id IN (SELECT s.id FROM segments g JOIN slots s ON s.chain_id = g.chain_id
+                  AND s.depth BETWEEN max(g.lo, ${below}) AND g.hi)
+                RETURNING 0 AS slots, 0 AS bytes`
+      const [stats] = yield* unseen("count")
+      const [tip] = yield* sql<{ content: string }>`
+        SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${fork.tip_slot_id}`
       const itemId = yield* insertItem({
         userId,
         kind: "branch",
-        targetId: slotId,
-        chatId: slot.chat_id,
-        title: `Branch of ${stats!.slots} message${stats!.slots === 1 ? "" : "s"} in ${chatName(slot.title)}`,
-        excerpt: slot.content,
+        targetId: forkId,
+        chatId: fork.chat_id,
+        title: `Fork of ${stats!.slots} message${stats!.slots === 1 ? "" : "s"} in ${chatName(fork.chat_title)}`,
+        excerpt: tip?.content ?? "",
         origin: {
-          chatId: slot.chat_id,
-          chatTitle: slot.title,
-          slotId,
-          depth: slot.depth,
-          parentSlotId: slot.parent_slot_id,
-          messages: stats!.slots
+          chatId: fork.chat_id,
+          chatTitle: fork.chat_title,
+          slotId: fork.tip_slot_id,
+          parentSlotId: fork.base_slot_id,
+          messages: stats!.slots,
+          ...forkOrigin(fork)
         },
         byteSize: stats!.bytes
       })
-      yield* sql`
-        WITH RECURSIVE sub(id) AS (SELECT ${slotId} UNION ALL SELECT s.id FROM slots s JOIN sub ON s.parent_slot_id = sub.id)
-        UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id IN sub AND deleted_at IS NULL`
-      yield* sql`UPDATE slots SET branch_deleted = 1 WHERE id = ${slotId}`
-      // The forks in it keep their tips and composers for Undo, including late saves.
-      yield* binForks(slot.chat_id, itemId)
-      // Forks whose tip was a message deleted on its own inside it come up out of it.
-      yield* relocateLeaf(slot.chat_id)
-      yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${slot.chat_id}`
+      yield* unseen("mark", itemId)
+      // The head of what it marked is a barrier, as a deleted branch's root always was: a message
+      // deleted on its own below it that's restored later doesn't bring the fork's slots back.
+      yield* sql`UPDATE slots SET branch_deleted = 1 WHERE bin_item_id = ${itemId}
+        AND NOT EXISTS (SELECT 1 FROM slots p WHERE p.id = slots.parent_slot_id AND p.bin_item_id = slots.bin_item_id)`
+      yield* sql`UPDATE forks SET deleted_at = ${Date.now()}, bin_item_id = ${itemId}, row_version = row_version + 1
+        WHERE id = ${forkId}`
+      yield* replaceCurrentFork(fork.chat_id)
+      yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${fork.chat_id}`
       return itemId
     })
 
-  /** Deletes one swipe. The only remaining version of a message takes the message with it. */
-  // A fork's copy standing in for a version (schema/forkVersions.ts) is deleted as that
-  // version: what goes is the swipe, with every fork's copy of it.
-  const deleteVersion = (userId: UserId, shownId: string) =>
+  /**
+   * Deletes one swipe in a fork. The only remaining version of a message in the fork takes the
+   * message with it. A fork's copy standing in for a version (schema/forkVersions.ts) is deleted
+   * as that version.
+   */
+  const deleteVersion = (userId: UserId, shownId: string, forkId?: string | null) =>
     Effect.gen(function* () {
       const [version] = yield* sql<{
         id: string
         slot_id: string
+        chat_id: string
         ordinal: number
         content: string
         bytes: number
       }>`
-        SELECT o.id, o.slot_id, o.ordinal, x.content,
+        SELECT o.id, o.slot_id, s.chat_id, o.ordinal, x.content,
           ${sql.literal(versionBytes("o"))} + (SELECT coalesce(sum(${sql.literal(versionBytes("c"))}), 0)
             FROM versions c WHERE c.source_version_id = o.id AND c.fork_id IS NOT NULL) AS bytes
         FROM versions x JOIN versions o ON o.id = ${sql.literal(originalSql("x"))}
@@ -313,12 +395,17 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           AND o.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
       if (!version) return yield* new NotFound({ entity: "version", id: shownId })
       const versionId = version.id
+      const fork = yield* deletingFork(version.chat_id, version.slot_id, forkId)
       const others = yield* sql<{ id: string; ordinal: number }>`
-        SELECT id, ordinal FROM versions WHERE slot_id = ${version.slot_id} AND deleted_at IS NULL AND id <> ${versionId}
-          AND fork_id IS NULL
-        ORDER BY ordinal`
-      if (others.length === 0) return yield* deleteMessage(userId, version.slot_id)
-      const slot = yield* ownedLiveSlot(userId, version.slot_id)
+        SELECT o.id, o.ordinal FROM versions o WHERE o.slot_id = ${version.slot_id} AND o.id <> ${versionId}
+          AND o.fork_id IS NULL AND NOT ${versionDeletedIn(sql, fork.id, "o")}
+        ORDER BY o.ordinal`
+      const [here] = yield* sql<{ gone: number }>`
+        SELECT (${versionDeletedIn(sql, fork.id, "o")} OR ${slotDeletedIn(sql, fork.id, "s")}) AS gone
+        FROM versions o JOIN slots s ON s.id = o.slot_id WHERE o.id = ${versionId}`
+      if (here!.gone) return yield* new NotFound({ entity: "version", id: shownId })
+      if (others.length === 0) return yield* deleteMessage(userId, version.slot_id, fork.id)
+      const slot = yield* ownedLiveSlot(userId, version.slot_id, fork.id)
       const itemId = yield* insertItem({
         userId,
         kind: "version",
@@ -331,16 +418,36 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           chatTitle: slot.title,
           slotId: slot.id,
           depth: slot.depth,
-          ordinal: version.ordinal
+          ordinal: version.ordinal,
+          ...forkOrigin(fork)
         },
         byteSize: version.bytes
       })
-      yield* sql`UPDATE versions SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${versionId}`
-      // Like ST, every fork that showed it shows the previous swipe, or the next one if this
-      // was the first. A swipe still goes from every fork at once until deletion is per fork
-      // (spec/FORK-INDEPENDENCE-DELTA.md §2.4), so each fork showing it gets a selection.
-      const previous = others.filter((o) => o.ordinal < version.ordinal).at(-1) ?? others[0]!
-      yield* reselectEverywhere(sql, slot.chat_id, version.slot_id, versionId, previous.id)
+      yield* writeOverride(
+        sql,
+        { id: fork.id, chatId: slot.chat_id },
+        { kind: "delete_version", targetId: versionId, slotId: slot.id, valueId: null, flag: 1, binItemId: itemId }
+      )
+      // Like ST, the fork shows the previous swipe if it showed this one, or the next one if
+      // this was the first.
+      const [selected] = yield* sql<{
+        id: string
+      }>`SELECT ${selectedIn(sql, fork.id, "s")} AS id FROM slots s WHERE s.id = ${slot.id}`
+      if (selected!.id === versionId) {
+        const previous = others.filter((o) => o.ordinal < version.ordinal).at(-1) ?? others[0]!
+        yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slot.id, previous.id)
+        yield* recordReduction(sql, slot.id, fork.id)
+      }
+      const shown = yield* forksShowing(sql, slot.chat_id, slot.id, versionId, fork.id, true)
+      if (shown.length === 0) {
+        yield* sql`UPDATE versions SET deleted_at = ${Date.now()}, bin_item_id = ${itemId} WHERE id = ${versionId}`
+        // Forks in the bin that selected it select a neighbour, as every fork did before.
+        const base = yield* sql<{ id: string; ordinal: number }>`
+          SELECT id, ordinal FROM versions WHERE slot_id = ${slot.id} AND id <> ${versionId} AND fork_id IS NULL
+            AND deleted_at IS NULL AND purged_at IS NULL ORDER BY ordinal`
+        const neighbour = base.filter((o) => o.ordinal < version.ordinal).at(-1) ?? base[0]
+        if (neighbour) yield* reselectEverywhere(sql, slot.chat_id, slot.id, versionId, neighbour.id)
+      }
       return itemId
     })
 
@@ -420,9 +527,96 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
 
   // --- Restoring and deleting for good -----------------------------------------------
 
+  /** SQL: bin items that name the fork a deletion was in (`origin_json.forkId`). */
+  const forkItems = `SELECT id FROM bin_items WHERE origin_json ->> '$.forkId' IS NOT NULL`
+
+  /**
+   * Restores what was deleted in a fork (`deleteMessage`, `deleteVersion`, `deleteFork`): the
+   * fork's own row says it's back, and a mark the writer put on the slot or version under a
+   * fork's item (it was shown by no live fork) is cleared, since a fork may show it again. The
+   * other forks never lost anything.
+   */
+  const restoreInFork = (item: BinRow, forkId: string) =>
+    Effect.gen(function* () {
+      const chatId = item.chat_id!
+      const [fork] = yield* sql<ForkRow>`SELECT * FROM forks WHERE id = ${forkId} AND purged_at IS NULL`
+      // Everything marked under the item, an ST import's copies of it included (§13).
+      yield* sql`UPDATE slots SET deleted_at = NULL, bin_item_id = NULL, branch_deleted = 0 WHERE bin_item_id = ${item.id}
+        AND purged_at IS NULL`
+      yield* sql`UPDATE versions SET deleted_at = NULL, bin_item_id = NULL WHERE bin_item_id = ${item.id}
+        AND purged_at IS NULL`
+      if (item.kind === "branch") {
+        yield* sql`UPDATE forks SET deleted_at = NULL, bin_item_id = NULL, row_version = row_version + 1
+          WHERE id = ${forkId}`
+        // Every message on its path is shown by it again, whoever's deletion marked it.
+        if (fork?.tip_slot_id) {
+          const onItsPath = sql`SELECT s.id FROM segments g JOIN slots s ON s.chain_id = g.chain_id
+            AND s.depth BETWEEN g.lo AND g.hi`
+          yield* sql`${pathSegments(sql, chatId, fork.tip_slot_id, null)}
+            UPDATE slots SET deleted_at = NULL, bin_item_id = NULL, branch_deleted = 0 WHERE id IN (${onItsPath}) AND deleted_at IS NOT NULL
+              AND purged_at IS NULL AND bin_item_id IN (${sql.literal(forkItems)})`
+          yield* sql`${pathSegments(sql, chatId, fork.tip_slot_id, null)}
+            UPDATE versions SET deleted_at = NULL, bin_item_id = NULL
+            WHERE slot_id IN (${onItsPath}) AND deleted_at IS NOT NULL AND purged_at IS NULL
+              AND bin_item_id IN (${sql.literal(forkItems)})`
+        }
+      } else if (item.kind === "message" || item.kind === "version") {
+        const slotId = JSON.parse(item.origin_json).slotId as string
+        const target = item.target_id
+        if (fork)
+          yield* writeOverride(
+            sql,
+            { id: fork.id, chatId },
+            {
+              kind: item.kind === "message" ? "delete_slot" : "delete_version",
+              targetId: target,
+              slotId,
+              valueId: null,
+              flag: 0
+            }
+          )
+        const table = item.kind === "message" ? "slots" : "versions"
+        yield* sql.unsafe(
+          `UPDATE ${table} SET deleted_at = NULL, bin_item_id = NULL WHERE id = ? AND deleted_at IS NOT NULL
+             AND purged_at IS NULL AND bin_item_id IN (${forkItems})`,
+          [target]
+        )
+        if (item.kind === "message" && fork && fork.deleted_at === null) {
+          // The fork's tip followed the delete up. If it's still where it went, it follows the
+          // message back down. If the fork went on, the message isn't on its path any more, and
+          // comes back as a fork of its own, from the fork, at its parent (§2.4).
+          const [slot] = yield* sql<{
+            parent_slot_id: string | null
+          }>`SELECT parent_slot_id FROM slots WHERE id = ${target}`
+          if (!(yield* onPath(sql, chatId, fork.tip_slot_id, target))) {
+            const tip = yield* latestBelow(chatId, target)
+            if (fork.tip_slot_id === (slot?.parent_slot_id ?? null)) {
+              yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fork.id}`
+            } else {
+              yield* insertFork(sql, {
+                chatId,
+                parent: fork,
+                baseSlotId: slot?.parent_slot_id ?? null,
+                tipSlotId: tip,
+                at: Date.now()
+              })
+            }
+          }
+        }
+      }
+    })
+
   const restore = (userId: UserId, itemId: string) =>
     Effect.gen(function* () {
       const item = yield* loadItem(userId, itemId)
+      const forkId = (JSON.parse(item.origin_json) as { forkId?: string }).forkId
+      if (forkId !== undefined && item.chat_id !== null) {
+        yield* discardDeletedQueue(item.chat_id)
+        yield* restoreInFork(item, forkId)
+        yield* sql`DELETE FROM bin_items WHERE id = ${itemId}`
+        yield* sql`UPDATE chats SET row_version = row_version + 1 WHERE id = ${item.chat_id}`
+        return toBinItem(item)
+      }
       // A deleted message took tips up to its parent (relocateLeaf): they come back down. A
       // restored branch brings back its own forks as they were, and a chat's last fork, kept
       // when its branch went, comes back down too.
@@ -450,6 +644,32 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       }
       for (const fork of tips) yield* followRestored(item.chat_id!, fork)
       return toBinItem(item)
+    })
+
+  /**
+   * `versionId` is going for good: every fork of the chat that selects it selects another swipe of
+   * the message that it still shows, or, with none left, deletes the message in its own view.
+   */
+  const dropSelections = (chatId: string, slotId: string, versionId: string) =>
+    Effect.gen(function* () {
+      const [gone] = yield* sql<{ ordinal: number }>`SELECT ordinal FROM versions WHERE id = ${versionId}`
+      const forks = yield* sql<{ id: string }>`
+        SELECT f.id FROM forks f JOIN slots s ON s.id = ${slotId}
+        WHERE f.chat_id = ${chatId} AND ${selectedIn(sql, sql.literal("f.id"), "s")} = ${versionId}`
+      for (const fork of forks) {
+        const left = yield* sql<{ id: string; ordinal: number }>`
+          SELECT o.id, o.ordinal FROM versions o WHERE o.slot_id = ${slotId} AND o.id <> ${versionId}
+            AND o.fork_id IS NULL AND NOT ${versionDeletedIn(sql, fork.id, "o")} ORDER BY o.ordinal`
+        const next = left.filter((o) => o.ordinal < gone!.ordinal).at(-1) ?? left[0]
+        if (next) yield* writeSelect(sql, { id: fork.id, chatId }, slotId, next.id)
+        else
+          yield* writeOverride(
+            sql,
+            { id: fork.id, chatId },
+            { kind: "delete_slot", targetId: slotId, slotId, valueId: null, flag: 1 }
+          )
+      }
+      yield* relocateLeaf(chatId)
     })
 
   /**
@@ -485,6 +705,26 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           )
         })
 
+      // What was deleted in a fork is erased everywhere (owner, 2026-10-27, Q3 (b)): the client
+      // warned which forks show it first (`BinItemForks`). The message or swipe is marked under
+      // the item, so the purge below empties it; forks that showed a swipe select another, or
+      // delete the message in their own view when it was its last.
+      const forkOwned = (kind: "message" | "version") =>
+        sql.unsafe<{ id: string; chat_id: string; target_id: string; slot_id: string }>(
+          `SELECT id, chat_id, target_id, origin_json ->> '$.slotId' AS slot_id FROM bin_items
+           WHERE kind = '${kind}' AND origin_json ->> '$.forkId' IS NOT NULL AND chat_id IS NOT NULL AND (${where})`,
+          params
+        )
+      const erasedMessages = yield* forkOwned("message")
+      for (const item of erasedMessages)
+        yield* sql`UPDATE slots SET deleted_at = coalesce(deleted_at, ${now}), bin_item_id = ${item.id}
+          WHERE id = ${item.target_id} AND purged_at IS NULL`
+      for (const item of yield* forkOwned("version")) {
+        yield* sql`UPDATE versions SET deleted_at = coalesce(deleted_at, ${now}), bin_item_id = ${item.id}
+          WHERE id = ${item.target_id} AND purged_at IS NULL`
+        yield* dropSelections(item.chat_id, item.slot_id, item.target_id)
+      }
+
       // A chat goes with everything in it, its other bin items included. A connection
       // using one of its overrides as its preset loses that preset.
       yield* run(`UPDATE connections SET preset_override_ref_id = NULL
@@ -496,6 +736,11 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       // conversation's structure and any summaries over it remain valid. A branch's forks
       // keep their rows, losing their names and tips.
       yield* run(`UPDATE slots SET purged_at = ? WHERE bin_item_id IN (${items("'message', 'branch'")})`, [now])
+      // The head of a purged fork's slots stays a barrier, as a purged branch's root always did.
+      yield* run(
+        `UPDATE slots SET branch_deleted = 1 WHERE bin_item_id IN (${items("'branch'")})
+           AND NOT EXISTS (SELECT 1 FROM slots p WHERE p.id = slots.parent_slot_id AND p.bin_item_id = slots.bin_item_id)`
+      )
       yield* run(
         `UPDATE forks SET purged_at = ?, name = NULL, tip_slot_id = NULL, bin_item_id = NULL, row_version = row_version + 1
          WHERE bin_item_id IN (${items("'branch'")})`,
@@ -537,6 +782,11 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       )
 
       yield* run(`DELETE FROM bin_items WHERE ${where}`)
+      // A message erased everywhere has no other deletion left to restore, and a fork whose tip it
+      // was goes up out of it.
+      for (const item of erasedMessages)
+        yield* sql`DELETE FROM bin_items WHERE kind = 'message' AND target_id = ${item.target_id}`
+      for (const chatId of new Set(erasedMessages.map((item) => item.chat_id))) yield* relocateLeaf(chatId)
     })
 
   const purge = (userId: UserId, itemId: string) =>
@@ -582,6 +832,25 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
                 ORDER BY deleted_at, id LIMIT 1`
               if (!oldest) return yield* new NoRoom()
               after = oldest
+              // Making room never erases what another fork still shows: its deletion in its own
+              // fork becomes permanent, and the item goes.
+              const origin = JSON.parse(oldest.origin_json) as { forkId?: string; slotId?: string }
+              if (
+                origin.forkId !== undefined &&
+                (oldest.kind === "message" || oldest.kind === "version") &&
+                oldest.chat_id !== null &&
+                (yield* forksShowing(
+                  sql,
+                  oldest.chat_id,
+                  origin.slotId!,
+                  oldest.kind === "version" ? oldest.target_id : null,
+                  origin.forkId,
+                  false
+                )).length > 0
+              ) {
+                yield* sql`DELETE FROM bin_items WHERE id = ${oldest.id}`
+                continue
+              }
               yield* sql
                 .withTransaction(purgeWhere("id = ?", [oldest.id]))
                 .pipe(
@@ -688,7 +957,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
     drafts,
     deleteChat,
     deleteMessage,
-    deleteBranch,
+    deleteFork,
     deleteVersion,
     deleteEntity,
     deleteConnection,

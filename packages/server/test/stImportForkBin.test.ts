@@ -70,6 +70,19 @@ const scenario = (dataDir: string, remove: (api: Api, child: PathWindow) => Effe
 const modelText = `SELECT v.slot_id, v.content, v.purged_at FROM versions v JOIN slots s ON s.id = v.slot_id
   WHERE (s.bin_item_id = ?1 OR v.bin_item_id = ?1) AND v.writer = 'model'`
 
+/**
+ * The child file's line goes as a fork: an import doesn't make forks yet (unit 9 of
+ * spec/FORK-INDEPENDENCE-DELTA.md), so opening the line through its first own message makes one, and
+ * deleting it deletes the messages of it that no other fork shows.
+ */
+const deleteChildFork = (api: Api, child: PathWindow) =>
+  Effect.gen(function* () {
+    const chat = (yield* api.ListChats({ limit: 100, before: null }))[0]!
+    const own = child.entries[5]!
+    const opened = yield* api.SwitchBranch({ chatId: chat.id, slotId: own.slotId, index: own.branchIndex })
+    return yield* api.DeleteFork({ forkId: opened.fork.id })
+  })
+
 const deleteForGood = (name: string, remove: Parameters<typeof scenario>[1]) => {
   const config = testConfig()
   layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })(name, (it) => {
@@ -108,9 +121,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
   (it) => {
     it.effect("restoring it brings back the original and the import's copy", () =>
       Effect.gen(function* () {
-        const { api, item, record, childPath, rows } = yield* scenario(config.dataDir, (api, child) =>
-          api.DeleteBranch({ slotId: child.entries[6]!.slotId })
-        )
+        const { api, item, record, childPath, rows } = yield* scenario(config.dataDir, deleteChildFork)
         const [roots] = yield* rows(`SELECT id FROM slots WHERE bin_item_id = ? AND branch_deleted = 1`)
         assert.strictEqual(roots!.length, 2)
         yield* api.RestoreBinItem({ itemId: item.id })

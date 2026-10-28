@@ -801,6 +801,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
           node.hidden = !node.hidden
           await call(
             fixtureSql(config.dataDir, [
+              { sql: "DROP TRIGGER IF EXISTS slots_hide_frozen" },
               {
                 sql: "UPDATE slots SET context_excluded=?,row_version=row_version+1 WHERE id=?",
                 params: [Number(node.hidden), node.id]

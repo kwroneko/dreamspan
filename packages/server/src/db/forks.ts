@@ -3,7 +3,7 @@
 // so the checks here cost the path's branch points, not its length.
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
-import { shownInSql } from "./forkState.ts"
+import { shownInSql, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
 
@@ -66,4 +66,58 @@ export const shownElsewhere = (
       ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
     for (const fork of candidates) if (yield* onPath(sql, chatId, fork.tip_slot_id, slotId)) return true
     return false
+  })
+
+/**
+ * The forks of the chat, other than `except`, that show `slotId` (and `versionId`, one of its
+ * message's own, when given): its path holds the slot and it isn't deleted there, as the
+ * fork's own view has it. Forks in the bin count unless `liveOnly`, since a restore brings
+ * them back; purged ones have no path. Most recently current first.
+ */
+export const forksShowing = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  slotId: string,
+  versionId: string | null,
+  except: string | null,
+  liveOnly: boolean
+) =>
+  Effect.gen(function* () {
+    const candidates = yield* sql<ForkRow>`
+      SELECT f.* FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
+      WHERE f.chat_id = ${chatId} AND f.id IS NOT ${except} AND t.depth >= x.depth
+        AND (${liveOnly ? 1 : 0} = 0 OR f.deleted_at IS NULL)
+        AND NOT ${slotDeletedIn(sql, sql.literal("f.id"), "x")}
+        AND (${versionId} IS NULL OR NOT EXISTS (SELECT 1 FROM versions o WHERE o.id = ${versionId}
+          AND ${versionDeletedIn(sql, sql.literal("f.id"), "o")}))
+      ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
+    const shown: Array<ForkRow> = []
+    for (const fork of candidates) if (yield* onPath(sql, chatId, fork.tip_slot_id, slotId)) shown.push(fork)
+    return shown
+  })
+
+/** The path to `tip` as chain segments `(chain, lo, hi)`, newest first. */
+const segmentsOf = (sql: SqlClient.SqlClient, chatId: string, tip: string) =>
+  sql<{ chain_id: string; lo: number; hi: number }>`
+    ${pathSegments(sql, chatId, tip, null)} SELECT chain_id, lo, hi FROM segments`
+
+/**
+ * The depth of the deepest slot that the paths to `tip` and to each of `others` share (-1 when
+ * none), so the slots below it on `tip`'s path are on no other path. Costs the branch points of
+ * each path, not its length.
+ */
+export const sharedDepth = (sql: SqlClient.SqlClient, chatId: string, tip: string, others: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const mine = yield* segmentsOf(sql, chatId, tip)
+    let deepest = -1
+    for (const other of others) {
+      for (const segment of yield* segmentsOf(sql, chatId, other)) {
+        for (const own of mine) {
+          if (own.chain_id !== segment.chain_id) continue
+          const hi = Math.min(own.hi, segment.hi)
+          if (hi >= Math.max(own.lo, segment.lo)) deepest = Math.max(deepest, hi)
+        }
+      }
+    }
+    return deepest
   })

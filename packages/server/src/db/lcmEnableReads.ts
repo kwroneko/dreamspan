@@ -1,11 +1,11 @@
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 // What enabling LCM on a chat takes (spec/LCM.md §2.7, §2.11), measured in one read: the
 // imported summary that could stand in for its hidden run, and the work the planner would do
 // from the first message or after that summary. The counts are priced on the main thread, where
 // the cost formulas are.
 import { foldState, noteSwitches } from "@rp/shared/state.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { atLeaf, shownIn, viewAt } from "./forkState.ts"
+import { atLeaf, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { BackfillCounts } from "@rp/shared/lcm.ts"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
@@ -52,8 +52,8 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           WHERE s.depth > ${after}
       ) SELECT count(*) AS n, coalesce(sum((length(v.content) + 3) / 4 + 3), 0) AS tokens
         FROM path p JOIN slots s ON s.id = p.id JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
-        WHERE s.deleted_at IS NULL AND s.purged_at IS NULL AND (${sql.literal(contextExcluded())} = 0 OR s.depth <= ${shownThrough})
-          AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed')
+        WHERE NOT ${slotDeletedIn(sql, fork, "s")} AND (${contextExcludedIn(sql, fork)} = 0 OR s.depth <= ${shownThrough})
+          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed')
           AND length(v.content) > 0`
     ).pipe(Effect.map(([row]) => row ?? { n: 0, tokens: 0 }))
 

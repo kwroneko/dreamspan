@@ -41,6 +41,8 @@ it.live("hiding makes covering L1 and L2 summaries stale, unhiding makes them fr
     // The same operation under the staged-unhide overlay must really hide the slot
     // even though its raw context_excluded flag was already 1.
     yield* fixtureSql(config.dataDir, [
+      // A message hidden before forks, which the database freezes now (a fork hides with an override).
+      { sql: "DROP TRIGGER slots_hide_frozen" },
       { sql: "UPDATE slots SET context_excluded=1 WHERE id=?", params: [entries[1]!.slotId] },
       {
         sql: "INSERT INTO lcm_enable_runs(id,chat_id,payload_json,phase,published) VALUES('review-overlay',?,'{}','done',1)",

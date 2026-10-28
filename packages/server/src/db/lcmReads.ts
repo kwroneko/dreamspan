@@ -1,6 +1,6 @@
-import { contextExcluded } from "./lcmVisibility.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 import { Summary } from "@rp/shared/lcm.ts"
-import { shownIn, viewAt } from "./forkState.ts"
+import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
@@ -52,8 +52,8 @@ export const readSummary = (
         effective: string | null
         current_amends: number
       }>`
-        SELECT i.*, CASE WHEN s.deleted_at IS NULL AND s.purged_at IS NULL AND ${sql.literal(contextExcluded())} = 0
-          AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
+        SELECT i.*, CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
+          AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating', 'failed') AND length(v.content) > 0
           THEN v.id ELSE NULL END AS effective, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS current_amends
         FROM summary_inputs i JOIN slots s ON s.id = i.slot_id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
         WHERE i.summary_id = ${summaryId} ORDER BY i.ordinal`

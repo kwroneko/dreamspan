@@ -1,5 +1,5 @@
-import { recordHistoryReduction } from "./historyChanges.ts"
-import { contextExcluded } from "./lcmVisibility.ts"
+import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
+import { contextExcludedIn } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -243,23 +243,25 @@ export const makeWriteHandlers = (bin: Bin) =>
           transaction("SelectVersion")
         ),
 
-      SetSlotHidden: ({ userId, slotId, hidden }) =>
+      // Hides a message from the model, or shows it again, in a fork: a `hide` row of the fork's
+      // own (spec/FORK-INDEPENDENCE-DELTA.md §2.4), so another fork's context and stepped
+      // history are untouched. A staged LCM unhide's overlay (lcmVisibility.ts) counts as shown here.
+      SetSlotHidden: ({ userId, slotId, forkId, hidden }) =>
         Effect.gen(function* () {
           yield* ownedSlot(userId, slotId)
-          // What the context reads: a staged LCM unhide shows a slot whose flag is still set.
-          const [row] = yield* sql<{ raw: number; effective: number }>`
-            SELECT s.context_excluded AS raw, ${sql.literal(contextExcluded("s"))} AS effective
-            FROM slots s WHERE s.id = ${slotId}`
+          const named = yield* forkOf(slotId, forkId)
+          if (named === null) return yield* new NotFound({ entity: "fork", id: forkId ?? slotId })
+          const fork = yield* ownedForkById(userId, named)
+          const [row] = yield* sql<{ effective: number }>`
+            SELECT ${contextExcludedIn(sql, fork.id, "s")} AS effective FROM slots s WHERE s.id = ${slotId}`
           if ((row!.effective === 1) === hidden) return { changed: false }
-          const flag = hidden ? 1 : 0
-          // Setting the flag ends a staged unhide's overlay (lcm_enable_explicit_visibility),
-          // and a hide records a history reduction (history_reduced_slot) for stepped history.
-          yield* sql`UPDATE slots SET context_excluded = ${flag}, hidden_by_user = ${flag},
-            row_version = row_version + 1 WHERE id = ${slotId}`
-          // Hidden under the overlay, the flag was set already, so the trigger saw no change.
-          if (hidden && row!.raw === 1)
-            yield* sql`INSERT INTO history_changes SELECT id, chat_id, depth, 1 FROM slots WHERE id = ${slotId}
-              ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1`
+          yield* writeOverride(
+            sql,
+            { id: fork.id, chatId: fork.chat_id },
+            { kind: "hide", targetId: slotId, slotId, valueId: null, flag: hidden ? 1 : 0 }
+          )
+          // A hide is a history reduction in the fork (stepped history, historyChanges.ts).
+          if (hidden) yield* recordReduction(sql, slotId, fork.id)
           return { changed: true }
         }).pipe(transaction("SetSlotHidden")),
 

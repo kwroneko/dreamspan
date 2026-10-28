@@ -342,11 +342,12 @@ describe("paths by chain segment", () => {
       ).map((row) => row.detail)
       db.close()
       // Only the segments, the events found and a fork's lineage (for an event attached to
-      // a version: its selection there, and the copy standing in for it) are scanned, never a
+      // a version: its selection there, and the copy standing in for it; and whether its message
+      // is deleted there) are scanned, never a
       // table; the lineage's overrides are found by index.
       assert.deepStrictEqual(
         plan.filter((step) => step.startsWith("SCAN")),
-        ["SCAN g", "SCAN g", "SCAN ev", "SCAN el VIRTUAL TABLE INDEX 1:", "SCAN el VIRTUAL TABLE INDEX 1:"],
+        ["SCAN g", "SCAN g", "SCAN ev", ...Array<string>(3).fill("SCAN el VIRTUAL TABLE INDEX 1:")],
         plan.join("\n")
       )
       assert.includeMembers(

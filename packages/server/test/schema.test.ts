@@ -356,6 +356,7 @@ describe("edits are non-destructive (invariant 1)", () => {
       run(`UPDATE slots SET bin_item_id = ? WHERE id = ?`, item, s.slotId)
       expect(purge).toThrow(/immutable once generated/)
     }
+    run(`DROP TRIGGER IF EXISTS slots_deletion_per_fork`)
     run(
       `UPDATE slots SET deleted_at = 1, bin_item_id = ? WHERE id = ?`,
       binItem(owner, "message", s.slotId, c.chatId),

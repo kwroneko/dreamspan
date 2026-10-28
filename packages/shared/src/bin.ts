@@ -5,6 +5,22 @@ import { DraftTargetKind } from "./drafts.ts"
 /** The deleted-item set changed since the user confirmed it. */
 export class BinChanged extends Schema.TaggedError<BinChanged>()("BinChanged", {}) {}
 
+/** A chat keeps at least one fork: deleting its last live one would leave nothing to open. */
+export class CannotDeleteLastFork extends Schema.TaggedError<CannotDeleteLastFork>()("CannotDeleteLastFork", {}) {}
+
+/**
+ * A fork that shows what a bin item holds, which deleting the item for good erases in it too
+ * (owner, 2026-10-27): the client names these in its warning. `deleted`: the fork is in the bin.
+ */
+export class BinForkShown extends Schema.Class<BinForkShown>("BinForkShown")({
+  itemId: Schema.String,
+  forkId: Schema.String,
+  chatTitle: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  tipExcerpt: Schema.String,
+  deleted: Schema.Boolean
+}) {}
+
 const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */

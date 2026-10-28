@@ -159,7 +159,8 @@ describe("independent shell reads", () => {
       yield* api.SetChatPin({ chatId, leaf: continued.entry.slotId, pinned: false })
       assert.isFalse((yield* api.GetShellLibrary()).forks.some((f) => f.pinned))
       yield* api.SetChatPin({ chatId, leaf: continued.entry.slotId, pinned: true })
-      yield* api.DeleteBranch({ slotId: second.entry.slotId })
+      const secondFork = (yield* api.ListForks({ chatId })).find((f) => f.tipSlotId === second.entry.slotId)!
+      yield* api.DeleteFork({ forkId: secondFork.id })
       assert.strictEqual((yield* api.GetShellLibrary()).forks.find((f) => f.pinned)!.leaf, continued.entry.slotId)
       yield* api.DeleteMessage({ slotId: continued.entry.slotId })
       const afterDelete = (yield* api.GetShellLibrary()).forks.find((f) => f.current)!

@@ -21,6 +21,9 @@ export const makeBinHandlers = Effect.gen(function* () {
     ListBin: ({ limit, before }) =>
       Effect.flatMap(userId, (id) => reader.ListBin({ userId: id, limit, before })).pipe(internal("ListBin")),
 
+    BinItemForks: ({ itemIds }) =>
+      Effect.flatMap(userId, (id) => reader.BinItemForks({ userId: id, itemIds })).pipe(internal("BinItemForks")),
+
     // Uninterruptible, so a caller going away can't skip telling the chat's tabs.
     RestoreBinItem: ({ itemId }) =>
       Effect.gen(function* () {

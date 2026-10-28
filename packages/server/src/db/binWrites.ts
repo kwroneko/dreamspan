@@ -20,9 +20,11 @@ export const makeBinWriteHandlers = (bin: Bin) =>
 
     const handlers = {
       DeleteChat: ({ userId, chatId }) => deleting("DeleteChat", userId, bin.deleteChat(userId, chatId)),
-      DeleteMessage: ({ userId, slotId }) => deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId)),
-      DeleteBranch: ({ userId, slotId }) => deleting("DeleteBranch", userId, bin.deleteBranch(userId, slotId)),
-      DeleteVersion: ({ userId, versionId }) => deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId)),
+      DeleteMessage: ({ userId, slotId, forkId }) =>
+        deleting("DeleteMessage", userId, bin.deleteMessage(userId, slotId, forkId)),
+      DeleteFork: ({ userId, forkId }) => deleting("DeleteFork", userId, bin.deleteFork(userId, forkId)),
+      DeleteVersion: ({ userId, versionId, forkId }) =>
+        deleting("DeleteVersion", userId, bin.deleteVersion(userId, versionId, forkId)),
       DeleteEntity: ({ userId, entityId }) => deleting("DeleteEntity", userId, bin.deleteEntity(userId, entityId)),
       DeleteConnection: ({ userId, connectionId }) =>
         deleting("DeleteConnection", userId, bin.deleteConnection(userId, connectionId)),

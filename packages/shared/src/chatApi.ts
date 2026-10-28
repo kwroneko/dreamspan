@@ -3,7 +3,7 @@
 // message names the tip it was written under (LeafMoved otherwise).
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { BinItem } from "./bin.ts"
+import { BinItem, CannotDeleteLastFork } from "./bin.ts"
 import {
   Chat,
   ChatId,
@@ -442,7 +442,7 @@ export class ChatApi extends RpcGroup.make(
    * stays in the chat, marked, and isn't sent. Like any edit it never starts a generation.
    */
   Rpc.make("SetMessageHidden", {
-    payload: { slotId: SlotId, hidden: Schema.Boolean },
+    payload: { slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)), hidden: Schema.Boolean },
     success: PathEntry,
     error: Schema.Union([...Errors])
   }),
@@ -511,9 +511,27 @@ export class ChatApi extends RpcGroup.make(
   // --- Deleting goes to the recycle bin (ARCHITECTURE §3.11); generations under what was
   // deleted are stopped.
   Rpc.make("DeleteChat", { payload: { chatId: ChatId }, success: BinItem, error: Schema.Union([...Errors]) }),
-  Rpc.make("DeleteMessage", { payload: { slotId: SlotId }, success: BinItem, error: Schema.Union([...Errors]) }),
-  Rpc.make("DeleteBranch", { payload: { slotId: SlotId }, success: BinItem, error: Schema.Union([...Errors]) }),
-  Rpc.make("DeleteVersion", { payload: { versionId: VersionId }, success: BinItem, error: Schema.Union([...Errors]) }),
+  /** Deletes a message in a fork (absent or null: the fork through it); the other forks that show it keep it. */
+  Rpc.make("DeleteMessage", {
+    payload: { slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    success: BinItem,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Deletes one fork and nothing else (owner, 2026-10-27): forks made from it keep their shared
+   * history. A chat's last live fork isn't deleted.
+   */
+  Rpc.make("DeleteFork", {
+    payload: { forkId: ForkId },
+    success: BinItem,
+    error: Schema.Union([...Errors, CannotDeleteLastFork])
+  }),
+  /** Deletes a swipe in a fork (absent or null: the fork through its message); the other forks keep it. */
+  Rpc.make("DeleteVersion", {
+    payload: { versionId: VersionId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
+    success: BinItem,
+    error: Schema.Union([...Errors])
+  }),
   /**
    * Where switching to the branch at `index` (0: the oldest) among the alternates at
    * `slotId` goes (DESIGN §3.2): the fork through that sibling that was current most

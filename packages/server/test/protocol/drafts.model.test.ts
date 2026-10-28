@@ -35,6 +35,7 @@ import { DraftClock } from "../../src/db/Database.ts"
 import { databaseFile } from "../../src/db/connection.ts"
 import { client, serverLayer, serverPort, testConfig } from "../support/config.ts"
 import { type Completed, FakeIndexedDb } from "./fakeIndexedDb.ts"
+import { deleteBranchBelow } from "../support/forkIds.ts"
 
 const idb = new FakeIndexedDb()
 globalThis.indexedDB = idb as unknown as IDBFactory
@@ -1672,7 +1673,7 @@ const purgeQueue = async (w: World, branch: boolean) => {
     w.api.Generate({ chatId: chat.id, parentSlotId: parent.entry.slotId, branch: false, direction: text })
   )
   const item = await Effect.runPromise(
-    branch ? w.api.DeleteBranch({ slotId: parent.entry.slotId }) : w.api.DeleteChat({ chatId: chat.id })
+    branch ? deleteBranchBelow(w.api, chat.id, null) : w.api.DeleteChat({ chatId: chat.id })
   )
   await Effect.runPromise(w.api.PurgeBinItem({ itemId: item.id }))
   w.check(true)

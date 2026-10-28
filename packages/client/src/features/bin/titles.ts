@@ -12,6 +12,16 @@ export const binTitle = (item: BinItem) => {
     case "version":
       return `Version of a message in “${chat}”`
     case "branch": {
+      // A fork deleted on its own (owner, 2026-10-27): named by its name, else by what only it had.
+      if (typeof item.origin.forkId === "string") {
+        const name =
+          typeof item.origin.forkName === "string" && item.origin.forkName !== "" ? item.origin.forkName : null
+        const only = item.origin.messages
+        if (name !== null) return `Fork “${name}” in “${chat}”`
+        return typeof only === "number" && only > 0
+          ? `Fork of ${only} message${only === 1 ? "" : "s"} in “${chat}”`
+          : `Fork in “${chat}”`
+      }
       const count = item.origin.messages
       return typeof count === "number"
         ? `Branch of ${count} message${count === 1 ? "" : "s"} in “${chat}”`

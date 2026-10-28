@@ -1,4 +1,4 @@
-// The baseline against the 56-step chain it replaced, and the migrator's refusal of a database
+// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5, edited in as the baseline allows), and the migrator's refusal of a database
 // made before it.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"

@@ -91,9 +91,9 @@ it.live(
       yield* writer.RestoreBinItem({ userId: user.id, itemId: bin.id })
       yield* fresh(true)
       assert.isFalse((yield* api.GetSummary({ summaryId: absent.id })).fresh)
-      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE slots SET context_excluded=1 WHERE id=?", params: [a.slotId] }])
+      yield* writer.SetSlotHidden({ userId: user.id, slotId: a.slotId, hidden: true })
       yield* fresh(false)
-      yield* fixtureSql(config.dataDir, [{ sql: "UPDATE slots SET context_excluded=0 WHERE id=?", params: [a.slotId] }])
+      yield* writer.SetSlotHidden({ userId: user.id, slotId: a.slotId, hidden: false })
       yield* fresh(true)
       const key = { targetKind: "summary_edit" as const, targetId: l1.id, field: "" }
       const draft = yield* writer.SaveDraft({

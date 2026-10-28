@@ -51,7 +51,7 @@ import {
   PathWindow
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { BinChanged, BinItem, RecoveredText } from "@rp/shared/bin.ts"
+import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
@@ -760,24 +760,30 @@ export class WriteOps extends RpcGroup.make(
     success: BinItem,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Deletes one message; its replies stay. */
+  /**
+   * Deletes one message in a fork (`forkId`, else the fork through it): the other forks that
+   * show it keep it. Its replies stay.
+   */
   Rpc.make("DeleteMessage", {
-    payload: { userId: UserId, slotId: SlotId },
+    payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: BinItem,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /** Deletes a message and everything after it on every branch below it. */
-  Rpc.make("DeleteBranch", {
-    payload: { userId: UserId, slotId: SlotId },
+  /**
+   * Deletes one fork (owner, 2026-10-27): only that fork goes, and forks made from it keep
+   * their shared history. A chat's last live fork can't be deleted (`CannotDeleteLastFork`).
+   */
+  Rpc.make("DeleteFork", {
+    payload: { userId: UserId, forkId: ForkId },
     success: BinItem,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, CannotDeleteLastFork, StorageError])
   }),
   /**
    * Deletes one swipe: the normal delete (owner, 2026-10-10). If it was showing, the
    * previous swipe shows. A message's only remaining version takes the message with it.
    */
   Rpc.make("DeleteVersion", {
-    payload: { userId: UserId, versionId: VersionId },
+    payload: { userId: UserId, versionId: VersionId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: BinItem,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1169,7 +1175,12 @@ export class WriteOps extends RpcGroup.make(
    * visibility when they're checked (lcmReads.ts). `changed`: whether it wasn't so already.
    */
   Rpc.make("SetSlotHidden", {
-    payload: { userId: UserId, slotId: SlotId, hidden: Schema.Boolean },
+    payload: {
+      userId: UserId,
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      hidden: Schema.Boolean
+    },
     success: Schema.Struct({ changed: Schema.Boolean }),
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -2045,6 +2056,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, key: DraftKey, seq: Schema.Int },
     success: Schema.Struct({ seq: Schema.Int, content: Schema.String }),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The forks that show what the user's bin items hold (`BinForkShown`), for the warning before deleting for good. */
+  Rpc.make("BinItemForks", {
+    payload: { userId: UserId, itemIds: Schema.Array(Schema.String) },
+    success: Schema.Array(BinForkShown),
+    error: StorageError
   }),
   /** The bin's deleted items, newest first. `before` pages back from the last item seen. */
   Rpc.make("ListBin", {

@@ -5,6 +5,12 @@
 // Generated from the 56-step chain it replaces (tables, indexes, triggers, views); the
 // chain's only rows were its ledger, so there is nothing to seed. Full-text tables create
 // their shadow tables themselves.
+const raise = (message: string) => `SELECT RAISE(ABORT, '${message.replaceAll("'", "''")}')`
+
+/** An item made by a deletion in a fork names it: `origin_json.forkId`. */
+const namesFork = (item: string) =>
+  `EXISTS (SELECT 1 FROM bin_items b WHERE b.id = ${item} AND b.origin_json ->> '$.forkId' IS NOT NULL)`
+
 export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -821,19 +827,22 @@ export const baseline: ReadonlyArray<string> = [
       BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`,
   `CREATE INDEX rollouts_history ON rollouts(chat_id, history_depth DESC, id DESC) WHERE history_depth IS NOT NULL`,
   `CREATE TABLE history_changes (
-    slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    -- The fork the reduction was made in; '' for every fork (a message nobody shows).
+    fork_id TEXT NOT NULL DEFAULT '',
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     depth INTEGER NOT NULL,
-    revision INTEGER NOT NULL
+    revision INTEGER NOT NULL,
+    -- The chat's state_seq of the newest reduction, for the forks made from the fork.
+    seq INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (slot_id, fork_id)
   ) STRICT`,
   `CREATE INDEX history_changes_depth ON history_changes(chat_id, depth)`,
-  `CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at, context_excluded ON slots
-    WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
-      OR (OLD.context_excluded = 0 AND NEW.context_excluded = 1)
-
+  `CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at ON slots
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
     BEGIN
-      INSERT INTO history_changes VALUES (NEW.id, NEW.chat_id, NEW.depth, 1)
-      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
+      INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) VALUES (NEW.id, '', NEW.chat_id, NEW.depth, 1)
+      ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1;
     END`,
   `CREATE TABLE summaries (
     id TEXT PRIMARY KEY,
@@ -1083,7 +1092,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE lcm_enable_runs (
     id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0,
-    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0
+    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0, fork_id TEXT
   ) STRICT`,
   `CREATE UNIQUE INDEX lcm_enable_one_staging ON lcm_enable_runs(chat_id) WHERE published = 0 AND phase <> 'cancelled'`,
   `CREATE TABLE lcm_enable_slots (
@@ -1334,11 +1343,11 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions
     WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
     BEGIN
-      INSERT INTO history_changes
-        SELECT id, chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id
+      INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision)
+        SELECT id, '', chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id
           OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select'
             AND o.value_id = NEW.id))
-      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
+      ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1;
     END`,
   `CREATE INDEX versions_fork ON versions(fork_id) WHERE fork_id IS NOT NULL`,
   `CREATE TRIGGER versions_fork_copy BEFORE INSERT ON versions WHEN NEW.fork_id IS NOT NULL
@@ -1395,5 +1404,23 @@ export const baseline: ReadonlyArray<string> = [
   OR (NEW.forked_from_revision_id IS NOT NULL
     AND (SELECT entity_id FROM entity_revisions WHERE id = NEW.forked_from_revision_id) IS NOT NEW.forked_from_entity_id)
   OR (NEW.forked_in_chat_id IS NOT NULL
-    AND (SELECT owner_user_id FROM chats WHERE id = NEW.forked_in_chat_id) IS NOT NEW.owner_user_id) BEGIN SELECT RAISE(ABORT, 'a fork''s parent is another entity of its owner and kind, its revision the parent''s, its chat its owner''s'); END`
+    AND (SELECT owner_user_id FROM chats WHERE id = NEW.forked_in_chat_id) IS NOT NEW.owner_user_id) BEGIN SELECT RAISE(ABORT, 'a fork''s parent is another entity of its owner and kind, its revision the parent''s, its chat its owner''s'); END`,
+  `CREATE TRIGGER slots_deletion_per_fork BEFORE UPDATE OF deleted_at ON slots
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT ${namesFork("NEW.bin_item_id")}
+    BEGIN ${raise("a slot is deleted in a fork with an override, or marked under the bin item of a deletion in a fork")}; END`,
+  `CREATE TRIGGER versions_deletion_per_fork BEFORE UPDATE OF deleted_at ON versions
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT ${namesFork("NEW.bin_item_id")}
+    BEGIN ${raise("a version is deleted in a fork with an override, or marked under the bin item of a deletion in a fork")}; END`,
+  `CREATE TRIGGER slots_hide_frozen BEFORE UPDATE OF context_excluded, hidden_by_user ON slots
+    WHEN NEW.context_excluded IS NOT OLD.context_excluded OR NEW.hidden_by_user IS NOT OLD.hidden_by_user
+    BEGIN ${raise("a slot keeps the visibility it was inserted with; a fork hides with an override")}; END`,
+
+  `CREATE TRIGGER fork_overrides_slot_kinds BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('delete_slot', 'hide')
+    AND (NEW.flag IS NULL OR NEW.slot_id IS NOT NEW.target_id
+      OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id))
+    BEGIN ${raise("a deletion or hide has a flag and names its slot")}; END`,
+  `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
+    AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
+      WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))
+    BEGIN ${raise("a deleted swipe is one of its message's own versions")}; END`
 ]

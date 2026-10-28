@@ -7,6 +7,7 @@ import { Reader } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig, typeInto } from "./support/config.ts"
 import { stFolder } from "./support/stFolder.ts"
 import { importStFolder, sendStFile } from "./support/stUpload.ts"
+import { deleteBranchBelow } from "./support/forkIds.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 const read = (api: Api, chatId: ChatId) =>
@@ -110,7 +111,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           const { api } = yield* importStFolder(folder(tag, 3))
           const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === tag)!
           const original = yield* read(api, chat.id)
-          const item = yield* api.DeleteBranch({ slotId: original.entries[position]!.slotId })
+          const item = yield* deleteBranchBelow(api, chat.id, position === 0 ? null : original.entries[0]!.slotId)
           if (purge) yield* api.PurgeBinItem({ itemId: item.id })
           const leaf = (yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId
           const draft = yield* typeInto(api, chat.id, null, "Outside deleted subtree")
@@ -160,7 +161,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         assert.strictEqual((yield* sendStFile(importId, path, files.get(path)!, { last: "0" })).outcome, "continue")
         const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title.startsWith(tag))!
         const original = yield* read(api, chat.id)
-        if (branch) yield* api.DeleteBranch({ slotId: original.entries[0]!.slotId })
+        if (branch) yield* deleteBranchBelow(api, chat.id, null)
         else yield* api.DeleteMessage({ slotId: original.entries[2]!.slotId })
         const draft = yield* typeInto(api, chat.id, null, "Unfinished import draft")
         yield* importStFolder(folder(tag, 5), { partBytes: 160 })

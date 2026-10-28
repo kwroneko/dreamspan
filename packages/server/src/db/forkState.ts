@@ -30,11 +30,34 @@ type ForkRef = string | null | Statement.Fragment
  * outside, since SQLite 3.53 (Node 24.22) otherwise takes `fork_overrides_target`, which reads
  * every fork's overrides of the target.
  */
-const effectiveOverrideSql = (kind: string, fork: string, target: string) => `(
+export const effectiveOverrideSql = (kind: string, fork: string, target: string) => `(
   SELECT eo.id FROM forks ef CROSS JOIN json_each(ef.lineage_json) el CROSS JOIN fork_overrides eo
   WHERE ef.id = ${fork} AND eo.fork_id = el.value ->> 0 AND eo.kind = '${kind}'
     AND eo.target_id = ${target} AND eo.seq <= coalesce(el.value ->> 1, 9223372036854775807)
   ORDER BY el.key, eo.seq DESC LIMIT 1)`
+
+/**
+ * SQL: whether slot `s` is deleted in the fork `fork`: marked on the slot (before forks, or
+ * because no live fork showed it, `markUnseen` in bin.ts), emptied for good, or deleted in the
+ * fork's own view (`delete_slot`). A flag of 0 is a restore.
+ */
+export const slotDeletedInSql = (fork: string, s: string) =>
+  `(${s}.deleted_at IS NOT NULL OR ${s}.purged_at IS NOT NULL OR coalesce((SELECT flag FROM fork_overrides
+    WHERE id = ${effectiveOverrideSql("delete_slot", fork, `${s}.id`)}), 0) = 1)`
+
+/** SQL: whether version `o`, one of a message's own versions, is deleted in the fork `fork` (`slotDeletedInSql`'s rule). */
+export const versionDeletedInSql = (fork: string, o: string) =>
+  `(${o}.deleted_at IS NOT NULL OR ${o}.purged_at IS NOT NULL OR coalesce((SELECT flag FROM fork_overrides
+    WHERE id = ${effectiveOverrideSql("delete_version", fork, `${o}.id`)}), 0) = 1)`
+
+/** SQL: whether version `v`, one a fork shows (a message's own, or the copy standing in for it), is deleted in `fork`. */
+const shownVersionDeletedInSql = (fork: string, v: string) =>
+  `(${v}.deleted_at IS NOT NULL OR ${v}.purged_at IS NOT NULL OR coalesce((SELECT flag FROM fork_overrides
+    WHERE id = ${effectiveOverrideSql("delete_version", fork, originalSql(v))}), 0) = 1)`
+
+/** `shownVersionDeletedInSql` for a fork bound as a parameter or given as a fragment. */
+export const shownVersionDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, v: string) =>
+  withFork(sql, fork, (f) => shownVersionDeletedInSql(f, v))
 
 /** SQL: the version slot `s` shows in the fork `fork` (an SQL expression): its selection there, else its own. */
 export const selectedInSql = (fork: string, s: string) =>
@@ -70,7 +93,7 @@ export const shownInSql = (fork: string, s: string) => `(
   SELECT coalesce(sr_.value_id, so_.value_id, ss_.selected_version_id) ${selectionJoins(fork, s)})`
 
 /** `sqlText` with the fork bound in place of its placeholder. */
-const withFork = (sql: SqlClient.SqlClient, fork: ForkRef, sqlText: (fork: string) => string) => {
+export const withFork = (sql: SqlClient.SqlClient, fork: ForkRef, sqlText: (fork: string) => string) => {
   const [first, ...rest] = sqlText("\u0000").split("\u0000")
   return rest.reduce((statement, part) => sql`${statement}${fork}${sql.literal(part)}`, sql`${sql.literal(first!)}`)
 }
@@ -78,6 +101,14 @@ const withFork = (sql: SqlClient.SqlClient, fork: ForkRef, sqlText: (fork: strin
 /** `effectiveOverrideSql` for a fork bound as a parameter or given as a fragment. */
 export const effectiveOverride = (sql: SqlClient.SqlClient, kind: string, fork: ForkRef, target: string) =>
   withFork(sql, fork, (f) => effectiveOverrideSql(kind, f, target))
+
+/** `slotDeletedInSql` for a fork bound as a parameter or given as a fragment. */
+export const slotDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, s: string) =>
+  withFork(sql, fork, (f) => slotDeletedInSql(f, s))
+
+/** `versionDeletedInSql` for a fork bound as a parameter or given as a fragment. */
+export const versionDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, o: string) =>
+  withFork(sql, fork, (f) => versionDeletedInSql(f, o))
 
 /** The version slot `s` shows in `fork`: its selection there, else the slot's own. */
 export const selectedIn = (sql: SqlClient.SqlClient, fork: ForkRef, s: string) =>
@@ -149,7 +180,7 @@ export const inFork =
         })
 
 /** The next state seq of a chat, for a per-fork write in the same transaction. */
-const nextSeq = (sql: SqlClient.SqlClient, chatId: string) =>
+export const nextSeq = (sql: SqlClient.SqlClient, chatId: string) =>
   Effect.map(
     sql<{ seq: number }>`UPDATE chats SET state_seq = state_seq + 1 WHERE id = ${chatId} RETURNING state_seq AS seq`,
     ([row]) => row!.seq
@@ -175,11 +206,13 @@ export const selectionIn = (sql: SqlClient.SqlClient, forkId: string | null, slo
 
 /** A row of what a fork changes, by kind: what it's about and its value (schema/forkOverrides.ts). */
 interface OverrideValue {
-  readonly kind: "select" | "replace" | "star" | "picker_hide"
+  readonly kind: "select" | "replace" | "star" | "picker_hide" | "delete_slot" | "delete_version" | "hide"
   readonly targetId: string
   readonly slotId: string
   readonly valueId: string | null
   readonly flag: number | null
+  /** The bin item of a deletion, which a restore names. */
+  readonly binItemId?: string | null
 }
 
 /**
@@ -203,13 +236,13 @@ export const writeOverride = (
       ORDER BY o.seq DESC LIMIT 1`
     if (own !== undefined && own.forked === 0) {
       yield* sql`UPDATE fork_overrides SET value_id = ${value.valueId}, flag = ${value.flag}, seq = ${seq},
-        origin = ${origin} WHERE id = ${own.id}`
+        bin_item_id = ${value.binItemId ?? null}, origin = ${origin} WHERE id = ${own.id}`
       return seq
     }
     yield* sql`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag,
-        origin)
+        bin_item_id, origin)
       SELECT ${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, id, depth,
-        ${value.valueId}, ${value.flag}, ${origin}
+        ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${origin}
       FROM slots WHERE id = ${value.slotId}`
     return seq
   })

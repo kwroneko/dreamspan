@@ -1,6 +1,6 @@
 // Resolve the editor through the same branch binding the assembler reads (DESIGN §3.4).
 import type { UserId } from "@rp/shared/domain.ts"
-import { attachedApplies, viewAt } from "./forkState.ts"
+import { attachedApplies, slotDeletedIn, viewAt } from "./forkState.ts"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -43,7 +43,7 @@ export const noteAt = Effect.fnUntraced(function* (
       LEFT JOIN path p ON p.id = e.slot_id LEFT JOIN slots s ON s.id = p.id
       WHERE e.chat_id = ${chatId} AND e.key = 'note.binding' AND json_extract(e.value_json, '$.note') = ${ref.entity_id}
         AND e.superseded_by_changeset IS NULL
-        AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
+        AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND NOT ${slotDeletedIn(sql, fork, "s")}))
         AND ${attachedApplies(sql, fork, "s", "e.version_id")}
       ORDER BY coalesce(s.depth, -1) DESC, e.seq DESC LIMIT 1`
   const [revision] = yield* sql<{

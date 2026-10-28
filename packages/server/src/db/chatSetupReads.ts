@@ -19,7 +19,7 @@ import { chatQueue } from "./queueRows.ts"
 import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { currentForkSql, selectedInSql, shownInSql } from "./forkState.ts"
+import { currentForkSql, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -71,7 +71,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             LEFT JOIN slots s ON s.id = p.id
             WHERE e.chat_id = c.id AND e.key IN ('participant.join', 'participant.leave', 'played_by_me.set', 'card.binding')
               AND e.superseded_by_changeset IS NULL
-              AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND s.deleted_at IS NULL))
+              AND (e.slot_id IS NULL OR (p.id IS NOT NULL AND NOT ${sql.literal(slotDeletedInSql("c.current_fork_id", "s"))}))
               AND (c.active_leaf_slot_id IS NULL OR e.version_id IS NULL
                 OR e.version_id = ${sql.literal(selectedInSql("c.current_fork_id", "s"))}
                 OR e.version_id = ${sql.literal(shownInSql("c.current_fork_id", "s"))})

@@ -845,7 +845,7 @@
       "type": "table",
       "name": "history_changes",
       "tbl_name": "history_changes",
-      "sql": "CREATE TABLE history_changes ( slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of the newest reduction, for the forks made from the fork. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id) ) STRICT"
     },
     {
       "type": "table",
@@ -863,7 +863,7 @@
       "type": "table",
       "name": "lcm_enable_runs",
       "tbl_name": "lcm_enable_runs",
-      "sql": "CREATE TABLE lcm_enable_runs ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0, copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0 ) STRICT"
+      "sql": "CREATE TABLE lcm_enable_runs ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0, copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0, fork_id TEXT ) STRICT"
     },
     {
       "type": "table",
@@ -1371,6 +1371,12 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_delete_version_own",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version' AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth)) BEGIN SELECT RAISE(ABORT, 'a deleted swipe is one of its message''s own versions'); END"
+    },
+    {
+      "type": "trigger",
       "name": "fork_overrides_flag_own",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_flag_own BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('star', 'picker_hide') AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth)) BEGIN SELECT RAISE(ABORT, 'a flag is set on one of its message''s own versions'); END"
@@ -1437,6 +1443,12 @@
     },
     {
       "type": "trigger",
+      "name": "fork_overrides_slot_kinds",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_slot_kinds BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('delete_slot', 'hide') AND (NEW.flag IS NULL OR NEW.slot_id IS NOT NEW.target_id OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id)) BEGIN SELECT RAISE(ABORT, 'a deletion or hide has a flag and names its slot'); END"
+    },
+    {
+      "type": "trigger",
       "name": "forks_chat_fixed",
       "tbl_name": "forks",
       "sql": "CREATE TRIGGER forks_chat_fixed BEFORE UPDATE OF chat_id ON forks WHEN NEW.chat_id IS NOT OLD.chat_id BEGIN SELECT RAISE(ABORT, 'forks rows never move to another chat'); END"
@@ -1487,13 +1499,13 @@
       "type": "trigger",
       "name": "history_reduced_slot",
       "tbl_name": "slots",
-      "sql": "CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at, context_excluded ON slots WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL) OR (OLD.context_excluded = 0 AND NEW.context_excluded = 1) BEGIN INSERT INTO history_changes VALUES (NEW.id, NEW.chat_id, NEW.depth, 1) ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1; END"
+      "sql": "CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at ON slots WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) VALUES (NEW.id, '', NEW.chat_id, NEW.depth, 1) ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1; END"
     },
     {
       "type": "trigger",
       "name": "history_reduced_version",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO history_changes SELECT id, chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select' AND o.value_id = NEW.id)) ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1; END"
+      "sql": "CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL BEGIN INSERT INTO history_changes(slot_id, fork_id, chat_id, depth, revision) SELECT id, '', chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select' AND o.value_id = NEW.id)) ON CONFLICT(slot_id, fork_id) DO UPDATE SET revision = revision + 1; END"
     },
     {
       "type": "trigger",
@@ -1743,6 +1755,12 @@
     },
     {
       "type": "trigger",
+      "name": "slots_deletion_per_fork",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER slots_deletion_per_fork BEFORE UPDATE OF deleted_at ON slots WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM bin_items b WHERE b.id = NEW.bin_item_id AND b.origin_json ->> '$.forkId' IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'a slot is deleted in a fork with an override, or marked under the bin item of a deletion in a fork'); END"
+    },
+    {
+      "type": "trigger",
       "name": "slots_fork_same_chat",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_fork_same_chat BEFORE INSERT ON slots WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a slot''s fork is in its chat'); END"
@@ -1752,6 +1770,12 @@
       "name": "slots_fork_same_chat_update",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_fork_same_chat_update BEFORE UPDATE OF fork_id ON slots WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a slot''s fork is in its chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "slots_hide_frozen",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER slots_hide_frozen BEFORE UPDATE OF context_excluded, hidden_by_user ON slots WHEN NEW.context_excluded IS NOT OLD.context_excluded OR NEW.hidden_by_user IS NOT OLD.hidden_by_user BEGIN SELECT RAISE(ABORT, 'a slot keeps the visibility it was inserted with; a fork hides with an override'); END"
     },
     {
       "type": "trigger",
@@ -2178,6 +2202,12 @@
       "name": "versions_changeset_id_same_chat_update",
       "tbl_name": "versions",
       "sql": "CREATE TRIGGER versions_changeset_id_same_chat_update BEFORE UPDATE OF changeset_id, slot_id ON versions WHEN NEW.changeset_id IS NOT NULL AND (SELECT chat_id FROM changesets WHERE id = NEW.changeset_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.changeset_id must be in the same chat'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "versions_deletion_per_fork",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER versions_deletion_per_fork BEFORE UPDATE OF deleted_at ON versions WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM bin_items b WHERE b.id = NEW.bin_item_id AND b.origin_json ->> '$.forkId' IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'a version is deleted in a fork with an override, or marked under the bin item of a deletion in a fork'); END"
     },
     {
       "type": "trigger",

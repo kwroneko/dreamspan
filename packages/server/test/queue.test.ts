@@ -10,6 +10,7 @@ import { Deferred, Effect, Layer, Option, Stream } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { GenerationFailed, Generator } from "../src/chat/Generator.ts"
 import { client, outcome, posted, serverLayer, testConfig, takenFrom, typeInto } from "./support/config.ts"
+import { deleteBranchBelow } from "./support/forkIds.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -176,7 +177,7 @@ describe("send queue", () => {
           deletion === "message"
             ? yield* api.DeleteMessage({ slotId: reply.slotId })
             : deletion === "branch"
-              ? yield* api.DeleteBranch({ slotId: reply.slotId })
+              ? yield* deleteBranchBelow(api, chat.id, null)
               : yield* api.DeleteChat({ chatId: chat.id })
         yield* api.RestoreBinItem({ itemId: item.id })
         assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])

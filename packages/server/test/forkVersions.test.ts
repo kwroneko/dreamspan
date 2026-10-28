@@ -346,11 +346,12 @@ describe("amending a shared message", () => {
         const { writer, userId, m0, main, hello, texts, amend, fork, rows, history } = yield* setup
         const g = yield* fork(main, m0.slotId)
         const copy = yield* amend(m0.slotId, main, "hello there")
-        const item = yield* writer.DeleteVersion({ userId, versionId: copy.id })
+        const item = yield* writer.DeleteVersion({ userId, versionId: copy.id, forkId: main })
         const [binned] = yield* rows("SELECT target_id FROM bin_items WHERE id = ?", item.id)
         assert.strictEqual(binned!.target_id, hello)
         assert.deepStrictEqual(yield* texts(main), ["hello again", "one", "go on"])
-        assert.deepStrictEqual(yield* texts(g), ["hello again"])
+        // Only `main` deleted it: `g` still shows the swipe.
+        assert.deepStrictEqual(yield* texts(g), ["hello"])
         yield* writer.RestoreBinItem({ userId, itemId: item.id })
         // The selection stays where the delete moved it; the copy is back in its original's place.
         yield* writer.SelectVersion({
@@ -364,7 +365,7 @@ describe("amending a shared message", () => {
           ))[0]!.value_id as VersionId
         })
         assert.deepStrictEqual((yield* texts(main))[0], "hello there")
-        const again = yield* writer.DeleteVersion({ userId, versionId: copy.id })
+        const again = yield* writer.DeleteVersion({ userId, versionId: copy.id, forkId: main })
         yield* writer.PurgeBinItem({ userId, itemId: again.id })
         const [purged] = yield* rows(
           "SELECT content, purged_at IS NOT NULL AS purged FROM versions WHERE id = ?",

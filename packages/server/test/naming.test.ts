@@ -221,7 +221,8 @@ describe("naming", () => {
       assert.isNull(cleared.name)
       assert.isUndefined((yield* path(api, chat.id)).at(-1)!.branchName)
       // A deleted branch is no longer among them.
-      yield* api.DeleteBranch({ slotId: a })
+      const tavern = (yield* api.ListForks({ chatId: chat.id })).find((fork) => fork.tipSlotId === a)!
+      yield* api.DeleteFork({ forkId: tavern.id })
       assert.deepStrictEqual(
         (yield* api.ListBranches({ slotId: b })).map((branch) => branch.slotId),
         [b]
