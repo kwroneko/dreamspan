@@ -55,6 +55,19 @@ it.effect("0050 makes persona description notes ordinary and keeps one copy of t
       VALUES('card-sam-v','card-sam','["card-sam-1"]',${JSON.stringify(variant)},${docHash(variant)},1,'user',${searchText(variant)},2)`
     yield* sql`INSERT INTO entity_refs(id,entity_id,ref_kind,head_revision_id,follows_ref_id,merge_base_revision_id,label,subtitle,created_at,updated_at)
       VALUES('variant-sam','card-sam','variant','card-sam-v','r-card-sam','card-sam-1','Sam','Variant',1,1)`
+    // Chat overrides of Sam's card (one edited, one alike) and of its note, in two chats.
+    yield* sql`INSERT INTO chats(id,owner_user_id,kind,status,created_at) VALUES('chat-1','u','rp','active',1),('chat-2','u','rp','active',1)`
+    const edited = persona("Sam", "Sam is curious, and shy.")
+    yield* sql`INSERT INTO entity_revisions(id,entity_id,parents,doc_json,doc_hash,schema_version,origin,search_text,created_at)
+      VALUES('card-sam-e','card-sam','["card-sam-1"]',${JSON.stringify(edited)},${docHash(edited)},1,'user',${searchText(edited)},2)`
+    yield* sql`INSERT INTO entity_refs(id,entity_id,ref_kind,head_revision_id,follows_ref_id,merge_base_revision_id,chat_id,label,subtitle,created_at,updated_at)
+      VALUES('over-sam-1','card-sam','chat_override','card-sam-e','r-card-sam','card-sam-1','chat-1','Sam','',1,1),
+        ('over-sam-2','card-sam','chat_override','card-sam-1','r-card-sam','card-sam-1','chat-2','Sam','',1,1)`
+    const own = { ...description("card-sam", "Sam is curious, in this chat.", { kind: "persona_description" }) }
+    yield* sql`INSERT INTO entity_revisions(id,entity_id,parents,doc_json,doc_hash,schema_version,origin,search_text,created_at)
+      VALUES('n1-sam-o','n1-sam','["n1-sam-1"]',${JSON.stringify(own)},${docHash(own)},1,'user',${searchText(own)},2)`
+    yield* sql`INSERT INTO entity_refs(id,entity_id,ref_kind,head_revision_id,follows_ref_id,merge_base_revision_id,chat_id,label,subtitle,created_at,updated_at)
+      VALUES('over-n1-sam','n1-sam','chat_override','n1-sam-o','r-n1-sam','n1-sam-1','chat-1','n','',1,1)`
     // Tess: the user edited the card's description since: both texts are kept.
     yield* insert("card-tess", "card", persona("Tess", "Tess, edited."))
     yield* insert("n2-tess", "note", description("card-tess", "Tess draws.", { kind: "persona_description" }))
@@ -120,6 +133,12 @@ it.effect("0050 makes persona description notes ordinary and keeps one copy of t
       assert.strictEqual(card.doc.description, "")
       assert.deepStrictEqual(JSON.parse(card.parents), [parent])
     }
+    // Overrides: an edited description stays (and its text with it), an alike one is emptied; the
+    // note's own override isn't revised, its text kept.
+    assert.strictEqual((yield* head("over-sam-1")).head, "card-sam-e")
+    assert.strictEqual((yield* head("over-sam-1")).doc.description, "Sam is curious, and shy.")
+    assert.strictEqual((yield* head("over-sam-2")).doc.description, "")
+    assert.strictEqual((yield* head("over-n1-sam")).head, "n1-sam-o")
     // An edited description, a note that wasn't first, a binned note and every other kind: unchanged.
     for (const ref of [
       "r-card-tess",
