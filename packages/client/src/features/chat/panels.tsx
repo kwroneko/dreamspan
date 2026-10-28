@@ -36,22 +36,40 @@ export interface PanelDescriptor {
 
 export const chatPanels = makeRegistry<PanelDescriptor>()
 export const useChatPanels = () => useSyncExternalStore(chatPanels.subscribe, chatPanels.snapshot, chatPanels.snapshot)
-export const resolvePanel = (value: string) => {
-  const exact = chatPanels.get(value)
-  return exact && !exact.matches ? exact : chatPanels.list().find((entry) => entry.matches?.(value))
+export const resolvePanel = (value: string, snapshot = chatPanels.snapshot()) => {
+  if (snapshot.disabled.has(value)) return undefined
+  const exact = snapshot.entries.find((entry) => entry.id === value)
+  return exact && !exact.matches ? exact : snapshot.entries.find((entry) => entry.matches?.(value))
 }
-export const isPanelTab = (value: unknown): value is string =>
-  typeof value === "string" && resolvePanel(value) !== undefined
+/** Without a view this validates stored syntax; with one it requires an offered tab. */
+export const isPanelTab = (value: unknown, view?: ChatView, snapshot = chatPanels.snapshot()): value is string =>
+  typeof value === "string" &&
+  (view === undefined
+    ? resolvePanel(value, snapshot) !== undefined
+    : panelTabs(view, value, snapshot).some((tab) => tab.value === value))
 
-export const panelTabs = (view: ChatView, selected: string | null) =>
-  [...chatPanels.list()]
+export const panelTabs = (view: ChatView, selected: string | null, snapshot = chatPanels.snapshot()) =>
+  [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
     .filter((entry) => entry.available?.(view) !== false)
     .flatMap((descriptor) =>
       (descriptor.tabs?.(view, selected) ?? [{ value: descriptor.id, label: descriptor.label }])
-        .filter((tab) => resolvePanel(tab.value) === descriptor)
+        .filter((tab) => resolvePanel(tab.value, snapshot) === descriptor)
         .map((tab) => ({ ...tab, descriptor }))
     )
+
+/** Read the captured data so React Compiler retains the registry as a render dependency. */
+export function usePanelTabs(view: ChatView, selected: string | null) {
+  const snapshot = useChatPanels()
+  return panelTabs(view, selected, snapshot)
+}
+
+export const useIsPanelTab = (value: unknown, view?: ChatView) =>
+  useSyncExternalStore(
+    chatPanels.subscribe,
+    () => isPanelTab(value, view),
+    () => isPanelTab(value, view)
+  )
 
 export function PanelContent({ descriptor, ...props }: PanelProps & { descriptor: PanelDescriptor }) {
   return <descriptor.component {...props} />

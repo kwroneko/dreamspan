@@ -34,12 +34,12 @@ export interface MessageAction {
 }
 
 export const messageActions = makeRegistry<MessageAction>()
-export const availableMessageActions = (context: MessageActionContext) =>
-  [...messageActions.list()].sort((a, b) => a.order - b.order).filter((entry) => entry.available?.(context) !== false)
+export const availableMessageActions = (context: MessageActionContext, snapshot = messageActions.snapshot()) =>
+  [...snapshot.entries].sort((a, b) => a.order - b.order).filter((entry) => entry.available?.(context) !== false)
 
 export function MessageActions({ context }: { context: MessageActionContext }) {
-  useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
-  const actions = availableMessageActions(context)
+  const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
+  const actions = availableMessageActions(context, snapshot)
   const [dialog, setDialog] = useState<MessageAction | null>(null)
   const activeDialog = dialog !== null && actions.includes(dialog) ? dialog : null
   if (dialog !== null && activeDialog === null) setDialog(null)

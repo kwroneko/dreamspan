@@ -48,8 +48,12 @@ export interface ComposerControl {
 }
 
 export const composerControls = makeRegistry<ComposerControl>()
-export const availableComposerControls = (placement: Placement, context: ComposerControlContext) =>
-  [...composerControls.list()]
+export const availableComposerControls = (
+  placement: Placement,
+  context: ComposerControlContext,
+  snapshot = composerControls.snapshot()
+) =>
+  [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
     .filter((entry) => entry.placement === placement && entry.available?.(context) !== false)
 
@@ -61,8 +65,13 @@ export const invokeComposerControl = (id: string, context: ComposerControlContex
 }
 
 export function ComposerControls({ placement, context }: { placement: Placement; context: ComposerControlContext }) {
-  useSyncExternalStore(composerControls.subscribe, composerControls.snapshot, composerControls.snapshot)
-  return availableComposerControls(placement, context).map((entry) => (
+  const snapshot = useSyncExternalStore(
+    composerControls.subscribe,
+    composerControls.snapshot,
+    composerControls.snapshot
+  )
+  const controls = availableComposerControls(placement, context, snapshot)
+  return controls.map((entry) => (
     <entry.component
       key={entry.id}
       {...context}

@@ -162,6 +162,46 @@ describe("chat contributions", () => {
     expect(onHistory).toHaveBeenCalledTimes(1)
   })
 
+  it("disables one family tab without falling back to its family, then restores it", () => {
+    const value = "card:00000000-0000-4000-8000-000000000001"
+    const original = resolvePanel(value)
+    const restore = chatPanels.disable(value)
+    dispose.push(restore)
+    expect(resolvePanel(value)).toBeUndefined()
+    expect(isPanelTab(value)).toBe(false)
+    expect(panelTabs(view, value).some((tab) => tab.value === value)).toBe(false)
+    restore()
+    expect(resolvePanel(value)).toBe(original)
+  })
+
+  it("validates URLs and command targets against the family's tabs in the viewed chat", () => {
+    dispose.push(
+      chatPanels.register({
+        id: "synthetic.family",
+        label: "Family",
+        order: 100,
+        icon: "note",
+        matches: (value) => value.startsWith("synthetic:"),
+        tabs: () => [{ value: "synthetic:visible", label: "Visible" }],
+        component: () => null
+      }),
+      chatCommands.register({
+        id: "synthetic.command",
+        label: "Unavailable target",
+        order: 0,
+        icon: "note",
+        panel: "synthetic:absent",
+        shortcut: { key: "x", mod: true },
+        run: vi.fn()
+      })
+    )
+    const context = { view } as ChatCommandContext
+    expect(isPanelTab("synthetic:visible", view)).toBe(true)
+    expect(isPanelTab("synthetic:absent", view)).toBe(false)
+    expect(availableCommands(context).some((entry) => entry.id === "synthetic.command")).toBe(false)
+    expect(runCommandShortcut({ key: "x", ctrlKey: true, metaKey: false }, context)).toBe(false)
+  })
+
   it("executes a synthetic history command in scope, then restores the built-in command", async () => {
     const original = chatCommands.get("history.search-replace")!
     const onHistory = vi.fn()

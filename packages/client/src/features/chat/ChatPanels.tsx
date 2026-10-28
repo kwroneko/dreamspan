@@ -8,7 +8,7 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
-import { chatPanels, isPanelTab, panelTabs, PanelContent, useChatPanels } from "./panels.tsx"
+import { chatPanels, isPanelTab, PanelContent, usePanelTabs } from "./panels.tsx"
 export { isPanelTab } from "./panels.tsx"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
@@ -74,8 +74,7 @@ export function PanelToggles({
   /** Opens the panel at a tab, or closes it when that tab is the one open. */
   onToggle: (tab: PanelTab) => void
 }) {
-  useChatPanels()
-  const available = panelTabs(view, open)
+  const available = usePanelTabs(view, open)
   const tabs = available.filter((tab) => tab.descriptor.header !== false)
   if (available.length === 0) return null
   if (!wide || open !== null)
@@ -133,7 +132,6 @@ export function ChatSidePanel({
 }) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
-  useChatPanels()
   const userId = useSession().user.id
   const { ref, width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, 640, 426, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
@@ -146,7 +144,7 @@ export function ChatSidePanel({
     for (const descriptor of chatPanels.list()) descriptor.preload?.()
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const tabs = panelTabs(content.view, tab).map((t) => ({
+  const tabs = usePanelTabs(content.view, tab).map((t) => ({
     value: t.value,
     label: t.label,
     panel:

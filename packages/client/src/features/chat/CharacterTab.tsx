@@ -7,7 +7,7 @@ import { AppClient } from "../../rpc.ts"
 import { CharacterPanel } from "../characters/CharacterPanel.tsx"
 import { ChatCardActions } from "./CardForkDialogs.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
-import type { PanelProps } from "./panels.tsx"
+import { useIsPanelTab, type PanelProps } from "./panels.tsx"
 
 export function CharacterTab({ session, view, tab, onNotes }: PanelProps) {
   const entityId = tab.slice(5) as EntityId
@@ -25,6 +25,7 @@ function ChatCharacterPanel({
   entityId: EntityId
   onNotes: () => void
 }) {
+  const notesPanel = useIsPanelTab("notes", view)
   const card = view.cast?.participants.includes(entityId)
     ? view.cast.cards.find((item) => item.entityId === entityId)
     : undefined
@@ -43,7 +44,7 @@ function ChatCharacterPanel({
   return (
     <CharacterPanel
       entityId={entityId}
-      onNotes={onNotes}
+      {...(notesPanel ? { onNotes } : {})}
       actions={
         card && (
           <div className="flex flex-col gap-2">

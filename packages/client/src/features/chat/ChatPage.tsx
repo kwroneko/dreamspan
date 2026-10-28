@@ -1,5 +1,5 @@
 import { useChatCommandKeys } from "./commands.tsx"
-import { resolvePanel, useChatPanels } from "./panels.tsx"
+import { useIsPanelTab } from "./panels.tsx"
 import { HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
@@ -472,10 +472,8 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   // Each user's own, read again when another signs in.
   const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
-  useChatPanels()
   const candidate = urlPanel ?? (wide ? rememberedTab : null)
-  const descriptor = candidate === null ? undefined : resolvePanel(candidate)
-  const panel = descriptor && descriptor.available?.(view) !== false ? candidate : null
+  const panel = useIsPanelTab(candidate, view) ? candidate : null
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
     if (urlPanel === null && panel !== null)
@@ -483,6 +481,7 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   }, [navigate, urlPanel, panel])
   const show = useCallback(
     (next: PanelTab | null, portrait?: string) => {
+      if (next !== null && !isPanelTab(next, view)) return
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
       void navigate({
@@ -493,7 +492,7 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
         replace: wide || next === null || urlPanel !== null
       })
     },
-    [navigate, wide, urlPanel, userId]
+    [navigate, wide, urlPanel, userId, view]
   )
   return { panel, show, wide, userId }
 }
@@ -713,12 +712,11 @@ function ChatSurface({
 
 /** /chats/$chatId, with `fork` for a fork other than the current one and `slot` for a message. */
 export function ChatPage() {
-  useChatPanels()
   const { chatId } = useParams({ strict: false }) as { chatId: ChatId }
   const search = useSearch({ strict: false }) as { fork?: unknown; slot?: unknown; panel?: unknown }
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
-  const panel = isPanelTab(search.panel) ? search.panel : null
+  const panel = useIsPanelTab(search.panel) ? (search.panel as string) : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
       <OpenChat key={chatId} chatId={chatId} fork={fork} slot={slot} panel={panel} />

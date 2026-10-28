@@ -1,4 +1,4 @@
-import { ChatCommandItems } from "./commands.tsx"
+import { ChatCommandMenu } from "./commands.tsx"
 // The open chat's header: whose chat it is (the cast's faces and a readable name, never
 // ST's file name), which branch is shown with a way to switch, and the chat's actions,
 // which the page passes in. On a phone the title can wrap, and the branch and actions
@@ -424,20 +424,7 @@ export function ChatHeader({
         </div>
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
           {fork && <PinButton fork={fork} />}
-          <Menu
-            label="Chat actions"
-            trigger={
-              <button
-                type="button"
-                aria-label="Chat actions"
-                className="rounded-md px-2 py-1 text-muted hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                •••
-              </button>
-            }
-          >
-            <ChatCommandItems context={{ session, view, onHistory, onJump }} />
-          </Menu>
+          <ChatCommandMenu context={{ session, view, onHistory, onJump }} />
           <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
             {actions}

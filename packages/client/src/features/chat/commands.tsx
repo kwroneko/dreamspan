@@ -1,11 +1,11 @@
-import { resolvePanel, useChatPanels } from "./panels.tsx"
+import { chatPanels, isPanelTab, useChatPanels } from "./panels.tsx"
 // Commands in the chat action menu. The host supplies the viewed fork and navigation;
 // contributions own the behavior, label, ordering and availability.
 import { useEffect, useSyncExternalStore } from "react"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"
-import { MenuItem } from "../../ui/Menu.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export interface ChatCommandContext {
@@ -28,25 +28,44 @@ interface ChatCommand {
 }
 
 export const chatCommands = makeRegistry<ChatCommand>()
-export const availableCommands = (context: ChatCommandContext) =>
-  [...chatCommands.list()]
+export const availableCommands = (
+  context: ChatCommandContext,
+  snapshot = chatCommands.snapshot(),
+  panels = chatPanels.snapshot()
+) =>
+  [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
-    .filter((entry) => {
-      const panel = entry.panel === undefined ? undefined : resolvePanel(entry.panel)
-      return (
-        (entry.panel === undefined || (panel !== undefined && panel.available?.(context.view) !== false)) &&
+    .filter(
+      (entry) =>
+        (entry.panel === undefined || isPanelTab(entry.panel, context.view, panels)) &&
         entry.available?.(context) !== false
-      )
-    })
+    )
 
-export function ChatCommandItems({ context }: { context: ChatCommandContext }) {
-  useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
-  useChatPanels()
-  return availableCommands(context).map((entry) => (
-    <MenuItem key={entry.id} icon={entry.icon} onClick={() => entry.run(context)}>
-      {entry.label}
-    </MenuItem>
-  ))
+export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
+  const snapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
+  const panels = useChatPanels()
+  const commands = availableCommands(context, snapshot, panels)
+  if (commands.length === 0) return null
+  return (
+    <Menu
+      label="Chat actions"
+      trigger={
+        <button
+          type="button"
+          aria-label="Chat actions"
+          className="rounded-md px-2 py-1 text-muted hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          •••
+        </button>
+      }
+    >
+      {commands.map((entry) => (
+        <MenuItem key={entry.id} icon={entry.icon} onClick={() => entry.run(context)}>
+          {entry.label}
+        </MenuItem>
+      ))}
+    </Menu>
+  )
 }
 
 /** Keyboard invocation resolves the same effective, available command as the menu. */
