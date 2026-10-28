@@ -1459,6 +1459,30 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
     expect(contents(snapshot).at(-1)).toMatch(/^system: \[Write your next reply from the point of view of Tobin/)
   })
 
+  it("unpins prompt names to follow the cast without following the chosen speaker", async () => {
+    const prompts = preset({ prompts: [{ identifier: "main", role: "system", content: "{{user}} / {{char}}" }] })
+    const pins = [
+      at(null, { key: "macro.binding", value: { name: "user", value: "Captain" } }),
+      at(null, { key: "macro.binding", value: { name: "char", value: "Narrator" } })
+    ]
+    for (const speaker of ["mira", "oren", "tobin"]) {
+      const pinned = await assembled(group({ preset: prompts, target: { speaker }, events: pins }))
+      expect(contents(pinned)[0]).toBe("system: Captain / Narrator")
+      const reset = await assembled(
+        group({
+          preset: prompts,
+          target: { speaker },
+          events: [
+            ...pins,
+            at(1, { key: "macro.unbind", value: { name: "user" } }),
+            at(1, { key: "macro.unbind", value: { name: "char" } })
+          ]
+        })
+      )
+      expect(contents(reset)[0]).toBe("system: Tobin / Mira, Oren")
+    }
+  })
+
   it("uses pinned bindings over the cast's (DESIGN §5.3)", async () => {
     const snapshot = await assembled(
       group({

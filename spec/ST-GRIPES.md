@@ -1,6 +1,6 @@
 # ST gripes: the checklist
 
-**Status**: Draft, 2026-10-14. Step 1 of the afternoon schedule in PLAN.md, and the checklist the next redesign round works from (WORKFLOW process step 1).
+**Status**: Draft, 2026-10-14. Step 1 of the afternoon schedule in PLAN.md, and the checklist the next redesign round works from (WORKFLOW process step 1). F12 binding controls are built (U09, 2026-10-28; ARCHITECTURE.md §15), superseding that gap.
 
 **How it was built.**
 - **The owner's words** come from three places:
@@ -126,7 +126,7 @@
 | F9 | "when it becomes a persona, the image is usually unrecognizably blurry" | P 14:43, D §1.4 [P] | has | Imported personas keep their original avatar; any card is a persona by the switch |
 | F10 | "My persona list has become extremely bloated from having single-chat specific personas that are copies of their card(s)" | P 14:43 | has | Cast → I play them, on any member; no copy needed |
 | F11 | "{{user}} in greetings in ST often sticks so if you open a card and then change persona, it actually keeps the old name" | P 14:12, D §5.6 [D] | has | Greetings resolve against the state at their position until a message follows (`TemplateText`) |
-| F12 | "having control over these variables, being able to override them and keep them fixed" | P 14:43, D §5.3 [D] | partial | `{{user}}` follows the "played by me" set (Cast → I play them). No per-chat override of `{{user}}` or `{{char}}`, and nothing shows what they resolve to |
+| F12 | "having control over these variables, being able to override them and keep them fixed" | P 14:43, D §5.3 [D] | has | This chat → Prompt names shows resolved `{{user}}` and `{{char}}`; pin the current value or an override, or unpin to follow the cast/personas (U09) |
 | F13 | "There isn't even a way to search (never mind search and replace) within chats or presets or cards" | P 13:23, D §6.2 [D] | partial | Editor → Search: plain or regex, replace, across all fields of one card or preset. Nothing across entries; chats are L2 |
 | F14 | "UI gripe #1, it appears to be designed to confuse you in how and when edits are saved" | P 13:23, D §6.2 [D] | has | Editors keep drafts per field; Save (n) makes a revision; a status line says "Everything is saved" or "n fields have changes" |
 

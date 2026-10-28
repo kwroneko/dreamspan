@@ -145,6 +145,10 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   globalLorebooksOff: Schema.Array(RefId),
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
   loreBelowHistory: Schema.Boolean,
+  /** Explicit prompt-name pins; an empty string is a pin too. */
+  macroBindings: Schema.Record(Schema.String, Schema.String),
+  /** Stable preset/chat names, independent of the current speaker. */
+  macroNames: Schema.Struct({ user: Schema.String, char: Schema.String }),
   rolesProjection: Schema.NullOr(RolesProjection),
   roleProjections: Schema.Array(RoleProjectionOption),
   /** Active cards plus swapped-out cards, to retain historical message names and portraits. */
@@ -176,6 +180,8 @@ export const CastChange = Schema.Union([
   /** The chat's own model or preset taken off (`model.unbind`, `preset.unbind`): it uses the default again. */
   Schema.TaggedStruct("DefaultModel", {}),
   Schema.TaggedStruct("DefaultPreset", {}),
+  /** A stable prompt-name pin; null removes it and follows the cast/personas again. */
+  Schema.TaggedStruct("MacroBinding", { name: Schema.Literals(["user", "char"]), value: Schema.NullOr(Schema.String) }),
   Schema.TaggedStruct("Roles", { projection: RolesProjection }),
   /** A note on or off (`note.activate`, `note.deactivate`): the chat's own, or a participant card's. */
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),

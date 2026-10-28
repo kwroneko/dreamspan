@@ -40,6 +40,10 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "model.unbind", value: {} }
     case "DefaultPreset":
       return { key: "preset.unbind", value: {} }
+    case "MacroBinding":
+      return change.value === null
+        ? { key: "macro.unbind", value: { name: change.name } }
+        : { key: "macro.binding", value: { name: change.name, value: change.value } }
     case "Roles":
       return { key: "roles.projection", value: change.projection }
     case "Lorebook":
@@ -108,6 +112,27 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           on ? [] : [ref as Cast["globalLorebooksOff"][number]]
         ),
         loreBelowHistory: state.loreBelowHistory ?? true,
+        macroBindings: state.macroBindings,
+        macroNames: {
+          user:
+            state.macroBindings.user ??
+            (state.playedByMe
+              .flatMap((id) => {
+                const card = cards.find((c) => c.entityId === id)
+                return card ? [card.modelName ?? card.name] : []
+              })
+              .join(", ") ||
+              "User"),
+          char:
+            state.macroBindings.char ??
+            state.participants
+              .filter((id) => !state.playedByMe.includes(id))
+              .flatMap((id) => {
+                const card = cards.find((c) => c.entityId === id)
+                return card ? [card.modelName ?? card.name] : []
+              })
+              .join(", ")
+        },
         rolesProjection: state.rolesProjection,
         roleProjections: yield* reader.RoleProjections(),
         cards

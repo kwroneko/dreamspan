@@ -47,6 +47,42 @@ const pathOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("chat setup", () => {
+  it.live("reads, pins and unpins stable prompt names on their own fork", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", { ...mira, nickname: "Pilot" })
+      const anaId = yield* card(api, "Ana", { name: "Ana" }, true)
+      const started = yield* api.StartChat({
+        cards: [miraId],
+        persona: anaId,
+        greeting: 0,
+        first: { _tag: "Send", content: "Hi", speakerEntityId: anaId }
+      })
+      const at = { chatId: started.chat.id, slotId: started.entry.slotId }
+      assert.deepStrictEqual((yield* api.GetCast(at)).macroNames, { user: "Ana", char: "Pilot" })
+      const pin = (name: "user" | "char", value: string | null) =>
+        api.ChangeCast({ ...at, change: { _tag: "MacroBinding", name, value } })
+      yield* pin("user", "Captain")
+      yield* pin("char", "Narrator")
+      const main = (yield* api.GetChat({ chatId: at.chatId })).currentForkId
+      const fork = yield* api.CreateFork({ chatId: at.chatId, fromForkId: main, atSlotId: at.slotId })
+      const changed = yield* api.ChangeCast({
+        ...at,
+        forkId: fork.fork.id,
+        change: { _tag: "MacroBinding", name: "user", value: null }
+      })
+      assert.deepStrictEqual(changed.macroNames, { user: "Ana", char: "Narrator" })
+      assert.deepStrictEqual((yield* api.GetCast({ ...at, forkId: main })).macroNames, {
+        user: "Captain",
+        char: "Narrator"
+      })
+      yield* pin("char", "")
+      assert.strictEqual((yield* api.GetCast(at)).macroNames.char, "")
+      yield* pin("char", null)
+      assert.deepStrictEqual((yield* api.GetCast(at)).macroNames, { user: "Ana", char: "Pilot" })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("a card's greetings show without a chat; the first send makes it, greetings as versions", () =>
     Effect.gen(function* () {
       const api = yield* client()

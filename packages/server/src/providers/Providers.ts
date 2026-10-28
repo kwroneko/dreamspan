@@ -1194,7 +1194,8 @@ export const layer = (options: ProvidersOptions = {}) =>
                   message,
                   { status: state.status, retryAfterMs: state.retryAfterMs, category: state.capture.refusalCategory },
                   knownContext,
-                  state.firstTokenAt !== null
+                  state.firstTokenAt !== null,
+                  attribution.purpose !== "generation"
                 )
           const error = classified === null ? null : scrubbed(prepared, classified)
           return { message, error }
