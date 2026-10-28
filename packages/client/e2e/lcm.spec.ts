@@ -3,7 +3,7 @@
 // history starts, the panel it opens (edit through a draft, revisions, asking for a summary
 // again), the distinct marks on summarized, dropped and hidden messages, the coverage rail,
 // the chat setting, and the context view. Each viewport runs the same flows.
-import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import type { VersionId } from "@rp/shared/chat.ts"
 import { expect, type Locator, type Page, test } from "@playwright/test"
@@ -56,6 +56,7 @@ const signIn = async (page: Page) => {
 }
 
 interface Fixture {
+  readonly forkId: ForkId
   readonly chatId: ChatId
   readonly entries: ReadonlyArray<PathEntry>
   /** Messages 1–4 and 5–8, and the level-2 summary over both. */
@@ -66,7 +67,7 @@ interface Fixture {
 
 /** A chat of twelve messages, the first eight summarized: two level-1 summaries and a level 2. */
 const makeChat = async (title: string): Promise<Fixture> => {
-  const { chatId, entries } = await admin((api) =>
+  const { chatId, forkId, entries } = await admin((api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title })
       let parent: PathEntry["slotId"] | null = null
@@ -86,14 +87,23 @@ const makeChat = async (title: string): Promise<Fixture> => {
         range: { _tag: "Bottom" },
         limit: 100
       })
-      return { chatId: chat.id, entries: window.entries }
+      return { chatId: chat.id, forkId: window.forkId!, entries: window.entries }
     })
   )
   const dataDir = server().dataDir
   const first = await level1(dataDir, chatId, entries.slice(0, 4), "The harbor was flooded and the road closed.")
   const second = await level1(dataDir, chatId, entries.slice(4, 8), "Mira found the ledger and kept it dry.")
   const top = await condensed(dataDir, chatId, [first, second], "A flood closed the road; Mira saved the ledger.")
-  return { chatId, entries, first, second, top }
+  return { chatId, forkId, entries, first, second, top }
+}
+
+const requested = async (fixture: Fixture) => {
+  const position = { chatId: fixture.chatId, forkId: fixture.forkId, leafSlotId: fixture.entries.at(-1)!.slotId }
+  const coverage = await admin((api) =>
+    api.GetLcmCoverage({ ...position, fromDepth: 0, toDepth: fixture.entries.length })
+  )
+  const state = await admin((api) => api.GetLcmState(position))
+  return coverage.summaries.filter((s) => s.rerun).length + state.jobs.filter((j) => j.rerun).length
 }
 
 const open = async (page: Page, fixture: Fixture, search = "") => {
@@ -140,10 +150,8 @@ for (const [name, viewport] of [
     test("summarized, dropped out of context and hidden messages look different", async ({ page }) => {
       const fixture = await makeChat(`marks-${name}`)
       // Message 3 is hidden on purpose, as SillyTavern's ghost does: it keeps the hidden mark only.
-      await Effect.runPromise(
-        fixtureSql(server().dataDir, [
-          { sql: "UPDATE slots SET context_excluded = 1 WHERE id = ?", params: [fixture.entries[2]!.slotId] }
-        ])
+      await admin((api) =>
+        api.SetMessageHidden({ slotId: fixture.entries[2]!.slotId, forkId: fixture.forkId, hidden: true })
       )
       await open(page, fixture, `?slot=${fixture.entries[1]!.slotId}`)
       const summarized = article(page, fixture, 2)
@@ -237,10 +245,10 @@ for (const [name, viewport] of [
       await page.waitForTimeout(1000)
       expect(await count(server().dataDir, "summarization_jobs")).toBe(jobs)
       expect(provider.completions.length).toBe(requests)
-      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(1)
+      expect(await requested(fixture)).toBe(1)
       await row.getByRole("button", { name: /^Cancel re-summarizing messages 1–4/ }).click()
       await expect(row.getByText("Re-summarizes with the next reply")).toHaveCount(0)
-      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(0)
+      expect(await requested(fixture)).toBe(0)
     })
 
     test("a job that gave up is shown as failed and can be asked to retry with the next reply", async ({ page }) => {
@@ -254,7 +262,7 @@ for (const [name, viewport] of [
       await expect(jobs).toContainText("The model refused three times.")
       await jobs.getByRole("button", { name: /^Retry messages 9–11 with the next reply/ }).click()
       await expect(jobs.getByText("Retries with the next reply")).toBeVisible()
-      expect(await count(server().dataDir, "summary_reruns", fixture.chatId)).toBeGreaterThan(0)
+      expect(await requested(fixture)).toBeGreaterThan(0)
     })
 
     test("the coverage rail draws a bar per summary by level; stale ones are marked; a click opens the summary", async ({
@@ -412,10 +420,10 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
     .click()
   const row = panel(page).locator(`[data-summary="${fixture.first.id}"]`)
   await row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ }).click()
-  await expect.poll(() => count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(1)
+  await expect.poll(() => requested(fixture)).toBe(1)
   await expect(row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ })).toBeVisible()
   await row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ }).click()
-  await expect.poll(() => count(server().dataDir, "summary_reruns", fixture.chatId)).toBe(0)
+  await expect.poll(() => requested(fixture)).toBe(0)
   await expect(row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeVisible()
   await admin((api) =>
     api.EditSummary({
@@ -481,7 +489,11 @@ test.describe("the text of a summary's edit", () => {
       .toBe(submitted)
     await expect(box(dialog)).toHaveValue(later)
     await expect
-      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId: fixture.top.id as never })))?.content)
+      .poll(
+        async () =>
+          (await admin((api) => api.GetSummaryDraft({ forkId: fixture.forkId, summaryId: fixture.top.id as never })))
+            ?.content
+      )
       .toBe(later)
     // Typed on the revision just saved: the draft isn't marked as started from an older one.
     await expect(dialog.getByText("The draft started from an older revision")).toHaveCount(0)
@@ -494,6 +506,7 @@ test.describe("the text of a summary's edit", () => {
     const summaryId = fixture.top.id as never
     const first = await admin((api) =>
       api.SaveSummaryDraft({
+        forkId: fixture.forkId,
         summaryId,
         draftId: null,
         content: "A flood closed the road; Mira saved the ledger. Shared.",
@@ -528,11 +541,12 @@ test.describe("the text of a summary's edit", () => {
     const offline = `${first.content} offline A`
     const copy = makeCopy(
       me,
-      fixture.top.id,
+      `${fixture.top.id}:${fixture.forkId}`,
       "summary",
       {
         kind: "summary",
         payload: {
+          forkId: fixture.forkId,
           summaryId,
           draftId: first.id,
           content: offline,
@@ -567,6 +581,7 @@ test.describe("the text of a summary's edit", () => {
     const elsewhere = `${first.content} other B`
     await admin((api) =>
       api.SaveSummaryDraft({
+        forkId: fixture.forkId,
         summaryId,
         draftId: first.id,
         content: elsewhere,
@@ -580,7 +595,7 @@ test.describe("the text of a summary's edit", () => {
     await expect(box(dialog)).toHaveValue(offline)
     await box(dialog).fill(`${offline}!`)
     await expect
-      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId })))?.content)
+      .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId, forkId: fixture.forkId })))?.content)
       .toBe(`${offline}!`)
     // Every attempt named the draft as this browser had it, not as the other device left it.
     expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])

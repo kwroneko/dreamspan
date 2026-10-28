@@ -83,9 +83,13 @@ export class SummaryDraft {
   private summary: LcmSummary
   private disposed = false
   private readonly session: ChatSession
+  private readonly forkId: ReturnType<ChatSession["snapshot"]>["forkId"]
+  private readonly backupId: string
   private readonly userId: string
 
   constructor(session: ChatSession, userId: string, summary: LcmSummary) {
+    this.forkId = session.snapshot().forkId
+    this.backupId = `${summary.id}:${this.forkId ?? ""}`
     this.session = session
     this.userId = userId
     this.summary = summary
@@ -138,7 +142,9 @@ export class SummaryDraft {
   }
 
   async open() {
-    const result = await this.session.call((client) => client("GetSummaryDraft", { summaryId: this.summary.id }))
+    const result = await this.session.call((client) =>
+      client("GetSummaryDraft", { forkId: this.forkId, summaryId: this.summary.id })
+    )
     if (this.disposed) return
     if (result.ok) {
       this.draft = result.value
@@ -146,7 +152,7 @@ export class SummaryDraft {
     }
     // Text that never reached the server, oldest first: each goes on top of the draft as it
     // was typed, and a newer one from another tab stays one step back in its history.
-    const copies = [...(await copiesOf(this.userId, this.summary.id))].sort((a, b) => a.at - b.at)
+    const copies = [...(await copiesOf(this.userId, this.backupId))].sort((a, b) => a.at - b.at)
     await this.serial(async () => {
       let error = result.ok ? null : result.error
       let restored = 0
@@ -189,6 +195,7 @@ export class SummaryDraft {
   private payload(content: string) {
     const base = this.base
     return {
+      forkId: this.forkId,
       summaryId: this.summary.id,
       draftId: base.draftId,
       content,
@@ -204,7 +211,7 @@ export class SummaryDraft {
     const replaces = previous !== null && !this.sending.has(previous)
     const copy = makeCopy(
       this.userId,
-      this.summary.id,
+      this.backupId,
       "summary",
       { kind: "summary", payload: this.payload(content) },
       Date.now(),
@@ -277,13 +284,14 @@ export class SummaryDraft {
     await this.flush()
     if (this.view.unsaved || this.draft === null) return
     const states = await this.session.call((client) =>
-      client("SummaryDraftHistory", { summaryId: this.summary.id, limit: 2 })
+      client("SummaryDraftHistory", { forkId: this.forkId, summaryId: this.summary.id, limit: 2 })
     )
     if (!states.ok) return this.refresh({ error: states.error })
     const previous = states.value[1]
     if (previous === undefined) return
     const result = await this.session.call((client) =>
       client("RestoreSummaryDraft", {
+        forkId: this.forkId,
         summaryId: this.summary.id,
         draftId: this.draft!.id,
         seq: previous.seq,
@@ -308,6 +316,7 @@ export class SummaryDraft {
     const content = this.shown()
     const result = await this.session.call((client) =>
       client("EditSummary", {
+        forkId: this.forkId,
         summaryId: this.summary.id,
         content,
         expectedRowVersion: this.summary.rowVersion,
@@ -355,6 +364,7 @@ export class SummaryDraft {
     }
     const result = await this.session.call((client) =>
       client("DiscardSummaryDraft", {
+        forkId: this.forkId,
         summaryId: this.summary.id,
         draftId: draft.id,
         expectedRowVersion: draft.rowVersion

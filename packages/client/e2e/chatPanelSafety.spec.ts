@@ -95,7 +95,11 @@ test("switching tabs saves text typed while a summary draft save was in flight",
   await expect
     .poll(
       async () =>
-        (await admin((api) => api.GetSummaryDraft({ summaryId: summary.id as typeof SummaryId.Type })))?.content
+        (
+          await admin((api) =>
+            api.GetSummaryDraft({ forkId: chat.currentForkId, summaryId: summary.id as typeof SummaryId.Type })
+          )
+        )?.content
     )
     .toBe("The latest text typed before switching tabs.")
   await page.getByRole("tab", { name: "Summaries", exact: true }).click()
@@ -125,7 +129,11 @@ test("summary text survives a failed save and switching to another tab", async (
   await expect
     .poll(
       async () =>
-        (await admin((api) => api.GetSummaryDraft({ summaryId: summary.id as typeof SummaryId.Type })))?.content
+        (
+          await admin((api) =>
+            api.GetSummaryDraft({ forkId: chat.currentForkId, summaryId: summary.id as typeof SummaryId.Type })
+          )
+        )?.content
     )
     .toBe("Offline text must survive switching tabs.")
 })

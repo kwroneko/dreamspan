@@ -1,4 +1,4 @@
-import { eventApplies, forkAt } from "./forkState.ts"
+import { eventApplies, inFork, viewAt } from "./forkState.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { tokensOf } from "../assembler/st.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
@@ -301,13 +301,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const [row] = yield* sql<{
           chat_id: string
+          fork_id: string | null
           slot_id: string
           rollout_id: string
           status: string
           snapshot: string
           sent_context_json: string | null
         }>`
-        SELECT s.chat_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json
+        SELECT s.chat_id, r.fork_id, v.slot_id, r.id AS rollout_id, r.status, p.context_snapshot_json AS snapshot, p.sent_context_json
         FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
         JOIN rollouts r ON r.id = v.rollout_id JOIN rollout_payloads p ON p.rollout_id = r.id
         WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND p.context_snapshot_json IS NOT NULL
@@ -319,16 +320,18 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
         const display = wire?.display
         const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
-        if (snapshot.lcm?.selected.length) {
-          const [settings] = yield* sql<{
-            enabled: number
-          }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
-            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* forkAt(sql, chatId, null), "e")} ORDER BY seq DESC LIMIT 1`
-          if (settings?.enabled)
-            for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
-              .summaries)
-              current.set(summary.id, summary)
-        }
+        yield* Effect.gen(function* () {
+          if (snapshot.lcm?.selected.length) {
+            const [settings] = yield* sql<{
+              enabled: number
+            }>`SELECT json_extract(value_json, '$.enabled') AS enabled FROM state_events e
+            WHERE chat_id = ${chatId} AND slot_id IS NULL AND scope IS NULL AND key = 'lcm.settings' AND ${eventApplies(sql, yield* viewAt(sql, chatId, null), "e")} ORDER BY seq DESC LIMIT 1`
+            if (settings?.enabled)
+              for (const summary of (yield* selectSummaryLayer(sql, userId, chatId, snapshot.inputs.leafSlotId))
+                .summaries)
+                current.set(summary.id, summary)
+          }
+        }).pipe(inFork(sql, chatId, row.fork_id, snapshot.inputs.leafSlotId))
         return new RunContext({
           chatId,
           slotId: row.slot_id as SlotId,

@@ -1,3 +1,5 @@
+import { inJobFork } from "./lcmFork.ts"
+import { viewAt } from "./forkState.ts"
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 import { inFork } from "./forkState.ts"
@@ -38,9 +40,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         )
         const state = foldState(events.map((e) => e.event))
         const defaults = yield* readDefaults(sql, userId)
+        const fork = yield* viewAt(sql, chatId, leafSlotId)
         const jobs = yield* sql.unsafe<SummaryJob>(
-          `SELECT ${jobColumns} FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id WHERE j.chat_id = ? AND c.owner_user_id = ? AND j.status IN ('pending','processing') ORDER BY j.created_at,j.id`,
-          [chatId, userId]
+          `SELECT ${jobColumns} FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id WHERE j.chat_id = ? AND c.owner_user_id = ? AND (j.fork_id IS NULL OR j.fork_id = ?) AND j.status IN ('pending','processing') ORDER BY j.created_at,j.id`,
+          [chatId, userId, fork]
         )
         const empty = {
           chunks: [],
@@ -63,7 +66,7 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         const row = yield* backfillOf(sql, chatId)
         const live = row?.status === "processing" ? row : null
         const stopped = live
-          ? live.paused || live.capped || overCap(live, yield* spentSince(sql, chatId, live.startedAt))
+          ? live.paused || live.capped || overCap(live, yield* spentSince(sql, chatId, live.startedAt, live.forkId))
           : false
         const progress = live ? { armed: live.armed, held: stopped, drive: live.drive } : null
         // Enabling waits for the next reply; startup and a finished job's pass do not begin it.
@@ -329,6 +332,6 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
             inspection: yield* inspectionInputs(sql, userId, taken)
           })
         }
-      }).pipe(query("AssembleSummary"))
+      }).pipe(inJobFork(sql, jobId), query("AssembleSummary"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

@@ -182,7 +182,10 @@ lcmTest(
       assert.strictEqual(rows[1]!.content, "A fallback summary.")
       assert.strictEqual(calls(), 1)
       const [left] = yield* fixtureSql(h.dataDir, [
-        { sql: "SELECT count(*) AS n FROM summary_reruns WHERE chat_id=?", params: [h.chat.id] }
+        {
+          sql: "SELECT count(*) AS n FROM fork_overrides WHERE chat_id=? AND kind='summary_rerun' AND flag=1",
+          params: [h.chat.id]
+        }
       ])
       assert.strictEqual(Number(left![0]!.n), 0)
       // A job that gave up is retried the same way (the first job's row, which ended in the failed summary).

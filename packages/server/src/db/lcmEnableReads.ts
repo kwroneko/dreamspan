@@ -121,14 +121,14 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
         const [existing] = yield* sql`SELECT 1 FROM summaries WHERE chat_id = ${chatId} AND sealed = 1 LIMIT 1`
         return existing ? null : yield* importedSummary(sql, userId, chatId, leafSlotId)
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("ReadLcmImported")),
-    GetBackfill: ({ userId, chatId }) =>
+    GetBackfill: ({ userId, chatId, forkId }) =>
       Effect.gen(function* () {
         const [owned] =
           yield* sql`SELECT 1 FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
         if (!owned) return yield* new NotFound({ entity: "chat", id: chatId })
         const row = yield* backfillOf(sql, chatId)
         if (!row) return null
-        const spent = yield* spentSince(sql, chatId, row.startedAt)
+        const spent = yield* spentSince(sql, chatId, row.startedAt, row.forkId)
         const state =
           row.status === "complete"
             ? ("done" as const)
@@ -153,7 +153,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           capCost: row.capCost,
           currency: row.currency ?? spent.currency
         }
-      }).pipe(query("GetBackfill")),
+      }).pipe(inFork(sql, chatId, forkId, null), query("GetBackfill")),
 
     EstimateBackfill: ({ userId, chatId, leafSlotId, forkId }) =>
       Effect.gen(function* () {

@@ -314,6 +314,7 @@ export const SummaryChange = Schema.Struct({ summary: Summary, recovered: Schema
  * and the text now. Also what a browser copy replays (`summaries` in `POST /library/drafts`).
  */
 export const SummaryDraftSave = Schema.Struct({
+  forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
   summaryId: SummaryId,
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
@@ -324,12 +325,13 @@ export const SummaryDraftSave = Schema.Struct({
 })
 export class LcmApi extends RpcGroup.make(
   Rpc.make("GetSummary", {
-    payload: { summaryId: SummaryId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), summaryId: SummaryId },
     success: Summary,
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("EditSummary", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       summaryId: SummaryId,
       content: Schema.String,
       expectedRowVersion: Schema.Int,
@@ -339,7 +341,12 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   Rpc.make("SelectSummaryRevision", {
-    payload: { summaryId: SummaryId, revisionId: SummaryRevisionId, expectedRowVersion: Schema.Int },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      summaryId: SummaryId,
+      revisionId: SummaryRevisionId,
+      expectedRowVersion: Schema.Int
+    },
     success: Summary,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
@@ -351,6 +358,7 @@ export class LcmApi extends RpcGroup.make(
   /** Summaries overlapping message depths `fromDepth`..`toDepth` on the path, outermost levels included. */
   Rpc.make("GetLcmCoverage", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       chatId: ChatId,
       leafSlotId: SlotId,
       includeResolved: Schema.optionalKey(Schema.Boolean),
@@ -361,7 +369,7 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("ListSummaryRevisions", {
-    payload: { summaryId: SummaryId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), summaryId: SummaryId },
     success: Schema.Array(SummaryRevision),
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -371,6 +379,7 @@ export class LcmApi extends RpcGroup.make(
    */
   Rpc.make("SetSummaryRerun", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       chatId: ChatId,
       target: RerunTarget,
       requested: Schema.Boolean,
@@ -406,7 +415,7 @@ export class LcmApi extends RpcGroup.make(
   }),
   /** The chat's backfill, if it has one: its state, spending and what is left. */
   Rpc.make("GetLcmBackfill", {
-    payload: { chatId: ChatId, leafSlotId: SlotId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), chatId: ChatId, leafSlotId: SlotId },
     success: Schema.NullOr(LcmBackfill),
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -416,6 +425,7 @@ export class LcmApi extends RpcGroup.make(
    */
   Rpc.make("SetLcmBackfill", {
     payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       chatId: ChatId,
       leafSlotId: SlotId,
       action: Schema.Literals(["pause", "continue", "summarizeNow"]),
@@ -447,7 +457,7 @@ export class LcmApi extends RpcGroup.make(
   }),
   // --- The edit of a summary goes through a draft like any text field (ARCHITECTURE §3.10).
   Rpc.make("GetSummaryDraft", {
-    payload: { summaryId: SummaryId },
+    payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), summaryId: SummaryId },
     success: Schema.NullOr(Draft),
     error: Schema.Union([NotFound, ServerError])
   }),
@@ -457,18 +467,32 @@ export class LcmApi extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, TextTooLong, ServerError])
   }),
   Rpc.make("SummaryDraftHistory", {
-    payload: { summaryId: SummaryId, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })) },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      summaryId: SummaryId,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+    },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, ServerError])
   }),
   Rpc.make("RestoreSummaryDraft", {
-    payload: { summaryId: SummaryId, draftId: Schema.String, ...DraftRestore },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      summaryId: SummaryId,
+      draftId: Schema.String,
+      ...DraftRestore
+    },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   /** Ends the edit unsaved; its text goes to the bin's recovered texts. */
   Rpc.make("DiscardSummaryDraft", {
-    payload: { summaryId: SummaryId, draftId: Schema.String, expectedRowVersion: Schema.Int },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      summaryId: SummaryId,
+      draftId: Schema.String,
+      expectedRowVersion: Schema.Int
+    },
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   })

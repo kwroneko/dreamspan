@@ -10,13 +10,19 @@ import { lastText, lcmHarness, lcmTest, requestsTo } from "./support/lcmHarness.
 type Harness = Effect.Success<ReturnType<typeof lcmHarness>>
 
 const rowsOf = (h: Harness) =>
-  fixtureSql(h.dataDir, [
-    {
-      sql: `SELECT s.id,s.level,s.status,s.error_json,s.first_slot_id,s.last_slot_id,r.content,r.origin
-        FROM summaries s JOIN summary_revisions r ON r.id=s.selected_revision_id WHERE s.chat_id=? ORDER BY s.created_at,s.id`,
-      params: [h.chat.id]
-    }
-  ]).pipe(Effect.map(([rows]) => rows!))
+  Effect.gen(function* () {
+    const [rows] = yield* fixtureSql(h.dataDir, [
+      { sql: "SELECT id FROM summaries WHERE chat_id=? ORDER BY created_at,id", params: [h.chat.id] }
+    ])
+    return yield* Effect.forEach(rows!, (row) =>
+      Effect.map(h.reader.GetSummary({ userId: h.userId, summaryId: row.id as Summary["id"] }), (s) => ({
+        ...s,
+        first_slot_id: s.firstSlotId,
+        last_slot_id: s.lastSlotId,
+        error_json: s.error
+      }))
+    )
+  })
 const contextOf = (h: Harness) =>
   Effect.gen(function* () {
     const leaf = h.rows.at(-1)!
@@ -366,7 +372,10 @@ lcmTest(
       assert.strictEqual(rows[2]!.origin, "generated")
       assert.strictEqual(rows[0]!.content, "My own summary.", "the user's text is kept")
       const [left] = yield* fixtureSql(h.dataDir, [
-        { sql: "SELECT count(*) AS n FROM summary_reruns WHERE chat_id=?", params: [h.chat.id] }
+        {
+          sql: "SELECT count(*) AS n FROM fork_overrides WHERE chat_id=? AND kind='summary_rerun' AND flag=1",
+          params: [h.chat.id]
+        }
       ])
       assert.strictEqual(Number(left![0]!.n), 0)
       assert.lengthOf(yield* h.plan("reply"), 0)

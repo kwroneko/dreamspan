@@ -242,10 +242,12 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             )
           // A previous backfill of this chat is over once the user chooses again.
           yield* sql`UPDATE jobs SET status = 'complete', updated_at = ${now}
-            WHERE kind = ${BACKFILL_KIND} AND status = 'processing' AND json_extract(payload_json, '$.chatId') = ${chatId}`
+            WHERE kind = ${BACKFILL_KIND} AND status = 'processing' AND json_extract(payload_json, '$.chatId') = ${chatId}
+              AND coalesce(json_extract(payload_json,'$.forkId'),(SELECT current_fork_id FROM chats WHERE id=${chatId})) IS ${yield* viewAt(sql, chatId, leafSlotId)}`
           if (approved.jobs > 0) {
             const payload: BackfillPayload = {
               chatId,
+              forkId: yield* viewAt(sql, chatId, leafSlotId),
               leafSlotId,
               choice,
               startedAt: now,
@@ -272,7 +274,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           return { unhidden, summaryId }
         }).pipe(inFork(sql, chatId, forkId, leafSlotId), transaction(sql, "EnableLcm")),
 
-      SetBackfill: ({ userId, chatId, action, approved }) =>
+      SetBackfill: ({ userId, chatId, forkId, action, approved }) =>
         Effect.gen(function* () {
           yield* ownedChat(userId, chatId, null)
           const row = yield* backfillOf(sql, chatId)
@@ -290,7 +292,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
           } else {
             // Continue: a new cap of 150% of what is left, counted from what has been spent.
             if (!approved) return yield* reject("SetBackfill", "Continuing needs the estimate of what is left.")
-            const spent = yield* spentSince(sql, chatId, row.startedAt)
+            const spent = yield* spentSince(sql, chatId, row.startedAt, row.forkId)
             yield* save(id, {
               ...payload,
               paused: false,
@@ -302,6 +304,6 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               ...capFor(approved, { tokens: spent.tokens, cost: spent.cost })
             })
           }
-        }).pipe(transaction(sql, "SetBackfill"))
+        }).pipe(inFork(sql, chatId, forkId, null), transaction(sql, "SetBackfill"))
     } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
   })
