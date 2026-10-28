@@ -50,28 +50,3 @@ export const recordHistoryReduction = Effect.fnUntraced(function* (
     yield* sql`INSERT INTO history_changes SELECT id, chat_id, depth, 1 FROM slots WHERE id = ${slotId}
       ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1`
 })
-
-export const historyChangesSchema = [
-  `CREATE TABLE history_changes (
-    slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
-    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
-    depth INTEGER NOT NULL,
-    revision INTEGER NOT NULL
-  ) STRICT`,
-  `CREATE INDEX history_changes_depth ON history_changes(chat_id, depth)`,
-  `CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at, context_excluded ON slots
-    WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
-      OR (OLD.context_excluded = 0 AND NEW.context_excluded = 1)
-
-    BEGIN
-      INSERT INTO history_changes VALUES (NEW.id, NEW.chat_id, NEW.depth, 1)
-      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
-    END`,
-  `CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions
-    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
-    BEGIN
-      INSERT INTO history_changes
-        SELECT id, chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND selected_version_id = NEW.id
-      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
-    END`
-]

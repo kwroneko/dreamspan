@@ -1,0 +1,1399 @@
+// The schema, created whole. Nobody has run an earlier version of this software, so there
+// is no chain of migrations to replay: while that holds, a schema change edits this file and
+// the deploy starts from an empty data directory (ARCHITECTURE.md, Migrations).
+//
+// Generated from the 56-step chain it replaces (tables, indexes, triggers, views); the
+// chain's only rows were its ledger, so there is nothing to seed. Full-text tables create
+// their shadow tables themselves.
+export const baseline: ReadonlyArray<string> = [
+  `CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    handle TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin', 'user')),
+    created_at INTEGER NOT NULL,
+    disabled_at INTEGER
+  , password_hash TEXT) STRICT`,
+  `CREATE TABLE drafts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'entity_field', 'summary_edit')),
+    target_id TEXT NOT NULL,
+    field TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key.
+    base_revision TEXT,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    UNIQUE (user_id, target_kind, target_id, field)
+  ) STRICT`,
+  `CREATE TABLE user_prefs (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+    PRIMARY KEY (user_id, key)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL CHECK (json_valid(value_json))
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE user_settings (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    key TEXT NOT NULL,
+    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+    PRIMARY KEY (user_id, key)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE media_assets (
+    id TEXT PRIMARY KEY,
+    sha256 TEXT NOT NULL UNIQUE,
+    mime TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    byte_size INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE TABLE media_refs (
+    media_id TEXT NOT NULL REFERENCES media_assets(id),
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    PRIMARY KEY (media_id, owner_user_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX media_refs_owner ON media_refs(owner_user_id)`,
+  `CREATE TABLE jobs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT REFERENCES users(id),
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
+    request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')),
+    payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 2,
+    run_after INTEGER,
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX jobs_queue ON jobs(status, request_class, run_after) WHERE status IN ('pending', 'processing')`,
+  `CREATE TABLE entities (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL CHECK (kind IN ('card', 'preset', 'lorebook', 'note', 'preset_overlay')),
+    created_at INTEGER NOT NULL,
+    archived_at INTEGER
+  , deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, forked_from_entity_id TEXT REFERENCES entities(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, forked_in_chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, forked_at INTEGER) STRICT`,
+  `CREATE INDEX entities_owner_kind ON entities(owner_user_id, kind) WHERE archived_at IS NULL`,
+  `CREATE TABLE entity_revisions (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    entity_id TEXT NOT NULL REFERENCES entities(id),
+    parents TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(parents) AND json_type(parents) = 'array'),
+    doc_json TEXT NOT NULL CHECK (json_valid(doc_json)),
+    doc_hash TEXT NOT NULL,
+    schema_version INTEGER NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge')),
+    origin_ref TEXT,
+    message TEXT,
+    -- Plain text extracted from doc_json for full-text search.
+    search_text TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
+  `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
+  `CREATE TABLE entity_refs (
+    id TEXT PRIMARY KEY,
+    entity_id TEXT NOT NULL REFERENCES entities(id),
+    ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')),
+    head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id),
+    follows_ref_id TEXT REFERENCES entity_refs(id),
+    merge_base_revision_id TEXT REFERENCES entity_revisions(id),
+    label TEXT NOT NULL,
+    subtitle TEXT NOT NULL DEFAULT '',
+    chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    source_path TEXT,
+    source_hash TEXT,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_used_at INTEGER,
+    CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
+    CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
+  ) STRICT`,
+  `CREATE INDEX entity_refs_entity ON entity_refs(entity_id)`,
+  `CREATE INDEX entity_refs_chat ON entity_refs(chat_id) WHERE chat_id IS NOT NULL`,
+  `CREATE INDEX entity_refs_follows ON entity_refs(follows_ref_id) WHERE follows_ref_id IS NOT NULL`,
+  `CREATE TABLE entity_tags (
+    entity_id TEXT NOT NULL REFERENCES entities(id),
+    tag TEXT NOT NULL,
+    PRIMARY KEY (entity_id, tag)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX entity_tags_tag ON entity_tags(tag, entity_id)`,
+  `CREATE TRIGGER entity_refs_head_same_entity
+    BEFORE INSERT ON entity_refs
+    WHEN (SELECT entity_id FROM entity_revisions WHERE id = NEW.head_revision_id) IS NOT NEW.entity_id
+    BEGIN SELECT RAISE(ABORT, 'entity_refs.head_revision_id belongs to another entity'); END`,
+  `CREATE TRIGGER entity_refs_head_same_entity_update
+    BEFORE UPDATE OF head_revision_id ON entity_refs
+    WHEN (SELECT entity_id FROM entity_revisions WHERE id = NEW.head_revision_id) IS NOT NEW.entity_id
+    BEGIN SELECT RAISE(ABORT, 'entity_refs.head_revision_id belongs to another entity'); END`,
+  `CREATE TABLE chats (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')),
+    title TEXT NOT NULL DEFAULT '',
+    title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')),
+    cover_media_id TEXT REFERENCES media_assets(id),
+    active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    last_message_at INTEGER
+  , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0) STRICT`,
+  `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
+  `CREATE TABLE lanes (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT,
+    forked_from_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX lanes_chat ON lanes(chat_id)`,
+  `CREATE TABLE slots (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    lane_id TEXT NOT NULL REFERENCES lanes(id),
+    parent_slot_id TEXT REFERENCES slots(id),
+    depth INTEGER NOT NULL CHECK (depth >= 0),
+    selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED,
+    context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)),
+    placement_group_id TEXT,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT,
+    CHECK ((parent_slot_id IS NULL) = (depth = 0))
+  ) STRICT`,
+  `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
+  `CREATE INDEX slots_chat_depth ON slots(chat_id, depth)`,
+  `CREATE INDEX slots_placement_group ON slots(placement_group_id) WHERE placement_group_id IS NOT NULL`,
+  `CREATE TABLE slot_parents (
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    parent_slot_id TEXT NOT NULL REFERENCES slots(id),
+    ordinal INTEGER NOT NULL,
+    PRIMARY KEY (slot_id, ordinal)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE versions (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    ordinal INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')),
+    speaker_entity_id TEXT REFERENCES entities(id),
+    writer TEXT NOT NULL CHECK (writer IN ('human', 'model')),
+    content TEXT NOT NULL DEFAULT '',
+    macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')),
+    context_form TEXT,
+    display_form TEXT,
+    reasoning TEXT,
+    frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
+    origin TEXT NOT NULL CHECK (origin IN
+      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad')),
+    source_version_id TEXT REFERENCES versions(id),
+    greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
+    direction TEXT,
+    rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED,
+    connection_id TEXT REFERENCES connections(id),
+    model_id TEXT REFERENCES models(id),
+    error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+    usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+    starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
+    hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+    changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT,
+    UNIQUE (slot_id, ordinal),
+    CHECK (status <> 'failed' OR error_json IS NOT NULL)
+  ) STRICT`,
+  `CREATE INDEX versions_rollout ON versions(rollout_id) WHERE rollout_id IS NOT NULL`,
+  `CREATE TABLE version_history (
+    id INTEGER PRIMARY KEY,
+    version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    replaced_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX version_history_version ON version_history(version_id, id)`,
+  `CREATE TABLE version_attachments (
+    version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    media_id TEXT NOT NULL REFERENCES media_assets(id),
+    kind TEXT NOT NULL CHECK (kind IN ('image')),
+    alt_text TEXT,
+    PRIMARY KEY (version_id, ordinal)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE state_events (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    slot_id TEXT REFERENCES slots(id) ON DELETE CASCADE,
+    version_id TEXT REFERENCES versions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    key TEXT NOT NULL,
+    scope TEXT,
+    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+    origin TEXT NOT NULL CHECK (origin IN ('user', 'rollout', 'changeset', 'import')),
+    origin_ref TEXT,
+    created_at INTEGER NOT NULL,
+    superseded_by_changeset TEXT REFERENCES changesets(id), slot_chain_id TEXT, slot_depth INTEGER,
+    CHECK (version_id IS NULL OR slot_id IS NOT NULL)
+  ) STRICT`,
+  `CREATE INDEX state_events_position ON state_events(chat_id, slot_id, seq)`,
+  `CREATE TABLE rollouts (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN
+      ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit')),
+    status TEXT NOT NULL CHECK (status IN
+      ('created', 'running', 'completed', 'stopped', 'failed', 'interrupted', 'discarded')),
+    slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    parent_rollout_id TEXT REFERENCES rollouts(id),
+    role TEXT NOT NULL,
+    connection_id TEXT REFERENCES connections(id),
+    model_id TEXT REFERENCES models(id),
+    request_class TEXT NOT NULL CHECK (request_class IN ('interactive', 'idle', 'background')),
+    -- Provider-reported usage, rolled up. NULL means unknown, not zero (as in reference-harness).
+    llm_requests INTEGER,
+    usage_input_tokens INTEGER,
+    usage_output_tokens INTEGER,
+    usage_cache_read_tokens INTEGER,
+    usage_cache_write_tokens INTEGER,
+    usage_cost REAL,
+    cache_observed_json TEXT CHECK (cache_observed_json IS NULL OR json_valid(cache_observed_json)),
+    error TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    completed_at INTEGER
+  , context_issues_json TEXT
+    CHECK (context_issues_json IS NULL OR json_valid(context_issues_json)), history_start_slot_id TEXT, history_start_depth INTEGER, history_depth INTEGER, fork_id TEXT) STRICT`,
+  `CREATE INDEX rollouts_chat ON rollouts(chat_id, created_at DESC)`,
+  `CREATE INDEX rollouts_slot ON rollouts(slot_id) WHERE slot_id IS NOT NULL`,
+  `CREATE INDEX rollouts_live ON rollouts(status, updated_at) WHERE status IN ('created', 'running', 'interrupted')`,
+  `CREATE TABLE rollout_payloads (
+    rollout_id TEXT PRIMARY KEY REFERENCES rollouts(id) ON DELETE CASCADE,
+    context_snapshot_json TEXT CHECK (context_snapshot_json IS NULL OR json_valid(context_snapshot_json)),
+    transcript_json TEXT CHECK (transcript_json IS NULL OR json_valid(transcript_json))
+  , sent_context_json TEXT
+      CHECK (sent_context_json IS NULL OR json_valid(sent_context_json))) STRICT`,
+  `CREATE TABLE rollout_branches (
+    rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
+    branch_no INTEGER NOT NULL CHECK (branch_no >= 1),
+    parent_branch_no INTEGER NOT NULL DEFAULT 0,
+    fork_index INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    messages_json TEXT NOT NULL CHECK (json_valid(messages_json)),
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (rollout_id, branch_no)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE changesets (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')),
+    rollout_id TEXT REFERENCES rollouts(id),
+    status TEXT NOT NULL CHECK (status IN ('applying', 'applied', 'reverted', 'partially_reverted')),
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX changesets_chat ON changesets(chat_id, created_at DESC)`,
+  `CREATE TABLE changeset_items (
+    id INTEGER PRIMARY KEY,
+    changeset_id TEXT NOT NULL REFERENCES changesets(id) ON DELETE CASCADE,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('slot_selection', 'summary_revision', 'state_event', 'ref_head')),
+    target_id TEXT NOT NULL,
+    before_json TEXT CHECK (before_json IS NULL OR json_valid(before_json)),
+    after_json TEXT CHECK (after_json IS NULL OR json_valid(after_json)),
+    reverted_at INTEGER
+  ) STRICT`,
+  `CREATE INDEX changeset_items_changeset ON changeset_items(changeset_id)`,
+  `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE ON entity_revisions
+    BEGIN SELECT RAISE(ABORT, 'entity revisions are immutable'); END`,
+  `CREATE TRIGGER rollout_snapshot_frozen BEFORE UPDATE OF context_snapshot_json ON rollout_payloads
+    WHEN OLD.context_snapshot_json IS NOT NULL AND NEW.context_snapshot_json IS NOT OLD.context_snapshot_json
+    BEGIN SELECT RAISE(ABORT, 'a rollout context snapshot is frozen once written'); END`,
+  `CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions
+    WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
+    BEGIN
+      INSERT INTO version_history (version_id, content, replaced_at) VALUES (OLD.id, OLD.content, NEW.updated_at);
+    END`,
+  `CREATE TRIGGER versions_identity_fixed BEFORE UPDATE OF id, slot_id, ordinal, writer, origin ON versions
+    WHEN NEW.id IS NOT OLD.id OR NEW.slot_id IS NOT OLD.slot_id OR NEW.ordinal IS NOT OLD.ordinal
+      OR NEW.writer IS NOT OLD.writer OR NEW.origin IS NOT OLD.origin
+    BEGIN SELECT RAISE(ABORT, 'a version''s identity, slot, writer and origin never change'); END`,
+  `CREATE TRIGGER state_events_immutable BEFORE UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, origin ON state_events
+    BEGIN SELECT RAISE(ABORT, 'state events are immutable; supersede them with a changeset'); END`,
+  `CREATE TRIGGER slots_parent_same_chat BEFORE INSERT ON slots
+    WHEN NEW.parent_slot_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM slots p WHERE p.id = NEW.parent_slot_id AND p.chat_id = NEW.chat_id AND p.depth + 1 = NEW.depth)
+    BEGIN SELECT RAISE(ABORT, 'a slot''s parent must be in the same chat, one level up'); END`,
+  `CREATE TRIGGER slots_lane_same_chat BEFORE INSERT ON slots
+    WHEN (SELECT chat_id FROM lanes WHERE id = NEW.lane_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a slot''s lane must be in the same chat'); END`,
+  `CREATE TRIGGER slots_shape_fixed BEFORE UPDATE OF chat_id, lane_id, parent_slot_id, depth ON slots
+    WHEN NEW.chat_id IS NOT OLD.chat_id OR NEW.lane_id IS NOT OLD.lane_id
+      OR NEW.parent_slot_id IS NOT OLD.parent_slot_id OR NEW.depth IS NOT OLD.depth
+    BEGIN SELECT RAISE(ABORT, 'the graph is append-only: a slot never moves'); END`,
+  `CREATE TRIGGER slots_selection_own_version BEFORE INSERT ON slots
+    WHEN (SELECT slot_id FROM versions WHERE id = NEW.selected_version_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a slot can only select one of its own versions'); END`,
+  `CREATE TRIGGER slots_selection_own_version_update BEFORE UPDATE OF selected_version_id ON slots
+    WHEN (SELECT slot_id FROM versions WHERE id = NEW.selected_version_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a slot can only select one of its own versions'); END`,
+  `CREATE TRIGGER chats_leaf_own_slot BEFORE UPDATE OF active_leaf_slot_id ON chats
+    WHEN NEW.active_leaf_slot_id IS NOT NULL
+      AND (SELECT chat_id FROM slots WHERE id = NEW.active_leaf_slot_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a chat''s active leaf must be one of its slots'); END`,
+  `CREATE TRIGGER state_events_position_valid BEFORE INSERT ON state_events
+    WHEN (NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id)
+      OR (NEW.version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.version_id) IS NOT NEW.slot_id)
+    BEGIN SELECT RAISE(ABORT, 'a state event''s slot must be in its chat, and its version in that slot'); END`,
+  `CREATE VIRTUAL TABLE versions_fts USING fts5(
+    content, content='versions', content_rowid='seq',
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3'
+  )`,
+  `CREATE TRIGGER versions_fts_insert AFTER INSERT ON versions WHEN NEW.status <> 'generating'
+    BEGIN INSERT INTO versions_fts (rowid, content) VALUES (NEW.seq, NEW.content); END`,
+  `CREATE TRIGGER versions_fts_update AFTER UPDATE OF content, status ON versions
+    BEGIN
+      INSERT INTO versions_fts (versions_fts, rowid, content)
+        SELECT 'delete', OLD.seq, OLD.content WHERE OLD.status <> 'generating';
+      INSERT INTO versions_fts (rowid, content)
+        SELECT NEW.seq, NEW.content WHERE NEW.status <> 'generating';
+    END`,
+  `CREATE TRIGGER versions_fts_delete AFTER DELETE ON versions WHEN OLD.status <> 'generating'
+    BEGIN INSERT INTO versions_fts (versions_fts, rowid, content) VALUES ('delete', OLD.seq, OLD.content); END`,
+  `CREATE VIRTUAL TABLE entity_revisions_fts USING fts5(
+    search_text, content='entity_revisions', content_rowid='seq',
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3'
+  )`,
+  `CREATE TRIGGER entity_revisions_fts_insert AFTER INSERT ON entity_revisions
+    BEGIN INSERT INTO entity_revisions_fts (rowid, search_text) VALUES (NEW.seq, NEW.search_text); END`,
+  `CREATE INDEX drafts_active ON drafts(user_id, updated_at DESC) WHERE status = 'active'`,
+  `CREATE TABLE draft_history (
+    draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL CHECK (seq >= 1),
+    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore')),
+    first_at INTEGER NOT NULL,
+    at INTEGER NOT NULL,
+    start INTEGER NOT NULL CHECK (start >= 0),
+    removed TEXT NOT NULL,
+    inserted TEXT NOT NULL, displaced INTEGER NOT NULL DEFAULT 0 CHECK (displaced IN (0, 1)),
+    PRIMARY KEY (draft_id, seq)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER drafts_gc_chat AFTER DELETE ON chats
+    BEGIN DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.id; END`,
+  `CREATE TRIGGER drafts_gc_version AFTER DELETE ON versions
+    BEGIN DELETE FROM drafts WHERE target_kind = 'version_edit' AND target_id = OLD.id; END`,
+  `CREATE TRIGGER drafts_gc_slot AFTER DELETE ON slots
+    BEGIN
+      DELETE FROM drafts WHERE target_kind = 'scratchpad' AND target_id = OLD.id;
+      DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.chat_id AND field = OLD.id;
+    END`,
+  `CREATE TRIGGER drafts_gc_ref AFTER DELETE ON entity_refs
+    BEGIN DELETE FROM drafts WHERE target_kind = 'entity_field' AND target_id = OLD.id; END`,
+  `CREATE INDEX slots_bin_item ON slots(bin_item_id) WHERE bin_item_id IS NOT NULL`,
+  `CREATE INDEX versions_bin_item ON versions(bin_item_id) WHERE bin_item_id IS NOT NULL`,
+  `CREATE TABLE recovered_texts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    -- The draft it came from.
+    source_kind TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    source_field TEXT NOT NULL,
+    source_label TEXT NOT NULL,
+    reason TEXT NOT NULL CHECK (reason IN ('commit', 'discard')),
+    content TEXT NOT NULL,
+    byte_size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX recovered_texts_user ON recovered_texts(user_id, created_at)`,
+  `CREATE TABLE connections (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    api TEXT NOT NULL,
+    -- NULL means the kind's default.
+    base_url TEXT,
+    -- Write-only secrets, encrypted with the server secret (PROVIDERS §5). Header values
+    -- often carry credentials too, so only header names are ever shown.
+    api_key_enc BLOB,
+    key_hint TEXT,
+    headers_enc BLOB,
+    header_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(header_names_json)),
+    compat_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(compat_json)),
+    cache_ttl_s INTEGER CHECK (cache_ttl_s IS NULL OR cache_ttl_s > 0),
+    max_concurrent INTEGER CHECK (max_concurrent IS NULL OR max_concurrent >= 1),
+    -- The per-connection proxy override (PROVIDERS §6.2).
+    proxy_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (proxy_mode IN ('inherit', 'direct', 'custom')),
+    proxy_url_enc BLOB,
+    preset_override_ref_id TEXT REFERENCES entity_refs(id),
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER,
+    bin_item_id TEXT,
+    -- Purged connections stay as tombstones, so old messages and ledger rows still
+    -- name their model (PROVIDERS §10).
+    purged_at INTEGER, credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_origin TEXT, cache_revision INTEGER NOT NULL DEFAULT 0,
+    CHECK ((api_key_enc IS NULL) = (key_hint IS NULL)),
+    CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)),
+    CHECK (purged_at IS NULL OR (api_key_enc IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL))
+  ) STRICT`,
+  `CREATE INDEX connections_owner ON connections(owner_user_id)`,
+  `CREATE TABLE models (
+    id TEXT PRIMARY KEY,
+    connection_id TEXT NOT NULL REFERENCES connections(id),
+    model_key TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('fetched', 'user')),
+    upstream_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(upstream_json)),
+    overrides_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(overrides_json)),
+    hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
+    fetched_at INTEGER,
+    missing_since INTEGER,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    UNIQUE (connection_id, model_key)
+  ) STRICT`,
+  `CREATE TRIGGER models_connection_fixed BEFORE UPDATE OF connection_id, model_key ON models
+    WHEN NEW.connection_id IS NOT OLD.connection_id OR NEW.model_key IS NOT OLD.model_key
+    BEGIN SELECT RAISE(ABORT, 'a model never moves to another connection or key'); END`,
+  `CREATE TABLE llm_requests (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    connection_id TEXT NOT NULL REFERENCES connections(id),
+    model_id TEXT REFERENCES models(id),
+    chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+    rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL,
+    version_id TEXT REFERENCES versions(id) ON DELETE SET NULL,
+    purpose TEXT NOT NULL CHECK (purpose IN
+      ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit', 'test')),
+    -- What was requested.
+    api TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model_key TEXT NOT NULL,
+    -- What served it: the model the response named, and the routed upstream where a
+    -- gateway reports one (OpenRouter).
+    response_model TEXT,
+    upstream TEXT,
+    status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')),
+    started_at INTEGER NOT NULL,
+    first_token_at INTEGER,
+    ended_at INTEGER,
+    -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write
+    -- written with the long TTL; reasoning is the subset of output.
+    input_uncached INTEGER,
+    cache_read INTEGER,
+    cache_write INTEGER,
+    cache_write_long INTEGER,
+    output INTEGER,
+    reasoning INTEGER,
+    usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')),
+    -- The provider's usage object verbatim, so counts can be recomputed if a
+    -- normalization turns out wrong.
+    raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)),
+    reported_cost REAL,
+    cost REAL,
+    cost_currency TEXT,
+    -- What produced cost: a built-in price source, 'reported', or a user formula.
+    cost_formula TEXT,
+    error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT,
+    CHECK ((status = 'running') = (ended_at IS NULL)),
+    CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL))
+  ) STRICT`,
+  `CREATE INDEX llm_requests_owner ON llm_requests(owner_user_id, started_at)`,
+  `CREATE INDEX llm_requests_connection ON llm_requests(connection_id, started_at)`,
+  `CREATE INDEX llm_requests_running ON llm_requests(status) WHERE status = 'running'`,
+  `CREATE INDEX llm_requests_rollout ON llm_requests(rollout_id) WHERE rollout_id IS NOT NULL`,
+  `CREATE INDEX llm_requests_version ON llm_requests(version_id) WHERE version_id IS NOT NULL`,
+  `CREATE TRIGGER llm_requests_attribution_valid BEFORE INSERT ON llm_requests
+    WHEN (NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id) IS NOT NEW.owner_user_id)
+      OR (NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id)
+      OR (NEW.version_id IS NOT NULL AND (SELECT s.chat_id FROM versions v JOIN slots s ON s.id = v.slot_id
+        WHERE v.id = NEW.version_id) IS NOT NEW.chat_id)
+      OR (NEW.model_id IS NOT NULL AND (SELECT connection_id FROM models WHERE id = NEW.model_id) IS NOT NEW.connection_id)
+    BEGIN SELECT RAISE(ABORT, 'a request is attributed only to its own user''s chat, and to a model of its connection'); END`,
+  `CREATE TRIGGER llm_requests_identity_fixed BEFORE UPDATE OF owner_user_id, connection_id, model_id, purpose, api, provider, model_key, started_at ON llm_requests
+    WHEN NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.connection_id IS NOT OLD.connection_id
+      OR NEW.model_id IS NOT OLD.model_id OR NEW.purpose IS NOT OLD.purpose OR NEW.api IS NOT OLD.api
+      OR NEW.provider IS NOT OLD.provider OR NEW.model_key IS NOT OLD.model_key OR NEW.started_at IS NOT OLD.started_at
+    BEGIN SELECT RAISE(ABORT, 'a request''s user, connection, model and purpose never change'); END`,
+  `CREATE TRIGGER llm_requests_attribution_fixed BEFORE UPDATE OF chat_id, rollout_id, version_id ON llm_requests
+    WHEN (NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id)
+      OR (NEW.rollout_id IS NOT NULL AND NEW.rollout_id IS NOT OLD.rollout_id)
+      OR (NEW.version_id IS NOT NULL AND NEW.version_id IS NOT OLD.version_id)
+    BEGIN SELECT RAISE(ABORT, 'a request''s attribution can only be cleared, never moved'); END`,
+  `CREATE TRIGGER llm_requests_closed_frozen BEFORE UPDATE ON llm_requests
+    WHEN OLD.status <> 'running' AND (
+      NEW.status IS NOT OLD.status OR NEW.ended_at IS NOT OLD.ended_at OR NEW.first_token_at IS NOT OLD.first_token_at
+      OR NEW.response_model IS NOT OLD.response_model OR NEW.upstream IS NOT OLD.upstream
+      OR NEW.input_uncached IS NOT OLD.input_uncached OR NEW.cache_read IS NOT OLD.cache_read
+      OR NEW.cache_write IS NOT OLD.cache_write OR NEW.cache_write_long IS NOT OLD.cache_write_long
+      OR NEW.output IS NOT OLD.output OR NEW.reasoning IS NOT OLD.reasoning OR NEW.usage_source IS NOT OLD.usage_source
+      OR NEW.raw_usage_json IS NOT OLD.raw_usage_json OR NEW.reported_cost IS NOT OLD.reported_cost
+      OR NEW.error_json IS NOT OLD.error_json)
+    BEGIN SELECT RAISE(ABORT, 'a closed request is a record; only its cost can be recomputed'); END`,
+  `CREATE TABLE "bin_items" (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL CHECK (kind IN ('chat', 'message', 'branch', 'version', 'entity', 'connection')),
+    target_id TEXT NOT NULL,
+    chat_id TEXT,
+    title TEXT NOT NULL,
+    excerpt TEXT NOT NULL,
+    origin_json TEXT NOT NULL CHECK (json_valid(origin_json)),
+    byte_size INTEGER NOT NULL,
+    deleted_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX bin_items_user ON bin_items(user_id, deleted_at)`,
+  `CREATE INDEX bin_items_chat ON bin_items(chat_id) WHERE chat_id IS NOT NULL`,
+  `CREATE TABLE credentials (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    -- Encrypted with the server secret, bound to "credential:<id>:key".
+    key_enc BLOB NOT NULL,
+    key_hint TEXT NOT NULL,
+    -- Origins (scheme://host[:port]) the key may be sent to.
+    origins_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(origins_json)),
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  , connection_owned INTEGER NOT NULL DEFAULT 0 CHECK (connection_owned IN (0, 1))) STRICT`,
+  `CREATE INDEX credentials_owner ON credentials(owner_user_id)`,
+  `CREATE INDEX connections_credential ON connections(credential_id) WHERE credential_id IS NOT NULL`,
+  `CREATE TRIGGER connections_credential_owner BEFORE INSERT ON connections
+    WHEN NEW.credential_id IS NOT NULL
+      AND (SELECT owner_user_id FROM credentials WHERE id = NEW.credential_id) IS NOT NEW.owner_user_id
+    BEGIN SELECT RAISE(ABORT, 'a connection can only use its owner''s credentials'); END`,
+  `CREATE TRIGGER connections_credential_owner_update BEFORE UPDATE OF credential_id, owner_user_id ON connections
+    WHEN NEW.credential_id IS NOT NULL
+      AND (SELECT owner_user_id FROM credentials WHERE id = NEW.credential_id) IS NOT NEW.owner_user_id
+    BEGIN SELECT RAISE(ABORT, 'a connection can only use its owner''s credentials'); END`,
+  `CREATE TRIGGER connections_purged_no_credential BEFORE UPDATE OF purged_at, credential_id ON connections
+    WHEN NEW.purged_at IS NOT NULL AND NEW.credential_id IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'a purged connection keeps no credential'); END`,
+  `CREATE TRIGGER connections_no_inline_key BEFORE INSERT ON connections
+    WHEN NEW.api_key_enc IS NOT NULL OR NEW.key_hint IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'keys are stored as credentials'); END`,
+  `CREATE TRIGGER connections_no_inline_key_update BEFORE UPDATE OF api_key_enc, key_hint ON connections
+    WHEN NEW.api_key_enc IS NOT NULL OR NEW.key_hint IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'keys are stored as credentials'); END`,
+  `CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX sessions_user ON sessions(user_id)`,
+  `CREATE INDEX bin_items_target ON bin_items(target_id)`,
+  `CREATE INDEX slots_selected_version ON slots(selected_version_id)`,
+  `CREATE INDEX versions_source ON versions(source_version_id) WHERE source_version_id IS NOT NULL`,
+  `CREATE INDEX state_events_slot ON state_events(slot_id) WHERE slot_id IS NOT NULL`,
+  `CREATE INDEX state_events_version ON state_events(version_id) WHERE version_id IS NOT NULL`,
+  `CREATE INDEX chats_active_leaf ON chats(active_leaf_slot_id) WHERE active_leaf_slot_id IS NOT NULL`,
+  `CREATE INDEX rollouts_leaf_slot ON rollouts(leaf_slot_id) WHERE leaf_slot_id IS NOT NULL`,
+  `CREATE INDEX lanes_forked_from ON lanes(forked_from_slot_id) WHERE forked_from_slot_id IS NOT NULL`,
+  `CREATE INDEX slot_parents_parent ON slot_parents(parent_slot_id)`,
+  `CREATE INDEX slots_lane ON slots(lane_id)`,
+  `CREATE INDEX rollouts_parent ON rollouts(parent_rollout_id) WHERE parent_rollout_id IS NOT NULL`,
+  `CREATE INDEX changesets_rollout ON changesets(rollout_id) WHERE rollout_id IS NOT NULL`,
+  `CREATE INDEX versions_changeset ON versions(changeset_id) WHERE changeset_id IS NOT NULL`,
+  `CREATE INDEX state_events_superseded ON state_events(superseded_by_changeset) WHERE superseded_by_changeset IS NOT NULL`,
+  `CREATE INDEX entity_refs_head ON entity_refs(head_revision_id)`,
+  `CREATE INDEX entity_refs_merge_base ON entity_refs(merge_base_revision_id) WHERE merge_base_revision_id IS NOT NULL`,
+  `CREATE INDEX connections_preset_override ON connections(preset_override_ref_id) WHERE preset_override_ref_id IS NOT NULL`,
+  `CREATE INDEX drafts_target ON drafts(target_kind, target_id, field)`,
+  `CREATE TRIGGER versions_generation_ends_once BEFORE UPDATE OF status ON versions
+    WHEN NEW.status = 'generating' AND OLD.status <> 'generating'
+    BEGIN SELECT RAISE(ABORT, 'a version never goes back to generating'); END`,
+  `CREATE TRIGGER versions_purge_final BEFORE UPDATE OF purged_at ON versions
+    WHEN OLD.purged_at IS NOT NULL AND NEW.purged_at IS NULL
+    BEGIN SELECT RAISE(ABORT, 'a purged version stays purged'); END`,
+  `CREATE TRIGGER slots_purge_final BEFORE UPDATE OF purged_at ON slots
+    WHEN OLD.purged_at IS NOT NULL AND NEW.purged_at IS NULL
+    BEGIN SELECT RAISE(ABORT, 'a purged slot stays purged'); END`,
+  `CREATE TRIGGER versions_source_same_slot BEFORE INSERT ON versions
+    WHEN NEW.source_version_id IS NOT NULL
+      AND (SELECT slot_id FROM versions WHERE id = NEW.source_version_id) IS NOT NEW.slot_id
+    BEGIN SELECT RAISE(ABORT, 'a version''s source must be another version of its slot'); END`,
+  `CREATE TRIGGER versions_source_fixed BEFORE UPDATE OF source_version_id ON versions
+    WHEN NEW.source_version_id IS NOT NULL AND NEW.source_version_id IS NOT OLD.source_version_id
+    BEGIN SELECT RAISE(ABORT, 'a version''s source never changes'); END`,
+  `CREATE TRIGGER versions_source_cleared AFTER DELETE ON versions
+    BEGIN UPDATE versions SET source_version_id = NULL WHERE source_version_id = OLD.id; END`,
+  `CREATE TRIGGER chats_leaf_own_slot_insert BEFORE INSERT ON chats
+    WHEN NEW.active_leaf_slot_id IS NOT NULL
+      AND (SELECT chat_id FROM slots WHERE id = NEW.active_leaf_slot_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a chat''s active leaf must be one of its slots'); END`,
+  `CREATE TRIGGER lanes_fork_same_chat BEFORE INSERT ON lanes
+    WHEN NEW.forked_from_slot_id IS NOT NULL
+      AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a lane forks from a slot of its own chat'); END`,
+  `CREATE TRIGGER lanes_fork_same_chat_update BEFORE UPDATE OF chat_id, forked_from_slot_id ON lanes
+    WHEN NEW.chat_id IS NOT OLD.chat_id OR (NEW.forked_from_slot_id IS NOT NULL
+      AND (SELECT chat_id FROM slots WHERE id = NEW.forked_from_slot_id) IS NOT NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a lane stays in its chat and forks from a slot of its own chat'); END`,
+  `CREATE TRIGGER slot_parents_same_chat BEFORE INSERT ON slot_parents
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.parent_slot_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id)
+    BEGIN SELECT RAISE(ABORT, 'a merge parent must be in the same chat'); END`,
+  `CREATE TRIGGER slot_parents_acyclic BEFORE INSERT ON slot_parents
+    WHEN NEW.parent_slot_id = NEW.slot_id
+      OR EXISTS (SELECT 1 FROM slots WHERE parent_slot_id = NEW.slot_id)
+      OR EXISTS (SELECT 1 FROM slot_parents WHERE parent_slot_id = NEW.slot_id)
+    BEGIN SELECT RAISE(ABORT, 'a slot''s merge parents are recorded before anything is appended below it'); END`,
+  `CREATE TRIGGER slot_parents_fixed BEFORE UPDATE ON slot_parents
+    BEGIN SELECT RAISE(ABORT, 'the graph is append-only: merge parents never change'); END`,
+  `CREATE TRIGGER rollouts_slot_id_same_chat BEFORE INSERT ON rollouts WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_slot_id_same_chat_update BEFORE UPDATE OF slot_id, chat_id
+      ON rollouts WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_leaf_slot_id_same_chat BEFORE INSERT ON rollouts WHEN NEW.leaf_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.leaf_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.leaf_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_leaf_slot_id_same_chat_update BEFORE UPDATE OF leaf_slot_id, chat_id
+      ON rollouts WHEN NEW.leaf_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.leaf_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.leaf_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_parent_rollout_id_same_chat BEFORE INSERT ON rollouts WHEN NEW.parent_rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.parent_rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.parent_rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_parent_rollout_id_same_chat_update BEFORE UPDATE OF parent_rollout_id, chat_id
+      ON rollouts WHEN NEW.parent_rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.parent_rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'rollouts.parent_rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER changesets_rollout_id_same_chat BEFORE INSERT ON changesets WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'changesets.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER changesets_rollout_id_same_chat_update BEFORE UPDATE OF rollout_id, chat_id
+      ON changesets WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'changesets.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER versions_rollout_id_same_chat BEFORE INSERT ON versions WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER versions_rollout_id_same_chat_update BEFORE UPDATE OF rollout_id, slot_id
+      ON versions WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER versions_changeset_id_same_chat BEFORE INSERT ON versions WHEN NEW.changeset_id IS NOT NULL AND (SELECT chat_id FROM changesets WHERE id = NEW.changeset_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.changeset_id must be in the same chat'); END`,
+  `CREATE TRIGGER versions_changeset_id_same_chat_update BEFORE UPDATE OF changeset_id, slot_id
+      ON versions WHEN NEW.changeset_id IS NOT NULL AND (SELECT chat_id FROM changesets WHERE id = NEW.changeset_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id) BEGIN SELECT RAISE(ABORT, 'versions.changeset_id must be in the same chat'); END`,
+  `CREATE TRIGGER state_events_superseded_by_changeset_same_chat BEFORE INSERT ON state_events WHEN NEW.superseded_by_changeset IS NOT NULL AND (SELECT chat_id FROM changesets WHERE id = NEW.superseded_by_changeset) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'state_events.superseded_by_changeset must be in the same chat'); END`,
+  `CREATE TRIGGER state_events_superseded_by_changeset_same_chat_update BEFORE UPDATE OF superseded_by_changeset, chat_id
+      ON state_events WHEN NEW.superseded_by_changeset IS NOT NULL AND (SELECT chat_id FROM changesets WHERE id = NEW.superseded_by_changeset) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'state_events.superseded_by_changeset must be in the same chat'); END`,
+  `CREATE TRIGGER rollouts_chat_fixed BEFORE UPDATE OF chat_id ON rollouts
+      WHEN NEW.chat_id IS NOT OLD.chat_id
+      BEGIN SELECT RAISE(ABORT, 'rollouts rows never move to another chat'); END`,
+  `CREATE TRIGGER changesets_chat_fixed BEFORE UPDATE OF chat_id ON changesets
+      WHEN NEW.chat_id IS NOT OLD.chat_id
+      BEGIN SELECT RAISE(ABORT, 'changesets rows never move to another chat'); END`,
+  `CREATE TRIGGER bin_items_chat_fixed BEFORE UPDATE OF chat_id ON bin_items
+      WHEN NEW.chat_id IS NOT OLD.chat_id
+      BEGIN SELECT RAISE(ABORT, 'bin_items rows never move to another chat'); END`,
+  `CREATE TRIGGER entity_refs_chat_fixed BEFORE UPDATE OF chat_id ON entity_refs
+    WHEN NEW.chat_id IS NOT NULL AND NEW.chat_id IS NOT OLD.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a chat override never moves to another chat'); END`,
+  `CREATE TRIGGER chats_owner_fixed BEFORE UPDATE OF owner_user_id ON chats
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'chats never change owner'); END`,
+  `CREATE TRIGGER entities_owner_fixed BEFORE UPDATE OF owner_user_id ON entities
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'entities never change owner'); END`,
+  `CREATE TRIGGER connections_owner_fixed BEFORE UPDATE OF owner_user_id ON connections
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'connections never change owner'); END`,
+  `CREATE TRIGGER entity_refs_chat_owner BEFORE INSERT ON entity_refs
+    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
+    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
+  `CREATE TRIGGER entity_refs_chat_owner_update BEFORE UPDATE OF chat_id, entity_id ON entity_refs
+    WHEN NEW.chat_id IS NOT NULL AND (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+      IS NOT (SELECT owner_user_id FROM entities WHERE id = NEW.entity_id)
+    BEGIN SELECT RAISE(ABORT, 'a chat override must be of the chat owner''s entity'); END`,
+  `CREATE TRIGGER entity_revisions_fts_delete AFTER DELETE ON entity_revisions
+    BEGIN INSERT INTO entity_revisions_fts (entity_revisions_fts, rowid, search_text) VALUES ('delete', OLD.seq, OLD.search_text); END`,
+  `CREATE TRIGGER credentials_owner_fixed BEFORE UPDATE OF owner_user_id ON credentials
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'credentials never change owner'); END`,
+  `CREATE TRIGGER sessions_owner_fixed BEFORE UPDATE OF user_id ON sessions
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'sessions never change owner'); END`,
+  `CREATE TRIGGER drafts_owner_fixed BEFORE UPDATE OF user_id ON drafts
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'drafts never change owner'); END`,
+  `CREATE TRIGGER bin_items_owner_fixed BEFORE UPDATE OF user_id ON bin_items
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'bin_items never change owner'); END`,
+  `CREATE TRIGGER recovered_texts_owner_fixed BEFORE UPDATE OF user_id ON recovered_texts
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'recovered_texts never change owner'); END`,
+  `CREATE TRIGGER user_prefs_owner_fixed BEFORE UPDATE OF user_id ON user_prefs
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'user_prefs never change owner'); END`,
+  `CREATE TRIGGER user_settings_owner_fixed BEFORE UPDATE OF user_id ON user_settings
+      WHEN NEW.user_id IS NOT OLD.user_id
+      BEGIN SELECT RAISE(ABORT, 'user_settings never change owner'); END`,
+  `CREATE TRIGGER media_refs_owner_fixed BEFORE UPDATE OF owner_user_id ON media_refs
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'media_refs never change owner'); END`,
+  `CREATE TRIGGER jobs_owner_fixed BEFORE UPDATE OF owner_user_id ON jobs
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'jobs never change owner'); END`,
+  `CREATE TRIGGER llm_requests_owner_fixed BEFORE UPDATE OF owner_user_id ON llm_requests
+      WHEN NEW.owner_user_id IS NOT OLD.owner_user_id
+      BEGIN SELECT RAISE(ABORT, 'llm_requests never change owner'); END`,
+  `CREATE TRIGGER entity_refs_entity_fixed BEFORE UPDATE OF entity_id ON entity_refs
+    WHEN NEW.entity_id IS NOT OLD.entity_id
+    BEGIN SELECT RAISE(ABORT, 'a ref never moves to another entity'); END`,
+  `CREATE TABLE queued_messages (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    -- The reply it waits for: the slot, not a version, so it posts after whichever version
+    -- ends up selected.
+    reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    -- Order among the entries waiting in a chat.
+    seq INTEGER NOT NULL,
+    -- A message to post, or a reply to generate.
+    kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')),
+    content TEXT NOT NULL,
+    speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    -- For 'message': who replies to it once it posts, picked when it was sent, as an
+    -- immediate send's reply is.
+    reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
+    -- For 'generate': the one-turn direction the reply gets.
+    direction TEXT,
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT,
+    CHECK (kind = 'generate' OR length(content) > 0),
+    CHECK (kind = 'generate' OR direction IS NULL),
+    CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)
+  ) STRICT`,
+  `CREATE INDEX queued_messages_reply ON queued_messages(reply_slot_id, seq)`,
+  `CREATE INDEX queued_messages_chat ON queued_messages(chat_id, seq)`,
+  `CREATE INDEX queued_messages_speaker ON queued_messages(speaker_entity_id)`,
+  `CREATE INDEX queued_messages_reply_speaker ON queued_messages(reply_speaker_entity_id)`,
+  `CREATE TRIGGER queued_messages_chat_fixed BEFORE UPDATE OF chat_id ON queued_messages
+    WHEN NEW.chat_id IS NOT OLD.chat_id
+    BEGIN SELECT RAISE(ABORT, 'queued messages never move to another chat'); END`,
+  `CREATE TRIGGER queued_messages_reply_same_chat BEFORE INSERT ON queued_messages
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.reply_slot_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'queued_messages.reply_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER queued_messages_reply_same_chat_update BEFORE UPDATE OF reply_slot_id ON queued_messages
+    WHEN (SELECT chat_id FROM slots WHERE id = NEW.reply_slot_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'queued_messages.reply_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER queued_messages_speaker_owner BEFORE INSERT ON queued_messages
+    WHEN NEW.speaker_entity_id IS NOT NULL AND (SELECT owner_user_id FROM entities WHERE id = NEW.speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a queued message speaks as a card of the chat''s owner'); END`,
+  `CREATE TRIGGER queued_messages_speaker_owner_update BEFORE UPDATE OF speaker_entity_id ON queued_messages
+    WHEN NEW.speaker_entity_id IS NOT NULL AND (SELECT owner_user_id FROM entities WHERE id = NEW.speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a queued message speaks as a card of the chat''s owner'); END`,
+  `CREATE TRIGGER queued_messages_reply_speaker_owner BEFORE INSERT ON queued_messages
+    WHEN NEW.reply_speaker_entity_id IS NOT NULL
+      AND (SELECT owner_user_id FROM entities WHERE id = NEW.reply_speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a queued message''s reply speaks as a card of the chat''s owner'); END`,
+  `CREATE TRIGGER queued_messages_reply_speaker_owner_update BEFORE UPDATE OF reply_speaker_entity_id ON queued_messages
+    WHEN NEW.reply_speaker_entity_id IS NOT NULL
+      AND (SELECT owner_user_id FROM entities WHERE id = NEW.reply_speaker_entity_id)
+      IS NOT (SELECT owner_user_id FROM chats WHERE id = NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a queued message''s reply speaks as a card of the chat''s owner'); END`,
+  `CREATE TABLE composer_save_receipts (
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      operation_id TEXT NOT NULL,
+      recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)), displaced_json TEXT
+      CHECK (displaced_json IS NULL OR json_valid(displaced_json)),
+      PRIMARY KEY (chat_id, operation_id)
+    ) STRICT`,
+  `CREATE TRIGGER connections_cache_revision AFTER UPDATE OF base_url, proxy_mode, proxy_url_enc,
+    credential_id, headers_enc, compat_json, deleted_at, purged_at ON connections
+    WHEN NEW.base_url IS NOT OLD.base_url OR NEW.proxy_mode IS NOT OLD.proxy_mode
+      OR NEW.proxy_url_enc IS NOT OLD.proxy_url_enc OR NEW.credential_id IS NOT OLD.credential_id
+      OR NEW.headers_enc IS NOT OLD.headers_enc OR NEW.compat_json IS NOT OLD.compat_json
+      OR NEW.deleted_at IS NOT OLD.deleted_at OR NEW.purged_at IS NOT OLD.purged_at
+    BEGIN UPDATE connections SET cache_revision = OLD.cache_revision + 1 WHERE id = NEW.id; END`,
+  `CREATE TRIGGER credentials_cache_revision AFTER UPDATE OF key_enc ON credentials
+    WHEN NEW.key_enc IS NOT OLD.key_enc
+    BEGIN UPDATE connections SET cache_revision = cache_revision + 1 WHERE credential_id = NEW.id; END`,
+  `CREATE TRIGGER network_cache_insert AFTER INSERT ON app_settings WHEN NEW.key = 'network'
+    BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END`,
+  `CREATE TRIGGER network_cache_update AFTER UPDATE ON app_settings WHEN NEW.key = 'network'
+    BEGIN UPDATE connections SET cache_revision = cache_revision + 1; END`,
+  `CREATE INDEX llm_requests_chat ON llm_requests(chat_id, started_at) WHERE chat_id IS NOT NULL`,
+  `CREATE TRIGGER llm_requests_stagger_frozen BEFORE UPDATE OF cache_stagger_json ON llm_requests
+      WHEN OLD.status <> 'running' AND NEW.cache_stagger_json IS NOT OLD.cache_stagger_json
+      BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`,
+  `CREATE TRIGGER llm_requests_cache_identity_frozen BEFORE UPDATE OF cache_identity_json ON llm_requests
+      WHEN OLD.status <> 'running' AND NEW.cache_identity_json IS NOT OLD.cache_identity_json
+      BEGIN SELECT RAISE(ABORT, 'a closed request is a record'); END`,
+  `CREATE INDEX rollouts_history ON rollouts(chat_id, history_depth DESC, id DESC) WHERE history_depth IS NOT NULL`,
+  `CREATE TABLE history_changes (
+    slot_id TEXT PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    depth INTEGER NOT NULL,
+    revision INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX history_changes_depth ON history_changes(chat_id, depth)`,
+  `CREATE TRIGGER history_reduced_slot AFTER UPDATE OF deleted_at, context_excluded ON slots
+    WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
+      OR (OLD.context_excluded = 0 AND NEW.context_excluded = 1)
+
+    BEGIN
+      INSERT INTO history_changes VALUES (NEW.id, NEW.chat_id, NEW.depth, 1)
+      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
+    END`,
+  `CREATE TABLE summaries (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL CHECK (level >= 1),
+    selected_revision_id TEXT NOT NULL REFERENCES summary_revisions(id) DEFERRABLE INITIALLY DEFERRED,
+    first_slot_id TEXT NOT NULL REFERENCES slots(id),
+    last_slot_id TEXT NOT NULL REFERENCES slots(id),
+    slot_count INTEGER NOT NULL CHECK (slot_count >= 1),
+    -- NULL = everyone; otherwise a JSON array of entity ids whose views may include it.
+    audience_json TEXT CHECK (audience_json IS NULL OR json_valid(audience_json)),
+    status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'truncated', 'superseded', 'failed')),
+    sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT REFERENCES rollouts(id),
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX summaries_chat_level ON summaries(chat_id, level)`,
+  `CREATE INDEX summaries_last_slot ON summaries(last_slot_id)`,
+  `CREATE TABLE summary_revisions (
+    seq INTEGER PRIMARY KEY,
+    id TEXT NOT NULL UNIQUE,
+    summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED,
+    content TEXT NOT NULL,
+    token_count INTEGER NOT NULL,
+    origin TEXT NOT NULL CHECK (origin IN ('generated', 'user', 'changeset', 'imported')),
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX summary_revisions_summary ON summary_revisions(summary_id, seq)`,
+  `CREATE TABLE summary_inputs (
+    summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    slot_id TEXT NOT NULL REFERENCES slots(id),
+    version_id TEXT REFERENCES versions(id),
+    amend_count INTEGER NOT NULL DEFAULT 0 CHECK (amend_count >= 0), PRIMARY KEY (summary_id, ordinal)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX summary_inputs_slot ON summary_inputs(slot_id)`,
+  `CREATE TABLE summary_parents (
+    summary_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE,
+    parent_id TEXT NOT NULL REFERENCES summaries(id),
+    ordinal INTEGER NOT NULL, parent_revision_id TEXT NOT NULL REFERENCES summary_revisions(id), UNIQUE (summary_id, ordinal),
+    PRIMARY KEY (summary_id, parent_id)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE INDEX summary_parents_parent ON summary_parents(parent_id)`,
+  `CREATE TABLE summarization_jobs (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    level INTEGER NOT NULL CHECK (level >= 1),
+    first_slot_id TEXT NOT NULL REFERENCES slots(id),
+    last_slot_id TEXT NOT NULL REFERENCES slots(id),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'complete', 'failed')),
+    request_class TEXT NOT NULL DEFAULT 'background' CHECK (request_class IN ('interactive', 'idle', 'background')),
+    batch_id TEXT, leaf_slot_id TEXT REFERENCES slots(id), input_token_count INTEGER,
+    target_token_count INTEGER NOT NULL,
+    -- Level >= 2: the ordered child summary ids (JSON array).
+    input_child_ids TEXT CHECK (input_child_ids IS NULL OR json_valid(input_child_ids)),
+    absorbed_parent_id TEXT REFERENCES summaries(id),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 2,
+    best_effort_draft TEXT,
+    error TEXT,
+    result_summary_id TEXT REFERENCES summaries(id),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  , clip_tokens INTEGER NOT NULL DEFAULT 6000 CHECK (clip_tokens > 0), claim_epoch INTEGER NOT NULL DEFAULT 0, rollout_id TEXT REFERENCES rollouts(id), prefix_json TEXT CHECK (prefix_json IS NULL OR json_valid(prefix_json)), model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)), fallback_used INTEGER NOT NULL DEFAULT 0 CHECK (fallback_used IN (0, 1)), eager INTEGER NOT NULL DEFAULT 0 CHECK (eager IN (0, 1)), source_summary_id TEXT REFERENCES summaries(id), source_revision_id TEXT REFERENCES summary_revisions(id), rerun_ids_json TEXT CHECK (rerun_ids_json IS NULL OR json_valid(rerun_ids_json)), explicit_requested INTEGER NOT NULL DEFAULT 0 CHECK (explicit_requested IN (0, 1))) STRICT`,
+  `CREATE INDEX summarization_jobs_queue ON summarization_jobs(status, created_at) WHERE status IN ('pending', 'processing')`,
+  `CREATE UNIQUE INDEX summarization_jobs_live_segment ON summarization_jobs(chat_id, first_slot_id, last_slot_id, level)
+    WHERE status IN ('pending', 'processing')`,
+  `CREATE INDEX summary_inputs_version ON summary_inputs(version_id)`,
+  `CREATE INDEX summaries_first_slot ON summaries(first_slot_id)`,
+  `CREATE INDEX summarization_jobs_first_slot ON summarization_jobs(first_slot_id)`,
+  `CREATE INDEX summarization_jobs_last_slot ON summarization_jobs(last_slot_id)`,
+  `CREATE INDEX summaries_selected_revision ON summaries(selected_revision_id)`,
+  `CREATE INDEX summaries_rollout ON summaries(rollout_id) WHERE rollout_id IS NOT NULL`,
+  `CREATE INDEX summarization_jobs_result ON summarization_jobs(result_summary_id) WHERE result_summary_id IS NOT NULL`,
+  `CREATE INDEX summarization_jobs_absorbed ON summarization_jobs(absorbed_parent_id) WHERE absorbed_parent_id IS NOT NULL`,
+  `CREATE TRIGGER summaries_selection_own_revision_insert BEFORE INSERT ON summaries
+    WHEN (SELECT summary_id FROM summary_revisions WHERE id = NEW.selected_revision_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a summary can only select one of its own revisions'); END`,
+  `CREATE TRIGGER summaries_first_slot_id_same_chat BEFORE INSERT ON summaries WHEN NEW.first_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.first_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.first_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_first_slot_id_same_chat_update BEFORE UPDATE OF first_slot_id, chat_id
+      ON summaries WHEN NEW.first_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.first_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.first_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_last_slot_id_same_chat BEFORE INSERT ON summaries WHEN NEW.last_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.last_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.last_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_last_slot_id_same_chat_update BEFORE UPDATE OF last_slot_id, chat_id
+      ON summaries WHEN NEW.last_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.last_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.last_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_rollout_id_same_chat BEFORE INSERT ON summaries WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_rollout_id_same_chat_update BEFORE UPDATE OF rollout_id, chat_id
+      ON summaries WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summaries.rollout_id must be in the same chat'); END`,
+  `CREATE TRIGGER summary_inputs_slot_id_same_chat BEFORE INSERT ON summary_inputs WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) BEGIN SELECT RAISE(ABORT, 'summary_inputs.slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summary_inputs_slot_id_same_chat_update BEFORE UPDATE OF slot_id, summary_id
+      ON summary_inputs WHEN NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) BEGIN SELECT RAISE(ABORT, 'summary_inputs.slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summary_inputs_version_in_slot BEFORE INSERT ON summary_inputs
+    WHEN NEW.version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.version_id) IS NOT NEW.slot_id
+    BEGIN SELECT RAISE(ABORT, 'a summary input''s version must be in its slot'); END`,
+  `CREATE TRIGGER summary_inputs_version_in_slot_update BEFORE UPDATE OF slot_id, version_id ON summary_inputs
+    WHEN NEW.version_id IS NOT NULL AND (SELECT slot_id FROM versions WHERE id = NEW.version_id) IS NOT NEW.slot_id
+    BEGIN SELECT RAISE(ABORT, 'a summary input''s version must be in its slot'); END`,
+  `CREATE TRIGGER summary_parents_parent_id_same_chat BEFORE INSERT ON summary_parents WHEN NEW.parent_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.parent_id) IS NOT (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) BEGIN SELECT RAISE(ABORT, 'summary_parents.parent_id must be in the same chat'); END`,
+  `CREATE TRIGGER summary_parents_parent_id_same_chat_update BEFORE UPDATE OF parent_id, summary_id
+      ON summary_parents WHEN NEW.parent_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.parent_id) IS NOT (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) BEGIN SELECT RAISE(ABORT, 'summary_parents.parent_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_first_slot_id_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.first_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.first_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.first_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_first_slot_id_same_chat_update BEFORE UPDATE OF first_slot_id, chat_id
+      ON summarization_jobs WHEN NEW.first_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.first_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.first_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_last_slot_id_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.last_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.last_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.last_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_last_slot_id_same_chat_update BEFORE UPDATE OF last_slot_id, chat_id
+      ON summarization_jobs WHEN NEW.last_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.last_slot_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.last_slot_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_absorbed_parent_id_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.absorbed_parent_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.absorbed_parent_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.absorbed_parent_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_absorbed_parent_id_same_chat_update BEFORE UPDATE OF absorbed_parent_id, chat_id
+      ON summarization_jobs WHEN NEW.absorbed_parent_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.absorbed_parent_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.absorbed_parent_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_result_summary_id_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.result_summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.result_summary_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.result_summary_id must be in the same chat'); END`,
+  `CREATE TRIGGER summarization_jobs_result_summary_id_same_chat_update BEFORE UPDATE OF result_summary_id, chat_id
+      ON summarization_jobs WHEN NEW.result_summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.result_summary_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summarization_jobs.result_summary_id must be in the same chat'); END`,
+  `CREATE TRIGGER summaries_chat_fixed BEFORE UPDATE OF chat_id ON summaries
+      WHEN NEW.chat_id IS NOT OLD.chat_id
+      BEGIN SELECT RAISE(ABORT, 'summaries rows never move to another chat'); END`,
+  `CREATE TRIGGER summarization_jobs_chat_fixed BEFORE UPDATE OF chat_id ON summarization_jobs
+      WHEN NEW.chat_id IS NOT OLD.chat_id
+      BEGIN SELECT RAISE(ABORT, 'summarization_jobs rows never move to another chat'); END`,
+  `CREATE TRIGGER summary_revisions_immutable BEFORE UPDATE ON summary_revisions
+    BEGIN SELECT RAISE(ABORT, 'summary revisions are immutable'); END`,
+  `CREATE TRIGGER summaries_selection_own_revision BEFORE UPDATE OF selected_revision_id ON summaries
+    WHEN (SELECT summary_id FROM summary_revisions WHERE id = NEW.selected_revision_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a summary can only select one of its own revisions'); END`,
+  `CREATE VIRTUAL TABLE summary_revisions_fts USING fts5(
+    content, content='summary_revisions', content_rowid='seq',
+    tokenize='unicode61 remove_diacritics 2', prefix='2 3'
+  )`,
+  `CREATE TRIGGER summary_revisions_fts_insert AFTER INSERT ON summary_revisions
+    BEGIN INSERT INTO summary_revisions_fts (rowid, content) VALUES (NEW.seq, NEW.content); END`,
+  `CREATE TRIGGER summary_revisions_fts_delete AFTER DELETE ON summary_revisions
+    BEGIN INSERT INTO summary_revisions_fts (summary_revisions_fts, rowid, content) VALUES ('delete', OLD.seq, OLD.content); END`,
+  `CREATE TRIGGER drafts_gc_summary AFTER DELETE ON summaries
+    BEGIN DELETE FROM drafts WHERE target_kind = 'summary_edit' AND target_id = OLD.id; END`,
+  `CREATE INDEX summary_parents_revision ON summary_parents(parent_revision_id)`,
+  `CREATE INDEX summarization_jobs_batch ON summarization_jobs(batch_id)`,
+  `CREATE INDEX summarization_jobs_leaf ON summarization_jobs(leaf_slot_id)`,
+  `CREATE TRIGGER summary_parents_own_revision BEFORE INSERT ON summary_parents
+    WHEN (SELECT summary_id FROM summary_revisions WHERE id = NEW.parent_revision_id) IS NOT NEW.parent_id
+    BEGIN SELECT RAISE(ABORT, 'lineage must pin a revision of its child'); END`,
+  `CREATE TRIGGER summaries_start_unsealed BEFORE INSERT ON summaries WHEN NEW.sealed <> 0
+    BEGIN SELECT RAISE(ABORT, 'summary lineage must be sealed after insertion'); END`,
+  `CREATE TRIGGER summary_inputs_closed BEFORE INSERT ON summary_inputs
+      WHEN (SELECT sealed FROM summaries WHERE id = NEW.summary_id) = 1
+      BEGIN SELECT RAISE(ABORT, 'sealed summary lineage is closed'); END`,
+  `CREATE TRIGGER summary_parents_closed BEFORE INSERT ON summary_parents
+      WHEN (SELECT sealed FROM summaries WHERE id = NEW.summary_id) = 1
+      BEGIN SELECT RAISE(ABORT, 'sealed summary lineage is closed'); END`,
+  `CREATE TRIGGER summary_parents_chain BEFORE INSERT ON summary_parents WHEN NOT EXISTS (
+    SELECT 1 FROM summaries s JOIN summaries child ON child.id = NEW.parent_id
+      JOIN slots first ON first.id = child.first_slot_id
+    WHERE s.id = NEW.summary_id AND s.level > 1 AND child.level < s.level AND child.id <> s.id
+      AND child.sealed = 1 AND child.status <> 'failed'
+      AND NEW.ordinal >= 0 AND NEW.ordinal = (SELECT count(*) FROM summary_parents WHERE summary_id = s.id)
+      AND CASE WHEN NEW.ordinal = 0 THEN child.first_slot_id = s.first_slot_id ELSE
+        first.parent_slot_id = (SELECT prev.last_slot_id FROM summary_parents p JOIN summaries prev ON prev.id = p.parent_id
+          WHERE p.summary_id = s.id AND p.ordinal = NEW.ordinal - 1) END
+    ) BEGIN SELECT RAISE(ABORT, 'summary children must partition its chain at strictly lower levels'); END`,
+  `CREATE TRIGGER summaries_seal BEFORE UPDATE OF sealed ON summaries WHEN OLD.sealed = 0 AND NEW.sealed = 1 AND NOT coalesce((
+    CASE WHEN NEW.level = 1 THEN
+      (SELECT count(*) FROM summary_inputs WHERE summary_id = NEW.id) = NEW.slot_count
+      AND (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.id ORDER BY ordinal DESC LIMIT 1) = NEW.last_slot_id
+      AND NOT EXISTS (SELECT 1 FROM summary_parents WHERE summary_id = NEW.id)
+    ELSE
+      (SELECT coalesce(sum(child.slot_count),0) FROM summary_parents p JOIN summaries child ON child.id = p.parent_id
+        WHERE p.summary_id = NEW.id) = NEW.slot_count
+      AND (SELECT child.last_slot_id FROM summary_parents p JOIN summaries child ON child.id = p.parent_id
+        WHERE p.summary_id = NEW.id ORDER BY p.ordinal DESC LIMIT 1) = NEW.last_slot_id
+      AND NOT EXISTS (SELECT 1 FROM summary_inputs WHERE summary_id = NEW.id)
+    END
+    ), 0) BEGIN SELECT RAISE(ABORT, 'sealed summary lineage must cover its entire chain'); END`,
+  `CREATE TRIGGER summarization_jobs_leaf_same_chat BEFORE INSERT ON summarization_jobs
+      WHEN NEW.leaf_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.leaf_slot_id) IS NOT NEW.chat_id
+      BEGIN SELECT RAISE(ABORT, 'a summary job''s leaf must be in its chat'); END`,
+  `CREATE TRIGGER summarization_jobs_leaf_same_chat_update BEFORE UPDATE OF leaf_slot_id, chat_id ON summarization_jobs
+      WHEN NEW.leaf_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.leaf_slot_id) IS NOT NEW.chat_id
+      BEGIN SELECT RAISE(ABORT, 'a summary job''s leaf must be in its chat'); END`,
+  `CREATE TRIGGER summaries_no_replace BEFORE INSERT ON summaries
+    WHEN EXISTS (SELECT 1 FROM summaries WHERE id = NEW.id)
+    BEGIN SELECT RAISE(ABORT, 'summary identities cannot be replaced'); END`,
+  `CREATE TRIGGER summary_revisions_no_replace BEFORE INSERT ON summary_revisions
+    WHEN EXISTS (SELECT 1 FROM summary_revisions WHERE id = NEW.id OR seq = NEW.seq)
+    BEGIN SELECT RAISE(ABORT, 'summary identities cannot be replaced'); END`,
+  `CREATE TRIGGER summary_inputs_no_replace BEFORE INSERT ON summary_inputs
+    WHEN EXISTS (SELECT 1 FROM summary_inputs WHERE summary_id = NEW.summary_id AND ordinal = NEW.ordinal)
+    BEGIN SELECT RAISE(ABORT, 'summary identities cannot be replaced'); END`,
+  `CREATE TRIGGER summary_parents_no_replace BEFORE INSERT ON summary_parents
+    WHEN EXISTS (SELECT 1 FROM summary_parents WHERE summary_id = NEW.summary_id AND (parent_id = NEW.parent_id OR ordinal = NEW.ordinal))
+    BEGIN SELECT RAISE(ABORT, 'summary identities cannot be replaced'); END`,
+  `CREATE TRIGGER summary_inputs_immutable BEFORE UPDATE ON summary_inputs BEGIN SELECT RAISE(ABORT, 'summary lineage is immutable'); END`,
+  `CREATE TRIGGER summary_inputs_retained BEFORE DELETE ON summary_inputs
+      WHEN EXISTS (SELECT 1 FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.id = OLD.summary_id)
+      BEGIN SELECT RAISE(ABORT, 'summary lineage lives as long as its chat'); END`,
+  `CREATE TRIGGER summary_parents_immutable BEFORE UPDATE ON summary_parents BEGIN SELECT RAISE(ABORT, 'summary lineage is immutable'); END`,
+  `CREATE TRIGGER summary_parents_retained BEFORE DELETE ON summary_parents
+      WHEN EXISTS (SELECT 1 FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.id = OLD.summary_id)
+      BEGIN SELECT RAISE(ABORT, 'summary lineage lives as long as its chat'); END`,
+  `CREATE TRIGGER summaries_immutable BEFORE UPDATE ON summaries WHEN
+    (OLD.sealed = 1 AND NEW.sealed <> 1) OR NEW.id IS NOT OLD.id OR NEW.chat_id IS NOT OLD.chat_id OR NEW.level IS NOT OLD.level OR
+    NEW.first_slot_id IS NOT OLD.first_slot_id OR NEW.last_slot_id IS NOT OLD.last_slot_id OR
+    NEW.slot_count IS NOT OLD.slot_count OR NEW.audience_json IS NOT OLD.audience_json OR
+    NEW.rollout_id IS NOT OLD.rollout_id OR NEW.error_json IS NOT OLD.error_json OR
+    NEW.batch_id IS NOT OLD.batch_id OR NEW.created_at IS NOT OLD.created_at OR
+    (NEW.status IS NOT OLD.status AND NEW.status <> 'superseded')
+    BEGIN SELECT RAISE(ABORT, 'only summary selection, supersession and row version can change'); END`,
+  `CREATE TRIGGER summaries_retained BEFORE DELETE ON summaries
+      WHEN EXISTS (SELECT 1 FROM chats c WHERE c.id = OLD.chat_id)
+      BEGIN SELECT RAISE(ABORT, 'summaries and revisions live as long as their chat'); END`,
+  `CREATE TRIGGER summary_revisions_retained BEFORE DELETE ON summary_revisions
+      WHEN EXISTS (SELECT 1 FROM chats c JOIN summaries s ON s.chat_id = c.id WHERE s.id = OLD.summary_id)
+      BEGIN SELECT RAISE(ABORT, 'summaries and revisions live as long as their chat'); END`,
+  `CREATE INDEX summarization_jobs_rollout ON summarization_jobs(rollout_id)`,
+  `CREATE TRIGGER summarization_jobs_rollout_same_chat BEFORE INSERT ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`,
+  `CREATE TRIGGER summarization_jobs_rollout_same_chat_update BEFORE UPDATE OF rollout_id, chat_id ON summarization_jobs WHEN NEW.rollout_id IS NOT NULL AND (SELECT chat_id FROM rollouts WHERE id = NEW.rollout_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'summary rollout must belong to its job chat'); END`,
+  `CREATE INDEX summarization_jobs_chat_status ON summarization_jobs(chat_id, status, level)`,
+  `CREATE TABLE summary_reruns (
+      id TEXT PRIMARY KEY,
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      summary_id TEXT REFERENCES summaries(id) ON DELETE CASCADE,
+      job_id TEXT REFERENCES summarization_jobs(id) ON DELETE CASCADE,
+      requested_at INTEGER NOT NULL, model_json TEXT CHECK (model_json IS NULL OR json_valid(model_json)),
+      CHECK ((summary_id IS NULL) <> (job_id IS NULL))
+    ) STRICT`,
+  `CREATE INDEX summary_reruns_chat ON summary_reruns(chat_id)`,
+  `CREATE UNIQUE INDEX summary_reruns_summary ON summary_reruns(summary_id) WHERE summary_id IS NOT NULL`,
+  `CREATE UNIQUE INDEX summary_reruns_job ON summary_reruns(job_id) WHERE job_id IS NOT NULL`,
+  `CREATE TRIGGER summary_reruns_same_chat BEFORE INSERT ON summary_reruns
+      WHEN (NEW.summary_id IS NOT NULL AND (SELECT chat_id FROM summaries WHERE id = NEW.summary_id) IS NOT NEW.chat_id)
+        OR (NEW.job_id IS NOT NULL AND (SELECT chat_id FROM summarization_jobs WHERE id = NEW.job_id) IS NOT NEW.chat_id)
+      BEGIN SELECT RAISE(ABORT, 'a rerun request must name something in its own chat'); END`,
+  `CREATE TRIGGER summary_reruns_fixed BEFORE UPDATE OF chat_id, summary_id, job_id ON summary_reruns
+      BEGIN SELECT RAISE(ABORT, 'a rerun request is withdrawn and asked again, never moved'); END`,
+  `CREATE INDEX jobs_lcm_backfill ON jobs(json_extract(payload_json, '$.chatId')) WHERE kind = 'lcm-backfill'`,
+  `CREATE TABLE lcm_reply_maintenance (
+      chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+      leaf_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+      pins_json TEXT NOT NULL CHECK (json_valid(pins_json)),
+      PRIMARY KEY (chat_id, leaf_slot_id)
+    ) STRICT`,
+  `CREATE INDEX summarization_jobs_source ON summarization_jobs(source_summary_id)`,
+  `CREATE INDEX summarization_jobs_source_revision ON summarization_jobs(source_revision_id)`,
+  `CREATE INDEX lcm_reply_maintenance_leaf ON lcm_reply_maintenance(leaf_slot_id)`,
+  `CREATE TABLE lcm_summary_choices (
+      summary_id TEXT PRIMARY KEY REFERENCES summaries(id) ON DELETE CASCADE,
+      chosen_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE
+    ) STRICT`,
+  `CREATE INDEX lcm_summary_choices_chosen ON lcm_summary_choices(chosen_id)`,
+  `CREATE INDEX llm_requests_backfill ON llm_requests(backfill_id, status)`,
+  `CREATE TABLE lcm_enable_runs (
+    id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0,
+    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0
+  ) STRICT`,
+  `CREATE UNIQUE INDEX lcm_enable_one_staging ON lcm_enable_runs(chat_id) WHERE published = 0 AND phase <> 'cancelled'`,
+  `CREATE TABLE lcm_enable_slots (
+    run_id TEXT NOT NULL REFERENCES lcm_enable_runs(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+    version_id TEXT REFERENCES versions(id), amend_count INTEGER NOT NULL, shown INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(run_id, ordinal)
+  ) STRICT`,
+  `CREATE INDEX lcm_enable_slots_slot ON lcm_enable_slots(slot_id, shown, run_id)`,
+  `CREATE TRIGGER lcm_enable_explicit_visibility AFTER UPDATE OF context_excluded ON slots
+    BEGIN UPDATE lcm_enable_slots SET shown = 0 WHERE slot_id = NEW.id; END`,
+  `CREATE TRIGGER summary_inputs_chain BEFORE INSERT ON summary_inputs WHEN NOT EXISTS (
+    SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id
+    WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count
+      AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0)
+      AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id ELSE
+        i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) END
+    ) BEGIN SELECT RAISE(ABORT, 'summary inputs must follow their declared chain in order'); END`,
+  `CREATE TRIGGER summaries_chain BEFORE INSERT ON summaries WHEN NOT EXISTS (SELECT 1 FROM lcm_enable_runs r
+    WHERE r.id = NEW.id AND r.chat_id = NEW.chat_id AND r.phase = 'copy' AND r.gathered = NEW.slot_count
+      AND json_extract(r.payload_json, '$.imported.firstSlotId') = NEW.first_slot_id
+      AND json_extract(r.payload_json, '$.imported.lastSlotId') = NEW.last_slot_id)
+    AND NOT EXISTS (
+    WITH RECURSIVE chain(id, parent_slot_id, n) AS (
+      SELECT id, parent_slot_id, 1 FROM slots WHERE id = NEW.last_slot_id AND chat_id = NEW.chat_id
+      UNION ALL SELECT s.id, s.parent_slot_id, c.n + 1 FROM slots s JOIN chain c ON s.id = c.parent_slot_id
+        WHERE c.n < NEW.slot_count AND s.chat_id = NEW.chat_id
+    ) SELECT 1 FROM chain WHERE id = NEW.first_slot_id AND n = NEW.slot_count
+      AND NOT EXISTS (SELECT 1 FROM chain c JOIN slot_parents p ON p.slot_id = c.id)
+    ) BEGIN SELECT RAISE(ABORT, 'summary endpoints must form its declared primary-parent chain'); END`,
+  `CREATE INDEX state_events_participants ON state_events(json_extract(value_json, '$.entity'), chat_id)
+      WHERE key = 'participant.join' AND superseded_by_changeset IS NULL`,
+  `CREATE INDEX drafts_speaker_entity_id ON drafts(speaker_entity_id) WHERE speaker_entity_id IS NOT NULL`,
+  `CREATE TRIGGER drafts_speaker_entity_id_owner BEFORE INSERT ON drafts
+      WHEN NEW.speaker_entity_id IS NOT NULL
+        AND (NEW.target_kind IS NOT 'composer'
+          OR (SELECT owner_user_id FROM entities WHERE id = NEW.speaker_entity_id) IS NOT NEW.user_id)
+      BEGIN SELECT RAISE(ABORT, 'a composer chooses among the cards of its owner'); END`,
+  `CREATE TRIGGER drafts_speaker_entity_id_owner_update BEFORE UPDATE OF speaker_entity_id ON drafts
+      WHEN NEW.speaker_entity_id IS NOT NULL
+        AND (NEW.target_kind IS NOT 'composer'
+          OR (SELECT owner_user_id FROM entities WHERE id = NEW.speaker_entity_id) IS NOT NEW.user_id)
+      BEGIN SELECT RAISE(ABORT, 'a composer chooses among the cards of its owner'); END`,
+  `CREATE INDEX drafts_reply_from_entity_id ON drafts(reply_from_entity_id) WHERE reply_from_entity_id IS NOT NULL`,
+  `CREATE TRIGGER drafts_reply_from_entity_id_owner BEFORE INSERT ON drafts
+      WHEN NEW.reply_from_entity_id IS NOT NULL
+        AND (NEW.target_kind IS NOT 'composer'
+          OR (SELECT owner_user_id FROM entities WHERE id = NEW.reply_from_entity_id) IS NOT NEW.user_id)
+      BEGIN SELECT RAISE(ABORT, 'a composer chooses among the cards of its owner'); END`,
+  `CREATE TRIGGER drafts_reply_from_entity_id_owner_update BEFORE UPDATE OF reply_from_entity_id ON drafts
+      WHEN NEW.reply_from_entity_id IS NOT NULL
+        AND (NEW.target_kind IS NOT 'composer'
+          OR (SELECT owner_user_id FROM entities WHERE id = NEW.reply_from_entity_id) IS NOT NEW.user_id)
+      BEGIN SELECT RAISE(ABORT, 'a composer chooses among the cards of its owner'); END`,
+  `CREATE TRIGGER versions_model_content_frozen BEFORE UPDATE OF content ON versions
+      WHEN OLD.writer = 'model' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
+        AND NOT (NEW.purged_at IS NOT NULL AND NEW.content = '' AND EXISTS (
+          SELECT 1 FROM slots s JOIN chats c ON c.id = s.chat_id
+            JOIN bin_items b ON b.user_id = c.owner_user_id AND b.chat_id = c.id
+          WHERE s.id = OLD.slot_id AND (
+            (b.id = OLD.bin_item_id AND b.kind = 'version')
+            OR (b.id = s.bin_item_id AND b.kind IN ('message', 'branch')))))
+      BEGIN SELECT RAISE(ABORT, 'model-written versions are immutable once generated; create a new version'); END`,
+  `CREATE TRIGGER card_names_insert AFTER INSERT ON entity_refs
+      WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+        AND (NEW.label IS NOT coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
+          OR NEW.subtitle IS NOT coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), ''))
+      BEGIN UPDATE entity_refs SET
+        label = coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), ''),
+        subtitle = coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
+        WHERE id = NEW.id; END`,
+  `CREATE TRIGGER card_names_update AFTER UPDATE OF head_revision_id, label, subtitle ON entity_refs
+      WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+        AND (NEW.label IS NOT coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
+          OR NEW.subtitle IS NOT coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), ''))
+      BEGIN UPDATE entity_refs SET
+        label = coalesce((SELECT json_extract(doc_json, '$.name') FROM entity_revisions WHERE id = NEW.head_revision_id), ''),
+        subtitle = coalesce((SELECT json_extract(doc_json, '$.character_version') FROM entity_revisions WHERE id = NEW.head_revision_id), '')
+        WHERE id = NEW.id; END`,
+  `CREATE TABLE chat_pins (user_id TEXT NOT NULL REFERENCES users(id), chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL, PRIMARY KEY(user_id, chat_id, fork_id))`,
+  `CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0)`,
+  `CREATE INDEX chats_owner_live ON chats(owner_user_id, id) WHERE deleted_at IS NULL`,
+  `CREATE UNIQUE INDEX slots_chain ON slots(chain_id, depth)`,
+  `CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)`,
+  `CREATE TRIGGER slots_chain_assigned AFTER INSERT ON slots BEGIN
+    UPDATE slots SET chain_id = coalesce(
+      (SELECT p.chain_id FROM slots p WHERE p.id = NEW.parent_slot_id AND p.lane_id = NEW.lane_id
+        AND NOT EXISTS (SELECT 1 FROM slots c WHERE c.chain_id = p.chain_id AND c.depth = NEW.depth AND c.id <> NEW.id)),
+      NEW.id)
+    WHERE id = NEW.id;
+  END`,
+  `CREATE TRIGGER slots_chain_fixed BEFORE UPDATE OF chain_id ON slots
+    WHEN OLD.chain_id IS NOT NULL AND NEW.chain_id IS NOT OLD.chain_id
+    BEGIN SELECT RAISE(ABORT, 'a slot keeps the chain it was inserted in'); END`,
+  `CREATE TRIGGER state_events_chain_unplaced BEFORE INSERT ON state_events
+    WHEN NEW.slot_id IS NULL AND (NEW.slot_chain_id IS NOT NULL OR NEW.slot_depth IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT, 'a chat-wide state event has no chain'); END`,
+  `CREATE TRIGGER state_events_chain_assigned AFTER INSERT ON state_events WHEN NEW.slot_id IS NOT NULL BEGIN
+    UPDATE state_events SET slot_chain_id = (SELECT chain_id FROM slots WHERE id = NEW.slot_id),
+      slot_depth = (SELECT depth FROM slots WHERE id = NEW.slot_id)
+    WHERE id = NEW.id;
+  END`,
+  `CREATE TRIGGER state_events_chain_fixed BEFORE UPDATE OF slot_chain_id, slot_depth ON state_events
+    WHEN (OLD.slot_chain_id IS NOT NULL OR OLD.slot_depth IS NOT NULL)
+      AND (NEW.slot_chain_id IS NOT OLD.slot_chain_id OR NEW.slot_depth IS NOT OLD.slot_depth)
+    BEGIN SELECT RAISE(ABORT, 'a state event keeps the chain and depth of its slot'); END`,
+  `CREATE TABLE forks (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    -- The fork it was made from (lineage); null for a chat's first.
+    parent_fork_id TEXT REFERENCES forks(id) DEFERRABLE INITIALLY DEFERRED,
+    -- The chat's state_seq when it was made.
+    branched_at INTEGER NOT NULL DEFAULT 0,
+    -- The message it was made at: its history is root to base, then what it appends.
+    base_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    -- Its path ends here; null before the first message.
+    tip_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
+    name TEXT,
+    name_user INTEGER NOT NULL DEFAULT 0 CHECK (name_user IN (0, 1)),
+    pinned_at INTEGER,
+    created_at INTEGER NOT NULL,
+    last_chatted_at INTEGER,
+    deleted_at INTEGER,
+    bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL,
+    purged_at INTEGER,
+    row_version INTEGER NOT NULL DEFAULT 1
+  , lineage_json TEXT CHECK (lineage_json IS NULL OR json_valid(lineage_json))) STRICT`,
+  `CREATE INDEX forks_chat ON forks(chat_id)`,
+  `CREATE INDEX forks_parent ON forks(parent_fork_id) WHERE parent_fork_id IS NOT NULL`,
+  `CREATE INDEX forks_base ON forks(base_slot_id) WHERE base_slot_id IS NOT NULL`,
+  `CREATE INDEX forks_tip ON forks(tip_slot_id) WHERE tip_slot_id IS NOT NULL`,
+  `CREATE INDEX forks_bin_item ON forks(bin_item_id) WHERE bin_item_id IS NOT NULL`,
+  `CREATE INDEX chats_current_fork ON chats(current_fork_id) WHERE current_fork_id IS NOT NULL`,
+  `CREATE INDEX slots_fork ON slots(fork_id) WHERE fork_id IS NOT NULL`,
+  `CREATE INDEX rollouts_fork ON rollouts(fork_id) WHERE fork_id IS NOT NULL`,
+  `CREATE INDEX queued_messages_fork ON queued_messages(fork_id) WHERE fork_id IS NOT NULL`,
+  `CREATE TRIGGER chats_first_fork AFTER INSERT ON chats BEGIN
+    INSERT INTO forks (id, chat_id, tip_slot_id, created_at)
+      VALUES (NEW.id, NEW.id, NEW.active_leaf_slot_id, NEW.created_at);
+    UPDATE chats SET current_fork_id = NEW.id WHERE id = NEW.id;
+  END`,
+  `CREATE TRIGGER forks_tip_mirrored AFTER UPDATE OF tip_slot_id ON forks BEGIN
+    UPDATE chats SET active_leaf_slot_id = NEW.tip_slot_id
+    WHERE id = NEW.chat_id AND current_fork_id = NEW.id AND active_leaf_slot_id IS NOT NEW.tip_slot_id;
+  END`,
+  `CREATE TRIGGER chats_current_fork_mirrored AFTER UPDATE OF current_fork_id ON chats BEGIN
+    UPDATE chats SET active_leaf_slot_id = (SELECT tip_slot_id FROM forks WHERE id = NEW.current_fork_id)
+    WHERE id = NEW.id;
+  END`,
+  `CREATE TRIGGER chats_active_leaf_mirrored AFTER UPDATE OF active_leaf_slot_id ON chats
+    WHEN NEW.current_fork_id IS NOT NULL BEGIN
+    UPDATE forks SET tip_slot_id = NEW.active_leaf_slot_id
+    WHERE id = NEW.current_fork_id AND tip_slot_id IS NOT NEW.active_leaf_slot_id;
+  END`,
+  `CREATE TRIGGER forks_chat_fixed BEFORE UPDATE OF chat_id ON forks
+    WHEN NEW.chat_id IS NOT OLD.chat_id
+    BEGIN SELECT RAISE(ABORT, 'forks rows never move to another chat'); END`,
+  `CREATE TRIGGER forks_same_chat BEFORE INSERT ON forks
+    WHEN (NEW.parent_fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.parent_fork_id) IS NOT NEW.chat_id)
+      OR (NEW.base_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.base_slot_id) IS NOT NEW.chat_id)
+      OR (NEW.tip_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.tip_slot_id) IS NOT NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a fork''s parent, base and tip are in its chat'); END`,
+  `CREATE TRIGGER forks_same_chat_update BEFORE UPDATE OF parent_fork_id, base_slot_id, tip_slot_id ON forks
+    WHEN (NEW.parent_fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.parent_fork_id) IS NOT NEW.chat_id)
+      OR (NEW.base_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.base_slot_id) IS NOT NEW.chat_id)
+      OR (NEW.tip_slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.tip_slot_id) IS NOT NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'a fork''s parent, base and tip are in its chat'); END`,
+  `CREATE TRIGGER forks_origin_fixed BEFORE UPDATE OF parent_fork_id, base_slot_id, branched_at ON forks
+    WHEN NEW.parent_fork_id IS NOT OLD.parent_fork_id OR NEW.base_slot_id IS NOT OLD.base_slot_id
+      OR NEW.branched_at IS NOT OLD.branched_at
+    BEGIN SELECT RAISE(ABORT, 'a fork keeps the parent, base and moment it was made at'); END`,
+  `CREATE TRIGGER chats_current_fork_own BEFORE UPDATE OF current_fork_id ON chats
+    WHEN NEW.current_fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.current_fork_id) IS NOT NEW.id
+    BEGIN SELECT RAISE(ABORT, 'a chat''s current fork is one of its forks'); END`,
+  `CREATE TRIGGER slots_fork_same_chat BEFORE INSERT ON slots
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a slot''s fork is in its chat'); END`,
+  `CREATE TRIGGER slots_fork_same_chat_update BEFORE UPDATE OF fork_id ON slots
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a slot''s fork is in its chat'); END`,
+  `CREATE TRIGGER rollouts_fork_same_chat BEFORE INSERT ON rollouts
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a rollout''s fork is in its chat'); END`,
+  `CREATE TRIGGER rollouts_fork_same_chat_update BEFORE UPDATE OF fork_id ON rollouts
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a rollout''s fork is in its chat'); END`,
+  `CREATE TRIGGER queued_messages_fork_same_chat BEFORE INSERT ON queued_messages
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a queued message''s fork is in its chat'); END`,
+  `CREATE TRIGGER queued_messages_fork_same_chat_update BEFORE UPDATE OF fork_id ON queued_messages
+    WHEN NEW.fork_id IS NOT NULL AND (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+    BEGIN SELECT RAISE(ABORT, 'a queued message''s fork is in its chat'); END`,
+  `CREATE TABLE fork_overrides (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE,
+    -- The chat's state_seq when written; a row updated in place takes the newer one.
+    seq INTEGER NOT NULL CHECK (seq > 0),
+    kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'star',
+      'picker_hide', 'summary_revision', 'summary_choice', 'suppress_event')),
+    target_id TEXT NOT NULL,
+    -- The slot the row is about, and its depth, for reading a window of a path.
+    slot_id TEXT,
+    slot_depth INTEGER,
+    value_id TEXT,
+    flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)),
+    bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL,
+    changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL,
+    summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)),
+    -- Who chose it: the user, or an ST re-import following the file (which the user's choice
+    -- then overrules: stImportWrites.ts).
+    origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import'))
+  ) STRICT`,
+  `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id)`,
+  `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
+  `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,
+  `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind)`,
+  `CREATE INDEX fork_overrides_bin_item ON fork_overrides(bin_item_id) WHERE bin_item_id IS NOT NULL`,
+  `CREATE INDEX fork_overrides_changeset ON fork_overrides(changeset_id) WHERE changeset_id IS NOT NULL`,
+  `CREATE TRIGGER fork_overrides_same_chat BEFORE INSERT ON fork_overrides
+    WHEN (SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT NEW.chat_id
+      OR (NEW.slot_id IS NOT NULL AND (SELECT chat_id FROM slots WHERE id = NEW.slot_id) IS NOT NEW.chat_id)
+    BEGIN SELECT RAISE(ABORT, 'an override is in its fork''s chat'); END`,
+  `CREATE TRIGGER fork_overrides_select_own_version BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'select'
+    AND (NEW.slot_id IS NOT NEW.target_id OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.target_id)
+      OR (SELECT slot_id FROM versions WHERE id = NEW.value_id) IS NOT NEW.target_id)
+    BEGIN SELECT RAISE(ABORT, 'a selection names a version of its slot'); END`,
+  `CREATE TRIGGER fork_overrides_select_update_own_version BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind = 'select' AND (SELECT slot_id FROM versions WHERE id = NEW.value_id) IS NOT NEW.target_id
+    BEGIN SELECT RAISE(ABORT, 'a selection names a version of its slot'); END`,
+  `CREATE TRIGGER fork_overrides_identity_fixed BEFORE UPDATE OF id, chat_id, fork_id, kind, target_id, slot_id, slot_depth
+    ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END`,
+  `CREATE TRIGGER fork_overrides_seq_forward BEFORE UPDATE OF seq ON fork_overrides WHEN NEW.seq < OLD.seq
+    BEGIN SELECT RAISE(ABORT, 'an override''s seq only moves forward'); END`,
+  `CREATE TRIGGER forks_lineage_given BEFORE INSERT ON forks
+    WHEN (NEW.lineage_json IS NULL AND NEW.parent_fork_id IS NOT NULL)
+      OR (NEW.lineage_json IS NOT NULL AND NEW.lineage_json ->> '$[0][0]' IS NOT NEW.id)
+    BEGIN SELECT RAISE(ABORT, 'a fork made from another is inserted with its lineage, itself first'); END`,
+  `CREATE TRIGGER forks_lineage_root AFTER INSERT ON forks WHEN NEW.lineage_json IS NULL BEGIN
+    UPDATE forks SET lineage_json = json_array(json_array(NEW.id, NULL)) WHERE id = NEW.id;
+  END`,
+  `CREATE TRIGGER forks_lineage_fixed BEFORE UPDATE OF lineage_json ON forks
+    WHEN OLD.lineage_json IS NOT NULL AND NEW.lineage_json IS NOT OLD.lineage_json
+    BEGIN SELECT RAISE(ABORT, 'a fork keeps its lineage'); END`,
+  `CREATE TRIGGER slots_selection_frozen BEFORE UPDATE OF selected_version_id ON slots
+    WHEN NEW.selected_version_id IS NOT OLD.selected_version_id
+    BEGIN SELECT RAISE(ABORT, 'a slot keeps the selection it was inserted with; a fork selects with an override'); END`,
+  `CREATE TRIGGER history_reduced_version AFTER UPDATE OF deleted_at ON versions
+    WHEN OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL
+    BEGIN
+      INSERT INTO history_changes
+        SELECT id, chat_id, depth, 1 FROM slots WHERE id = NEW.slot_id AND (selected_version_id = NEW.id
+          OR EXISTS (SELECT 1 FROM fork_overrides o WHERE o.target_id = NEW.slot_id AND o.kind = 'select'
+            AND o.value_id = NEW.id))
+      ON CONFLICT(slot_id) DO UPDATE SET revision = revision + 1;
+    END`,
+  `CREATE INDEX versions_fork ON versions(fork_id) WHERE fork_id IS NOT NULL`,
+  `CREATE TRIGGER versions_fork_copy BEFORE INSERT ON versions WHEN NEW.fork_id IS NOT NULL
+    AND ((SELECT chat_id FROM forks WHERE id = NEW.fork_id) IS NOT (SELECT chat_id FROM slots WHERE id = NEW.slot_id)
+      OR NOT EXISTS (SELECT 1 FROM versions o WHERE o.id = NEW.source_version_id AND o.slot_id = NEW.slot_id
+        AND o.fork_id IS NULL))
+    BEGIN SELECT RAISE(ABORT, 'a fork''s own version is in its chat and stands in for one of its message''s own'); END`,
+  `CREATE TRIGGER versions_fork_fixed BEFORE UPDATE OF fork_id ON versions WHEN NEW.fork_id IS NOT OLD.fork_id
+    BEGIN SELECT RAISE(ABORT, 'a version keeps its fork'); END`,
+  `CREATE TRIGGER versions_flags_frozen BEFORE UPDATE OF starred, hidden ON versions
+    WHEN NEW.starred IS NOT OLD.starred OR NEW.hidden IS NOT OLD.hidden
+    BEGIN SELECT RAISE(ABORT, 'a version keeps the flags it was inserted with; a fork sets them with an override'); END`,
+  `CREATE TRIGGER fork_overrides_replace_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'replace'
+    AND (NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id WHERE o.id = NEW.target_id
+        AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth)
+      OR (NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM versions c WHERE c.id = NEW.value_id
+        AND c.source_version_id = NEW.target_id AND c.fork_id IS NOT NULL)))
+    BEGIN SELECT RAISE(ABORT, 'a replacement stands a copy in for one of its message''s own versions'); END`,
+  `CREATE TRIGGER fork_overrides_replace_update_own BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind = 'replace' AND NEW.value_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM versions c
+      WHERE c.id = NEW.value_id AND c.source_version_id = NEW.target_id AND c.fork_id IS NOT NULL)
+    BEGIN SELECT RAISE(ABORT, 'a replacement stands a copy in for one of its message''s own versions'); END`,
+  `CREATE TRIGGER fork_overrides_flag_own BEFORE INSERT ON fork_overrides WHEN NEW.kind IN ('star', 'picker_hide')
+    AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s
+      ON s.id = o.slot_id WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id
+        AND s.depth = NEW.slot_depth))
+    BEGIN SELECT RAISE(ABORT, 'a flag is set on one of its message''s own versions'); END`,
+  `CREATE TRIGGER fork_overrides_flag_set BEFORE UPDATE OF flag ON fork_overrides
+    WHEN NEW.kind IN ('star', 'picker_hide') AND NEW.flag IS NULL
+    BEGIN SELECT RAISE(ABORT, 'a flag is set on one of its message''s own versions'); END`,
+  `CREATE TRIGGER fork_overrides_select_message_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'select'
+    AND (SELECT fork_id FROM versions WHERE id = NEW.value_id) IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'a selection names one of its message''s own versions'); END`,
+  `CREATE TRIGGER fork_overrides_select_update_message_own BEFORE UPDATE OF value_id ON fork_overrides
+    WHEN NEW.kind = 'select' AND (SELECT fork_id FROM versions WHERE id = NEW.value_id) IS NOT NULL
+    BEGIN SELECT RAISE(ABORT, 'a selection names one of its message''s own versions'); END`,
+  `CREATE INDEX entities_forked_from ON entities(forked_from_entity_id) WHERE forked_from_entity_id IS NOT NULL`,
+  `CREATE INDEX entities_forked_from_revision ON entities(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL`,
+  `CREATE INDEX entities_forked_in_chat ON entities(forked_in_chat_id) WHERE forked_in_chat_id IS NOT NULL`,
+  `CREATE TRIGGER entities_fork_parent BEFORE INSERT ON entities WHEN NEW.forked_from_entity_id = NEW.id
+  OR (NEW.forked_from_entity_id IS NOT NULL AND (
+    (SELECT owner_user_id FROM entities WHERE id = NEW.forked_from_entity_id) IS NOT NEW.owner_user_id
+    OR (SELECT kind FROM entities WHERE id = NEW.forked_from_entity_id) IS NOT NEW.kind))
+  OR (NEW.forked_from_revision_id IS NOT NULL
+    AND (SELECT entity_id FROM entity_revisions WHERE id = NEW.forked_from_revision_id) IS NOT NEW.forked_from_entity_id)
+  OR (NEW.forked_in_chat_id IS NOT NULL
+    AND (SELECT owner_user_id FROM chats WHERE id = NEW.forked_in_chat_id) IS NOT NEW.owner_user_id) BEGIN SELECT RAISE(ABORT, 'a fork''s parent is another entity of its owner and kind, its revision the parent''s, its chat its owner''s'); END`,
+  `CREATE TRIGGER entities_fork_parent_update
+    BEFORE UPDATE OF forked_from_entity_id, forked_from_revision_id, forked_in_chat_id, kind ON entities
+    WHEN NEW.forked_from_entity_id = NEW.id
+  OR (NEW.forked_from_entity_id IS NOT NULL AND (
+    (SELECT owner_user_id FROM entities WHERE id = NEW.forked_from_entity_id) IS NOT NEW.owner_user_id
+    OR (SELECT kind FROM entities WHERE id = NEW.forked_from_entity_id) IS NOT NEW.kind))
+  OR (NEW.forked_from_revision_id IS NOT NULL
+    AND (SELECT entity_id FROM entity_revisions WHERE id = NEW.forked_from_revision_id) IS NOT NEW.forked_from_entity_id)
+  OR (NEW.forked_in_chat_id IS NOT NULL
+    AND (SELECT owner_user_id FROM chats WHERE id = NEW.forked_in_chat_id) IS NOT NEW.owner_user_id) BEGIN SELECT RAISE(ABORT, 'a fork''s parent is another entity of its owner and kind, its revision the parent''s, its chat its owner''s'); END`
+]

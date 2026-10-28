@@ -116,14 +116,6 @@ export const LCM_BUILTIN = {
   leafTarget: 600
 } as const
 
-/** The built-in sizes before 2026-10-28, which chats created until then hold as copies (migration 0051). */
-export const LCM_OLD_BUILTIN_SIZES = {
-  recentTarget: 16_000,
-  recentMax: 24_000,
-  layerTarget: 8_000,
-  layerMax: 12_000
-} as const
-
 /** A summary length in tokens as the words an instruction asks for: about 0.75 words a token. */
 export const summaryWords = (tokens: number) => Math.max(1, Math.round(tokens * 0.75))
 
