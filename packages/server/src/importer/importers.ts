@@ -313,7 +313,7 @@ export const parsedFile = ({ report, library, files, stCreatedAt }: Imported, fi
     library: library && {
       kind: library.kind,
       label: library.label,
-      ...encoded(library.doc),
+      ...encoded(library.kind === "preset" && docCheck?.ok ? docCheck.doc : library.doc),
       schemaVersion: library.schemaVersion,
       noteDocJson: library.note && JSON.stringify(library.note),
       ...(library.notes?.length ? { notesDocJson: library.notes.map((note) => JSON.stringify(note)) } : {})

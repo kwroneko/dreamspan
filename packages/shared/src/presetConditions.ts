@@ -4,7 +4,7 @@
 // saved before conditions existed go through the same conversion. ST's per-prompt triggers
 // (generation types) stay a filter of their own beside the condition (owner 2026-10-28).
 import type { PresetDoc, PresetPrompt, PromptCondition, PromptOrderEntry } from "./docs/preset.ts"
-import { newestMessage, presetOrder } from "./presetOrder.ts"
+import { newestMessage, presetOrder, withMain } from "./presetOrder.ts"
 
 export const GROUP_NUDGE = "groupNudge"
 export const IMPERSONATION_PROMPT = "impersonationPrompt"
@@ -97,6 +97,7 @@ type ConditionedDoc = Pick<PresetDoc, "prompts" | "order" | "utility_prompts">
  * one. Pure: a preset already converted comes back as it is.
  */
 export const withConditions = <D extends ConditionedDoc>(doc: D): { doc: D; changes: Array<ConditionChange> } => {
+  doc = withMain(doc)
   const changes: Array<ConditionChange> = []
   const utility = { ...doc.utility_prompts }
   const ids = new Set(doc.prompts.map((p) => p.identifier))

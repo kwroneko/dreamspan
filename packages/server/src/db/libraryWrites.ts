@@ -1,3 +1,4 @@
+import { withMain } from "@rp/shared/presetOrder.ts"
 import { PresetDoc } from "@rp/shared/docs/preset.ts"
 import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
@@ -46,7 +47,9 @@ export interface EncodedDoc {
 
 const encode = (input: Doc): EncodedDoc => {
   const doc =
-    Array.isArray(input.prompts) && Array.isArray(input.order) ? Schema.decodeUnknownSync(PresetDoc)(input) : input
+    Array.isArray(input.prompts) && Array.isArray(input.order)
+      ? withMain(Schema.decodeUnknownSync(PresetDoc)(input))
+      : input
   return { json: JSON.stringify(doc), hash: docHash(doc), searchText: searchText(doc) }
 }
 

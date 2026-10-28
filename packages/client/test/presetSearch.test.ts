@@ -1,3 +1,5 @@
+import { writePresetOrder } from "../src/features/editor/presetDraft.ts"
+import { mainPrompt } from "@rp/shared/presetOrder.ts"
 import { describe, expect, it } from "vitest"
 import { searchTexts } from "../src/features/editor/searchCore.ts"
 import { presetOrder, newestMessage } from "@rp/shared/presetOrder.ts"
@@ -58,9 +60,29 @@ it("keeps off prompts in place and appends older pool entries off", () => {
       { identifier: "off", enabled: false }
     ])
   ).toEqual([
+    { identifier: "main", enabled: false },
     { identifier: "chatHistory", enabled: true },
     { identifier: "newestMessage", enabled: true },
     { identifier: "off", enabled: false },
     { identifier: "parked", enabled: false }
+  ])
+})
+
+it("materializes Main and keeps it off when an editor order write omits it", () => {
+  const writes = new Map<string, unknown>()
+  writePresetOrder(
+    {
+      value: () => [],
+      setValue: (path, value) => {
+        writes.set(path.join("/"), value)
+      }
+    },
+    []
+  )
+  expect(writes.get("prompts/identifier=main")).toEqual(mainPrompt)
+  expect(writes.get("prompts/identifier=newestMessage")).toEqual(newestMessage)
+  expect(writes.get("order")).toEqual([
+    { identifier: "main", enabled: false },
+    { identifier: "newestMessage", enabled: true }
   ])
 })

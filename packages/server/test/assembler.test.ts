@@ -2136,6 +2136,50 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
     expect(marker(definitions, "charDefinitions")).toContain("\n\n<Tobin>\nTobin draws maps.\n</Tobin>")
   })
 
+  it.each(["relative", "absolute", "missing"] as const)("keeps notes in Main's empty slot (%s)", async (position) => {
+    const missing = position === "missing"
+    const base = preset()
+    const mainIndex = base.order.findIndex((e) => e.identifier === "main")
+    // Move the slot after the definitions to prove this isn't a prepend-notes fallback.
+    const order = base.order.filter((e) => e.identifier !== "main")
+    order.splice(mainIndex + 3, 0, { identifier: "main", enabled: false })
+    const own = (id: string, section: "before_main_prompt" | "after_main_prompt"): NoteInput => ({
+      ...note(id, 1, "system"),
+      entity: id,
+      doc: {
+        ...note(id, 1, "system").doc,
+        owner: { chat: "chat-1" as never },
+        placement: { mode: "section", section, role: "system" }
+      }
+    })
+    const notes = [own("BEFORE MAIN", "before_main_prompt"), own("AFTER MAIN", "after_main_prompt")]
+    const snapshot = await assembled(
+      cast(["mira"], {
+        preset: {
+          ...base,
+          prompts: missing
+            ? base.prompts.filter((p) => p.identifier !== "main")
+            : base.prompts.map((p) =>
+                p.identifier === "main"
+                  ? { ...p, injection_position: position as "relative" | "absolute", injection_depth: 1 }
+                  : p
+              ),
+          order: missing ? order.filter((e) => e.identifier !== "main") : order
+        },
+        notes,
+        events: notes.map((n) => at(null, { key: "note.activate", value: { note: n.entity as never } }))
+      })
+    )
+    const sent = contents(snapshot)
+    const before = sent.findIndex((line) => line.startsWith("system: BEFORE MAIN"))
+    expect(before).toBeGreaterThanOrEqual(0)
+    if (position === "absolute") expect(sent[before]).toBe("system: BEFORE MAIN\nAFTER MAIN")
+    else expect(sent[before + 1]).toBe("system: AFTER MAIN")
+    expect(sent.filter((line) => line.includes("Write Mira"))).toEqual([])
+    if (missing) expect(before).toBe(0)
+    else expect(before).toBeGreaterThan(0)
+  })
+
   it("puts a card's note placed with the definitions inside its own part, and a chat's after the main prompt", async () => {
     const definitions = { mode: "section", section: "after_main_prompt", role: "system" } as const
     const outfit: NoteInput = {

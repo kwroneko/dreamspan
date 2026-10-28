@@ -628,3 +628,23 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
     .poll(async () => (await storedCopies(page)).map((copy) => copy.refId).sort())
     .toEqual(["a", "b", "c", "old"])
 })
+
+test("Main can be switched off and moved but a custom Main cannot be deleted", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const file = JSON.parse(await fixture("default"))
+  file.prompts.find((p: { identifier: string }) => p.identifier === "main").system_prompt = false
+  const refId = await importPreset(page, Buffer.from(JSON.stringify(file)))
+  await open(page, refId)
+  const main = page.locator('[data-prompt="main"]')
+  await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+  const send = main.getByRole("switch", { name: "Send Main Prompt" })
+  await send.click()
+  await expect(send).not.toBeChecked()
+  await main.getByRole("button", { name: "Move Main Prompt" }).press("ArrowDown")
+  await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
+  await expect(page.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+  await page.reload()
+  await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
+  await expect(main.getByRole("switch", { name: "Send Main Prompt" })).not.toBeChecked()
+  await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+})

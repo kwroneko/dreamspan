@@ -9,6 +9,8 @@ import { textField, validateDoc, valueField } from "@rp/shared/editing.ts"
 import { ImportResult } from "@rp/shared/libraryImport.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect, Exit, Schema } from "effect"
+import { presetDoc } from "./support/docs.ts"
+import { docHash, searchText } from "../src/db/documents.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { chunk, png, stCardV2 } from "./formats/support.ts"
 import { client, outcome, post, serverLayer, serverPort, testConfig } from "./support/config.ts"
@@ -84,6 +86,46 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
 const doc = (api: Api, refId: RefId) => Effect.map(api.OpenEditor({ refId }), (opened) => opened.doc)
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("editing the library", (it) => {
+  it.effect("restoring a legacy preset without Main materializes a disabled first slot", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const me = yield* api.Whoami()
+      // Simulate an old stored revision through the writer's prevalidated-import boundary.
+      const legacy = presetDoc([{ identifier: "style", content: "STYLE" }])
+      const imported = yield* writer.ImportFile({
+        userId: me.id,
+        intoRefId: null,
+        kind: "preset",
+        label: "Legacy without Main",
+        docJson: JSON.stringify(legacy),
+        docHash: docHash(legacy),
+        searchText: searchText(legacy),
+        schemaVersion: 1,
+        sourceName: "legacy.json",
+        sourceHash: "a".repeat(64),
+        media: [],
+        noteDocJson: null
+      })
+      const refId = imported.ref.id
+      yield* draft(api, refId, textField(["prompts", "identifier=style", "content"]), "CHANGED")
+      const saved = yield* commit(api, refId)
+      const restored = yield* api.RestoreRevision({
+        refId,
+        revisionId: imported.ref.headRevisionId,
+        expectedRowVersion: saved.ref.rowVersion
+      })
+      // Read the stored revision, bypassing the editor's virtual normalization.
+      const stored = yield* api.GetRevision({ refId, revisionId: restored.ref.headRevisionId })
+      assert.deepStrictEqual((stored.order as PresetDoc["order"])[0], { identifier: "main", enabled: false })
+      assert.isTrue((stored.prompts as PresetDoc["prompts"]).some((p) => p.identifier === "main"))
+      assert.strictEqual(
+        (stored.prompts as PresetDoc["prompts"]).find((p) => p.identifier === "style")!.content,
+        "STYLE"
+      )
+    })
+  )
+
   it.effect("standard card names survive create, rename, fork, revision history and V3 export", () =>
     Effect.gen(function* () {
       const api = yield* client()

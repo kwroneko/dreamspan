@@ -7,6 +7,8 @@ import { Effect } from "effect"
 import { sniff } from "../src/importer/detect.ts"
 import * as Importers from "../src/importer/importers.ts"
 import { cardChunk, cardV3, json, png, stCardV2, worldInfo, zip } from "./formats/support.ts"
+import { presetDoc } from "./support/docs.ts"
+import { mainPrompt } from "@rp/shared/presetOrder.ts"
 import { cardDoc } from "./support/docs.ts"
 
 const parse = (bytes: Uint8Array, name = "upload.bin") =>
@@ -32,6 +34,20 @@ describe("format detection", () => {
 })
 
 describe("the built-in importers", () => {
+  it("normalizes our own imported preset document before encoding it", () => {
+    const parsed = Importers.parsedFile(
+      {
+        report: new ImportReport({ format: "synthetic-preset", issues: [] }),
+        library: { kind: "preset", label: "Older preset", doc: presetDoc([]), schemaVersion: 1, note: null },
+        files: []
+      },
+      "a".repeat(64)
+    )
+    const stored = JSON.parse(parsed.library!.docJson)
+    assert.deepStrictEqual(stored.prompts, [mainPrompt])
+    assert.deepStrictEqual(stored.order, [{ identifier: "main", enabled: false }])
+  })
+
   it("picks the importer from the bytes, not the name", async () => {
     const cases: Array<[Uint8Array, string, string | null]> = [
       [png(cardChunk("chara", stCardV2())), "card-v2-png", "card"],

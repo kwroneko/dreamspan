@@ -1,7 +1,7 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
-import { charDefinitions, newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
+import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import {
   conditionOf,
@@ -719,7 +719,7 @@ const conditionHolds = (assembly: Assembly, condition: PromptCondition) => {
  * history changes from turn to turn, so it's never inside the cached part.
  */
 const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsDirection: boolean } => {
-  const doc = need(assembly, "preset").doc
+  const doc = withMain(need(assembly, "preset").doc)
   const type = need(assembly, "cast").type
   const prompts = new Map(
     [...doc.prompts, ...(doc.prompts.some((p) => p.identifier === "newestMessage") ? [] : [newestMessage])].map((p) => [
@@ -1267,7 +1267,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
 
 /** The context as ST's populateChatCompletion builds it, filled the way the preset says. */
 const composeStage = sync("compose", (assembly) => {
-  let doc = need(assembly, "preset").doc
+  let doc = withMain(need(assembly, "preset").doc)
   const cast = need(assembly, "cast")
   const mode = need(assembly, "mode")
   const env = need(assembly, "macros")
@@ -1772,8 +1772,8 @@ const composeStage = sync("compose", (assembly) => {
         continue
       }
       const main = collection.findIndex((p) => p.identifier === "main")
-      const mainPrompt = collection[main]
-      if (mainPrompt?.injection_position === "absolute") {
+      const mainPrompt = collection[main]!
+      if (mainPrompt.injection_position === "absolute") {
         // Main in-chat: the note is injected beside it, with its role, depth and order.
         collection.splice(place.at === "start" ? main : main + 1, 0, {
           ...mainPrompt,
@@ -1785,7 +1785,7 @@ const composeStage = sync("compose", (assembly) => {
           forbid_overrides: false,
           barrier: (place.volatile || env.isVolatile(text.piece)) && !text.text
         })
-      } else if (mainPrompt) {
+      } else {
         const kind = place.volatile ? "volatile" : "prefix"
         beside.push({ message: { role: place.role, content: text.text, pieces: [text.piece], kind }, at: place.at })
       }
