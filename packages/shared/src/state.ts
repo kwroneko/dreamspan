@@ -36,7 +36,8 @@ export const StateEventData = Schema.Union([
   event("preset.unbind", Schema.Struct({})),
   event("model.unbind", Schema.Struct({})),
   event("layout.cards", Schema.Literals(["concat", "swap_tail"])),
-  event("roles.projection", Schema.Literals(["by_writer", "alternate", "perspective"])),
+  /** An open id: the built-ins are `by_writer`, `alternate` and `perspective`; a plugin registers others (resolved at use). */
+  event("roles.projection", Schema.String),
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
@@ -243,7 +244,7 @@ export interface ChatState {
   readonly presetOverlays: Readonly<Record<string, boolean>>
   readonly modelBindings: Readonly<Record<string, { readonly connection: string; readonly model: string }>>
   readonly layoutCards: "concat" | "swap_tail" | null
-  readonly rolesProjection: "by_writer" | "alternate" | "perspective" | null
+  readonly rolesProjection: string | null
   readonly macroBindings: Readonly<Record<string, string>>
   readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
   readonly outputContract: "final_text" | "send_message" | "both" | null

@@ -20,6 +20,7 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
       globalLorebooksOff: [],
       loreBelowHistory: true,
       rolesProjection: null,
+      roleProjections: [],
       cards: []
     })
     assert.deepStrictEqual(nextInTurn(cast, [], null), { id: a, after: null })

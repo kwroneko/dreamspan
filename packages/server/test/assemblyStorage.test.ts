@@ -11,6 +11,10 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
+import { inject } from "vitest"
+import { RpcClient } from "effect/rpc"
+import { AssemblyModules } from "../src/assembler/modules.ts"
+import type * as AssemblyPlugin from "./support/assemblyPlugin.ts"
 import { readFileSync } from "node:fs"
 import { ASSEMBLER_VERSION, generationOf, type ContextSnapshot } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
@@ -124,6 +128,100 @@ const setup = (handle = "ana") =>
   })
 
 const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
+
+for (const workers of ["source", "bundle"] as const) {
+  describe(`assembly plugin modules in ${workers} readers`, () => {
+    it.live(
+      "scoped projection additions, overrides and disablement reach assembly and metadata",
+      () =>
+        Effect.gen(function* () {
+          const modules = yield* AssemblyModules
+          const { state, assemble, reader, userId } = yield* setup()
+          const source = (exportName: keyof typeof AssemblyPlugin) => ({
+            id: "synthetic",
+            module: new URL("./support/assemblyPlugin.ts", import.meta.url).href,
+            exportName
+          })
+          const greetingRole = (snapshot: ContextSnapshot) =>
+            snapshot.request.messages.find((m) => m.content.includes("Late again"))?.role
+          // Incoming RPC headers cannot supply trusted worker modules.
+          const injected = yield* reader.RoleProjections().pipe(
+            RpcClient.withHeaders({
+              "rp-assembly-modules": JSON.stringify([source("install")])
+            })
+          )
+          assert.isFalse(injected.some((p) => p.id === "plugin/all_user"))
+          yield* state({ key: "roles.projection", value: "plugin/all_user" })
+          assert.strictEqual(greetingRole(yield* assemble()), "assistant")
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* modules.register(source("install"))
+              assert.strictEqual(greetingRole(yield* assemble()), "user")
+              assert.isTrue(
+                (yield* reader.RoleProjections()).some((p) => p.id === "plugin/all_user" && p.label === "Plugin roles")
+              )
+              const snapshots = yield* Effect.all([assemble(), assemble(), assemble()], { concurrency: 3 })
+              assert.isTrue(snapshots.every((s) => !s.issues.some((i) => i.kind === "role_projection_missing")))
+              yield* Effect.scoped(
+                Effect.gen(function* () {
+                  yield* modules.disable("synthetic")
+                  assert.strictEqual(greetingRole(yield* assemble()), "assistant")
+                })
+              )
+              assert.strictEqual(greetingRole(yield* assemble()), "user")
+            })
+          )
+          const missing = yield* assemble()
+          assert.strictEqual(greetingRole(missing), "assistant")
+          assert.isTrue(missing.issues.some((i) => i.kind === "role_projection_missing"))
+          assert.isFalse((yield* reader.RoleProjections()).some((p) => p.id === "plugin/all_user"))
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* modules.register(source("withTransform"))
+              const transformed = yield* assemble()
+              assert.strictEqual(greetingRole(transformed), "user")
+              assert.deepStrictEqual(transformed.request.messages.at(-1), {
+                role: "system",
+                content: "Transported transform"
+              })
+              const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(transformed) })
+              assert.strictEqual(rebuilt._tag, "Rebuilt")
+              if (rebuilt._tag === "Rebuilt")
+                assert.deepStrictEqual(JSON.parse(rebuilt.snapshot).request, transformed.request)
+            })
+          )
+          assert.isFalse((yield* assemble()).request.messages.some((m) => m.content === "Transported transform"))
+          yield* state({ key: "roles.projection", value: "by_writer" })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* modules.register(source("overrideWriter"))
+              assert.strictEqual(greetingRole(yield* assemble()), "user")
+            })
+          )
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* modules.register(source("disableWriter"))
+              const disabled = yield* assemble()
+              assert.strictEqual(greetingRole(disabled), "assistant")
+              assert.isTrue(disabled.issues.some((i) => i.kind === "role_projection_missing"))
+            })
+          )
+          assert.strictEqual(greetingRole(yield* assemble()), "assistant")
+        }).pipe(
+          Effect.provide(
+            Database.layer({
+              dataDir: tempDir("assembly-modules"),
+              readers: 2,
+              allowNetworkFs: false,
+              workers,
+              ...(workers === "bundle" ? { bundleDir: inject("bundleDir") } : {})
+            })
+          )
+        ),
+      60_000
+    )
+  })
+}
 
 describe("context assembly from the database", () => {
   it.live("projects current preset fills, note slots and real cache boundaries without prompt text", () =>

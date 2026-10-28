@@ -1,6 +1,6 @@
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import { RoleProjectionOption, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -2483,6 +2483,7 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
+  Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
   Rpc.make("AssembleContext", {
     payload: {
       partialBatch: Schema.optionalKey(Schema.Boolean),

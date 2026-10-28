@@ -36,6 +36,8 @@ import {
   need,
   type PositionedEvent,
   type ProjectedEntry,
+  type ProjectionRegistry,
+  type RoleProjection,
   type Scripted,
   type StageRegistry
 } from "./pipeline.ts"
@@ -326,7 +328,7 @@ const noteGateStage = sync("note-gate", (assembly) => {
     need(assembly, "projected").at(-1)?.role === "assistant" &&
     need(assembly, "preset").doc.utility_prompts.send_if_empty !== ""
   const cast = need(assembly, "cast")
-  const active = need(assembly, "notes")
+  const active = assembly.notes ?? []
   const switches = switchesOf(need(assembly, "events"))
   const holds = new Map(active.map((note) => [note.entity, noteConditionHolds(note, cast)]))
   assembly.noteDecisions = new Map(
@@ -651,9 +653,42 @@ const resolveStage: AssemblerStage = {
  * alternation by position (even depths, the greeting's, are `assistant`), or by
  * perspective (the speaker's own turns are `assistant`).
  */
+const builtinProjections: ReadonlyArray<RoleProjection> = [
+  {
+    id: "by_writer",
+    label: "By writer",
+    description: "Yours as user, the model's as assistant.",
+    role: ({ side }) => side
+  },
+  {
+    id: "alternate",
+    label: "Alternating",
+    description: "Strictly alternating by position, for models that require it.",
+    role: ({ entry }) => (entry.depth % 2 === 0 ? "assistant" : "user")
+  },
+  {
+    id: "perspective",
+    label: "By perspective",
+    description: "The replying character's own turns as assistant, everyone else's as user.",
+    role: ({ speaker, cast }) => (speaker !== undefined && speaker === cast.speaker ? "assistant" : "user")
+  }
+]
+
+export const registerBuiltinProjections = (registry: ProjectionRegistry): Effect.Effect<void, never, Scope.Scope> =>
+  Effect.forEach(builtinProjections, (projection) => registry.register(projection), { discard: true })
+
 const rolesStage = sync("roles", (assembly) => {
   const cast = need(assembly, "cast")
-  const { projection } = need(assembly, "mode")
+  const { projection: chosen } = need(assembly, "mode")
+  // Resolved at use: a plugin's projection may be gone since the chat chose it.
+  const found = assembly.request.projections.get(chosen)
+  if (!found) {
+    assembly.issues.push({
+      kind: "role_projection_missing",
+      message: `This chat's role projection "${chosen}" isn't installed (a plugin may be off); roles are by writer instead.`
+    })
+  }
+  const projection = found ?? assembly.request.projections.get("by_writer")
   const names = need(assembly, "macros").names
   assembly.projected = need(assembly, "resolved").map(({ entry, piece }): ProjectedEntry => {
     const speaker = speakerOf(entry, cast)
@@ -662,16 +697,7 @@ const rolesStage = sync("roles", (assembly) => {
     // A speaker who has left still names its own messages; otherwise the side's first card does.
     const named =
       (entry.speaker && !recorded(entry, cast) ? assembly.departed?.get(entry.speaker) : undefined) ?? speaker
-    const role =
-      projection === "alternate"
-        ? entry.depth % 2 === 0
-          ? "assistant"
-          : "user"
-        : projection === "perspective"
-          ? speaker !== undefined && speaker === cast.speaker
-            ? "assistant"
-            : "user"
-          : side
+    const role = projection?.role({ entry, cast, speaker, side }) ?? side
     return {
       entry,
       role,
@@ -1135,7 +1161,7 @@ const withDefinitions = (note: NoteInput) =>
 const cardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | null): ReadonlyArray<Text> => {
   const env = need(assembly, "macros")
   const skipped = assembly.skippedNotes ?? []
-  return [...need(assembly, "notes"), ...skipped]
+  return [...(assembly.notes ?? []), ...skipped]
     .filter((note) => noteCard(note.doc) === card.entity && withDefinitions(note))
     .toSorted((a, b) => (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
     .flatMap((note) => {
@@ -1188,7 +1214,7 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
   const env = need(assembly, "macros")
   const state = need(assembly, "state")
   // A summary note is placed by its own switch alone, also beside summaries (DESIGN §8 [P]).
-  const candidates = [...need(assembly, "notes"), ...(assembly.skippedNotes ?? [])]
+  const candidates = [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])]
   const isSummary = (note: NoteInput) => isSummaryNote(note)
   const isPersona = (note: NoteInput) => personas.some((p) => p.entity === noteCard(note.doc))
   const rank = (note: NoteInput) =>

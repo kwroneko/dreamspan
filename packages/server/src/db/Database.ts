@@ -1,4 +1,5 @@
 // Main-thread access to the database workers. ARCHITECTURE.md §3.1 and §3.6.
+import { AssemblyModules, moduleClient } from "../assembler/modules.ts"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -162,6 +163,7 @@ export const layer = (options: DatabaseOptions) => {
     Effect.gen(function* () {
       const entries = yield* workerEntries(options)
       const draftClock = yield* DraftClock
+      const modules = yield* AssemblyModules
       const WriterLive = Layer.effect(Writer, RpcClient.make(WriteOps)).pipe(
         Layer.provide(
           writerProtocol(
@@ -178,7 +180,10 @@ export const layer = (options: DatabaseOptions) => {
         Effect.gen(function* () {
           const writer = yield* Writer
           yield* writer.Ready()
-          return Layer.effect(Reader, ReaderPool.client(ReadOps)).pipe(
+          return Layer.effect(
+            Reader,
+            Effect.map(ReaderPool.client(ReadOps), (calls) => moduleClient(calls, modules))
+          ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
             Layer.provide(ReaderPool.layer(options.readers, { retryCrashed: true })),
             Layer.provide(workerThreads(entries.reader, { dbPath }, entries.bundleDir))
@@ -189,5 +194,5 @@ export const layer = (options: DatabaseOptions) => {
     })
   )
 
-  return Workers.pipe(Layer.provide(Guards))
+  return Workers.pipe(Layer.provide(Guards), Layer.provideMerge(AssemblyModules.layer))
 }

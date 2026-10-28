@@ -24,6 +24,7 @@ import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { Context, Effect, Exit, Layer, Schema } from "effect"
+import { makeRegistry, type Registry } from "../registry.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -214,6 +215,35 @@ export class StImportFailed extends Schema.TaggedError<StImportFailed>()("StImpo
   }
 }
 
+/** One uploaded file of the folder, as its kind's handler receives it. */
+export interface StFolderCall<F extends StFile = StFile> {
+  readonly session: Session
+  readonly user: User
+  readonly importId: string
+  readonly path: string
+  readonly file: F
+  readonly bytes: Uint8Array
+  readonly request: ChatRequest
+}
+
+/**
+ * What the import does with the folder files of one kind (PLUGINS §8): the dispatch by the
+ * file's place in the folder. The built-ins register through the same registry a plugin's
+ * handler does, which replaces or wraps (`get` first) one for a scope. The handler reads
+ * through the typed format operations (`Formats.st`, worker execution) and stores through
+ * the writer's typed operations; it holds no database access of its own.
+ */
+export interface StFolderHandler {
+  /** The kind of folder file it handles: `settings`, `card`, `chat`... */
+  readonly id: Exclude<StFile["kind"], "unsupported">
+  readonly run: (call: StFolderCall) => Effect.Effect<StFileResult, unknown>
+}
+
+const on = <K extends Exclude<StFile["kind"], "unsupported">>(
+  id: K,
+  run: (call: StFolderCall<Extract<StFile, { kind: K }>>) => Effect.Effect<StFileResult, unknown>
+): StFolderHandler => ({ id, run: run as StFolderHandler["run"] })
+
 const result = (outcome: StFileResult["outcome"], message = "") => new StFileResult({ outcome, message })
 
 export class StImports extends Context.Service<
@@ -231,6 +261,8 @@ export class StImports extends Context.Service<
     ) => Effect.Effect<StFileResult, NotFound | StImportFailed>
     readonly unhidden: (user: User, chatId: ChatId) => void
     readonly exists: (user: User, importId: string) => boolean
+    /** The folder-file handlers by kind, for a plugin to register into, wrap or disable. */
+    readonly handlers: Registry<StFolderHandler>
   }
 >()("rp/importer/StImports") {
   static readonly layer = Layer.effect(
@@ -243,6 +275,7 @@ export class StImports extends Context.Service<
       const { holding } = yield* MediaHolds
       const hub = yield* ChatHub
       const sessions = new Map<string, Session>()
+      const handlers = makeRegistry<StFolderHandler>()
 
       yield* removeOldStaging(config.dataDir)
 
@@ -1028,103 +1061,129 @@ export class StImports extends Context.Service<
         Effect.gen(function* () {
           const session = yield* sessionOf(user, importId)
           const kind = classifyStPath(path)
+          const handler = kind === null ? undefined : handlers.get(kind.kind)
           if (kind === null || kind.kind === "unsupported") {
             return result("failed", "This file isn't one the import reads.")
           }
-          switch (kind.kind) {
-            case "settings": {
-              const parsed = yield* formats.st.settings(bytes)
-              session.report.file(path, parsed.report)
-              const settings = parsed.settings
-              if (settings === null) return result("failed")
-              const size = JSON.stringify(settings).length
-              session.held -= session.settingsHeld
-              session.settingsHeld = 0
-              if (!hold(session, path, "settings", size)) return result("failed", "too much in one import")
-              session.settingsHeld = size
-              yield* writer.StImportSummarySettings({
-                userId: user.id,
-                importId,
-                prompt: settings.summary.prompt,
-                settings: JSON.stringify(settings.summary)
-              })
-              session.settings = settings
-              session.report.selectedPreset =
-                settings.selectedPreset === null
-                  ? null
-                  : new StIssue({
-                      path,
-                      level: "warning",
-                      code: "st.preset_missing",
-                      message: `ST used preset “${shownText(settings.selectedPreset)}”, but its preset file has not been imported from this folder. Your default preset was left unchanged.`
-                    })
-              session.personaNames = new Map()
-              for (const persona of settings.personas) {
-                session.personaNames.set(persona.name, [
-                  ...(session.personaNames.get(persona.name) ?? []),
-                  persona.avatar
-                ])
-              }
-              if (settings.globalWorlds.length > 0) {
-                for (const name of settings.globalWorlds) {
-                  const ref = session.worlds.get(name)
-                  if (ref) yield* writer.SetGlobalLorebook({ userId: user.id, ref, global: true })
-                }
-              }
-              return result("added")
-            }
-            case "persona_avatar":
-              return yield* personaFile(session, user, path, kind.file, bytes)
-            case "card":
-              return yield* cardFile(session, user, path, kind.file, bytes, request.createdAt)
-            case "world":
-              return yield* libraryFile(session, user, path, `${kind.name}.json`, bytes, "lorebook", kind.name)
-            case "preset":
-              return yield* libraryFile(session, user, path, `${kind.name}.json`, bytes, "preset", kind.name)
-            case "group": {
-              const parsed = yield* formats.st.group(bytes, kind.file)
-              session.report.file(path, parsed.report)
-              const group = parsed.group
-              if (group === null) return result("failed")
-              const size = [group.name, ...group.members, ...group.disabledMembers, ...group.chats].reduce(
-                (sum, text) => sum + text.length + 16,
-                0
-              )
-              if (!hold(session, path, "group", size)) return result("failed", "too much in one import")
-              for (const chat of group.chats) session.groups.set(chat, group)
-              return result("added")
-            }
-            case "chat":
-            case "group_chat":
-              return yield* chatFile(session, user, path, kind, bytes, request).pipe(
-                // A chat left between parts is the only one kept; one that failed, or whose
-                // request was interrupted, gives back what it held.
-                Effect.onExit((exit) =>
-                  Exit.isFailure(exit) && session.chat?.path === path ? dropChat(session) : Effect.void
-                ),
-                Effect.catchTags({
-                  // Another run of this import took the file over, or finished it.
-                  ImportLeaseLost: () => Effect.succeed(result("failed", "Another import of this chat took it over.")),
-                  NotFound: (error) => {
-                    const cached = session.records.get(path)
-                    // The chat went to the recycle bin meanwhile: like one found there, it's left there.
-                    if (error.entity === "chat" && cached !== undefined) {
-                      session.records.set(path, { ...cached, binned: true })
-                      session.report.count(kind.kind, "skipped")
-                      return Effect.succeed(result("skipped", "in the recycle bin"))
-                    }
-                    if (error.entity === "slot" || error.entity === "import record") {
-                      return Effect.succeed(
-                        result("restart", "The chat changed meanwhile; send it again from its start.")
-                      )
-                    }
-                    session.report.count(kind.kind, "failed")
-                    return Effect.succeed(result("failed", "A card it names isn't in your library."))
-                  }
-                })
-              )
+          if (handler === undefined) {
+            const message = `The ${kind.kind} folder import handler is disabled.`
+            session.report.issue(path, "error", "st.handler_disabled", message)
+            session.report.count(kind.kind, "failed")
+            return result("failed", message)
           }
+          return yield* handler.run({ session, user, importId, path, file: kind, bytes, request })
         })
+
+      const chatHandler = (kind: "chat" | "group_chat") =>
+        on(kind, ({ session, user, path, file, bytes, request }) =>
+          Effect.gen(function* () {
+            return yield* chatFile(session, user, path, file, bytes, request).pipe(
+              // A chat left between parts is the only one kept; one that failed, or whose
+              // request was interrupted, gives back what it held.
+              Effect.onExit((exit) =>
+                Exit.isFailure(exit) && session.chat?.path === path ? dropChat(session) : Effect.void
+              ),
+              Effect.catchTags({
+                // Another run of this import took the file over, or finished it.
+                ImportLeaseLost: () => Effect.succeed(result("failed", "Another import of this chat took it over.")),
+                NotFound: (error) => {
+                  const cached = session.records.get(path)
+                  // The chat went to the recycle bin meanwhile: like one found there, it's left there.
+                  if (error.entity === "chat" && cached !== undefined) {
+                    session.records.set(path, { ...cached, binned: true })
+                    session.report.count(file.kind, "skipped")
+                    return Effect.succeed(result("skipped", "in the recycle bin"))
+                  }
+                  if (error.entity === "slot" || error.entity === "import record") {
+                    return Effect.succeed(
+                      result("restart", "The chat changed meanwhile; send it again from its start.")
+                    )
+                  }
+                  session.report.count(file.kind, "failed")
+                  return Effect.succeed(result("failed", "A card it names isn't in your library."))
+                }
+              })
+            )
+          })
+        )
+
+      // The built-in handlers register the way a plugin's will (PLUGINS §8): its own, under
+      // the same kind, replaces one for the scope it is registered in.
+      const builtins: ReadonlyArray<StFolderHandler> = [
+        on("settings", ({ session, user, importId, path, bytes }) =>
+          Effect.gen(function* () {
+            const parsed = yield* formats.st.settings(bytes)
+            session.report.file(path, parsed.report)
+            const settings = parsed.settings
+            if (settings === null) return result("failed")
+            const size = JSON.stringify(settings).length
+            session.held -= session.settingsHeld
+            session.settingsHeld = 0
+            if (!hold(session, path, "settings", size)) return result("failed", "too much in one import")
+            session.settingsHeld = size
+            yield* writer.StImportSummarySettings({
+              userId: user.id,
+              importId,
+              prompt: settings.summary.prompt,
+              settings: JSON.stringify(settings.summary)
+            })
+            session.settings = settings
+            session.report.selectedPreset =
+              settings.selectedPreset === null
+                ? null
+                : new StIssue({
+                    path,
+                    level: "warning",
+                    code: "st.preset_missing",
+                    message: `ST used preset “${shownText(settings.selectedPreset)}”, but its preset file has not been imported from this folder. Your default preset was left unchanged.`
+                  })
+            session.personaNames = new Map()
+            for (const persona of settings.personas) {
+              session.personaNames.set(persona.name, [
+                ...(session.personaNames.get(persona.name) ?? []),
+                persona.avatar
+              ])
+            }
+            if (settings.globalWorlds.length > 0) {
+              for (const name of settings.globalWorlds) {
+                const ref = session.worlds.get(name)
+                if (ref) yield* writer.SetGlobalLorebook({ userId: user.id, ref, global: true })
+              }
+            }
+            return result("added")
+          })
+        ),
+        on("persona_avatar", ({ session, user, path, file, bytes }) =>
+          personaFile(session, user, path, file.file, bytes)
+        ),
+        on("card", ({ session, user, path, file, bytes, request }) =>
+          cardFile(session, user, path, file.file, bytes, request.createdAt)
+        ),
+        on("world", ({ session, user, path, file, bytes }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name)
+        ),
+        on("preset", ({ session, user, path, file, bytes }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "preset", file.name)
+        ),
+        on("group", ({ session, path, file, bytes }) =>
+          Effect.gen(function* () {
+            const parsed = yield* formats.st.group(bytes, file.file)
+            session.report.file(path, parsed.report)
+            const group = parsed.group
+            if (group === null) return result("failed")
+            const size = [group.name, ...group.members, ...group.disabledMembers, ...group.chats].reduce(
+              (sum, text) => sum + text.length + 16,
+              0
+            )
+            if (!hold(session, path, "group", size)) return result("failed", "too much in one import")
+            for (const chat of group.chats) session.groups.set(chat, group)
+            return result("added")
+          })
+        ),
+        chatHandler("chat"),
+        chatHandler("group_chat")
+      ]
+      for (const handler of builtins) yield* handlers.register(handler)
 
       return StImports.of({
         start: (user, unsupported) =>
@@ -1161,7 +1220,8 @@ export class StImports extends Context.Service<
             )
           ),
         unhidden: (user, chatId) => void sessions.get(user.id)?.report.hiddenRuns.delete(chatId),
-        exists: (user, importId) => sessions.get(user.id)?.id === importId
+        exists: (user, importId) => sessions.get(user.id)?.id === importId,
+        handlers
       })
     })
   )

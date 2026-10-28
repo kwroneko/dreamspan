@@ -109,6 +109,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         ),
         loreBelowHistory: state.loreBelowHistory ?? true,
         rolesProjection: state.rolesProjection,
+        roleProjections: yield* reader.RoleProjections(),
         cards
       })
     })

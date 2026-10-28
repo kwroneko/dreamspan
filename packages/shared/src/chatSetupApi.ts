@@ -113,7 +113,14 @@ export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   pinsCollapsed: Schema.Boolean
 }) {}
 
-const RolesProjection = Schema.Literals(["by_writer", "alternate", "perspective"])
+/** An open id, resolved against the server's role-projection registry when a context is assembled. */
+const RolesProjection = Schema.String
+
+export const RoleProjectionOption = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  description: Schema.optionalKey(Schema.String)
+})
 
 /**
  * Who is in a chat, and its settings, at one position: the fold of its state events
@@ -139,6 +146,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
   loreBelowHistory: Schema.Boolean,
   rolesProjection: Schema.NullOr(RolesProjection),
+  roleProjections: Schema.Array(RoleProjectionOption),
   /** Active cards plus swapped-out cards, to retain historical message names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}

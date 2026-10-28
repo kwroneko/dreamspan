@@ -426,7 +426,8 @@ export const serverWith = <E>(
     )
   ).pipe(
     // --- ST data folder import (ARCHITECTURE.md §13)
-    Layer.provide(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
+    // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
+    Layer.provideMerge(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(
       Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
         Layer.provideMerge(generator),

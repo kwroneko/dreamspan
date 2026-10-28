@@ -33,6 +33,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const assembler = yield* WorkerAssembler
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
+    RoleProjections: () => assembler.projectionOptions,
     AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
