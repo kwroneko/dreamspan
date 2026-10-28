@@ -1,3 +1,4 @@
+import { SnippetsApi } from "./snippetsApi.ts"
 import { HistoryApi } from "./historyApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
@@ -315,6 +316,7 @@ export class AppApi extends RpcGroup.make(
   .merge(StImportApi)
   // --- The card and preset editors (editorApi.ts).
   .merge(EditorApi)
+  .merge(SnippetsApi)
   // --- The recycle bin, the composer's drafts, notices (binApi.ts, composerApi.ts, noticeApi.ts).
   .merge(BinApi)
   .merge(ComposerApi)

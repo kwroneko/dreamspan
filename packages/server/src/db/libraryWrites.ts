@@ -177,6 +177,13 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             SELECT count(*) AS n FROM media_refs WHERE media_id = ${String(id)} AND owner_user_id = ${userId}`
           if (typeof id !== "string" || held!.n === 0) return yield* new NotFound({ entity: "media", id: String(id) })
         }
+        const sharedScope = Predicate.isObject(doc.owner) ? doc.owner.shared : undefined
+        if (sharedScope !== undefined && sharedScope !== "global") {
+          const [chat] = yield* sql<{
+            id: string
+          }>`SELECT id FROM chats WHERE id = ${String(sharedScope)} AND owner_user_id = ${userId}`
+          if (!chat) return yield* new NotFound({ entity: "chat", id: String(sharedScope) })
+        }
         const cards = [
           Predicate.isObject(doc.owner) ? doc.owner.card : undefined,
           Predicate.isObject(doc.condition) ? doc.condition.card : undefined

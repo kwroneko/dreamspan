@@ -3,7 +3,7 @@
 
 ## 1. Where things stand
 
-- **Code:** master = `origin/master` (`dreamspan`). Nothing from this discussion is built: it was design only, and no code changes until the design is agreed. One exception, on a branch: `refs/heads/claude/compassionate-rhodes-787c7d` (d30483d) imports the names users gave forks in ST as branch names, and re-import fills in missing names without overwriting app-set ones. It's not reviewed or merged; three scale tests timed out in its full run under load and pass alone.
+- **Historical code snapshot when this discussion was written** (superseded for implemented sections above): master = `origin/master` (`dreamspan`). Nothing from this discussion is built: it was design only, and no code changes until the design is agreed. One exception, on a branch: `refs/heads/claude/compassionate-rhodes-787c7d` (d30483d) imports the names users gave forks in ST as branch names, and re-import fills in missing names without overwriting app-set ones. It's not reviewed or merged; three scale tests timed out in its full run under load and pass alone.
 
 ## 2. The owner's position and how to work
 
@@ -47,11 +47,8 @@
 - **D Rejected** in the right panel: a "lines and forks" section, and a full section for the chat's origin (not something you need to keep looking at).
 
 ### Snippets (owner confirmed 2026-10-27)
-- **D** Snippets and shared named notes are one store: a named piece of text, belonging to one chat (and its forks) or global; a note slot can link to one.
-- **D** A Snippets tab in the right panel: search, the list, each opened in the code-editor box; saved continuously as a draft like every field, explicit Save only where versions matter.
-- **D** From any field to a snippet: select text, "Send to snippet" (context menu or shortcut) appends it to the open snippet or makes a new one; works on messages and swipes, so text from another fork can be carried over.
-- **D** From a snippet to a field: "Insert" puts the snippet, or its selected part, at the cursor of the field last focused, the composer included.
-- **D** A new snippet belongs to this chat and its forks; one click makes it global.
+
+**Implemented; obsolete as a proposal** (2026-10-28). The five confirmed items—one store with shared named notes, the searchable right-panel code editor with continuous drafts, Send to snippet from selections including messages/swipes, Insert of all or selected text at the last field's cursor, and chat/future-fork scope with one-click global promotion—are documented in [ARCHITECTURE.md §14](../ARCHITECTURE.md). Scope follows fork independence: existing forks keep their text; new forks inherit the snapshot. Global promotion is an explicit change to sharing.
 
 ### Portraits
 - **D** Portraits are rectangular, the shape of a card, everywhere: character tiles, chat rows, messages, cast chips, panels. ST uses rectangular avatars and thumbnails; the app mixes round and square (chats have round avatars), which makes no sense. One shape, used consistently (owner, 2026-10-26).
@@ -80,7 +77,8 @@
 - **D** For notes it depends on the note (background and story-level notes aren't tied to the message they were last edited at). Harder than for cards: there are many notes and they don't modify something that already existed. A per-note setting is possible but must not become confusing.
 
 ### Snippets
-- **D** A text snippet system is wanted, separate from notes, needing major UI design. Snippets are reachable from and to anywhere: copy part of any field into a snippet edited beside it, and bring snippet text into any field. Replaces the owner's unsaved notepad tabs. Example: part of a message or swipe from another branch into this one.
+
+The older separate-from-notes wording is superseded by the owner's one-store confirmation above, now implemented in ARCHITECTURE §14.
 
 ## 4. Proposed, not confirmed
 
@@ -139,7 +137,7 @@
 - Notes as a whole (§4.1): owners (card, chat, persona, global), conditions (on this character's turn, while present, decision model), placement, how card notes start in a new chat, how they serve character progression.
 
 **Snippets**
-- The whole UI: how text moves between any field and a snippet, where snippets live on screen, how they're found.
+- Implemented 2026-10-28: the confirmed snippet UI and transfers moved to ARCHITECTURE §14.
 
 **The RP loop** (owner, 2026-10-27: "quite literally the core of the RP loop", not discussed properly yet)
 - Switching the character that represents you, speaking for other characters, making other characters speak, and having the model speak for you.

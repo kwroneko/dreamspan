@@ -1,3 +1,4 @@
+import { registerTextTarget } from "./textTargets.ts"
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
 import { Compartment, EditorState, Transaction } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
@@ -66,6 +67,10 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
         changeGutter,
         options.of(attributes()),
         EditorView.updateListener.of((update) => {
+          if (update.selectionSet || update.docChanged) {
+            const range = update.state.selection.main
+            props.onSelectionChange?.(update.state.sliceDoc(range.from, range.to))
+          }
           if (update.docChanged && !applying) {
             deferred = null // A composition edit is now the latest user text.
             props.onChange(update.state.doc.toString())
@@ -78,6 +83,23 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
         })
       ]
     })
+  })
+  const unregister = registerTextTarget(host, () => {
+    const range = view.state.selection.main
+    return {
+      text: view.state.sliceDoc(range.from, range.to),
+      editable: !props.readOnly,
+      insert: (text) => {
+        if (!host.isConnected || props.readOnly) return
+        const target = view.state.selection.main
+        view.dispatch({
+          changes: { from: target.from, to: target.to, insert: text },
+          selection: { anchor: target.from + text.length },
+          userEvent: "input"
+        })
+        view.focus()
+      }
+    }
   })
   const replace = (value: string) => {
     value = view.state.toText(value).toString()
@@ -132,6 +154,9 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
         replace(value)
       }
     },
-    destroy: () => view.destroy()
+    destroy: () => {
+      unregister()
+      view.destroy()
+    }
   }
 }

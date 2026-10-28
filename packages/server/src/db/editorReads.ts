@@ -1,3 +1,5 @@
+import { inFork } from "./forkState.ts"
+import { readSnippet, snippetFork } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -19,6 +21,20 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
   const drafts = makeDraftStore(sql)
 
   const handlers = {
+    ListSnippets: ({ userId, chatId, forkId, query: search }) =>
+      Effect.gen(function* () {
+        const fork = yield* snippetFork(sql, userId, chatId, forkId)
+        const refs = yield* lib.refsWhere(
+          "e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'",
+          [userId]
+        )
+        const items = yield* Effect.forEach(refs, (ref) => readSnippet(sql, userId, ref, chatId, fork))
+        const needle = search?.trim().toLocaleLowerCase() ?? ""
+        return items
+          .filter((item) => item !== null && `${item.title} ${item.content}`.toLocaleLowerCase().includes(needle))
+          .filter((item) => item !== null)
+          .sort((a, b) => a.title.localeCompare(b.title))
+      }).pipe(query("ListSnippets")),
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
@@ -117,10 +133,11 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           ],
           entry
         )
-      }).pipe(query("ChatNoteEntries")),
+      }).pipe(inFork(sql, chatId, forkId, slotId), query("ChatNoteEntries")),
 
-    ListSharedNotes: ({ userId, query: search, refId, entityId }) =>
+    ListSharedNotes: ({ userId, query: search, refId, entityId, chatNote }) =>
       Effect.gen(function* () {
+        if (chatNote) yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
         // SQLite LIKE's case folding is ASCII-only, so titles are matched here.
         const rows = yield* lib.refsWhere(
           `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
@@ -133,7 +150,19 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         const docs = yield* Effect.forEach(rows, (row) =>
           Effect.map(lib.loadDoc(row.head_revision_id), (doc) => ({ row, doc }))
         )
-        const found = docs.filter(({ doc }) =>
+        const visible = []
+        for (const { row, doc } of docs) {
+          const scope = (doc.owner as { shared?: string } | undefined)?.shared
+          if (scope === "global") {
+            visible.push({ row, doc })
+            continue
+          }
+          if (!chatNote || scope !== chatNote.chatId) continue
+          const fork = yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
+          const item = yield* readSnippet(sql, userId, row, chatNote.chatId, fork)
+          if (item) visible.push({ row, doc: { ...doc, title: item.title, content: item.content } })
+        }
+        const found = visible.filter(({ doc }) =>
           String(doc.title ?? "")
             .toLocaleLowerCase()
             .includes(needle)

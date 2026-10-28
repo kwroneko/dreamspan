@@ -432,7 +432,12 @@ export class ChatSetupApi extends RpcGroup.make(
    * `link`, a slot showing that shared note.
    */
   Rpc.make("CreateChatNote", {
-    payload: { chatId: ChatId, title: Schema.String, link: Schema.optionalKey(EntityId) },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      chatId: ChatId,
+      title: Schema.String,
+      link: Schema.optionalKey(EntityId)
+    },
     success: LibraryRef,
     error: Schema.Union([...Errors])
   }),

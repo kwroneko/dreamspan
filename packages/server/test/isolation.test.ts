@@ -1825,6 +1825,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   CreateCardNote: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
+        yield* refused(
+          actor.api.CreateCardNote({
+            cardRefId: actor.editor.cardRefId,
+            title: "Planted",
+            chatNote: { chatId: owner.chat.chatId, forkId: owner.chat.forkId, slotId: owner.chat.slotId }
+          }),
+          "NotFound"
+        )
         yield* refused(actor.api.CreateCardNote({ cardRefId: owner.editor.cardRefId, title: "Planted" }), "NotFound")
         yield* refused(
           actor.api.CreateCardNote({
@@ -1835,6 +1843,47 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "NotFound"
         )
       })
+  },
+  ListSnippets: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.ListSnippets({ chatId: owner.chat.chatId, forkId: null }), "NotFound")
+        const mine = yield* actor.api.ListSnippets({ chatId: null, forkId: null })
+        assert.isFalse(mine.some((n) => n.ref.id === owner.editor.sharedRefId))
+      })
+  },
+  CreateSnippet: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.CreateSnippet({ chatId: owner.chat.chatId, forkId: null, title: "Taken", content: "Planted" }),
+        "NotFound"
+      )
+  },
+  SaveSnippet: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SaveSnippet({
+          chatId: null,
+          forkId: null,
+          refId: owner.editor.sharedRefId,
+          expectedRevision: owner.editor.revisionId,
+          title: "Taken",
+          content: "Planted"
+        }),
+        "NotFound"
+      )
+  },
+  MakeSnippetGlobal: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.MakeSnippetGlobal({
+          chatId: null,
+          forkId: null,
+          refId: owner.editor.sharedRefId,
+          expectedRevision: owner.editor.revisionId
+        }),
+        "NotFound"
+      )
   },
   ListSharedNotes: {
     probe: (actor, owner) =>

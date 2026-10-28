@@ -1,3 +1,10 @@
+import {
+  Snippet,
+  SnippetContext,
+  CreateSnippetFields,
+  SaveSnippetFields,
+  GlobalSnippetFields
+} from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { RoleProjectionOption, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
@@ -374,6 +381,21 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("CreateSnippet", {
+    payload: { userId: UserId, ...CreateSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, DraftTooLarge, StorageError])
+  }),
+  Rpc.make("SaveSnippet", {
+    payload: { userId: UserId, ...SaveSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+  }),
+  Rpc.make("MakeSnippetGlobal", {
+    payload: { userId: UserId, ...GlobalSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
@@ -1745,13 +1767,25 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** A new note on the card; with `link`, a slot showing that shared note of the user's. */
   Rpc.make("CreateCardNote", {
-    payload: { userId: UserId, cardRefId: RefId, title: Schema.String, link: Schema.optionalKey(EntityId) },
+    payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
+      userId: UserId,
+      cardRefId: RefId,
+      title: Schema.String,
+      link: Schema.optionalKey(EntityId)
+    },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A note of the live chat's own (DESIGN §4.1), an upstream like a card's note; `link` as above. */
   Rpc.make("CreateChatNote", {
-    payload: { userId: UserId, chatId: ChatId, title: Schema.String, link: Schema.optionalKey(EntityId) },
+    payload: {
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      userId: UserId,
+      chatId: ChatId,
+      title: Schema.String,
+      link: Schema.optionalKey(EntityId)
+    },
     success: LibraryRef,
     error: Schema.Union([NotFound, StorageError])
   }),
@@ -1914,6 +1948,11 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("ListSnippets", {
+    payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
+    success: Schema.Array(Snippet),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   historyReadRpcs[3]
     .setPayload(Schema.Struct({ ...historyReadRpcs[3].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
@@ -2390,6 +2429,7 @@ export class ReadOps extends RpcGroup.make(
    */
   Rpc.make("ListSharedNotes", {
     payload: {
+      chatNote: Schema.optionalKey(ChatNotePosition),
       userId: UserId,
       query: Schema.optionalKey(Schema.String),
       refId: Schema.optionalKey(RefId),

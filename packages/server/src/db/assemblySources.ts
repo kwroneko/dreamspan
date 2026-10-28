@@ -1,3 +1,4 @@
+import { sharedNote } from "./sharedNotes.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -235,15 +236,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
   /** A shared note's library head, which a linked slot shows; a binned or missing one has none. */
   const sharedHead = (entity: string) =>
     Effect.gen(function* () {
-      const [row] = yield* sql<{ revision: string; doc_json: string }>`
-        SELECT r.head_revision_id AS revision, h.doc_json FROM entities e
-        JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
-        JOIN entity_revisions h ON h.id = r.head_revision_id
-        WHERE e.id = ${entity} AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
-          AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`
-      if (!row) return { entity, revision: null, doc: null }
-      const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row.doc_json)), "A shared note")
-      return { entity, revision: row.revision, doc }
+      const shared = yield* sharedNote(sql, userId, entity)
+      if (!shared || shared.deleted === 1 || (shared.scope !== "global" && shared.scope !== chatId))
+        return { entity, revision: null, doc: null }
+      const [row] = yield* sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${shared.head}`
+      const doc = yield* decoded<NoteDoc>(decodeNote(JSON.parse(row!.doc_json)), "A shared note")
+      return { entity, revision: shared.head, doc }
     })
 
   let chosenModel: ChosenModel | null | undefined

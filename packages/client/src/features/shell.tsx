@@ -1,3 +1,6 @@
+import { TextActionHost } from "../textActions.tsx"
+import { defineSlot, SlotOutlet } from "../slots.tsx"
+export const appTools = defineSlot<Record<string, never>>("app.tools")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -260,6 +263,7 @@ function AppShell() {
           Skip to content
         </a>
         <Toasts>
+          <SlotOutlet slot={appTools} props={{}} />
           <div className="flex h-dvh">
             <DesktopSidebar key={result.value.user.id} />
             <div className="flex min-w-0 flex-1 flex-col">
@@ -328,6 +332,7 @@ function SettingsIndex() {
 }
 
 export const register = () => {
+  appTools.register({ id: "text-actions", order: 10, component: TextActionHost })
   routes.register({ id: "app", parent: "root", component: AppShell })
   routes.register({
     id: "settings",

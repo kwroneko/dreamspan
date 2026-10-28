@@ -351,9 +351,15 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         )
       }).pipe(internal("ListChatNotes")),
 
-    CreateChatNote: ({ chatId, title, link }) =>
+    CreateChatNote: ({ chatId, title, link, forkId }) =>
       Effect.flatMap(userId, (id) =>
-        writer.CreateChatNote({ userId: id, chatId, title, ...(link === undefined ? {} : { link }) })
+        writer.CreateChatNote({
+          userId: id,
+          chatId,
+          title,
+          ...(forkId === undefined ? {} : { forkId }),
+          ...(link === undefined ? {} : { link })
+        })
       ).pipe(internal("CreateChatNote")),
 
     ListQueued: ({ chatId }) =>

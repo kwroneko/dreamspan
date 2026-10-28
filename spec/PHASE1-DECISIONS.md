@@ -45,7 +45,7 @@ The owner can't test the harness without it; it comes before everything else.
 - **Card note placed "with the definitions" (owner):** inside that card's own part.
 - **Conditioned note above the history (owner):** allowed; a user choice. A cache warning may show; nothing is restricted.
 - **Deleting a shared note that slots link to (default):** keep as built (to the bin; its slots send nothing and offer Restore and Unlink).
-- **Shared notes:** global only for now; chat-scoped ones come with snippets.
+- **Shared notes:** global only for now; chat-scoped ones come with snippets. **Implemented 2026-10-28; obsolete as a proposal:** snippets extend the same store with fork-scoped bindings (ARCHITECTURE §14).
 
 ## 4. Assembly
 

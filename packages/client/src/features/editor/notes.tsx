@@ -1,3 +1,4 @@
+import { textActions } from "../../textActions.tsx"
 // Notes (DESIGN §4.1): a note's fields and its editor, its collapsed row, and the picker of
 // shared named notes, used by the card editor, a note's own page and a chat's notes.
 import { useAtomValue } from "@effect/atom-react"
@@ -9,7 +10,7 @@ import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc, LibraryRef } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
@@ -245,10 +246,15 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
 }
 
 /** The shared note `link` names, while it's out of the bin (null in it). */
-const useSharedNote = (link: EntityId) => {
+const useSharedNote = (link: EntityId, chatNote: ChatNotePosition | undefined) => {
   const atom = useMemo(
-    () => AppClient.query("ListSharedNotes", { entityId: link }, { reactivityKeys: ["library"] }),
-    [link]
+    () =>
+      AppClient.query(
+        "ListSharedNotes",
+        { entityId: link, ...(chatNote ? { chatNote } : {}) },
+        { reactivityKeys: ["library"] }
+      ),
+    [link, chatNote]
   )
   const result = useAtomValue(atom)
   if (!AsyncResult.isSuccess(result)) return { loading: true, note: null }
@@ -256,8 +262,20 @@ const useSharedNote = (link: EntityId) => {
 }
 
 /** Where a shared note can be edited, and how many slots it changes. */
-function SharedBanner({ link, onUnlink, onRestore }: { link: EntityId; onUnlink: () => void; onRestore: () => void }) {
-  const { loading, note } = useSharedNote(link)
+function SharedBanner({
+  link,
+  onUnlink,
+  onRestore,
+  chatNote
+}: {
+  link: EntityId
+  onUnlink: () => void
+  onRestore: () => void
+  chatNote?: ChatNotePosition | undefined
+}) {
+  const { loading, note } = useSharedNote(link, chatNote)
+  const actions = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
+  const openSnippet = actions.entries.find((action) => action.id === "snippets.open")
   if (loading) return <p className="text-sm text-muted">Loading the shared note…</p>
   if (note === null)
     return (
@@ -284,9 +302,15 @@ function SharedBanner({ link, onUnlink, onRestore }: { link: EntityId; onUnlink:
       }
       actions={
         <>
-          <Link to="/library/$refId" params={{ refId: note.ref.id }} className={buttonClass()}>
-            Open shared note
-          </Link>
+          {chatNote && openSnippet ? (
+            <Button onClick={() => openSnippet.run({ text: "", source: "note", refId: note.ref.id })}>
+              {openSnippet.label}
+            </Button>
+          ) : (
+            <Link to="/library/$refId" params={{ refId: note.ref.id }} className={buttonClass()}>
+              Open shared note
+            </Link>
+          )}
           <Button onClick={onUnlink}>Unlink</Button>
         </>
       }
@@ -324,10 +348,12 @@ function SharedUse({ refId }: { refId: string }) {
 export function NoteFields({
   store,
   cards = [],
+  chatNote,
   onUnlink,
   onRestore
 }: {
   store: EditorStore
+  chatNote?: ChatNotePosition | undefined
   /** The cards its condition can name. */
   cards?: ReadonlyArray<NoteCard>
   onUnlink?: () => void
@@ -337,6 +363,20 @@ export function NoteFields({
   const link = useValue<EntityId | undefined>(store, ["link"])
   const exportable = useValue<boolean | undefined>(store, ["exportable"]) !== false
   const refId = useEditorState(store).snapshot?.ref.id
+  if (owner?.shared !== undefined && owner.shared !== "global")
+    return (
+      <Alert title="A chat snippet">
+        <p>Open this snippet beside its chat to edit the text for that fork.</p>
+        <Link
+          to="/chats/$chatId"
+          params={{ chatId: owner.shared }}
+          search={{ panel: "snippets" }}
+          className={buttonClass()}
+        >
+          Open in Snippets
+        </Link>
+      </Alert>
+    )
   if (owner?.shared !== undefined)
     return (
       <div className="flex flex-col gap-3">
@@ -352,7 +392,7 @@ export function NoteFields({
       {link === undefined ? (
         <TextField store={store} path={["content"]} label="Content" rows={4} />
       ) : (
-        <SharedBanner link={link} onUnlink={() => onUnlink?.()} onRestore={() => onRestore?.()} />
+        <SharedBanner chatNote={chatNote} link={link} onUnlink={() => onUnlink?.()} onRestore={() => onRestore?.()} />
       )}
       <PlacementField store={store} path={["placement"]} label="Position" card={card} />
       <ConditionField store={store} cards={cards} />
@@ -477,6 +517,7 @@ export function NoteEditor({
       <RestoredNotice count={state.restored} />
       <RecoveredNotice count={state.recovered} />
       <NoteFields
+        chatNote={chatNote}
         store={store}
         {...(cards ? { cards } : {})}
         onUnlink={() => void relink("unlink")}
@@ -610,11 +651,13 @@ export function SharedNotePicker({
   open,
   onOpenChange,
   call,
-  onPick
+  onPick,
+  chatNote
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   call: Caller
+  chatNote?: ChatNotePosition | undefined
   onPick: (note: SharedNote) => void
 }) {
   const [query, setQuery] = useState("")
@@ -623,7 +666,7 @@ export function SharedNotePicker({
   useEffect(() => {
     if (!open) return
     let current = true
-    void call((client) => client("ListSharedNotes", query.trim() === "" ? {} : { query })).then((result) => {
+    void call((client) => client("ListSharedNotes", { query, ...(chatNote ? { chatNote } : {}) })).then((result) => {
       if (!current) return
       if (result.ok) {
         setNotes(result.value)
@@ -633,7 +676,7 @@ export function SharedNotePicker({
     return () => {
       current = false
     }
-  }, [call, open, query])
+  }, [call, open, query, chatNote])
   return (
     <Dialog
       open={open}

@@ -10,6 +10,7 @@ export interface CodeEditorProps {
   mono?: boolean | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void
+  onSelectionChange?: ((text: string) => void) | undefined
   onBlur?: (() => void) | undefined
 }
 
