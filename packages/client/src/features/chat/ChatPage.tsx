@@ -649,6 +649,7 @@ function ChatSurface({
               session={session}
               view={view}
               focus={focus}
+              onSummaries={openSummaries}
               onJump={jump}
               onEnable={() => setEnabling(true)}
             />

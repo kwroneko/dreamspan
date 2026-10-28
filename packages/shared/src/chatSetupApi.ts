@@ -147,7 +147,7 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   loreBelowHistory: Schema.Boolean,
   rolesProjection: Schema.NullOr(RolesProjection),
   roleProjections: Schema.Array(RoleProjectionOption),
-  /** Active cards plus swapped-out cards, to retain historical message names and portraits. */
+  /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
 
