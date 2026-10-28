@@ -113,7 +113,8 @@ export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   pinsCollapsed: Schema.Boolean
 }) {}
 
-const RolesProjection = Schema.Literals(["by_writer", "alternate", "perspective"])
+/** An open id, resolved against the server's role-projection registry when a context is assembled. */
+const RolesProjection = Schema.String
 
 /**
  * Who is in a chat, and its settings, at one position: the fold of its state events

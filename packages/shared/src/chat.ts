@@ -110,7 +110,8 @@ export const ContextIssue = Schema.Struct({
     "last_turn_filled",
     "direction_prompt_missing",
     "layout_ignored",
-    "cache_breakpoints"
+    "cache_breakpoints",
+    "role_projection_missing"
   ]),
   message: Schema.String
 })
