@@ -126,9 +126,16 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             messages++
             endpoint = s
             state = foldState(positional.get(s.id) ?? [], state)
-            const here = foldState(branch, state)
+            let here = state
+            // Existing turns retain their authors across card swaps. Keep the played
+            // identities at each step, including intermediate cards in a swap chain.
+            let playedByMe = s.speaker !== null && here.playedByMe.includes(s.speaker)
+            for (const event of branch) {
+              here = foldState([event], here)
+              playedByMe ||= s.speaker !== null && here.playedByMe.includes(s.speaker)
+            }
             for (const id of here.participants) joined.add(id)
-            if (s.speaker !== null && !here.playedByMe.includes(s.speaker))
+            if (s.speaker !== null && !playedByMe)
               activity.set(s.speaker, {
                 entityId: s.speaker as EntityId,
                 at: s.at,

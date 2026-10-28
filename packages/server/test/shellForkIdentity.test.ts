@@ -3,6 +3,98 @@ import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 
+it.live("card swaps keep user-played speaking turns out of shell activity", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const card = yield* api.CreateCard({ label: "User-played pilot", name: "Pilot" })
+    const start = yield* api.StartChat({
+      cards: [card.entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "Before playing this card", speakerEntityId: null }
+    })
+    const original = (yield* api.ListForks({ chatId: start.chat.id }))[0]!
+    yield* api.ChangeCast({
+      chatId: start.chat.id,
+      forkId: original.id,
+      slotId: original.tipSlotId,
+      change: { _tag: "PlayedByMe", entityIds: [card.entityId] }
+    })
+    const turn = yield* posted(
+      api.SendMessage({
+        chatId: start.chat.id,
+        forkId: original.id,
+        parentSlotId: original.tipSlotId,
+        speakerEntityId: card.entityId,
+        content: "A user-played turn",
+        branch: false
+      })
+    )
+    const peer = (yield* api.CreateFork({
+      chatId: start.chat.id,
+      fromForkId: original.id,
+      atSlotId: turn.entry.slotId
+    })).fork
+    const copy = yield* api.ForkCardForChat({
+      chatId: start.chat.id,
+      forkId: original.id,
+      slotId: turn.entry.slotId,
+      entityId: card.entityId,
+      name: "Copied pilot",
+      nickname: "",
+      characterVersion: "1",
+      moveDrafts: false
+    })
+    const secondTurn = yield* posted(
+      api.SendMessage({
+        chatId: start.chat.id,
+        forkId: original.id,
+        parentSlotId: turn.entry.slotId,
+        speakerEntityId: copy.entityId,
+        content: "Still played by the user",
+        branch: false
+      })
+    )
+    const secondCopy = yield* api.ForkCardForChat({
+      chatId: start.chat.id,
+      forkId: original.id,
+      slotId: secondTurn.entry.slotId,
+      entityId: copy.entityId,
+      name: "Twice copied pilot",
+      nickname: "",
+      characterVersion: "2",
+      moveDrafts: false
+    })
+    const rows = (yield* api.GetShellLibrary()).forks
+    assert.isEmpty(rows.find((f) => f.forkId === original.id)!.activity)
+    assert.isEmpty(rows.find((f) => f.forkId === peer.id)!.activity)
+    for (const entityId of [card.entityId, copy.entityId, secondCopy.entityId])
+      assert.isNull((yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === entityId)!.card.lastMessageAt)
+    const modelTurn = yield* posted(
+      api.SendMessage({
+        chatId: start.chat.id,
+        forkId: original.id,
+        parentSlotId: secondTurn.entry.slotId,
+        speakerEntityId: secondCopy.entityId,
+        content: "Now a character turn",
+        branch: false
+      })
+    )
+    yield* api.ChangeCast({
+      chatId: start.chat.id,
+      forkId: original.id,
+      slotId: modelTurn.entry.slotId,
+      change: { _tag: "PlayedByMe", entityIds: [] }
+    })
+    assert.deepEqual(
+      (yield* api.GetShellLibrary()).forks
+        .find((f) => f.forkId === original.id)!
+        .activity.map((a) => [a.entityId, a.slot]),
+      [[secondCopy.entityId, modelTurn.entry.slotId]]
+    )
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)))
+)
+
 it.live("shell rows retain interior checkpoints, same-tip peers and empty forks with their own views", () =>
   Effect.gen(function* () {
     const api = yield* client()
