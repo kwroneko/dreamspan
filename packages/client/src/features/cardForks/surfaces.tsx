@@ -17,8 +17,12 @@ interface CardContribution {
 }
 export const cardContributions = makeRegistry<CardContribution>()
 export function CardSurface({ placement, ...context }: CardSurfaceContext & { placement: CardPlacement }) {
-  useSyncExternalStore(cardContributions.subscribe, cardContributions.snapshot, cardContributions.snapshot)
-  return [...cardContributions.list()]
+  const snapshot = useSyncExternalStore(
+    cardContributions.subscribe,
+    cardContributions.snapshot,
+    cardContributions.snapshot
+  )
+  return [...snapshot.entries]
     .filter((entry) => entry.placement === placement)
     .sort((a, b) => a.order - b.order)
     .map((entry) => <entry.component key={entry.id} {...context} />)

@@ -12,6 +12,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { ValueDiff } from "../editor/diff.tsx"
 import { changedFields, fieldLabel } from "../editor/fields.ts"
@@ -41,37 +42,53 @@ function MemberLink({ member }: { member: FamilyMember }) {
   )
 }
 function FamilyTree({ family, entityId }: { family: CardFamily; entityId: EntityId }) {
+  const usage = useAtomValue(shellAtom)
+  // The shell counts visible fork views as chats and dates each card by its own speech.
+  // Family metadata alone counts containers, so it disagrees as soon as a chat branches.
+  const forks = AsyncResult.isSuccess(usage) ? usage.value.forks : null
   const walk = (parent: EntityId | null, depth = 0): Array<{ member: FamilyMember; depth: number }> =>
     family.members
       .filter((m) => m.parentEntityId === parent)
       .flatMap((member) => [{ member, depth }, ...walk(member.entityId, depth + 1)])
   return (
     <ul aria-label="Forks tree" className="flex flex-col gap-3">
-      {walk(null).map(({ member, depth }) => (
-        <li
-          key={member.entityId}
-          style={{ paddingInlineStart: `${Math.min(depth, 6) * 12}px` }}
-          className="flex min-w-0 flex-col gap-1 border-l border-border pl-2"
-        >
-          <div className="flex items-start gap-2">
-            {depth > 0 && (
-              <span aria-hidden className="shrink-0">
-                ↳
-              </span>
-            )}
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <MemberLink member={member} />
-              {member.entityId === entityId && <Badge tone="accent">this card</Badge>}
+      {walk(null).map(({ member, depth }) => {
+        const used = forks?.filter((fork) => fork.joined.includes(member.entityId))
+        const spoken = used?.flatMap((fork) => fork.activity.filter((a) => a.entityId === member.entityId))
+        const last =
+          spoken?.reduce<number | null>((latest, a) => (latest === null ? a.at : Math.max(latest, a.at)), null) ?? null
+        return (
+          <li
+            key={member.entityId}
+            style={{ paddingInlineStart: `${Math.min(depth, 6) * 12}px` }}
+            className="flex min-w-0 flex-col gap-1 border-l border-border pl-2"
+          >
+            <div className="flex items-start gap-2">
+              {depth > 0 && (
+                <span aria-hidden className="shrink-0">
+                  ↳
+                </span>
+              )}
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <MemberLink member={member} />
+                {member.entityId === entityId && <Badge tone="accent">this card</Badge>}
+              </div>
             </div>
-          </div>
-          <p className="text-xs text-muted">
-            {member.chats} {member.chats === 1 ? "chat" : "chats"} ·{" "}
-            {member.lastMessageAt === null
-              ? "Never used"
-              : `Last used ${new Date(member.lastMessageAt).toLocaleDateString()}`}
-          </p>
-        </li>
-      ))}
+            <p className="text-xs text-muted">
+              {used ? (
+                <>
+                  {used.length} {used.length === 1 ? "chat" : "chats"} ·{" "}
+                  {last === null ? "Never used" : `Last used ${new Date(last).toLocaleDateString()}`}
+                </>
+              ) : AsyncResult.isFailure(usage) ? (
+                "Usage unavailable"
+              ) : (
+                "Loading usage…"
+              )}
+            </p>
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -250,7 +267,11 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
           const current = cards.find((c) => c.entityId === entityId)
           const candidates = cards
             .filter(
-              (c) => c.entityId !== entityId && `${c.label} ${c.subtitle}`.toLowerCase().includes(search.toLowerCase())
+              (c) =>
+                c.entityId !== entityId &&
+                [c.label, c.subtitle, c.modelName ?? ""].some((value) =>
+                  value.toLowerCase().includes(search.trim().toLowerCase())
+                )
             )
             .sort(
               (a, b) =>

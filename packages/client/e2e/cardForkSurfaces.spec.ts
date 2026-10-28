@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { textField } from "@rp/shared/editing.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
@@ -47,6 +48,16 @@ for (const width of [1440, 390])
       }
       await page.goto(`${server().url}/cards/${parent.entityId}`)
       await expect(page.getByRole("list", { name: "Forks tree" })).toContainText(parent.label)
+      const usage = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetShellLibrary())
+      const used = usage.cards.find((c) => c.card.entityId === parent.entityId)!.card.chats
+      await expect(
+        page
+          .getByRole("list", { name: "Forks tree" })
+          .getByRole("listitem")
+          .filter({
+            has: page.getByText("this card", { exact: true })
+          })
+      ).toContainText(`${used} chats`)
       await shot("card-page")
       await page.getByRole("button", { name: "Fork", exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
@@ -178,4 +189,82 @@ test("chat provenance and deleted family members remain visible", async ({ page 
   await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("purged")
   await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Compare with parent", exact: true })).toContainText("deleted for good")
+})
+
+test("the parent picker finds archived cards by their in-character name", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const seed = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const source = yield* api.CreateCard({ label: "Search source", name: "Search source" })
+      const parent = yield* api.ForkCard({
+        refId: source.id,
+        name: "Library title",
+        nickname: "Captain Searchable",
+        characterVersion: "old",
+        moveDrafts: false
+      })
+      const child = yield* api.CreateCard({ label: "Picker child", name: "Picker child" })
+      return { parent, child }
+    })
+  )
+  await Effect.runPromise(
+    fixtureSql(server().dataDir, [
+      { sql: "UPDATE entities SET archived_at=? WHERE id=?", params: [Date.now(), seed.parent.entityId] }
+    ])
+  )
+  await page.goto(`${server().url}/library/${seed.child.id}`)
+  await page.getByRole("button", { name: "Mark as a fork of…", exact: true }).click()
+  const picker = page.getByRole("dialog", { name: "Mark as a fork of…", exact: true })
+  await picker.getByRole("textbox", { name: "Find a parent card" }).fill("captain searchable")
+  await picker.getByRole("button", { name: "Library title · old", exact: true }).click()
+  await expect(picker).not.toBeVisible()
+  await expect(page.getByText("Forked from").locator("..")).toContainText("Library title")
+  await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("archived")
+})
+
+test("family comparison reads both current saved heads and excludes drafts", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const seed = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const parent = yield* api.CreateCard({ label: "Saved comparison", name: "Saved comparison" })
+      const saveDescription = (refId: typeof parent.id, content: string, commit: boolean) =>
+        Effect.gen(function* () {
+          const opened = yield* api.OpenEditor({ refId })
+          const draft = yield* api.SaveEditorDraft({
+            refId,
+            field: textField(["description"]),
+            content,
+            draftId: null,
+            expectedSession: null,
+            expectedRowVersion: null,
+            baseRevisionId: opened.ref.headRevisionId
+          })
+          if (commit)
+            yield* api.CommitEditorDrafts({
+              refId,
+              expectedRowVersion: opened.ref.rowVersion,
+              fields: [{ field: draft.key.field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+              message: null
+            })
+        })
+      yield* saveDescription(parent.id, "The saved lighthouse keeper.", true)
+      const child = yield* api.ForkCard({
+        refId: parent.id,
+        name: "Saved comparison",
+        nickname: "",
+        characterVersion: "child",
+        moveDrafts: false
+      })
+      yield* saveDescription(parent.id, "The parent’s later saved premise.", true)
+      yield* saveDescription(parent.id, "PARENT DRAFT EXCLUDED", false)
+      yield* saveDescription(child.id, "CHILD DRAFT EXCLUDED", false)
+      return { child }
+    })
+  )
+  await page.goto(`${server().url}/library/${seed.child.id}`)
+  await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+  const diff = page.getByRole("dialog", { name: "Compare with parent", exact: true }).getByLabel("Card differences")
+  await expect(diff).toContainText("The parent’s later saved premise.")
+  await expect(diff).toContainText("The saved lighthouse keeper.")
+  await expect(diff).not.toContainText("DRAFT EXCLUDED")
 })

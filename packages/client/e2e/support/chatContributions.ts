@@ -5,6 +5,7 @@ import { createElement } from "react"
 import { chatCommands } from "../../src/features/chat/commands.tsx"
 import { composerControls } from "../../src/features/chat/composerControls.tsx"
 import { messageActions } from "../../src/features/chat/messageActions.tsx"
+import { cardContributions } from "../../src/features/cardForks/surfaces.tsx"
 import { chatPanels } from "../../src/features/chat/panels.tsx"
 
 const scopes = new Map<string, Scope.Closeable>()
@@ -24,12 +25,39 @@ export const close = async (id: string) => {
   scopes.delete(id)
 }
 
-export const install = async (id: "plugin" | "settings" | "notes" | "history" | "family-tab") => {
+export const install = async (
+  id: "plugin" | "settings" | "notes" | "history" | "family-tab" | "cards" | "card-hide"
+) => {
   await close(id)
   const scope = await Effect.runPromise(Scope.make())
   scopes.set(id, scope)
   const own = async (dispose: () => void) => Effect.runPromise(Scope.addFinalizer(scope, Effect.sync(dispose)))
-  if (id === "settings") {
+  if (id === "cards") {
+    for (const [placement, suffix] of [
+      ["actions", "fork"],
+      ["family", "family-surface"],
+      ["provenance", "provenance-surface"],
+      ["badge", "badge-surface"]
+    ] as const)
+      await own(
+        cardContributions.register({
+          id: `card-forks.${suffix}`,
+          placement,
+          order: 0,
+          component: () => createElement("p", null, `Plugin card ${placement}`)
+        })
+      )
+    await own(
+      cardContributions.register({
+        id: "synthetic.card-action",
+        placement: "actions",
+        order: 0,
+        component: () => createElement("p", null, "Added card action")
+      })
+    )
+  } else if (id === "card-hide") {
+    await own(cardContributions.disable("card-forks.fork"))
+  } else if (id === "settings") {
     await own(chatPanels.disable("model"))
     await own(chatPanels.disable("preset"))
   } else if (id === "family-tab") {

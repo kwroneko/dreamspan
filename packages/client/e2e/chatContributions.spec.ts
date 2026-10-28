@@ -122,3 +122,47 @@ test("a dynamic family obeys individual disablement and rejects unlisted URLs", 
   await expect(page).toHaveURL(/panel=synthetic%3Aabsent/)
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
 })
+
+test("card contributions update every mounted placement and restore built-ins", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateCard({ label: "Card seam review", name: "Card seam review" })
+  )
+  for (const path of [`/cards/${card.entityId}`, `/library/${card.id}`, "/library"]) {
+    await page.goto(`${url}${path}`)
+    const host =
+      path === "/library"
+        ? page.getByRole("list", { name: "Cards", exact: true }).locator("li").filter({ hasText: "Card seam review" })
+        : page.locator("main")
+    const fork = host.getByRole("button", { name: "Fork", exact: true })
+    await expect(fork).toBeEnabled()
+    await contribution(page, "install", "cards")
+    await expect(host.getByText("Plugin card actions", { exact: true })).toBeVisible()
+    await expect(host.getByText("Added card action", { exact: true })).toBeVisible()
+    await expect(host.getByText("Plugin card provenance", { exact: true })).toBeVisible()
+    if (path !== "/library") await expect(host.getByText("Plugin card family", { exact: true })).toBeVisible()
+    await contribution(page, "install", "card-hide")
+    await expect(host.getByText("Plugin card actions", { exact: true })).toHaveCount(0)
+    await contribution(page, "close", "card-hide")
+    await expect(host.getByText("Plugin card actions", { exact: true })).toBeVisible()
+    await contribution(page, "close", "cards")
+    await expect(host.getByText(/^Plugin card /)).toHaveCount(0)
+    await expect(host.getByText("Added card action", { exact: true })).toHaveCount(0)
+    await expect(fork).toBeEnabled()
+    // Disabling an action also unmounts its open dialog.
+    await fork.click()
+    await expect(page.getByRole("dialog", { name: "Fork card", exact: true })).toBeVisible()
+    await contribution(page, "install", "card-hide")
+    await expect(page.getByRole("dialog", { name: "Fork card", exact: true })).toHaveCount(0)
+    await contribution(page, "close", "card-hide")
+    await expect(fork).toBeEnabled()
+  }
+  await page.goto(url)
+  await expect(page.getByRole("button", { name: "Open Card seam review", exact: true })).toBeVisible()
+  const tile = page.getByRole("button", { name: "Open Card seam review", exact: true }).locator("..")
+  await contribution(page, "install", "cards")
+  await expect(tile.getByText("Plugin card badge", { exact: true })).toBeVisible()
+  await contribution(page, "close", "cards")
+  await expect(tile.getByText("Plugin card badge", { exact: true })).toHaveCount(0)
+})
