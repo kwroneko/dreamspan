@@ -2,7 +2,7 @@
 // the formats a library document can be exported as.
 import { Schema } from "effect"
 import { ImportReport } from "./importReport.ts"
-import { type EntityKind, LibraryRef, MergeOutcome, RefId } from "./library.ts"
+import { EntityKind, LibraryRef, MergeOutcome, RefId } from "./library.ts"
 
 export class ImportedFollower extends Schema.Class<ImportedFollower>("ImportedFollower")({
   refId: RefId,
@@ -35,22 +35,20 @@ export class ImportResult extends Schema.Class<ImportResult>("ImportResult")({
   library: Schema.NullOr(LibraryImport)
 }) {}
 
-export const ExportFormat = Schema.Literals([
-  "card-v2-json",
-  "card-v3-json",
-  "card-png",
-  "card-charx",
-  "st-world-info",
-  "st-preset"
-])
+/** Format ids are open; the worker's exporter registry validates them at use. */
+export const ExportFormat = Schema.String
 export type ExportFormat = typeof ExportFormat.Type
 
-/** The formats each kind exports to, the first being the usual one. */
-export const exportFormats: Partial<Record<EntityKind, ReadonlyArray<ExportFormat>>> = {
-  card: ["card-png", "card-v2-json", "card-v3-json", "card-charx"],
-  lorebook: ["st-world-info"],
-  preset: ["st-preset"]
-}
+/** Data only: executable exporters stay inside format workers. List order is preference order. */
+export const ExportFormatInfo = Schema.Struct({
+  id: ExportFormat,
+  kind: EntityKind,
+  label: Schema.String,
+  mime: Schema.String,
+  extension: Schema.String,
+  media: Schema.Literals(["none", "avatar", "all"])
+})
+export type ExportFormatInfo = typeof ExportFormatInfo.Type
 
 /** The largest file an import takes (ARCHITECTURE.md §8), so the client can say so before uploading. */
 export const MAX_IMPORT_BYTES = 64 * 1024 * 1024

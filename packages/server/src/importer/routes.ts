@@ -6,12 +6,7 @@ import { createHash } from "node:crypto"
 import { CurrentUser } from "@rp/shared/api.ts"
 import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
-import {
-  type ExportFormat,
-  ExportFormat as ExportFormatSchema,
-  exportFormats,
-  ImportResult
-} from "@rp/shared/libraryImport.ts"
+import { ExportFormat as ExportFormatSchema, ImportResult } from "@rp/shared/libraryImport.ts"
 import { RefId } from "@rp/shared/library.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
@@ -119,15 +114,6 @@ const LeavingDrafts = Schema.Struct({
   /** Message editors' text, from this browser's copies (`messageDraft.ts`). */
   messages: Schema.optionalKey(Schema.Array(MessageDraftSave).check(Schema.isMaxLength(50)))
 })
-
-const CONTENT_TYPES: Record<ExportFormat, readonly [mime: string, extension: string]> = {
-  "card-v2-json": ["application/json", "json"],
-  "card-v3-json": ["application/json", "json"],
-  "card-png": ["image/png", "png"],
-  "card-charx": ["application/zip", "charx"],
-  "st-world-info": ["application/json", "json"],
-  "st-preset": ["application/json", "json"]
-}
 
 /** `attachment` with an ASCII fallback name and the real one percent-encoded (RFC 6266). */
 const disposition = (label: string, extension: string) => {
@@ -315,14 +301,15 @@ export const layer = Layer.unwrap(
       if (Option.isNone(input)) return jsonError(400, "expected a refId and a format")
       const { refId, format } = input.value
       const source = yield* reader.ExportSource({ userId: user.id, refId })
-      if (!exportFormats[source.kind]?.includes(format)) {
+      const exporter = (yield* formats.listExports).find((entry) => entry.id === format)
+      if (!exporter || exporter.kind !== source.kind) {
         return jsonError(400, `a ${source.kind} can't be exported as ${format}`)
       }
       // Only the files the format holds: the avatar for a PNG, every file for a CHARX. A
       // document can name any number of them, the same one many times over, so their total
       // is capped before anything is read, and each is read once.
-      const files = format === "card-charx" ? [source.avatar, ...source.assets] : [source.avatar]
-      const wanted = format === "card-png" || format === "card-charx" ? files.filter((file) => file !== null) : []
+      const files = exporter.media === "all" ? [source.avatar, ...source.assets] : [source.avatar]
+      const wanted = exporter.media !== "none" ? files.filter((file) => file !== null) : []
       const total = wanted.reduce((sum, file) => sum + file.byteSize, 0)
       if (total > MAX_EXPORT_FILE_BYTES) {
         return jsonError(
@@ -337,14 +324,14 @@ export const layer = Layer.unwrap(
           const bytes = cache.get(file.path)
           return bytes && { bytes, mime: file.mime }
         })
-      const [mime, extension] = CONTENT_TYPES[format]
+      const { mime, extension } = exporter
       return yield* oneAtATime(
         user.id,
         exports.withPermits(1)(
           Effect.gen(function* () {
             const avatar = source.avatar && wanted.length > 0 ? yield* read(source.avatar) : undefined
             const assets =
-              format === "card-charx"
+              exporter.media === "all"
                 ? yield* Effect.forEach(source.assets, (asset) =>
                     Effect.map(read(asset), (file) => (file ? [{ ...file, uri: asset.uri }] : []))
                   )

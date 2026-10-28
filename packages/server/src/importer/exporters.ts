@@ -5,11 +5,13 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { Effect, Predicate, Schema } from "effect"
+import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { exportCardCharx, exportCardJson, exportCardPng } from "../formats/cardExport.ts"
 import { exportPromptPreset } from "../formats/presetSettings.ts"
 import { exportLorebook } from "../formats/worldInfo.ts"
 import { OUR_EXTENSION } from "../formats/lorebook.ts"
+import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
 
 /** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
@@ -91,27 +93,73 @@ const withNotes = (card: CardDoc, noteDocJson: string | null, notesDocJson: Read
 
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value, null, 4))
 
-const exportCard = (input: ExportInput) =>
-  Effect.gen(function* () {
-    const card = yield* withNotes(yield* decode(CardDoc, "card")(input.docJson), input.noteDocJson, input.notesDocJson)
-    switch (input.format) {
-      case "card-v2-json":
-        return exportCardJson(card, "v2")
-      case "card-v3-json":
-        return exportCardJson(card, "v3")
-      case "card-png": {
+/** An executable format and all metadata needed by routes and client choices. */
+export interface Exporter extends ExportFormatInfo {
+  readonly write: (input: ExportInput) => Effect.Effect<Uint8Array, ExportRefused>
+}
+
+export class Exporters extends Context.Service<Exporters, Registry<Exporter>>()("rp/importer/Exporters") {}
+
+const cardWriter =
+  (write: (card: CardDoc, input: ExportInput) => Effect.Effect<Uint8Array, ExportRefused>) => (input: ExportInput) =>
+    Effect.gen(function* () {
+      const card = yield* withNotes(
+        yield* decode(CardDoc, "card")(input.docJson),
+        input.noteDocJson,
+        input.notesDocJson
+      )
+      return yield* write(card, input)
+    })
+
+const builtins: ReadonlyArray<Exporter> = [
+  {
+    id: "card-png",
+    kind: "card",
+    label: "PNG",
+    mime: "image/png",
+    extension: "png",
+    media: "avatar",
+    write: cardWriter((card, input) =>
+      Effect.gen(function* () {
         if (input.avatar && input.avatar.mime !== "image/png") {
           const type = (EXTENSIONS[input.avatar.mime] ?? "non-PNG").toUpperCase()
           return yield* new ExportRefused({
             message: `This card's avatar is a ${type} image, which a PNG card can't hold. Export it as CHARX, which keeps the image, or as JSON.`
           })
         }
-        const image = input.avatar?.bytes ?? PLACEHOLDER_PNG
-        return yield* exportCardPng(card, image).pipe(
+        return yield* exportCardPng(card, input.avatar?.bytes ?? PLACEHOLDER_PNG).pipe(
           Effect.mapError(() => new ExportRefused({ message: "The card's avatar isn't a valid PNG." }))
         )
-      }
-      default: {
+      })
+    )
+  },
+  {
+    id: "card-v2-json",
+    kind: "card",
+    label: "V2 JSON",
+    mime: "application/json",
+    extension: "json",
+    media: "none",
+    write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v2")))
+  },
+  {
+    id: "card-v3-json",
+    kind: "card",
+    label: "V3 JSON",
+    mime: "application/json",
+    extension: "json",
+    media: "none",
+    write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v3")))
+  },
+  {
+    id: "card-charx",
+    kind: "card",
+    label: "CHARX",
+    mime: "application/zip",
+    extension: "charx",
+    media: "all",
+    write: cardWriter((card, input) =>
+      Effect.sync(() => {
         const mainIcon = card.assets?.find(
           (asset) => asset.type.toLowerCase() === "icon" && asset.name.toLowerCase() === "main"
         )
@@ -122,25 +170,62 @@ const exportCard = (input: ExportInput) =>
         }
         const assets = input.assets.map((asset) => ({ uri: asset.uri, ext: "", bytes: asset.bytes }))
         return exportCardCharx(card, { avatar, assets })
-      }
-    }
-  })
-
-export const exportFile = (input: ExportInput): Effect.Effect<Uint8Array, ExportRefused> => {
-  switch (input.format) {
-    case "st-world-info":
-      return Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
-    case "st-preset":
-      // Hydrate legacy export fields from a recognized chat-completion document.
-      // Prompt-only revisions deliberately have no sampler or wire fields.
-      return Effect.map(
+      })
+    )
+  },
+  {
+    id: "st-world-info",
+    kind: "lorebook",
+    label: "World Info JSON",
+    mime: "application/json",
+    extension: "json",
+    media: "none",
+    write: (input) => Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
+  },
+  {
+    id: "st-preset",
+    kind: "preset",
+    label: "Preset JSON",
+    mime: "application/json",
+    extension: "json",
+    media: "none",
+    // Hydrate legacy export fields from a recognized chat-completion document.
+    // Prompt-only revisions deliberately have no sampler or wire fields.
+    write: (input) =>
+      Effect.map(
         decode(
           PresetDoc,
           "preset"
         )(JSON.stringify({ ...importStPreset('{"main_prompt":""}').document, ...JSON.parse(input.docJson) })),
         (doc) => json(exportPromptPreset(doc))
       )
-    default:
-      return exportCard(input)
   }
-}
+]
+
+/** Each worker owns its registry; plugin registrations use this same scoped service. */
+export const layer = Layer.effect(
+  Exporters,
+  Effect.gen(function* () {
+    const registry = makeRegistry<Exporter>()
+    for (const entry of builtins) yield* registry.register(entry)
+    return registry
+  })
+)
+
+/** Direct format callers get the built-ins; workers pass their scoped registry. */
+export const exportFile = (
+  input: ExportInput,
+  registry?: Registry<Exporter>
+): Effect.Effect<Uint8Array, ExportRefused> =>
+  registry === undefined
+    ? Effect.flatMap(Exporters, (registry) => exportFile(input, registry)).pipe(Effect.provide(layer))
+    : Effect.suspend(() => {
+        const entry = registry.get(input.format)
+        return entry
+          ? entry.write(input)
+          : Effect.fail(new ExportRefused({ message: `Unknown export format: ${input.format}` }))
+      })
+
+/** Never pass executable code across the worker boundary. */
+export const listFormats = (registry: Registry<Exporter>): ReadonlyArray<ExportFormatInfo> =>
+  registry.list().map(({ id, kind, label, mime, extension, media }) => ({ id, kind, label, mime, extension, media }))

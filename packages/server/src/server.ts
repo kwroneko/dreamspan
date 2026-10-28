@@ -408,7 +408,8 @@ export const serverWith = <E>(
     E,
     AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer
   >,
-  summaries = Summarizer.layer
+  summaries = Summarizer.layer,
+  formats = FormatsLive
 ) =>
   HttpRouter.serve(
     Layer.mergeAll(
@@ -437,7 +438,7 @@ export const serverWith = <E>(
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),
-    Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, FormatsLive)),
+    Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, formats)),
     Layer.provide(InFlightRpcs.layer)
   )
 

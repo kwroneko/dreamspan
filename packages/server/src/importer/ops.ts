@@ -3,7 +3,7 @@ import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
-import { ExportFormat } from "@rp/shared/libraryImport.ts"
+import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
@@ -184,6 +184,7 @@ export class FormatOps extends RpcGroup.make(
     payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
     success: ParsedFile
   }),
+  Rpc.make("ListExportFormats", { success: Schema.Array(ExportFormatInfo) }),
   Rpc.make("Export", { payload: ExportInput, success: Transferable.Uint8Array, error: ExportRefused }),
   // --- ST data folder import
   Rpc.make("ParseStChatPart", {
