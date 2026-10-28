@@ -393,11 +393,34 @@ for (const [name, viewport] of [
       await open(page, fixture)
       await expect(page.getByRole("article", { name: "Reply" }).getByText("The bridge holds.")).toBeVisible()
       await page.goto(`${server().url}/chats/${fixture.chatId}/context/${reply.entry.version.id}`)
-      const messages = page.getByRole("region", { name: "Messages" })
+      const messages = page.getByRole("region", { name: "Messages", exact: true })
       await expect(messages.getByText("Summary, level 2, messages 1–8, revision 1")).toBeVisible()
+      // Another fork becomes current and edits the same shared summary. The historical
+      // request and its changed-since comparison still belong to the generating fork.
+      const sibling = await admin((api) =>
+        api.CreateFork({
+          chatId: fixture.chatId,
+          fromForkId: fixture.forkId,
+          atSlotId: reply.entry.slotId
+        })
+      )
+      await admin((api) =>
+        api.EditSummary({
+          summaryId: fixture.top.id as never,
+          forkId: sibling.fork.id,
+          content: "The sibling's different continuity.",
+          expectedRowVersion: 1,
+          commitDraft: null
+        })
+      )
+      await page.reload()
+      await expect(page.getByText("Summary stale or replaced since this reply.")).toHaveCount(0)
+      await expect(messages).toContainText("A flood closed the road; Mira saved the ledger.")
+      await expect(messages).not.toContainText("The sibling's different continuity.")
       // Edited since the reply was generated: the context says it changed.
       await admin((api) =>
         api.EditSummary({
+          forkId: fixture.forkId,
           summaryId: fixture.top.id as never,
           content: "Edited afterwards.",
           expectedRowVersion: 1,

@@ -1,5 +1,6 @@
 import { inJobFork, withdrawReruns } from "./lcmFork.ts"
 import { viewAt } from "./forkState.ts"
+import { onPath as slotOnPath } from "./forks.ts"
 import { eventAppliesSql } from "./forkState.ts"
 import { completeEmpty } from "./lcmEmpty.ts"
 import { summaryIsWarm } from "./lcmWarmth.ts"
@@ -103,8 +104,8 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           // Already summarized: a fresh level-1 summary over any of these slots. A rewrite of a stale
           // summary is its own range's business, so overlapping fresh ones don't make it redundant.
           if (!chunk.refresh) {
-            const owners = yield* sql<{ id: string }>`
-              SELECT DISTINCT s.id FROM summary_inputs i JOIN summaries s ON s.id = i.summary_id
+            const owners = yield* sql<{ id: string; last_slot_id: string }>`
+              SELECT DISTINCT s.id,s.last_slot_id FROM summary_inputs i JOIN summaries s ON s.id = i.summary_id
               WHERE i.slot_id IN (WITH RECURSIVE chain(id,n) AS (
                 SELECT ${last},1 UNION ALL SELECT s.parent_slot_id,c.n+1 FROM slots s JOIN chain c ON c.id=s.id
                   WHERE c.n < ${chunk.inputs.length}
@@ -112,7 +113,12 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
                 AND s.sealed = 1 AND s.status IN ('complete', 'truncated')`
             let covered = false
             for (const owner of owners)
-              if ((yield* valid(owner.id)) && (yield* readSummary(sql, userId, owner.id)).fresh) covered = true
+              if (
+                (yield* slotOnPath(sql, chatId, leafSlotId, owner.last_slot_id)) &&
+                (yield* valid(owner.id)) &&
+                (yield* readSummary(sql, userId, owner.id)).fresh
+              )
+                covered = true
             if (covered) {
               yield* withdraw(chunk.rerunIds)
               continue

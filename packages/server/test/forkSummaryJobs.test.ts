@@ -1,8 +1,91 @@
 import { assert } from "@effect/vitest"
 import { Effect } from "effect"
+import { NewVersion } from "@rp/shared/chat.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
-import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
+import { completeFixture, fixtureSql, summaryJob } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
+
+for (const status of ["complete", "failed"] as const)
+  lcmTest(`a sibling's ${status} summary cannot cover a divergent path with the same first slot`, (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server, {
+        messages: 2,
+        settings: { recentTarget: 400, recentMax: 1400, leafInput: 400 }
+      })
+      if (status === "complete")
+        yield* completeFixture(
+          h.dataDir,
+          h.writer,
+          h.userId,
+          h.chat.id,
+          h.rows.map((r) => ({ slotId: r.slotId, versionId: r.version.id, amendCount: 0 }))
+        )
+      else {
+        const job = yield* summaryJob(h.dataDir, h.chat.id, h.rows[0]!.slotId, h.rows[1]!.slotId)
+        yield* fixtureSql(h.dataDir, [
+          {
+            sql: "UPDATE summarization_jobs SET attempts=1,max_retries=0 WHERE id=?",
+            params: [job.jobId]
+          }
+        ])
+        yield* h.writer.FailSummaryAttempt({
+          userId: h.userId,
+          jobId: job.jobId,
+          attempt: 0,
+          rolloutId: null,
+          error: "Synthetic terminal failure."
+        })
+      }
+      const fork = (yield* h.writer.CreateFork({
+        userId: h.userId,
+        chatId: h.chat.id,
+        fromForkId: h.chat.currentForkId!,
+        atSlotId: h.rows[0]!.slotId
+      })).fork
+      let leaf = h.rows[0]!.slotId
+      for (let n = 0; n < 30; n++) {
+        const row = yield* h.writer.AppendMessage({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId: fork.id,
+          parentSlotId: leaf,
+          branch: false,
+          commitDraft: null,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: `Different branch ${n}. ` + "The river ran on. ".repeat(10),
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          })
+        })
+        leaf = row.slotId
+      }
+      const plan = yield* h.reader.PlanSummaries({
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: fork.id,
+        leafSlotId: leaf,
+        reason: "reply"
+      })
+      assert.strictEqual(plan.chunks[0]?.inputs[0]?.slotId, h.rows[0]!.slotId)
+      assert.notInclude(
+        plan.chunks.flatMap((c) => c.inputs.map((i) => i.slotId)),
+        h.rows[1]!.slotId
+      )
+      const enqueued = yield* h.writer.EnqueueSummaries({
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: fork.id,
+        leafSlotId: leaf,
+        requestClass: "interactive",
+        chunks: plan.chunks
+      })
+      assert.lengthOf(enqueued, plan.chunks.length)
+      assert.strictEqual(enqueued[0]?.firstSlotId, h.rows[0]!.slotId)
+    })
+  )
 
 lcmTest("summary jobs assemble, complete and repair in their fork when another fork becomes current", (server) =>
   Effect.gen(function* () {
