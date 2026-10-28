@@ -322,7 +322,7 @@ function CompareDialog({ family, member, onClose }: { family: CardFamily; member
       wide
       open
       onOpenChange={(open) => !open && onClose()}
-      title="Compare with parent"
+      title={member.parentEntityId ? "Compare with parent" : "Compare with family"}
       description="Read-only comparison of saved cards. Drafts are not included. Removed text is from the selected card; added text is from this card."
     >
       <Field label="Compare this card with">

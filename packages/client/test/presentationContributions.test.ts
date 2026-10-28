@@ -1,0 +1,249 @@
+import { Effect } from "effect"
+import { createElement, type ComponentType } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { SlotOutlet, type Slot } from "../src/slots.tsx"
+import { registerPresentation } from "../src/features/chat/registerPresentation.tsx"
+import {
+  accountSettingSections,
+  chatCardActions,
+  chatBranchControls,
+  messagePreviews,
+  chatComposer,
+  chatOverlays,
+  chatSettingSections,
+  chatSurfaceProviders,
+  ChatSurfaceProviders,
+  messageRetries,
+  messageVersions,
+  summarySettingFields,
+  timelineBoundaries,
+  timelineRails,
+  timelineSummaries,
+  useVersionNavigation
+} from "../src/features/chat/presentation.tsx"
+import { messageRows, timelineTransforms, type TimelineContext } from "../src/features/chat/timelineContributions.tsx"
+import type { ChatView } from "../src/features/chat/session.ts"
+
+vi.hoisted(() => {
+  vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
+})
+
+let disposers: Array<() => void>
+beforeEach(() => {
+  disposers = registerPresentation()
+})
+afterEach(() => {
+  for (const dispose of disposers.reverse()) dispose()
+})
+const scoped = (install: () => () => void) =>
+  Effect.acquireRelease(Effect.sync(install), (dispose) => Effect.sync(dispose))
+
+// Every new outlet actually renders the effective component, rather than merely exposing a registry.
+const acceptsAlternative = <P extends object>(slot: Slot<P>) => {
+  it(`${slot.id}: scoped replacements, additions and disablement render, then restore defaults`, async () => {
+    const original = slot.list()[0]!
+    const component: ComponentType<P> = () => createElement("span", null, "synthetic alternative")
+    const props = {} as P // Synthetic components need no persisted data.
+    const render = () => renderToStaticMarkup(createElement(SlotOutlet<P>, { slot, props }))
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          for (const entry of slot.list()) yield* scoped(() => slot.disable(entry.id))
+          yield* scoped(() => slot.register({ ...original, component }))
+          yield* scoped(() =>
+            slot.register({ id: "synthetic.peer", order: -1, component: () => createElement("b", null, "peer") })
+          )
+          expect(render()).toBe("<b>peer</b><span>synthetic alternative</span>")
+          yield* scoped(() => slot.disable(original.id))
+          expect(render()).toBe("<b>peer</b>")
+        })
+      )
+    )
+    expect(slot.get(original.id)).toBe(original)
+    expect(slot.get("synthetic.peer")).toBeUndefined()
+  })
+}
+acceptsAlternative(chatCardActions)
+acceptsAlternative(chatBranchControls)
+acceptsAlternative(messagePreviews)
+acceptsAlternative(chatComposer)
+acceptsAlternative(chatOverlays)
+acceptsAlternative(chatSettingSections)
+acceptsAlternative(accountSettingSections)
+acceptsAlternative(summarySettingFields)
+acceptsAlternative(messageRetries)
+acceptsAlternative(messageVersions)
+acceptsAlternative(timelineBoundaries)
+acceptsAlternative(timelineSummaries)
+acceptsAlternative(timelineRails)
+
+it("surface providers compose scoped alternatives around the actual children and restore", async () => {
+  const original = chatSurfaceProviders.list()
+  const props = { children: createElement("p", null, "chat") } as unknown as Parameters<typeof ChatSurfaceProviders>[0]
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (const entry of original)
+          yield* scoped(() =>
+            chatSurfaceProviders.register({
+              ...entry,
+              component: ({ children }) => createElement("section", { "data-provider": entry.id }, children)
+            })
+          )
+        const html = renderToStaticMarkup(createElement(ChatSurfaceProviders, props))
+        expect(html).toBe(
+          '<section data-provider="chat.history-preview"><section data-provider="chat.preset-workspace"><section data-provider="chat.portraits"><p>chat</p></section></section></section>'
+        )
+        yield* scoped(() => chatSurfaceProviders.disable("chat.preset-workspace"))
+        expect(renderToStaticMarkup(createElement(ChatSurfaceProviders, props))).not.toContain("chat.preset-workspace")
+      })
+    )
+  )
+  expect(chatSurfaceProviders.list()).toEqual(original)
+})
+
+it("version gestures use the same effective registration as the visible control", async () => {
+  const original = messageVersions.get("message.versions")!
+  let navigation: ReturnType<typeof useVersionNavigation>
+  function Probe() {
+    navigation = useVersionNavigation()
+    return null
+  }
+  const read = () => {
+    renderToStaticMarkup(createElement(Probe))
+    return navigation
+  }
+  expect(read()).toBe(original)
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* scoped(() => messageVersions.register({ id: original.id, order: 10, component: () => null }))
+        expect(read()).toBeUndefined()
+        yield* scoped(() => messageVersions.disable(original.id))
+        expect(read()).toBeUndefined()
+      })
+    )
+  )
+  expect(read()).toBe(original)
+})
+
+it("timeline transforms insert arbitrary rows, replace built-in projection and restore it", async () => {
+  const original = timelineTransforms.get("timeline.lcm")!
+  const context = {
+    view: { entries: [] } as unknown as ChatView,
+    lcm: null,
+    summaries: true,
+    divider: -1,
+    historyDivider: -1
+  } satisfies TimelineContext
+  const rows = () =>
+    [...timelineTransforms.list()]
+      .sort((a, b) => a.order - b.order)
+      .reduce((rows, entry) => entry.transform(rows, context), messageRows([]))
+  expect(rows()).toEqual([])
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* scoped(() =>
+          timelineTransforms.register({
+            ...original,
+            transform: () => [
+              {
+                key: "synthetic-row",
+                estimate: 80,
+                from: 1,
+                to: 2,
+                render: () => createElement("p", null, "synthetic timeline")
+              }
+            ]
+          })
+        )
+        yield* scoped(() =>
+          timelineTransforms.register({
+            id: "synthetic.peer",
+            order: 30,
+            transform: (rows) => rows.map((row) => ({ ...row, estimate: 90 }))
+          })
+        )
+        expect(rows()[0]?.estimate).toBe(90)
+        expect(renderToStaticMarkup(createElement(() => rows()[0]!.render({} as never)))).toBe(
+          "<p>synthetic timeline</p>"
+        )
+      })
+    )
+  )
+  expect(rows()).toEqual([])
+  expect(timelineTransforms.get(original.id)).toBe(original)
+})
+
+it("keeps the LCM divider before a coincident history divider and projects covered messages", () => {
+  const entries = [0, 1, 2].map((depth) => ({ depth, slotId: `slot-${depth}` })) as unknown as ChatView["entries"]
+  const summary = { id: "synthetic-summary", from: 1, to: 1, lastSlotId: entries[0]!.slotId }
+  const view = {
+    entries,
+    history: { budget: { maximum: 100, target: 80, responseReserve: 20, nonHistoryTokens: 40 } }
+  } as unknown as ChatView
+  const lcm = { cursorDepth: 0, layer: [summary] } as unknown as NonNullable<ChatView["lcm"]>
+  const project = (summaries: boolean) =>
+    timelineTransforms
+      .list()
+      .reduce(
+        (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider: 1, historyDivider: 1 }),
+        messageRows(entries)
+      )
+  expect(project(false).map((row) => row.key)).toEqual([
+    "slot-0",
+    "lcm-boundary",
+    "history-boundary",
+    "slot-1",
+    "slot-2"
+  ])
+  const rows = project(true)
+  expect(rows.map((row) => row.key)).toEqual([
+    "synthetic-summary",
+    "lcm-boundary",
+    "history-boundary",
+    "slot-1",
+    "slot-2"
+  ])
+  expect(rows[0]).toMatchObject({ from: 0, to: 0, lastSlotId: "slot-0" })
+})
+
+it("the history preview uses its registered body and disappears when History is disabled", async () => {
+  const { HistoryPreviewContext } = await import("../src/features/chat/historyPreview.tsx")
+  const { chatPanels } = await import("../src/features/chat/panels.tsx")
+  const entry = { version: { id: "synthetic-version" } } as unknown as import("@rp/shared/chat.ts").PathEntry
+  const session = {
+    snapshot: () => ({ cast: null })
+  } as unknown as import("../src/features/chat/session.ts").ChatSession
+  const hit = {
+    kind: "version_replace",
+    beforeId: "synthetic-version",
+    before: "A synthetic sentence",
+    matches: [{ start: 2, end: 11, replacement: "replacement" }]
+  } as unknown as import("@rp/shared/historyApi.ts").HistoryHit
+  const render = () =>
+    renderToStaticMarkup(
+      createElement(
+        HistoryPreviewContext,
+        { value: { hits: [hit], publish: () => undefined } },
+        createElement(SlotOutlet<{ entry: typeof entry; session: typeof session }>, {
+          slot: messagePreviews,
+          props: { entry, session }
+        })
+      )
+    )
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* scoped(() =>
+          chatPanels.register({ id: "history", label: "History", order: 10, icon: "edit", component: () => null })
+        )
+        expect(render()).toContain("Replacement preview")
+        yield* scoped(() => chatPanels.disable("history"))
+        expect(render()).toBe("")
+      })
+    )
+  )
+})

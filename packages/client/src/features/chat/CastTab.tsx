@@ -24,7 +24,7 @@ import { castView, CastContext } from "./cast.ts"
 import { MoreIcon, PlusIcon } from "./icons.tsx"
 import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import { ChatCardActions } from "./CardForkDialogs.tsx"
+import { ChatCardActions } from "./presentation.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`

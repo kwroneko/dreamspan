@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { chatBranchControls } from "./presentation.tsx"
 import { ChatCommandMenu } from "./commands.tsx"
 // The open chat's header: whose chat it is (the cast's faces and a readable name, never
 // ST's file name), which branch is shown with a way to switch, and the chat's actions,
@@ -60,7 +62,7 @@ function useWrite() {
  * Which branch is shown, and the others at each place the path branches, by name where they
  * have one (DESIGN §3.2), with naming and deleting the branch shown at each place.
  */
-function BranchMenu({
+export function BranchMenu({
   session,
   view,
   onBranch,
@@ -425,7 +427,7 @@ export function ChatHeader({
         <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
           {fork && <PinButton fork={fork} />}
           <ChatCommandMenu context={{ session, view, onHistory, onJump }} />
-          <BranchMenu session={session} view={view} onBranch={onBranch} onJump={onJump} />
+          <SlotOutlet slot={chatBranchControls} props={{ session, view, onBranch, onJump }} />
           <div className="flex min-w-0 flex-wrap items-center justify-end gap-0.5 max-sm:[&_button]:px-1.5 max-sm:[&_button]:text-xs">
             {actions}
           </div>

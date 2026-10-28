@@ -5,7 +5,7 @@ import { AsyncResult } from "effect/reactivity"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { AppClient } from "../../rpc.ts"
 import { CharacterPanel } from "../characters/CharacterPanel.tsx"
-import { ChatCardActions } from "./CardForkDialogs.tsx"
+import { ChatCardActions } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 import { useIsPanelTab, type PanelProps } from "./panels.tsx"
 

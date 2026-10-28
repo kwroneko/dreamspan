@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { accountSettingSections, summarySettingFields } from "./presentation.tsx"
 // Settings → Chats: what applies to all of the user's chats (DESIGN §5.2, §8): the model and
 // preset a chat uses when it sets none of its own, and the models and instruction summaries
 // use. A chat's own setting takes precedence; its side panel says which one is in effect.
@@ -21,7 +23,7 @@ import { Field, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
-import { LcmFields, type Write } from "./LcmFields.tsx"
+import { type Write } from "./LcmFields.tsx"
 import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
 
 const NONE = "none"
@@ -195,83 +197,140 @@ export function ChatDefaultsPage() {
           </Field>
         </div>
       </Card>
-      <Card>
-        <CardHeader
-          title="Summaries"
-          description="For all your chats with summaries on. A chat turns summaries on or off in its side panel."
-        />
-        <section aria-label="Models for summaries" className="flex flex-col gap-4">
-          <Field
-            label="Refusal judge"
-            description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught."
-          >
-            <Select
-              items={items}
-              value={defaults ? choice(defaults.judge) : null}
-              placeholder="None"
-              onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
-            />
-          </Field>
-          <Field label="Fallback summarizer" description="Tried once when a summary keeps failing on its own model.">
-            <Select
-              items={items}
-              value={defaults ? choice(defaults.lcm?.fallback) : null}
-              placeholder="None"
-              onValueChange={(value) => void change({ fallback: value === NONE ? null : parseModelValue(value) })}
-            />
-          </Field>
-          <Switch
-            checked={account.enabled}
-            disabled={!defaults}
-            onCheckedChange={(enabled) => void writeLcm({ enabled })}
-            description="Chats imported from SillyTavern start with summaries off whatever this says."
-          >
-            New chats summarize older messages
-          </Switch>
-          <Field
-            label="Summarization instruction"
-            description="The default for new chats, which copy it when they're made; a chat's own instruction takes precedence. Use {{words}} for the summary's length; leave empty for the built-in instruction."
-          >
-            <Textarea value={tail} onChange={(event) => type(event.target.value)} rows={5} disabled={!defaults} />
-          </Field>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={!defaults || action.pending || !unsaved} onClick={() => void saveTail()}>
-              Save summarization instruction
-            </Button>
-            {saved && !unsaved ? (
-              <span role="status" className="text-sm text-muted">
-                Saved.
-              </span>
-            ) : (
-              unsaved && (
-                <span role="status" className="text-sm text-muted">
-                  {restored ? "Typed earlier and not saved yet" : "Not saved yet"}: kept in this browser until you save
-                  it.
-                </span>
-              )
-            )}
-          </div>
-        </section>
-        <section aria-label="Summary defaults for new chats" className="mt-6 flex flex-col gap-3">
-          <h3 className="text-sm font-medium text-text">For new chats</h3>
-          <p className="text-sm text-muted">
-            A new chat copies these when it's made and keeps them; change a chat's own in its side panel's This chat
-            tab. Chats from before these settings follow them until they set their own.
-          </p>
-          <LcmFields
-            scope="account"
-            view={{ resolved: account, fit: lcmMisfits(account, null), now: null, fitted: null }}
-            fallback={LCM_BUILTIN}
-            write={writeLcm}
-            disabled={!defaults}
-          />
-        </section>
-        {action.error && (
-          <p role="alert" className="mt-3 text-sm text-danger">
-            {action.error.message}
-          </p>
-        )}
-      </Card>
+      <SlotOutlet
+        slot={accountSettingSections}
+        props={{
+          defaults,
+          items,
+          account,
+          change,
+          writeLcm,
+          tail,
+          type,
+          unsaved,
+          saved,
+          restored,
+          saveTail,
+          pending: action.pending,
+          error: action.error
+        }}
+      />
     </div>
+  )
+}
+
+export interface SummaryDefaultsProps {
+  defaults: GenerationDefaults | null
+  items: ReturnType<typeof useModelChoices>
+  account: ReturnType<typeof resolveLcm>
+  change: (change: GenerationDefaultsChange) => Promise<boolean>
+  writeLcm: Write
+  tail: string
+  type: (text: string) => void
+  unsaved: boolean
+  saved: boolean
+  restored: boolean
+  saveTail: () => Promise<void>
+  pending: boolean
+  error: import("../../errors.ts").AppError | null
+}
+export function SummaryDefaults({
+  defaults,
+  items,
+  account,
+  change,
+  writeLcm,
+  tail,
+  type,
+  unsaved,
+  saved,
+  restored,
+  saveTail,
+  pending,
+  error
+}: SummaryDefaultsProps) {
+  const choice = (picked: { connection: string; model: string } | null | undefined) =>
+    picked ? modelValue(picked.connection, picked.model) : NONE
+  return (
+    <Card>
+      <CardHeader
+        title="Summaries"
+        description="For all your chats with summaries on. A chat turns summaries on or off in its side panel."
+      />
+      <section aria-label="Models for summaries" className="flex flex-col gap-4">
+        <Field
+          label="Refusal judge"
+          description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught."
+        >
+          <Select
+            items={items}
+            value={defaults ? choice(defaults.judge) : null}
+            placeholder="None"
+            onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
+          />
+        </Field>
+        <Field label="Fallback summarizer" description="Tried once when a summary keeps failing on its own model.">
+          <Select
+            items={items}
+            value={defaults ? choice(defaults.lcm?.fallback) : null}
+            placeholder="None"
+            onValueChange={(value) => void change({ fallback: value === NONE ? null : parseModelValue(value) })}
+          />
+        </Field>
+        <Switch
+          checked={account.enabled}
+          disabled={!defaults}
+          onCheckedChange={(enabled) => void writeLcm({ enabled })}
+          description="Chats imported from SillyTavern start with summaries off whatever this says."
+        >
+          New chats summarize older messages
+        </Switch>
+        <Field
+          label="Summarization instruction"
+          description="The default for new chats, which copy it when they're made; a chat's own instruction takes precedence. Use {{words}} for the summary's length; leave empty for the built-in instruction."
+        >
+          <Textarea value={tail} onChange={(event) => type(event.target.value)} rows={5} disabled={!defaults} />
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button disabled={!defaults || pending || !unsaved} onClick={() => void saveTail()}>
+            Save summarization instruction
+          </Button>
+          {saved && !unsaved ? (
+            <span role="status" className="text-sm text-muted">
+              Saved.
+            </span>
+          ) : (
+            unsaved && (
+              <span role="status" className="text-sm text-muted">
+                {restored ? "Typed earlier and not saved yet" : "Not saved yet"}: kept in this browser until you save
+                it.
+              </span>
+            )
+          )}
+        </div>
+      </section>
+      <section aria-label="Summary defaults for new chats" className="mt-6 flex flex-col gap-3">
+        <h3 className="text-sm font-medium text-text">For new chats</h3>
+        <p className="text-sm text-muted">
+          A new chat copies these when it's made and keeps them; change a chat's own in its side panel's This chat tab.
+          Chats from before these settings follow them until they set their own.
+        </p>
+        <SlotOutlet
+          slot={summarySettingFields}
+          props={{
+            scope: "account",
+            view: { resolved: account, fit: lcmMisfits(account, null), now: null, fitted: null },
+            fallback: LCM_BUILTIN,
+            write: writeLcm,
+            disabled: !defaults
+          }}
+        />
+      </section>
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-danger">
+          {error.message}
+        </p>
+      )}
+    </Card>
   )
 }

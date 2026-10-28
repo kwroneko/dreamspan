@@ -1,8 +1,15 @@
+import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import {
+  ChatSurfaceProviders,
+  chatOverlays,
+  chatComposer,
+  timelineRails,
+  timelineBoundaries,
+  timelineSummaries
+} from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
 import { useIsPanelTab } from "./panels.tsx"
-import { HistoryPreviewProvider } from "./historyPreview.tsx"
-import { PresetWorkspace, PresetOverlayHost } from "../editor/PresetWorkspace.tsx"
-import { PortraitProvider } from "../../ui/Portrait.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
@@ -38,12 +45,8 @@ import {
 } from "./ChatPanels.tsx"
 import { ChatHeader, chatDisplayName } from "./ChatHeader.tsx"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
-import { Composer } from "./Composer.tsx"
-import { CoverageRail, LANE_PX, useCoverage } from "./CoverageRail.tsx"
-import { LcmBoundary } from "./LcmBoundary.tsx"
+import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { TimelineSummary } from "./TimelineSummary.tsx"
-import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
@@ -102,7 +105,18 @@ function MessageList({
   const [follow] = useState({ stuck: true })
   const { entries } = view
   const { prefs } = useViewPrefs()
-  const summaries = prefs.timeline === "summaries"
+  const summarySlots = useSyncExternalStore(
+    timelineSummaries.subscribe,
+    timelineSummaries.snapshot,
+    timelineSummaries.snapshot
+  )
+  const boundarySlots = useSyncExternalStore(
+    timelineBoundaries.subscribe,
+    timelineBoundaries.snapshot,
+    timelineBoundaries.snapshot
+  )
+  const railSlots = useSyncExternalStore(timelineRails.subscribe, timelineRails.snapshot, timelineRails.snapshot)
+  const summaries = prefs.timeline === "summaries" && summarySlots.entries.length > 0
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
   const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
@@ -147,52 +161,28 @@ function MessageList({
   }
   // The divider is a row of its own, before the entry at `divider` (-1: none).
   const divider =
-    summaries && lcm && lcm.layer.length > 0 && (entries[0]?.depth ?? -1) > lcm.cursorDepth
-      ? 0
-      : (boundaryIndex(view) ?? -1)
-  const originalRows = Array.from({ length: entries.length + 1 }, (_, index) => [
-    ...(index === divider ? [{ kind: "lcm" as const }] : []),
-    ...(index === historyDivider ? [{ kind: "history" as const }] : []),
-    ...(index < entries.length ? [{ kind: "message" as const, entry: entries[index]! }] : [])
-  ]).flat()
-  type TimelineRow = (typeof originalRows)[number] | { kind: "summary"; summary: LcmSummary }
-  // The server's selected layer is already in path order. Include its prefix even when
-  // originals are outside the loaded window; expanding reads those messages separately.
-  const layer = summaries ? (lcm?.layer ?? []).filter((s) => s.from <= (entries.at(-1)?.depth ?? -1) + 1) : []
-  const rows: TimelineRow[] = []
-  let nextSummary = 0
-  for (const row of originalRows) {
-    const depth =
-      row.kind === "message" ? row.entry.depth : row.kind === "lcm" ? (lcm?.cursorDepth ?? -1) + 1 : Infinity
-    while (nextSummary < layer.length && layer[nextSummary]!.from - 1 <= depth)
-      rows.push({ kind: "summary", summary: layer[nextSummary++]! })
-    if (row.kind !== "message" || !layer.some((s) => row.entry.depth >= s.from - 1 && row.entry.depth < s.to))
-      rows.push(row)
-  }
-  while (nextSummary < layer.length) rows.push({ kind: "summary", summary: layer[nextSummary++]! })
+    boundarySlots.entries.length === 0
+      ? -1
+      : summaries && lcm && lcm.layer.length > 0 && (entries[0]?.depth ?? -1) > lcm.cursorDepth
+        ? 0
+        : (boundaryIndex(view) ?? -1)
+  const transforms = useTimelineTransforms()
+  const rows = [...transforms.entries]
+    .sort((a, b) => a.order - b.order)
+    .reduce(
+      (rows, entry) => entry.transform(rows, { view, lcm, summaries, divider, historyDivider }),
+      messageRows(entries)
+    )
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
-    rows.findIndex((row) =>
-      row.kind === "message"
-        ? row.entry.slotId === entries[entry]!.slotId
-        : row.kind === "summary" &&
-          entries[entry]!.depth >= row.summary.from - 1 &&
-          entries[entry]!.depth < row.summary.to
-    )
+    rows.findIndex((row) => entries[entry]!.depth >= row.from && entries[entry]!.depth <= row.to)
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => parent.current,
-    estimateSize: (row) => (rows[row]!.kind === "message" ? 160 : rows[row]!.kind === "lcm" ? 44 : 64),
-    getItemKey: (row) => {
-      const item = rows[row]!
-      return item.kind === "message"
-        ? item.entry.slotId
-        : item.kind === "summary"
-          ? item.summary.id
-          : `${item.kind}-boundary`
-    },
+    estimateSize: (row) => rows[row]!.estimate,
+    getItemKey: (row) => rows[row]!.key,
     overscan: 4,
     anchorTo: "end",
     followOnAppend: view.follow,
@@ -219,11 +209,8 @@ function MessageList({
     settled.current = false
     const requested = anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
     const entryIndex = entries.findIndex((entry) => entry.slotId === requested)
-    const row =
-      entryIndex >= 0
-        ? rowOf(entryIndex)
-        : rows.findIndex((row) => row.kind === "summary" && row.summary.lastSlotId === requested)
-    if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.kind === "summary" ? "start" : "center" })
+    const row = entryIndex >= 0 ? rowOf(entryIndex) : rows.findIndex((row) => row.lastSlotId === requested)
+    if (row >= 0) virtualizer.scrollToIndex(row, { align: rows[row]?.lastSlotId !== undefined ? "start" : "center" })
     else virtualizer.scrollToEnd()
     hold(row < 0)
     requestAnimationFrame(() => requestAnimationFrame(() => (settled.current = true)))
@@ -352,8 +339,8 @@ function MessageList({
   })
 
   // What the summaries cover, for the marks on the messages and the rail.
-  const railRows = useCoverage(session, entries, lcm, view.lcmVersion, rail && lcm !== null)
-  const showRail = rail && lcm !== null
+  const showRail = rail && lcm !== null && railSlots.entries.length > 0
+  const railRows = useCoverage(session, entries, lcm, view.lcmVersion, showRail)
   const railLevels = Math.max(
     1,
     ...(lcm?.layer.map((s) => s.level) ?? []),
@@ -390,7 +377,10 @@ function MessageList({
       >
         <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
           {showRail && (
-            <CoverageRail entries={entries} rows={railRows} lcm={lcm} position={position} onOpen={onOpenSummaries} />
+            <SlotOutlet
+              slot={timelineRails}
+              props={{ entries, rows: railRows, lcm, position, onOpen: onOpenSummaries }}
+            />
           )}
           {items.map((item) => {
             const row = rows[item.index]!
@@ -405,29 +395,7 @@ function MessageList({
                   ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
                 }}
               >
-                {row.kind === "lcm" ? (
-                  <LcmBoundary lcm={lcm!} onOpen={() => onOpenSummaries(null)} />
-                ) : row.kind === "summary" ? (
-                  <TimelineSummary
-                    session={session}
-                    summary={row.summary}
-                    renderMessage={renderMessage}
-                    target={
-                      entries.find(
-                        (e) => e.slotId === anchor && e.depth >= row.summary.from - 1 && e.depth < row.summary.to
-                      ) ?? null
-                    }
-                  />
-                ) : row.kind === "history" ? (
-                  <Alert>
-                    Messages above this aren&rsquo;t sent to the model: the model’s context budget allows{" "}
-                    {budget!.maximum.toLocaleString()} tokens, targets {budget!.target.toLocaleString()}, reserves{" "}
-                    {budget!.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed
-                    content take ~{budget!.nonHistoryTokens.toLocaleString()}.
-                  </Alert>
-                ) : (
-                  renderMessage(row.entry)
-                )}
+                {row.render({ session, anchor, renderMessage, onOpenSummaries })}
               </div>
             )
           })}
@@ -593,120 +561,102 @@ function ChatSurface({
   const title = chatDisplayName(view)
   const panelOpen = panel !== null
   return (
-    <HistoryPreviewProvider>
-      <PresetWorkspace
-        context={view.history?.presetContext ?? null}
-        onOpen={() => {
-          if (!wide) show(null)
-        }}
-      >
-        <PortraitProvider
-          onOpen={(id) => show("portrait", id)}
-          faces={[...cast.cards.values()].map((card) => ({
-            id: card.entityId,
-            name: card.name,
-            mediaId: card.avatarMediaId
-          }))}
+    <ChatSurfaceProviders session={session} cast={cast} view={view} wide={wide} onOpenPanel={show}>
+      <CastContext value={cast}>
+        <div
+          className="flex min-h-0 flex-1"
+          style={
+            {
+              "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
+            } as CSSProperties
+          }
         >
-          <CastContext value={cast}>
-            <div
-              className="flex min-h-0 flex-1"
-              style={
-                {
-                  "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
-                } as CSSProperties
-              }
-            >
-              <div className="relative flex min-w-0 flex-1 flex-col">
-                <ChatHeader
-                  session={session}
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            <ChatHeader
+              session={session}
+              view={view}
+              onBranch={switchBranch}
+              onJump={jump}
+              onHistory={() => show("history")}
+              actions={
+                <PanelToggles
                   view={view}
-                  onBranch={switchBranch}
-                  onJump={jump}
-                  onHistory={() => show("history")}
-                  actions={
-                    <PanelToggles
-                      view={view}
-                      userId={userId}
-                      open={panel}
-                      wide={wide}
-                      onToggle={(tab) => show(panel === tab ? null : tab)}
-                    />
-                  }
-                />
-                {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
-                {view.lcm !== null &&
-                  !view.lcm.enabled &&
-                  view.lcm.leafSlotId === view.leafSlotId &&
-                  (view.history?.historyStart?.depth ?? 0) > 0 && (
-                    // One line, not a block: it stays while the chat is read for hours.
-                    <div
-                      role="status"
-                      className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
-                    >
-                      {/* A phone's line has room for the gist only; the button says the rest. */}
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="sm:hidden">Summaries are off.</span>
-                        <span className="hidden sm:inline">
-                          The oldest messages aren&rsquo;t sent: summaries are off.
-                        </span>
-                      </span>
-                      <Button
-                        variant="ghost"
-                        className="h-7 shrink-0 px-2 text-accent"
-                        title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
-                        aria-description="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
-                        onClick={() => setEnabling(true)}
-                      >
-                        Enable summaries
-                      </Button>
-                    </div>
-                  )}
-                {(view.error ?? branchError) && (
-                  <div className="mx-auto w-full max-w-3xl">
-                    <Alert tone="danger">{view.error ?? branchError}</Alert>
-                  </div>
-                )}
-                {view.loading ? (
-                  <Loading label="Loading the chat…" />
-                ) : (
-                  <MessageList
-                    // A replacement layer has different row coordinates. Give it fresh
-                    // virtualizer measurements rather than inheriting the old pixel anchor.
-                    key={prefs.timeline}
-                    session={session}
-                    view={view}
-                    anchor={slot}
-                    rail={rail}
-                    onBranch={switchBranch}
-                    onOpenSummaries={openSummaries}
-                  />
-                )}
-                <CacheIndicator warmth={view.cache} />
-                <Composer session={session} view={view} onSettings={show} />
-                <PresetOverlayHost />
-              </div>
-              {/* Mounted only while open: the surface re-renders with every page of history. */}
-              {panelOpen && (
-                <ChatSidePanel
-                  tab={panel}
+                  userId={userId}
+                  open={panel}
                   wide={wide}
-                  title={title}
-                  onTab={show}
-                  onClose={() => show(null)}
-                  session={session}
-                  view={view}
-                  focus={focus}
-                  onJump={jump}
-                  onEnable={() => setEnabling(true)}
+                  onToggle={(tab) => show(panel === tab ? null : tab)}
                 />
+              }
+            />
+            {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
+            {view.lcm !== null &&
+              !view.lcm.enabled &&
+              view.lcm.leafSlotId === view.leafSlotId &&
+              (view.history?.historyStart?.depth ?? 0) > 0 && (
+                // One line, not a block: it stays while the chat is read for hours.
+                <div
+                  role="status"
+                  className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+                >
+                  {/* A phone's line has room for the gist only; the button says the rest. */}
+                  <span className="min-w-0 flex-1 truncate">
+                    <span className="sm:hidden">Summaries are off.</span>
+                    <span className="hidden sm:inline">The oldest messages aren&rsquo;t sent: summaries are off.</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    className="h-7 shrink-0 px-2 text-accent"
+                    title="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
+                    aria-description="The oldest messages aren’t sent to the model. Summaries keep what happened in them in the context."
+                    onClick={() => setEnabling(true)}
+                  >
+                    Enable summaries
+                  </Button>
+                </div>
               )}
-            </div>
-            {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
-          </CastContext>
-        </PortraitProvider>
-      </PresetWorkspace>
-    </HistoryPreviewProvider>
+            {(view.error ?? branchError) && (
+              <div className="mx-auto w-full max-w-3xl">
+                <Alert tone="danger">{view.error ?? branchError}</Alert>
+              </div>
+            )}
+            {view.loading ? (
+              <Loading label="Loading the chat…" />
+            ) : (
+              <MessageList
+                // A replacement layer has different row coordinates. Give it fresh
+                // virtualizer measurements rather than inheriting the old pixel anchor.
+                key={prefs.timeline}
+                session={session}
+                view={view}
+                anchor={slot}
+                rail={rail}
+                onBranch={switchBranch}
+                onOpenSummaries={openSummaries}
+              />
+            )}
+            <CacheIndicator warmth={view.cache} />
+            <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show }} />
+            <SlotOutlet slot={chatOverlays} props={{ session, view }} />
+          </div>
+          {/* Mounted only while open: the surface re-renders with every page of history. */}
+          {panelOpen && (
+            <ChatSidePanel
+              tab={panel}
+              wide={wide}
+              title={title}
+              onTab={show}
+              onClose={() => show(null)}
+              session={session}
+              view={view}
+              focus={focus}
+              onJump={jump}
+              onEnable={() => setEnabling(true)}
+            />
+          )}
+        </div>
+        {enabling && <EnableLcmDialog session={session} onOpenChange={setEnabling} />}
+      </CastContext>
+    </ChatSurfaceProviders>
   )
 }
 

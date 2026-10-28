@@ -1,4 +1,3 @@
-import { HistoryDiff, HistoryPreviewContext } from "./historyPreview.tsx"
 // One message: who wrote it (avatar, name, time, its number on the path, the model of a
 // generated version), its versions (swipe through them, pick one in the version picker, or
 // generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
@@ -15,7 +14,6 @@ import {
   type PointerEvent,
   type ReactNode,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -28,7 +26,6 @@ import { Button } from "../../ui/Button.tsx"
 import { Textarea } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { Select } from "../../ui/Select.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
@@ -38,11 +35,12 @@ import { MessageActions } from "./messageActions.tsx"
 import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
-import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
-import { VersionPicker } from "./VersionPicker.tsx"
+import { stepFrom } from "./VersionControls.tsx"
+import { messageRetries, messageVersions, messagePreviews, useVersionNavigation } from "./presentation.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import type { RefId } from "@rp/shared/library.ts"
 
@@ -116,21 +114,6 @@ function TemplateText({
     version.frozenMacros ?? {}
   )
   return <Markdown text={text} streaming={false} />
-}
-
-/** "Retry with…" another model, for a reply that was refused. */
-function RetryWith({ onPick }: { onPick: (model: ReturnType<typeof parseModelValue>) => void | Promise<void> }) {
-  const models = useModelChoices(true)
-  return (
-    <div className="w-56">
-      <Select
-        items={models}
-        value={null}
-        placeholder="Retry with…"
-        onValueChange={(value) => void onPick(parseModelValue(value))}
-      />
-    </div>
-  )
 }
 
 function VersionBody({
@@ -295,70 +278,6 @@ function useVersions(session: ChatSession, entry: PathEntry, report: (outcome: O
   return { versions: position >= 0 ? versions : null, position, load, replace }
 }
 
-/** The next version the arrows reach from `index` going `step`: hidden ones are skipped. */
-const stepFrom = (versions: ReadonlyArray<Version>, index: number, step: -1 | 1) => {
-  let i = index + step
-  while (versions[i]?.hidden) i += step
-  return versions[i]
-}
-
-/** `‹ 3/7 ›`: the versions of a message, with the version picker on the counter. */
-function Versions({
-  entry,
-  generated,
-  versions,
-  position,
-  onStep,
-  onPick,
-  onFlag,
-  onOpen
-}: {
-  entry: PathEntry
-  /** A model writes this message's versions, so › past the last one generates another. */
-  generated: boolean
-  versions: ReadonlyArray<Version> | null
-  position: number
-  onStep: (step: -1 | 1) => void
-  onPick: (version: Version) => void
-  onFlag: (version: Version, flags: { starred?: boolean; hidden?: boolean }) => void
-  onOpen: () => void
-}) {
-  // Until the list is read, the arrows go by the count; then they skip hidden versions.
-  const listed = versions !== null && position >= 0
-  const before = listed ? stepFrom(versions, position, -1) !== undefined : position !== 0
-  const after = listed ? stepFrom(versions, position, 1) !== undefined : position < entry.versionCount - 1
-  return (
-    <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
-      <IconButton
-        label="Previous version"
-        icon="left"
-        className="max-sm:size-7"
-        disabled={entry.versionCount <= 1 || !before}
-        onClick={() => onStep(-1)}
-      />
-      {entry.versionCount > 1 ? (
-        <VersionPicker
-          entry={entry}
-          versions={versions}
-          position={position}
-          onOpen={onOpen}
-          onPick={onPick}
-          onFlag={onFlag}
-        />
-      ) : (
-        <span className="min-w-6 text-center text-xs text-muted tabular-nums">1/1</span>
-      )}
-      <IconButton
-        label={generated && (position === -1 || !after) ? "Generate another version" : "Next version"}
-        icon="right"
-        className="max-sm:size-7"
-        disabled={!generated && (entry.versionCount <= 1 || !after)}
-        onClick={() => onStep(1)}
-      />
-    </div>
-  )
-}
-
 /** Where this message sits among the alternate branches of the story here (DESIGN §3.2). */
 function Branches({ entry, onBranch }: { entry: PathEntry; onBranch: (entry: PathEntry, index: number) => void }) {
   return (
@@ -453,9 +372,6 @@ export const Message = memo(function Message({
   /** Switches to another of the alternate branches at this message. */
   onBranch: (entry: PathEntry, index: number) => void
 }) {
-  const historyPreview = useContext(HistoryPreviewContext).hits.find(
-    (hit) => hit.kind === "version_replace" && hit.beforeId === entry.version.id
-  )
   useRenderCount("rowRenders")
   const cast = useCast()
   const { version } = entry
@@ -516,7 +432,7 @@ export const Message = memo(function Message({
     if (outcome.ok) deleted(outcome.value)
   }
 
-  const swipe = async (step: -1 | 1) => {
+  const defaultStep = async (step: -1 | 1) => {
     const all = entry.versionCount > 1 ? await load() : [version]
     if (all === null) return
     const target = stepFrom(
@@ -528,6 +444,8 @@ export const Message = memo(function Message({
     // Past the last version of a generated message, a swipe generates another, as in SillyTavern.
     if (step === 1 && generated) report(await session.regenerate(entry))
   }
+  const versionNavigation = useVersionNavigation()
+  const swipe = (step: -1 | 1) => versionNavigation?.step?.({ entry, session, defaultStep }, step)
   const flag = async (target: Version, flags: { starred?: boolean; hidden?: boolean }) => {
     const outcome = await session.setVersionFlags(target, flags)
     report(outcome)
@@ -700,11 +618,7 @@ export const Message = memo(function Message({
             Another version is selected. Your edit still belongs to the version you opened.
           </p>
         )}
-        {historyPreview && (
-          <div className="my-2 rounded-md border border-accent/40 p-2">
-            <HistoryDiff hit={historyPreview} />
-          </div>
-        )}
+        <SlotOutlet slot={messagePreviews} props={{ entry, session }} />
         {editor !== undefined ? (
           <Editor
             key={editing}
@@ -774,7 +688,10 @@ export const Message = memo(function Message({
         )}
         {generated &&
           (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
-            <RetryWith onPick={async (choice) => report(await session.regenerate(entry, choice))} />
+            <SlotOutlet
+              slot={messageRetries}
+              props={{ onPick: async (choice) => report(await session.regenerate(entry, choice)) }}
+            />
           )}
         {(showVersions || (revealed && !editing)) && (
           // At the end of the message, as in ST: where reading it ends, and where a swipe
@@ -791,15 +708,18 @@ export const Message = memo(function Message({
               )}
               <span className="flex-1" />
               {showVersions && (
-                <Versions
-                  entry={entry}
-                  generated={generated}
-                  versions={versions}
-                  position={position}
-                  onStep={(step) => void swipe(step)}
-                  onPick={async (picked) => report(await session.select(entry, picked))}
-                  onFlag={(target, flags) => void flag(target, flags)}
-                  onOpen={() => void load(true)}
+                <SlotOutlet
+                  slot={messageVersions}
+                  props={{
+                    entry,
+                    generated,
+                    versions,
+                    position,
+                    onStep: (step) => void swipe(step),
+                    onPick: async (picked) => report(await session.select(entry, picked)),
+                    onFlag: (target, flags) => void flag(target, flags),
+                    onOpen: () => void load(true)
+                  }}
                 />
               )}
             </footer>

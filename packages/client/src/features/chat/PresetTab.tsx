@@ -85,7 +85,7 @@ function PresetSwitches({ store }: { store: EditorStore }) {
           const p = all.find((p) => p.identifier === entry.identifier)!
           const content =
             (doc.prompts as PresetPrompt[] | undefined)?.find((p) => p.identifier === entry.identifier)?.content ?? ""
-          const filled = workspace.context?.blocks.find((b) => b.identifier === entry.identifier)
+          const filled = workspace?.context?.blocks.find((b) => b.identifier === entry.identifier)
           return (
             <li key={entry.identifier} className="flex flex-wrap items-center gap-2 py-2">
               {entry.identifier !== "newestMessage" && (
@@ -106,8 +106,8 @@ function PresetSwitches({ store }: { store: EditorStore }) {
               {/* The badge goes under the name, so the name keeps the row's width. */}
               <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
                 <span className="text-sm break-words">{p.name}</span>
-                {!p.marker && /\{\{summary\}\}/i.test(content) && workspace.context?.summary && (
-                  <Badge>{summaryBadge(workspace.context.summary)}</Badge>
+                {!p.marker && /\{\{summary\}\}/i.test(content) && workspace?.context?.summary && (
+                  <Badge>{summaryBadge(workspace?.context.summary)}</Badge>
                 )}
               </span>
               <span className="text-xs text-muted">
@@ -116,7 +116,7 @@ function PresetSwitches({ store }: { store: EditorStore }) {
               <Button
                 variant="ghost"
                 aria-label={`Edit ${p.name}`}
-                onClick={() => workspace.open(store.refId, entry.identifier)}
+                onClick={() => workspace?.open(store.refId, entry.identifier)}
               >
                 Edit
               </Button>
@@ -143,7 +143,7 @@ function PresetSwitches({ store }: { store: EditorStore }) {
 export function PresetTab({ view }: { view: ChatView }) {
   const workspace = usePresetWorkspace()
   const preset = view.history?.preset
-  return preset?.ref ? (
+  return preset?.ref && workspace ? (
     <PresetSwitches key={preset.ref} store={workspace.store(preset.ref as RefId)} />
   ) : (
     <p className="text-sm text-muted">
