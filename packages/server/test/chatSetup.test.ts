@@ -495,3 +495,158 @@ describe("chat setup", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 })
+
+// Queue prose uses the same drafting protocol as message edits, with a key owned by the
+// chat so posting/withdrawing the queue entry cannot invalidate an in-flight draft save.
+describe("queued edits", () => {
+  for (const kind of ["message", "direction"] as const) {
+    it.live(`persists ${kind} edits, undo and recovery across a queue lifecycle`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const miraId = yield* card(api, "Mira", mira)
+        const started = yield* api.StartChat({
+          cards: [miraId],
+          persona: null,
+          greeting: null,
+          first: { _tag: "Generate", speakerEntityId: miraId, direction: "Wait" }
+        })
+        const sent =
+          kind === "message"
+            ? yield* api.SendMessage({
+                chatId: started.chat.id,
+                parentSlotId: started.entry.slotId,
+                branch: false,
+                speakerEntityId: null,
+                content: "Original message",
+                reply: false
+              })
+            : yield* api.Generate({
+                chatId: started.chat.id,
+                parentSlotId: started.entry.slotId,
+                branch: false,
+                speakerEntityId: miraId,
+                direction: "Original direction"
+              })
+        assert.strictEqual(sent._tag, "Queued")
+        if (sent._tag !== "Queued") return
+        const queued = sent.queued
+        const target = {
+          _tag: "Queue" as const,
+          chatId: started.chat.id,
+          queuedId: queued.id,
+          rowVersion: queued.rowVersion
+        }
+        const original = kind === "message" ? queued.content : queued.direction!
+        const first = yield* api.SaveMessageDraft({
+          target,
+          draftId: null,
+          content: original,
+          expectedRowVersion: null,
+          expectedSession: null
+        })
+        const long = "Unsent writing about the harbor and its keeper. ".repeat(8)
+        const second = yield* api.SaveMessageDraft({
+          target,
+          draftId: first.id,
+          content: long,
+          expectedRowVersion: first.rowVersion,
+          expectedSession: first.session
+        })
+        const third = yield* api.SaveMessageDraft({
+          target,
+          draftId: second.id,
+          content: "x",
+          expectedRowVersion: second.rowVersion,
+          expectedSession: second.session
+        })
+        const history = yield* api.QueueDraftHistory({ chatId: started.chat.id, queuedId: queued.id })
+        const state = history.find((state) => state.length === long.length)!
+        assert.isDefined(state)
+        const restored = yield* api.RestoreQueueDraft({
+          chatId: started.chat.id,
+          queuedId: queued.id,
+          draftId: third.id,
+          seq: state.seq,
+          expectedRowVersion: third.rowVersion
+        })
+        assert.strictEqual(restored.content, long)
+        const changed = yield* api.EditQueued({
+          queuedId: queued.id,
+          content: long,
+          speakerEntityId: queued.speakerEntityId,
+          expectedRowVersion: queued.rowVersion,
+          draft: { draftId: restored.id, session: restored.session }
+        })
+        assert.strictEqual(kind === "message" ? changed.content : changed.direction, long)
+        assert.lengthOf(yield* api.MessageDrafts({ chatId: started.chat.id }), 0)
+        // Text typed while Save was travelling starts a new drafting session, and survives
+        // removal of the queue entry before that save reaches the writer.
+        yield* api.WithdrawQueued({ queuedId: queued.id, expectedRowVersion: changed.rowVersion })
+        const late = yield* api.SaveMessageDraft({
+          target,
+          draftId: restored.id,
+          content: "Typed during Save",
+          expectedRowVersion: restored.rowVersion,
+          expectedSession: restored.session
+        })
+        assert.strictEqual(late.content, "Typed during Save")
+        assert.deepStrictEqual(
+          (yield* api.MessageDrafts({ chatId: started.chat.id })).map((draft) => draft.content),
+          ["Typed during Save"]
+        )
+        yield* api.DiscardMessageDraft({ target, draftId: late.id, expectedRowVersion: late.rowVersion })
+        const recovered = yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        assert.isTrue(recovered.some((text) => text.content === "Typed during Save"))
+        yield* api.StopGeneration({ versionId: started.entry.version.id })
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
+    )
+  }
+
+  it.live("posting a queued message preserves an unsent edit and accepts a late browser save", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", mira)
+      const started = yield* api.StartChat({
+        cards: [miraId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Generate", speakerEntityId: miraId, direction: "" }
+      })
+      const sent = yield* api.SendMessage({
+        chatId: started.chat.id,
+        parentSlotId: started.entry.slotId,
+        branch: false,
+        speakerEntityId: null,
+        content: "Posted original",
+        reply: false
+      })
+      if (sent._tag !== "Queued") return yield* Effect.die("expected queue")
+      const target = {
+        _tag: "Queue" as const,
+        chatId: started.chat.id,
+        queuedId: sent.queued.id,
+        rowVersion: sent.queued.rowVersion
+      }
+      const draft = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        content: "Unsent edit",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      yield* api.StopGeneration({ versionId: started.entry.version.id })
+      while ((yield* api.ListQueued({ chatId: started.chat.id })).length > 0) yield* Effect.sleep(20)
+      const late = yield* api.SaveMessageDraft({
+        target,
+        draftId: draft.id,
+        content: "Still editing after posting",
+        expectedRowVersion: draft.rowVersion,
+        expectedSession: draft.session
+      })
+      assert.strictEqual(late.content, "Still editing after posting")
+      const path = yield* pathOf(api, started.chat.id)
+      assert.strictEqual(path.at(-1)!.version.content, "Posted original")
+      assert.strictEqual((yield* api.MessageDrafts({ chatId: started.chat.id }))[0]!.content, late.content)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
+  )
+})

@@ -38,7 +38,8 @@ test("saving a queued message another tab changed meanwhile is a conflict, not a
 
   await mine.getByRole("button", { name: "Edit" }).click()
   await mine.getByLabel("Queued message").fill("An older draft.")
-  await theirs.getByRole("button", { name: "Edit" }).click()
+  if (await theirs.getByRole("button", { name: "Edit", exact: true }).count())
+    await theirs.getByRole("button", { name: "Edit", exact: true }).click()
   await theirs.getByLabel("Queued message").fill("The other tab's edit.")
   await theirs.getByRole("button", { name: "Save" }).click()
   await expect(theirs).toContainText("The other tab's edit.")

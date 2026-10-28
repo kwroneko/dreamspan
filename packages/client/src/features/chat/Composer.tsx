@@ -8,7 +8,7 @@ import { ComposerControls, invokeComposerControl, type ComposerControlContext } 
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
-import type { CastCard, EntityId, QueuedMessage } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
@@ -17,10 +17,8 @@ import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
-import { Textarea } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { Badge } from "../../ui/Surface.tsx"
 import { defaultSpeaker, nameOf, recentSpeakers, replyFaces, useCast } from "./cast.ts"
 import { planReply } from "./replyPolicy.ts"
 import { HistoryIcon } from "./icons.tsx"
@@ -36,120 +34,6 @@ const BRANCH_CHANGED: AppError = {
   message: "The branch changed before this was sent, so it wasn't. It's back in that branch's composer.",
   problems: [],
   reason: null
-}
-
-function Queued({
-  queued,
-  session,
-  onWithdrawn
-}: {
-  queued: QueuedMessage
-  session: ChatSession
-  onWithdrawn: (text: string) => void
-}) {
-  const view = useCast()
-  // The text being edited, and the version of the entry it started from: saving over a
-  // newer one from another tab is a conflict, never a silent overwrite.
-  const [editing, setEditing] = useState<{
-    readonly text: string
-    readonly rowVersion: number
-    readonly speakerEntityId: QueuedMessage["speakerEntityId"]
-  } | null>(null)
-  const [error, setError] = useState<AppError | null>(null)
-  const [conflict, setConflict] = useState(false)
-  const who = nameOf(view, queued.speakerEntityId)
-  const message = queued.kind === "message"
-  return (
-    <li className="flex flex-col gap-2 rounded-md border border-dashed border-border px-3 py-2" aria-label="Queued">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge tone="warning">queued</Badge>
-        <span className="text-muted">
-          {message ? `Posts as ${who ?? "you"} when the reply finishes` : `Generates ${who ?? "a reply"} next`}
-        </span>
-      </div>
-      {editing !== null ? (
-        <form
-          className="flex flex-col gap-2"
-          onSubmit={async (event) => {
-            event.preventDefault()
-            const outcome = await session.editQueued(queued, editing.text, editing)
-            if (outcome.ok) {
-              setEditing(null)
-              setError(null)
-              setConflict(false)
-            } else if (outcome.error.tag === "StaleWrite") {
-              // Keep this text; show theirs; saving again (deliberately) replaces it.
-              setConflict(true)
-              setError(null)
-              setEditing({ ...editing, rowVersion: queued.rowVersion, speakerEntityId: queued.speakerEntityId })
-            } else setError(outcome.error)
-          }}
-        >
-          {conflict && (
-            <div role="alert" className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-sm">
-              <p>Changed in another tab while you were editing. It now reads:</p>
-              <p className="mt-1 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{queued.content}</p>
-              <p className="mt-1">Save again to replace it with your text, or cancel to keep theirs.</p>
-            </div>
-          )}
-          <Textarea
-            aria-label="Queued message"
-            value={editing.text}
-            onChange={(e) => setEditing({ ...editing, text: e.currentTarget.value })}
-          />
-          <div className="flex gap-2">
-            <Button type="submit" variant="primary">
-              Save
-            </Button>
-            <Button
-              onClick={() => {
-                setEditing(null)
-                setConflict(false)
-              }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <p className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {message ? queued.content : queued.direction ? `Direction: ${queued.direction}` : null}
-        </p>
-      )}
-      <div className="flex gap-1">
-        {message && editing === null && (
-          <Button
-            variant="ghost"
-            onClick={() =>
-              setEditing({
-                text: queued.content,
-                rowVersion: queued.rowVersion,
-                speakerEntityId: queued.speakerEntityId
-              })
-            }
-          >
-            Edit
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          onClick={async () => {
-            const outcome = await session.withdrawQueued(queued)
-            setError(outcome.ok ? null : outcome.error)
-            if (outcome.ok)
-              onWithdrawn(outcome.value.kind === "message" ? outcome.value.content : (outcome.value.direction ?? ""))
-          }}
-        >
-          Withdraw
-        </Button>
-      </div>
-      {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error.message}
-        </p>
-      )}
-    </li>
-  )
 }
 
 /** Undo from the server's history of the composer's text (DESIGN §6.2): any earlier state, back. */
@@ -422,6 +306,10 @@ export function Composer({
   const shownError = error ?? saveError
 
   const controls: ComposerControlContext = {
+    recoverQueued: (withdrawn) => {
+      const current = draft.snapshot().text
+      draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
+    },
     session,
     view,
     onSettings,
@@ -470,22 +358,7 @@ export function Composer({
   return (
     <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
       <ComposerControls placement="settings" context={controls} />
-      {view.queue.length > 0 && (
-        <ul className="flex flex-col gap-2" aria-label="Queued messages">
-          {view.queue.map((queued) => (
-            <Queued
-              key={queued.id}
-              queued={queued}
-              session={session}
-              // Withdrawn text never just disappears: it comes back to the box, after what's there.
-              onWithdrawn={(withdrawn) => {
-                const current = draft.snapshot().text
-                draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
-              }}
-            />
-          ))}
-        </ul>
-      )}
+      <ComposerControls placement="queue" context={controls} />
       {conflict && (
         <ReplayNotice
           conflict={conflict}

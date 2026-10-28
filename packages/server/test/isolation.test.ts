@@ -1115,6 +1115,16 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.all([
         refused(
           actor.api.SaveMessageDraft({
+            target: { _tag: "Queue", chatId: owner.chat.chatId, queuedId: owner.queuedId, rowVersion: 1 },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SaveMessageDraft({
             target: { _tag: "Edit", versionId: owner.chat.versionId },
             draftId: null,
             content: "planted",
@@ -1134,6 +1144,23 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "NotFound"
         )
       ]).pipe(Effect.asVoid)
+  },
+  QueueDraftHistory: {
+    probe: (actor, owner) =>
+      refused(actor.api.QueueDraftHistory({ chatId: owner.chat.chatId, queuedId: owner.queuedId }), "NotFound")
+  },
+  RestoreQueueDraft: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RestoreQueueDraft({
+          chatId: owner.chat.chatId,
+          queuedId: owner.queuedId,
+          draftId: "none",
+          seq: 0,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
   },
   DiscardMessageDraft: {
     probe: (actor, owner) =>
@@ -2205,7 +2232,8 @@ const routes: Record<string, Probe> = {
       const before = yield* owner.api.MessageDrafts({ chatId: owner.chat.chatId })
       for (const target of [
         { _tag: "Edit", versionId: owner.chat.versionId },
-        { _tag: "Write", slotId: owner.chat.slotId }
+        { _tag: "Write", slotId: owner.chat.slotId },
+        { _tag: "Queue", chatId: owner.chat.chatId, queuedId: owner.queuedId, rowVersion: 1 }
       ]) {
         const response = yield* http(
           actor,

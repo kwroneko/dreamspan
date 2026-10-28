@@ -21,6 +21,8 @@ The owner can't test the harness without it; it comes before everything else.
 
 ## 2. RP loop
 
+Guidance and speaker-picker corrections are built for saved and pending chats (U06, 2026-10-28); their implemented behavior lives in ARCHITECTURE.md §12.
+
 - **Guidance (owner).** Guidance changes only *who writes*, never *which character*. Off: Enter sends your text as the selected speaker's message. On: Enter makes the model write the **selected speaker's** message following your text as the direction (persona or card alike). **Change:** the build generates for the "Reply from" / next-in-turn character.
 - **Speaker picker (owner).** "Writing as" lists only the chat's cast (the persona and the cards in the chat). To speak as another card, add it to the chat first. **Change:** the build lists library cards and silently adds the chosen one.
 - **Closing user turn (owner).** Added only when there's no new user text **and** no user-role prompt follows the history. It goes right after the last chat message (before any system prompts that follow). **No warning** on messages or replies; it's visible only in the inspector. **Change:** remove the per-reply warning; check placement.

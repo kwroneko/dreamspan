@@ -601,7 +601,10 @@ export class ChatSession {
     }
   }
 
+  private queueEditorSnapshot: ReadonlyArray<MessageDraft> = []
+
   private editorsChanged() {
+    this.queueEditorSnapshot = [...this.editors.values()].filter((editor) => editor.target._tag === "Queue")
     for (const listener of this.editorListeners) listener()
   }
 
@@ -609,6 +612,8 @@ export class ChatSession {
   editor(key: MessageEditorKey): MessageDraft | undefined {
     return this.editors.get(key)
   }
+
+  readonly queueEditors = () => this.queueEditorSnapshot
 
   /** An edit stays on its slot when an import or another tab selects another version. */
   editForSlot(slotId: SlotId, versions: ReadonlyArray<Version>): MessageDraft | undefined {
@@ -628,8 +633,8 @@ export class ChatSession {
   }
 
   /** Opens an editor, or the one already open there, with its text. */
-  openEditor(target: MessageDraftTarget, initial: string, slotId: SlotId): MessageDraft {
-    if (target._tag === "Edit") this.editSlots.set(target.versionId, slotId)
+  openEditor(target: MessageDraftTarget, initial: string, slotId?: SlotId): MessageDraft {
+    if (target._tag === "Edit" && slotId !== undefined) this.editSlots.set(target.versionId, slotId)
     const key = editorKey(target)
     const open = this.editors.get(key)
     if (open) return open
@@ -1175,11 +1180,13 @@ export class ChatSession {
   async editQueued(
     queued: QueuedMessage,
     content: string,
-    from: { readonly rowVersion: number; readonly speakerEntityId: EntityId | null }
+    from: { readonly rowVersion: number; readonly speakerEntityId: EntityId | null },
+    draft?: { readonly draftId: string; readonly session: number } | null
   ): Promise<Outcome<QueuedMessage>> {
     return this.call((client) =>
       client("EditQueued", {
         queuedId: queued.id,
+        ...(draft == null ? {} : { draft }),
         content,
         speakerEntityId: from.speakerEntityId,
         expectedRowVersion: from.rowVersion

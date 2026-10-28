@@ -1,3 +1,8 @@
+import {
+  PendingComposerControls,
+  invokePendingComposer,
+  type PendingComposerContext
+} from "./pendingComposerControls.tsx"
 // A chat that doesn't exist yet (DESIGN §2.1): a card's greeting, with its alternates to
 // pick from and `{{user}}` following the persona picked, and a composer. Nothing is saved
 // until the first send, so opening cards never leaves greeting-only chats behind. What's
@@ -21,12 +26,9 @@ import { rememberPanel, useWide } from "./ChatPanels.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { type ReactNode } from "react"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { composerKeyDown } from "./composerKeys.ts"
-import { GenerateIcon, SendIcon } from "./icons.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { CastContext, castView } from "./cast.ts"
-import { Switch } from "../../ui/Choice.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -158,6 +160,7 @@ function Pending({
   const greeting = picks[0] ?? 0
   const members = group?.group.members ?? null
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).
+  const [selectedSpeaker, setSelectedSpeaker] = useState<EntityId | null>(null)
   const [replier, setReplier] = useState<string>(card.card.entityId)
   const [text, setTextState] = useState("")
   // The latest text, for what's typed while the first send is on its way (read after it).
@@ -208,6 +211,7 @@ function Pending({
                   ? { entityId, name: card.card.name, content }
                   : { entityId, name: group.group.name, content, groupChatId: group.chatId }
             },
+            // eslint-disable-next-line react-hooks/purity -- keep runs from input/request handlers; registered controls carry start as a callback.
             Date.now()
           )
     return keepCopy(copy.current, previous)
@@ -235,7 +239,30 @@ function Pending({
   /** What the chat is with: the card, or the group. */
   const title = group?.group.name ?? name
   const replyId = (members === null ? entityId : replier) as EntityId
-  const replyName = members?.find((member) => member.entityId === replyId)?.name ?? name
+  const castCards = [
+    ...new Map(
+      [...greeters.map((greeter) => greeter.card), ...(playing ? [playing] : [])].map((item) => [item.entityId, item])
+    ).values()
+  ]
+  const speakerId = castCards.some((item) => item.entityId === selectedSpeaker)
+    ? selectedSpeaker
+    : (playing?.entityId ?? null)
+  const speakerName = castCards.find((item) => item.entityId === speakerId)?.name ?? "You"
+  const speakerView = castView({
+    participants: castCards.map((item) => item.entityId),
+    playedByMe: playing ? [playing.entityId] : [],
+    cards: castCards,
+    slotId: null,
+    absent: [],
+    model: null,
+    preset: null,
+    lorebooks: [],
+    cardLorebooksOff: [],
+    globalLorebooksOff: [],
+    loreBelowHistory: true,
+    rolesProjection: null,
+    roleProjections: []
+  })
   // What each greeting's random and time macros drew when first shown, by greeter and
   // greeting: the chat keeps them, so a greeting reads the same after the send (DESIGN §5.6).
   const [frozen] = useState(() => greeters.map(() => new Map<number, FrozenValues>()))
@@ -297,8 +324,8 @@ function Pending({
                 }),
             first:
               first === "send"
-                ? { _tag: "Send", content: submitted, speakerEntityId: personaId }
-                : { _tag: "Generate", speakerEntityId: replyId, direction: guidance ? submitted : "" }
+                ? { _tag: "Send", content: submitted, speakerEntityId: speakerId }
+                : { _tag: "Generate", speakerEntityId: speakerId, direction: guidance ? submitted : "" }
           })
           // A message gets its reply, as after any send; a server without a generator still keeps the message.
           if (first === "send") {
@@ -336,6 +363,17 @@ function Pending({
         ...(navigationSearch.character ? { character: navigationSearch.character } : {})
       }
     })
+  }
+
+  const controls: PendingComposerContext = {
+    speaker: { speaker: speakerId, recent: [], pending: true, onPick: (picked) => setSelectedSpeaker(picked.entityId) },
+    speakerName,
+    guidance,
+    prefsReady: viewPrefs.ready,
+    changeGuidance: (next) => void viewPrefs.change({ guidance: next }),
+    busy: action.pending,
+    hasText: text.trim() !== "",
+    start
   }
 
   return (
@@ -440,18 +478,15 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
-        <div className="flex justify-end text-sm">
-          <Switch
-            checked={guidance}
-            disabled={!viewPrefs.ready}
-            onCheckedChange={(next) => void viewPrefs.change({ guidance: next })}
-          >
-            Guidance
-          </Switch>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CastContext value={speakerView}>
+            <PendingComposerControls placement="speaker" context={controls} />
+          </CastContext>
+          <PendingComposerControls placement="guidance" context={controls} />
         </div>
         <div
           data-guidance={guidance || undefined}
-          className={`flex min-w-0 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
+          className={`flex min-w-0 flex-col items-stretch gap-1 rounded-lg border p-1 sm:flex-row sm:items-end focus-within:ring-2 ${
             guidance
               ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
               : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
@@ -472,7 +507,11 @@ function Pending({
               // Short, so it fits one line on a phone, as the chat's composer does.
               placeholder={guidance ? "Direction for the next message…" : "Write a message…"}
               aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
-              onKeyDown={(event) => composerKeyDown(() => start(guidance ? "generate" : "send"))(event)}
+              onKeyDown={(event) =>
+                composerKeyDown(async () => {
+                  await invokePendingComposer(controls)
+                })(event)
+              }
               onChange={(event) => {
                 const value = event.currentTarget.value
                 typed.current = value
@@ -483,45 +522,14 @@ function Pending({
               }}
             />
           </div>
-          {guidance ? (
-            // Guidance is never sent as a message: Send gives way to generating.
-            <SquareIconButton
-              label={`Generate ${replyName}`}
-              hint={`${replyName} writes the first reply${text.trim() !== "" ? ", following the guidance" : ""} (Enter)`}
-              variant="primary"
-              pending={action.pending}
-              onClick={() => void start("generate")}
-            >
-              {!action.pending && <GenerateIcon />}
-            </SquareIconButton>
-          ) : (
-            <>
-              <Tooltip label={`${replyName} writes the next turn`}>
-                <Button
-                  aria-label={`Generate ${replyName}`}
-                  disabled={action.pending}
-                  onClick={() => void start("generate")}
-                >
-                  Generate
-                </Button>
-              </Tooltip>
-              <SquareIconButton
-                label={playing ? `Send as ${playing.name}` : "Send"}
-                hint={`${playing ? `Send as ${playing.name}` : "Send"} (Enter; Shift+Enter for a new line)`}
-                variant="primary"
-                pending={action.pending}
-                disabled={text.trim() === ""}
-                onClick={() => void start("send")}
-              >
-                {!action.pending && <SendIcon />}
-              </SquareIconButton>
-            </>
-          )}
+          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1">
+            <PendingComposerControls placement="actions" context={controls} />
+          </div>
         </div>
         {(guidance || text.trim() !== "") && (
           <p id="composer-hint" className="text-xs text-muted">
             {guidance
-              ? `Guidance: a one-turn direction for ${replyName}'s first reply. It stays in the box.`
+              ? `Guidance: a one-turn direction for ${speakerName}'s first reply. It stays in the box.`
               : "Generate doesn't use this text: turn guidance on to direct the reply with it."}
           </p>
         )}

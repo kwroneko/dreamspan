@@ -39,6 +39,7 @@ export const binTitle = (item: BinItem) => {
 export const recoveredSource = (text: Pick<RecoveredText, "sourceKind" | "sourceLabel">) => {
   const prefixes = {
     composer: "Composer in ",
+    queue_edit: "Queued text in ",
     version_edit: "Edit of a message in ",
     scratchpad: "Scratchpad in ",
     summary_edit: "Summary in ",

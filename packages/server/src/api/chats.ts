@@ -477,7 +477,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           content,
           expectedRowVersion,
           expectedSession,
-          baseRevision: null
+          baseRevision: target._tag === "Queue" ? String(target.rowVersion) : null
         })
       ).pipe(
         Effect.catchIf(
@@ -487,6 +487,22 @@ export const makeChatHandlers = Effect.gen(function* () {
         internal("SaveMessageDraft")
       ),
 
+    QueueDraftHistory: ({ chatId, queuedId }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.DraftHistory({
+          userId: id,
+          key: messageDraftKey({ _tag: "Queue", chatId, queuedId, rowVersion: 0 }),
+          limit: 100
+        })
+      ).pipe(internal("QueueDraftHistory")),
+    RestoreQueueDraft: ({ chatId, queuedId, ...restore }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.RestoreDraftState({
+          userId: id,
+          key: messageDraftKey({ _tag: "Queue", chatId, queuedId, rowVersion: 0 }),
+          ...restore
+        })
+      ).pipe(internal("RestoreQueueDraft")),
     DiscardMessageDraft: ({ target, draftId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.ClearDraft({

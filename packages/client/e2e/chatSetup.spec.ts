@@ -426,7 +426,8 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await expect(composer(page)).toHaveValue("Is the ferry running?")
   await page.getByLabel("Reply from").click()
   await page.getByRole("option", { name: "Tobin" }).click()
-  await expect(page.getByRole("button", { name: "Generate Tobin" })).toBeVisible()
+  // Reply from is independent of the speaker that Generate writes.
+  await expect(page.getByRole("button", { name: "Generate Ana" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
   // Reopening draws again. Pick the alternate explicitly before sending.

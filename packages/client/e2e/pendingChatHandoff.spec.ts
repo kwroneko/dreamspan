@@ -177,8 +177,11 @@ for (const target of ["card", "group"] as const) {
       expect(empty.height).toBeLessThan(45)
       for (const control of [send, generate]) {
         const box = (await control.boundingBox())!
-        expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
-        expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
+        if (width === 390) expect(box.y).toBeGreaterThanOrEqual(empty.y + empty.height)
+        else {
+          expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
+          expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
+        }
         expect(box.x + box.width).toBeLessThanOrEqual(width)
       }
       const pendingUrl = page.url()

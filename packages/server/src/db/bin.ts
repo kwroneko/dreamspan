@@ -931,6 +931,8 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       const chatTitle = (sqlText: string) =>
         sql.unsafe<{ title: string }>(sqlText, [key.targetId]).pipe(Effect.map(([row]) => chatName(row?.title)))
       switch (key.targetKind) {
+        case "queue_edit":
+          return `Queued text in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "composer":
           return `Composer in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "version_edit":

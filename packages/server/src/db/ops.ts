@@ -1429,7 +1429,8 @@ export class WriteOps extends RpcGroup.make(
       queuedId: Schema.String,
       content: Schema.String,
       speakerEntityId: Schema.NullOr(EntityId),
-      expectedRowVersion: Schema.Int
+      expectedRowVersion: Schema.Int,
+      draft: Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
     },
     success: Schema.Struct({ queued: QueuedMessage, queue: Schema.Array(QueuedMessage) }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])

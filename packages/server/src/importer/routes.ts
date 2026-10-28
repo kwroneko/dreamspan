@@ -632,7 +632,7 @@ export const layer = Layer.unwrap(
           content: message.content,
           expectedRowVersion: message.expectedRowVersion,
           expectedSession: message.expectedSession,
-          baseRevision: null
+          baseRevision: message.target._tag === "Queue" ? String(message.target.rowVersion) : null
         })
         recovered += saved.recovered
       }

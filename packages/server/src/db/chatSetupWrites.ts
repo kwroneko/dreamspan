@@ -1,3 +1,4 @@
+import { composerKey } from "@rp/shared/drafts.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -312,12 +313,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             first._tag === "Send"
               ? userMessage(first.content, first.speakerEntityId)
               : reply(first.speakerEntityId, first.direction)
-          return yield* graph
+          const added = yield* graph
             .appendMessage({ userId, chatId, parentSlotId: root, branch: false, version, commitDraft: null })
             .pipe(
               // Its parent is the new chat's leaf; only a speaker can be missing.
               Effect.catchTag("LeafMoved", (error) => Effect.die(error))
             )
+          const composer = yield* bin.drafts.openComposer(userId, composerKey(chatId, added.forkId), null)
+          yield* bin.drafts.setComposerChoice(userId, chatId, composer.id, { speakerEntityId: first.speakerEntityId })
+          return added
         }).pipe(transaction("StartChat")),
 
       SendOrQueue: ({
@@ -406,7 +410,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           return { _tag: "Posted" as const, result }
         }).pipe(transaction("SendOrQueue")),
 
-      EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion }) =>
+      EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft }) =>
         Effect.gen(function* () {
           const row = yield* ownedQueued(sql, userId, queuedId)
           if (row === null) return yield* new NotFound({ entity: "queued message", id: queuedId })
@@ -421,8 +425,14 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* graph.checkSpeaker(userId, speakerEntityId)
           const [updated] = yield* sql<QueuedRow>`
             UPDATE queued_messages SET content = ${row.kind === "message" ? content : ""},
+              direction = ${row.kind === "message" ? row.direction : content},
               speaker_entity_id = ${speakerEntityId}, row_version = row_version + 1, updated_at = ${Date.now()}
             WHERE id = ${queuedId} RETURNING *`
+          yield* bin.drafts.commit(userId, draft ?? null, {
+            targetKind: "queue_edit",
+            targetId: row.chat_id,
+            content: (field) => (field === queuedId ? content : null)
+          })
           return { queued: toQueued(updated!), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("EditQueued")),
 

@@ -19,7 +19,7 @@ import {
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerChoice, TextTooLong } from "./composerApi.ts"
-import { Draft, DraftKey } from "./drafts.ts"
+import { Draft, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
@@ -178,7 +178,8 @@ const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String
  */
 export const MessageDraftTarget = Schema.Union([
   Schema.TaggedStruct("Edit", { versionId: VersionId }),
-  Schema.TaggedStruct("Write", { slotId: SlotId })
+  Schema.TaggedStruct("Write", { slotId: SlotId }),
+  Schema.TaggedStruct("Queue", { chatId: ChatId, queuedId: Schema.String, rowVersion: Schema.Int })
 ])
 export type MessageDraftTarget = typeof MessageDraftTarget.Type
 
@@ -186,7 +187,9 @@ export type MessageDraftTarget = typeof MessageDraftTarget.Type
 export const messageDraftKey = (target: MessageDraftTarget) =>
   target._tag === "Edit"
     ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
-    : new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
+    : target._tag === "Write"
+      ? new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
+      : new DraftKey({ targetKind: "queue_edit", targetId: target.chatId, field: target.queuedId })
 
 /**
  * Text typed into a message editor, onto the draft as the tab last saw it (null before it
@@ -501,6 +504,16 @@ export class ChatApi extends RpcGroup.make(
     payload: MessageDraftSave.fields,
     success: Draft,
     error: Schema.Union([...Errors, TextTooLong])
+  }),
+  Rpc.make("QueueDraftHistory", {
+    payload: { chatId: ChatId, queuedId: Schema.String },
+    success: Schema.Array(DraftState),
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("RestoreQueueDraft", {
+    payload: { chatId: ChatId, queuedId: Schema.String, draftId: Schema.String, ...DraftRestore },
+    success: Draft,
+    error: Schema.Union([...WriteErrors])
   }),
   /** Closes a message editor unsaved: its text goes to the bin's recovered texts. */
   Rpc.make("DiscardMessageDraft", {

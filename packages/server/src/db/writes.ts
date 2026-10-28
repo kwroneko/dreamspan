@@ -81,6 +81,9 @@ export const makeWriteHandlers = (bin: Bin) =>
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
       entity_field: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
         WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`,
+      // The chat owns an edit even after its queue entry posts or is withdrawn.
+      queue_edit: (userId, key) => sql`SELECT count(*) AS n FROM chats c
+        WHERE c.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`,
       summary_edit: (userId, key) => sql`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     }

@@ -18,12 +18,6 @@ export const SendIcon = () => (
   </svg>
 )
 
-export const StopIcon = () => (
-  <svg {...base}>
-    <rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor" />
-  </svg>
-)
-
 export const HistoryIcon = () => (
   <svg {...base}>
     <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.5H5" />
