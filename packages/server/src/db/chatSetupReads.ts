@@ -200,6 +200,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
     // one with the last message, a chat without messages only when none has any. Per
     // card, an index seek on the cards each chat joined (`state_events_participants`); the
     // `+` keeps the column's affinity off the indexed expression, so the seek is used.
+    // CROSS JOIN keeps the indexed participant seek first: reordering chats first probes
+    // every live chat for every card (5 million probes in the scale fixture).
     CardUsage: ({ userId }) =>
       sql<{
         entity_id: string
@@ -229,7 +231,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               'last', max(c.last_message_at),
               'latest', substr(max(
                 (c.last_message_at IS NOT NULL) || printf('%016d', coalesce(c.last_message_at, c.created_at)) || c.id), 18))
-            FROM state_events s JOIN chats c ON c.id = s.chat_id
+            FROM state_events s CROSS JOIN chats c ON c.id = s.chat_id
             WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
               AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
