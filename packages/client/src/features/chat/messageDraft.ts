@@ -10,7 +10,7 @@
 // the chat, which opening the chat again replays, with the draft it was typed on.
 import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -286,7 +286,11 @@ export class MessageDraft {
 
   async history() {
     await this.save()
-    return this.session.call((client) => client("MessageDraftHistory", { target: this.target, limit: 1000 }))
+    if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null) return { ok: true as const, value: [] }
+    return this.session.call((client) =>
+      client("MessageDraftHistory", { target: this.target, limit: DraftHistoryPolicy.maxEntries + 1 })
+    )
   }
 
   async restoreState(seq: number, content?: string): Promise<boolean> {

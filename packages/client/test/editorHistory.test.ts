@@ -1,6 +1,6 @@
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { Draft, DraftKey } from "@rp/shared/drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftKey } from "@rp/shared/drafts.ts"
 import type { VersionId } from "@rp/shared/chat.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
@@ -25,6 +25,33 @@ const draft = (content: string, rowVersion = 1) =>
 
 for (const kind of ["message", "summary"] as const)
   describe(`${kind} history`, () => {
+    it("has no earlier text before the first draft is saved", async () => {
+      const calls: string[] = []
+      const rpc = (tag: string) => {
+        calls.push(tag)
+        return Effect.succeed(null)
+      }
+      const session = {
+        snapshot: () => ({ forkId: "fork" }),
+        call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+          ok: true,
+          value: await Effect.runPromise(request(rpc))
+        })
+      } as unknown as ChatSession
+      const store =
+        kind === "message"
+          ? new MessageDraft(session, "user", { _tag: "Edit", versionId: "version" as VersionId }, "saved", null)
+          : new SummaryDraft(session, "user", {
+              id: "summary",
+              revisionId: "revision",
+              content: "saved",
+              rowVersion: 1
+            } as LcmSummary)
+      if (store instanceof SummaryDraft) await store.open()
+      expect(await store.history()).toEqual({ ok: true, value: [] })
+      expect(calls).toEqual(kind === "summary" ? ["GetSummaryDraft"] : [])
+    })
+
     it("loads the complete retained history and preserves typing while restore is in flight", async () => {
       const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
       let answer: ((value: Draft) => void) | undefined
@@ -66,7 +93,7 @@ for (const kind of ["message", "summary"] as const)
             } as LcmSummary)
       if (store instanceof SummaryDraft) await store.open()
       await store.history()
-      expect(calls.at(-1)?.payload.limit).toBe(1000)
+      expect(calls.at(-1)?.payload.limit).toBe(DraftHistoryPolicy.maxEntries + 1)
       const restore = store.restoreState(1)
       await vi.waitFor(() => expect(answer).toBeDefined())
       store.setText("typed while restoring")

@@ -61,7 +61,7 @@ import {
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
-import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
@@ -2066,15 +2066,16 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
     error: Schema.Union([NotFound, StorageError])
   }),
-  /**
-   * A slot's own versions as fork `forkId` shows them (absent or null: the fork through it,
-   * forkAt): a copy it amended in its original's place, with the fork's stars and picker flags.
-   */
+  /** Earlier saved text of an owned human-written version. */
   Rpc.make("VersionAmendments", {
     payload: { userId: UserId, versionId: VersionId },
     success: Schema.Array(VersionAmendment),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * A slot's own versions as fork `forkId` shows them (absent or null: the fork through it,
+   * forkAt): a copy it amended in its original's place, with the fork's stars and picker flags.
+   */
   Rpc.make("ListVersions", {
     payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Version),
@@ -2143,7 +2144,7 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
     },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])

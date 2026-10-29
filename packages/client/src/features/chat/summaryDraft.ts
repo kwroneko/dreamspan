@@ -7,7 +7,7 @@
 // As in the library's fields, text typed is copied into this browser (`editor/backup.ts`)
 // until the server has it: a save that fails, a closed tab or panel, or a reload leaves the
 // copy, which opening the edit again replays, with the base it was typed on.
-import type { Draft } from "@rp/shared/drafts.ts"
+import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
@@ -281,11 +281,13 @@ export class SummaryDraft {
 
   async history() {
     await this.flush()
+    if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null) return { ok: true as const, value: [] }
     return this.session.call((client) =>
       client("SummaryDraftHistory", {
         forkId: this.forkId,
         summaryId: this.summary.id,
-        limit: 1000
+        limit: DraftHistoryPolicy.maxEntries + 1
       })
     )
   }

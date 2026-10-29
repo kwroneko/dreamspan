@@ -19,7 +19,7 @@ import {
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerChoice, TextTooLong } from "./composerApi.ts"
-import { Draft, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
@@ -506,7 +506,10 @@ export class ChatApi extends RpcGroup.make(
     error: Schema.Union([...WriteErrors, NotAmendable])
   }),
   Rpc.make("MessageDraftHistory", {
-    payload: { target: MessageDraftTarget, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })) },
+    payload: {
+      target: MessageDraftTarget,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+    },
     success: Schema.Array(DraftState),
     error: Schema.Union([...Errors])
   }),

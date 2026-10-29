@@ -1,4 +1,6 @@
 import { mkdir } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { SendResult } from "@rp/shared/chatApi.ts"
@@ -10,7 +12,7 @@ import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 
 const server = serverPerFile(withAdmin)
-const screens = "~/projects/work-folder/2026-10-28/night/bl-f/screens"
+const screens = process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-message-history-screens")
 const oldText = "The lantern keeper waited beside the harbor. ".repeat(8)
 const middleText = "The road led past the lighthouse. ".repeat(8)
 
