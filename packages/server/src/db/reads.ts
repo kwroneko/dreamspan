@@ -1,4 +1,5 @@
 import { previewForkNotes } from "./forkNotes.ts"
+import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { stateEventsOnPath } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
@@ -203,6 +204,7 @@ export const walkTowards = (sql: SqlClient.SqlClient, leaf: SlotPosition, after:
 
 export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  const binLimits = yield* BinLimitDefaults
   const lib = makeLibraryQueries(sql)
   const drafts = makeDraftStore(sql)
 
@@ -253,6 +255,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     )
 
   const handlers = {
+    GetBinLimits: ({ userId }) => readBinLimits(sql, userId, binLimits).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
         Effect.map(([row]) => (row ? toUser(row) : null)),

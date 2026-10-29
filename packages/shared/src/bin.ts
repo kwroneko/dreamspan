@@ -57,12 +57,16 @@ export class RecoveredText extends Schema.Class<RecoveredText>("RecoveredText")(
 }) {}
 
 /** Each section's capacity. Past either limit, that section's oldest entries go first. */
-export interface BinLimits {
-  readonly deletedItems: number
-  readonly deletedBytes: number
-  readonly recoveredTexts: number
-  readonly recoveredBytes: number
-}
+const Capacity = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
+export const BinLimits = Schema.Struct({
+  deletedItems: Capacity,
+  deletedBytes: Capacity,
+  recoveredTexts: Capacity,
+  recoveredBytes: Capacity
+})
+export type BinLimits = typeof BinLimits.Type
+const BinLimitKey = Schema.Literals(["deletedItems", "deletedBytes", "recoveredTexts", "recoveredBytes"])
+export const BinLimitChange = Schema.Struct({ key: BinLimitKey, value: Capacity })
 
 export const defaultBinLimits: BinLimits = {
   deletedItems: 10_000,

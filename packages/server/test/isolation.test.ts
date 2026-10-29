@@ -1719,6 +1719,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   OpenEditor: {
     probe: (actor, owner) => refused(actor.api.OpenEditor({ refId: owner.editor.cardRefId }), "NotFound")
   },
+  CreatePreset: { createOnly: "makes a new prompt preset for the caller" },
   CreateCard: { createOnly: "makes a new card for the caller" },
   SaveEditorDraft: {
     probe: (actor, owner) =>
@@ -2181,6 +2182,24 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       Effect.gen(function* () {
         assert.deepStrictEqual(yield* actor.api.BinItemForks({ itemIds: [owner.binItemId] }), [])
+      })
+  },
+  GetBinLimits: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const original = yield* owner.api.GetBinLimits()
+        yield* actor.api.ChangeBinLimit({ key: "deletedItems", value: 17 })
+        assert.strictEqual((yield* actor.api.GetBinLimits()).deletedItems, 17)
+        assert.deepStrictEqual(yield* owner.api.GetBinLimits(), original)
+      })
+  },
+  ChangeBinLimit: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const original = yield* owner.api.GetBinLimits()
+        yield* actor.api.ChangeBinLimit({ key: "recoveredBytes", value: 12345 })
+        assert.strictEqual((yield* actor.api.GetBinLimits()).recoveredBytes, 12345)
+        assert.deepStrictEqual(yield* owner.api.GetBinLimits(), original)
       })
   },
   ListBin: {
@@ -3345,6 +3364,7 @@ const snapshot = (owner: Party) =>
     outcome(owner.api.ListCardNotes({ cardRefId: owner.editor.cardRefId }), JSON.stringify),
     outcome(owner.api.ListSharedNotes({}), JSON.stringify),
     outcome(owner.api.ListLibrary({ kind: "card" }), JSON.stringify),
+    outcome(owner.api.GetBinLimits(), JSON.stringify),
     outcome(owner.api.ListBin({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.ListRecoveredTexts({ limit: 500, before: null }), JSON.stringify),
     outcome(owner.api.OpenComposer({ chatId: owner.chat.chatId, forkId: owner.chat.forkId }), JSON.stringify),

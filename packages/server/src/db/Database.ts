@@ -193,7 +193,13 @@ export const layer = (options: DatabaseOptions) => {
           ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
             Layer.provide(ReaderPool.layer(options.readers, { retryCrashed: true })),
-            Layer.provide(workerThreads(entries.reader, { dbPath }, entries.bundleDir))
+            Layer.provide(
+              workerThreads(
+                entries.reader,
+                { dbPath, binLimits: options.binLimits ?? defaultBinLimits },
+                entries.bundleDir
+              )
+            )
           )
         })
       )

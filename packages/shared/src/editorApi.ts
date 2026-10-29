@@ -157,6 +157,12 @@ export class EditorApi extends RpcGroup.make(
     success: EditorSnapshot,
     error: Schema.Union([...Errors])
   }),
+  /** An ordered prompt preset using the built-in document and safe override defaults. */
+  Rpc.make("CreatePreset", {
+    payload: { label: Label },
+    success: LibraryRef,
+    error: Schema.Union([InvalidDocument, ServerError])
+  }),
   /** A card from scratch: an upstream with every field empty but its name. */
   Rpc.make("CreateCard", {
     payload: {

@@ -11,7 +11,8 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
-import { NewCardButton } from "../editor/NewCard.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { libraryActions } from "./slots.ts"
 import { useTitle } from "../shell.tsx"
 import { LISTED, libraryAtom } from "./data.ts"
 import { downloadExport } from "./files.ts"
@@ -148,7 +149,7 @@ function LibraryContent() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Library</h1>
         <div className="flex flex-wrap gap-2">
-          <NewCardButton />
+          <SlotOutlet slot={libraryActions} props={{}} />
           <Link to="/import" className={buttonClass("primary")}>
             Import files
           </Link>
