@@ -1,4 +1,6 @@
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { useSession } from "../../session.ts"
+import { showCardSaved, type CardSaved } from "../editor/cardSaved.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -20,7 +22,7 @@ export interface ChatCardActionProps {
   info: ChatCard | undefined
 }
 
-export function EditChatCard({ card, info }: ChatCardActionProps) {
+export function EditChatCard({ session, card, info }: ChatCardActionProps) {
   const navigate = useNavigate()
   return (
     <Button
@@ -28,7 +30,14 @@ export function EditChatCard({ card, info }: ChatCardActionProps) {
       className="h-8! px-2!"
       aria-label={`Edit ${card.name}`}
       disabled={!info}
-      onClick={() => info && void navigate({ to: "/library/$refId", params: { refId: info.refId } })}
+      onClick={() =>
+        info &&
+        void navigate({
+          to: "/library/$refId",
+          params: { refId: info.refId },
+          search: { renameChat: session.id, renameFork: session.snapshot().forkId }
+        })
+      }
     >
       Edit
     </Button>
@@ -96,6 +105,11 @@ function ChatCardForkDialog({
   const clash = useCardNameCheck(name.trim(), version.trim())
   const action = useAction()
   const navigate = useNavigate()
+  const userId = useSession().user.id
+  const finish = (refId: string, stay = false) => {
+    onClose()
+    if (!stay) void navigate({ to: "/library/$refId", params: { refId } })
+  }
   return (
     <Dialog
       open
@@ -125,8 +139,15 @@ function ChatCardForkDialog({
               )
               .then((result) => {
                 if (result.ok) {
+                  const change: CardSaved = {
+                    entityId: result.value.entityId,
+                    oldName: card.modelName ?? card.name,
+                    newName: result.value.modelName ?? result.value.label,
+                    ...(position.forkId ? { current: { chatId: session.id, forkId: position.forkId } } : {}),
+                    onlyThis: true
+                  }
                   onClose()
-                  void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+                  showCardSaved(userId, change, (stay) => finish(result.value.id, stay))
                 }
                 return result.ok
               })
@@ -177,6 +198,8 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
     [card.entityId]
   )
   const result = useAtomValue(query)
+  const userId = useSession().user.id
+  const [position] = useState(() => ({ forkId: session.snapshot().forkId }))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const members = AsyncResult.isSuccess(result) ? result.value.members : []
@@ -199,13 +222,29 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
               disabled={pending || member.entityId === card.entityId || !["live", "archived"].includes(member.state)}
               onClick={() => {
                 setPending(true)
-                void session
-                  .changeCast({ _tag: "Swap", entityId: member.entityId, replaces: card.entityId })
-                  .then((outcome) => {
+                void (async () => {
+                  if (session.snapshot().forkId !== position.forkId) {
                     setPending(false)
-                    if (outcome.ok) onClose()
-                    else setError(outcome.error.message)
+                    return setError("The viewed fork changed. Close this dialog and choose again.")
+                  }
+                  const outcome = await session.changeCast({
+                    _tag: "Swap",
+                    entityId: member.entityId,
+                    replaces: card.entityId
                   })
+                  setPending(false)
+                  if (!outcome.ok) return setError(outcome.error.message)
+                  const used = outcome.value.cards.find((c) => c.entityId === member.entityId)
+                  const change: CardSaved = {
+                    entityId: member.entityId,
+                    oldName: card.modelName ?? card.name,
+                    newName: used?.modelName ?? used?.name ?? member.label,
+                    ...(position.forkId ? { current: { chatId: session.id, forkId: position.forkId } } : {}),
+                    onlyThis: true
+                  }
+                  onClose()
+                  showCardSaved(userId, change, () => {})
+                })()
               }}
             >
               {depth > 0 ? "↳ " : ""}

@@ -1,3 +1,9 @@
+import { cardNames } from "@rp/shared/cardNames.ts"
+import { ChatId, ForkId } from "@rp/shared/chat.ts"
+import { Schema } from "effect"
+import { useSearch } from "@tanstack/react-router"
+import { cardSavedContribution, type CardSaved } from "./cardSaved.ts"
+import { CardSavedFlow } from "./CardSavedFlow.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 // Saving: what changed, field by field, then one revision with an optional message
 // (DESIGN §6.2). Fields another tab or an update changed meanwhile are picked one by one.
@@ -28,6 +34,11 @@ export function SaveDialog({
   onClose: () => void
   onSaved: (saved: SavedRef) => void
 }) {
+  const search = useSearch({ strict: false }) as { renameChat?: unknown; renameFork?: unknown }
+  const [followup, setFollowup] = useState<{
+    change: CardSaved
+    saved: SavedRef
+  } | null>(null)
   const ref = useEditorState(store).snapshot!.ref
   const kind = ref.kind
   const name = useText(store, ["name"]) ?? ""
@@ -64,9 +75,26 @@ export function SaveDialog({
     event.preventDefault()
     if (clash) return
     setPending(true)
+    const oldName = cardNames(store.head).modelName
     const result = await store.commit(message.trim() === "" ? null : message.trim())
     setPending(false)
-    if (result.ok) return onSaved(result.value)
+    if (result.ok) {
+      if (kind === "card") {
+        const chatId = Schema.decodeUnknownOption(ChatId)(search.renameChat)
+        const forkId = Schema.decodeUnknownOption(ForkId)(search.renameFork)
+        const change: CardSaved = {
+          entityId: ref.entityId,
+          oldName,
+          newName: result.value.ref.modelName ?? result.value.ref.label,
+          ...(chatId._tag === "Some" && forkId._tag === "Some"
+            ? { current: { chatId: chatId.value, forkId: forkId.value } }
+            : {})
+        }
+        const contribution = cardSavedContribution(change)
+        if (contribution) return setFollowup({ change, saved: result.value })
+      }
+      return onSaved(result.value)
+    }
     if (result.cause instanceof EditConflict) {
       const doc = store.working().doc
       setConflicts(
@@ -104,11 +132,13 @@ export function SaveDialog({
     })
   }
 
+  if (followup) return <CardSavedFlow change={followup.change} onDone={() => onSaved(followup.saved)} />
+
   return (
     <Dialog
       wide={kind === "card" || kind === "preset"}
       open
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) => !open && !pending && onClose()}
       title={conflicts.length > 0 ? "Changed meanwhile" : "Save a revision"}
       description={
         conflicts.length > 0
@@ -137,7 +167,9 @@ export function SaveDialog({
             ))}
           </ul>
           <DialogActions>
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
             <Button variant="primary" pending={pending} onClick={() => void resolve()}>
               Use these
             </Button>
@@ -181,7 +213,9 @@ export function SaveDialog({
             <Input value={message} onChange={(event) => setMessage(event.currentTarget.value)} />
           </Field>
           <DialogActions>
-            <Button onClick={onClose}>Cancel</Button>
+            <Button onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
             <Button type="submit" variant="primary" pending={pending} disabled={view === null || clash !== null}>
               Save revision
             </Button>
