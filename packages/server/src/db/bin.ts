@@ -1,6 +1,7 @@
 // The recycle bin (DESIGN §6.2), used by the writer. Deleting marks rows (deleted_at,
 // bin_item_id) instead of removing them, so restoring puts things back exactly where
 // they were. Two sections with independent capacities: deleted items and recovered text.
+import { readBinLimits } from "./binLimits.ts"
 import { Buffer } from "node:buffer"
 import { BinChanged, BinItem, type BinLimits, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -113,7 +114,7 @@ const chatRecordBytes = [
    FROM changeset_items i JOIN changesets c ON c.id = i.changeset_id WHERE c.chat_id = ?`
 ]
 
-export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => number = Date.now) => {
+export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () => number = Date.now) => {
   const insertItem = (item: {
     readonly userId: UserId
     readonly kind: BinItem["kind"]
@@ -858,6 +859,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
    */
   const evictDeleted = (userId: UserId, created: string) =>
     Effect.gen(function* () {
+      const limits = yield* readBinLimits(sql, userId, defaults)
       const fits = sql<{ n: number; bytes: number }>`
         SELECT count(*) AS n, coalesce(sum(byte_size), 0) AS bytes FROM bin_items WHERE user_id = ${userId}`.pipe(
         Effect.map(([usage]) => usage!.n <= limits.deletedItems && usage!.bytes <= limits.deletedBytes)
@@ -971,6 +973,7 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
           created_at: now
         })}`
       }
+      const limits = yield* readBinLimits(sql, userId, defaults)
       // Its own track: recovered text never evicts deleted items, or the other way round.
       const rows = yield* sql<{ id: string; byte_size: number }>`
         SELECT id, byte_size FROM recovered_texts WHERE user_id = ${userId} ORDER BY created_at DESC, id DESC`

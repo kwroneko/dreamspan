@@ -2,13 +2,15 @@
 // deleted, to restore in place or delete for good, and the text recovered from drafts.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { BinChanged, BinForkShown, BinItem, RecoveredText } from "./bin.ts"
+import { BinLimits, BinLimitChange, BinChanged, BinForkShown, BinItem, RecoveredText } from "./bin.ts"
 import { NotFound, ServerError } from "./errors.ts"
 
 const Errors = [NotFound, ServerError] as const
 const Page = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
 
 export class BinApi extends RpcGroup.make(
+  Rpc.make("GetBinLimits", { success: BinLimits, error: ServerError }),
+  Rpc.make("ChangeBinLimit", { payload: BinLimitChange.fields, success: BinLimits, error: ServerError }),
   /** Deleted items, newest first. `before` is the last item of the previous page. */
   Rpc.make("ListBin", {
     payload: { limit: Page, before: Schema.NullOr(Schema.Struct({ deletedAt: Schema.Number, id: Schema.String })) },

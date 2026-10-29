@@ -1,3 +1,4 @@
+import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import {
   Snippet,
   SnippetContext,
@@ -381,6 +382,11 @@ const StChatRecord = Schema.Struct({
 })
 
 export class WriteOps extends RpcGroup.make(
+  Rpc.make("ChangeBinLimit", {
+    payload: { userId: UserId, ...BinLimitChange.fields },
+    success: BinLimits,
+    error: StorageError
+  }),
   Rpc.make("CreateSnippet", {
     payload: { userId: UserId, ...CreateSnippetFields },
     success: Snippet,
@@ -1948,6 +1954,7 @@ export class WriteOps extends RpcGroup.make(
 ) {}
 
 export class ReadOps extends RpcGroup.make(
+  Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),

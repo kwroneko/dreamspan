@@ -345,6 +345,14 @@ describe("recycle bin", () => {
   it.live("each section evicts its own oldest entries, never the other's", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, chat, a, b, c, bin } = yield* setup()
+      for (const [key, value] of [
+        ["deletedItems", 2],
+        ["deletedBytes", 1e9],
+        ["recoveredTexts", 2],
+        ["recoveredBytes", 1e9]
+      ] as const) {
+        yield* writer.ChangeBinLimit({ userId, key, value })
+      }
       // Three deletes into a two-item section: the oldest goes for good.
       yield* writer.DeleteMessage({ userId, slotId: a.slotId })
       yield* writer.DeleteMessage({ userId, slotId: b.slotId })
@@ -355,7 +363,7 @@ describe("recycle bin", () => {
       )
 
       // Three discarded drafts into a two-text section don't touch the deleted items.
-      for (const text of ["one", "two", "three"]) {
+      for (const text of ["one", "two", "three", "four"]) {
         const draft = yield* writer.SaveDraft({
           draftId: null,
           expectedSession: null,
@@ -373,17 +381,20 @@ describe("recycle bin", () => {
           outcome: "discarded",
           expectedRowVersion: draft.rowVersion
         })
+        if (text === "three") {
+          assert.deepStrictEqual(
+            (yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })).map((t) => t.content),
+            ["three", "two"]
+          )
+          yield* writer.ChangeBinLimit({ userId, key: "recoveredBytes", value: 6 })
+        }
       }
       assert.deepStrictEqual(
         (yield* reader.ListRecoveredTexts({ userId, source: null, limit: 10, before: null })).map((t) => t.content),
-        ["three", "two"]
+        ["four"]
       )
       assert.strictEqual((yield* bin()).length, 2)
-    }).pipe(
-      Effect.provide(
-        database(undefined, { deletedItems: 2, deletedBytes: 1e9, recoveredTexts: 2, recoveredBytes: 1e9 })
-      )
-    )
+    }).pipe(Effect.provide(database()))
   )
 
   it.live("emptying the bin deletes everything in it for good", () => {

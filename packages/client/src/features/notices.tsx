@@ -5,6 +5,14 @@
 // for permission only when they turn it on, never by itself.
 //
 // Unseen counts belong to this tab and go with a reload.
+import {
+  activateSound,
+  canSound,
+  noticeDeduplicator,
+  playCompletionSound,
+  setSoundWanted,
+  soundWanted
+} from "./completionSound.ts"
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { Notice } from "@rp/shared/noticeApi.ts"
@@ -17,6 +25,7 @@ import { AppClient } from "../rpc.ts"
 import { Switch } from "../ui/Choice.tsx"
 import { Alert, Card, CardHeader } from "../ui/Surface.tsx"
 
+const firstNotice = noticeDeduplicator()
 const unseen = new Map<ChatId, number>()
 const listeners = new Set<() => void>()
 /** The chat open in this tab, if any. */
@@ -94,11 +103,14 @@ export const useNotices = () => {
       if (open !== null && document.visibilityState === "visible") seen(open)
     }
     document.addEventListener("visibilitychange", onVisible)
+    document.addEventListener("pointerdown", activateSound)
+    document.addEventListener("keydown", activateSound)
     const receive = (notice: Notice, client: AppClient["Service"]) =>
       Effect.gen(function* () {
-        if (looking(notice.chatId)) return
+        if (!firstNotice(notice) || looking(notice.chatId)) return
         unseen.set(notice.chatId, (unseen.get(notice.chatId) ?? 0) + 1)
         render()
+        playCompletionSound()
         if (!systemWanted() || !canNotify() || Notification.permission !== "granted") return
         const chat = yield* Effect.option(client("GetChat", { chatId: notice.chatId }))
         const name = chat._tag === "Some" ? chat.value.title || "Untitled chat" : "A chat"
@@ -126,6 +138,8 @@ export const useNotices = () => {
     )
     return () => {
       document.removeEventListener("visibilitychange", onVisible)
+      document.removeEventListener("pointerdown", activateSound)
+      document.removeEventListener("keydown", activateSound)
       Effect.runFork(Fiber.interrupt(fiber))
     }
   }, [registry, navigate])
@@ -136,6 +150,7 @@ export const useNotices = () => {
 function NotificationSettings() {
   useEffect(() => setPageTitle("Notifications · rp-harness"), [])
   const [on, setOn] = useState(() => systemWanted() && canNotify() && Notification.permission === "granted")
+  const [sound, setSound] = useState(soundWanted)
   const [refused, setRefused] = useState(false)
   const toggle = async (next: boolean) => {
     setRefused(false)
@@ -165,6 +180,21 @@ function NotificationSettings() {
         description="A reply that finishes in a chat you aren't looking at gets a badge in the chat list, and the tab's title and icon count them."
       />
       <div className="flex flex-col gap-3">
+        {canSound() ? (
+          <Switch
+            checked={sound}
+            onCheckedChange={(next) => {
+              setSoundWanted(next)
+              setSound(next)
+              if (next) activateSound()
+            }}
+            description="In this browser only, for replies that finish elsewhere. After opening or reloading the app, interact with it once to allow audio. Blocked sounds are skipped."
+          >
+            Completion sound
+          </Switch>
+        ) : (
+          <Alert>This browser can't play completion sounds.</Alert>
+        )}
         {canNotify() ? (
           <Switch
             checked={on}

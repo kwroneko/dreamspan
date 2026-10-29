@@ -1,5 +1,6 @@
 // The recycle bin (DESIGN §6.2): what the user deleted, newest first, to restore where it was
 // or delete for good (the one place that asks first), and the text recovered from drafts.
+import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { RegistryContext } from "@effect/atom-react"
 import type { BinForkShown, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Link, useSearch } from "@tanstack/react-router"
@@ -16,6 +17,8 @@ import { useTitle } from "../shell.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
 import { binTitle, recoveredSource } from "./titles.ts"
+
+export const binSettings = defineSlot<Record<string, never>>("bin.settings")
 
 const PAGE = 50
 
@@ -441,6 +444,7 @@ export function BinPage() {
   return (
     <Card>
       <CardHeader title="Bin" description="Deleted things wait here, newest first: restore them where they were." />
+      <SlotOutlet slot={binSettings} props={{}} />
       <Tabs
         label="Bin sections"
         value={tab}

@@ -6,6 +6,8 @@
 - **[O] Open**: needs a decision.
 - **[L] Later**: wanted, but deferred until the core works.
 
+**Built 2026-10-28 (U11, U13, U14):** prompt-preset creation and its forbid-overrides defaults (§1.2, §5.0), configurable bin capacities (§6.2), and optional completion sound (§10.1) are implemented; these requirements are obsolete as proposals. See ARCHITECTURE §14, §3.11 and §12. Other items retain their statuses.
+
 Where the owner corrected an earlier proposal, the corrected version is recorded and the rejected one is noted, so it doesn't come back.
 
 ---
@@ -305,7 +307,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[D]** Later, not now: modes where the card definitions move into the tail and are swapped every turn for the character speaking. The layout must allow it.
 
 - **[D]** (owner confirmed 2026-10-27) **Card definitions are filled the way the preset says**, globally, never per chat: ST's per-field markers and macros (`{{description}}`, Char Description, Char Personality, Scenario…) are filled field by field, each character's part wrapped in `<{{char}}>` … `</{{char}}>` by default (the owner's ST setting; ST's join prefix/suffix); the whole-card "Definitions" marker puts each card in whole, in a labelled block (§5.2). **[D]** There is never only one character (`{{user}}` is a cast card), so every cast card's definitions, the persona's included, are always wrapped as `<Name>…</Name>`, at the per-field markers and at the Definitions marker alike (owner, 2026-10-28). The build's hidden switch to ST-compatible assembly for one-character chats is removed.
-- **[D]** (owner confirmed 2026-10-27) **A card's system prompt and post-history instructions** replace the preset's Main Prompt and post-history prompt, as in ST, with `{{original}}` for the replaced text, unless that prompt **forbids overrides**. These card prompts are usually an awkward attempt at a jailbreak, though not always; they must stay usable and not counterintuitive. **Forbidding overrides is on by default** for a new preset and for any new prompt it can apply to. Visible from both sides: the preset editor shows "replaced in this chat by Aria's system prompt" at that prompt, the card editor shows whether its prompt is used. On an impersonation turn the speaking card's prompts apply too; impersonating a persona without them, none (owner, 2026-10-28).
+- **[D]** (owner confirmed 2026-10-27) **A card's system prompt and post-history instructions** replace the preset's Main Prompt and post-history prompt, as in ST, with `{{original}}` for the replaced text, unless that prompt **forbids overrides**. These card prompts are usually an awkward attempt at a jailbreak, though not always; they must stay usable and not counterintuitive. **Built U11** (ARCHITECTURE §14): New prompt preset creates the ordered prompt document in the existing editor. **Forbidding overrides is on by default** for a new preset and for any new prompt it can apply to. Visible from both sides: the preset editor shows "replaced in this chat by Aria's system prompt" at that prompt, the card editor shows whether its prompt is used. On an impersonation turn the speaking card's prompts apply too; impersonating a persona without them, none (owner, 2026-10-28).
 - **[D]** (owner confirmed 2026-10-27) **Card modules are card notes**: the 2026-10-09 "extended prompts attached to a card, swapped per chat or situation, possibly private" are what card notes now do (position, per-chat switch, conditions, private flag). One concept.
 - **[D]** (owner confirmed 2026-10-27) **Choosing lorebooks**: a Lorebooks tab in the right panel, per chat (fork), listing each character's embedded book (on by default), books added from the library, and the global books, each with its switch; the "only below the history" setting (§1.3) sits there.
 
@@ -401,7 +403,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **[D]** Deleting a single swipe (version), not the whole message, is the normal case, as in ST, and the most readily available delete in the UI. Deleting the whole message is the secondary action (owner, 2026-10-10). Deleting a message's only remaining version deletes the message.
   - **[D]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
   - **[D]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
-  - **[D]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable. (These three confirmed by the owner, 2026-10-10.)
+  - **[D]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable. **Built U13:** account capacities and UI; ARCHITECTURE §3.11. (These three confirmed by the owner, 2026-10-10.)
   - **[P]** Eviction never deletes the item a delete just made. If deleting everything else that can go still wouldn't bring the section within its limits (one item bigger than the whole section, or old items that fail to delete), nothing is evicted: the delete goes through and the bin stays over capacity rather than one delete emptying it. Later deletes or emptying the bin bring it back within its limits.
 - **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
   - Each chat, and each branch within it, has its own composer.
@@ -622,7 +624,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** Any number of generations can run at once across chats. You can read or send in another chat while one is generating.
 - **[D]** **Nothing is locked during generation.** (ST can't even show group members' cards while generating.)
 - **[P]** A running generation uses the context snapshot taken when it started.
-- **[D]** Notifications when something finishes elsewhere, like a chat client: badges, plus the tab title and favicon, with optional sound. **[P]** Web push for phones.
+- **[D]** Notifications when something finishes elsewhere, like a chat client: badges, plus the tab title and favicon, with optional sound. **Built U14:** browser-local opt-in completion sound; ARCHITECTURE §12. **[P]** Web push for phones.
 - **[P]** The server owns all state. Clients subscribe over a WebSocket. Writes are per entity with a version check, and no client ever writes back a large settings blob.
 - **[D]** **Separate users**, each with their own library, chats, connections and settings, as in ST's multi-user mode.
 - **[P]** Authentication: works behind a reverse proxy that handles auth, such as Authelia, plus built-in login. Proxy identities map to users.

@@ -125,6 +125,36 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("creates a prompt preset with editable ordered prompts and safe overrides", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const ref = yield* api.CreatePreset({ label: "From scratch" })
+      assert.strictEqual(ref.kind, "preset")
+      assert.strictEqual(ref.label, "From scratch")
+      assert.include(
+        (yield* api.ListLibrary({ kind: "preset" })).map((p) => p.id),
+        ref.id
+      )
+      const first = yield* doc(api, ref.id)
+      const prompts = first.prompts as PresetDoc["prompts"]
+      const order = first.order as PresetDoc["order"]
+      assert.isAbove(order.length, 5)
+      assert.isTrue(order.every((e) => prompts.some((p) => p.identifier === e.identifier)))
+      for (const id of ["main", "jailbreak"]) assert.isTrue(prompts.find((p) => p.identifier === id)!.forbid_overrides)
+      assert.isFalse(first.regex_approved)
+      assert.notProperty(first, "samplers")
+      const field = textField(["prompts", "identifier=main", "content"])
+      yield* draft(api, ref.id, field, "A synthetic instruction")
+      yield* commit(api, ref.id)
+      assert.strictEqual(
+        ((yield* doc(api, ref.id)).prompts as PresetDoc["prompts"]).find((p) => p.identifier === "main")!.content,
+        "A synthetic instruction"
+      )
+      const original = yield* api.GetRevision({ refId: ref.id, revisionId: ref.headRevisionId })
+      assert.notStrictEqual((original.prompts as PresetDoc["prompts"])[0]!.content, "A synthetic instruction")
+    })
+  )
+
   it.effect("standard card names survive create, rename, fork, revision history and V3 export", () =>
     Effect.gen(function* () {
       const api = yield* client()

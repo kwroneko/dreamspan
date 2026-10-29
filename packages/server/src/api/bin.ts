@@ -32,6 +32,10 @@ export const makeBinHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    GetBinLimits: () =>
+      Effect.flatMap(userId, (id) => reader.GetBinLimits({ userId: id })).pipe(internal("GetBinLimits")),
+    ChangeBinLimit: (change) =>
+      Effect.flatMap(userId, (id) => writer.ChangeBinLimit({ userId: id, ...change })).pipe(internal("ChangeBinLimit")),
     ListBin: ({ limit, before }) =>
       Effect.flatMap(userId, (id) => reader.ListBin({ userId: id, limit, before })).pipe(internal("ListBin")),
 

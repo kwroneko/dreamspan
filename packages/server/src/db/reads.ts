@@ -1,3 +1,4 @@
+import { readBinLimits } from "./binLimits.ts"
 import { stateEventsOnPath } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
@@ -252,6 +253,7 @@ export const makeReadHandlers = Effect.gen(function* () {
     )
 
   const handlers = {
+    GetBinLimits: ({ userId }) => readBinLimits(sql, userId).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
       sql<UserRow>`SELECT * FROM users WHERE handle = ${handle}`.pipe(
         Effect.map(([row]) => (row ? toUser(row) : null)),
