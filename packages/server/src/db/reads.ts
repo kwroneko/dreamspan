@@ -654,6 +654,17 @@ export const makeReadHandlers = Effect.gen(function* () {
         return { chatId: owned.chat_id, entry: toPathEntry(row!) }
       }).pipe(query("GetSlot")),
 
+    VersionAmendments: ({ userId, versionId }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql`SELECT v.id FROM versions v JOIN slots s ON s.id=v.slot_id
+          JOIN chats c ON c.id=s.chat_id WHERE v.id=${versionId} AND c.owner_user_id=${userId}
+          AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND v.deleted_at IS NULL AND v.purged_at IS NULL
+          AND v.writer='human'`
+        if (!owned) return yield* new NotFound({ entity: "human version", id: versionId })
+        return yield* sql<{ id: number; content: string; at: number }>`SELECT id, content, replaced_at AS at
+          FROM version_history WHERE version_id=${versionId} ORDER BY id DESC`
+      }).pipe(query("VersionAmendments")),
+
     GetVersion: ({ userId, versionId }) =>
       Effect.gen(function* () {
         const [row] = yield* sql<VersionRow>`

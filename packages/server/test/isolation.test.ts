@@ -1222,6 +1222,57 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       ]).pipe(Effect.asVoid)
   },
+  VersionAmendments: {
+    probe: (actor, owner) => refused(actor.api.VersionAmendments({ versionId: owner.chat.versionId }), "NotFound")
+  },
+  RestoreVersionAmendment: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RestoreVersionAmendment({
+          versionId: owner.chat.versionId,
+          amendmentId: 1,
+          forkId: owner.chat.forkId,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
+  MessageDraftHistory: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.MessageDraftHistory({ target: { _tag: "Edit", versionId: owner.chat.versionId }, limit: 1000 }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.MessageDraftHistory({ target: { _tag: "Write", slotId: owner.chat.slotId }, limit: 1000 }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
+  RestoreMessageDraft: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.RestoreMessageDraft({
+            target: { _tag: "Edit", versionId: owner.chat.versionId },
+            draftId: "none",
+            seq: 0,
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.RestoreMessageDraft({
+            target: { _tag: "Write", slotId: owner.chat.slotId },
+            draftId: "none",
+            seq: 0,
+            expectedRowVersion: 1
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
   MessageDrafts: {
     probe: (actor, owner) => refused(actor.api.MessageDrafts({ chatId: owner.chat.chatId }), "NotFound")
   },

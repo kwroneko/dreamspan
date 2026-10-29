@@ -1,3 +1,5 @@
+import { SlotOutlet } from "../../slots.tsx"
+import { summaryEditorTools } from "./editorHistory.tsx"
 // The summaries in use on the path shown (DESIGN §8.1, ARCHITECTURE §16): by level and
 // range, each with its state and what can be done to it. Nothing here generates: asking for
 // a summary to be made again is a request the planner finds with the next reply.
@@ -96,6 +98,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       )}
       {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
       {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
+      <SlotOutlet slot={summaryEditorTools} props={{ draft: store }} />
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" pending={pending} disabled={!view.changed || view.text.trim() === ""}>

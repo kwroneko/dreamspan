@@ -5,6 +5,7 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
+import { NotFound } from "@rp/shared/errors.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
@@ -460,6 +461,39 @@ export const makeChatHandlers = Effect.gen(function* () {
         })
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("WriteVersion")),
+
+    VersionAmendments: ({ versionId }) =>
+      Effect.flatMap(userId, (id) => reader.VersionAmendments({ userId: id, versionId })).pipe(
+        internal("VersionAmendments")
+      ),
+
+    RestoreVersionAmendment: ({ versionId, amendmentId, forkId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const states = yield* reader.VersionAmendments({ userId: id, versionId })
+        const state = states.find((state) => state.id === amendmentId)
+        if (!state) return yield* new NotFound({ entity: "version amendment", id: String(amendmentId) })
+        const version = yield* writer.AmendVersion({
+          userId: id,
+          versionId,
+          forkId,
+          content: state.content,
+          expectedRowVersion,
+          commitDraft: null
+        })
+        yield* publishSlot(id, version.slotId, forkId)
+        return version
+      }).pipe(internal("RestoreVersionAmendment")),
+
+    MessageDraftHistory: ({ target, limit }) =>
+      Effect.flatMap(userId, (id) => reader.DraftHistory({ userId: id, key: messageDraftKey(target), limit })).pipe(
+        internal("MessageDraftHistory")
+      ),
+
+    RestoreMessageDraft: ({ target, ...restore }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.RestoreDraftState({ userId: id, key: messageDraftKey(target), ...restore })
+      ).pipe(internal("RestoreMessageDraft")),
 
     MessageDrafts: ({ chatId }) =>
       Effect.gen(function* () {

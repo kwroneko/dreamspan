@@ -10,7 +10,7 @@
 // the chat, which opening the chat again replays, with the draft it was typed on.
 import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, dropCopy, keepCopy, makeCopy, pendingOf, type ReplayConflict } from "../editor/backup.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -297,34 +297,50 @@ export class MessageDraft {
 
   async history() {
     await this.save()
-    if (this.target._tag !== "Queue") return { ok: true as const, value: [] }
-    const target = this.target
-    return this.session.call((client) => client("QueueDraftHistory", target))
+    if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null) return { ok: true as const, value: [] }
+    return this.session.call((client) =>
+      client("MessageDraftHistory", { target: this.target, limit: DraftHistoryPolicy.maxEntries + 1 })
+    )
   }
 
-  async restoreState(seq: number) {
+  async restoreState(seq: number, content?: string): Promise<boolean> {
+    const picked = this.view.text
     await this.save()
     return this.serial(async () => {
-      const draft = this.draft
-      const target = this.target
-      if (this.local !== null || draft === null || target._tag !== "Queue") return
-      const shown = this.view.text
+      if (this.local !== null || this.draft === null || this.view.text !== picked) return false
       const result = await this.session.call((client) =>
-        client("RestoreQueueDraft", {
-          chatId: target.chatId,
-          queuedId: target.queuedId,
-          draftId: draft.id,
+        client("RestoreMessageDraft", {
+          target: this.target,
+          draftId: this.draft!.id,
           seq,
-          expectedRowVersion: draft.rowVersion
+          expectedRowVersion: this.draft!.rowVersion,
+          ...(content === undefined ? {} : { content })
         })
       )
-      if (!result.ok) return this.set({ error: result.error })
-      this.draft = result.value
-      if (this.local === null && this.view.text === shown) {
-        this.base = baseOf(result.value)
-        this.set({ text: result.value.content })
+      if (!result.ok) {
+        this.set({ error: result.error })
+        return false
       }
+      this.draft = result.value
+      this.base = baseOf(result.value)
+      // Typing during the restore stays in the box, with its browser copy on the new base.
+      if (this.local !== null) this.keep(this.local)
+      this.set({ text: this.local ?? result.value.content, unsaved: this.local !== null, error: null })
+      return true
     })
+  }
+
+  async switchConflict() {
+    const conflict = this.view.conflict
+    if (
+      conflict &&
+      (await this.restoreState(0, conflict.content)) &&
+      !this.view.unsaved &&
+      this.view.text === conflict.content &&
+      this.view.conflict === conflict
+    )
+      this.acknowledgeConflict()
   }
 
   acknowledgeConflict() {

@@ -1,3 +1,4 @@
+import { messageEditorTools } from "./editorHistory.tsx"
 // One message: who wrote it (avatar, name, time, its number on the path, the model of a
 // generated version), its versions (swipe through them, pick one in the version picker, or
 // generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
@@ -186,7 +187,8 @@ function Editor({
         onSave()
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") onCancel()
+        if (event.key === "Escape" && event.currentTarget.contains(event.target as Node) && !event.defaultPrevented)
+          onCancel()
       }}
     >
       <Textarea
@@ -203,10 +205,13 @@ function Editor({
         </p>
       )}
       {conflict && (
-        // No history to switch back from here: the other text stays one step back, and goes to
-        // the recovered texts when the edit is saved or cancelled.
-        <ReplayNotice conflict={conflict} acknowledge={() => draft.acknowledgeConflict()} />
+        <ReplayNotice
+          conflict={conflict}
+          acknowledge={() => draft.acknowledgeConflict()}
+          switchText={() => draft.switchConflict()}
+        />
       )}
+      <SlotOutlet slot={messageEditorTools} props={{ draft }} />
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
           <Icon name="check" />

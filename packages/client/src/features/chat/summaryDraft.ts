@@ -7,7 +7,7 @@
 // As in the library's fields, text typed is copied into this browser (`editor/backup.ts`)
 // until the server has it: a save that fails, a closed tab or panel, or a reload leaves the
 // copy, which opening the edit again replays, with the base it was typed on.
-import type { Draft } from "@rp/shared/drafts.ts"
+import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { AppError } from "../../errors.ts"
 import { type Copy, copiesOf, dropCopy, keepCopy, makeCopy, pendingOf } from "../editor/backup.ts"
@@ -279,29 +279,50 @@ export class SummaryDraft {
     while (this.local !== null && this.view.error === null) await this.save()
   }
 
-  /** One step back in the draft's history. */
-  async undo(): Promise<void> {
+  async history() {
     await this.flush()
-    if (this.view.unsaved || this.draft === null) return
-    const states = await this.session.call((client) =>
-      client("SummaryDraftHistory", { forkId: this.forkId, summaryId: this.summary.id, limit: 2 })
-    )
-    if (!states.ok) return this.refresh({ error: states.error })
-    const previous = states.value[1]
-    if (previous === undefined) return
-    const result = await this.session.call((client) =>
-      client("RestoreSummaryDraft", {
+    if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
+    if (this.draft === null) return { ok: true as const, value: [] }
+    return this.session.call((client) =>
+      client("SummaryDraftHistory", {
         forkId: this.forkId,
         summaryId: this.summary.id,
-        draftId: this.draft!.id,
-        seq: previous.seq,
-        expectedRowVersion: this.draft!.rowVersion
+        limit: DraftHistoryPolicy.maxEntries + 1
       })
     )
-    if (!result.ok) return this.refresh({ error: result.error })
-    this.draft = result.value
-    if (this.local === null) this.base = baseOf(result.value)
-    this.refresh({ error: null })
+  }
+
+  async restoreState(seq: number): Promise<boolean> {
+    const picked = this.view.text
+    await this.flush()
+    return this.serial(async () => {
+      if (this.local !== null || this.draft === null || this.view.text !== picked) return false
+      const result = await this.session.call((client) =>
+        client("RestoreSummaryDraft", {
+          forkId: this.forkId,
+          summaryId: this.summary.id,
+          draftId: this.draft!.id,
+          seq,
+          expectedRowVersion: this.draft!.rowVersion
+        })
+      )
+      if (!result.ok) {
+        this.refresh({ error: result.error })
+        return false
+      }
+      this.draft = result.value
+      this.base = baseOf(result.value)
+      if (this.local !== null) this.keep(this.local)
+      this.refresh({ error: null })
+      return true
+    })
+  }
+
+  /** One step back in the draft's history. */
+  async undo(): Promise<void> {
+    const states = await this.history()
+    if (!states.ok) return this.refresh({ error: states.error })
+    if (states.value[1]) await this.restoreState(states.value[1].seq)
   }
 
   /**

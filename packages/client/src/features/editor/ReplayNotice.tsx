@@ -1,5 +1,5 @@
 // A replay displaced text saved elsewhere. Switching is an explicit, undoable restore; a field
-// with no history to undo it from (a message editor) offers none, and its other text goes to
+// with no history to undo it from offers none, and its other text goes to
 // the recovered texts when the edit ends, as every displaced text does (ARCHITECTURE §3.10).
 import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"

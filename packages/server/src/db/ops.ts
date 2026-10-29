@@ -52,6 +52,7 @@ import {
   ForkNote,
   ForkNoteSelection,
   ForkNotesChanged,
+  VersionAmendment,
   Branch,
   ChatCursor,
   ChatSearch,
@@ -2078,6 +2079,12 @@ export class ReadOps extends RpcGroup.make(
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
     success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Earlier saved text of an owned human-written version. */
+  Rpc.make("VersionAmendments", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Array(VersionAmendment),
     error: Schema.Union([NotFound, StorageError])
   }),
   /**
