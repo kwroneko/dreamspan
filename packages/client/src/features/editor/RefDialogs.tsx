@@ -50,32 +50,34 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       setPreparing(false)
       return
     }
-    await durable.commit(durable.text, async () => {
-      const result = await action.run(
-        (client) =>
-          Effect.gen(function* () {
-            if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
-            if (ref.kind === "card")
-              return yield* client("ForkCard", {
+    await durable
+      .commit(durable.text, async () => {
+        const result = await action.run(
+          (client) =>
+            Effect.gen(function* () {
+              if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
+              if (ref.kind === "card")
+                return yield* client("ForkCard", {
+                  refId: ref.id,
+                  name: label.trim(),
+                  nickname,
+                  characterVersion: subtitle.trim(),
+                  moveDrafts
+                })
+              return yield* client("ForkVariant", {
                 refId: ref.id,
-                name: label.trim(),
-                nickname,
-                characterVersion: subtitle.trim(),
+                label: label.trim(),
+                subtitle: subtitle.trim(),
                 moveDrafts
               })
-            return yield* client("ForkVariant", {
-              refId: ref.id,
-              label: label.trim(),
-              subtitle: subtitle.trim(),
-              moveDrafts
-            })
-          }),
-        ["library"]
-      )
-      setPreparing(false)
-      if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
-      return result.ok
-    })
+            }),
+          ["library"]
+        )
+        setPreparing(false)
+        if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+        return result.ok
+      })
+      .finally(() => setPreparing(false))
   }
 
   return (

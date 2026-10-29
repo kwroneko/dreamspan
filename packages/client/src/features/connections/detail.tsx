@@ -77,28 +77,34 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
-    await durable.commit(durable.text, async () => {
-      const result = await action.run(
-        (client) =>
-          client("UpdateConnection", {
-            connectionId: connection.id,
-            expectedRowVersion: values.rowVersion,
-            settings: {
-              name: values.name.trim(),
-              baseUrl: values.baseUrl.trim() || null,
-              compat: connection.compat,
-              cacheTtlS: ttl.value,
-              maxConcurrent: concurrency.value,
-              presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
-            }
-          }),
-        ["connections"]
-      )
-      if (result.ok) {
-        setSubmitted(false)
-      }
-      return result.ok
-    })
+    let savedVersion = values.rowVersion
+    await durable.commit(
+      durable.text,
+      async () => {
+        const result = await action.run(
+          (client) =>
+            client("UpdateConnection", {
+              connectionId: connection.id,
+              expectedRowVersion: values.rowVersion,
+              settings: {
+                name: values.name.trim(),
+                baseUrl: values.baseUrl.trim() || null,
+                compat: connection.compat,
+                cacheTtlS: ttl.value,
+                maxConcurrent: concurrency.value,
+                presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
+              }
+            }),
+          ["connections"]
+        )
+        if (result.ok) {
+          savedVersion = result.value.rowVersion
+          setSubmitted(false)
+        }
+        return result.ok
+      },
+      (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion })
+    )
   }
 
   const discard = () => {

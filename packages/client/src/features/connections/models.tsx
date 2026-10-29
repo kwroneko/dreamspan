@@ -197,23 +197,29 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         prefill: prefill === "auto" ? undefined : prefill
       }).filter(([, value]) => value !== undefined)
     )
+    let savedVersion = values.rowVersion
     await durable
-      .commit(durable.text, async () => {
-        const result = await action.run(
-          (client) =>
-            client("EditModel", {
-              modelId: model.id,
-              overrides,
-              expectedRowVersion:
-                committed === null ? values.rowVersion : Math.max(values.rowVersion, committed.rowVersion)
-            }),
-          ["models"]
-        )
-        if (result.ok) {
-          setCommitted(result.value)
-        }
-        return result.ok
-      })
+      .commit(
+        durable.text,
+        async () => {
+          const result = await action.run(
+            (client) =>
+              client("EditModel", {
+                modelId: model.id,
+                overrides,
+                expectedRowVersion:
+                  committed === null ? values.rowVersion : Math.max(values.rowVersion, committed.rowVersion)
+              }),
+            ["models"]
+          )
+          if (result.ok) {
+            savedVersion = result.value.rowVersion
+            setCommitted(result.value)
+          }
+          return result.ok
+        },
+        (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion })
+      )
       .then((ok) => {
         if (ok) onSaved?.()
       })

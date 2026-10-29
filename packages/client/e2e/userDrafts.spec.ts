@@ -179,11 +179,15 @@ for (const scope of ["account", "fork"] as const)
   }) => {
     let release: (() => void) | undefined
     let fail = true
+    let hold = true
     await page.routeWebSocket(/\/rpc$/, (socket) => {
       const upstream = socket.connectToServer()
       socket.onMessage((data) => {
         const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
-        if (request?.tag === (scope === "account" ? "ChangeGenerationDefaults" : "ChangeLcmSettings")) {
+        if (
+          (fail || hold) &&
+          request?.tag === (scope === "account" ? "ChangeGenerationDefaults" : "ChangeLcmSettings")
+        ) {
           if (fail) {
             socket.send(
               JSON.stringify({
@@ -238,6 +242,7 @@ for (const scope of ["account", "fork"] as const)
     await saveButton.click()
     await expect.poll(() => !!release).toBe(true)
     await box.fill("Text typed during Save")
+    hold = false
     release!()
     await expect.poll(() => draftText(targetId, "Summarization instruction")).toBe("Text typed during Save")
     await page.reload()
@@ -258,6 +263,27 @@ for (const scope of ["account", "fork"] as const)
           )
         )
       ).toBe(`Submitted ${scope} instruction`)
+    if (scope === "fork") {
+      await page.getByRole("button", { name: "Use account default", exact: true }).click()
+      await expect(page.getByRole("link", { name: "recovered texts in the bin", exact: true })).toBeVisible()
+      await expect
+        .poll(() =>
+          api((client) =>
+            Effect.map(
+              client.GetUserDraft({ ownerId, targetId, field: "Summarization instruction" }),
+              (draft) => draft?.status
+            )
+          )
+        )
+        .toBe("discarded")
+      expect(
+        await api((client) =>
+          Effect.map(client.ListRecoveredTexts({ limit: 100, before: null }), (texts) =>
+            texts.some((text) => text.content === "Text typed during Save")
+          )
+        )
+      ).toBe(true)
+    }
   })
 
 test("creation and rename forms keep non-secret text without copying a typed key", async ({ page }) => {
@@ -424,3 +450,132 @@ test("a refused server draft and interrupted closing save replay the browser cop
     .poll(async () => JSON.parse((await draftText("connection:new", "Settings")) ?? "{}").name)
     .toBe("Only in this browser until replay")
 })
+
+test("connection settings typed during Save can be saved again on their own acknowledged base", async ({ page }) => {
+  let release: (() => void) | undefined
+  let hold = true
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
+      if (hold && request?.tag === "UpdateConnection") {
+        release = () => upstream.send(data)
+        return
+      }
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  const connection = await api((client) =>
+    client.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Connection save race",
+        baseUrl: "http://127.0.0.1:1/v1",
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings/connections/${connection.id}`)
+  const name = page.getByLabel("Name", { exact: true })
+  await name.fill("First submitted connection name")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => !!release).toBe(true)
+  await name.fill("Connection name typed during Save")
+  hold = false
+  release!()
+  await expect(page.getByRole("heading", { name: "First submitted connection name", exact: true })).toBeVisible()
+  await expect(name).toHaveValue("Connection name typed during Save")
+  await expect
+    .poll(async () => JSON.parse((await draftText(`connection:${connection.id}`, "Settings")) ?? "{}").rowVersion)
+    .toBe(connection.rowVersion + 1)
+  await page.reload()
+  await expect(name).toHaveValue("Connection name typed during Save")
+  await page.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Connection name typed during Save", exact: true })).toBeVisible()
+  await page.reload()
+  await expect(name).toHaveValue("Connection name typed during Save")
+})
+
+test("a refused draft save leaves the library fork form available for retry and Cancel", async ({ page }) => {
+  let fail = true
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+      if (fail && request?.tag === "SaveUserDraft") {
+        socket.send(
+          JSON.stringify({
+            _tag: "Exit",
+            requestId: request.id,
+            exit: {
+              _tag: "Failure",
+              cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Draft refused" } }]
+            }
+          })
+        )
+        return
+      }
+      upstream.send(data)
+    })
+    upstream.onMessage((data) => socket.send(data))
+  })
+  const card = await api((client) => client.CreateCard({ name: "Fork retry fixture", label: "Fork retry fixture" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  await page.getByRole("button", { name: "Fork", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
+  await dialog.getByLabel("Version (shown as subtitle)", { exact: true }).fill("Unfinished fork version")
+  await dialog.getByRole("button", { name: "Fork card", exact: true }).click()
+  await expect(dialog.getByText("Something failed on the server. The details are in the server's log.")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Cancel", exact: true })).toBeEnabled()
+  await expect(dialog.getByRole("button", { name: "Fork card", exact: true })).toBeEnabled()
+  fail = false
+  await dialog.getByRole("button", { name: "Fork card", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page).not.toHaveURL(`${server().url}/library/${card.id}`)
+})
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`${width} ${theme}: conflicting instructions stay visible and can be restored`, async ({ page, browser }) => {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/settings/chats`)
+      const box = page.getByLabel("Summarization instruction", { exact: true })
+      const local = `Keep the lighthouse keeper's promises, debts and unresolved questions. ${width} ${theme}`
+      await box.fill(local)
+      await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(local)
+      const context = await browser.newContext()
+      try {
+        const device = await context.newPage()
+        await apiLogin(device.request, server(), ADMIN.handle, ADMIN.password)
+        await device.goto(`${server().url}/settings/chats`)
+        await expect(device.getByLabel("Summarization instruction", { exact: true })).toHaveValue(local)
+        const other = `Another device's instruction: retain the journey's language and the keeper's voice. ${width} ${theme}`
+        await device.getByLabel("Summarization instruction", { exact: true }).fill(other)
+        await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(other)
+        await box.fill(`${local} Continued locally.`)
+        await expect(page.getByText(/Another edit from .* is kept in field undo history/)).toBeVisible()
+        await box.fill(`${local} Continued locally, once more.`)
+        await expect
+          .poll(() => draftText("Settings → Chats", "Summarization instruction"))
+          .toBe(`${local} Continued locally, once more.`)
+        await page.getByText("Preview the other edit", { exact: true }).click()
+        await expect(page.locator("pre").filter({ hasText: other })).toBeVisible()
+        await page.getByRole("button", { name: "Use the other edit", exact: true }).scrollIntoViewIfNeeded()
+        await shot(page, `conflict-${width}-${theme}`)
+        await page.getByRole("button", { name: "Use the other edit", exact: true }).click()
+        await expect(box).toHaveValue(other)
+        await page.getByRole("button", { name: "Save summarization instruction", exact: true }).click()
+        await expect(page.getByRole("link", { name: "recovered texts in the bin", exact: true })).toBeVisible()
+      } finally {
+        await context.close()
+      }
+    })
+  }

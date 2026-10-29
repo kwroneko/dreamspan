@@ -1,15 +1,26 @@
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { Draft, DraftState } from "@rp/shared/drafts.ts"
+import type { Draft, DraftDisplacement, DraftState } from "@rp/shared/drafts.ts"
+import type { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
 
 type Run = ReturnType<typeof useAction>["run"]
-class UserDraftStore {
+type Base = Pick<typeof UserDraftSave.Type, "draftId" | "expectedRowVersion" | "expectedSession">
+const baseOf = (draft: Draft | null): Base => ({
+  draftId: draft?.id ?? null,
+  expectedRowVersion: draft?.rowVersion ?? null,
+  expectedSession: draft?.session ?? null
+})
+export class UserDraftStore {
   private draft: Draft | null = null
+  // The base of the displayed text, independent of reads/restores the user hasn't seen.
+  private base = baseOf(null)
+  private edits = 0
+  private pendingTypes = new Set<{ initial: string; content: string }>()
   private copy: Copy | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private listeners = new Set<() => void>()
@@ -17,7 +28,9 @@ class UserDraftStore {
     text: null as string | null,
     ready: false,
     error: null as string | null,
-    history: null as ReadonlyArray<DraftState> | null
+    history: null as ReadonlyArray<DraftState> | null,
+    displaced: null as DraftDisplacement | null,
+    recovered: 0
   }
   private userId: UserId
   private targetId: string
@@ -44,9 +57,7 @@ class UserDraftStore {
   private payload = (content: string) => ({
     ...this.address(),
     content,
-    draftId: this.draft?.id ?? null,
-    expectedRowVersion: this.draft?.rowVersion ?? null,
-    expectedSession: this.draft?.session ?? null
+    ...this.base
   })
   private remember(content: string, current: boolean) {
     const previous = current ? this.copy : null
@@ -73,9 +84,17 @@ class UserDraftStore {
       return false
     }
     this.draft = result.value
+    this.base = baseOf(result.value)
     if (this.copy === copy) this.copy = null
     await dropCopy(copy)
-    this.update({ error: result.value.displaced ? "Another edit was kept in field undo history." : null })
+    // Later typing is descended from this acknowledged text. Refile its browser copy
+    // now, even if another queued operation delays its own save or the page closes.
+    if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+    this.update({
+      error: null,
+      displaced: result.value.displaced ?? this.state.displaced,
+      recovered: this.state.recovered + result.value.recovered
+    })
     return true
   }
   open = () => {
@@ -84,8 +103,10 @@ class UserDraftStore {
         this.run((client) => client("GetUserDraft", this.address())),
         copiesOf(this.userId, this.targetId)
       ])
-      if (result.ok) this.draft = result.value
-      else this.update({ error: result.error.message })
+      if (result.ok) {
+        this.draft = result.value
+        if (this.edits === 0) this.base = baseOf(result.value)
+      } else this.update({ error: result.error.message })
       for (const copy of copies
         .filter((c) => c.field === this.field || (this.field === "First message" && c.field === "first message"))
         .sort((a, b) => a.at - b.at)) {
@@ -104,16 +125,54 @@ class UserDraftStore {
           )
           if (replay.ok) {
             this.draft = replay.value
+            if (this.edits === 0) {
+              this.base = baseOf(replay.value)
+              this.copy = null
+              this.update({ text: replay.value.content })
+            }
+            this.update({
+              displaced: replay.value.displaced ?? this.state.displaced,
+              recovered: this.state.recovered + replay.value.recovered
+            })
             await dropCopy(copy)
-          } else this.update({ error: replay.error.message, text: this.state.text ?? copy.content })
+          } else {
+            if (this.edits === 0) {
+              // Legacy copies have no draft identity: their replay and any continuation
+              // must keep the null base, rather than adopting the opening read unseen.
+              this.base = baseOf(null)
+              this.copy = copy
+              this.update({ text: copy.content })
+            }
+            this.update({ error: replay.error.message })
+          }
           continue
         }
         if (save?.kind !== "userDraft") continue
         const replay = await this.run((client) => client("SaveUserDraft", save.payload))
         if (replay.ok) {
           this.draft = replay.value
+          if (this.edits === 0) {
+            this.base = baseOf(replay.value)
+            this.copy = null
+            this.update({ text: replay.value.content })
+          }
+          this.update({
+            displaced: replay.value.displaced ?? this.state.displaced,
+            recovered: this.state.recovered + replay.value.recovered
+          })
           await dropCopy(copy)
-        } else this.update({ error: replay.error.message, text: this.state.text ?? copy.content })
+        } else {
+          if (this.edits === 0) {
+            this.base = {
+              draftId: save.payload.draftId,
+              expectedRowVersion: save.payload.expectedRowVersion,
+              expectedSession: save.payload.expectedSession
+            }
+            this.copy = copy
+            this.update({ text: copy.content })
+          }
+          this.update({ error: replay.error.message })
+        }
       }
       this.update({
         ready: true,
@@ -133,21 +192,45 @@ class UserDraftStore {
   }
   type = (content: string, saved: string) => {
     const initial = this.state.text ?? saved
+    this.edits++
     this.update({ text: content, history: null })
     void this.remember(content, true).kept
+    const pending = { initial, content }
+    this.pendingTypes.add(pending)
     this.queue = this.queue.then(async () => {
-      if (this.draft === null || this.draft.status !== "active") {
-        if (!(await this.persist(initial))) return
+      try {
+        if (this.draft === null || this.draft.status !== "active") {
+          if (!(await this.persist(pending.initial))) return
+        }
+        await this.persist(pending.content)
+      } finally {
+        this.pendingTypes.delete(pending)
       }
-      await this.persist(content)
     })
   }
   /** The save takes only its submitted text. Later keystrokes stay queued and backed up. */
-  commit = (content: string, save: () => Promise<boolean>, outcome: "committed" | "discarded" = "committed") => {
+  commit = (
+    content: string,
+    save: () => Promise<boolean>,
+    outcome: "committed" | "discarded" = "committed",
+    rebase?: (text: string) => string
+  ) => {
     const operation = this.queue.then(async () => {
       if (!(await this.persist(content))) return false
       const draft = this.draft!
       if (!(await save())) return false
+      // Only this form's acknowledged Save can advance the settings version in later
+      // snapshots. Keep it in the durable text too, so a reload can save the next edit.
+      if (rebase) {
+        for (const pending of this.pendingTypes) {
+          pending.initial = rebase(pending.initial)
+          pending.content = rebase(pending.content)
+        }
+        if (this.state.text !== null && this.state.text !== content) {
+          this.update({ text: rebase(this.state.text) })
+          await this.remember(this.state.text!, true).kept
+        }
+      }
       const ended = await this.run((client) =>
         client("EndUserDraft", {
           ...this.address(),
@@ -156,10 +239,15 @@ class UserDraftStore {
           outcome
         })
       )
-      if (ended.ok) this.draft = ended.value
+      if (ended.ok) {
+        this.draft = ended.value
+        this.base = baseOf(ended.value)
+        if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+      }
       this.update({
         text: this.state.text === content ? null : this.state.text,
         error: ended.ok ? null : ended.error.message,
+        recovered: this.state.recovered + (ended.ok ? ended.value.recovered : 0),
         history: null
       })
       return true
@@ -179,8 +267,9 @@ class UserDraftStore {
     })
   }
   restore = (seq: number) => {
-    const typed = this.state.text
+    const edits = this.edits
     this.queue = this.queue.then(async () => {
+      if (this.copy !== null && this.state.text !== null && !(await this.persist(this.state.text))) return
       if (!this.draft) return
       const result = await this.run((client) =>
         client("RestoreUserDraft", {
@@ -192,13 +281,18 @@ class UserDraftStore {
       )
       if (result.ok) {
         this.draft = result.value
-        if (this.state.text === typed) this.update({ text: result.value.content, history: null })
+        this.update({ error: null, recovered: this.state.recovered + result.value.recovered })
+        if (this.edits === edits) {
+          this.base = baseOf(result.value)
+          this.update({ text: result.value.content, history: null })
+        }
       } else this.update({ error: result.error.message })
     })
   }
   undo = () => {
-    const typed = this.state.text
+    const edits = this.edits
     this.queue = this.queue.then(async () => {
+      if (this.copy !== null && this.state.text !== null && !(await this.persist(this.state.text))) return
       if (!this.draft) return
       const history = await this.run((client) => client("UserDraftHistory", this.address()))
       if (!history.ok) {
@@ -217,10 +311,15 @@ class UserDraftStore {
       )
       if (result.ok) {
         this.draft = result.value
-        if (this.state.text === typed) this.update({ text: result.value.content })
+        this.update({ error: null, recovered: this.state.recovered + result.value.recovered })
+        if (this.edits === edits) {
+          this.base = baseOf(result.value)
+          this.update({ text: result.value.content })
+        }
       } else this.update({ error: result.error.message })
     })
   }
+  acknowledge = () => this.update({ displaced: null })
 }
 
 export function useUserDraft(targetId: string, field: string, saved: string) {
@@ -242,11 +341,13 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
     ...state,
     text: state.text ?? saved,
     setText: (text: string) => store.type(text, saved),
-    commit: store.commit,
+    commit: (content: string, save: () => Promise<boolean>, rebase?: (text: string) => string) =>
+      store.commit(content, save, "committed", rebase),
     discard: (save: () => Promise<boolean> = async () => true) => store.commit(state.text ?? saved, save, "discarded"),
     undo: store.undo,
     showHistory: store.history,
-    restore: store.restore
+    restore: store.restore,
+    acknowledge: store.acknowledge
   }
 }
 
@@ -272,6 +373,38 @@ export function UserDraftStatus({ draft }: { draft: ReturnType<typeof useUserDra
         </ul>
       )}
       <span>{draft.error ?? "Draft and field undo are kept on the server."}</span>
+      {draft.recovered > 0 && (
+        <span>
+          Earlier text was kept in{" "}
+          <a className="underline" href="/bin?section=recovered">
+            recovered texts in the bin
+          </a>
+          .
+        </span>
+      )}
+      {draft.displaced && (
+        <div role="status" className="flex w-full flex-col gap-2">
+          <span>Another edit from {new Date(draft.displaced.at).toLocaleString()} is kept in field undo history.</span>
+          <details>
+            <summary>Preview the other edit</summary>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.displaced.content}</pre>
+          </details>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="ghost"
+              onClick={() => {
+                draft.setText(draft.displaced!.content)
+                draft.acknowledge()
+              }}
+            >
+              Use the other edit
+            </Button>
+            <Button variant="ghost" onClick={draft.acknowledge}>
+              Keep this edit
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
