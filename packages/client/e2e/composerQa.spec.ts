@@ -128,6 +128,74 @@ for (const width of [1440, 390]) {
   })
 }
 
+test("a preference read after acknowledgement accepts a newer account choice", async ({ page }) => {
+  let holdReads = false
+  const held: Array<() => void> = []
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      if (holdReads && typeof data === "string" && JSON.parse(data).tag === "GetDisplayPrefs")
+        held.push(() => upstream.send(data))
+      else upstream.send(data)
+    })
+  })
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+  const chatId = await group()
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(toggle(page)).toBeEnabled()
+  holdReads = true
+  await toggle(page).click()
+  await expect.poll(() => held.length).toBe(1)
+  expect((await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(true)
+  // Another browser changes the account after this tab's save, before its readback.
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+  holdReads = false
+  held[0]!()
+  await expect(toggle(page)).not.toBeChecked()
+})
+
+test("a refused Guidance save rolls back visibly and a later choice can still save", async ({ page }) => {
+  let refuse = true
+  let release: (() => void) | undefined
+  await page.routeWebSocket(/\/rpc$/, (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+      if (request?.tag === "SetDisplayPrefs" && refuse) {
+        release = () =>
+          socket.send(
+            JSON.stringify({
+              _tag: "Exit",
+              requestId: request.id,
+              exit: {
+                _tag: "Failure",
+                cause: [{ _tag: "Fail", error: { _tag: "ServerError", message: "Synthetic preference refusal" } }]
+              }
+            })
+          )
+      } else upstream.send(data)
+    })
+  })
+  await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+  const chatId = await group()
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(toggle(page)).toBeEnabled()
+  await toggle(page).click()
+  await expect(toggle(page)).toBeChecked()
+  await expect.poll(() => !!release).toBe(true)
+  release!()
+  await expect(toggle(page)).not.toBeChecked()
+  await expect(page.getByRole("alert")).toContainText("Something failed on the server")
+  refuse = false
+  await toggle(page).click()
+  await expect.poll(async () => (await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(true)
+  await expect(page.getByRole("alert")).toHaveCount(0)
+  await page.reload()
+  await expect(toggle(page)).toBeChecked()
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`group reading space and controls (${width}px ${theme})`, async ({ page }, testInfo) => {
