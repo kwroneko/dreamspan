@@ -1,3 +1,4 @@
+import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { SnippetsApi } from "./snippetsApi.ts"
 import { HistoryApi } from "./historyApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
@@ -137,6 +138,12 @@ export class AppApi extends RpcGroup.make(
   // --- Connections and models (spec/PROVIDERS.md §2, §3). Keys go in, never out.
   /** The provider kinds a connection can use, built-in and from plugins, in picker order. */
   Rpc.make("ListProviderKinds", { success: Schema.Array(ProviderKindInfo) }),
+  Rpc.make("GetCostSettings", { success: CostSettings, error: ServerError }),
+  Rpc.make("SetCostSettings", {
+    payload: { expectedRevision: Schema.Int, rules: CostRules },
+    success: CostSettings,
+    error: Schema.Union([StaleWrite, NotFound, ServerError])
+  }),
   Rpc.make("ListConnections", { success: Schema.Array(Connection), error: ServerError }),
   /**
    * Uses an existing credential, or a key typed for it, which becomes a credential named

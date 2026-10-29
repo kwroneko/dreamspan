@@ -5,7 +5,7 @@ import type { AssistantMessage, Context as PiContext } from "@earendil-works/pi-
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionSettings, ModelId, ProviderKind } from "@rp/shared/providers.ts"
-import { Effect, Exit, Layer, Scope, Stream } from "effect"
+import { Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
 import * as Database from "../src/db/Database.ts"
 import * as Network from "../src/net/Network.ts"
 import { classify, parseRetryAfter } from "../src/providers/errors.ts"
@@ -1835,5 +1835,101 @@ it.live("Google applies a custom thinking-level map once and keeps tool call ids
     assert.lengthOf(calls, 2)
     assert.equal(calls[0]!.id, "synthetic-call")
     assert.notEqual(calls[0]!.id, calls[1]!.id)
+  }).pipe(Effect.scoped, Effect.provide(layer()))
+)
+
+it.live("user pricing persists, snapshots in-flight requests and never reprices historical ledger rows", () =>
+  Effect.gen(function* () {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    let waiting = true
+    const server = yield* mock(async (request, res) => {
+      if (request.path.endsWith("/models"))
+        return json(res, 200, openAiList([{ id: "m", pricing: { prompt: "0.000002", completion: "0.00001" } }]))
+      if (waiting) {
+        waiting = false
+        started.resolve()
+        await release.promise
+      }
+      sse(
+        res,
+        completionChunks(["Hi."], { prompt_tokens: 100, completion_tokens: 10, cost: 123 }, { provider: "Route" })
+      )
+    })
+    const { userId, connection, modelId, providers, reader, writer } = yield* connect(
+      "openrouter",
+      `${server.url}/v1`,
+      "key",
+      "m"
+    )
+    const rule = {
+      id: "private",
+      name: "Contract",
+      kind: null,
+      connectionId: connection.id,
+      model: "m",
+      upstream: "Route",
+      currency: "credits",
+      rates: { input: 2, read: 0, write: 0, writeLong: 0, output: 3 },
+      tiers: []
+    }
+    yield* writer.SetCostSettings({ userId, expectedRevision: 0, rules: [rule] })
+    assert.deepStrictEqual((yield* reader.GetCostSettings({ userId })).rules, [rule])
+    const stream = () =>
+      collect(
+        providers.stream({
+          userId,
+          connectionId: connection.id,
+          modelId,
+          context,
+          attribution: { purpose: "generation" }
+        })
+      )
+    const running = yield* stream().pipe(Effect.forkChild)
+    yield* Effect.promise(() => started.promise)
+    yield* writer.SetCostSettings({
+      userId,
+      expectedRevision: 1,
+      rules: [{ ...rule, rates: { ...rule.rates, input: 20 } }]
+    })
+    release.resolve()
+    yield* Fiber.join(running)
+    const [first] = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
+    assert.deepStrictEqual(first!.cost, { amount: 230 / 1e6, currency: "credits", formula: "user:private:1" })
+    yield* stream()
+    const rows = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
+    assert.deepStrictEqual(rows.find((r) => r.id === first!.id)!.cost, first!.cost)
+    assert.deepStrictEqual(rows.find((r) => r.id !== first!.id)!.cost, {
+      amount: 2030 / 1e6,
+      currency: "credits",
+      formula: "user:private:2"
+    })
+    assert.isTrue(
+      Exit.isFailure(yield* Effect.exit(writer.SetCostSettings({ userId, expectedRevision: 1, rules: [] })))
+    )
+    const estimate = yield* providers.estimateCost(userId, connection.id, modelId, {
+      inputUncached: 100,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWriteLong: 0,
+      output: 10,
+      reasoning: 0
+    })
+    // Unknown upstream cannot silently take a route-specific price as certain.
+    assert.isNull(estimate)
+    yield* writer.SetCostSettings({ userId, expectedRevision: 2, rules: [{ ...rule, upstream: null }] })
+    const ownEstimate = yield* providers.estimateCost(userId, connection.id, modelId, {
+      inputUncached: 100,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cacheWriteLong: 0,
+      output: 10,
+      reasoning: 0
+    })
+    assert.deepStrictEqual(ownEstimate, { amount: 230 / 1e6, currency: "credits", formula: "user:private:3" })
+    yield* writer.SetCostSettings({ userId, expectedRevision: 3, rules: [] })
+    yield* stream()
+    const after = yield* reader.ListLlmRequests({ userId, limit: 10, before: null })
+    assert.equal(after[0]!.cost!.formula, "reported")
   }).pipe(Effect.scoped, Effect.provide(layer()))
 )

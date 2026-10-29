@@ -31,6 +31,14 @@ export const makeProviderHandlers = Effect.gen(function* () {
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
   const handlers = {
+    GetCostSettings: () =>
+      Effect.flatMap(userId, (id) => reader.GetCostSettings({ userId: id })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("GetCostSettings"))
+      ),
+    SetCostSettings: (input) =>
+      Effect.flatMap(userId, (id) => writer.SetCostSettings({ userId: id, ...input })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SetCostSettings"))
+      ),
     ListProviderKinds: () => Effect.sync(() => providers.kinds()),
     ListConnections: () =>
       Effect.flatMap(userId, (id) => reader.ListConnections({ userId: id })).pipe(

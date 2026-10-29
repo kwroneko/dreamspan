@@ -204,12 +204,15 @@ export const priceCost = (counts: TokenCounts, price: Price): number | null => {
 export const costOf = (
   formulas: ReadonlyArray<CostFormula>,
   target: RequestTarget & { readonly model: string },
-  input: Parameters<CostFormula["cost"]>[0]
+  input: Parameters<CostFormula["cost"]>[0],
+  estimating = false
 ): Cost | null => {
   for (const formula of [...formulas].reverse()) {
     if (!formula.appliesTo(target)) continue
-    const cost = formula.cost(input)
-    if (cost !== null) return { ...cost, formula: formula.id }
+    const estimate = estimating ? formula.estimate?.(input) : undefined
+    if (estimate === null) return null
+    const cost = estimate ?? formula.cost(input)
+    if (cost !== null) return { ...cost, formula: cost.formula ?? formula.id }
   }
   return null
 }
