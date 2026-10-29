@@ -254,6 +254,52 @@ test("attachment order follows selection rather than UUID key order", async ({ p
     .toEqual(["first.png", "second.png", "third.png"])
 })
 
+test("all selected images survive a failed first upload and reload", async ({ page }) => {
+  await page.addInitScript(() => {
+    let sequence = 999999999999
+    Object.defineProperty(crypto, "randomUUID", { value: () => `eeeeeeee-eeee-4eee-8eee-${sequence--}` })
+  })
+  await openChat(page, "Offline image batch")
+  const buffer = await drawing(page)
+  await page.route("**/chat/image", (route) => route.abort())
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles(["first.png", "second.png"].map((name) => ({ name, mimeType: "image/png", buffer })))
+  await expect(page.getByRole("alert")).toContainText("kept in this browser")
+  const attached = page.getByRole("list", { name: "Attached images" })
+  await expect(attached.getByRole("img")).toHaveCount(2)
+  // Pending selection order must survive IndexedDB's UUID-key ordering too.
+  await page.reload()
+  await expect(page.getByRole("alert")).toContainText("kept in this browser")
+  await expect
+    .poll(() => attached.getByRole("img").evaluateAll((images) => images.map((image) => image.getAttribute("alt"))))
+    .toEqual(["first.png", "second.png"])
+  await page.unroute("**/chat/image")
+  await page.reload()
+  await expect(attached.getByRole("img")).toHaveCount(2)
+  await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+  await expect(attached.getByRole("img").first()).toHaveAttribute("src", /library\/media/)
+  await expect
+    .poll(() => attached.getByRole("img").evaluateAll((images) => images.map((image) => image.getAttribute("alt"))))
+    .toEqual(["first.png", "second.png"])
+})
+
+test("an image awaiting upload has a working local thumbnail under CSP", async ({ page }) => {
+  await openChat(page, "Offline image preview")
+  const violations: string[] = []
+  page.on("console", (message) => {
+    if (message.text().includes("Content Security Policy")) violations.push(message.text())
+  })
+  await page.route("**/chat/image", (route) => route.abort())
+  await page
+    .getByLabel("Choose images")
+    .setInputFiles({ name: "pending.png", mimeType: "image/png", buffer: await drawing(page) })
+  await expect(page.getByRole("alert")).toContainText("kept in this browser")
+  const thumbnail = page.getByRole("list", { name: "Attached images" }).getByRole("img")
+  await expect.poll(() => thumbnail.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
+  expect(violations).toEqual([])
+})
+
 test("hide images covers draft, message and full-size attachment surfaces", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("rp.images", "hide"))
   await openChat(page, "Concealed images")

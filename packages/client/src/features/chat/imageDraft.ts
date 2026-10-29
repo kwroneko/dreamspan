@@ -5,6 +5,7 @@ export interface ImageDraftEntry {
   readonly scope: string
   readonly name: string
   readonly position?: number
+  readonly pendingPosition?: number
   readonly file?: Blob
   readonly mediaId?: string
   readonly saved?: boolean
@@ -37,6 +38,10 @@ const transaction = async <T>(mode: IDBTransactionMode, run: (store: IDBObjectSt
 export const readImages = async (scope: string): Promise<ImageDraftEntry[]> =>
   ((await transaction("readonly", (store) => store.getAll())) as ImageDraftEntry[])
     .filter((entry) => entry.scope === scope)
-    .sort((a, b) => (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER))
+    .sort(
+      (a, b) =>
+        (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) ||
+        (a.pendingPosition ?? 0) - (b.pendingPosition ?? 0)
+    )
 export const keepImage = (entry: ImageDraftEntry) => transaction("readwrite", (store) => store.put(entry))
 export const dropImage = (id: string) => transaction("readwrite", (store) => store.delete(id))

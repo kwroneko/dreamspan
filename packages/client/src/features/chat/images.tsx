@@ -76,7 +76,13 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       })
       if (!response.ok) throw new Error(await response.text())
       const { mediaId } = (await response.json()) as { mediaId: string }
-      const uploaded = { id: entry.id, scope, name: entry.name, mediaId }
+      const uploaded = {
+        id: entry.id,
+        scope,
+        name: entry.name,
+        mediaId,
+        ...(entry.pendingPosition === undefined ? {} : { pendingPosition: entry.pendingPosition })
+      }
       await keepImage(uploaded)
       await sync(uploaded)
     } catch (error) {
@@ -148,12 +154,21 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
       setBusy(true)
       setError(null)
       try {
-        for (const file of files) {
-          if (!file.type.startsWith("image/")) continue
-          if ((await readImages(scope)).length >= 32) throw new Error("A message can hold at most 32 images.")
-          const entry = { id: crypto.randomUUID(), scope, name: file.name || "Pasted image", file }
-          await keepImage(entry)
-          await refresh()
+        const stored = await readImages(scope)
+        const selected = files.filter((file) => file.type.startsWith("image/"))
+        if (stored.length + selected.length > 32) throw new Error("A message can hold at most 32 images.")
+        const firstPosition = Math.max(0, ...stored.map((entry) => entry.pendingPosition ?? 0)) + 1
+        const added = selected.map((file, index) => ({
+          id: crypto.randomUUID(),
+          scope,
+          name: file.name || "Pasted image",
+          file,
+          pendingPosition: firstPosition + index
+        }))
+        // Keep the entire selection before any upload can fail or outlive this page.
+        for (const entry of added) await keepImage(entry)
+        await refresh()
+        for (const entry of (await readImages(scope)).filter((entry) => !entry.saved)) {
           await upload(entry)
           await refresh()
         }
