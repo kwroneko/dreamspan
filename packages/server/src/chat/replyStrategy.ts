@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Effect, Exit, Stream } from "effect"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
 import type { Generation } from "../assembler/types.ts"
 import { providerRequest } from "../assembler/wire.ts"
@@ -61,6 +61,19 @@ export const defaultReplyStrategy: ReplyStrategy = {
       )
     return showStreaming
       ? chunks
-      : Stream.fromEffect(Stream.runCollect(chunks)).pipe(Stream.flatMap((items) => Stream.fromIterable(items)))
+      : Stream.unwrap(
+          Effect.gen(function* () {
+            const buffered: Array<GenerationChunk> = []
+            const exit = yield* Effect.exit(
+              Stream.runForEach(chunks, (chunk) =>
+                Effect.sync(() => {
+                  buffered.push(chunk)
+                })
+              )
+            )
+            const text = Stream.fromIterable(buffered)
+            return Exit.isFailure(exit) ? Stream.concat(text, Stream.failCause(exit.cause)) : text
+          })
+        )
   }
 }

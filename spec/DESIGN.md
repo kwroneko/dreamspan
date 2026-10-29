@@ -1,6 +1,6 @@
 # Design: requirements and decisions
 
-**Status**: Draft, 2026-10-09. Each item is marked:
+**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
 - **[O] Open**: needs a decision.
@@ -153,7 +153,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 
 - **[P]** The version picker is built for dozens of versions: compact previews, star, hide, delete, side-by-side comparison.
 - **[D]** Pressing swipe while a generation is running starts another one. You can move freely between versions that are still generating and finished ones. **The stop button belongs to the version**, not the composer. There's no dedicated "generate ×N" action.
-- **[D]** **Failed generations are versions** with a clear failure style showing the cause: HTTP error, context length, classifier refusal (with its category), or a length cutoff. They never enter the context.
+- **[D]** **Failed generations are versions** with a clear failure style showing the cause: HTTP error, context length, classifier refusal (with its category), or a length cutoff. They never enter the context. **Built** (U08, 2026-10-28; ARCHITECTURE.md §12).
 - **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals offer Retry and "Retry with…" another model.
 - **[D]** Generating with different models and upstreams at the same time is required. The model is chosen per generation and recorded on the version **[P]**.
 
@@ -331,7 +331,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a).
 
 ### 5.3 `{{user}}`, `{{char}}` and the speaker
-- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace.
+- **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate.
 - **[P]** The prefix uses stable bindings: by default, `{{char}}` resolves to the cast or narrator framing and `{{user}}` to the "played by me" set, both overridable per chat. A small **tail directive** names the speaker for this turn and who not to write for, overriding anti-impersonation rules when the model is meant to write one of your characters.
 
 ### 5.4 Role projection [P]

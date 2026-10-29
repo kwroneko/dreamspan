@@ -5,7 +5,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import type { Version } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
-import { client, serverLayer, testConfig } from "./support/config.ts"
+import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { anthropicSse, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -55,6 +55,68 @@ const provider = (request: Recorded, res: Parameters<typeof sse>[0]) => {
 }
 
 describe("continue and reasoning", () => {
+  for (const stream of [true, false]) {
+    it.live(
+      `retains length-cutoff text as a failure, excludes it from context and continues it (stream=${stream})`,
+      () => {
+        const config = testConfig()
+        return Effect.gen(function* () {
+          let first = true
+          const mock = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startMockProvider((request, res) => {
+                if (!first) return provider(request, res)
+                first = false
+                return sse(res, [
+                  chunk({ role: "assistant", content: "Unfinished cutoff text" }),
+                  chunk({}, "length"),
+                  usage
+                ])
+              })
+            ),
+            (m) => Effect.promise(() => m.close())
+          )
+          const api = yield* client()
+          const { version, chat, events } = yield* generateReply(api, {
+            connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+            model: { prefill: "assistant", settings: { stream } }
+          })
+          assert.strictEqual(version.status, "failed")
+          assert.strictEqual(version.error?.class, "length_cutoff")
+          assert.include(version.error?.message ?? "", "output length limit")
+          assert.strictEqual(version.content, "Unfinished cutoff text")
+          // A normal next turn excludes the failed text even while it is selected.
+          const generated = yield* posted(
+            api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false })
+          )
+          yield* eventually(() => finished(events, generated.entry.version.id) !== undefined)
+          assert.notInclude(JSON.stringify(mock.requests()[1]!.body), version.content)
+          // Continue makes another version of the original slot and keeps the failure.
+          const path = yield* api.ReadPath({
+            chatId: chat.id,
+            leafSlotId: version.slotId,
+            range: { _tag: "Bottom" },
+            limit: 10
+          })
+          const continued = yield* api.ContinueVersion({
+            versionId: version.id,
+            expectedRowVersion: path.entries.at(-1)!.rowVersion
+          })
+          yield* eventually(() => finished(events, continued.version.id) !== undefined)
+          assert.strictEqual(finished(events, continued.version.id)!.status, "complete")
+          assert.strictEqual(
+            finished(events, continued.version.id)!.content,
+            "Unfinished cutoff text and the tide is late."
+          )
+          assert.strictEqual(messagesOf(mock.requests()[2]!).at(-1)!.content, version.content)
+          const versions = yield* api.ListVersions({ slotId: version.slotId })
+          assert.strictEqual(versions[0]!.status, "failed")
+          assert.strictEqual(versions[0]!.content, version.content)
+        }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+      }
+    )
+  }
+
   it.live("keeps streamed reasoning on the version and continues a reply through a prefill", () => {
     const config = testConfig()
     return Effect.gen(function* () {

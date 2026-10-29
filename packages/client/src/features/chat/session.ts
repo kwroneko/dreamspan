@@ -322,10 +322,16 @@ export class ChatSession {
   private async refreshCast() {
     const read = ++this.castReads
     const slotId = this.view.leafSlotId
-    const result = await this.call((client) =>
-      client("GetCast", { chatId: this.chatId, slotId, forkId: this.view.forkId })
+    const forkId = this.view.forkId
+    const result = await this.call((client) => client("GetCast", { chatId: this.chatId, slotId, forkId }))
+    if (
+      !result.ok ||
+      read !== this.castReads ||
+      this.disposed ||
+      forkId !== this.view.forkId ||
+      slotId !== this.view.leafSlotId
     )
-    if (!result.ok || read !== this.castReads || this.disposed) return
+      return
     // Unchanged, it stays the same object: every message row reads it.
     if (JSON.stringify(result.value) !== JSON.stringify(this.view.cast)) this.update({ cast: result.value })
   }
@@ -1158,13 +1164,14 @@ export class ChatSession {
 
   /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
   async changeCast(change: CastChange): Promise<Outcome<Cast>> {
+    const { forkId, leafSlotId } = this.view
     const result = await this.call((client) =>
-      client("ChangeCast", { chatId: this.chatId, slotId: this.view.leafSlotId, forkId: this.view.forkId, change })
+      client("ChangeCast", { chatId: this.chatId, slotId: leafSlotId, forkId, change })
     )
-    if (result.ok) {
-      this.castReads++
-      this.update({ cast: result.value })
+    // The save's snapshot may predate another pin. Read the current cast after it commits.
+    if (result.ok && !this.disposed && forkId === this.view.forkId && leafSlotId === this.view.leafSlotId) {
       this.forgetPositions()
+      await this.refreshCast()
     }
     return result
   }

@@ -13,6 +13,17 @@ const connection = "c1" as ConnectionId
 const model = (id: string) => id as ModelId
 
 describe("foldState", () => {
+  it("unpins a macro without removing other bindings, including an explicitly empty pin", () => {
+    const pinned = foldState([
+      e({ key: "macro.binding", value: { name: "user", value: "Captain" } }),
+      e({ key: "macro.binding", value: { name: "char", value: "" } })
+    ])
+    expect(pinned.macroBindings).toEqual({ user: "Captain", char: "" })
+    const reset = foldState([e({ key: "macro.unbind", value: { name: "user" } })], pinned)
+    expect(reset.macroBindings).toEqual({ char: "" })
+    expect(pinned.macroBindings.user).toBe("Captain")
+  })
+
   it("tracks participants in join order, and presence separately", () => {
     const state = foldState([
       e({ key: "participant.join", value: { entity: mira } }),

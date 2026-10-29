@@ -45,7 +45,9 @@ export const classify = (
   seen: { readonly status: number | null; readonly retryAfterMs: number | null; readonly category: string | null },
   /** The model's context, when some source reported it; never a guessed default. */
   contextWindow: number | undefined,
-  afterTokens: boolean
+  afterTokens: boolean,
+  /** Non-reply requests retain their existing truncated-output handling. */
+  allowLength = false
 ): ProviderError | null => {
   const text = message.errorMessage ?? message.rawStopReason ?? "request failed"
   const extra = { status: seen.status, retryAfterMs: seen.retryAfterMs, category: seen.category, afterTokens }
@@ -53,7 +55,13 @@ export const classify = (
   if (seen.category || (message.rawStopReason && REFUSAL_STOPS.has(message.rawStopReason))) {
     return providerError("refused", text, extra)
   }
-  // A completed generation is never turned into a failure after the fact. pi-ai can also
+  if (message.stopReason === "length" && !allowLength)
+    return providerError(
+      "length_cutoff",
+      "The reply reached its output length limit. Partial text is kept; use Continue to write on with a model that supports prefill.",
+      extra
+    )
+  // An ordinary completion is not failed from usage alone. pi-ai can also
   // flag a "silent" overflow from usage alone, but against a guessed context window that
   // fails ordinary long requests, and the output is there either way.
   if (message.stopReason !== "error") return null

@@ -1,3 +1,4 @@
+import { MacroBindings } from "./MacroBindings.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
@@ -89,6 +90,7 @@ export const registerPresentation = () => [
       </Suspense>
     )
   }),
+  chatSettingSections.register({ id: "settings.macro-bindings", order: 5, component: MacroBindings }),
   chatSettingSections.register({
     id: "settings.roles",
     order: 20,

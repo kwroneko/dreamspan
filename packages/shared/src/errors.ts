@@ -70,6 +70,7 @@ export const ProviderErrorReason = Schema.Literals([
   "rate_limited",
   "overloaded",
   "context_overflow",
+  "length_cutoff",
   "refused",
   "bad_request",
   "network",
