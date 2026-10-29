@@ -130,7 +130,7 @@ export function MessageDirection({ entry, session }: { entry: PathEntry; session
 }
 
 /** The bar above the composer while its box holds a reply's guidance. */
-export function GuidanceEditBar({ session }: ComposerControlContext) {
+function GuidanceEditBar({ session }: ComposerControlContext) {
   const edit = useGuidanceEdit(session)
   const castView = useCast()
   if (edit === null) return null
