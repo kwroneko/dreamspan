@@ -46,6 +46,14 @@ export const makeComposerHandlers = Effect.gen(function* () {
         internal("RestoreComposer")
       ),
 
+    GetComposerImages: (payload) =>
+      Effect.flatMap(userId, (id) => reader.GetComposerImages({ userId: id, ...payload })).pipe(
+        internal("GetComposerImages")
+      ),
+    SetComposerImage: (payload) =>
+      Effect.flatMap(userId, (id) => writer.SetComposerImage({ userId: id, ...payload })).pipe(
+        internal("SetComposerImage")
+      ),
     GetComposerChoice: ({ chatId, draftId }) =>
       Effect.flatMap(userId, (id) => reader.GetComposerChoice({ userId: id, chatId, draftId })).pipe(
         internal("GetComposerChoice")

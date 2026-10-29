@@ -245,6 +245,15 @@ export const baseline: ReadonlyArray<string> = [
     alt_text TEXT,
     PRIMARY KEY (version_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE composer_images (
+    id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+    media_id TEXT REFERENCES media_assets(id),
+    alt_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','sent','removed')),
+    CHECK (status <> 'active' OR media_id IS NOT NULL)
+  ) STRICT`,
+  `CREATE INDEX composer_images_draft ON composer_images(draft_id, status)`,
   `CREATE TABLE state_events (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,

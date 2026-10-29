@@ -1,3 +1,4 @@
+import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -348,6 +349,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         replySpeakerEntityId,
         noReply,
         images,
+        imageDraftIds,
         direction,
         commitDraft
       }) =>
@@ -355,6 +357,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           yield* graph.ownedChat(userId, chatId)
           let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
           yield* graph.checkImages(userId, images ?? [])
+          yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
           yield* graph.checkSpeaker(userId, speakerEntityId)
           if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
           if (parentSlotId !== null) {

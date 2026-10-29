@@ -62,7 +62,13 @@ import {
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
-import { ComposerChoice } from "@rp/shared/composerApi.ts"
+import {
+  ComposerImage,
+  ComposerImageIds,
+  ComposerImageKey,
+  SetComposerImageFields,
+  ComposerChoice
+} from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
   CardFamily,
@@ -692,6 +698,11 @@ export class WriteOps extends RpcGroup.make(
    * Changes a composer draft's speaker or reply choice (null clears one, a missing field
    * stays). Each card named must be one of the user's live cards.
    */
+  Rpc.make("SetComposerImage", {
+    payload: { userId: UserId, ...SetComposerImageFields },
+    success: ComposerImage,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("SetComposerChoice", {
     payload: {
       userId: UserId,
@@ -1418,6 +1429,7 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("SendOrQueue", {
     payload: {
       images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
       userId: UserId,
       chatId: ChatId,
       /** The fork it's sent in, as AppendMessage takes it. */
@@ -2132,6 +2144,11 @@ export class ReadOps extends RpcGroup.make(
     error: StorageError
   }),
   /** A chat's composer draft's speaker and reply choice, by the draft's id. */
+  Rpc.make("GetComposerImages", {
+    payload: { userId: UserId, ...ComposerImageKey, ids: ComposerImageIds },
+    success: Schema.Array(ComposerImage),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("GetComposerChoice", {
     payload: { userId: UserId, chatId: ChatId, draftId: Schema.String },
     success: ComposerChoice,

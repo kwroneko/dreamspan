@@ -51,7 +51,36 @@ export const ComposerBeacon = Schema.Struct({
   content: Schema.String
 })
 
+export const ComposerImage = Schema.Struct({
+  position: Schema.Int,
+  id: Schema.String,
+  mediaId: Schema.NullOr(Schema.String),
+  altText: Schema.String,
+  status: Schema.Literals(["active", "sent", "removed"])
+})
+export type ComposerImage = typeof ComposerImage.Type
+export const ComposerImageKey = { chatId: ChatId, draftId: Schema.String }
+export const ComposerImageIds = Schema.Array(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200))).check(
+  Schema.isMaxLength(32)
+)
+export const SetComposerImageFields = {
+  ...ComposerImageKey,
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(200)),
+  mediaId: Schema.NullOr(Schema.String),
+  altText: Schema.String.check(Schema.isMaxLength(2000))
+}
+
 export class ComposerApi extends RpcGroup.make(
+  Rpc.make("GetComposerImages", {
+    payload: { ...ComposerImageKey, ids: ComposerImageIds },
+    success: Schema.Array(ComposerImage),
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("SetComposerImage", {
+    payload: SetComposerImageFields,
+    success: ComposerImage,
+    error: Schema.Union([...Errors])
+  }),
   /**
    * The composer of a fork of the chat (null: its current fork), made empty if there's
    * none. `copyFrom` (a composer draft's id) starts a branch: its text is copied in, unless

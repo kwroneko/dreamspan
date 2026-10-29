@@ -14,7 +14,7 @@ import type { AppendResult } from "../../src/db/ops.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
 import { makeSummarizer, Summarizer } from "../../src/lcm/Summarizer.ts"
 import { Layer } from "effect"
-import type { AppConfigShape } from "../../src/config.ts"
+import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import { client, serverLayer, testConfig } from "./config.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./mockProvider.ts"
 
@@ -94,8 +94,8 @@ export const lcmServer = (config: AppConfigShape = testConfig(), pool = false) =
     Summarizer,
     Effect.gen(function* () {
       const context = (yield* Effect.context<
-        Reader | Writer | Providers | SummaryChecks | ChatHub | Scope.Scope
-      >()).pipe(Context.pick(Reader, Writer, Providers, SummaryChecks, ChatHub, Scope.Scope))
+        Reader | Writer | Providers | SummaryChecks | ChatHub | AppConfig | Scope.Scope
+      >()).pipe(Context.pick(Reader, Writer, Providers, SummaryChecks, ChatHub, AppConfig, Scope.Scope))
       captured = yield* makeSummarizer(pool)
       const startPool = makeSummarizer(true).pipe(
         Effect.provide(context),

@@ -160,7 +160,8 @@ export class ChatSession {
   private reads = 0
   private missed: Array<Replayable> = []
 
-  private readonly chatId: ChatId
+  /** Stable chat identity, available while its view is still loading. */
+  readonly chatId: ChatId
   /** The fork the URL asks for; null opens the chat's current fork. */
   private requestedFork: ForkId | null
   private readonly registry: AtomRegistry.AtomRegistry
@@ -1089,7 +1090,9 @@ export class ChatSession {
     /** The composer draft the text came from, which the send commits (DESIGN §6.2). */
     composer?: ComposerSource,
     /** False when no one may reply (every character muted, DESIGN §3.5): the message is only posted. */
-    reply = true
+    reply = true,
+    images?: import("@rp/shared/chat.ts").MessageImages,
+    imageDraftIds?: readonly string[]
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1104,6 +1107,8 @@ export class ChatSession {
           parentSlotId: this.view.leafSlotId,
           branch: false,
           content,
+          ...(images === undefined ? {} : { images }),
+          ...(imageDraftIds === undefined ? {} : { imageDraftIds }),
           speakerEntityId: speaker,
           // If it's queued, the server asks for the reply when it posts, from the same speaker.
           replySpeakerEntityId: replySpeaker,

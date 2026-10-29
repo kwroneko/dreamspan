@@ -9,6 +9,7 @@ import {
   chatCardActions,
   chatBranchControls,
   messagePreviews,
+  queuedPreviews,
   chatComposer,
   chatOverlays,
   chatSettingSections,
@@ -67,6 +68,7 @@ const acceptsAlternative = <P extends object>(slot: Slot<P>) => {
 acceptsAlternative(chatCardActions)
 acceptsAlternative(chatBranchControls)
 acceptsAlternative(messagePreviews)
+acceptsAlternative(queuedPreviews)
 acceptsAlternative(chatComposer)
 acceptsAlternative(chatOverlays)
 acceptsAlternative(chatSettingSections)
@@ -93,7 +95,7 @@ it("surface providers compose scoped alternatives around the actual children and
           )
         const html = renderToStaticMarkup(createElement(ChatSurfaceProviders, props))
         expect(html).toBe(
-          '<section data-provider="chat.history-preview"><section data-provider="chat.preset-workspace"><section data-provider="chat.portraits"><p>chat</p></section></section></section>'
+          '<section data-provider="chat.history-preview"><section data-provider="chat.preset-workspace"><section data-provider="chat.portraits"><section data-provider="chat.images"><p>chat</p></section></section></section></section>'
         )
         yield* scoped(() => chatSurfaceProviders.disable("chat.preset-workspace"))
         expect(renderToStaticMarkup(createElement(ChatSurfaceProviders, props))).not.toContain("chat.preset-workspace")

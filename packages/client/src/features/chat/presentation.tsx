@@ -80,3 +80,5 @@ export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.
 export const chatBranchControls =
   defineSlot<ComponentProps<typeof import("./ChatHeader.tsx").BranchMenu>>("chat.branch-controls")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
+
+export const queuedPreviews = defineSlot<{ queued: import("@rp/shared/chat.ts").QueuedMessage }>("chat.queued-previews")

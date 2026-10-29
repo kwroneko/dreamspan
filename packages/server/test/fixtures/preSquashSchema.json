@@ -98,6 +98,12 @@
     },
     {
       "type": "index",
+      "name": "composer_images_draft",
+      "tbl_name": "composer_images",
+      "sql": "CREATE INDEX composer_images_draft ON composer_images(draft_id, status)"
+    },
+    {
+      "type": "index",
       "name": "connections_credential",
       "tbl_name": "connections",
       "sql": "CREATE INDEX connections_credential ON connections(credential_id) WHERE credential_id IS NOT NULL"
@@ -821,6 +827,12 @@
       "name": "chats",
       "tbl_name": "chats",
       "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "composer_images",
+      "tbl_name": "composer_images",
+      "sql": "CREATE TABLE composer_images ( id TEXT PRIMARY KEY, draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, media_id TEXT REFERENCES media_assets(id), alt_text TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active','sent','removed')), CHECK (status <> 'active' OR media_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",

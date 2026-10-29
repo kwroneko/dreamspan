@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Layer, Schema, type Scope } from "effect"
+import { AppConfig } from "../src/config.ts"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { SummaryChecks } from "../src/lcm/OutputChecks.ts"
@@ -36,8 +37,8 @@ for (const phase of ["missing leaf", "plan", "reconcile", "claim", "job"] as con
       const layer = Layer.effect(
         Summarizer,
         Effect.gen(function* () {
-          const context = (yield* Effect.context<Providers | SummaryChecks | ChatHub>()).pipe(
-            Context.pick(Providers, SummaryChecks, ChatHub)
+          const context = (yield* Effect.context<Providers | SummaryChecks | ChatHub | AppConfig>()).pipe(
+            Context.pick(Providers, SummaryChecks, ChatHub, AppConfig)
           )
           start = (reader, writer) =>
             makeSummarizer(true).pipe(

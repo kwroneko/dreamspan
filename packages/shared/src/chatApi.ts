@@ -19,7 +19,7 @@ import {
   VersionId
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { ComposerChoice, TextTooLong } from "./composerApi.ts"
+import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
@@ -336,6 +336,7 @@ export class ChatApi extends RpcGroup.make(
       branch: Schema.Boolean,
       content: Schema.String,
       images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /**
        * Who replies to it, if it's queued: the reply then starts on the server, as the client

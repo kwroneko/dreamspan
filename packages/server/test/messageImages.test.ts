@@ -44,6 +44,75 @@ const notFound = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   })
 
 describe("message images", () => {
+  it.live(
+    "persists composer image references, fences removals and sends, and consumes only a send's captured rows",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const chat = yield* api.CreateChat({ title: "Synthetic attachment draft" })
+        const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+        const image = yield* upload()
+        const key = { chatId: chat.id, draftId: draft.id }
+        const put = (id: string) => api.SetComposerImage({ ...key, id, mediaId: image.mediaId, altText: id })
+        yield* put("removed")
+        yield* api.SetComposerImage({ ...key, id: "removed", mediaId: null, altText: "" })
+        assert.strictEqual((yield* put("removed")).status, "removed", "offline replay must not restore a removed image")
+        yield* put("sending")
+        yield* put("next")
+        const { entry: first } = yield* posted(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "",
+            images: [image],
+            imageDraftIds: ["sending"],
+            composer: { draftId: draft.id, session: draft.session },
+            reply: false
+          })
+        )
+        assert.strictEqual(first.version.images?.[0]?.mediaId, image.mediaId)
+        const read = yield* api.GetComposerImages({ ...key, ids: ["removed", "sending"] })
+        assert.deepStrictEqual(
+          read.map((entry) => [entry.id, entry.status]),
+          [
+            ["removed", "removed"],
+            ["sending", "sent"],
+            ["next", "active"]
+          ]
+        )
+        assert.strictEqual((yield* put("sending")).status, "sent", "a sent row is an idempotent receipt")
+        yield* notFound(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: first.slotId,
+            branch: false,
+            content: "",
+            images: [image],
+            imageDraftIds: ["sending"],
+            composer: { draftId: draft.id, session: draft.session + 1 },
+            reply: false
+          })
+        )
+        yield* notFound(
+          api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: first.slotId,
+            branch: false,
+            content: "",
+            images: [image, image],
+            imageDraftIds: ["next", "missing"],
+            composer: { draftId: draft.id, session: draft.session + 1 },
+            reply: false
+          })
+        )
+        assert.deepStrictEqual(
+          (yield* api.GetComposerImages({ ...key, ids: [] })).map((entry) => entry.id),
+          ["next"]
+        )
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("uploads, sends image-only messages, reads ordered version images, and rejects another owner's media", () =>
     Effect.gen(function* () {
       const api = yield* client()

@@ -191,6 +191,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   ...(resolved
                     ? {
                         prefill: resolved.prefill,
+                        vision: resolved.vision,
+                        maxImages: resolved.maxImages,
                         ...(resolved.continueUnavailable ? { continueUnavailable: resolved.continueUnavailable } : {})
                       }
                     : {})

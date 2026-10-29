@@ -1,3 +1,4 @@
+import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
@@ -152,5 +153,6 @@ export const registerPresentation = () => [
       </PortraitProvider>
     )
   }),
-  chatOverlays.register({ id: "chat.preset-overlay", order: 10, component: () => <PresetOverlayHost /> })
+  chatOverlays.register({ id: "chat.preset-overlay", order: 10, component: () => <PresetOverlayHost /> }),
+  ...registerImages()
 ]

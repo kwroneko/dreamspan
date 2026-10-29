@@ -143,6 +143,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly parentSlotId: SlotId | null
       readonly branch: boolean
       readonly kind: "message" | "generate"
+      readonly imageDraftIds?: readonly string[]
       readonly images?: import("@rp/shared/chat.ts").MessageImages
       readonly content: string
       readonly speakerEntityId: EntityId | null
@@ -246,6 +247,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       speakerEntityId,
       replySpeakerEntityId,
       images,
+      imageDraftIds,
       reply,
       composer
     }) =>
@@ -257,6 +259,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           branch,
           kind: "message",
           ...(images === undefined ? {} : { images }),
+          ...(imageDraftIds === undefined ? {} : { imageDraftIds }),
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
