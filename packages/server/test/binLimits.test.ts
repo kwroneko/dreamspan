@@ -5,6 +5,45 @@ import * as Database from "../src/db/Database.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
+it.live("reading and changing a limit preserve the configured capacities used by eviction", () =>
+  Effect.gen(function* () {
+    const writer = yield* Database.Writer
+    const reader = yield* Database.Reader
+    const userId = (yield* writer.EnsureUser({ handle: "configured", displayName: "Configured" })).id
+    const configured = { deletedItems: 2, deletedBytes: 1_000_000, recoveredTexts: 3, recoveredBytes: 100 }
+    // Saving an unrelated field must not replace the configured deletion limit with 10,000.
+    const changed = yield* writer.ChangeBinLimit({ userId, key: "recoveredTexts", value: 4 })
+    assert.deepStrictEqual(changed, { ...configured, recoveredTexts: 4 })
+    assert.deepStrictEqual(yield* reader.GetBinLimits({ userId }), changed)
+    for (let n = 0; n < 3; n++) {
+      const chat = yield* writer.CreateChat({
+        userId,
+        kind: "rp",
+        status: "active",
+        title: `Configured ${n}`,
+        participants: [],
+        greeting: null
+      })
+      yield* writer.DeleteChat({ userId, chatId: chat.id })
+    }
+    assert.lengthOf(yield* reader.ListBin({ userId, limit: 10, before: null }), 2)
+    // A different account with no saved preferences sees the same worker fallback.
+    const another = (yield* writer.EnsureUser({ handle: "untouched", displayName: "Untouched" })).id
+    assert.deepStrictEqual(yield* reader.GetBinLimits({ userId: another }), configured)
+  }).pipe(
+    Effect.provide(
+      Database.layer({
+        dataDir: tempDir("bin-configured-limits"),
+        readers: 1,
+        workers: "source",
+        allowNetworkFs: false,
+        binLimits: { deletedItems: 2, deletedBytes: 1_000_000, recoveredTexts: 3, recoveredBytes: 100 }
+      })
+    ),
+    Effect.scoped
+  )
+)
+
 it.live("persists independent capacities across worker restart, with no purge when a limit is saved", () => {
   const dataDir = tempDir("bin-limits")
   const database = Database.layer({ dataDir, readers: 1, workers: "source", allowNetworkFs: false })

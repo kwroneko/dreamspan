@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "80" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -36,7 +37,18 @@ for (const width of [1440, 390])
       await expect(page.getByText("Main Prompt", { exact: true }).filter({ visible: true }).first()).toBeVisible()
       await shot("preset-editor")
       const presets = await admin((api) => api.ListLibrary({ kind: "preset" }))
-      expect(presets.some((p) => p.label === `Fresh ${width} ${theme}`)).toBe(true)
+      const preset = presets.find((p) => p.label === `Fresh ${width} ${theme}`)!
+      expect(preset).toBeDefined()
+      const main = page.locator('[data-prompt="main"]')
+      await expect(main.locator("[data-override]")).toHaveAttribute("data-override", "forbidden")
+      const content = `A synthetic instruction at ${width} in ${theme}.`
+      await main.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill(content)
+      await page.getByRole("button", { name: "Save (1)", exact: true }).click()
+      await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+      await expect(page.getByText("Saved a revision.")).toBeVisible()
+      await page.goto(`${server().url}/library/${preset.id}`)
+      await expectTextBox(page.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), content)
+      await expect(page.locator('[data-prompt="main"] [data-override]')).toHaveAttribute("data-override", "forbidden")
 
       await page.goto(`${server().url}/bin`)
       await page.getByText("Bin capacity", { exact: true }).click()
@@ -89,4 +101,44 @@ test("only unseen completions play sound after activation; disabling it silences
   await reply()
   await expect(page).toHaveTitle(/^\(2\)/)
   expect(await page.evaluate(() => (window as unknown as { soundCount: () => number }).soundCount())).toBe(1)
+})
+
+test("saved sound skips completions before interaction and touch activation never plays them late", async ({
+  browser
+}) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+  try {
+    await context.addInitScript(() => {
+      localStorage.setItem("rp.notifications.sound", "on")
+      let played = 0
+      Object.assign(window, { soundCount: () => played })
+      const create = AudioContext.prototype.createOscillator
+      AudioContext.prototype.createOscillator = function () {
+        played++
+        return create.call(this)
+      }
+    })
+    await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
+    const page = await context.newPage()
+    await page.goto(`${server().url}/settings/notifications`)
+    await expect(page.getByRole("switch", { name: /^Completion sound/ })).toBeChecked()
+    const reply = () =>
+      admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Touch activation" })
+          yield* api.Generate({ chatId: chat.id, parentSlotId: null, branch: false })
+        })
+      )
+    const count = () => page.evaluate(() => (window as unknown as { soundCount: () => number }).soundCount())
+    await reply()
+    await expect(page).toHaveTitle(/^\(1\)/)
+    expect(await count()).toBe(0)
+    await page.getByRole("heading", { name: "Notifications", exact: true }).tap()
+    expect(await count()).toBe(0)
+    await reply()
+    await expect.poll(count).toBe(1)
+    await expect(page).toHaveTitle(/^\(2\)/)
+  } finally {
+    await context.close()
+  }
 })

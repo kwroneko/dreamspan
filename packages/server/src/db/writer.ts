@@ -48,7 +48,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         const [graph, library, binOps, providers, accounts, chatSetup, generation] = yield* Effect.all([
           makeWriteHandlers(bin),
           makeLibraryWriteHandlers(bin),
-          makeBinWriteHandlers(bin),
+          makeBinWriteHandlers(bin, binLimits),
           makeProviderWriteHandlers,
           makeAccountWriteHandlers,
           makeChatSetupWriteHandlers(bin),

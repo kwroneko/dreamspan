@@ -397,6 +397,22 @@ describe("recycle bin", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  it.live("the saved deleted-byte limit evicts oldest items independently of the item limit", () =>
+    Effect.gen(function* () {
+      const { writer, userId, a, b, c, bin } = yield* setup()
+      yield* writer.ChangeBinLimit({ userId, key: "deletedItems", value: 100 })
+      const first = yield* writer.DeleteMessage({ userId, slotId: a.slotId })
+      assert.isAbove(first.byteSize, 0)
+      yield* writer.ChangeBinLimit({ userId, key: "deletedBytes", value: first.byteSize * 2 })
+      yield* writer.DeleteMessage({ userId, slotId: b.slotId })
+      yield* writer.DeleteMessage({ userId, slotId: c.slotId })
+      assert.deepStrictEqual(
+        (yield* bin()).map((item) => item.targetId),
+        [c.slotId, b.slotId]
+      )
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("emptying the bin deletes everything in it for good", () => {
     const dir = tempDir("bin")
     return Effect.gen(function* () {

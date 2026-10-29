@@ -1,7 +1,11 @@
 import { defaultBinLimits, type BinLimits } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+
+export const BinLimitDefaults = Context.Reference<BinLimits>("rp/db/BinLimitDefaults", {
+  defaultValue: () => defaultBinLimits
+})
 
 export const readBinLimits = (sql: SqlClient.SqlClient, userId: UserId, defaults: BinLimits = defaultBinLimits) =>
   sql<{

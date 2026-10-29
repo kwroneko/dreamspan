@@ -49,14 +49,3 @@ export const playCompletionSound = () => {
     /* A device change must not interrupt notices. */
   }
 }
-
-/** Keep identities for this tab's lifetime, across subscription retries and remounts. */
-export const noticeDeduplicator = () => {
-  const received = new Set<string>()
-  return (notice: { versionId: string; status: string }) => {
-    const key = `${notice.versionId}:${notice.status}`
-    if (received.has(key)) return false
-    received.add(key)
-    return true
-  }
-}

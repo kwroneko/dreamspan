@@ -1,4 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import type { Notice } from "@rp/shared/noticeApi.ts"
 
 const stored = new Map<string, string>()
 const resume = vi.fn(async () => {})
@@ -61,10 +64,59 @@ it("is opt-in, activates only on interaction, skips suspended audio and stops af
 })
 
 it("deduplicates replayed versions across chats and subscription retries", async () => {
-  const { noticeDeduplicator } = await import("../src/features/completionSound.ts")
+  const { noticeDeduplicator } = await import("../src/features/noticeContributions.tsx")
   const first = noticeDeduplicator()
   expect(first({ versionId: "v1", status: "complete" })).toBe(true)
   expect(first({ versionId: "v1", status: "complete" })).toBe(false)
   expect(first({ versionId: "v2", status: "failed" })).toBe(true)
   expect(first({ versionId: "v2", status: "failed" })).toBe(false)
+})
+
+it("replaces or disables sound settings, activation and playback together, then restores them", async () => {
+  vi.stubGlobal("localStorage", {
+    getItem: (k: string) => stored.get(k),
+    setItem: (k: string, v: string) => stored.set(k, v)
+  })
+  vi.stubGlobal("AudioContext", FakeAudio)
+  const { register } = await import("../src/features/completionSoundFeature.tsx")
+  const { setSoundWanted } = await import("../src/features/completionSound.ts")
+  const { noticeChannels, NoticeChannelSettings, activateNoticeChannels, receiveNoticeChannels } =
+    await import("../src/features/noticeContributions.tsx")
+  const dispose = register()
+  setSoundWanted(true)
+  state = "running"
+  const notice = { status: "complete" } as Notice
+  const render = () => renderToStaticMarkup(createElement(NoticeChannelSettings))
+  expect(render()).toContain("Completion sound")
+  activateNoticeChannels()
+  receiveNoticeChannels(notice)
+  expect(resume).toHaveBeenCalledOnce()
+  expect(start).toHaveBeenCalledOnce()
+  const disabled = noticeChannels.disable("notifications.completion-sound")
+  expect(render()).toBe("")
+  activateNoticeChannels()
+  receiveNoticeChannels(notice)
+  expect(resume).toHaveBeenCalledOnce()
+  expect(start).toHaveBeenCalledOnce()
+  disabled()
+  const activate = vi.fn()
+  const receive = vi.fn()
+  const replacement = noticeChannels.register({
+    id: "notifications.completion-sound",
+    component: () => createElement("span", null, "Alternative sound"),
+    activate,
+    receive
+  })
+  expect(render()).toBe("<span>Alternative sound</span>")
+  activateNoticeChannels()
+  receiveNoticeChannels(notice)
+  expect(activate).toHaveBeenCalledOnce()
+  expect(receive).toHaveBeenCalledWith(notice)
+  expect(start).toHaveBeenCalledOnce()
+  replacement()
+  expect(render()).toContain("Completion sound")
+  receiveNoticeChannels({ ...notice, status: "failed" })
+  expect(start).toHaveBeenCalledTimes(2)
+  dispose()
+  expect(render()).toBe("")
 })
