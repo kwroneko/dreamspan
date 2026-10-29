@@ -80,3 +80,6 @@ export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.
 export const chatBranchControls =
   defineSlot<ComponentProps<typeof import("./ChatHeader.tsx").BranchMenu>>("chat.branch-controls")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
+export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(
+  "summary.previews"
+)

@@ -1,16 +1,22 @@
 import { isPanelTab, useChatPanels } from "./panels.tsx"
 import type { PathEntry } from "@rp/shared/chat.ts"
 import type { ChatSession } from "./session.ts"
-import { createContext, useContext, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 import type { HistoryHit } from "@rp/shared/historyApi.ts"
+import type { LcmSummary } from "@rp/shared/lcm.ts"
 
 export const HistoryPreviewContext = createContext<{
   hits: ReadonlyArray<HistoryHit>
-  publish: (hits: ReadonlyArray<HistoryHit>) => void
-}>({ hits: [], publish: () => undefined })
+  active: boolean
+  publish: (hits: ReadonlyArray<HistoryHit>, active?: boolean) => void
+}>({ hits: [], active: false, publish: () => undefined })
 export function HistoryPreviewProvider({ children }: { children: ReactNode }) {
-  const [hits, publish] = useState<ReadonlyArray<HistoryHit>>([])
-  return <HistoryPreviewContext value={{ hits, publish }}>{children}</HistoryPreviewContext>
+  const [preview, setPreview] = useState<{ hits: ReadonlyArray<HistoryHit>; active: boolean }>({
+    hits: [],
+    active: false
+  })
+  const publish = useCallback((hits: ReadonlyArray<HistoryHit>, active = true) => setPreview({ hits, active }), [])
+  return <HistoryPreviewContext value={{ ...preview, publish }}>{children}</HistoryPreviewContext>
 }
 export function HistoryDiff({ hit }: { hit: HistoryHit }) {
   let end = 0
@@ -39,13 +45,22 @@ export function HistoryDiff({ hit }: { hit: HistoryHit }) {
 
 export function HistoryMessagePreview({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const panels = useChatPanels()
-  const preview = useContext(HistoryPreviewContext).hits.find(
-    (hit) => hit.kind === "version_replace" && hit.beforeId === entry.version.id
-  )
-  if (!preview || !isPanelTab("history", session.snapshot(), panels)) return null
+  const { hits, active } = useContext(HistoryPreviewContext)
+  const preview = hits.find((hit) => hit.kind === "version_replace" && hit.beforeId === entry.version.id)
+  if (!active || !preview || !isPanelTab("history", session.snapshot(), panels)) return null
   return (
     <div className="my-2 rounded-md border border-accent/40 p-2">
       <HistoryDiff hit={preview} />
     </div>
   )
+}
+
+/** The retained search remains previewable when its result opens the Summaries tab. */
+export function HistorySummaryPreview({ summary, session }: { summary: LcmSummary; session: ChatSession }) {
+  const panels = useChatPanels()
+  const preview = useContext(HistoryPreviewContext).hits.find(
+    (hit) => hit.kind === "summary_revision" && hit.targetId === summary.id && hit.beforeId === summary.revisionId
+  )
+  if (!preview || !isPanelTab("history", session.snapshot(), panels)) return null
+  return <HistoryDiff hit={preview} />
 }

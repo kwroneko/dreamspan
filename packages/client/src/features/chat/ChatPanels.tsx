@@ -129,6 +129,7 @@ export function ChatSidePanel({
   focus: string | null
   onJump: (slot: SlotId) => void
   onEnable: () => void
+  onSummaries: (summary: string) => void
 }) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.

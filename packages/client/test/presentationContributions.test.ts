@@ -9,6 +9,7 @@ import {
   chatCardActions,
   chatBranchControls,
   messagePreviews,
+  summaryPreviews,
   chatComposer,
   chatOverlays,
   chatSettingSections,
@@ -67,6 +68,7 @@ const acceptsAlternative = <P extends object>(slot: Slot<P>) => {
 acceptsAlternative(chatCardActions)
 acceptsAlternative(chatBranchControls)
 acceptsAlternative(messagePreviews)
+acceptsAlternative(summaryPreviews)
 acceptsAlternative(chatComposer)
 acceptsAlternative(chatOverlays)
 acceptsAlternative(chatSettingSections)
@@ -265,7 +267,7 @@ it("the history preview uses its registered body and disappears when History is 
     renderToStaticMarkup(
       createElement(
         HistoryPreviewContext,
-        { value: { hits: [hit], publish: () => undefined } },
+        { value: { hits: [hit], active: true, publish: () => undefined } },
         createElement(SlotOutlet<{ entry: typeof entry; session: typeof session }>, {
           slot: messagePreviews,
           props: { entry, session }
@@ -279,6 +281,47 @@ it("the history preview uses its registered body and disappears when History is 
           chatPanels.register({ id: "history", label: "History", order: 10, icon: "edit", component: () => null })
         )
         expect(render()).toContain("Replacement preview")
+        yield* scoped(() => chatPanels.disable("history"))
+        expect(render()).toBe("")
+      })
+    )
+  )
+})
+
+it("summary previews retain skipped matches across tabs and reject obsolete revisions or a disabled History panel", async () => {
+  const { HistoryPreviewContext } = await import("../src/features/chat/historyPreview.tsx")
+  const { chatPanels } = await import("../src/features/chat/panels.tsx")
+  const session = {
+    snapshot: () => ({ cast: null })
+  } as unknown as import("../src/features/chat/session.ts").ChatSession
+  const summary = { id: "summary", revisionId: "revision" } as unknown as import("@rp/shared/lcm.ts").LcmSummary
+  const hit = {
+    kind: "summary_revision",
+    targetId: "summary",
+    beforeId: "revision",
+    before: "bridge and bridge",
+    matches: [{ start: 11, end: 17, replacement: "pier" }]
+  } as unknown as import("@rp/shared/historyApi.ts").HistoryHit
+  const render = (revisionId = "revision") =>
+    renderToStaticMarkup(
+      createElement(
+        HistoryPreviewContext,
+        { value: { hits: [hit], active: false, publish: () => undefined } },
+        createElement(SlotOutlet<{ summary: typeof summary; session: typeof session }>, {
+          slot: summaryPreviews,
+          props: { session, summary: { ...summary, revisionId: revisionId as typeof summary.revisionId } }
+        })
+      )
+    )
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* scoped(() =>
+          chatPanels.register({ id: "history", label: "History", order: 10, icon: "edit", component: () => null })
+        )
+        expect(render()).toContain("bridge and <mark")
+        expect(render()).toContain('<ins class="text-accent">pier</ins>')
+        expect(render("new-revision")).toBe("")
         yield* scoped(() => chatPanels.disable("history"))
         expect(render()).toBe("")
       })

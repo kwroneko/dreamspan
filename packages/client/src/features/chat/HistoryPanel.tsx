@@ -23,11 +23,13 @@ export function HistoryPanel({
   session,
   view,
   onJump,
+  onSummaries,
   active
 }: {
   session: ChatSession
   view: ChatView
   onJump: (slot: SlotId) => void
+  onSummaries: (summary: string) => void
   active: boolean
 }) {
   const { publish } = useContext(HistoryPreviewContext)
@@ -54,10 +56,9 @@ export function HistoryPanel({
   useEffect(() => {
     const timer = setTimeout(() => {
       if (active) void history()
-      else publish([])
     }, 0)
     return () => clearTimeout(timer)
-  }, [active, history, publish])
+  }, [active, history])
   useEffect(() => {
     const request = ++revision.current
 
@@ -119,7 +120,7 @@ export function HistoryPanel({
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, active, publish, view.lcm, view.history])
+  }, [search, session, forkId, publish, view.lcm, view.history])
   useEffect(() => () => publish([]), [publish])
   const undo = async (record: Record, slotId?: string, itemIds?: ReadonlyArray<number>) => {
     if (!target) return
@@ -158,7 +159,7 @@ export function HistoryPanel({
     [hits, skipped]
   )
   useEffect(() => {
-    publish(active && completedSearch === JSON.stringify(search) ? included : [])
+    publish(completedSearch === JSON.stringify(search) ? included : [], active)
   }, [active, completedSearch, search, included, publish])
   const apply = async (one: boolean) => {
     if (!target || JSON.stringify(search) !== completedSearch) return
@@ -208,12 +209,16 @@ export function HistoryPanel({
     setSearch((s) => ({ ...s }))
   }
   const counts = (test: (h: HistoryHit) => boolean) => hits.filter(test).reduce((n, h) => n + h.matches.length, 0)
+  const openHit = (hit: HistoryHit) => {
+    if (hit.kind === "summary_revision") onSummaries(hit.targetId)
+    else onJump(hit.slotId as SlotId)
+  }
   const step = (back: boolean) => {
     const matches = included.flatMap((hit) => hit.matches.map((match) => ({ hit, match })))
     if (!matches.length) return
     const next = (current + (back ? -1 : 1) + matches.length) % matches.length
     setCurrent(next)
-    onJump(matches[next]!.hit.slotId as SlotId)
+    openHit(matches[next]!.hit)
   }
   return (
     <div className="flex flex-col gap-4 p-3 text-sm">
@@ -332,12 +337,7 @@ export function HistoryPanel({
             .map((hit) => (
               <article key={keyOf(hit)} className="rounded-md border border-border p-2">
                 <div className="flex items-center justify-between gap-2">
-                  <button
-                    className="text-accent underline"
-                    onClick={() => {
-                      if (!hit.level) onJump(hit.slotId as SlotId)
-                    }}
-                  >
+                  <button className="text-accent underline" onClick={() => openHit(hit)}>
                     {hit.level
                       ? `Level ${hit.level} summary, messages ${hit.depth + 1}–${hit.toDepth + 1}`
                       : `Message ${hit.depth + 1}`}

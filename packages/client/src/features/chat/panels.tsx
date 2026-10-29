@@ -14,6 +14,7 @@ export interface PanelProps {
   readonly view: ChatView
   readonly focus: string | null
   readonly notesFocus: EntityId | null
+  readonly onSummaries: (summary: string) => void
   readonly onNotes: (card: EntityId) => void
   readonly onJump: (slot: SlotId) => void
   readonly onEnable: () => void

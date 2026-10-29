@@ -116,8 +116,8 @@ export const registerPanels = () => [
     component: lazyPanel(
       () =>
         import("./HistoryPanel.tsx").then((m) => ({
-          default: ({ session, view, active, onJump }: PanelProps) => (
-            <m.HistoryPanel session={session} view={view} active={active} onJump={onJump} />
+          default: ({ session, view, active, onJump, onSummaries }: PanelProps) => (
+            <m.HistoryPanel session={session} view={view} active={active} onJump={onJump} onSummaries={onSummaries} />
           )
         })),
       "history edits"

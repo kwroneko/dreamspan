@@ -3,8 +3,8 @@ import { chatBranchControls } from "./presentation.tsx"
 import { ChatCommandMenu } from "./commands.tsx"
 // The open chat's header: whose chat it is (the cast's faces and a readable name, never
 // ST's file name), which branch is shown with a way to switch, and the chat's actions,
-// which the page passes in. On a phone the title can wrap, and the branch and actions
-// have a second row so they don't crowd its name.
+// which the page passes in. The branch and actions have a second row so they do not
+// crowd the title, including group names beside several portraits.
 import type { Chat, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { Branch } from "@rp/shared/chatApi.ts"
 import type { ChatName } from "@rp/shared/chatName.ts"
@@ -394,7 +394,7 @@ export function ChatHeader({
   ].filter(Boolean)
   return (
     <TooltipProvider>
-      <header className="mx-auto flex w-full max-w-3xl min-w-0 items-center gap-1.5 pb-2 max-sm:flex-wrap sm:gap-3">
+      <header className="mx-auto flex w-full max-w-3xl min-w-0 flex-wrap items-center gap-1.5 pb-2 sm:gap-3">
         <Tooltip label="All chats">
           <Link
             to="/chats"
@@ -428,7 +428,7 @@ export function ChatHeader({
           </div>
           {about.length > 0 && <p className="truncate text-xs text-muted">{about.join(" · ")}</p>}
         </div>
-        <div className="flex min-w-0 items-center justify-end gap-1.5 max-sm:w-full sm:gap-3">
+        <div className="flex w-full min-w-0 items-center justify-end gap-1.5 sm:gap-3">
           {fork && <PinButton fork={fork} />}
           <ChatCommandMenu context={{ session, view, onHistory, onJump }} />
           <SlotOutlet slot={chatBranchControls} props={{ session, view, onBranch, onJump }} />

@@ -357,6 +357,10 @@ describe("chat setup", () => {
       assert.isTrue(before.loreBelowHistory)
       const left = yield* change({ _tag: "Leave", entityId: tobin })
       assert.deepStrictEqual(left.participants, [miraId])
+      assert.include(
+        left.cards.map((card) => card.entityId),
+        tobin
+      )
 
       // Send as a card: the message is theirs.
       const sent = yield* posted(
@@ -399,6 +403,15 @@ describe("chat setup", () => {
       const switched = yield* change({ _tag: "Persona", entityId: bo })
       assert.deepStrictEqual(switched.playedByMe, [bo])
       assert.deepStrictEqual(switched.participants, [miraId, bo])
+      assert.include(
+        switched.cards.map((card) => card.entityId),
+        ana
+      )
+      const reloaded = yield* api.GetCast({ chatId: started.chat.id, slotId: at })
+      assert.include(
+        reloaded.cards.map((card) => card.entityId),
+        ana
+      )
       assert.lengthOf(yield* events(), count + 3)
       // A card that isn't a persona stays when it stops being played; one already in the chat doesn't join again.
       yield* change({ _tag: "Join", entityId: tobin })

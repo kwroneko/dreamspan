@@ -86,11 +86,21 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     Effect.gen(function* () {
       const events = yield* reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null })
       const state = foldState(events)
-      // Swapped-out cards still name the messages they wrote. Include them for message
-      // rendering after a reload, without putting them back in the active cast.
-      const previous = events.flatMap(({ data }) =>
-        data.key === "card.swap" ? [data.value.replaces, data.value.entity] : []
-      )
+      // Departed cards still name the messages they wrote, including old personas and
+      // impersonated turns. Retain their faces without adding them to the active cast.
+      const previous = events.flatMap(({ data }) => {
+        switch (data.key) {
+          case "card.swap":
+            return [data.value.replaces, data.value.entity]
+          case "participant.join":
+          case "participant.leave":
+            return [data.value.entity]
+          case "played_by_me.set":
+            return data.value.entities
+          default:
+            return []
+        }
+      })
       const ids = [...new Set([...state.participants, ...state.playedByMe, ...previous])]
       const cards = yield* reader.CastCards({
         userId: user,

@@ -7,6 +7,7 @@ import {
   chatCardActions,
   chatBranchControls,
   messagePreviews,
+  summaryPreviews,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -19,7 +20,7 @@ import {
 } from "./presentation.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
-import { HistoryMessagePreview, HistoryPreviewProvider } from "./historyPreview.tsx"
+import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
   const Component = lazy(load)
@@ -68,6 +69,7 @@ export const registerPresentation = () => [
   ...registerTimelineTransforms(),
   chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchMenu }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
+  summaryPreviews.register({ id: "history.summary-preview", order: 10, component: HistorySummaryPreview }),
   accountSettingSections.register({ id: "settings.summary-defaults", order: 10, component: SummaryDefaults }),
   chatComposer.register({
     id: "chat.composer",
