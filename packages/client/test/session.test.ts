@@ -3,6 +3,7 @@
 import type { Chat, ChatId, ForkId, PathEntry, QueuedMessage, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import type { LcmState } from "@rp/shared/lcm.ts"
 import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
+import { Cast } from "@rp/shared/chatSetupApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
 import { planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
@@ -92,7 +93,112 @@ const first = entry("s1", null, version("v1", "s1", "complete", "Hello."))
 const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
+const boundCast = (macroBindings: Record<string, string> = {}) =>
+  new Cast({
+    slotId: null,
+    participants: [],
+    absent: [],
+    playedByMe: [],
+    model: null,
+    preset: null,
+    lorebooks: [],
+    cardLorebooksOff: [],
+    globalLorebooksOff: [],
+    loreBelowHistory: true,
+    macroBindings,
+    macroNames: { user: macroBindings.user ?? "User", char: macroBindings.char ?? "Mira" },
+    rolesProjection: null,
+    roleProjections: [],
+    cards: []
+  })
+
 describe("ChatSession", () => {
+  for (const moved of ["fork", "leaf", "disposed"] as const) {
+    it(`does not apply a prompt-name pin's old cast after the view is ${moved}`, async () => {
+      const { s } = session()
+      const internals = s as unknown as {
+        view: ReturnType<typeof s.snapshot>
+        call: () => Promise<unknown>
+      }
+      const original = boundCast()
+      const changed = boundCast({ user: "Captain" })
+      let answer!: (value: unknown) => void
+      internals.call = () => new Promise((resolve) => (answer = resolve))
+      internals.view = { ...s.snapshot(), forkId: "old" as ForkId, leafSlotId: first.slotId, cast: original }
+      const saving = s.changeCast({ _tag: "MacroBinding", name: "user", value: "Captain" })
+      if (moved === "disposed") s.dispose()
+      else
+        internals.view = {
+          ...s.snapshot(),
+          ...(moved === "fork" ? { forkId: "new" as ForkId } : { leafSlotId: second.slotId })
+        }
+      answer({ ok: true, value: changed })
+      await saving
+      expect(s.snapshot().cast).toBe(original)
+      s.dispose()
+    })
+  }
+
+  it("does not let an older prompt-name save overwrite the later pin", async () => {
+    const { s } = session()
+    const internals = s as unknown as { call: () => Promise<unknown> }
+    const answers: Array<(value: unknown) => void> = []
+    internals.call = () => new Promise((resolve) => answers.push(resolve))
+    const user = s.changeCast({ _tag: "MacroBinding", name: "user", value: "Captain" })
+    const char = s.changeCast({ _tag: "MacroBinding", name: "char", value: "Narrator" })
+    const latest = boundCast({ user: "Captain", char: "Narrator" })
+    answers[1]!({ ok: true, value: latest })
+    await vi.waitFor(() => expect(answers).toHaveLength(3))
+    answers[2]!({ ok: true, value: latest })
+    await char
+    answers[0]!({ ok: true, value: boundCast({ user: "Captain" }) })
+    await vi.waitFor(() => expect(answers).toHaveLength(4))
+    answers[3]!({ ok: true, value: latest })
+    await user
+    expect(s.snapshot().cast).toBe(latest)
+    s.dispose()
+  })
+
+  it("drops a pin's refreshed cast after switching forks", async () => {
+    const { s } = session()
+    const internals = s as unknown as {
+      view: ReturnType<typeof s.snapshot>
+      call: () => Promise<unknown>
+    }
+    const answers: Array<(value: unknown) => void> = []
+    internals.call = () => new Promise((resolve) => answers.push(resolve))
+    const original = boundCast()
+    const changed = boundCast({ user: "Captain" })
+    internals.view = { ...s.snapshot(), forkId: "old" as ForkId, cast: original }
+    const saving = s.changeCast({ _tag: "MacroBinding", name: "user", value: "Captain" })
+    answers[0]!({ ok: true, value: changed })
+    await vi.waitFor(() => expect(answers).toHaveLength(2))
+    internals.view = { ...s.snapshot(), forkId: "new" as ForkId }
+    answers[1]!({ ok: true, value: changed })
+    await saving
+    expect(s.snapshot().cast).toBe(original)
+    s.dispose()
+  })
+
+  it("a failed prompt-name save leaves an in-flight cast read valid", async () => {
+    const { s } = session()
+    const internals = s as unknown as {
+      call: () => Promise<unknown>
+      refreshCast: () => Promise<void>
+    }
+    const answers: Array<(value: unknown) => void> = []
+    internals.call = () => new Promise((resolve) => answers.push(resolve))
+    const reading = internals.refreshCast()
+    const saving = s.changeCast({ _tag: "MacroBinding", name: "user", value: "Captain" })
+    answers[1]!({ ok: false, error: { message: "Synthetic save failure" } })
+    await saving
+    const latest = boundCast({ char: "Narrator" })
+    answers[0]!({ ok: true, value: latest })
+    await reading
+    expect(s.snapshot().cast).toBe(latest)
+    s.dispose()
+  })
+
   for (const queued of [false, true]) {
     it(`a disabled reply policy sends reply=false for ${queued ? "queued" : "immediate"} messages`, async () => {
       const { s } = session()
