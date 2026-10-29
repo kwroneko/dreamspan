@@ -56,10 +56,9 @@ export function HistoryPanel({
   useEffect(() => {
     const timer = setTimeout(() => {
       if (active) void history()
-      else publish([])
     }, 0)
     return () => clearTimeout(timer)
-  }, [active, history, publish])
+  }, [active, history])
   useEffect(() => {
     const request = ++revision.current
 
@@ -121,7 +120,7 @@ export function HistoryPanel({
       clearTimeout(timer)
       if (revision.current === request) revision.current = request + 1
     }
-  }, [search, session, forkId, active, publish, view.lcm, view.history])
+  }, [search, session, forkId, publish, view.lcm, view.history])
   useEffect(() => () => publish([]), [publish])
   const undo = async (record: Record, slotId?: string, itemIds?: ReadonlyArray<number>) => {
     if (!target) return
@@ -160,7 +159,7 @@ export function HistoryPanel({
     [hits, skipped]
   )
   useEffect(() => {
-    publish(active && completedSearch === JSON.stringify(search) ? included : [])
+    publish(completedSearch === JSON.stringify(search) ? included : [], active)
   }, [active, completedSearch, search, included, publish])
   const apply = async (one: boolean) => {
     if (!target || JSON.stringify(search) !== completedSearch) return

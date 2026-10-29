@@ -16,6 +16,8 @@ import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
+import { SlotOutlet } from "../../slots.tsx"
+import { summaryPreviews } from "./presentation.tsx"
 
 function Problem({ error }: { error: AppError | null }) {
   return error ? (
@@ -298,6 +300,7 @@ function SummaryRow({
           <p className="max-h-48 overflow-y-auto text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{content}</p>
         )
       )}
+      {mode !== "edit" && <SlotOutlet slot={summaryPreviews} props={{ summary, session }} />}
       {mode !== "edit" && (
         <div className="flex flex-wrap gap-1">
           {summary.status !== "failed" && (
