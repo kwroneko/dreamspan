@@ -1,4 +1,4 @@
-import { messageEditorTools } from "./editorHistory.tsx"
+import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
 // One message: who wrote it (avatar, name, time, its number on the path, the model of a
 // generated version), its versions (swipe through them, pick one in the version picker, or
 // generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
@@ -24,7 +24,6 @@ import {
 import type { AppError } from "../../errors.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Textarea } from "../../ui/Field.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -167,18 +166,39 @@ function Editor({
   draft,
   label,
   saveLabel,
-  placeholder,
+  source,
+  session,
+  entry,
   onSave,
   onCancel
 }: {
   draft: MessageDraft
   label: string
   saveLabel: string
-  placeholder?: string
+  source: Version | undefined
+  session: ChatSession
+  entry: PathEntry
   onSave: () => void
   onCancel: () => void
 }) {
   const { text, error, conflict } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const [original, setOriginal] = useState<Version | undefined>(source)
+  useEffect(() => {
+    if (draft.target._tag !== "Edit" || source) return
+    let live = true
+    const id = draft.target.versionId
+    void session.listVersions(entry.slotId).then((result) => {
+      if (live && result.ok) setOriginal(result.value.find((version) => version.id === id))
+    })
+    return () => {
+      live = false
+    }
+  }, [session, entry.slotId, draft, source])
+  const base =
+    draft.target._tag === "Write"
+      ? ""
+      : (source ?? (original?.id === draft.target.versionId ? original : undefined))?.content
+
   return (
     <form
       className="flex flex-col gap-2"
@@ -191,14 +211,14 @@ function Editor({
           onCancel()
       }}
     >
-      <Textarea
-        aria-label={label}
-        value={text}
-        placeholder={placeholder}
-        className="max-h-[60vh] [field-sizing:content]"
-        autoFocus
-        onChange={(event) => draft.setText(event.currentTarget.value)}
-      />
+      {base === undefined ? (
+        <p role="status">Loading saved text…</p>
+      ) : (
+        <SlotOutlet
+          slot={messageTextEditor}
+          props={{ label, value: text, base, autoFocus: true, onChange: (value) => draft.setText(value) }}
+        />
+      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           The text isn’t saved as a draft yet: {error.message}
@@ -211,7 +231,7 @@ function Editor({
           switchText={() => draft.switchConflict()}
         />
       )}
-      <SlotOutlet slot={messageEditorTools} props={{ draft }} />
+      {base !== undefined && <SlotOutlet slot={messageEditorTools} props={{ draft, base }} />}
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
           <Icon name="check" />
@@ -628,12 +648,20 @@ export const Message = memo(function Message({
           <Editor
             key={editing}
             draft={editor}
+            session={session}
+            entry={entry}
+            source={
+              editor.target._tag === "Edit"
+                ? [version, ...(versions ?? [])].find(
+                    (item) => item.id === (editor.target._tag === "Edit" ? editor.target.versionId : null)
+                  )
+                : undefined
+            }
             {...(editing === "edit"
               ? { label: "Message text", saveLabel: "Save" }
               : {
                   label: "Your version",
-                  saveLabel: "Add as a new version",
-                  placeholder: "Write your own version of this message…"
+                  saveLabel: "Add as a new version"
                 })}
             onCancel={async () => {
               // Its text goes to the bin's recovered texts, never nowhere (DESIGN §6.2).

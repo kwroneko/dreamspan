@@ -1,5 +1,5 @@
 import { SlotOutlet } from "../../slots.tsx"
-import { summaryEditorTools } from "./editorHistory.tsx"
+import { summaryEditorTools, summaryTextEditor } from "./editorHistory.tsx"
 // The summaries in use on the path shown (DESIGN §8.1, ARCHITECTURE §16): by level and
 // range, each with its state and what can be done to it. Nothing here generates: asking for
 // a summary to be made again is a request the planner finds with the next reply.
@@ -10,7 +10,7 @@ import type { AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
-import { Textarea } from "../../ui/Field.tsx"
+import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
 import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
@@ -53,6 +53,30 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
     return () => store.dispose()
   }, [store])
   useEffect(() => store.update(summary), [store, summary])
+  const baseId = store.comparisonRevisionId
+  const [comparison, setComparison] = useState<SummaryRevision | null>(null)
+  const [comparisonError, setComparisonError] = useState<AppError | null>(null)
+  useEffect(() => {
+    if (baseId === summary.revisionId) return
+    let live = true
+    void session
+      .call((client) =>
+        client("ListSummaryRevisions", {
+          forkId: session.snapshot().forkId,
+          summaryId: summary.id
+        })
+      )
+      .then((result) => {
+        if (!live) return
+        if (result.ok) setComparison(result.value.find((revision) => revision.id === baseId) ?? null)
+        else setComparisonError(result.error)
+      })
+    return () => {
+      live = false
+    }
+  }, [session, baseId, summary.id, summary.revisionId])
+  const base =
+    baseId === summary.revisionId ? (summary.content ?? "") : comparison?.id === baseId ? comparison.content : null
   const [pending, setPending] = useState(false)
   const finish = async (action: () => Promise<{ ok: boolean }>) => {
     setPending(true)
@@ -72,11 +96,15 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
         })
       }}
     >
-      <Textarea
-        aria-label={`Text of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`}
-        value={view.text}
-        disabled={view.loading}
-        onChange={(event) => store.setText(event.currentTarget.value)}
+      <SlotOutlet
+        slot={summaryTextEditor}
+        props={{
+          label: `Text of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`,
+          value: view.text,
+          base: base ?? "",
+          readOnly: view.loading || base === null,
+          onChange: (value) => store.setText(value)
+        }}
       />
       <p className="text-xs text-muted" aria-live="polite">
         {view.unsaved
@@ -96,7 +124,8 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       )}
       {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
       {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
-      <SlotOutlet slot={summaryEditorTools} props={{ draft: store }} />
+      {base !== null && <SlotOutlet slot={summaryEditorTools} props={{ draft: store, base }} />}
+      <Problem error={comparisonError} />
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" pending={pending} disabled={!view.changed || view.text.trim() === ""}>
@@ -164,7 +193,11 @@ function Revisions({ session, summary }: { session: ChatSession; summary: LcmSum
                 </Button>
               )}
             </div>
-            <p className="line-clamp-3 text-sm whitespace-pre-wrap text-muted">{revision.content}</p>
+            <RevisionComparison
+              label={`Compare revision ${revision.number} with saved text`}
+              before={revision.content}
+              after={summary.content ?? ""}
+            />
           </li>
         ))}
       </ol>

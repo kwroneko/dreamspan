@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import type { VersionAmendment } from "@rp/shared/chatApi.ts"
+import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
+import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
 import { defineSlot } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
@@ -9,8 +11,16 @@ import type { MessageDraft } from "./messageDraft.ts"
 import type { SummaryDraft } from "./summaryDraft.ts"
 import { messageActions, type MessageActionProps } from "./messageActions.tsx"
 
-export const messageEditorTools = defineSlot<{ draft: MessageDraft }>("message.editor.tools")
-export const summaryEditorTools = defineSlot<{ draft: SummaryDraft }>("summary.editor.tools")
+export const messageEditorTools = defineSlot<{ draft: MessageDraft; base: string }>("message.editor.tools")
+export const summaryEditorTools = defineSlot<{ draft: SummaryDraft; base: string }>("summary.editor.tools")
+
+export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-editor")
+export const summaryTextEditor = defineSlot<CodeEditorProps>("summary.text-editor")
+
+function CurrentChanges({ draft, base }: { draft: MessageDraft | SummaryDraft; base: string }) {
+  const text = useSyncExternalStore(draft.subscribe, () => draft.snapshot().text)
+  return <RevisionComparison label="Compare with saved text" before={base} after={text} />
+}
 
 function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
   const [open, setOpen] = useState(false)
@@ -102,6 +112,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
   return (
     <Dialog
       open
+      wide
       onOpenChange={(open) => !open && closeDialog()}
       title="Saved amendment history"
       description="Earlier saved text of this human-written version. Restoring changes only this fork and keeps the current text in history."
@@ -120,7 +131,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
           {states.map((state) => (
             <li key={state.id} className="rounded-md border border-border p-3">
               <p className="text-sm text-muted">{new Date(state.at).toLocaleString()}</p>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm">{state.content}</pre>
+              <RevisionComparison label="Compare with saved text" before={state.content} after={base.version.content} />
               <Button
                 disabled={busy}
                 onClick={async () => {
@@ -153,6 +164,10 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
 }
 
 export const registerEditorHistory = () => [
+  messageTextEditor.register({ id: "message.code-editor", order: 10, component: CodeEditor }),
+  summaryTextEditor.register({ id: "summary.code-editor", order: 10, component: CodeEditor }),
+  messageEditorTools.register({ id: "message.current-changes", order: 20, component: CurrentChanges }),
+  summaryEditorTools.register({ id: "summary.current-changes", order: 20, component: CurrentChanges }),
   messageEditorTools.register({ id: "message.draft-history", order: 10, component: DraftHistory }),
   summaryEditorTools.register({ id: "summary.draft-history", order: 10, component: DraftHistory }),
   messageActions.register({

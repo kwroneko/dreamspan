@@ -109,10 +109,23 @@ for (const kind of ["message", "summary"] as const)
   })
 
 it("editor history and saved amendments are removable registered contributions", async () => {
-  const { registerEditorHistory, messageEditorTools, summaryEditorTools } =
+  const { registerEditorHistory, messageEditorTools, summaryEditorTools, messageTextEditor, summaryTextEditor } =
     await import("../src/features/chat/editorHistory.tsx")
   const { messageActions } = await import("../src/features/chat/messageActions.tsx")
   const disposers = registerEditorHistory()
+  expect(messageTextEditor.get("message.code-editor")).toBeDefined()
+  expect(summaryTextEditor.get("summary.code-editor")).toBeDefined()
+  expect(messageEditorTools.get("message.current-changes")).toBeDefined()
+  expect(summaryEditorTools.get("summary.current-changes")).toBeDefined()
+  const original = messageTextEditor.get("message.code-editor")!
+  const alternative = () => null
+  const replace = messageTextEditor.register({ ...original, component: alternative })
+  expect(messageTextEditor.get(original.id)?.component).toBe(alternative)
+  const disable = messageTextEditor.disable(original.id)
+  expect(messageTextEditor.get(original.id)).toBeUndefined()
+  disable()
+  replace()
+  expect(messageTextEditor.get(original.id)).toBe(original)
   expect(messageEditorTools.get("message.draft-history")).toBeDefined()
   expect(summaryEditorTools.get("summary.draft-history")).toBeDefined()
   expect(messageActions.get("message.amendments")?.dialog).toBeDefined()
@@ -120,4 +133,8 @@ it("editor history and saved amendments are removable registered contributions",
   expect(messageEditorTools.get("message.draft-history")).toBeUndefined()
   expect(summaryEditorTools.get("summary.draft-history")).toBeUndefined()
   expect(messageActions.get("message.amendments")).toBeUndefined()
+  expect(messageTextEditor.get("message.code-editor")).toBeUndefined()
+  expect(summaryTextEditor.get("summary.code-editor")).toBeUndefined()
+  expect(messageEditorTools.get("message.current-changes")).toBeUndefined()
+  expect(summaryEditorTools.get("summary.current-changes")).toBeUndefined()
 })

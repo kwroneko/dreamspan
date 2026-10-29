@@ -39,13 +39,15 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
     }
   }, [store, revision])
   const names = cardNames(docs?.doc ?? {})
-  const clash = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
+  const nameCheck = useCardNameCheck(names.displayName, names.version, state.snapshot!.ref)
+  const clash = state.snapshot!.ref.kind === "card" ? nameCheck : null
   const restore = async () => {
     if (!docs || clash) return
     const result = await call(
       (client) =>
         Effect.gen(function* () {
-          yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
+          if (state.snapshot!.ref.kind === "card")
+            yield* checkCardNames(client, names.displayName, names.version, state.snapshot!.ref)
           return yield* client("RestoreRevision", {
             refId: store.refId,
             revisionId: revision.id,

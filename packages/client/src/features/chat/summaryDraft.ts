@@ -103,6 +103,11 @@ export class SummaryDraft {
   }
   readonly snapshot = () => this.view
 
+  /** Revision named by the text shown, including a recovered or stale draft. */
+  get comparisonRevisionId() {
+    return this.base.revisionId ?? this.summary.revisionId
+  }
+
   private set(change: Partial<SummaryDraftView>) {
     this.view = { ...this.view, ...change }
     for (const listener of this.listeners) listener()
