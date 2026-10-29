@@ -67,6 +67,9 @@ export const previewForkNotes = Effect.fnUntraced(function* (
     )
   )
   if (changed.size === 0) return []
+  const cards = [
+    ...new Set([...thenState.participants, ...thenState.playedByMe, ...nowState.participants, ...nowState.playedByMe])
+  ]
   const rows = yield* sql<{ entity: EntityId; revision: string; doc_json: string; card_name: string | null }>`
     SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json,
       (SELECT label FROM entity_refs WHERE entity_id = json_extract(h.doc_json, '$.owner.card')
@@ -76,7 +79,7 @@ export const previewForkNotes = Effect.fnUntraced(function* (
     WHERE e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
       AND e.id IN ${sql.in([...changed])}
       AND (json_extract(h.doc_json, '$.owner.chat') = ${chatId}
-        OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(nowState.participants.length ? [...nowState.participants] : [""])})
+        OR json_extract(h.doc_json, '$.owner.card') IN ${sql.in(cards.length ? cards : [""])})
     ORDER BY e.id`
   const result: Array<ForkNote> = []
   for (const row of rows) {

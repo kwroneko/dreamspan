@@ -502,8 +502,11 @@ export const makeWriteHandlers = (bin: Bin) =>
           const fork = yield* createFork(chatId, from, atSlotId, Date.now())
           for (const row of comparison) {
             const choice = notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then"
+            // Positional inheritance already gives "then". Rewriting it would detach
+            // version-owned effects from their message and freeze default-on switches.
+            if (choice === "then") continue
             const selected = row[choice]
-            if (!row.card)
+            if (!row.card && selected.revision !== row.then.revision)
               yield* insertStateEvent(
                 userId,
                 chatId,
@@ -513,15 +516,16 @@ export const makeWriteHandlers = (bin: Bin) =>
                 { key: "note.binding", value: { note: row.note, revision: selected.revision as never } },
                 fork.id as ForkId
               )
-            yield* insertStateEvent(
-              userId,
-              chatId,
-              atSlotId,
-              null,
-              null,
-              { key: selected.enabled ? "note.activate" : "note.deactivate", value: { note: row.note } },
-              fork.id as ForkId
-            )
+            if (selected.enabled !== row.then.enabled)
+              yield* insertStateEvent(
+                userId,
+                chatId,
+                atSlotId,
+                null,
+                null,
+                { key: selected.enabled ? "note.activate" : "note.deactivate", value: { note: row.note } },
+                fork.id as ForkId
+              )
           }
           const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return { fork: yield* forkOut(fork.id), chat: toChat(chat!) }

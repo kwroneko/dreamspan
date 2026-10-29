@@ -120,6 +120,7 @@ const setup = Effect.gen(function* () {
     note: note.ref,
     cardNote: cardNote.ref,
     changed: changed.ref,
+    card: card.ref,
     payload,
     preview,
     state,
@@ -130,6 +131,127 @@ const setup = Effect.gen(function* () {
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seconds" })(
   "fork note inheritance",
   (it) => {
+    for (const membership of ["earlier cast", "played card"] as const)
+      it.effect(`offers activation choices for a card in the ${membership}`, () =>
+        Effect.gen(function* () {
+          const h = yield* setup
+          if (membership === "played card")
+            yield* h.writer.AddStateEvent({
+              userId: h.userId,
+              chatId: h.chat.id,
+              forkId: h.main,
+              slotId: h.a.slotId,
+              versionId: null,
+              scope: null,
+              data: { key: "played_by_me.set", value: { entities: [h.card.entityId] } }
+            })
+          yield* h.writer.AddStateEvent({
+            userId: h.userId,
+            chatId: h.chat.id,
+            forkId: h.main,
+            slotId: membership === "played card" ? h.a.slotId : h.b.slotId,
+            versionId: null,
+            scope: null,
+            data: { key: "participant.leave", value: { entity: h.card.entityId } }
+          })
+          const preview = yield* h.reader.PreviewForkNotes(h.payload)
+          const note = preview.find((row) => row.note === h.cardNote.entityId)
+          assert.isDefined(note)
+          assert.isTrue(note!.then.enabled)
+          assert.isFalse(note!.now.enabled)
+          const made = yield* h.writer.CreateFork({
+            ...h.payload,
+            notes: {
+              comparison: canonicalJson(preview),
+              choices: [{ note: h.cardNote.entityId, choice: "now" }]
+            }
+          })
+          const notes = yield* h.api.ListChatNotes({ chatId: h.chat.id, forkId: made.fork.id, slotId: h.a.slotId })
+          assert.isFalse(notes.find((row) => row.ref.entityId === h.cardNote.entityId)!.active)
+        })
+      )
+
+    it.effect("carrying a changed switch keeps an unchanged binding attached to its version", () =>
+      Effect.gen(function* () {
+        const h = yield* setup
+        yield* h.writer.AddStateEvent({
+          userId: h.userId,
+          chatId: h.chat.id,
+          forkId: h.main,
+          slotId: h.a.slotId,
+          versionId: h.a.version.id,
+          scope: null,
+          data: { key: "note.binding", value: { note: h.note.entityId, revision: h.changed.headRevisionId } }
+        })
+        const preview = yield* h.reader.PreviewForkNotes(h.payload)
+        const made = yield* h.writer.CreateFork({
+          ...h.payload,
+          notes: {
+            comparison: canonicalJson(preview),
+            choices: [{ note: h.note.entityId, choice: "now" }]
+          }
+        })
+        assert.strictEqual((yield* h.state(made.fork.id)).noteRevisions[h.note.entityId], h.changed.headRevisionId)
+        yield* h.writer.AddVersion({
+          userId: h.userId,
+          slotId: h.a.slotId,
+          forkId: made.fork.id,
+          version: new NewVersion({
+            speakerEntityId: null,
+            writer: "human",
+            content: "Another arrival.",
+            status: "complete",
+            macroMode: "verbatim",
+            origin: "user_written"
+          }),
+          select: true,
+          commitDraft: null
+        })
+        assert.strictEqual((yield* h.state(made.fork.id)).noteRevisions[h.note.entityId], h.note.headRevisionId)
+        assert.notInclude((yield* h.state(made.fork.id)).activeNotes, h.note.entityId)
+      })
+    )
+
+    for (const choice of ["then", "now"] as const)
+      it.effect(
+        `${choice} choices preserve unchanged version-attached switches when the inherited message is swiped`,
+        () =>
+          Effect.gen(function* () {
+            const h = yield* setup
+            yield* h.writer.AddStateEvent({
+              userId: h.userId,
+              chatId: h.chat.id,
+              forkId: h.main,
+              slotId: h.a.slotId,
+              versionId: h.a.version.id,
+              scope: null,
+              data: { key: "note.deactivate", value: { note: h.note.entityId } }
+            })
+            const preview = yield* h.reader.PreviewForkNotes(h.payload)
+            const made = yield* h.writer.CreateFork({
+              ...h.payload,
+              notes: { comparison: canonicalJson(preview), choices: [{ note: h.note.entityId, choice }] }
+            })
+            assert.notInclude((yield* h.state(made.fork.id)).activeNotes, h.note.entityId)
+            yield* h.writer.AddVersion({
+              userId: h.userId,
+              slotId: h.a.slotId,
+              forkId: made.fork.id,
+              version: new NewVersion({
+                speakerEntityId: null,
+                writer: "human",
+                content: "Another arrival.",
+                status: "complete",
+                macroMode: "verbatim",
+                origin: "user_written"
+              }),
+              select: true,
+              commitDraft: null
+            })
+            assert.include((yield* h.state(made.fork.id)).activeNotes, h.note.entityId)
+          })
+      )
+
     it.effect("previews text and switches; mixed choices persist independently and later forks inherit them", () =>
       Effect.gen(function* () {
         const h = yield* setup
@@ -152,7 +274,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "120 seco
         const state = yield* h.state(made.fork.id)
         assert.strictEqual(state.noteRevisions[h.note.entityId], h.changed.headRevisionId)
         assert.notInclude(state.activeNotes, h.note.entityId)
-        assert.include(state.activeNotes, h.cardNote.entityId)
+        const notes = yield* h.api.ListChatNotes({ chatId: h.chat.id, forkId: made.fork.id, slotId: h.a.slotId })
+        assert.isTrue(notes.find((row) => row.ref.entityId === h.cardNote.entityId)!.active)
         // Card-note choices change activation only; card text keeps its library ownership.
         assert.isUndefined(state.noteRevisions[h.cardNote.entityId])
         const parent = yield* h.state(h.main, h.b.slotId)
