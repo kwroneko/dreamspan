@@ -92,6 +92,9 @@ export const makeWriteHandlers = (bin: Bin) =>
           SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id WHERE f.id = ${key.field}
           AND c.owner_user_id = ${userId} AND f.chat_id = json_extract(h.doc_json, '$.owner.shared')
           AND f.deleted_at IS NULL AND c.deleted_at IS NULL))`,
+      // The chat owns an edit even after its queue entry posts or is withdrawn.
+      queue_edit: (userId, key) => sql`SELECT count(*) AS n FROM chats c
+        WHERE c.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`,
       summary_edit: (userId, key) => sql`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     }

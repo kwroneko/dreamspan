@@ -400,7 +400,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ListQueued: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.ListQueued({ userId: id, chatId })).pipe(internal("ListQueued")),
 
-    EditQueued: ({ queuedId, content, speakerEntityId, expectedRowVersion }) =>
+    EditQueued: ({ queuedId, content, speakerEntityId, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const { queued, queue } = yield* writer.EditQueued({
@@ -408,6 +408,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           queuedId,
           content,
           speakerEntityId,
+          ...(draft === undefined ? {} : { draft }),
           expectedRowVersion
         })
         hub.publish(queued.chatId, { _tag: "Queue", queue })

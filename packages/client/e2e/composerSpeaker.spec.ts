@@ -74,6 +74,7 @@ for (const [width, height] of [
         })
       )
       await page.goto(`${server().url}/chats/${chatId}`)
+      if (width < 640) await page.getByRole("button", { name: "Composer options", exact: true }).click()
       await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
       if (turns > 60) await expect(page.getByText("Mira's earlier turn", { exact: true })).toHaveCount(0)
       const deleted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
@@ -86,6 +87,10 @@ for (const [width, height] of [
       // Delete again, then verify both send paths actually use the corrected order.
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteMessage({ slotId: first }))
       await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
+      if (width < 640) {
+        await page.keyboard.press("Escape")
+        await expect(page.getByRole("dialog", { name: "Next reply", exact: true })).toHaveCount(0)
+      }
       if (turns === 2) {
         await composer(page).fill("A new persona turn after deletion.")
         await page.getByRole("button", { name: "Send as Ana", exact: true }).click()

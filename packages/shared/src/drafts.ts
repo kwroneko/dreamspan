@@ -11,7 +11,8 @@ export const DraftTargetKind = Schema.Literals([
   "snippet",
   "entity_field",
   "user_field",
-  "summary_edit"
+  "summary_edit",
+  "queue_edit"
 ])
 
 /** What a draft is for: the composer of a chat, the edit of a version, a field of a ref... */

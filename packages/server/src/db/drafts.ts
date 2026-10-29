@@ -255,11 +255,12 @@ export const makeDraftStore = (
   const listMessageDrafts = (userId: UserId, chatId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
-      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND d.content <> '' AND (
+      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.target_kind = 'queue_edit') AND (
         (d.target_kind = 'version_edit' AND d.target_id IN (SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s
-          WHERE s.chat_id = ${chatId} AND s.deleted_at IS NULL)))
+          WHERE s.chat_id = ${chatId} AND s.deleted_at IS NULL))
+        OR (d.target_kind = 'queue_edit' AND d.target_id = ${chatId}))
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
   /** The text of state `seq`: the current text with newer entries undone. */

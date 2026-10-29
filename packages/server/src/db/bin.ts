@@ -933,6 +933,8 @@ export const makeBin = (sql: SqlClient.SqlClient, limits: BinLimits, now: () => 
       switch (key.targetKind) {
         case "user_field":
           return `${key.targetId} › ${key.field}`
+        case "queue_edit":
+          return `Queued text in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "composer":
           return `Composer in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "version_edit":

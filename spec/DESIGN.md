@@ -1,6 +1,6 @@
 # Design: requirements and decisions
 
-**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Each item is marked:
+**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Composer backlog U03/U06/U07 built 2026-10-28: queue edit drafts and recovery (§6.2), pending cast speaker/guidance parity (§2.2), and version-only Stop (§3.1) are implemented; those requirements are now documented in ARCHITECTURE.md §12. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
 - **[O] Open**: needs a decision.

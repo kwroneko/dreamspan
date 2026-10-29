@@ -62,23 +62,38 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
       : warmth.verified
         ? "The provider reported using its cache on the last request."
         : "Assumed: the provider didn't report its cache on the last request."
+  const badge = (
+    <Badge tone={warm ? "success" : changed ? "warning" : "neutral"}>
+      {!timed ? "Cache rewrite" : warm ? "Cache warm" : "Cache cold"} (estimate)
+    </Badge>
+  )
+  const timer = warm && countdown && <span className="tabular-nums">{clock(expiresAt - now)} left</span>
+  const countdownButton = warm && (
+    <Button variant="ghost" className="h-6 px-2 text-xs" onClick={toggle}>
+      {countdown ? "Hide countdown" : "Show countdown"}
+    </Button>
+  )
   return (
-    <section
-      aria-label="Cache estimate"
-      className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 py-1 text-xs text-muted"
-    >
-      <span aria-live="polite" className="flex flex-wrap items-center gap-2">
-        <Badge tone={warm ? "success" : changed ? "warning" : "neutral"}>
-          {!timed ? "Cache rewrite" : warm ? "Cache warm" : "Cache cold"} (estimate)
-        </Badge>
-        <span>{detail}</span>
-      </span>
-      {warm && countdown && <span className="tabular-nums">{clock(expiresAt - now)} left</span>}
-      {warm && (
-        <Button variant="ghost" className="h-6 px-2 text-xs" onClick={toggle}>
-          {countdown ? "Hide countdown" : "Show countdown"}
-        </Button>
-      )}
+    <section aria-label="Cache estimate" className="mx-auto w-full max-w-3xl py-1 text-xs text-muted">
+      <details className="relative sm:hidden">
+        <summary className="flex cursor-pointer items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          {badge}
+          {timer}
+          <span className="ml-auto">Cache details</span>
+        </summary>
+        <div className="absolute bottom-full z-20 mb-1 flex max-h-48 w-full flex-wrap items-center gap-2 overflow-y-auto rounded-md border border-border bg-surface p-3 text-text shadow-lg">
+          <span>{detail}</span>
+          {countdownButton}
+        </div>
+      </details>
+      <div className="hidden flex-wrap items-center gap-x-2 gap-y-1 sm:flex">
+        <span aria-live="polite" className="flex flex-wrap items-center gap-2">
+          {badge}
+          <span>{detail}</span>
+        </span>
+        {timer}
+        {countdownButton}
+      </div>
     </section>
   )
 }

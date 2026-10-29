@@ -23,7 +23,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE drafts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field')),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field', 'queue_edit')),
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
@@ -443,7 +443,7 @@ export const baseline: ReadonlyArray<string> = [
     PRIMARY KEY (draft_id, seq)
   ) STRICT, WITHOUT ROWID`,
   `CREATE TRIGGER drafts_gc_chat AFTER DELETE ON chats
-    BEGIN DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.id; END`,
+    BEGIN DELETE FROM drafts WHERE target_kind IN ('composer', 'queue_edit') AND target_id = OLD.id; END`,
   `CREATE TRIGGER drafts_gc_version AFTER DELETE ON versions
     BEGIN DELETE FROM drafts WHERE target_kind = 'version_edit' AND target_id = OLD.id; END`,
   `CREATE TRIGGER drafts_gc_slot AFTER DELETE ON slots

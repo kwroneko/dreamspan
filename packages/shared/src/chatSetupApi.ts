@@ -459,7 +459,8 @@ export class ChatSetupApi extends RpcGroup.make(
       queuedId: Schema.String,
       content: Schema.String,
       speakerEntityId: Schema.NullOr(EntityId),
-      expectedRowVersion: Schema.Int
+      expectedRowVersion: Schema.Int,
+      draft: Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
     },
     success: QueuedMessage,
     error: Schema.Union([NotFound, StaleWrite, ServerError])

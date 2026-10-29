@@ -8,7 +8,7 @@
 // As for summaries, text typed is copied into this browser (`editor/backup.ts`) until the
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
-import type { SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
@@ -18,10 +18,14 @@ import type { ChatSession, Outcome } from "./session.ts"
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 400
 
-export type MessageEditorKey = `edit:${string}` | `write:${string}`
+export type MessageEditorKey = `edit:${string}` | `write:${string}` | `queue:${string}`
 
 export const editorKey = (target: MessageDraftTarget): MessageEditorKey =>
-  target._tag === "Edit" ? `edit:${target.versionId}` : `write:${target.slotId}`
+  target._tag === "Edit"
+    ? `edit:${target.versionId}`
+    : target._tag === "Write"
+      ? `write:${target.slotId}`
+      : `queue:${target.queuedId}`
 
 /** What this browser's copies (backup.ts) file a chat's message editors under. */
 export const messageCopies = (chatId: string) => `messages:${chatId}`
@@ -32,7 +36,14 @@ export const targetOf = (draft: Draft): MessageDraftTarget | null =>
     ? { _tag: "Edit", versionId: draft.key.targetId as VersionId }
     : draft.key.targetKind === "scratchpad"
       ? { _tag: "Write", slotId: draft.key.targetId as SlotId }
-      : null
+      : draft.key.targetKind === "queue_edit"
+        ? {
+            _tag: "Queue",
+            chatId: draft.key.targetId as ChatId,
+            queuedId: draft.key.field,
+            rowVersion: Number(draft.baseRevision ?? 0)
+          }
+        : null
 
 export interface MessageDraftView {
   /** What the box shows. */
@@ -282,6 +293,38 @@ export class MessageDraft {
     this.local = null
     this.forget()
     return true
+  }
+
+  async history() {
+    await this.save()
+    if (this.target._tag !== "Queue") return { ok: true as const, value: [] }
+    const target = this.target
+    return this.session.call((client) => client("QueueDraftHistory", target))
+  }
+
+  async restoreState(seq: number) {
+    await this.save()
+    return this.serial(async () => {
+      const draft = this.draft
+      const target = this.target
+      if (this.local !== null || draft === null || target._tag !== "Queue") return
+      const shown = this.view.text
+      const result = await this.session.call((client) =>
+        client("RestoreQueueDraft", {
+          chatId: target.chatId,
+          queuedId: target.queuedId,
+          draftId: draft.id,
+          seq,
+          expectedRowVersion: draft.rowVersion
+        })
+      )
+      if (!result.ok) return this.set({ error: result.error })
+      this.draft = result.value
+      if (this.local === null && this.view.text === shown) {
+        this.base = baseOf(result.value)
+        this.set({ text: result.value.content })
+      }
+    })
   }
 
   acknowledgeConflict() {

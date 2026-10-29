@@ -7,10 +7,12 @@ import type { ReplyFrom } from "./ReplyFrom.tsx"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
-type Placement = "settings" | "speaker" | "actions" | "guidance" | "reply"
+type Placement = "settings" | "speaker" | "actions" | "guidance" | "reply" | "queue" | "help"
 type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
+  readonly compact?: boolean
+  readonly recoverQueued: (text: string) => void
   readonly session: ChatSession
   readonly view: ChatView
   readonly onSettings: (tab: "model" | "preset") => void

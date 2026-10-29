@@ -1,3 +1,8 @@
+import {
+  invokePendingComposer,
+  pendingComposerControls,
+  type PendingComposerContext
+} from "../src/features/chat/pendingComposerControls.tsx"
 import { Effect } from "effect"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -108,6 +113,27 @@ describe("composer contributions", () => {
     await invokeComposerControl("composer.send", context, "keyboard")
     expect(send).toHaveBeenCalledTimes(1)
     expect(composerControls.get("synthetic.control")).toBeUndefined()
+  })
+
+  it("pending Enter follows guidance through overridable registered actions", async () => {
+    const start = vi.fn(async () => {})
+    const context = { guidance: false, start } as unknown as PendingComposerContext
+    await invokePendingComposer(context)
+    await invokePendingComposer({ ...context, guidance: true })
+    expect(start.mock.calls).toEqual([["send"], ["generate"]])
+    const close = pendingComposerControls.disable("pending.generate")
+    await invokePendingComposer({ ...context, guidance: true })
+    expect(start).toHaveBeenCalledTimes(2)
+    close()
+  })
+
+  it("keeps Stop exclusively on versions, even while the selected leaf generates", () => {
+    const context = {
+      leafGenerating: true,
+      leaf: { version: { writer: "model" } }
+    } as unknown as ComposerControlContext
+    expect(composerControls.get("composer.stop")).toBeUndefined()
+    expect(availableComposerControls("actions", context).map((entry) => entry.id)).not.toContain("composer.stop")
   })
 
   it("preserves the empty-text difference between Enter and the reply-now button", async () => {

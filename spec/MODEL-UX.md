@@ -1,6 +1,6 @@
 # Model rules at the UI boundary
 
-**Status: Input for discussion, 2026-10-14; nothing decided**. Cases 11 (length cutoff) and 84 (binding controls) are built (U08/U09, 2026-10-28; ARCHITECTURE.md §12, §15), superseding their missing-behavior notes.
+**Status: Input for discussion, 2026-10-14; nothing decided**. Cases 11 (length cutoff) and 84 (binding controls) are built (U08/U09, 2026-10-28; ARCHITECTURE.md §12, §15), superseding their missing-behavior notes. Cases 10 and 74 are implemented through the later owner decisions (U07 version-only Stop and U03 durable queue edits, 2026-10-28); see ARCHITECTURE.md §12.
 
 The owner, 2026-10-14: “the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly.” [DESIGN §3.1](DESIGN.md#31-slots-and-versions) now records that presentation question as **[O]**. This inventory supplies discussion cases, not a proposed design or approval of the existing UI.
 
