@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@rp/shared/modelSettings.ts"
 import { Schema } from "effect"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
@@ -105,18 +106,49 @@ const DEFAULT_LABELS: Partial<Record<SamplerKey, string>> = {
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
 export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?: () => void }) {
   const action = useAction()
-  const [rowVersion, setRowVersion] = useState(model.rowVersion)
-  const [name, setName] = useState(model.overrides.name ?? "")
-  const [context, setContext] = useState(model.overrides.context?.toString() ?? "")
-  const [maxOutput, setMaxOutput] = useState(model.overrides.maxOutput?.toString() ?? "")
-  const [vision, setVision] = useState<Tri>(triOf(model.overrides.vision))
-  const [reasoning, setReasoning] = useState<Tri>(triOf(model.overrides.reasoning))
-  const [tools, setTools] = useState<Tri>(triOf(model.overrides.tools))
-  const [prefill, setPrefill] = useState<PrefillChoice>(model.overrides.prefill ?? "auto")
-  const [capabilities, setCapabilities] = useState(JSON.stringify(model.overrides, null, 2))
-  const [settings, setSettings] = useState(JSON.stringify(model.overrides.settings ?? {}, null, 2))
-  // Number fields as typed, until they parse: "0." on the way to "0.7", or empty.
-  const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
+  const [committed, setCommitted] = useState<Model | null>(null)
+  const savedModel = committed ?? model
+  const durable = useUserDraft(
+    `model:${model.id}`,
+    "Custom settings",
+    JSON.stringify({
+      name: savedModel.overrides.name ?? "",
+      context: savedModel.overrides.context?.toString() ?? "",
+      maxOutput: savedModel.overrides.maxOutput?.toString() ?? "",
+      vision: triOf(savedModel.overrides.vision),
+      reasoning: triOf(savedModel.overrides.reasoning),
+      tools: triOf(savedModel.overrides.tools),
+      prefill: savedModel.overrides.prefill ?? "auto",
+      capabilities: JSON.stringify(savedModel.overrides, null, 2),
+      settings: JSON.stringify(savedModel.overrides.settings ?? {}, null, 2),
+      drafts: {},
+      rowVersion: savedModel.rowVersion
+    })
+  )
+  const values = JSON.parse(durable.text) as {
+    name: string
+    context: string
+    maxOutput: string
+    vision: Tri
+    reasoning: Tri
+    tools: Tri
+    prefill: PrefillChoice
+    capabilities: string
+    settings: string
+    drafts: Readonly<Record<string, string>>
+    rowVersion: number
+  }
+  const { name, context, maxOutput, vision, reasoning, tools, prefill, capabilities, settings, drafts } = values
+  const edit = <K extends keyof typeof values>(key: K, value: (typeof values)[K]) =>
+    durable.setText(JSON.stringify({ ...values, [key]: value }))
+  const setName = (value: string) => edit("name", value)
+  const setContext = (value: string) => edit("context", value)
+  const setMaxOutput = (value: string) => edit("maxOutput", value)
+  const setVision = (value: Tri) => edit("vision", value)
+  const setReasoning = (value: Tri) => edit("reasoning", value)
+  const setTools = (value: Tri) => edit("tools", value)
+  const setPrefill = (value: PrefillChoice) => edit("prefill", value)
+  const setCapabilities = (value: string) => edit("capabilities", value)
   const [problem, setProblem] = useState<string | null>(null)
   let current: typeof ModelSettings.Type | null = null
   try {
@@ -125,8 +157,7 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
     // The JSON editor shows the problem on save; the fields wait until it's valid.
   }
   const replaceSettings = (next: string) => {
-    setSettings(next)
-    setDrafts({})
+    durable.setText(JSON.stringify({ ...values, settings: next, drafts: {} }))
   }
   const contextValue = parseOptionalInt(context, 1)
   const maxOutputValue = parseOptionalInt(maxOutput, 1)
@@ -166,18 +197,37 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         prefill: prefill === "auto" ? undefined : prefill
       }).filter(([, value]) => value !== undefined)
     )
-    const result = await action.run(
-      (client) => client("EditModel", { modelId: model.id, overrides, expectedRowVersion: rowVersion }),
-      ["models"]
-    )
-    if (result.ok) {
-      setRowVersion(result.value.rowVersion)
-      onSaved?.()
-    }
+    let savedVersion = values.rowVersion
+    await durable
+      .commit(
+        durable.text,
+        async () => {
+          const result = await action.run(
+            (client) =>
+              client("EditModel", {
+                modelId: model.id,
+                overrides,
+                expectedRowVersion:
+                  committed === null ? values.rowVersion : Math.max(values.rowVersion, committed.rowVersion)
+              }),
+            ["models"]
+          )
+          if (result.ok) {
+            savedVersion = result.value.rowVersion
+            setCommitted(result.value)
+          }
+          return result.ok
+        },
+        (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion })
+      )
+      .then((ok) => {
+        if (ok) onSaved?.()
+      })
   }
 
   return (
     <form onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
+      <UserDraftStatus draft={durable} />
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
@@ -248,8 +298,13 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
                         : Number.isFinite(number)
                           ? { ...rest, [key]: number }
                           : (current.samplers ?? {})
-                  setSettings(JSON.stringify({ ...current, samplers }, null, 2))
-                  setDrafts((previous) => ({ ...previous, [key]: text }))
+                  durable.setText(
+                    JSON.stringify({
+                      ...values,
+                      settings: JSON.stringify({ ...current, samplers }, null, 2),
+                      drafts: { ...drafts, [key]: text }
+                    })
+                  )
                 }}
               />
             </Field>
@@ -305,8 +360,22 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
         title="Not saved"
         actions={
           action.error?.tag === "StaleWrite" ? (
-            <Button variant="ghost" onClick={() => onSaved?.()}>
-              Close and reload
+            <Button
+              variant="ghost"
+              onClick={() =>
+                void durable.discard(async () => {
+                  const result = await action.run((client) =>
+                    client("ListModels", { connectionId: model.connectionId, includeHidden: true })
+                  )
+                  if (!result.ok) return false
+                  const latest = result.value.find((entry) => entry.id === model.id)
+                  if (!latest) return false
+                  setCommitted(latest)
+                  return true
+                })
+              }
+            >
+              Load the latest
             </Button>
           ) : undefined
         }
@@ -339,14 +408,21 @@ function AddModelDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const action = useAction()
-  const [key, setKey] = useState("")
+  const durable = useUserDraft(`connection:${connectionId}`, "New model id", "")
+  const { text: key, setText: setKey } = durable
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const result = await action.run(
-      (client) => client("AddUserModel", { connectionId, key: key.trim(), overrides: {} }),
-      ["models"]
-    )
-    if (result.ok) onOpenChange(false)
+    await durable
+      .commit(key, async () => {
+        const result = await action.run(
+          (client) => client("AddUserModel", { connectionId, key: key.trim(), overrides: {} }),
+          ["models"]
+        )
+        return result.ok
+      })
+      .then((ok) => {
+        if (ok) onOpenChange(false)
+      })
   }
   return (
     <Dialog
@@ -356,6 +432,7 @@ function AddModelDialog({
       description="For a model the provider doesn't list. Use the exact id the API expects."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <UserDraftStatus draft={durable} />
         <Field label="Model id">
           <Input value={key} onValueChange={setKey} autoCapitalize="none" spellCheck={false} />
         </Field>

@@ -1,6 +1,7 @@
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
 // AppApi. Every text field edits through a draft on the server, with its own undo history;
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
+import { UserId } from "./domain.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
@@ -105,7 +106,52 @@ export const EditorDraftSave = Schema.Struct({
   baseRevisionId: Schema.NullOr(RevisionId)
 })
 
+/** Non-secret authored settings and pre-creation text; keys are private to the authenticated user. */
+export const UserDraftSave = Schema.Struct({
+  ownerId: UserId,
+  targetId: Schema.String,
+  field: Schema.String,
+  draftId: Schema.NullOr(Schema.String),
+  content: Schema.String,
+  expectedRowVersion: Schema.NullOr(Schema.Int),
+  expectedSession: Schema.NullOr(Schema.Int)
+})
+
 export class EditorApi extends RpcGroup.make(
+  Rpc.make("GetUserDraft", {
+    payload: { ownerId: UserId, targetId: Schema.String, field: Schema.String },
+    success: Schema.NullOr(Draft),
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("SaveUserDraft", { payload: UserDraftSave.fields, success: Draft, error: Schema.Union([...Writes]) }),
+  Rpc.make("UserDraftHistory", {
+    payload: { ownerId: UserId, targetId: Schema.String, field: Schema.String },
+    success: Schema.Array(DraftState),
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("RestoreUserDraft", {
+    payload: {
+      ownerId: UserId,
+      targetId: Schema.String,
+      field: Schema.String,
+      draftId: Schema.String,
+      ...DraftRestore
+    },
+    success: Draft,
+    error: Schema.Union([...Writes])
+  }),
+  Rpc.make("EndUserDraft", {
+    payload: {
+      ownerId: UserId,
+      targetId: Schema.String,
+      field: Schema.String,
+      draftId: Schema.String,
+      expectedRowVersion: Schema.Int,
+      outcome: Schema.Literals(["committed", "discarded"])
+    },
+    success: Draft,
+    error: Schema.Union([...Writes])
+  }),
   Rpc.make("OpenEditor", {
     payload: { refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: EditorSnapshot,

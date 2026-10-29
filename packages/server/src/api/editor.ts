@@ -80,6 +80,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
     <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.tap(effect, () => warmth.refreshUser(id))
 
+  const userKey = (targetId: string, field: string) => new DraftKey({ targetKind: "user_field", targetId, field })
+  const draftOwner = (ownerId: UserId) =>
+    Effect.flatMap(userId, (id) =>
+      id === ownerId ? Effect.succeed(id) : Effect.fail(new NotFound({ entity: "draft owner", id: ownerId }))
+    )
   const handlers = {
     ListSnippets: (args) =>
       Effect.flatMap(userId, (id) => reader.ListSnippets({ userId: id, ...args })).pipe(settle("ListSnippets")),
@@ -95,6 +100,26 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.MakeSnippetGlobal({ userId: id, ...args }).pipe(changed(id))).pipe(
         settle("MakeSnippetGlobal")
       ),
+    GetUserDraft: ({ ownerId, targetId, field }) =>
+      Effect.flatMap(draftOwner(ownerId), (id) => reader.GetDraft({ userId: id, key: userKey(targetId, field) })).pipe(
+        settle("GetUserDraft")
+      ),
+    SaveUserDraft: ({ ownerId, targetId, field, ...save }) =>
+      Effect.flatMap(draftOwner(ownerId), (id) =>
+        writer.SaveDraft({ userId: id, key: userKey(targetId, field), ...save, baseRevision: null })
+      ).pipe(settle("SaveUserDraft")),
+    UserDraftHistory: ({ ownerId, targetId, field }) =>
+      Effect.flatMap(draftOwner(ownerId), (id) =>
+        reader.DraftHistory({ userId: id, key: userKey(targetId, field), limit: 1000 })
+      ).pipe(settle("UserDraftHistory")),
+    RestoreUserDraft: ({ ownerId, targetId, field, ...restore }) =>
+      Effect.flatMap(draftOwner(ownerId), (id) =>
+        writer.RestoreDraftState({ userId: id, key: userKey(targetId, field), ...restore })
+      ).pipe(settle("RestoreUserDraft")),
+    EndUserDraft: ({ ownerId, targetId, field, ...end }) =>
+      Effect.flatMap(draftOwner(ownerId), (id) =>
+        writer.ClearDraft({ userId: id, key: userKey(targetId, field), ...end })
+      ).pipe(settle("EndUserDraft")),
     OpenEditor: ({ refId, chatNote }) =>
       Effect.flatMap(userId, (id) => reader.OpenEditor({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })).pipe(
         settle("OpenEditor")

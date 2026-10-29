@@ -226,6 +226,7 @@ export function BranchMenu({
         )}
       </Menu>
       <NameDialog
+        draftTarget={`chat:${session.id}:branch:${naming?.slotId ?? ""}`}
         open={naming !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -241,10 +242,11 @@ export function BranchMenu({
         pending={write.pending}
         error={write.error}
         onSave={async (name) => {
-          if (naming === null) return
+          if (naming === null) return false
           const result = await write.run(() => session.nameFork(naming, name))
-          if (!result.ok) return
+          if (!result.ok) return false
           setNaming(null)
+          return true
         }}
       />
     </>
@@ -291,6 +293,7 @@ function ChatTitle({ session, view, name }: { session: ChatSession; view: ChatVi
         </Tooltip>
       </h1>
       <NameDialog
+        draftTarget={`chat:${session.id}:rename`}
         open={open}
         onOpenChange={setOpen}
         title="Rename chat"
@@ -312,6 +315,7 @@ function ChatTitle({ session, view, name }: { session: ChatSession; view: ChatVi
               ? await write.run(() => session.renameGroup(next))
               : await write.run(() => session.rename(next))
           if (result.ok) setOpen(false)
+          return result.ok
         }}
       >
         {group !== null &&

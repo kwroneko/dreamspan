@@ -1,6 +1,6 @@
 # Design: requirements and decisions
 
-**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. Each item is marked:
+**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
 - **[O] Open**: needs a decision.
@@ -410,7 +410,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - Starting a branch copies the current composer into it.
   - Switching between existing branches doesn't carry text along: moving text to another branch or chat is copy and paste, which is simpler than a composer that follows you around.
 - **[P]** Anything appended at a branch's tip, such as a model reply, carries that branch's composer forward to the new tip, so text typed meanwhile stays in view.
-- **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices.
+- **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices. **Built for U02/U05**: both summarization instructions, non-secret connection/model forms, pending-chat prose and the short creation/rename forms; implementation and remaining live-subscription limit: ARCHITECTURE §3.10. The broader requirement still applies to other text surfaces.
 - **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10).
 - **[D]** A bad save can lose hours of typing in any field (a card, a preset), whatever happened to the previous version. So when a draft is committed, the text from before **each** destructive change in that session goes to the bin's recovered-text section, and a discarded draft goes there too (owner, 2026-10-10).
 - **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.

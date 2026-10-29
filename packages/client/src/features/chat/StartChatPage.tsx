@@ -1,8 +1,8 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // A chat that doesn't exist yet (DESIGN §2.1): a card's greeting, with its alternates to
-// pick from and `{{user}}` following the persona picked, and a composer. Nothing is saved
-// until the first send, so opening cards never leaves greeting-only chats behind. What's
-// typed is kept in this browser (editor/backup.ts) until that send makes the chat, whose
-// own composer draft takes over: leaving and coming back finds it (DESIGN §6.2).
+// pick from and `{{user}}` following the persona picked, and a composer. The chat is made
+// only on the first send, so opening cards leaves no greeting-only chats behind. Pending
+// prose has a private server draft and browser copy before that chat exists (DESIGN §6.2).
 //
 // A new chat of a group (`/groups/$chatId/new`) is the same, with the group's characters:
 // each member greets in turn, as ST starts a group chat (`getGroupChat` in its
@@ -178,10 +178,18 @@ function Pending({
           group.group.name,
           group.group.members.map((member) => member.entityId)
         )
-  const copy = useRef<Copy | null>(null)
+  const durable = useUserDraft(copyKey, "First message", "")
   const sending = useRef<string | null>(null)
   const destination = useRef<string | null>(null)
+  useEffect(() => {
+    if (durable.ready && sending.current === null) {
+      typed.current = durable.text
+      setTextState(durable.text)
+    }
+  }, [durable.ready, durable.text])
+  const copy = useRef<Copy | null>(null)
   const keep = (content: string) => {
+    if (destination.current === null) durable.setText(content)
     const previous = copy.current
     copy.current = null
     if (content === "") {
@@ -328,6 +336,7 @@ function Pending({
     // the extra text addressed to the saved chat, before navigating or opening its draft.
     destination.current = result.value.chat.id
     await keep(typed.current)
+    await durable.commit(durable.text, async () => true)
     void navigate({
       to: "/chats/$chatId",
       params: { chatId: result.value.chat.id },
@@ -440,6 +449,7 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+        <UserDraftStatus draft={durable} />
         <div className="flex justify-end text-sm">
           <Switch
             checked={guidance}

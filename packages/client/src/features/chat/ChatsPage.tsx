@@ -1,10 +1,11 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 // The chats as a page (DESIGN §2.1): the sidebar's list, full width, for phones, where the
 // sidebar is folded away. Chats with characters start from the character grid; this page
 // also starts one without any.
 import type { Chat } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useEffect, useState } from "react"
+import { type FormEvent, useEffect } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -21,14 +22,19 @@ export function ChatBadges({ chat }: { chat: Pick<Chat, "title"> }) {
 function EmptyChat() {
   const action = useAction()
   const navigate = useNavigate()
-  const [title, setTitle] = useState("")
+  const durable = useUserDraft("chat:new", "Title", "")
+  const { text: title, setText: setTitle } = durable
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const result = await action.run((client) => client("CreateChat", { title }), ["chats"])
-    if (result.ok) void navigate({ to: "/chats/$chatId", params: { chatId: result.value.id } })
+    await durable.commit(title, async () => {
+      const result = await action.run((client) => client("CreateChat", { title }), ["chats"])
+      if (result.ok) void navigate({ to: "/chats/$chatId", params: { chatId: result.value.id } })
+      return result.ok
+    })
   }
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
+      <UserDraftStatus draft={durable} />
       <div className="flex gap-2">
         <Input
           aria-label="Title of the new chat"

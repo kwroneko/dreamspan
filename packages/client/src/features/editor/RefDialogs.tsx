@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "./userDraft.tsx"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
@@ -20,9 +21,20 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
   const action = useAction()
   const navigate = useNavigate()
   const dirty = state.dirty > 0
-  const [label, setLabel] = useState(ref.kind === "card" ? ref.label : `${ref.label} (variant)`)
-  const [subtitle, setSubtitle] = useState(ref.kind === "card" ? ref.subtitle : "")
-  const [nickname, setNickname] = useState(cardNames(state.snapshot!.doc).modelName)
+  const durable = useUserDraft(
+    `ref:${ref.id}:fork`,
+    "Names",
+    JSON.stringify({
+      label: ref.kind === "card" ? ref.label : `${ref.label} (variant)`,
+      subtitle: ref.kind === "card" ? ref.subtitle : "",
+      nickname: cardNames(state.snapshot!.doc).modelName
+    })
+  )
+  const names = JSON.parse(durable.text) as { label: string; subtitle: string; nickname: string }
+  const { label, subtitle, nickname } = names
+  const setLabel = (label: string) => durable.setText(JSON.stringify({ ...names, label }))
+  const setSubtitle = (subtitle: string) => durable.setText(JSON.stringify({ ...names, subtitle }))
+  const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
   const nameCheck = useCardNameCheck(label.trim(), subtitle.trim())
   const clash = ref.kind === "card" ? nameCheck : null
   const [moveDrafts, setMoveDrafts] = useState(dirty)
@@ -38,29 +50,34 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       setPreparing(false)
       return
     }
-    const result = await action.run(
-      (client) =>
-        Effect.gen(function* () {
-          if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
-          if (ref.kind === "card")
-            return yield* client("ForkCard", {
-              refId: ref.id,
-              name: label.trim(),
-              nickname,
-              characterVersion: subtitle.trim(),
-              moveDrafts
-            })
-          return yield* client("ForkVariant", {
-            refId: ref.id,
-            label: label.trim(),
-            subtitle: subtitle.trim(),
-            moveDrafts
-          })
-        }),
-      ["library"]
-    )
-    setPreparing(false)
-    if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+    await durable
+      .commit(durable.text, async () => {
+        const result = await action.run(
+          (client) =>
+            Effect.gen(function* () {
+              if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim())
+              if (ref.kind === "card")
+                return yield* client("ForkCard", {
+                  refId: ref.id,
+                  name: label.trim(),
+                  nickname,
+                  characterVersion: subtitle.trim(),
+                  moveDrafts
+                })
+              return yield* client("ForkVariant", {
+                refId: ref.id,
+                label: label.trim(),
+                subtitle: subtitle.trim(),
+                moveDrafts
+              })
+            }),
+          ["library"]
+        )
+        setPreparing(false)
+        if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+        return result.ok
+      })
+      .finally(() => setPreparing(false))
   }
 
   return (
@@ -74,6 +91,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
           : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
       }
     >
+      <UserDraftStatus draft={durable} />
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />
@@ -129,28 +147,38 @@ export function RenameDialog({
 }) {
   const ref = useEditorState(store).snapshot!.ref
   const action = useAction()
-  const [label, setLabel] = useState(ref.label)
-  const [subtitle, setSubtitle] = useState(ref.subtitle)
+  const durable = useUserDraft(
+    `ref:${ref.id}:rename`,
+    "Names",
+    JSON.stringify({ label: ref.label, subtitle: ref.subtitle, rowVersion: ref.rowVersion })
+  )
+  const names = JSON.parse(durable.text) as { label: string; subtitle: string; rowVersion: number }
+  const { label, subtitle } = names
+  const setLabel = (label: string) => durable.setText(JSON.stringify({ ...names, label }))
+  const setSubtitle = (subtitle: string) => durable.setText(JSON.stringify({ ...names, subtitle }))
   const nameCheck = useCardNameCheck(label.trim(), subtitle.trim(), ref)
   const clash = ref.kind === "card" ? nameCheck : null
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (clash) return
-    const result = await action.run(
-      (client) =>
-        Effect.gen(function* () {
-          if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim(), ref)
-          return yield* client("RenameRef", {
-            refId: ref.id,
-            label: label.trim(),
-            subtitle: subtitle.trim(),
-            expectedRowVersion: ref.rowVersion
-          })
-        }),
-      ["library"]
-    )
-    if (result.ok) onRenamed(result.value)
+    await durable.commit(durable.text, async () => {
+      const result = await action.run(
+        (client) =>
+          Effect.gen(function* () {
+            if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim(), ref)
+            return yield* client("RenameRef", {
+              refId: ref.id,
+              label: label.trim(),
+              subtitle: subtitle.trim(),
+              expectedRowVersion: names.rowVersion
+            })
+          }),
+        ["library"]
+      )
+      if (result.ok) onRenamed(result.value)
+      return result.ok
+    })
   }
 
   return (
@@ -164,6 +192,7 @@ export function RenameDialog({
           : "Changes the entry’s library label."
       }
     >
+      <UserDraftStatus draft={durable} />
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
           <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />

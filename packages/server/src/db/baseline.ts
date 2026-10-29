@@ -23,7 +23,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE drafts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit')),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field')),
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,

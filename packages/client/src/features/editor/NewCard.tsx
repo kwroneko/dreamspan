@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "./userDraft.tsx"
 import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
@@ -13,24 +14,30 @@ export function NewCardButton() {
   const action = useAction()
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState("")
-  const [nickname, setNickname] = useState("")
-  const [version, setVersion] = useState("")
+  const durable = useUserDraft("card:new", "Names", JSON.stringify({ name: "", nickname: "", version: "" }))
+  const names = JSON.parse(durable.text) as { name: string; nickname: string; version: string }
+  const { name, nickname, version } = names
+  const setName = (name: string) => durable.setText(JSON.stringify({ ...names, name }))
+  const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
+  const setVersion = (version: string) => durable.setText(JSON.stringify({ ...names, version }))
   const clash = useCardNameCheck(name.trim(), version.trim())
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (clash) return
     const trimmed = name.trim()
-    const result = await action.run(
-      (client) =>
-        Effect.gen(function* () {
-          yield* checkCardNames(client, trimmed, version.trim())
-          return yield* client("CreateCard", { label: trimmed, name: trimmed, nickname, version: version.trim() })
-        }),
-      ["library"]
-    )
-    if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+    await durable.commit(durable.text, async () => {
+      const result = await action.run(
+        (client) =>
+          Effect.gen(function* () {
+            yield* checkCardNames(client, trimmed, version.trim())
+            return yield* client("CreateCard", { label: trimmed, name: trimmed, nickname, version: version.trim() })
+          }),
+        ["library"]
+      )
+      if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
+      return result.ok
+    })
   }
 
   return (
@@ -43,6 +50,7 @@ export function NewCardButton() {
         description="These names are saved with the card and travel with its exported file."
       >
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
+          <UserDraftStatus draft={durable} />
           <Field label="Display name">
             <Input value={name} onChange={(event) => setName(event.currentTarget.value)} required />
           </Field>

@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect } from "react"
@@ -53,10 +54,10 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   useEffect(() => {
     void action.run((client) => Effect.map(client("ListLibrary", { kind: "preset" }), setPresets))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [draft, setDraft] = useState<SettingsDraft | null>(null)
+  const durable = useUserDraft(`connection:${connection.id}`, "Settings", JSON.stringify(draftOf(connection)))
+  const values: SettingsDraft = JSON.parse(durable.text)
   const [submitted, setSubmitted] = useState(false)
-  const values = draft ?? draftOf(connection)
-  const edit = (change: Partial<SettingsDraft>) => setDraft({ ...values, ...change })
+  const edit = (change: Partial<SettingsDraft>) => durable.setText(JSON.stringify({ ...values, ...change }))
   const kind = kinds.find((entry) => entry.id === connection.kind)
 
   const concurrency = parseOptionalInt(values.maxConcurrent, 1)
@@ -76,30 +77,38 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
     event.preventDefault()
     setSubmitted(true)
     if (Object.values(problems).some((problem) => problem !== null)) return focusFirstInvalid(event.currentTarget)
-    const result = await action.run(
-      (client) =>
-        client("UpdateConnection", {
-          connectionId: connection.id,
-          expectedRowVersion: values.rowVersion,
-          settings: {
-            name: values.name.trim(),
-            baseUrl: values.baseUrl.trim() || null,
-            compat: connection.compat,
-            cacheTtlS: ttl.value,
-            maxConcurrent: concurrency.value,
-            presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
-          }
-        }),
-      ["connections"]
+    let savedVersion = values.rowVersion
+    await durable.commit(
+      durable.text,
+      async () => {
+        const result = await action.run(
+          (client) =>
+            client("UpdateConnection", {
+              connectionId: connection.id,
+              expectedRowVersion: values.rowVersion,
+              settings: {
+                name: values.name.trim(),
+                baseUrl: values.baseUrl.trim() || null,
+                compat: connection.compat,
+                cacheTtlS: ttl.value,
+                maxConcurrent: concurrency.value,
+                presetOverrideRefId: values.preset === "none" ? null : (values.preset as LibraryRef["id"])
+              }
+            }),
+          ["connections"]
+        )
+        if (result.ok) {
+          savedVersion = result.value.rowVersion
+          setSubmitted(false)
+        }
+        return result.ok
+      },
+      (text) => JSON.stringify({ ...JSON.parse(text), rowVersion: savedVersion })
     )
-    if (result.ok) {
-      setDraft(null)
-      setSubmitted(false)
-    }
   }
 
   const discard = () => {
-    setDraft(null)
+    void durable.discard()
     setSubmitted(false)
     action.clearError()
   }
@@ -107,6 +116,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   return (
     <Card>
       <CardHeader title="Settings" />
+      <UserDraftStatus draft={durable} />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <Field label="Name" error={shown(problems.name)}>
           <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
@@ -166,10 +176,15 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           }
         />
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button type="submit" variant="primary" pending={action.pending} disabled={draft === null}>
+          <Button
+            type="submit"
+            variant="primary"
+            pending={action.pending}
+            disabled={durable.text === JSON.stringify(draftOf(connection))}
+          >
             Save
           </Button>
-          {draft !== null && (
+          {durable.text !== JSON.stringify(draftOf(connection)) && (
             <Button variant="ghost" onClick={discard}>
               Discard changes
             </Button>

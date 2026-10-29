@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // The side panel's "This chat" tab (DESIGN §5.4, §8; DATA-MODEL §5.3, §5.4): what the
@@ -32,23 +33,30 @@ function Problem({ error }: { error: AppError | null }) {
 }
 
 /** The instruction in the code editor, saved by its button; "Use account default" drops the chat's own. */
-function Instruction({ view, write, disabled }: { view: LcmSettingsView; write: Write; disabled: boolean }) {
+function Instruction({
+  view,
+  write,
+  disabled,
+  targetId
+}: {
+  view: LcmSettingsView
+  write: Write
+  disabled: boolean
+  targetId: string
+}) {
   const saved = view.resolved.tail ?? BUILTIN_SUMMARY_INSTRUCTION
-  const [text, setText] = useState(saved)
-  const [base, setBase] = useState(saved)
+  const draft = useUserDraft(targetId, "Summarization instruction", saved)
+  const { text, setText } = draft
+  const base = saved
   const [problem, setProblem] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  // Another tab's save shows here unless something is typed.
-  if (saved !== base) {
-    setBase(saved)
-    if (text === base) setText(saved)
-  }
   const own = view.resolved.from.tail === "chat"
   const save = async (change: LcmSettingsChange) => {
     setPending(true)
     const message = await write(change)
     setPending(false)
     setProblem(message)
+    return message === null
   }
   return (
     <Fieldset
@@ -60,12 +68,24 @@ function Instruction({ view, write, disabled }: { view: LcmSettingsView; write: 
         <Button
           disabled={disabled || text === saved || text.trim() === ""}
           pending={pending}
-          onClick={() => void save({ tail: text })}
+          onClick={() =>
+            void draft.commit(text, async () => {
+              setPending(true)
+              const message = await write({ tail: text })
+              setPending(false)
+              setProblem(message)
+              return message === null
+            })
+          }
         >
           Save instruction
         </Button>
         {own && (
-          <Button variant="ghost" disabled={disabled || pending} onClick={() => void save({ tail: null })}>
+          <Button
+            variant="ghost"
+            disabled={disabled || pending}
+            onClick={() => void draft.discard(() => save({ tail: null }))}
+          >
             Use account default
           </Button>
         )}
@@ -78,6 +98,7 @@ function Instruction({ view, write, disabled }: { view: LcmSettingsView; write: 
           {text !== saved && " Not saved yet."}
         </span>
       </div>
+      <UserDraftStatus draft={draft} />
       {problem && <p className="text-sm text-danger">{problem}</p>}
     </Fieldset>
   )
@@ -158,7 +179,15 @@ export function SummariesSetting({ session }: { session: ChatSession }) {
             fallback: resolveLcm(null, settings.account),
             write,
             disabled: false,
-            instruction: <Instruction view={settings} write={write} disabled={false} />
+            instruction: (
+              <Instruction
+                key={view.forkId}
+                targetId={`chat:${session.id}:fork:${view.forkId}`}
+                view={settings}
+                write={write}
+                disabled={false}
+              />
+            )
           }}
         />
       )}

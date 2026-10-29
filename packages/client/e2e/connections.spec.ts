@@ -94,9 +94,11 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
   await expect(page.getByRole("alert")).toContainText("changed since you opened it")
   await page.getByRole("button", { name: "Load the latest" }).click()
   await expect(page.getByLabel("Name")).toHaveValue("Renamed in the other tab")
-  await page.getByLabel("Concurrent requests").fill("3")
+  // The second tab may have opened the shared draft after concurrency was typed and
+  // saved that visible value too. Make a fresh change after loading the latest version.
+  await page.getByLabel("Concurrent requests").fill("4")
   await page.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(page.getByLabel("Concurrent requests")).toHaveValue("3")
+  await expect(page.getByLabel("Concurrent requests")).toHaveValue("4")
   await expect(page.getByRole("alert")).toHaveCount(0)
 
   // A key typed against an address the other tab has since changed: refused, then reloaded.

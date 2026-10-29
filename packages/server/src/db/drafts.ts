@@ -63,8 +63,44 @@ interface EntryRow {
   readonly start: number
   readonly removed: string
   readonly inserted: string
-  /** Saved over another tab's text: the text before it is kept, whatever its size. */
+  /** Keep the prior state: a displaced tab, or a destructive field edit inside a form. */
   readonly displaced: 0 | 1
+}
+
+/** A form's short fields must not disappear inside a much larger JSON snapshot. */
+const formChange = (before: string, after: string) => {
+  const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+  let left: unknown
+  let right: unknown
+  try {
+    left = JSON.parse(before)
+    right = JSON.parse(after)
+  } catch {
+    return null
+  }
+  if (!object(left) || !object(right)) return null
+  const stack: Array<{ left: unknown; right: unknown; path: ReadonlyArray<string> }> = [{ left, right, path: [] }]
+  const paths: Array<string> = []
+  let destructive = false
+  let visited = 0
+  while (stack.length) {
+    const { left, right, path } = stack.pop()!
+    // Arbitrary text may happen to be JSON. Bound the extra work; our forms have shallow fields.
+    if (++visited > 10_000 || path.length > 64) return null
+    if (left === right) continue
+    if (object(left) && object(right)) {
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)]))
+        stack.push({ left: left[key], right: right[key], path: [...path, key] })
+    } else {
+      paths.push(JSON.stringify(path))
+      if (
+        typeof left === "string" &&
+        isDestructive(diffPatch(left, typeof right === "string" ? right : ""), left.length)
+      )
+        destructive = true
+    }
+  }
+  return { paths: paths.sort().join("\n"), destructive }
 }
 
 const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
@@ -316,12 +352,16 @@ export const makeDraftStore = (
     displaced: boolean
   ) =>
     Effect.gen(function* () {
+      const form = draft.target_kind === "user_field" ? formChange(draft.content, content) : null
+      const keep = displaced || form?.destructive === true
       const [last] =
         yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
-      if (last && !displaced && kind === "edit" && last.kind === "edit" && draft.status === "active") {
+      if (last && !keep && kind === "edit" && last.kind === "edit" && draft.status === "active") {
         const lastPatch = patchOf(last)
         const beforeLast = applyPatch(draft.content, invertPatch(lastPatch))
+        const sameField = form === null || formChange(beforeLast, draft.content)?.paths === form.paths
         const continuing =
+          sameField &&
           now - last.at < DraftHistoryPolicy.coalesceGapMs &&
           now - last.first_at < DraftHistoryPolicy.coalesceSpanMs &&
           !isDestructive(lastPatch, beforeLast.length) &&
@@ -347,7 +387,7 @@ export const makeDraftStore = (
         start: patch.start,
         removed: patch.removed,
         inserted: patch.inserted,
-        displaced: displaced ? 1 : 0
+        displaced: keep ? 1 : 0
       })}`
       return yield* retain(draft, content)
     })

@@ -1,3 +1,4 @@
+import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
 // Saved keys (ARCHITECTURE §3.12). A key goes in and never comes out, and it's sent only
 // to the origins the user confirmed. Every origin is confirmed by the user, one by one:
 // the server can't tell a stolen session's choices from the user's.
@@ -245,9 +246,12 @@ function ReplaceKeyDialog({
 
 function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
   const action = useAction()
-  const [name, setName] = useState("")
+  const durable = useUserDraft("credential:new", "Non-secret settings", JSON.stringify({ name: "", urls: "" }))
+  const values = JSON.parse(durable.text) as { name: string; urls: string }
+  const { name, urls } = values
+  const setName = (name: string) => durable.setText(JSON.stringify({ ...values, name }))
+  const setUrls = (urls: string) => durable.setText(JSON.stringify({ ...values, urls }))
   const [keyEmpty, setKeyEmpty] = useState(true)
-  const [urls, setUrls] = useState("")
   const lines = urls
     .split("\n")
     .map((line) => line.trim())
@@ -256,11 +260,17 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const apiKey = formText(event.currentTarget, "apiKey")
-    const result = await action.run(
-      (client) => client("CreateCredential", { name: name.trim(), apiKey, urls: lines }),
-      ["credentials"]
-    )
-    if (result.ok) onOpenChange(false)
+    await durable
+      .commit(durable.text, async () => {
+        const result = await action.run(
+          (client) => client("CreateCredential", { name: name.trim(), apiKey, urls: lines }),
+          ["credentials"]
+        )
+        return result.ok
+      })
+      .then((ok) => {
+        if (ok) onOpenChange(false)
+      })
   }
   return (
     <Dialog
@@ -270,6 +280,7 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
       description="Saved once, usable by any number of connections."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <UserDraftStatus draft={durable} />
         <Field label="Name">
           <Input value={name} onValueChange={setName} autoComplete="off" />
         </Field>
@@ -302,18 +313,26 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
 
 function RenameDialog({ credential, onOpenChange }: { credential: Credential; onOpenChange: (open: boolean) => void }) {
   const action = useAction()
-  const [name, setName] = useState(credential.name)
+  const durable = useUserDraft(`credential:${credential.id}`, "Name", credential.name)
+  const { text: name, setText: setName } = durable
   const submit = async (event: FormEvent) => {
     event.preventDefault()
-    const result = await action.run(
-      (client) => client("RenameCredential", { credentialId: credential.id, name: name.trim() }),
-      ["credentials", "connections"]
-    )
-    if (result.ok) onOpenChange(false)
+    await durable
+      .commit(name, async () => {
+        const result = await action.run(
+          (client) => client("RenameCredential", { credentialId: credential.id, name: name.trim() }),
+          ["credentials", "connections"]
+        )
+        return result.ok
+      })
+      .then((ok) => {
+        if (ok) onOpenChange(false)
+      })
   }
   return (
     <Dialog open onOpenChange={onOpenChange} title="Rename the key">
       <form onSubmit={submit} className="flex flex-col gap-4">
+        <UserDraftStatus draft={durable} />
         <Field label="Name">
           <Input value={name} onValueChange={setName} autoComplete="off" />
         </Field>
