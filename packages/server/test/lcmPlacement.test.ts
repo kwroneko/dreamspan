@@ -162,6 +162,7 @@ it.effect("rendered layer framing stays inside the example-prefix allowance", ()
       const input = fixture({ mode: "none" }, { openai_max_context: 540, openai_max_tokens: 1 })
       return assembleFixture({
         ...input,
+        preset: { ...input.preset, pin_examples: true },
         notes: [],
         summaries: Array.from({ length: count }, (_, i) => summary(i)),
         cards: [

@@ -47,6 +47,11 @@ interface StSummarySettings {
 }
 
 export interface StSettings {
+  readonly textSwitches?: {
+    readonly pin_examples: boolean
+    readonly strip_examples: boolean
+    readonly collapse_newlines: boolean
+  }
   readonly selectedPreset: string | null
   readonly personas: ReadonlyArray<StPersona>
   /** Lorebooks ST applies to every chat (`world_info_settings.world_info.globalSelect`). */
@@ -147,6 +152,15 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
       : []
   })
   return {
+    ...(["pin_examples", "strip_examples", "collapse_newlines"].some((key) => powerUser[key] !== undefined)
+      ? {
+          textSwitches: {
+            pin_examples: Boolean(powerUser.pin_examples),
+            strip_examples: Boolean(powerUser.strip_examples),
+            collapse_newlines: Boolean(powerUser.collapse_newlines)
+          }
+        }
+      : {}),
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     personas,
     globalWorlds: strings(worldInfo.globalSelect, 1000),

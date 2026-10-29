@@ -361,6 +361,8 @@ const setPersonaPlacement = (page: Page, placement: PersonaPlacement) =>
 export interface Capture {
   readonly previewOverlap?: "protected" | "unprotected"
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
+  readonly textSwitches?: { pin_examples: boolean; strip_examples: boolean; collapse_newlines: boolean }
+  readonly multilineCard?: boolean
   readonly overMaximum?: boolean
   readonly presets: ReadonlyArray<string>
   readonly character: string
@@ -437,6 +439,28 @@ export const captureWithSettings = async (
           value
       }, postProcessing)
     }
+    if (capture.textSwitches) {
+      await page.evaluate(
+        (switches) => Object.assign(SillyTavern.getContext().powerUserSettings, switches),
+        capture.textSwitches
+      )
+    }
+    if (capture.multilineCard) {
+      await page.evaluate(
+        ({ name, tight }) => {
+          const card = SillyTavern.getContext().characters.find((c) => c.name === name)! as unknown as Record<
+            string,
+            unknown
+          >
+          card.description = "First line\n\n{{char}} last line."
+          card.mes_example =
+            "<START>\n{{user}}: Example question " +
+            (tight ? "lantern ".repeat(80) : "") +
+            "\n{{char}}: Example\n\nanswer"
+        },
+        { name: capture.character, tight: capture.overMaximum === true }
+      )
+    }
     if (capture.overMaximum)
       await page.evaluate(() => {
         const ctx = SillyTavern.getContext()
@@ -451,7 +475,7 @@ export const captureWithSettings = async (
         ;(ctx.chat as Array<unknown>).splice(0, ctx.chat.length, ...history)
       })
     if (capture.previewOverlap) await armPreviewOverlap(page, capture.previewOverlap === "protected")
-    settings = await settingsInForce(page)
+    settings = { ...(await settingsInForce(page)), ...capture.textSwitches }
   })
   return { body, settings }
 }

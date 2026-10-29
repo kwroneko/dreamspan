@@ -551,7 +551,7 @@ export class StImports extends Context.Service<
         name: string
       ) =>
         Effect.gen(function* () {
-          const parsed = yield* formats.st.libraryFile(bytes, file, kind)
+          const parsed = yield* formats.st.libraryFile(bytes, file, kind, session.settings?.textSwitches)
           const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
           if (imported.entity !== null && kind === "lorebook") {
             session.worlds.set(name, imported.entity.refId)

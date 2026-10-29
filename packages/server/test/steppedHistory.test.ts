@@ -292,7 +292,7 @@ describe("stepped history", () => {
       }
       const fixture: AssemblyFixture = {
         ...base,
-        preset: { ...doc, prefill: { ...doc.prefill, assistant: "begin" } },
+        preset: { ...doc, pin_examples: true, prefill: { ...doc.prefill, assistant: "begin" } },
         model: { ...base.model!, prefill: "assistant" },
         messages: messages(30),
         cards: [
@@ -372,6 +372,7 @@ describe("stepped history", () => {
     Effect.gen(function* () {
       const fixture: AssemblyFixture = {
         ...base,
+        preset: { ...base.preset, pin_examples: true },
         cards: [
           {
             entity: "mira",
