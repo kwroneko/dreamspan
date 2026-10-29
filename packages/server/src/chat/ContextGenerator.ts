@@ -1,3 +1,5 @@
+import { AppConfig } from "../config.ts"
+import { hydrateMessageImages } from "./messageImages.ts"
 import { executionRegistry } from "../execution.ts"
 import { Summarizer } from "../lcm/Summarizer.ts"
 // The real generator: assembly, rollout, provider stream (ARCHITECTURE §15, "Generation").
@@ -26,6 +28,7 @@ export const layer = Layer.effect(
     const reader = yield* Reader
     const writer = yield* Writer
     const providers = yield* Providers
+    const config = yield* AppConfig
 
     // Rollouts a previous process left running ended with it; their versions were
     // interrupted the same way (Generations).
@@ -139,7 +142,15 @@ export const layer = Layer.effect(
           const strategy = execution.replyStrategies.get("reply")
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
-          return strategy.run({ request, generation, rolloutId, output, providers })
+          return strategy.run({
+            request,
+            generation,
+            rolloutId,
+            output,
+            providers,
+            resolveImages: (input) =>
+              hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
+          })
         })
       )
 

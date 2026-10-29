@@ -811,7 +811,8 @@ export const baseline: ReadonlyArray<string> = [
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT,
-    CHECK (kind = 'generate' OR length(content) > 0),
+    images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)),
+    CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
     CHECK (kind = 'generate' OR direction IS NULL),
     CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)
   ) STRICT`,

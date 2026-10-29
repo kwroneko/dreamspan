@@ -79,6 +79,7 @@ const decoded = <A>(
 ) => (exit._tag === "Success" ? Effect.succeed(exit.value as A) : Effect.fail(invalid(what)))
 
 interface HistoryRow {
+  readonly images_json: string
   readonly slot_id: string
   readonly parent_slot_id: string | null
   readonly depth: number
@@ -442,6 +443,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           SELECT s.id AS slot_id, s.parent_slot_id, s.depth, ${contextExcludedIn(sql, fork)} AS context_excluded,
             ${slotDeletedIn(sql, fork, "s")} AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
+            (SELECT json_group_array(json_object('mediaId', a.media_id)) FROM
+              (SELECT media_id FROM version_attachments WHERE version_id=v.id ORDER BY ordinal) a) AS images_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL
               AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
@@ -461,10 +464,14 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             speaker: row.speaker_entity_id,
             side: row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant",
             content: row.content,
+            ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
             written: row.written === 1,
-            inContext: row.context_excluded === 0 && row.status !== "failed" && row.content.length > 0,
+            inContext:
+              row.context_excluded === 0 &&
+              row.status !== "failed" &&
+              (row.content.length > 0 || row.images_json !== "[]"),
             sentAt: row.created_at,
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
@@ -642,6 +649,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             c.baseUrl
           ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
+          vision: effective.vision.value,
+          maxImages: effective.maxImages.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,
           maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
           presetOverride: c.presetOverrideRefId

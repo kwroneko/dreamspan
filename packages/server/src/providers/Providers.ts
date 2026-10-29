@@ -1,5 +1,5 @@
 import { documentedCachePolicy } from "./cachePolicy.ts"
-import { limitImages } from "./images.ts"
+import { hasImageBlocks, limitImages } from "./images.ts"
 import { captureToolArguments } from "./toolArguments.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
 // assembler and, later, the agent loop, plus the connection operations that need the
@@ -890,13 +890,15 @@ export const layer = (options: ProvidersOptions = {}) =>
         const open = (payload: Readonly<Record<string, unknown>>) =>
           Effect.gen(function* () {
             if (state.opened) return
-            const hasImages = request.context.messages.some(
-              (m) => typeof m.content !== "string" && m.content.some((p) => p.type === "image")
-            )
-            const inputTokens =
+            const hasImages = hasImageBlocks(payload)
+            // Unknown image tokenization reserves the largest safe ledger value. Saturate
+            // after adding framing/output too: MAX_SAFE_INTEGER + bytes is not a safe Int.
+            const inputTokens = Math.min(
+              Number.MAX_SAFE_INTEGER,
               Buffer.byteLength(JSON.stringify(payload), "utf8") +
-              256 +
-              (hasImages ? (knownContext ?? Number.MAX_SAFE_INTEGER) : 0)
+                256 +
+                (hasImages ? (knownContext ?? Number.MAX_SAFE_INTEGER) : 0)
+            )
             const configurations = ["generationConfig", "config", "inferenceConfig", "inference_config"]
               .map((key) => payload[key])
               .filter(isPlain)
@@ -948,7 +950,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   modelKey: model.key,
                   startedAt: Date.now(),
                   reservation: {
-                    tokens: inputTokens + outputTokens,
+                    tokens: Math.min(Number.MAX_SAFE_INTEGER, inputTokens + outputTokens),
                     cost: bound?.amount ?? null,
                     currency: bound?.currency ?? null
                   }

@@ -6,6 +6,8 @@
 - **[O] Open**: needs a decision.
 - **[L] Later**: wanted, but deferred until the core works.
 
+Implementation status: **U15 storage and reply image transport built**, ARCHITECTURE §12. The composer/viewer (U16) and summary image inputs (U22) in §10.2a remain unbuilt.
+
 Where the owner corrected an earlier proposal, the corrected version is recorded and the rejected one is noted, so it doesn't come back.
 
 ---
@@ -648,9 +650,11 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[L]** Template-bound UI: a persistent "stage" or widget whose state the model updates through tools, so only small state changes enter the context.
 
 ### 10.2a Image input (vision)
-- **[D]** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
+
+**Partly built (U15; obsolete as a storage/reply transport proposal):** ARCHITECTURE §12 describes version-owned uploads, reads, preservation, reply transport and explicit text-only refusal. Direct attachment UI and summary range transport remain U16/U22. The [P] choices below retain their status.
+- **[D], storage/reply transport built (U15)** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
 - **[D]** Attaching is direct: drag and drop onto the composer or the chat, paste from the clipboard, and a picker button. ST's "find the right button in a submenu" is the anti-pattern.
-- **[D]** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
+- **[D], built (U15)** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
 - **[P]** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
 - **[P]** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
 - **[P]** Images are context like anything else, so their token cost and cache effect show in the context view.

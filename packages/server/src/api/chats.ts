@@ -143,6 +143,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       readonly parentSlotId: SlotId | null
       readonly branch: boolean
       readonly kind: "message" | "generate"
+      readonly images?: import("@rp/shared/chat.ts").MessageImages
       readonly content: string
       readonly speakerEntityId: EntityId | null
       readonly replySpeakerEntityId: EntityId | null
@@ -244,6 +245,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       content,
       speakerEntityId,
       replySpeakerEntityId,
+      images,
       reply,
       composer
     }) =>
@@ -254,6 +256,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           parentSlotId,
           branch,
           kind: "message",
+          ...(images === undefined ? {} : { images }),
           content,
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: replySpeakerEntityId ?? null,
@@ -296,6 +299,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           forkId: forkId ?? null,
           version: {
             ...generating,
+            ...(before.version.images === undefined ? {} : { images: before.version.images }),
             speakerEntityId: yield* speakerNow(
               id,
               chatId,
@@ -428,7 +432,7 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
-    EditVersion: ({ slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
+    EditVersion: ({ images, slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
@@ -437,14 +441,14 @@ export const makeChatHandlers = Effect.gen(function* () {
           userId: id,
           slotId,
           forkId: forkId ?? null,
-          version,
+          version: { ...version, ...(images === undefined ? {} : { images }) },
           expectedRowVersion,
           commitDraft: draft ?? null
         })
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("EditVersion")),
 
-    WriteVersion: ({ slotId, forkId, content, expectedRowVersion, draft }) =>
+    WriteVersion: ({ images, slotId, forkId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
@@ -453,7 +457,10 @@ export const makeChatHandlers = Effect.gen(function* () {
           userId: id,
           slotId,
           forkId: forkId ?? null,
-          version,
+          version: {
+            ...version,
+            images: images ?? entry.version.images ?? []
+          },
           expectedRowVersion,
           commitDraft: draft ?? null
         })

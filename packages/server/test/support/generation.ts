@@ -46,6 +46,8 @@ export const generateReply = (
     readonly modelKey?: string
     readonly model: ModelOverrides
     readonly preset?: Record<string, unknown>
+    readonly content?: string
+    readonly images?: import("@rp/shared/chat.ts").MessageImages
     readonly example?: string
     readonly greeting?: string
     readonly personality?: string
@@ -131,7 +133,8 @@ export const generateReply = (
         chatId: chat.id,
         parentSlotId: chat.activeLeafSlotId,
         branch: false,
-        content: "The road flooded."
+        content: options.content ?? "The road flooded.",
+        ...(options.images === undefined ? {} : { images: options.images })
       })
     )
     const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))

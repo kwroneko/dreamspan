@@ -732,10 +732,14 @@ describe("window reads", () => {
             "SCAN g",
             ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
             "SCAN visibility candidates",
-            ...Array<string>(4).fill("SCAN el VIRTUAL TABLE INDEX 1:")
+            ...Array<string>(3).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
+            // Only the ordered attachments of this version are scanned, via its primary key.
+            "SCAN a",
+            "SCAN el VIRTUAL TABLE INDEX 1:"
           ],
           plan.join("\n")
         )
+        assert.include(plan, "SEARCH version_attachments USING PRIMARY KEY (version_id=?)", plan.join("\n"))
         assert.lengthOf(
           plan.filter(
             (step) =>

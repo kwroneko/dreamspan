@@ -488,7 +488,10 @@ const historyStage: AssemblerStage = {
           verbatim.map(({ entry, depth }) => ({ text: entry.content, placement: placementOf(entry, cast), depth }))
         )
         verbatim.forEach(({ entry, depth }, i) => {
-          const result = { ...results[i]!, text: clipForSummary(assembly, results[i]!.text) }
+          const result = {
+            ...results[i]!,
+            text: clipForSummary(assembly, results[i]!.text || (entry.images?.length ? "[Image]" : ""))
+          }
           scripted.set(entry.versionId, { ...result, depth })
           tokens += tokensOf({ content: result.text })
         })
@@ -621,7 +624,11 @@ const resolveStage: AssemblerStage = {
               : {})
           }
         }
-        const piece = env.message(entry, messages, at)
+        const piece = env.message(
+          entry.content || !entry.images?.length ? entry : { ...entry, content: "[Image]" },
+          messages,
+          at
+        )
         resolved.push({ entry, piece })
         messages.push({
           text: env.text(piece),
@@ -925,7 +932,7 @@ const chatLine = (
   scripted: { readonly text: string; readonly volatile: boolean }
 ): ChatLine => {
   const behavior = need(assembly, "preset").doc.names_behavior
-  const text = scripted.text.replace(/\r/gm, "")
+  const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
   const pieces = [projected.piece]
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
@@ -2303,9 +2310,16 @@ const requestStage = sync("request", (assembly) => {
       reason: "invalid_document",
       message: "This preset has no enabled placement for its summaries."
     })
+  const imagesByVersion = new Map(assembly.resolved?.map(({ entry }) => [entry.versionId, entry.images ?? []]))
   assembly.result = {
     ...(firstSummary >= 0 ? { summaryStart: firstSummary } : {}),
-    messages: messages.map(({ role, content, name }) => ({ role, content, ...(name ? { name } : {}) })),
+    messages: messages.map(({ role, content, name, pieces }) => {
+      const images = pieces.flatMap((p) => {
+        const source = assembly.pieces[p]?.source
+        return source?.kind === "message" ? (imagesByVersion.get(source.version) ?? []) : []
+      })
+      return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
+    }),
     prefill: assembly.prefill ?? null,
     samplers: {
       temperature: s.temperature,
@@ -2323,6 +2337,17 @@ const requestStage = sync("request", (assembly) => {
     breakpoints: assembly.breakpoints ?? [],
     names: assembly.postNames ?? { user: "", char: "", group: [] }
   }
+  const imageCount = assembly.result.messages.reduce((n, m) => n + (m.images?.length ?? 0), 0)
+  if (imageCount && assembly.model?.vision === false)
+    assembly.issues.push({
+      kind: "images_unsupported",
+      message: "This model cannot see images. Choose a vision model before replying."
+    })
+  if (imageCount > (assembly.model?.maxImages ?? 4))
+    assembly.issues.push({
+      kind: "images_limited",
+      message: `Only the last ${assembly.model?.maxImages ?? 4} images will be sent.`
+    })
   const mark = (piece: number, i: number) => {
     const record = assembly.pieces[piece]!
     if (!record.messages.includes(i)) record.messages.push(i)

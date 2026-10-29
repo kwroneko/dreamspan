@@ -41,6 +41,7 @@ import {
   EntityId,
   Fork,
   ForkId,
+  MessageImages,
   NewVersion,
   PathEntry,
   SlotId,
@@ -1416,6 +1417,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("SendOrQueue", {
     payload: {
+      images: Schema.optionalKey(MessageImages),
       userId: UserId,
       chatId: ChatId,
       /** The fork it's sent in, as AppendMessage takes it. */
@@ -1760,6 +1762,20 @@ export class WriteOps extends RpcGroup.make(
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
   /** A new avatar for a card, already written to media storage. */
+  Rpc.make("RecordMessageImage", {
+    payload: {
+      userId: UserId,
+      media: Schema.Struct({
+        sha256: Sha256,
+        mime: Schema.String,
+        byteSize: Schema.Int,
+        width: Schema.NullOr(Schema.Int),
+        height: Schema.NullOr(Schema.Int)
+      })
+    },
+    success: Schema.String,
+    error: StorageError
+  }),
   Rpc.make("SetCardAvatar", {
     payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, media: ImportedMedia },
     success: RefChange,

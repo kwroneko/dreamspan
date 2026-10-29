@@ -1,3 +1,15 @@
+/** Image blocks in the final wire body, including Chat Completions payload overrides. */
+export const hasImageBlocks = (node: unknown): boolean => {
+  if (!node || typeof node !== "object") return false
+  if (
+    ("type" in node && ["image", "image_url", "input_image"].includes(String(node.type))) ||
+    "inlineData" in node ||
+    "inline_data" in node
+  )
+    return true
+  return Object.values(node).some(hasImageBlocks)
+}
+
 /** Cap actual image blocks after all payload overrides, newest first, on every request. */
 export const limitImages = <A>(value: A, maximum: number): A => {
   let left = Math.max(0, Math.floor(maximum))
