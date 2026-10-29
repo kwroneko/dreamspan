@@ -1,4 +1,5 @@
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
+import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import {
   Snippet,
   SnippetContext,
@@ -397,6 +398,11 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...BinLimitChange.fields },
     success: BinLimits,
     error: StorageError
+  }),
+  Rpc.make("SetCostSettings", {
+    payload: { userId: UserId, expectedRevision: Schema.Int, rules: CostRules },
+    success: CostSettings,
+    error: Schema.Union([StaleWrite, NotFound, StorageError])
   }),
   Rpc.make("CreateSnippet", {
     payload: { userId: UserId, ...CreateSnippetFields },
@@ -1994,6 +2000,7 @@ export class WriteOps extends RpcGroup.make(
 
 export class ReadOps extends RpcGroup.make(
   Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
+  Rpc.make("GetCostSettings", { payload: { userId: UserId }, success: CostSettings, error: StorageError }),
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),

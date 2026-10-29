@@ -1569,5 +1569,6 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN SELECT RAISE(ABORT, 'a summary request names its own target'); END`,
   `CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance
     WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
-    BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`
+    BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`,
+  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))`
 ]

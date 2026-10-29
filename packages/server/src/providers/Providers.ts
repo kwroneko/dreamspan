@@ -798,7 +798,8 @@ export const layer = (options: ProvidersOptions = {}) =>
         knownContext: number | undefined,
         request: StreamRequest,
         offer: (event: ProviderEvent) => void,
-        number: number
+        number: number,
+        pricing: import("./userCosts.ts").UserPricing
       ) => {
         const requestId = uuidv7() as LlmRequestId
         const attribution = request.attribution
@@ -846,7 +847,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
-              { counts, capture: state.capture, price: model.upstream.price ?? null }
+              { counts, pricing, capture: state.capture, price: model.upstream.price ?? null }
             )
             yield* writer
               .CloseLlmRequest({
@@ -919,7 +920,9 @@ export const layer = (options: ProvidersOptions = {}) =>
               .filter((f) => f.appliesTo(target) && f.id !== "reported")
             const formula = formulas.find(
               (f) =>
+                f.reserves?.({ pricing }) ||
                 f.cost({
+                  pricing,
                   counts: {
                     inputUncached: inputTokens,
                     cacheRead: 0,
@@ -933,7 +936,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                 }) !== null
             )
             const bound =
-              formula?.upperBound?.({ inputTokens, outputTokens, price: model.upstream.price ?? null }) ?? null
+              formula?.upperBound?.({ inputTokens, outputTokens, pricing, price: model.upstream.price ?? null }) ?? null
             const allowed = yield* fromStorage(
               writer.OpenLlmRequest({
                 userId: request.userId,
@@ -1257,6 +1260,12 @@ export const layer = (options: ProvidersOptions = {}) =>
             if (model.connectionId !== prepared.connection.id) {
               return yield* providerError("unusable", "that model belongs to another connection")
             }
+            const pricing = {
+              settings: yield* fromStorage(reader.GetCostSettings({ userId: request.userId })),
+              kind: prepared.kind.id,
+              connectionId: prepared.connection.id,
+              model: model.key
+            }
             const effective = resolveModel(model.key, model.upstream, model.overrides, prepared.connection.compat)
             const piModel = yield* Effect.tryPromise({
               try: () => buildPiModel(prepared, model, effective),
@@ -1271,7 +1280,7 @@ export const layer = (options: ProvidersOptions = {}) =>
             for (let n = 0; ; n++) {
               const outcome = yield* capped(
                 waitForPause(prepared.connection.id, offer).pipe(
-                  Effect.andThen(attempt(prepared, model, piModel, knownContext, request, offer, n + 1))
+                  Effect.andThen(attempt(prepared, model, piModel, knownContext, request, offer, n + 1, pricing))
                 )
               )
               if (outcome.ok) {
@@ -1318,7 +1327,18 @@ export const layer = (options: ProvidersOptions = {}) =>
           return costOf(
             registry.costs.list(),
             { kind: connection.kind, api: connection.api, model: model.key },
-            { counts, capture: emptyCapture(), price: model.upstream.price ?? null }
+            {
+              counts,
+              pricing: {
+                settings: yield* fromStorage(reader.GetCostSettings({ userId })),
+                kind: connection.kind,
+                connectionId,
+                model: model.key
+              },
+              capture: emptyCapture(),
+              price: model.upstream.price ?? null
+            },
+            true
           )
         })
 

@@ -9,6 +9,7 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import type { ListedModel, ListRequest, ModelListError } from "./modelLists.ts"
 import type { Price } from "@rp/shared/providers.ts"
 import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
+import type { UserPricing } from "./userCosts.ts"
 import type { Capture } from "./usage.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
@@ -75,16 +76,27 @@ export interface ResponseObserver {
 export interface CostFormula {
   readonly id: string
   readonly appliesTo: (target: RequestTarget & { readonly model: string }) => boolean
+  /** Claims admission even when upstream-only pricing cannot produce a point estimate. */
+  readonly reserves?: (input: { readonly pricing?: UserPricing }) => boolean
   readonly upperBound?: (input: {
+    readonly pricing?: UserPricing
     readonly inputTokens: number
     readonly outputTokens: number
     readonly price: Price | null
   }) => Omit<Cost, "formula"> | null
-  readonly cost: (input: {
+  /** Undefined passes through; null means no single-currency estimate is possible. */
+  readonly estimate?: (input: {
+    readonly pricing?: UserPricing
     readonly counts: TokenCounts
     readonly capture: Capture
     readonly price: Price | null
-  }) => Omit<Cost, "formula"> | null
+  }) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null | undefined
+  readonly cost: (input: {
+    readonly pricing?: UserPricing
+    readonly counts: TokenCounts
+    readonly capture: Capture
+    readonly price: Price | null
+  }) => (Omit<Cost, "formula"> & { readonly formula?: string }) | null
 }
 
 export interface ProviderRegistryShape {

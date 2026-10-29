@@ -24,6 +24,21 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
   const { ownedConnection, ownedModel, ownedCredential } = makeProviderQueries(sql)
 
   const handlers = {
+    GetCostSettings: ({ userId }) =>
+      sql<{
+        revision: number
+        rules_json: string
+      }>`SELECT revision, rules_json FROM cost_settings WHERE user_id = ${userId}`.pipe(
+        Effect.map(([row]) =>
+          row
+            ? {
+                revision: row.revision,
+                rules: JSON.parse(row.rules_json) as import("@rp/shared/costFormulas.ts").CostSettings["rules"]
+              }
+            : { revision: 0, rules: [] }
+        ),
+        query("GetCostSettings")
+      ),
     CachePrefixWarm: ({ userId, connectionId, modelId, prefix, now }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, connectionId)

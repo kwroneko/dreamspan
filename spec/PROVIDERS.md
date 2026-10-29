@@ -1,6 +1,6 @@
 # Provider layer
 
-**Status**: Proposed, 2026-10-10, with the owner's decisions of the same day marked **[D]**. **Partially implemented** (ARCHITECTURE.md §2, §3.12, §6): the schema, secrets, the network module (instance proxy, bypass list, per-connection override), connection and model operations, model-list fetching merged with pi-ai's catalog, the streaming service with typed errors, retries before the first token, the per-connection cap, and the usage ledger with built-in and reported cost. Client RPCs, host-bound credentials (§5) and the provider registry (spec/PLUGINS.md §8) are built too. Explicit breakpoints are built for Anthropic Messages. Not built yet: explicit breakpoints for the other APIs (§8), the settings page, user cost formulas, and ledger rollups. One change from §2: header values are encrypted like the key, with only header names in the clear.
+**Status**: User cost formulas and their editor (§9.3, U12) built 2026-10-28; those parts are obsolete as implementation plans, see ARCHITECTURE.md §6. Proposed, 2026-10-10, with the owner's decisions of the same day marked **[D]**. **Partially implemented** (ARCHITECTURE.md §2, §3.12, §6): the schema, secrets, the network module (instance proxy, bypass list, per-connection override), connection and model operations, model-list fetching merged with pi-ai's catalog, the streaming service with typed errors, retries before the first token, the per-connection cap, and the usage ledger with built-in and reported cost. Client RPCs, host-bound credentials (§5) and the provider registry (spec/PLUGINS.md §8) are built too. Explicit breakpoints are built for Anthropic Messages. Not built yet: explicit breakpoints for the other APIs (§8), the settings page, and ledger rollups. One change from §2: header values are encrypted like the key, with only header names in the clear.
 - pi-ai 1.x is the provider layer
 - a connection is one wire type, one provider and one set of settings
 - every provider type has an overridable base URL
@@ -324,6 +324,8 @@ reference-harness's full scheduler (priority classes, admission inside retry, he
 
 ### 9.3 Cost formulas
 
+**Built (U12, 2026-10-28; obsolete as an implementation plan).** ARCHITECTURE.md §6 documents the declarative editor, storage, precedence, bounds and tests. Recomputing historical rows on request remains unimplemented.
+
 A formula turns the counts into one number:
 
 ```
@@ -347,7 +349,7 @@ cost = (input_uncached × in + cache_read × read + (cache_write − cache_write
 
 **Recomputing.** A row's `cost` is what was computed when it closed, with the formula that produced it. The counts are kept, so a changed formula can be applied to past rows on request, never silently.
 
-**Phase 0 builds:** the ledger, the normalization tests, and cost from built-in prices plus OpenRouter's reported cost. The formula table and editor come later, but the ledger already stores everything a formula needs.
+**Phase 0 builds:** the ledger, the normalization tests, and cost from built-in prices plus OpenRouter's reported cost. The formula table and editor are now built (U12); the ledger retains the rule identity and settings revision.
 
 ---
 
@@ -398,7 +400,6 @@ Built:
 
 Not built until needed:
 - for the assembler: sampler mapping from presets, prefill, the other APIs' explicit breakpoints, the cold-cache stagger, and per-chat model bindings in the UI (the `model.binding` state event already exists, DATA-MODEL §5.3)
-- user cost formulas and their editor
 - shared connections and cost limits
 
 ---

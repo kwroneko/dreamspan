@@ -572,6 +572,43 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   PreviewStSettings: { global: "pure preview of the supplied file; no stored user data is read or changed" },
   ListExportFormats: { global: "the instance's worker exporter registry, with no user documents" },
   ListProviderKinds: { global: "the instance's provider registry, the same for every user" },
+  GetCostSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* actor.api.GetCostSettings()
+        const own = yield* owner.api.GetCostSettings()
+        yield* owner.api.SetCostSettings({ expectedRevision: own.revision, rules: [] })
+        assert.deepStrictEqual(yield* actor.api.GetCostSettings(), before)
+      })
+  },
+  SetCostSettings: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetCostSettings()
+        const own = yield* actor.api.GetCostSettings()
+        yield* actor.api.SetCostSettings({ expectedRevision: own.revision, rules: [] })
+        yield* refused(
+          actor.api.SetCostSettings({
+            expectedRevision: own.revision + 1,
+            rules: [
+              {
+                id: "foreign",
+                name: "Foreign",
+                kind: null,
+                connectionId: owner.connectionId,
+                model: "m",
+                upstream: null,
+                currency: "USD",
+                rates: { input: 1, read: 1, write: 1, writeLong: 1, output: 1 },
+                tiers: []
+              }
+            ]
+          }),
+          "NotFound"
+        )
+        assert.deepStrictEqual(yield* owner.api.GetCostSettings(), before)
+      })
+  },
   ListConnections: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

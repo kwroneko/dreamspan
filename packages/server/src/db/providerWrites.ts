@@ -105,6 +105,17 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    SetCostSettings: ({ userId, expectedRevision, rules }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ revision: number }>`SELECT revision FROM cost_settings WHERE user_id = ${userId}`
+        const actual = row?.revision ?? 0
+        if (actual !== expectedRevision)
+          return yield* new StaleWrite({ entity: "cost settings", id: userId, expected: expectedRevision, actual })
+        for (const rule of rules) if (rule.connectionId !== null) yield* ownedConnection(userId, rule.connectionId)
+        const revision = actual + 1
+        yield* sql`INSERT INTO cost_settings(user_id, revision, rules_json) VALUES (${userId}, ${revision}, ${JSON.stringify(rules)}) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, rules_json = excluded.rules_json`
+        return { revision, rules }
+      }).pipe(transaction(sql, "SetCostSettings")),
     CreateConnection: ({ userId, connectionId, kind, api, settings, credential }) =>
       Effect.gen(function* () {
         yield* checkPresetRef(userId, settings.presetOverrideRefId)
