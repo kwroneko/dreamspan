@@ -266,6 +266,25 @@ export function PresetEditor({
         <PromptDocument store={store} context={context} focus={focus} />
       </Card>
       <Card>
+        <CardHeader title="Text and context" description="SillyTavern's prompt text switches." />
+        <div className="flex flex-col gap-3">
+          <SwitchField store={store} path={["pin_examples"]} label="Pin example dialogues" />
+          <p className="text-sm text-muted">
+            Give examples room before chat history. Off: history takes priority. Examples still need to fit the context
+            limit.
+          </p>
+          <SwitchField store={store} path={["strip_examples"]} label="Strip example dialogues" />
+          <p className="text-sm text-muted">
+            Send no example dialogues, including lorebook examples. This takes priority over pinning.
+          </p>
+          <SwitchField store={store} path={["collapse_newlines"]} label="Collapse blank lines in character fields" />
+          <p className="text-sm text-muted">
+            Replace repeated newlines with one after expanding character fields. Saved messages and preset prompts keep
+            their blank lines.
+          </p>
+        </div>
+      </Card>
+      <Card>
         <CardHeader title="Prefill" description="Dropped where the provider can't take it." />
         <div className="flex flex-col gap-3">
           <TextField store={store} path={["prefill", "assistant"]} label="Start of the reply" rows={3} />

@@ -73,7 +73,8 @@ export class Formats extends Context.Service<
       readonly libraryFile: (
         bytes: Uint8Array,
         fileName: string,
-        expect: EntityKind
+        expect: EntityKind,
+        textSwitches?: StSettings["textSwitches"]
       ) => Effect.Effect<StLibraryFile, FormatWorkerFailed>
       readonly persona: (
         bytes: Uint8Array,
@@ -162,13 +163,14 @@ export const layer = (options: FormatsOptions) =>
                 Effect.suspend(() =>
                   workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName, parser: parser("group") }))
                 ),
-              libraryFile: (bytes, fileName, expect) =>
+              libraryFile: (bytes, fileName, expect, textSwitches) =>
                 Effect.suspend(() =>
                   workerFailures(
                     client.ParseStLibraryFile({
                       bytes: ownBuffer(bytes),
                       fileName,
                       expect,
+                      ...(textSwitches ? { textSwitches } : {}),
                       parser: parser("library-file")
                     })
                   )

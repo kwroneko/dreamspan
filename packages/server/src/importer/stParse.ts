@@ -2,6 +2,7 @@
 // chat part, settings.json, a group, or one of the folder's library files, and building a
 // persona's card. Like every parse, nothing here throws on a file's content: a file that
 // can't be read is a report with an error.
+import { docHash, searchText } from "../db/documents.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
 import { ImportReport, ReportBuilder } from "@rp/shared/importReport.ts"
@@ -82,8 +83,29 @@ const parseGroup = (bytes: Uint8Array, fileName: string) => {
 }
 
 /** A card, World Info file or preset, refused when it isn't what its folder holds. */
-const parseLibraryFile = (bytes: Uint8Array, fileName: string, expect: EntityKind) =>
-  Effect.map(parseFile(bytes, fileName), (parsed) => {
+const parseLibraryFile = (
+  bytes: Uint8Array,
+  fileName: string,
+  expect: EntityKind,
+  textSwitches?: StSettings["textSwitches"]
+) =>
+  Effect.map(parseFile(bytes, fileName), (file) => {
+    let parsed = file
+    if (expect === "preset" && parsed.library?.kind === "preset" && textSwitches) {
+      // Global in ST, prompt-local here. Both content and reimport hashes must
+      // include the copied settings, including when only settings.json changed.
+      const doc = { ...JSON.parse(parsed.library.docJson), ...textSwitches }
+      parsed = new ParsedFile({
+        ...parsed,
+        library: {
+          ...parsed.library,
+          docJson: JSON.stringify(doc),
+          docHash: docHash(doc),
+          searchText: searchText(doc)
+        },
+        sha256: sha256(new TextEncoder().encode(JSON.stringify([parsed.sha256, textSwitches])))
+      })
+    }
     if (parsed.library !== null && parsed.library.kind !== expect) {
       return new StLibraryFile({
         parsed: {

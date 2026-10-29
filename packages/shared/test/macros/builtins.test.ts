@@ -56,6 +56,25 @@ const run = (text: string, context: Partial<MacroContext> = {}, random: () => nu
 const vectors = (cases: ReadonlyArray<readonly [string, string]>, context: Partial<MacroContext> = {}) =>
   it.each(cases)("%j → %j", (input, output) => expect(run(input, context)).toBe(output))
 
+it("collapses expanded field macros before removing carriage returns, preserving prompt and version text", () => {
+  const text = "A{{newline}}{{newline}}B\n\r\nC"
+  const card = {
+    persona: text,
+    systemPrompt: text,
+    postHistoryInstructions: text,
+    depthPrompt: text,
+    firstMessage: text,
+    alternateGreetings: [text],
+    version: "1\n\n2"
+  }
+  const prompt =
+    "Prompt\n\n{{persona}}|{{charPrompt}}|{{charInstruction}}|{{charDepthPrompt}}|{{greeting}}|{{greeting::1}}|{{version}}"
+  expect(run(prompt, { card, collapseNewlines: true })).toBe(
+    "Prompt\n\n" + Array(6).fill("A\nB\n\nC").join("|") + "|1\n\n2"
+  )
+  expect(run("{{persona}}", { card })).toBe("A\n\nB\n\nC")
+})
+
 describe("utility", () => {
   vectors([
     ["{{space}}|{{space::3}}|", " |   |"],

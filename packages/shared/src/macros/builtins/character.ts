@@ -6,10 +6,12 @@ import type { MacroCall, MacroSpec } from "../registry.ts"
 
 type TextField = Exclude<keyof CardFields, "alternateGreetings" | "version" | "joined">
 
-/** ST's baseChatReplace: trimmed, expanded without card fields, carriage returns removed. */
+/** ST's baseChatReplace: expand, optionally collapse newlines, then remove carriage returns. */
 const expanded = (call: MacroCall, text: string | undefined, scope: string) => {
   const trimmed = text?.trim()
-  return trimmed ? call.expandTemplate(trimmed, scope).replace(/\r/g, "") : ""
+  if (!trimmed) return ""
+  const value = call.expandTemplate(trimmed, scope)
+  return (call.context.collapseNewlines ? value.replace(/\n+/g, "\n") : value).replace(/\r/g, "")
 }
 
 export const cardField = (call: MacroCall, key: TextField) => expanded(call, call.context.card?.[key], `card.${key}`)

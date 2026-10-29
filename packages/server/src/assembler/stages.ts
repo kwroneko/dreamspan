@@ -414,6 +414,7 @@ const macrosStage = sync("macros", (assembly) => {
   assembly.macros = makeMacroEnvironment(assembly, {
     names: namesFor(need(assembly, "state"), cast),
     card: macroCard(cast, assembly.notes),
+    collapseNewlines: preset.collapse_newlines === true,
     messages: [],
     model: assembly.model?.key ?? "",
     maxContextTokens: preset.samplers.openai_max_context,
@@ -708,17 +709,26 @@ const rolesStage = sync("roles", (assembly) => {
   })
 })
 
+/** ST's baseChatReplace collapses expanded card fields, before removing carriage returns. */
+const cardNewlines = (assembly: Assembly, piece: number): Text => {
+  const original = need(assembly, "macros").text(piece)
+  const text = (need(assembly, "preset").doc.collapse_newlines ? original.replace(/\n+/g, "\n") : original).replace(
+    /\r/g,
+    ""
+  )
+  assembly.pieces[piece] = { ...assembly.pieces[piece]!, text }
+  return { text, piece }
+}
+
 /** A card field as ST's baseChatReplace gives it: trimmed, expanded without card fields, no carriage returns. */
 const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text => {
   const env = need(assembly, "macros")
-  const raw = String(card.doc[field] ?? "")
-    .trim()
-    .replace(/\r/g, "")
+  const raw = String(card.doc[field] ?? "").trim()
   const piece = env.piece(`card:${card.entity}:${String(field)}`, cardSource(card, String(field)), raw, {
     withoutCard: true,
     ...(names ? { names } : {})
   })
-  return { text: env.text(piece), piece }
+  return cardNewlines(assembly, piece)
 }
 
 const presetText = (
@@ -1478,7 +1488,7 @@ const composeStage = sync("compose", (assembly) => {
                 cardSource(card, "description"),
                 card.doc.description
               )
-              return { text: env.text(piece), piece }
+              return cardNewlines(assembly, piece)
             })()
           : null
       )
@@ -1588,7 +1598,7 @@ const composeStage = sync("compose", (assembly) => {
       (position === "em_top" ? positioned.toReversed() : positioned)
         .filter((e) => e.entry.position === position)
         .flatMap((e) =>
-          exampleBlocks(env.text(e.piece)).map((block) =>
+          exampleBlocks(cardNewlines(assembly, e.piece).text).map((block) =>
             parseExampleBlock(block, names.user, names.char, false).map((line): ChatLine => ({
               role: "system",
               content: line.content,
@@ -1598,7 +1608,7 @@ const composeStage = sync("compose", (assembly) => {
             }))
           )
         )
-    examples = [...loreExamples("em_top"), ...examples0, ...loreExamples("em_bottom")]
+    examples = doc.strip_examples ? [] : [...loreExamples("em_top"), ...examples0, ...loreExamples("em_bottom")]
   }
   placeLore()
   for (const e of positioned.filter((e) => e.entry.position === "outlet"))
@@ -1945,7 +1955,7 @@ const composeStage = sync("compose", (assembly) => {
     }))
     return compose({
       layer: [...layer, ...markers],
-      stableExamples: assembly.lcm !== undefined,
+      stableExamples: assembly.lcm !== undefined || doc.pin_examples === true,
       beside,
       collection,
       disabled,
@@ -2041,12 +2051,27 @@ const composeStage = sync("compose", (assembly) => {
     return Math.max(actual, Math.min(reserved, actual + allowance))
   }
   const admit = () => {
+    // Unpinned examples use only the room left by history. At a cut, keep the
+    // normal stepped target; between cuts the admitted examples stay stable.
+    let history = projected.length
+    let limit = maximum
+    if (!doc.pin_examples) {
+      if (budgetCost(0, false, false) > maximum) limit = desiredTarget
+      let low = 0,
+        high = projected.length
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2)
+        if (budgetCost(mid, false, false) <= limit) high = mid
+        else low = mid + 1
+      }
+      history = low
+    }
     let low = 0,
       high = examples.length
     while (low < high) {
       const mid = Math.ceil((low + high) / 2)
       admittedExamples = examples.slice(0, mid)
-      if (budgetCost(projected.length, true, false) <= maximum) low = mid
+      if (budgetCost(history, true, false) <= limit) low = mid
       else high = mid - 1
     }
     admittedExamples = examples.slice(0, low)

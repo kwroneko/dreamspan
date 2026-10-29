@@ -129,7 +129,14 @@ const StPersona = Schema.Struct({
 })
 export type StPersona = typeof StPersona.Type
 
+const StTextSwitches = Schema.Struct({
+  pin_examples: Schema.Boolean,
+  strip_examples: Schema.Boolean,
+  collapse_newlines: Schema.Boolean
+})
+
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
+  textSwitches: Schema.optionalKey(StTextSwitches),
   selectedPreset: Schema.NullOr(Schema.String),
   personas: Schema.Array(StPersona),
   globalWorlds: Schema.Array(Schema.String),
@@ -214,7 +221,13 @@ export class FormatOps extends RpcGroup.make(
   }),
   /** A card, World Info file or preset of the folder; `expect` is the kind its folder holds. */
   Rpc.make("ParseStLibraryFile", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, expect: EntityKind, parser },
+    payload: {
+      bytes: Transferable.Uint8Array,
+      fileName: Schema.String,
+      expect: EntityKind,
+      parser,
+      textSwitches: Schema.optionalKey(StTextSwitches)
+    },
     success: StLibraryFile
   }),
   /** A persona as a card with its avatar; null for an avatar ST lists under no name. */

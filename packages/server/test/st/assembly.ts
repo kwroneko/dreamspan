@@ -180,6 +180,9 @@ const dropMissing = (
 }
 
 interface Config {
+  readonly textSwitches?: { pin_examples: boolean; strip_examples: boolean; collapse_newlines: boolean }
+  readonly multilineCard?: boolean
+  readonly fieldMacros?: boolean
   readonly overMaximum?: boolean
   readonly lorebook?: boolean
   readonly name: string
@@ -365,7 +368,20 @@ const ourRequest = async (
     regex_approved: true,
     utility_prompts: { ...parsed.utility_prompts, card_join_prefix: "", card_join_suffix: "" }
   }
-  const card = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
+  const importedCard = await imported(fixtures.cards.find((c) => c.name === character)!.png, character)
+  const card = config.multilineCard
+    ? {
+        ...importedCard,
+        doc: {
+          ...importedCard.doc,
+          description: "First line\n\n{{char}} last line.",
+          mes_example:
+            "<START>\n{{user}}: Example question " +
+            (config.overMaximum ? "lantern ".repeat(80) : "") +
+            "\n{{char}}: Example\n\nanswer"
+        }
+      }
+    : importedCard
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
   const importedAuthorNote = config.authorNote ? authorNoteInput(config.authorNote, config.defaultAuthorNote) : null
   const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona) : null
@@ -469,6 +485,30 @@ export const compareAssembly = async (
   await savePoisonPreset(browser, url, POISON)
   const configs: ReadonlyArray<Config> = [
     { name: "baseline", presets: [] },
+    ...[false, true].flatMap((pin_examples) =>
+      [false, true].flatMap((strip_examples) =>
+        [false, true].map((collapse_newlines) => ({
+          name: `text switches pin=${pin_examples} strip=${strip_examples} collapse=${collapse_newlines}`,
+          presets: ["default"],
+          multilineCard: true,
+          textSwitches: { pin_examples, strip_examples, collapse_newlines }
+        }))
+      )
+    ),
+    ...[false, true].map((pin_examples) => ({
+      name: `text switches tight pin=${pin_examples}`,
+      presets: ["default"],
+      multilineCard: true,
+      overMaximum: true,
+      textSwitches: { pin_examples, strip_examples: false, collapse_newlines: false }
+    })),
+    ...[false, true].map((collapse_newlines) => ({
+      name: `text switches field macros collapse=${collapse_newlines}`,
+      presets: ["default"],
+      multilineCard: true,
+      fieldMacros: true,
+      textSwitches: { pin_examples: false, strip_examples: true, collapse_newlines }
+    })),
     { name: "history over maximum, stepped target", presets: ["default"], overMaximum: true },
     ...["default", "full"].map((preset) => ({
       name: `${preset}, lorebook positions`,
@@ -650,12 +690,15 @@ export const compareAssembly = async (
   let compared = 0
   let equal = 0
   for (const character of fixtures.gateCards) {
-    for (const config of configs) {
+    for (const config of configs.filter((c) => !process.env.ST_DIFF_TEXT_SWITCHES || c.textSwitches)) {
       const { body, settings } = await captureWithSettings(
         browser,
         url,
         mock,
         {
+          ...(config.textSwitches ? { textSwitches: config.textSwitches } : {}),
+          ...(config.multilineCard ? { multilineCard: true } : {}),
+          ...(config.fieldMacros ? { fieldMacros: true } : {}),
           overMaximum: config.overMaximum ?? false,
           presets: config.presets,
           character,
@@ -675,6 +718,32 @@ export const compareAssembly = async (
           `${character}, ${config.name}: ST didn't trigger lore on the author's note, so this compares nothing`
         )
       const ours = await ourRequest(fixtures, character, config, settings)
+      if (config.textSwitches) {
+        for (const [side, request] of [
+          ["ST", body],
+          ["ours", ours.body]
+        ] as const) {
+          const messages = messagesOf(request) ?? []
+          const examples = messages.some((m) => m.name === "example_user" && m.content.includes("Example question"))
+          const expected =
+            !config.textSwitches.strip_examples && (!config.overMaximum || config.textSwitches.pin_examples)
+          if (examples !== expected)
+            differences.push(`${character}, ${config.name}: ${side} examples ${examples}, expected ${expected}`)
+          if (config.fieldMacros) {
+            const main = messages.find((m) => m.content.startsWith("Field macros"))?.content ?? ""
+            const answer = config.textSwitches.collapse_newlines ? "Example\nanswer" : "Example\n\nanswer"
+            if (!main.startsWith("Field macros\n\n<START>") || !main.includes(answer))
+              differences.push(`${character}, ${config.name}: ${side} didn't exercise card field macros`)
+          }
+          const description = messages.find((m) => m.content.includes("First line"))?.content ?? ""
+          if (
+            !description.includes(
+              config.textSwitches.collapse_newlines ? "First line\n" + character : "First line\n\n" + character
+            )
+          )
+            differences.push(`${character}, ${config.name}: ${side} didn't exercise newline collapse`)
+        }
+      }
       const label = `${character}, ${config.name}`
       // Both sides leaving it out would compare equal: ST must have sent it.
       if (config.summary && !JSON.stringify(body).includes(config.summary.text)) {
@@ -736,7 +805,7 @@ export const compareAssembly = async (
       notes.push(`${label}: ${(body as { messages?: ReadonlyArray<unknown> }).messages?.length ?? 0} messages`)
     }
   }
-  if (!everyOther.includes(true) || !everyOther.includes(false)) {
+  if (!process.env.ST_DIFF_TEXT_SWITCHES && (!everyOther.includes(true) || !everyOther.includes(false))) {
     differences.push("the author's note with an interval was always or never sent, so its interval compares nothing")
   }
   return [

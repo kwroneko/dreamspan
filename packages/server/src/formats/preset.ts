@@ -475,6 +475,11 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
     order,
     samplers,
     utility_prompts,
+    ...Object.fromEntries(
+      ["pin_examples", "strip_examples", "collapse_newlines"]
+        .filter((key) => src[key] !== undefined)
+        .map((key) => [key, bool(key, false)])
+    ),
     names_behavior,
     squash: bool("squash_system_messages", false),
     postprocess,
@@ -929,6 +934,11 @@ export const exportStPreset = (stored: PresetDoc): Json => {
     ...doc.unsupported,
     ...doc.samplers,
     ...utility_prompts,
+    ...Object.fromEntries(
+      ["pin_examples", "strip_examples", "collapse_newlines"]
+        .filter((key) => doc[key as keyof PresetDoc] !== undefined)
+        .map((key) => [key, doc[key as keyof PresetDoc]])
+    ),
     names_behavior: NamesBehavior.literals.indexOf(doc.names_behavior) - 1,
     squash_system_messages: doc.squash,
     custom_prompt_post_processing: doc.postprocess === "none" ? "" : doc.postprocess,

@@ -193,6 +193,10 @@ export const LegacyPresetDoc = Schema.Struct({
   /** Total target after a history cut; absent means 80% of the effective maximum. */
   context_target: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
   utility_prompts: UtilityPrompts,
+  /** ST power-user prompt switches; absent is false for existing revisions. */
+  pin_examples: Schema.optionalKey(Schema.Boolean),
+  strip_examples: Schema.optionalKey(Schema.Boolean),
+  collapse_newlines: Schema.optionalKey(Schema.Boolean),
   names_behavior: NamesBehavior,
   /** ST's `squash_system_messages`: consecutive system messages are joined into one. */
   squash: Schema.Boolean,
