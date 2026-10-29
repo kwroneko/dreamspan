@@ -135,7 +135,9 @@ export class SummaryDraft {
       text,
       changed: text !== (this.summary.content ?? ""),
       unsaved: this.local !== null,
-      outdated: this.draft?.status === "active" && this.draft.baseRevision !== this.summary.revisionId,
+      outdated:
+        (this.local !== null || this.draft?.status === "active") &&
+        this.comparisonRevisionId !== this.summary.revisionId,
       ...extra
     })
   }
@@ -233,6 +235,8 @@ export class SummaryDraft {
   }
 
   setText(text: string) {
+    // The first keystroke fixes the revision, before autosave or another tab's update.
+    if (this.base.revisionId === null) this.base = { ...this.base, revisionId: this.summary.revisionId }
     this.local = text
     this.keep(text)
     this.refresh()

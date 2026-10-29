@@ -23,6 +23,31 @@ const draft = (content: string, rowVersion = 1) =>
     historyLength: 3
   })
 
+it("keeps a summary's original comparison and save base when another revision arrives before autosave", async () => {
+  const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
+  const rpc = (tag: string, payload: Record<string, unknown>) => {
+    calls.push({ tag, payload })
+    return Effect.succeed(tag === "GetSummaryDraft" ? null : draft(String(payload.content)))
+  }
+  const session = {
+    snapshot: () => ({ forkId: "fork" }),
+    call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+      ok: true,
+      value: await Effect.runPromise(request(rpc))
+    })
+  } as unknown as ChatSession
+  const summary = { id: "summary", revisionId: "revision", content: "original", rowVersion: 1 } as LcmSummary
+  const store = new SummaryDraft(session, "user", summary)
+  await store.open()
+  store.setText("typed from the original")
+  store.update({ ...summary, revisionId: "new-revision" as LcmSummary["revisionId"], content: "elsewhere" })
+  expect(store.comparisonRevisionId).toBe("revision")
+  expect(store.snapshot().outdated).toBe(true)
+  await store.save()
+  expect(calls.at(-1)?.payload.baseRevisionId).toBe("revision")
+  store.dispose()
+})
+
 for (const kind of ["message", "summary"] as const)
   describe(`${kind} history`, () => {
     it("has no earlier text before the first draft is saved", async () => {

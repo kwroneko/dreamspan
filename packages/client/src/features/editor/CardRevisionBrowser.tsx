@@ -12,8 +12,25 @@ import { RadioGroup } from "../../ui/Choice.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
-import { changedFields, fieldLabel } from "./fields.ts"
+import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
 import { type EditorStore, useEditorState, useWorkingDoc } from "./store.ts"
+
+function FieldComparison({ label, change }: { label: string; change: FieldChange }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <details
+      className="min-w-0 rounded-md border border-border p-2"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>
+      {open && (
+        <div className="mt-2">
+          <ValueDiff before={change.before} after={change.after} rich />
+        </div>
+      )}
+    </details>
+  )
+}
 
 function RevisionComparison({ store, call, revision }: { store: EditorStore; call: Caller; revision: Revision }) {
   const [mode, setMode] = useState<"parent" | "current">("parent")
@@ -89,14 +106,7 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
         <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
           {changes.map((change) => {
             const label = fieldLabel(state.snapshot!.ref.kind, mode === "parent" ? docs!.doc : current, change.path)
-            return (
-              <details key={JSON.stringify(change.path)} className="min-w-0 rounded-md border border-border p-2">
-                <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>
-                <div className="mt-2">
-                  <ValueDiff before={change.before} after={change.after} rich />
-                </div>
-              </details>
-            )
+            return <FieldComparison key={JSON.stringify(change.path)} label={label} change={change} />
           })}
         </div>
       )}

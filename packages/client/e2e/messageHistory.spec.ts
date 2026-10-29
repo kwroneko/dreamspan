@@ -18,6 +18,95 @@ const oldText = "The lantern keeper waited beside the harbor. ".repeat(8)
 const middleText = "The road led past the lighthouse. ".repeat(8)
 
 for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a failed summary comparison read can be retried without closing the draft ${width} ${theme}`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height: 960 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+      const fixture = await admin((api) =>
+        Effect.gen(function* () {
+          const chat = yield* api.CreateChat({ title: "Summary comparison recovery" })
+          const sent = yield* api.SendMessage({
+            chatId: chat.id,
+            parentSlotId: null,
+            branch: false,
+            content: "A harbor."
+          })
+          if (sent._tag !== "Posted") throw new Error("queued fixture")
+          return { chat, entry: sent.entry }
+        })
+      )
+      const summary = await level1(server().dataDir, fixture.chat.id, [fixture.entry], "Original summary.")
+      await admin((api) =>
+        Effect.gen(function* () {
+          const key = { forkId: fixture.chat.currentForkId!, summaryId: summary.id as LcmSummary["id"] }
+          yield* api.SaveSummaryDraft({
+            ...key,
+            draftId: null,
+            content: "Recovered summary draft.",
+            expectedRowVersion: null,
+            expectedSession: null,
+            baseRevisionId: summary.revisionId as LcmSummary["revisionId"]
+          })
+          yield* api.EditSummary({ ...key, content: "Newer summary.", expectedRowVersion: 1, commitDraft: null })
+        })
+      )
+      let failed = false
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
+          if (!failed && request?.tag === "ListSummaryRevisions") {
+            failed = true
+            const error = { _tag: "ServerError", message: "Synthetic comparison read failure" }
+            socket.send(
+              JSON.stringify({
+                _tag: "Exit",
+                requestId: request.id,
+                exit: { _tag: "Failure", cause: [{ _tag: "Fail", error }] }
+              })
+            )
+          } else upstream.send(data)
+        })
+      })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${fixture.chat.id}`)
+      const panel = await openPanel(page, "Summaries")
+      await panel.getByRole("button", { name: /Edit the summary/ }).click()
+      await expect(panel.getByRole("alert")).toHaveText(
+        "Something failed on the server. The details are in the server's log."
+      )
+      const box = panel.getByRole("textbox", { name: /Text of the summary/ })
+      await expectTextBox(box, "Recovered summary draft.")
+      await mkdir(screens, { recursive: true })
+      await page.screenshot({ animations: "disabled", path: `${screens}/summary-read-retry-${width}-${theme}.png` })
+      await panel.getByRole("button", { name: "Retry saved text" }).click()
+      await expectTextBox(box, "Recovered summary draft.")
+      await panel.getByText("Compare with saved text", { exact: true }).click()
+      if (width > 639)
+        await expectTextBox(panel.getByRole("textbox", { name: "Before", exact: true }), "Original summary.")
+      else await expect(panel.locator(".cm-deletedChunk").first()).toContainText("Original summary.")
+      await expect(panel.getByRole("alert")).toHaveCount(0)
+      await page.screenshot({ animations: "disabled", path: `${screens}/summary-read-recovered-${width}-${theme}.png` })
+      await box.fill("Continued after the retry.")
+      await expect(panel.getByText("Your text is kept as a draft.")).toBeVisible()
+      await panel.getByRole("button", { name: "Save revision", exact: true }).click()
+      await expect
+        .poll(
+          async () =>
+            (
+              await admin((api) =>
+                api.GetSummary({ forkId: fixture.chat.currentForkId!, summaryId: summary.id as LcmSummary["id"] })
+              )
+            ).content
+        )
+        .toBe("Continued after the retry.")
+    })
+
+for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`message and summary history ${width} ${theme}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 960 })

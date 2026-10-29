@@ -60,11 +60,17 @@ for (const width of [1440, 390])
         const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
         await revisions.first().getByRole("button").click()
         const change = history.locator("details").first()
+        await expect(change).toBeVisible()
+        // Closed fields must not allocate merge editors for the whole revision.
+        await expect(history.locator(".cm-editor")).toHaveCount(0)
         await change.locator("summary").click()
         await expectTextBox(
           change.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
           after
         )
+        await change.locator("summary").click()
+        await expect(history.locator(".cm-editor")).toHaveCount(0)
+        await change.locator("summary").click()
         await page.screenshot({ animations: "disabled", path: join(screens, `${kind}-history-${width}-${theme}.png`) })
         await history.getByRole("radio", { name: "Current draft / head" }).click()
         await expect(history.getByText("No fields differ.", { exact: true })).toBeVisible()

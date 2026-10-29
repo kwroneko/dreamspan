@@ -56,6 +56,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
   const baseId = store.comparisonRevisionId
   const [comparison, setComparison] = useState<SummaryRevision | null>(null)
   const [comparisonError, setComparisonError] = useState<AppError | null>(null)
+  const [comparisonAttempt, setComparisonAttempt] = useState(0)
   useEffect(() => {
     if (baseId === summary.revisionId) return
     let live = true
@@ -68,13 +69,25 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       )
       .then((result) => {
         if (!live) return
-        if (result.ok) setComparison(result.value.find((revision) => revision.id === baseId) ?? null)
-        else setComparisonError(result.error)
+        if (result.ok) {
+          const revision = result.value.find((revision) => revision.id === baseId)
+          setComparison(revision ?? null)
+          setComparisonError(
+            revision
+              ? null
+              : {
+                  tag: "NotFound",
+                  message: "The saved text this draft started from is unavailable.",
+                  problems: [],
+                  reason: null
+                }
+          )
+        } else setComparisonError(result.error)
       })
     return () => {
       live = false
     }
-  }, [session, baseId, summary.id, summary.revisionId])
+  }, [session, baseId, summary.id, summary.revisionId, comparisonAttempt])
   const base =
     baseId === summary.revisionId ? (summary.content ?? "") : comparison?.id === baseId ? comparison.content : null
   const [pending, setPending] = useState(false)
@@ -125,7 +138,19 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       {view.restored > 0 && <Alert>Text typed here earlier and kept in this browser is back in the box.</Alert>}
       {view.recovered > 0 && <Alert>Earlier text from this edit is in the bin's recovered texts.</Alert>}
       {base !== null && <SlotOutlet slot={summaryEditorTools} props={{ draft: store, base }} />}
-      <Problem error={comparisonError} />
+      {base === null && comparisonError && (
+        <>
+          <Problem error={comparisonError} />
+          <Button
+            onClick={() => {
+              setComparisonError(null)
+              setComparisonAttempt((attempt) => attempt + 1)
+            }}
+          >
+            Retry saved text
+          </Button>
+        </>
+      )}
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" pending={pending} disabled={!view.changed || view.text.trim() === ""}>
