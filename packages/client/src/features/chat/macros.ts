@@ -1,6 +1,6 @@
 // Macros in displayed text (DESIGN §5.6, ARCHITECTURE §10): a greeting keeps `{{user}}`
 // and `{{char}}` unresolved, so it follows the chat's state. Only `expand()` decides what
-// expands: a message's stored macro mode, never this code.
+// expands: a message's stored macro mode and the explicit display-only opt-in.
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import { expand, type FrozenValues } from "@rp/shared/macros/expand.ts"
@@ -43,19 +43,24 @@ export const expandForDisplay = (
   macroMode: "template" | "verbatim",
   names: DisplayNames,
   card: CardFields = {},
-  frozen: FrozenValues = {}
-): { readonly text: string; readonly frozen: FrozenValues } => {
-  if (macroMode !== "template" || (!text.includes("{{") && !text.includes("<"))) return { text, frozen: {} }
+  frozen: FrozenValues = {},
+  displayRule = false
+): { readonly text: string; readonly frozen: FrozenValues; readonly issue?: string } => {
+  if ((macroMode !== "template" && !displayRule) || (!text.includes("{{") && !text.includes("<")))
+    return { text, frozen: {} }
   const result = expand({
     text,
     origin: { kind: "message", macroMode },
     purpose: "display",
+    displayRule,
     registry,
     context: { names, card, now: Date.now(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
     frozen,
     random: seeded(text)
   })
-  return result._tag === "Expanded" ? { text: result.text, frozen: result.frozen } : { text, frozen: {} }
+  return result._tag === "Expanded"
+    ? { text: result.text, frozen: result.frozen }
+    : { text, frozen: {}, issue: `Display macros skipped: ${result.limit} limit reached.` }
 }
 
 /** Text as shown (`expandForDisplay`), without the values drawn. */

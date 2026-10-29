@@ -1,3 +1,5 @@
+import { run, OutputLimit } from "@rp/shared/regexReplace.ts"
+export { run } from "@rp/shared/regexReplace.ts"
 // A preset's prompt-only regex scripts, as ST 1.19 runs them when it builds a prompt
 // (extensions/regex/engine.js), on V8's linear-time engine and within a time and output
 // budget (ARCHITECTURE §15).
@@ -115,56 +117,6 @@ const maxBounded = (script: RegexScript) => script.max_depth !== null && script.
 /** Whether ST runs a prompt-only script on a message at this depth (getRegexedString). */
 const withinDepth = (script: RegexScript, depth: number) =>
   (!minBounded(script) || depth >= script.min_depth!) && (!maxBounded(script) || depth <= script.max_depth!)
-
-/** Thrown from a replacement once the scripts have made all the text they may. */
-class OutputLimit extends Error {}
-
-/**
- * ST's runRegexScript, its replacement already expanded, the text it makes charged to `output`.
- * It loops over `exec` because V8's `replace` can hang where no timeout reaches (§15).
- */
-export const run = (
-  regex: RegExp,
-  replacement: string,
-  trimStrings: ReadonlyArray<string>,
-  text: string,
-  output: { left: number } = { left: Number.POSITIVE_INFINITY }
-) => {
-  const template = replacement.replace(/{{match}}/gi, "$0")
-  const replace = (match: RegExpExecArray) => {
-    // What a replace function gets: the match, its groups, its offset and the text.
-    const args: ReadonlyArray<unknown> = [...match, match.index, text]
-    const made = template.replaceAll(/\$(\d+)|\$<([^>]+)>/g, (_, num: string | undefined, name: string | undefined) => {
-      const value = num ? args[Number(num)] : name ? match.groups?.[name] : undefined
-      if (typeof value !== "string" || !value) return ""
-      return trimStrings.reduce((s, trim) => s.replaceAll(trim, ""), value)
-    })
-    return made
-  }
-  const charge = (length: number) => {
-    output.left -= length
-    if (output.left < 0) throw new OutputLimit()
-  }
-  regex.lastIndex = 0
-  let result = ""
-  let copied = 0
-  let matched = false
-  for (;;) {
-    const match = regex.exec(text)
-    if (match === null) break
-    matched = true
-    const made = replace(match)
-    charge(match.index - copied + made.length)
-    result += text.slice(copied, match.index) + made
-    copied = match.index + match[0].length
-    if (!regex.global) break
-    if (match[0] === "") regex.lastIndex++
-  }
-  // Without a match the text is returned as it is, and nothing is made.
-  if (!matched) return text
-  charge(text.length - copied)
-  return result + text.slice(copied)
-}
 
 /** Runs `job()` in a context of its own, so a timeout can stop it. */
 const JOB = new Script("job()")

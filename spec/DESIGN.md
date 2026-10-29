@@ -359,13 +359,13 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** **Parallel requests with a cold cache can cause N cache writes.** Stagger them deliberately per provider: start one, and release the others once its cache write is readable. When that happens differs by provider, so it must be tested and measured (cache-read token counts on the follow-ups) **[P]**.
 
 ### 5.6 Macros
+
+**Built 2026-10-28 (U10; obsolete as requirements):** verbatim defaults for human/model text and opt-in output substitution are implemented in [ARCHITECTURE.md §10](../ARCHITECTURE.md#10-macros), alongside the bounded, approved display-only preset regex pipeline. Other proposals below retain their status.
 - **[D]** In ST, `{{user}}` in greetings gets fixed when a card is opened, so changing persona before the first message keeps the old name. Substitution must stay dynamic until a message is sent.
 - **[P]** Card-sourced text keeps its macros unresolved in storage. They're resolved when rendered or assembled, against the state at that message's position.
 - **[P]** Non-deterministic macros (`{{random}}`, `{{roll}}`, `{{time}}`) are evaluated once and frozen, for determinism and caching.
-- **[D]** **Text the user types is not macro-expanded by default** either. **[P]** A per-message toggle can switch expansion on.
-- **[D]** **Model output is not macro-substituted by default.** The model never sees macros, so a `{{user}}` it writes is literal. That's required when, say, it writes a card.
+- **[P]** A per-message toggle can switch expansion on.
 - **[P]** Expansion therefore depends on where text came from, and model text stays verbatim when it's sent back in later turns.
-- **[D]** Substituting in output is still useful, as an opt-in display rule.
 
 ---
 
