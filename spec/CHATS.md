@@ -1,6 +1,6 @@
 # Chats: identity, finding, forks
 
-**Status**: Design discussion in progress, 2026-10-16. Nothing is built. [D] items are the owner's words (also in DESIGN §2.1); [P] items are proposals from the discussion, not confirmed. [O] items are open.
+**Status**: Design discussion in progress, 2026-10-16. [D] items are the owner's words (also in DESIGN §2.1); [P] items are proposals from the discussion, not confirmed. [O] items are open. Shell integration U01 is built (2026-10-28): stable fork rows, independent metadata/pins and explicit fork navigation, documented in ARCHITECTURE §12; these portions are obsolete as proposals.
 
 ## Constraints
 

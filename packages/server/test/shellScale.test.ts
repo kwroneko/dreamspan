@@ -85,7 +85,7 @@ describe("group read scale", () => {
         )
         for (const plan of plans) {
           const details = plan.map((row) => String(row.detail))
-          assert.match(details[0]!, /SEARCH c .*owner_user_id/)
+          assert.isTrue(details.some((detail) => /SEARCH c .*owner_user_id/.test(detail)))
           assert.isFalse(details.some((detail) => /^SCAN [se] /.test(detail)))
         }
         yield* api.GetShellLibrary()

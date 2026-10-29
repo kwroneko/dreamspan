@@ -64,6 +64,7 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
       to: "/chats/$chatId",
       params: { chatId: fork.chat.id },
       search: {
+        fork: fork.forkId,
         ...(fork.leaf ? { leaf: fork.leaf } : {}),
         ...(panel ? { panel } : {}),
         ...(scopeChat ? { forks: fork.chat.id } : {})
@@ -213,7 +214,7 @@ export function PinnedChats({
         {(!home || !data.pinsCollapsed) && <SortSwitch value={sort} onChange={setSort} label="Sort pinned chats" />}
       </div>
       {(!home || !data.pinsCollapsed) &&
-        pins.map((fork) => <ForkRow key={`${fork.chat.id}/${fork.leaf}`} fork={fork} />)}
+        pins.map((fork) => <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} />)}
       <ErrorAlert error={action.error} />
     </section>
   )
@@ -236,7 +237,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       <section className="flex flex-col gap-1" aria-label={title}>
         <h3 className="mt-3 text-xs font-semibold text-muted">{title}</h3>
         {forks.map((f) => (
-          <div key={`${f.chat.id}/${f.leaf}`}>
+          <div key={`${f.chat.id}/${f.forkId}`}>
             <ForkRow fork={f} />
             <button
               type="button"

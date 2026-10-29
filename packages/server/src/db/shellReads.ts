@@ -1,37 +1,32 @@
-import { stateEventsOnPath } from "./stateRead.ts"
-import { forkAt } from "./forkState.ts"
 // Graph metadata and bounded excerpts at visible endpoints. Runs in a reader worker.
 import { type CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { foldState, type FoldableEvent } from "@rp/shared/state.ts"
+import { branchOwned, foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { shownInSql } from "./forkState.ts"
-import { shellSlotsQuery, shellEventsQuery, tipForkSql } from "./shellQueries.ts"
+import { shellSlotsQuery, shellEventsQuery } from "./shellQueries.ts"
 import { loadCards } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
-import type { ChatRow } from "./rows.ts"
+import type { ChatRow, ForkRow } from "./rows.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
 
 type Slot = {
+  fork_id: string
   id: string
   chat_id: string
   parent_slot_id: string | null
   created_at: number
-  branch_name: string | null
-  selected_version_id: string
   deleted_at: number | null
-  branch_deleted: number
   speaker: string | null
-  writer: string
   at: number
   depth: number
+  preview: string
 }
-type Event = FoldableEvent & { chat_id: string; slot_id: string | null; version_id: string | null }
+type Event = FoldableEvent & { fork_id: string; chat_id: string; slot_id: string | null }
 // Built plainly during the walk; each becomes a ShellFork once, with its excerpt.
 type Fork = { -readonly [K in keyof Omit<ShellFork, "cast">]: Omit<ShellFork, "cast">[K] } & { cast: Array<CastCard> }
 
@@ -56,18 +51,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
-        // The chat's current fork ends at its active leaf (schema/forks.ts), which is where the shell's current is.
-        const chats = (yield* sql<
-          ChatRow & { current_leaf_slot_id: string | null }
-        >`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`).map((row) => ({
-          ...row,
-          current_leaf_slot_id: row.active_leaf_slot_id
-        }))
+        const chats = yield* sql<ChatRow>`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
+        const records = yield* sql<ForkRow>`SELECT f.* FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
         const slots = yield* sql.unsafe<Slot>(shellSlotsQuery, [userId])
         const raw = yield* sql.unsafe<{
+          fork_id: string
           chat_id: string
           slot_id: string | null
-          version_id: string | null
           scope: string
           key: string
           value_json: string
@@ -75,239 +66,114 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         const events = (yield* withoutPurged(
           sql,
           raw.map((e) => ({ ...e, data: { key: e.key, value: JSON.parse(e.value_json) } })) as Array<Event>,
-          (event) => event.chat_id
-        )) as Array<Event>
-        const eventsAt = new Map<string, Array<Event>>()
-        for (const e of events) {
-          const key = e.slot_id ?? e.chat_id
-          const list = eventsAt.get(key) ?? []
-          list.push(e)
-          eventsAt.set(key, list)
+          (event) => event.fork_id
+        )) as ReadonlyArray<Event>
+        const eventsByFork = new Map<string, Array<Event>>()
+        for (const event of events) {
+          const list = eventsByFork.get(event.fork_id) ?? []
+          list.push(event)
+          eventsByFork.set(event.fork_id, list)
         }
-        const pins = yield* sql<{
-          chat_id: string
-          fork_id: string
-        }>`SELECT chat_id, fork_id FROM chat_pins WHERE user_id = ${userId}`
-        const pinned = new Set(pins.map((p) => `${p.chat_id}/${p.fork_id}`))
-        // A fork's own name and pin (SetForkName, SetForkPinned) belong to the fork ending at this leaf.
-        const named = yield* sql<{
-          chat_id: string
-          tip_slot_id: string
-          name: string | null
-          pinned: number
-        }>`SELECT f.chat_id, f.tip_slot_id, f.name, f.pinned_at IS NOT NULL AS pinned FROM forks f JOIN chats c ON c.id = f.chat_id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL AND f.tip_slot_id IS NOT NULL
-            AND (f.name IS NOT NULL OR f.pinned_at IS NOT NULL)`
-        const forkNames = new Map(
-          named.flatMap((f) => (f.name === null ? [] : [[`${f.chat_id}/${f.tip_slot_id}`, f.name]]))
-        )
-        const forkPins = new Set(named.filter((f) => f.pinned === 1).map((f) => `${f.chat_id}/${f.tip_slot_id}`))
-        const slotById = new Map(slots.map((s) => [s.id, s]))
-        const children = new Map<string, Array<Slot>>()
-        for (const s of slots) {
-          const key = s.parent_slot_id ?? s.chat_id
-          const list = children.get(key) ?? []
-          list.push(s)
-          children.set(key, list)
+        const slotsByFork = new Map<string, Map<string, Slot>>()
+        for (const slot of slots) {
+          const map = slotsByFork.get(slot.fork_id) ?? new Map<string, Slot>()
+          map.set(slot.id, slot)
+          slotsByFork.set(slot.fork_id, map)
         }
+        const chatById = new Map(chats.map((c) => [c.id, c]))
         const forks: Array<Fork> = []
-        // Iterative walk: avoids recursion limits on long imported conversations.
-        for (const row of chats) {
-          const firstFork = forks.length
-          const base = foldState(eventsAt.get(row.id) ?? [])
-          type Walk = {
-            slot: Slot
-            state: typeof base
-            joined: Set<string>
-            activity: Map<string, { entityId: EntityId; at: number; slot: SlotId; category: "just" | "with" | "was" }>
-            fork: string
-            name: string | null
-            created: number
-            current: boolean
-            liveLeaf: string | null
-            recent: number
+        for (const record of records) {
+          const row = chatById.get(record.chat_id)!
+          const map = slotsByFork.get(record.id)
+          // Iterative, including an interior checkpoint and every same-tip peer.
+          const path: Array<Slot> = []
+          let slot = map?.get(record.tip_slot_id ?? "")
+          while (slot) {
+            path.push(slot)
+            const parent = map?.get(slot.parent_slot_id ?? "")
+            slot = parent && parent.depth < slot.depth ? parent : undefined
           }
-          const stack: Array<Walk> = (children.get(row.id) ?? []).map((slot) => ({
-            slot,
-            state: base,
-            joined: new Set(base.participants),
-            activity: new Map(),
-            fork: "",
-            name: null,
-            created: row.created_at,
-            liveLeaf: null,
-            recent: row.created_at,
-            current: false
-          }))
-          const chat = { id: row.id as ChatId, title: row.title }
-          const emptyFork = (): Fork => {
-            const cast = base.participants
-              .filter((id) => !base.playedByMe.includes(id))
-              .flatMap((id) => byCard.get(id) ?? [])
-            return {
-              forkId: "",
-              preview: "",
-              messages: 0,
-              chat,
-              leaf: null,
-              name: chatName(importState(row.title).title, cast).name,
-              current: true,
-              named: false,
-              pinned: pinned.has(`${row.id}/`),
-              createdAt: row.created_at,
-              recentAt: row.last_message_at ?? row.created_at,
-              cast,
-              joined: base.participants as Array<EntityId>,
-              departed: [],
-              activity: []
+          path.reverse()
+          const onPath = new Set(path.map((s) => s.id))
+          const applicable = (eventsByFork.get(record.id) ?? []).filter(
+            (e) => e.slot_id === null || onPath.has(e.slot_id)
+          )
+          const branch = applicable.filter((e) => branchOwned.has(e.data.key))
+          const positional = new Map<string, Array<Event>>()
+          for (const e of applicable) {
+            if (branchOwned.has(e.data.key)) continue
+            const key = e.slot_id ?? ""
+            const list = positional.get(key) ?? []
+            list.push(e)
+            positional.set(key, list)
+          }
+          let state = foldState(positional.get("") ?? [])
+          const joined = new Set([
+            ...state.participants,
+            ...foldState(branch, state).participants,
+            ...applicable.flatMap(({ data }) =>
+              data.key === "participant.join" || data.key === "card.swap" ? [data.value.entity] : []
+            )
+          ])
+          const activity = new Map<
+            string,
+            { entityId: EntityId; at: number; slot: SlotId; category: "just" | "with" | "was" }
+          >()
+          let endpoint: Slot | undefined
+          let messages = 0
+          for (const s of path) {
+            if (s.deleted_at !== null) continue
+            messages++
+            endpoint = s
+            state = foldState(positional.get(s.id) ?? [], state)
+            let here = state
+            // Existing turns retain their authors across card swaps. Keep the played
+            // identities at each step, including intermediate cards in a swap chain.
+            let playedByMe = s.speaker !== null && here.playedByMe.includes(s.speaker)
+            for (const event of branch) {
+              here = foldState([event], here)
+              playedByMe ||= s.speaker !== null && here.playedByMe.includes(s.speaker)
             }
-          }
-          if (stack.length === 0) forks.push(emptyFork())
-          while (stack.length) {
-            const item = stack.pop()!
-            const s = item.slot
-            const liveLeaf = s.deleted_at === null ? s.id : item.liveLeaf
-            const recent = s.deleted_at === null ? s.at : item.recent
-            if (s.branch_deleted) continue
-            const applicable = (eventsAt.get(s.id) ?? []).filter(
-              (e) => s.deleted_at === null && (e.version_id === null || e.version_id === s.selected_version_id)
-            )
-            // foldState takes an initial state, so branch state follows exactly the same rules as GetCast.
-            let state = item.state
-            for (const e of applicable) state = foldState([e], state)
-            const joined = new Set([...item.joined, ...state.participants])
-            const siblings = children.get(s.parent_slot_id ?? s.chat_id) ?? []
-            const fork = siblings.findIndex((x) => x.id === s.id) > 0 ? s.id : item.fork
-            const name = s.branch_name ?? (fork !== item.fork ? null : item.name)
-            const activity =
-              (children.get(s.parent_slot_id ?? s.chat_id)?.length ?? 0) > 1 ? new Map(item.activity) : item.activity
-            const present = state.participants.filter(
-              (id) => !state.playedByMe.includes(id) && !state.absent.includes(id)
-            )
-            if (s.deleted_at === null && s.speaker !== null && !state.playedByMe.includes(s.speaker))
+            for (const id of here.participants) joined.add(id)
+            if (s.speaker !== null && !playedByMe)
               activity.set(s.speaker, {
                 entityId: s.speaker as EntityId,
                 at: s.at,
                 slot: s.id as SlotId,
-                category: present.filter((id) => id !== s.speaker).length === 0 ? "just" : "with"
+                category: "just"
               })
-            const current = item.current || s.id === row.current_leaf_slot_id
-            const next = (children.get(s.id) ?? []).filter((x) => !x.branch_deleted)
-            if (next.length) {
-              // Only branch points copy these small maps; the next iteration owns the state.
-              for (const slot of next)
-                stack.push({
-                  slot,
-                  state,
-                  joined,
-                  activity,
-                  fork,
-                  name,
-                  created: fork !== item.fork ? s.created_at : item.created,
-                  current,
-                  liveLeaf,
-                  recent
-                })
-            } else {
-              const cast = state.participants
-                .filter((id) => !state.playedByMe.includes(id))
-                .flatMap((id) => byCard.get(id) ?? [])
-              const given = liveLeaf === null ? undefined : forkNames.get(`${row.id}/${liveLeaf}`)
-              forks.push({
-                forkId: fork,
-                preview: "",
-                messages: liveLeaf ? (slotById.get(liveLeaf)?.depth ?? -1) + 1 : 0,
-                chat,
-                leaf: liveLeaf as SlotId | null,
-                name: given ?? name ?? chatName(importState(row.title).title, cast).name,
-                named: given !== undefined || name !== null,
-                current:
-                  s.id === row.current_leaf_slot_id ||
-                  (row.current_leaf_slot_id === null && s.id === row.active_leaf_slot_id),
-                pinned: pinned.has(`${row.id}/${fork}`) || (liveLeaf !== null && forkPins.has(`${row.id}/${liveLeaf}`)),
-                createdAt: fork !== item.fork ? s.created_at : item.created,
-                recentAt: recent,
-                cast,
-                joined: [...joined] as Array<EntityId>,
-                departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
-                activity: [...activity.values()].map((a) => ({
-                  ...a,
-                  category: !state.participants.includes(a.entityId)
-                    ? ("was" as const)
-                    : present.some((id) => id !== a.entityId)
-                      ? ("with" as const)
-                      : ("just" as const)
-                }))
-              })
-            }
           }
-          if (forks.length === firstFork) forks.push(emptyFork())
-          const visible = forks.slice(firstFork)
-          if (visible.length > 0 && !visible.some((f) => f.current)) {
-            const fallback =
-              visible.find((f) => f.leaf === row.active_leaf_slot_id) ??
-              [...visible].sort((a, b) => b.recentAt - a.recentAt)[0]!
-            forks[forks.indexOf(fallback)] = { ...fallback, current: true }
-          }
-        }
-        // A single fork with no swaps or suppression uses exactly the state already
-        // folded by the tree walk. Only chats that need independent views are reread.
-        const independent = new Set(
-          (yield* sql<{ chat_id: string }>`
-          SELECT f.chat_id FROM forks f JOIN chats c ON c.id = f.chat_id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.parent_fork_id IS NOT NULL
-          UNION SELECT o.chat_id FROM fork_overrides o JOIN chats c ON c.id = o.chat_id
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND o.kind = 'suppress_event'`).map(
-            (r) => r.chat_id
-          )
-        )
-        for (const e of raw) if (e.key === "card.swap") independent.add(e.chat_id)
-        const chatTitles = new Map(chats.map((c) => [c.id, c.title]))
-        // Fork-scoped state cannot be propagated down the shared slot tree: two forks
-        // may end at the same slot and have different casts. Resolve each endpoint in its fork.
-        for (const f of forks) {
-          if (!independent.has(f.chat.id)) continue
-          const fork = yield* forkAt(sql, f.chat.id, f.leaf)
-          const rows = yield* stateEventsOnPath(sql, f.chat.id, f.leaf, fork)
-          const events = yield* withoutPurged(
-            sql,
-            rows.map((e) => ({
-              scope: e.scope,
-              data: { key: e.key, value: JSON.parse(e.value_json) }
-            })) as Array<FoldableEvent>
-          )
-          const state = foldState(events)
-          f.cast = state.participants
+          state = foldState(branch, state)
+          const cast = state.participants
             .filter((id) => !state.playedByMe.includes(id))
             .flatMap((id) => byCard.get(id) ?? [])
-          const joined = new Set(
-            events.flatMap(({ data }) =>
-              data.key === "participant.join" || data.key === "card.swap" ? [data.value.entity] : []
-            )
+          const present = state.participants.filter(
+            (id) => !state.playedByMe.includes(id) && !state.absent.includes(id)
           )
-          f.joined = [...joined] as Array<EntityId>
-          f.departed = [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>
-          f.activity = f.activity.map((a) => ({
-            ...a,
-            category: !state.participants.includes(a.entityId)
-              ? "was"
-              : state.participants.some(
-                    (id) => id !== a.entityId && !state.playedByMe.includes(id) && !state.absent.includes(id)
-                  )
-                ? "with"
-                : "just"
-          }))
-          if (!f.named) f.name = chatName(importState(chatTitles.get(f.chat.id)!).title, f.cast).name
-        }
-        // Only the visible endpoints need text, and only a bounded excerpt.
-        const previewByLeaf = new Map<string, string>()
-        const leaves = [...new Set(forks.flatMap((f) => f.leaf ?? []))]
-        for (let at = 0; at < leaves.length; at += 200) {
-          const rows = yield* sql<{
-            id: string
-            preview: string
-          }>`SELECT s.id, substr(v.content,1,160) AS preview FROM slots s JOIN versions v ON v.id = ${sql.literal(shownInSql(tipForkSql, "s"))} WHERE s.id IN ${sql.in(leaves.slice(at, at + 200))} AND s.deleted_at IS NULL`
-          for (const row of rows) previewByLeaf.set(row.id, row.preview)
+          forks.push({
+            forkId: record.id,
+            preview: endpoint?.preview ?? "",
+            messages,
+            chat: { id: row.id as ChatId, title: row.title },
+            leaf: (endpoint?.id as SlotId) ?? null,
+            name: record.name ?? chatName(importState(row.title).title, cast).name,
+            named: record.name !== null,
+            current: record.id === row.current_fork_id,
+            pinned: record.pinned_at !== null,
+            createdAt: record.created_at,
+            recentAt: endpoint?.at ?? record.created_at,
+            cast,
+            joined: [...joined] as Array<EntityId>,
+            departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
+            activity: [...activity.values()].map((a) => ({
+              ...a,
+              category: !state.participants.includes(a.entityId)
+                ? "was"
+                : present.some((id) => id !== a.entityId)
+                  ? "with"
+                  : "just"
+            }))
+          })
         }
         const people = new Map<string, CastCard>()
         for (const f of forks) for (const c of f.cast) people.set(c.entityId, c)
@@ -356,7 +222,6 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               (f) =>
                 new ShellFork({
                   ...f,
-                  preview: f.leaf ? (previewByLeaf.get(f.leaf) ?? "") : "",
                   cast: f.cast.map((c) => c.entityId)
                 })
             ),

@@ -83,6 +83,7 @@ export function useOpenCharacter() {
         params: { chatId: latest.chat.id },
         search: {
           character: entity,
+          fork: latest.forkId,
           panel,
           ...(latest.leaf ? { leaf: latest.leaf } : {}),
           ...(latest.activity.find((a) => a.entityId === entity)?.slot
