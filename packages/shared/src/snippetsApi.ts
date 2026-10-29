@@ -3,7 +3,7 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ForkId } from "./chat.ts"
-import { Draft } from "./drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { LibraryRef, RefId, RevisionId } from "./library.ts"
 import { EditRefused } from "./editorApi.ts"
@@ -24,6 +24,13 @@ export const SaveSnippetFields = {
   expectedRevision: RevisionId
 }
 export const GlobalSnippetFields = { ...SnippetContext, refId: RefId, expectedRevision: RevisionId }
+export const SnippetHistoryFields = {
+  ...SnippetContext,
+  refId: RefId,
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+}
+/** Restores state `seq` of the snippet's text history and saves it as the snippet's text. */
+export const RestoreSnippetFields = { ...GlobalSnippetFields, seq: Schema.Int }
 export class SnippetsApi extends RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: { ...SnippetContext, query: Schema.optionalKey(Schema.String) },
@@ -44,5 +51,16 @@ export class SnippetsApi extends RpcGroup.make(
     payload: GlobalSnippetFields,
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
+  }),
+  /** The snippet's earlier texts, newest first, kept on the server across reloads. */
+  Rpc.make("SnippetHistory", {
+    payload: SnippetHistoryFields,
+    success: Schema.Array(DraftState),
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  Rpc.make("RestoreSnippet", {
+    payload: RestoreSnippetFields,
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, ServerError, EditRefused])
   })
 ) {}

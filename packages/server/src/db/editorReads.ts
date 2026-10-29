@@ -1,5 +1,5 @@
 import { inFork } from "./forkState.ts"
-import { readSnippet, snippetFork } from "./snippets.ts"
+import { readSnippet, snippetFork, snippetKey } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -35,6 +35,14 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           .filter((item) => item !== null)
           .sort((a, b) => a.title.localeCompare(b.title))
       }).pipe(query("ListSnippets")),
+    SnippetHistory: ({ userId, chatId, forkId, refId, limit }) =>
+      Effect.gen(function* () {
+        const fork = yield* snippetFork(sql, userId, chatId, forkId)
+        const current = yield* readSnippet(sql, userId, yield* lib.ownedRef(userId, refId), chatId, fork)
+        if (!current) return yield* new NotFound({ entity: "snippet", id: refId })
+        const draft = yield* drafts.find(userId, snippetKey(refId, current.global ? null : fork))
+        return draft === null ? [] : yield* drafts.history(draft, limit)
+      }).pipe(query("SnippetHistory")),
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)

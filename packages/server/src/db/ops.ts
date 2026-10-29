@@ -5,7 +5,9 @@ import {
   SnippetContext,
   CreateSnippetFields,
   SaveSnippetFields,
-  GlobalSnippetFields
+  GlobalSnippetFields,
+  SnippetHistoryFields,
+  RestoreSnippetFields
 } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
@@ -418,6 +420,11 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...GlobalSnippetFields },
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("RestoreSnippet", {
+    payload: { userId: UserId, ...RestoreSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
   }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
@@ -2004,6 +2011,11 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SnippetHistory", {
+    payload: { userId: UserId, ...SnippetHistoryFields },
+    success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("PreviewForkNotes", {

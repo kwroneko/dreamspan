@@ -5,11 +5,41 @@ import { Effect } from "effect"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { readSnippet, snippetFork, snippetKey } from "./snippets.ts"
 import { writeOverride } from "./forkState.ts"
-import { toLibraryRef } from "./library.ts"
+import { type RefRow, toLibraryRef } from "./library.ts"
+import type { Snippet } from "@rp/shared/snippetsApi.ts"
 import { transaction } from "./tx.ts"
 
 export const makeSnippetWrites = (steps: LibrarySteps) => {
   const { sql, lib, drafts } = steps
+  /** A new revision with the snippet's text: the head of a global one, this fork's binding otherwise. */
+  const commit = Effect.fnUntraced(function* (
+    ref: RefRow,
+    current: Snippet,
+    fork: string | null,
+    chatId: string | null,
+    fields: { readonly title: string; readonly content: string },
+    message: string
+  ) {
+    const old = yield* lib.loadDoc(current.revision)
+    const revision = yield* steps.insertRevision({
+      entityId: ref.entity_id,
+      schemaVersion: 1,
+      doc: steps.encode({ ...old, ...fields }),
+      parents: [current.revision],
+      origin: "user",
+      originRef: null,
+      message
+    })
+    if (current.global) {
+      yield* steps.moveHead(ref.id, revision, null)
+      yield* steps.changed(ref.id)
+    } else
+      yield* writeOverride(
+        sql,
+        { id: fork!, chatId: chatId! },
+        { kind: "snippet_revision", targetId: ref.entity_id, slotId: null, valueId: revision, flag: null }
+      )
+  })
   const handlers = {
     CreateSnippet: ({ userId, chatId, forkId, title, content }) =>
       Effect.gen(function* () {
@@ -71,26 +101,7 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
           baseRevision: current.revision,
           checkTarget: Effect.void
         })
-        const old = yield* lib.loadDoc(current.revision)
-        const encoded = steps.encode({ ...old, title, content })
-        const revision = yield* steps.insertRevision({
-          entityId: ref.entity_id,
-          schemaVersion: 1,
-          doc: encoded,
-          parents: [current.revision],
-          origin: "user",
-          originRef: null,
-          message: "Snippet draft"
-        })
-        if (current.global) {
-          yield* steps.moveHead(ref.id, revision, null)
-          yield* steps.changed(ref.id)
-        } else
-          yield* writeOverride(
-            sql,
-            { id: fork!, chatId: chatId! },
-            { kind: "snippet_revision", targetId: ref.entity_id, slotId: null, valueId: revision, flag: null }
-          )
+        yield* commit(ref, current, fork, chatId, { title, content }, "Snippet draft")
         return (yield* readSnippet(sql, userId, yield* steps.reload(ref.id), chatId, fork))!
       }).pipe(transaction(sql, "SaveSnippet")),
     MakeSnippetGlobal: ({ userId, chatId, forkId, refId, expectedRevision }) =>
@@ -116,7 +127,32 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
           yield* steps.changed(ref.id)
         }
         return (yield* readSnippet(sql, userId, yield* steps.reload(toLibraryRef(ref).id), chatId, fork))!
-      }).pipe(transaction(sql, "MakeSnippetGlobal"))
-  } satisfies Pick<Parameters<typeof WriteOps.of>[0], "CreateSnippet" | "SaveSnippet" | "MakeSnippetGlobal">
+      }).pipe(transaction(sql, "MakeSnippetGlobal")),
+    // The text history is the snippet draft's (DESIGN §6.2): restoring a state records it as a
+    // restore there, then saves that text as a revision, like typing it would.
+    RestoreSnippet: ({ userId, chatId, forkId, refId, seq, expectedRevision }) =>
+      Effect.gen(function* () {
+        const fork = yield* snippetFork(sql, userId, chatId, forkId)
+        const ref = yield* lib.ownedRef(userId, refId)
+        const current = yield* readSnippet(sql, userId, ref, chatId, fork)
+        if (!current?.draft) return yield* new NotFound({ entity: "snippet", id: refId })
+        if (current.revision !== expectedRevision)
+          return yield* new StaleWrite({ entity: "snippet", id: refId, expected: 0, actual: 1 })
+        const key = snippetKey(ref.id, current.global ? null : fork)
+        const restored = yield* drafts.restore(userId, key, current.draft.id, seq, current.draft.rowVersion)
+        yield* commit(
+          ref,
+          current,
+          fork,
+          chatId,
+          { title: current.title, content: restored.content },
+          "Restored snippet text"
+        )
+        return (yield* readSnippet(sql, userId, yield* steps.reload(ref.id), chatId, fork))!
+      }).pipe(transaction(sql, "RestoreSnippet"))
+  } satisfies Pick<
+    Parameters<typeof WriteOps.of>[0],
+    "CreateSnippet" | "SaveSnippet" | "MakeSnippetGlobal" | "RestoreSnippet"
+  >
   return handlers
 }

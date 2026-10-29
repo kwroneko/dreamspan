@@ -6,6 +6,54 @@ import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { client, outcome, testConfig, withServer } from "./support/config.ts"
 
 describe("snippets", () => {
+  it.live("a snippet's earlier text is listed and restored from the server, in its own fork only", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Snippet history" })
+      const scope = { chatId: chat.id, forkId: chat.currentForkId }
+      const made = yield* api.CreateSnippet({ ...scope, title: "Passage", content: "" })
+      const first = yield* api.SaveSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: made.revision,
+        title: "Passage",
+        content: "The first good passage, kept from a swipe."
+      })
+      // Replacing the whole text is destructive, so the text before it has its own entry.
+      const replaced = yield* api.SaveSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: first.revision,
+        title: "Passage",
+        content: "Replaced."
+      })
+      const history = yield* api.SnippetHistory({ ...scope, refId: made.ref.id, limit: 10 })
+      assert.strictEqual(history[0]!.length, "Replaced.".length)
+      const earlier = history.find((state) => state.length === first.content.length)
+      assert.isDefined(earlier)
+      // A stale revision is refused rather than overwriting newer text.
+      const stale = yield* outcome(
+        api.RestoreSnippet({ ...scope, refId: made.ref.id, expectedRevision: first.revision, seq: earlier!.seq })
+      )
+      assert.strictEqual(stale, "StaleWrite")
+      const restored = yield* api.RestoreSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: replaced.revision,
+        seq: earlier!.seq
+      })
+      assert.strictEqual(restored.content, first.content)
+      assert.strictEqual(restored.title, "Passage")
+      assert.notStrictEqual(restored.revision, replaced.revision)
+      // After a reload (a fresh list), the restored text is the snippet's, and the replaced text
+      // stays in the history as a restore.
+      const listed = (yield* api.ListSnippets(scope)).find((item) => item.ref.id === made.ref.id)!
+      assert.strictEqual(listed.content, first.content)
+      const after = yield* api.SnippetHistory({ ...scope, refId: made.ref.id, limit: 10 })
+      assert.strictEqual(after[0]!.kind, "restore")
+      assert.isTrue(after.some((state) => state.length === "Replaced.".length))
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
   it.live("assembles linked snippets from the viewed fork and rebuilds the pinned text", () =>
     Effect.gen(function* () {
       const api = yield* client()

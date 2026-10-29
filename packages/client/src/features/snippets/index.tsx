@@ -10,6 +10,9 @@ import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { SnippetHistory } from "./history.tsx"
+import { snippetTools } from "./slots.ts"
 import { SnippetWorkspace } from "./workspace.ts"
 
 let workspace: SnippetWorkspace | null = null
@@ -140,6 +143,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
               </Button>
             )}
             {!item.global && <Button onClick={() => void store.makeGlobal(item.ref.id)}>Make global</Button>}
+            <SlotOutlet slot={snippetTools} props={{ store, item }} />
             <span role="status" className="text-xs text-muted">
               {state.error ? "Not saved" : state.saving ? "Saving…" : "Saved continuously"}
             </span>
@@ -168,6 +172,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   )
 }
 export const register = () => [
+  snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
   appTools.register({ id: "snippets.tools", order: 20, component: Tools }),
   chatSurfaceProviders.register({ id: "snippets.scope", order: 20, component: Scope }),
   chatPanels.register({

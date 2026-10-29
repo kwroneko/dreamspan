@@ -2133,6 +2133,37 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  SnippetHistory: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(
+          actor.api.SnippetHistory({
+            chatId: owner.chat.chatId,
+            forkId: null,
+            refId: owner.editor.sharedRefId,
+            limit: 5
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SnippetHistory({ chatId: null, forkId: null, refId: owner.editor.sharedRefId, limit: 5 }),
+          "NotFound"
+        )
+      })
+  },
+  RestoreSnippet: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.RestoreSnippet({
+          chatId: null,
+          forkId: null,
+          refId: owner.editor.sharedRefId,
+          expectedRevision: owner.editor.revisionId,
+          seq: 0
+        }),
+        "NotFound"
+      )
+  },
   ListSharedNotes: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

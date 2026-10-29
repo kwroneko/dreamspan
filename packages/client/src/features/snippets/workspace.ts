@@ -180,6 +180,35 @@ export class SnippetWorkspace {
       )
     })
   }
+  /** The snippet's earlier texts on the server, newest first; pending typing is saved first. */
+  history = (ref: RefId, limit = 50) =>
+    this.enqueue(() => this.saveNow(ref)).then(() =>
+      this.call((api) => api("SnippetHistory", { ...this.scope, refId: ref, limit }))
+    )
+  /** Restores state `seq` of the text history as the snippet's text. */
+  restore = (ref: RefId, seq: number) => this.enqueue(() => this.restoreNow(ref, seq))
+  /** One step back in the server's text history, so it works after a reload too. */
+  undo = (ref: RefId) =>
+    this.enqueue(async () => {
+      await this.saveNow(ref)
+      if (this.dirty.has(ref)) return
+      const result = await this.call((api) => api("SnippetHistory", { ...this.scope, refId: ref, limit: 2 }))
+      if (!result.ok) return this.update({ error: result.error.message })
+      const earlier = result.value[1]
+      if (earlier === undefined) return this.update({ error: "There's no earlier text to go back to." })
+      await this.restoreNow(ref, earlier.seq)
+    })
+  private restoreNow = async (ref: RefId, seq: number) => {
+    await this.saveNow(ref)
+    const item = this.state.items.find((i) => i.ref.id === ref)
+    if (!item || this.dirty.has(ref)) return
+    const result = await this.call(
+      (api) => api("RestoreSnippet", { ...this.scope, refId: ref, seq, expectedRevision: item.revision }),
+      ["library"]
+    )
+    if (!result.ok) return this.update({ error: result.error.message })
+    this.update({ error: null, items: this.state.items.map((i) => (i.ref.id === ref ? result.value : i)) })
+  }
   send = (text: string) => {
     this.open()
     void this.enqueue(async () => {

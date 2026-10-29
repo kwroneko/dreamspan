@@ -102,6 +102,12 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.MakeSnippetGlobal({ userId: id, ...args }).pipe(changed(id))).pipe(
         settle("MakeSnippetGlobal")
       ),
+    SnippetHistory: (args) =>
+      Effect.flatMap(userId, (id) => reader.SnippetHistory({ userId: id, ...args })).pipe(settle("SnippetHistory")),
+    RestoreSnippet: (args) =>
+      Effect.flatMap(userId, (id) => writer.RestoreSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
+        settle("RestoreSnippet")
+      ),
     GetUserDraft: ({ ownerId, targetId, field }) =>
       Effect.flatMap(draftOwner(ownerId), (id) => reader.GetDraft({ userId: id, key: userKey(targetId, field) })).pipe(
         settle("GetUserDraft")
