@@ -10,7 +10,15 @@ import { cardNames } from "@rp/shared/cardNames.ts"
 // changes only together with its text, or when the server answers with exactly the text
 // this tab sent; every save names that draft; a copy in this browser goes only once the
 // server acknowledged it, or a newer copy of the field typed from it replaces it.
-import { applyDrafts, type FieldPath, getAt, parseField, textField, valueField } from "@rp/shared/editing.ts"
+import {
+  applyDrafts,
+  canonicalJson,
+  type FieldPath,
+  getAt,
+  parseField,
+  textField,
+  valueField
+} from "@rp/shared/editing.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
@@ -576,7 +584,7 @@ export class EditorStore {
     const result = await this.call((client) =>
       client("DiscardEditorDraft", { refId: this.refId, field: key, draftId, expectedRowVersion: rowVersion })
     )
-    if (result.ok) this.settle(key, result.value)
+    if (result.ok) await this.settle(key, result.value)
     return result
   }
 
@@ -623,7 +631,7 @@ export class EditorStore {
         expectedRowVersion: rowVersion ?? 0
       })
     )
-    if (result.ok) this.settle(key, result.value)
+    if (result.ok) await this.settle(key, result.value)
     return result
   }
 
@@ -631,8 +639,35 @@ export class EditorStore {
   async undo(key: string) {
     await this.save(key)
     const states = await this.history(key, 2)
-    if (!states.ok || states.value.length < 2) return states
-    return this.restore(key, states.value[1]!.seq)
+    if (!states.ok) return states
+    const previous = states.value[1]
+    // The first save creates a draft at its typed value. A reopened session starts
+    // from empty storage. In either case undoing that first edit means the revision's
+    // value, not an empty string (which is invalid for a JSON value draft).
+    if (previous === undefined || (previous.kind === "initial" && previous.length === 0)) {
+      const picked = this.current(key)
+      const parsed = parseField(key)!
+      const revision = this.comparisonRevision(key)
+      let doc = this.head
+      if (revision !== null) {
+        const cached = this.revisionDocs.get(revision)
+        if (cached) doc = cached
+        else {
+          const result = await this.call((client) => client("GetRevision", { refId: this.refId, revisionId: revision }))
+          if (!result.ok) return result
+          this.revisionDocs.set(revision, result.value)
+          doc = result.value
+        }
+      }
+      if (this.current(key) !== picked) return changed()
+      const value = getAt(doc, parsed.path)
+      return this.restore(
+        key,
+        previous?.seq ?? 0,
+        parsed.kind === "value" ? canonicalJson(value) : typeof value === "string" ? value : ""
+      )
+    }
+    return this.restore(key, previous.seq)
   }
 
   /**
@@ -656,7 +691,7 @@ export class EditorStore {
         baseRevisionId: this.snapshot!.ref.headRevisionId
       })
     )
-    if (result.ok) this.settle(key, result.value)
+    if (result.ok) await this.settle(key, result.value)
     return result
   }
 
@@ -711,13 +746,34 @@ export class EditorStore {
    * it with. What was typed while it was on its way stays, on the base it was typed on, and
    * its save goes on top.
    */
-  private settle(key: string, draft: Draft) {
+  private async settle(key: string, draft: Draft): Promise<void> {
     if (this.field(key).local !== null) this.recovered += draft.recovered
     const field = this.field(key)
     if (field.local === null) this.hold(field, draft)
     else this.schedule(key)
     if (key.startsWith("=")) this.rebuild()
     this.bump(key, STRUCTURE, DRAFTS)
+    // Undoing or reverting an added object can remove the home of its field drafts.
+    // Recover those texts just as removing a list entry does; hidden orphan drafts
+    // would otherwise block every later revision save. Keep descendants that still fit.
+    const changed = parseField(key)
+    if (changed?.kind !== "value") return
+    const orphans = this.working().problems.filter(({ field, orphan }) => {
+      const path = parseField(field)?.path
+      return (
+        orphan &&
+        path !== undefined &&
+        path.length > changed.path.length &&
+        changed.path.every((segment, at) => path[at] === segment)
+      )
+    })
+    for (const { field } of orphans) {
+      const result = await this.discard(field)
+      if (result && !result.ok) {
+        this.saveError = result.error
+        this.bump(DRAFTS)
+      }
+    }
   }
 }
 

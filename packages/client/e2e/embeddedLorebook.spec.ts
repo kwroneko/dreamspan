@@ -215,3 +215,78 @@ test("an absent embedded book can be authored, including an empty book after rem
   const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
   expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])
 })
+
+for (const target of ["book", "entry"] as const) {
+  for (const action of ["Revert", "Undo"] as const) {
+    test(`${action} a new ${target} recovers its field drafts and permits later card saves`, async ({ page }) => {
+      const name = `${action} lore ${target}`
+      const card = await admin((api) => api.CreateCard({ label: name, name }))
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/library/${card.id}`)
+      await page.getByRole("button", { name: "Add lorebook entry" }).click()
+      await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Draft book")
+      if (target === "entry") {
+        await page.getByRole("button", { name: "Remove entry", exact: true }).click()
+        await save(page)
+        await page.getByRole("button", { name: "Add lorebook entry" }).click()
+      }
+      const text = `Recover this lore: ${name}`
+      await page.getByRole("textbox", { name: "Entry content", exact: true }).fill(text)
+      await page
+        .getByRole("button", {
+          name: `${action} ${target === "book" ? "Embedded lorebook" : "Untitled entry"}`,
+          exact: true
+        })
+        .click()
+      await expect(
+        page.getByText(target === "book" ? "This card has no embedded lorebook." : "No entries yet.")
+      ).toBeVisible()
+      await expect
+        .poll(async () =>
+          (await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))).some((r) => r.content === text)
+        )
+        .toBe(true)
+      await page.getByRole("textbox", { name: "Creator", exact: true }).fill("Synthetic creator")
+      await save(page)
+      await page.reload()
+      const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
+      if (target === "book") expect(opened.doc.character_book).toBeUndefined()
+      else expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])
+      expect(opened.doc.creator).toBe("Synthetic creator")
+      expect(opened.drafts.filter((draft) => draft.status === "active")).toEqual([])
+    })
+  }
+}
+
+test("card search and replace includes embedded lore and keys in closed entries", async ({ page }) => {
+  const card = await admin((api) => api.CreateCard({ label: "Search lore", name: "Search lore" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  await page.getByRole("button", { name: "Add lorebook entry" }).click()
+  await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Harbour")
+  await page.getByRole("textbox", { name: "Lorebook description", exact: true }).fill("Harbour guide")
+  await page.getByRole("textbox", { name: "Entry title", exact: true }).fill("Harbour tides")
+  await page.getByRole("textbox", { name: "Entry content", exact: true }).fill("Harbour tide")
+  await page.getByRole("textbox", { name: "Primary keys", exact: true }).fill("harbour\n/harbour,a/iu")
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Harbour tides$/ })
+    .click()
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Search and replace" })
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("port")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
+  await expect(dialog.getByRole("status")).toHaveText("6 matches.")
+  await dialog.getByRole("button", { name: "Replace all", exact: true }).click()
+  await expect(dialog.getByRole("status")).toHaveText("No matches.")
+  await dialog.press("Escape")
+  await save(page)
+  await page.reload()
+  const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
+  expect(opened.doc.character_book).toMatchObject({
+    name: "port",
+    description: "port guide",
+    entries: [{ comment: "port tides", content: "port tide", keys: ["port", "/port,a/iu"] }]
+  })
+})

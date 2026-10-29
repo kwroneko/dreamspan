@@ -1,7 +1,8 @@
 import { assert, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { NewVersion } from "@rp/shared/chat.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
+import { emptyBook, emptyEntry } from "../../../client/src/features/editor/lorebookDefaults.ts"
 import { Writer } from "../../src/db/Database.ts"
 import { client, posted, post, testConfig, withServer, takenFrom, typeInto } from "../support/config.ts"
 import { FakeIndexedDb } from "./fakeIndexedDb.ts"
@@ -167,6 +168,71 @@ it.live("Revert must expose recovered text at its source", () =>
     assert.isAbove(store.state().recovered, 0)
   }).pipe(Effect.scoped, withServer(testConfig()))
 )
+
+for (const action of ["discard", "undo"] as const) {
+  for (const existing of [false, true]) {
+    it.live(`${action} of a book draft recovers only descendants whose parents disappear (${existing})`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const card = yield* api.CreateCard({ label: "Nested recovery", name: "Nested recovery" })
+        const store = new EditorStore(
+          card.id,
+          "nested-user",
+          (async (rpc: (client: never) => Effect.Effect<unknown, unknown>) => {
+            const exit = await Effect.runPromiseExit(
+              rpc(((tag: string, p: unknown) =>
+                (api as unknown as Record<string, (payload: unknown) => Effect.Effect<unknown, unknown>>)[tag]!(
+                  p
+                )) as never)
+            )
+            return Exit.isSuccess(exit)
+              ? { ok: true, value: exit.value }
+              : { ok: false, error: { tag: "error", message: String(exit.cause) } }
+          }) as never,
+          { setTimer: () => 0, clearTimer: () => {}, now: () => Date.now(), keepalive: async () => false }
+        )
+        const path = ["character_book"]
+        const contentPath = [...path, "entries", "uid=7", "content"]
+        const text = "NESTED LORE TEXT 425081"
+        yield* Effect.promise(async () => {
+          await store.load()
+          if (existing) {
+            store.setValue(path, { ...emptyBook(), entries: [emptyEntry(7)] })
+            assert.isTrue((await store.commit(null)).ok)
+          }
+          store.setValue(path, { ...emptyBook(), name: "Draft book", entries: [emptyEntry(7)] })
+          store.setText(contentPath, text)
+          // A value field has its own draft too, and unrelated fields must stay.
+          store.setValue([...path, "entries", "uid=7", "keys"], ["harbour"])
+          store.setText(["description"], "Keep this unrelated change.")
+          await store.flush()
+          await store[action](valueField(path))
+          assert.deepStrictEqual(store.working().problems, [])
+          if (action === "undo") {
+            const history = await store.history(valueField(path))
+            assert.isTrue(history.ok)
+            if (history.ok) assert.strictEqual(history.value[0]?.kind, "restore")
+          }
+          assert.strictEqual(store.isDirty(textField(contentPath)), existing)
+          assert.strictEqual(store.isDirty(valueField([...path, "entries", "uid=7", "keys"])), existing)
+          assert.strictEqual(store.text(["description"]), "Keep this unrelated change.")
+          if (existing) assert.strictEqual(store.text(contentPath), text)
+          assert.isTrue((await store.commit(null)).ok)
+        })
+        const recovered = yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        assert.strictEqual(
+          recovered.some((r) => r.content === text),
+          !existing
+        )
+        const opened = yield* api.OpenEditor({ refId: card.id })
+        assert.deepStrictEqual(
+          opened.drafts.filter((d) => d.status === "active"),
+          []
+        )
+      }).pipe(Effect.scoped, withServer(testConfig()))
+    )
+  }
+}
 
 it.live(
   "history retention must report its recovery",

@@ -2,6 +2,7 @@
 // which differ between two versions of a document.
 import { canonicalJson, type FieldPath, getAt, parseField } from "@rp/shared/editing.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
+import { makeRegistry } from "../../registry.ts"
 
 const CARD_LABELS: Record<string, string> = {
   name: "Display name",
@@ -95,6 +96,15 @@ export interface Searchable {
   readonly inList?: { readonly path: FieldPath; readonly index: number }
 }
 
+interface TextFieldContribution {
+  readonly id: string
+  readonly kind: EntityKind
+  readonly fields: (doc: Doc) => ReadonlyArray<Searchable>
+}
+
+/** Feature-owned document sections contribute their text without coupling the search UI to them. */
+export const editorTextFields = makeRegistry<TextFieldContribution>()
+
 const strings = (doc: Doc, paths: ReadonlyArray<FieldPath>) =>
   paths.flatMap((path) => {
     const text = getAt(doc, path)
@@ -113,7 +123,7 @@ const identified = (doc: Doc, list: string, key: string, fields: ReadonlyArray<s
 }
 
 /** Every text field of the document, in the order the editor shows them. */
-export const searchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> => {
+const builtinSearchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> => {
   const label = (entry: { path: FieldPath; text: string }) => ({ ...entry, label: fieldLabel(kind, doc, entry.path) })
   if (kind === "card") {
     const top = ["name", "nickname", "description", "personality", "scenario", "first_mes"].map((key) => [key])
@@ -165,6 +175,15 @@ export const searchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable
   }
   return strings(doc, [["title"], ["content"]]).map(label)
 }
+
+export const searchable = (
+  kind: EntityKind,
+  doc: Doc,
+  contributions: ReadonlyArray<TextFieldContribution> = editorTextFields.list()
+): ReadonlyArray<Searchable> => [
+  ...builtinSearchable(kind, doc),
+  ...contributions.flatMap((entry) => (entry.kind === kind ? entry.fields(doc) : []))
+]
 
 /** A field that differs between two versions of a document. */
 export interface FieldChange {
