@@ -51,6 +51,7 @@ export const registerComposerControls = () => [
         aria-label={`Generate ${context.speakerName}`}
         pending={context.busy}
         disabled={context.busy}
+        className="min-w-0 max-w-52 sm:max-w-56"
         onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
       >
         {context.guidance && <GenerateIcon />}

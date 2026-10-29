@@ -567,7 +567,7 @@ export function StartChatPage() {
   }, [entityId])
   return (
     <PendingLayout entityId={entityId}>
-      <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
+      <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
         {loaded ? (
           <Pending key={entityId} card={loaded.card} personas={loaded.personas} cards={loaded.cards} />
         ) : action.error ? (
@@ -621,7 +621,7 @@ export function StartGroupChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group
   }, [chatId])
   return (
-    <div data-fill className="flex min-h-0 flex-1 flex-col px-4 pt-4">
+    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
       {loaded ? (
         <Pending
           key={chatId}
@@ -658,7 +658,7 @@ function PendingLayout({ entityId, children }: { entityId: EntityId; children: R
     </>
   )
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 min-w-0 flex-1">
       {children}
       {open &&
         (wide ? (

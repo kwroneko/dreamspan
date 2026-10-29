@@ -53,7 +53,7 @@ import {
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
-import { Draft, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import {
@@ -2099,7 +2099,7 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
     },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])

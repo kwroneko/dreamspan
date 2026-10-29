@@ -6,6 +6,7 @@ import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@r
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { conditionOf } from "@rp/shared/presetConditions.ts"
 import { foldState, swappedCard } from "@rp/shared/state.ts"
@@ -492,7 +493,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         reader.DraftHistory({
           userId: id,
           key: messageDraftKey({ _tag: "Queue", chatId, queuedId, rowVersion: 0 }),
-          limit: 100
+          limit: DraftHistoryPolicy.maxEntries + 1
         })
       ).pipe(internal("QueueDraftHistory")),
     RestoreQueueDraft: ({ chatId, queuedId, ...restore }) =>
