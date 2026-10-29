@@ -57,3 +57,47 @@ test("saving a queued message another tab changed meanwhile is a conflict, not a
   await other.close()
   await page.getByRole("button", { name: "Stop", exact: true }).first().click()
 })
+
+for (const width of [1440, 390]) {
+  test(`queued image previews and withdrawal preserve durable edits and attachments at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats`)
+    await page.getByLabel("Title of the new chat").fill(`Queue image recovery ${width}`)
+    await page.getByRole("button", { name: "New chat" }).click()
+    await composer(page).fill("Start a long reply.")
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+    await expect(page.getByText("generating", { exact: true })).toBeVisible()
+
+    const image = await page.evaluate(() => {
+      const canvas = document.createElement("canvas")
+      canvas.width = canvas.height = 32
+      canvas.getContext("2d")!.fillRect(0, 0, 32, 32)
+      return canvas.toDataURL("image/png").split(",")[1]!
+    })
+    await page.getByLabel("Choose images").setInputFiles({
+      name: "queued.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(image, "base64")
+    })
+    await expect(page.getByRole("button", { name: "Send", exact: true })).toBeEnabled()
+    await page.getByRole("button", { name: "Send", exact: true }).click()
+    const queue = page.getByRole("list", { name: "Queued messages" })
+    await expect(queue.getByRole("button", { name: "View image 1" })).toBeVisible()
+    await queue.getByRole("button", { name: "Edit", exact: true }).click()
+    await queue.getByLabel("Queued message").fill("An image with a durable queued edit.")
+    await expect(queue.getByRole("button", { name: "Save", exact: true })).toBeEnabled()
+    await queue.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(queue).toContainText("An image with a durable queued edit.")
+    await page.reload()
+    await expect(queue.getByRole("button", { name: "View image 1" })).toBeVisible()
+    await queue.getByRole("button", { name: "Withdraw", exact: true }).click()
+    await expect(queue).toHaveCount(0)
+    await expect(composer(page)).toHaveValue("An image with a durable queued edit.")
+    await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+    await page.getByRole("button", { name: "Stop", exact: true }).first().click()
+    await page.reload()
+    await expect(composer(page)).toHaveValue("An image with a durable queued edit.")
+    await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+  })
+}
