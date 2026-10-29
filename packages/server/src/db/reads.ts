@@ -1,3 +1,4 @@
+import { previewForkNotes } from "./forkNotes.ts"
 import { stateEventsOnPath } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
@@ -597,6 +598,8 @@ export const makeReadHandlers = Effect.gen(function* () {
       }).pipe(query("ReadPath")),
 
     // --- Branches (DESIGN §3.2) and forks
+    PreviewForkNotes: (payload) => previewForkNotes(sql, payload).pipe(query("PreviewForkNotes")),
+
     ListForks: ({ userId, chatId }) =>
       Effect.gen(function* () {
         yield* ownedChat(userId, chatId)

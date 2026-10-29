@@ -1,3 +1,6 @@
+import { canonicalJson } from "@rp/shared/editing.ts"
+import { previewForkNotes } from "./forkNotes.ts"
+import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
@@ -482,7 +485,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* forkOut(fork.id)
         }).pipe(transaction("SetForkPinned")),
 
-      CreateFork: ({ userId, chatId, fromForkId, atSlotId }) =>
+      CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes }) =>
         Effect.gen(function* () {
           const from = yield* ownedFork(userId, chatId, fromForkId)
           if (atSlotId !== null)
@@ -491,7 +494,46 @@ export const makeWriteHandlers = (bin: Bin) =>
               "slot",
               atSlotId
             )
+          const comparison = notes
+            ? yield* previewForkNotes(sql, { userId, chatId, fromForkId: from.id as ForkId, atSlotId })
+            : []
+          if (
+            notes &&
+            (notes.comparison !== canonicalJson(comparison) ||
+              notes.choices.some((choice) => !comparison.some((row) => row.note === choice.note)) ||
+              new Set(notes.choices.map((choice) => choice.note)).size !== notes.choices.length)
+          )
+            return yield* new ForkNotesChanged({
+              message: "Notes changed while this dialog was open. Close it and branch again to review them."
+            })
           const fork = yield* createFork(chatId, from, atSlotId, Date.now())
+          for (const row of comparison) {
+            const choice = notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then"
+            // Positional inheritance already gives "then". Rewriting it would detach
+            // version-owned effects from their message and freeze default-on switches.
+            if (choice === "then") continue
+            const selected = row[choice]
+            if (!row.card && selected.revision !== row.then.revision)
+              yield* insertStateEvent(
+                userId,
+                chatId,
+                atSlotId,
+                null,
+                null,
+                { key: "note.binding", value: { note: row.note, revision: selected.revision as never } },
+                fork.id as ForkId
+              )
+            if (selected.enabled !== row.then.enabled)
+              yield* insertStateEvent(
+                userId,
+                chatId,
+                atSlotId,
+                null,
+                null,
+                { key: selected.enabled ? "note.activate" : "note.deactivate", value: { note: row.note } },
+                fork.id as ForkId
+              )
+          }
           const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return { fork: yield* forkOut(fork.id), chat: toChat(chat!) }
         }).pipe(transaction("CreateFork")),

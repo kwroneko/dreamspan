@@ -159,6 +159,28 @@ export const ChatEvent = Schema.Union([
 ])
 export type ChatEvent = typeof ChatEvent.Type
 
+/** The note comparison changed while the fork dialog was open. Reload before choosing. */
+export class ForkNotesChanged extends Schema.TaggedError<ForkNotesChanged>()("ForkNotesChanged", {
+  message: Schema.String
+}) {}
+
+const ForkNoteState = Schema.Struct({ revision: Schema.String, content: Schema.String, enabled: Schema.Boolean })
+export const ForkNote = Schema.Struct({
+  note: EntityId,
+  title: Schema.String,
+  owner: Schema.String,
+  card: Schema.Boolean,
+  then: ForkNoteState,
+  now: ForkNoteState
+})
+export type ForkNote = typeof ForkNote.Type
+export const ForkNoteSelection = Schema.Struct({
+  /** The exact comparison reviewed by the user, checked again inside the write transaction. */
+  comparison: Schema.String,
+  choices: Schema.Array(Schema.Struct({ note: EntityId, choice: Schema.Literals(["then", "now"]) }))
+})
+export type ForkNoteSelection = typeof ForkNoteSelection.Type
+
 const Errors = [NotFound, ServerError] as const
 const WriteErrors = [NotFound, StaleWrite, ServerError] as const
 
@@ -581,10 +603,20 @@ export class ChatApi extends RpcGroup.make(
    * A fork of `fromForkId` (null: the current one) at `atSlotId`, a message on its path
    * (null: before the first message): "Branch from here". It becomes the current fork.
    */
-  Rpc.make("CreateFork", {
+  Rpc.make("PreviewForkNotes", {
     payload: { chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
-    success: Schema.Struct({ fork: Fork, chat: Chat }),
+    success: Schema.Array(ForkNote),
     error: Schema.Union([...Errors])
+  }),
+  Rpc.make("CreateFork", {
+    payload: {
+      chatId: ChatId,
+      fromForkId: Schema.NullOr(ForkId),
+      atSlotId: Schema.NullOr(SlotId),
+      notes: Schema.optionalKey(ForkNoteSelection)
+    },
+    success: Schema.Struct({ fork: Fork, chat: Chat }),
+    error: Schema.Union([...Errors, ForkNotesChanged])
   }),
   /**
    * Names a fork; an empty name takes the name off. Its first message, among the alternates

@@ -13,7 +13,7 @@ import {
   ServerError,
   StaleWrite
 } from "@rp/shared/errors.ts"
-import { GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
+import { ForkNotesChanged, GenerationUnavailable, NotAmendable } from "@rp/shared/chatApi.ts"
 import { EditConflict, EditRefused, InvalidDocument } from "@rp/shared/editorApi.ts"
 import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { Cause } from "effect"
@@ -51,6 +51,7 @@ const stale = (entity: string) =>
   )
 
 const describeError = (error: unknown): AppError => {
+  if (error instanceof ForkNotesChanged) return make("ForkNotesChanged", error.message)
   if (error instanceof LcmEstimateChanged) return make("LcmEstimateChanged", error.message)
   if (error instanceof CannotDeleteLastFork)
     return make("CannotDeleteLastFork", "A chat keeps at least one fork, so this one can't be deleted.")

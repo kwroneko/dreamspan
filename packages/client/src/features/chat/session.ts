@@ -1,3 +1,4 @@
+import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // One open chat (CLIENT-FRAMEWORK §5): the loaded window of its path, kept current by its
 // subscription, and the text of versions still generating. The server is the source of
 // truth: the window is what reads and events said, and writes apply the server's reply.
@@ -1454,9 +1455,14 @@ export class ChatSession {
    * "Branch from here": a fork of the one shown, at `at`, which becomes the chat's current
    * fork. Its composer starts as a copy of this one's (DESIGN §6.2).
    */
-  async branchFrom(at: SlotId) {
+  async branchFrom(at: SlotId, notes?: ForkNoteSelection, fromForkId = this.view.forkId) {
     const result = await this.call((client) =>
-      client("CreateFork", { chatId: this.chatId, fromForkId: this.view.forkId, atSlotId: at })
+      client("CreateFork", {
+        chatId: this.chatId,
+        fromForkId,
+        atSlotId: at,
+        ...(notes ? { notes } : {})
+      })
     )
     if (result.ok) {
       this.branchStart = result.value.fork.id

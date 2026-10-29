@@ -2,8 +2,20 @@ import { lazy, Suspense } from "react"
 
 const Diff = lazy(() => import("./RevisionDiffView.tsx"))
 
-/** Full, read-only text comparison, side by side on desktop and unified on phones. */
-export function RevisionDiff({ before, after }: { before: string; after: string }) {
+/** Full, read-only text comparison, side by side on desktop; unified on phones unless explicitly kept side by side. */
+export function RevisionDiff({
+  before,
+  after,
+  sideBySide = false,
+  beforeLabel = "Before",
+  afterLabel = "After"
+}: {
+  before: string
+  after: string
+  sideBySide?: boolean
+  beforeLabel?: string
+  afterLabel?: string
+}) {
   return (
     <Suspense
       fallback={
@@ -12,7 +24,7 @@ export function RevisionDiff({ before, after }: { before: string; after: string 
         </p>
       }
     >
-      <Diff before={before} after={after} />
+      <Diff before={before} after={after} sideBySide={sideBySide} beforeLabel={beforeLabel} afterLabel={afterLabel} />
     </Suspense>
   )
 }
