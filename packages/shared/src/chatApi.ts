@@ -19,10 +19,14 @@ import {
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerChoice, TextTooLong } from "./composerApi.ts"
-import { Draft, DraftKey } from "./drafts.ts"
+import { Draft, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
+
+/** Earlier saved text of a human-written version, newest first. */
+export const VersionAmendment = Schema.Struct({ id: Schema.Int, content: Schema.String, at: Schema.Number })
+export type VersionAmendment = typeof VersionAmendment.Type
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
 export class GenerationUnavailable extends Schema.TaggedError<GenerationUnavailable>()("GenerationUnavailable", {
@@ -489,6 +493,27 @@ export class ChatApi extends RpcGroup.make(
     },
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])
+  }),
+  Rpc.make("VersionAmendments", {
+    payload: { versionId: VersionId },
+    success: Schema.Array(VersionAmendment),
+    error: Schema.Union([...Errors])
+  }),
+  /** Restores saved text as an ordinary, optimistic, fork-local human amendment. */
+  Rpc.make("RestoreVersionAmendment", {
+    payload: { versionId: VersionId, amendmentId: Schema.Int, forkId: ForkId, expectedRowVersion: Schema.Int },
+    success: Version,
+    error: Schema.Union([...WriteErrors, NotAmendable])
+  }),
+  Rpc.make("MessageDraftHistory", {
+    payload: { target: MessageDraftTarget, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })) },
+    success: Schema.Array(DraftState),
+    error: Schema.Union([...Errors])
+  }),
+  Rpc.make("RestoreMessageDraft", {
+    payload: { target: MessageDraftTarget, draftId: Schema.String, ...DraftRestore },
+    success: Draft,
+    error: Schema.Union([...WriteErrors])
   }),
   /** The chat's open message editors: the drafts with text of edits and versions being written. */
   Rpc.make("MessageDrafts", {

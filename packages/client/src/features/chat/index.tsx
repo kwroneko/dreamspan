@@ -1,3 +1,4 @@
+import { registerEditorHistory } from "./editorHistory.tsx"
 import { registerPresentation } from "./registerPresentation.tsx"
 import { registerComposerControls } from "./registerComposerControls.tsx"
 import { registerMessageActions } from "./registerMessageActions.tsx"
@@ -50,6 +51,7 @@ function LazyStartChatPage() {
 }
 
 export const register = () => {
+  registerEditorHistory()
   registerPresentation()
   registerComposerControls()
   registerMessageActions()

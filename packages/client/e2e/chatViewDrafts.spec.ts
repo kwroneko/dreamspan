@@ -333,11 +333,15 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   await expect(notice).toBeVisible()
   await notice.getByText("View the other text").click()
   await expect(notice.getByText(elsewhere, { exact: true })).toBeVisible()
-  // Typing keeps it; acknowledging dismisses it.
+  // Typing keeps it. Switching is explicit and can itself be undone from server history.
   await box.fill(`${offline} More.`)
   await expect(notice).toBeVisible()
-  await notice.getByRole("button", { name: "Keep this browser's text" }).click()
+  await notice.getByRole("button", { name: "Use the other text" }).click()
   await expect(notice).toHaveCount(0)
+  await expect(box).toHaveValue(elsewhere)
+  await page.getByRole("button", { name: "Earlier draft text" }).click()
+  const history = page.getByRole("dialog", { name: "Earlier draft text", exact: true })
+  await history.getByRole("button", { name: "Restore draft text" }).first().click()
   await expect(box).toHaveValue(`${offline} More.`)
   // Saved as a version, the other text is in the recovered texts.
   await page.getByRole("button", { name: "Add as a new version" }).click()

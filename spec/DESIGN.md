@@ -6,6 +6,8 @@
 - **[O] Open**: needs a decision.
 - **[L] Later**: wanted, but deferred until the core works.
 
+Message amendment history and message/summary draft history controls (§3.1, §6.2) are **built, obsolete as proposals** (2026-10-28); see [ARCHITECTURE §12](../ARCHITECTURE.md). The remaining decisions in this document retain their status.
+
 Where the owner corrected an earlier proposal, the corrected version is recorded and the rejected one is noted, so it doesn't come back.
 
 ---

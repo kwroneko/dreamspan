@@ -49,6 +49,7 @@ import {
 } from "@rp/shared/chat.ts"
 import { ContextIssue, VersionError, VersionStatus } from "@rp/shared/chat.ts"
 import {
+  VersionAmendment,
   Branch,
   ChatCursor,
   ChatSearch,
@@ -2069,6 +2070,11 @@ export class ReadOps extends RpcGroup.make(
    * A slot's own versions as fork `forkId` shows them (absent or null: the fork through it,
    * forkAt): a copy it amended in its original's place, with the fork's stars and picker flags.
    */
+  Rpc.make("VersionAmendments", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: Schema.Array(VersionAmendment),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   Rpc.make("ListVersions", {
     payload: { userId: UserId, slotId: SlotId, forkId: Schema.optionalKey(Schema.NullOr(ForkId)) },
     success: Schema.Array(Version),

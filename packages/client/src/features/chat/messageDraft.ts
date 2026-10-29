@@ -284,6 +284,50 @@ export class MessageDraft {
     return true
   }
 
+  async history() {
+    await this.save()
+    return this.session.call((client) => client("MessageDraftHistory", { target: this.target, limit: 1000 }))
+  }
+
+  async restoreState(seq: number, content?: string): Promise<boolean> {
+    const picked = this.view.text
+    await this.save()
+    return this.serial(async () => {
+      if (this.local !== null || this.draft === null || this.view.text !== picked) return false
+      const result = await this.session.call((client) =>
+        client("RestoreMessageDraft", {
+          target: this.target,
+          draftId: this.draft!.id,
+          seq,
+          expectedRowVersion: this.draft!.rowVersion,
+          ...(content === undefined ? {} : { content })
+        })
+      )
+      if (!result.ok) {
+        this.set({ error: result.error })
+        return false
+      }
+      this.draft = result.value
+      this.base = baseOf(result.value)
+      // Typing during the restore stays in the box, with its browser copy on the new base.
+      if (this.local !== null) this.keep(this.local)
+      this.set({ text: this.local ?? result.value.content, unsaved: this.local !== null, error: null })
+      return true
+    })
+  }
+
+  async switchConflict() {
+    const conflict = this.view.conflict
+    if (
+      conflict &&
+      (await this.restoreState(0, conflict.content)) &&
+      !this.view.unsaved &&
+      this.view.text === conflict.content &&
+      this.view.conflict === conflict
+    )
+      this.acknowledgeConflict()
+  }
+
   acknowledgeConflict() {
     this.set({ conflict: null })
   }
