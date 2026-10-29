@@ -36,6 +36,9 @@ import { MessageActions } from "./messageActions.tsx"
 import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
+import { applyDisplayTransforms, displayTransforms } from "./displayPipeline.ts"
+import { useDisplayContext } from "./DisplaySettings.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
@@ -87,44 +90,92 @@ export interface ContextMark {
 function TemplateText({
   version,
   session,
-  parentSlotId
+  parentSlotId,
+  depth,
+  placement
 }: {
   version: Version
   session: ChatSession
   parentSlotId: SlotId | null
+  depth: number
+  placement: 1 | 2
 }) {
+  const viewer = useViewPrefs()
+  const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
   const cast = useCast()
-  const read = useCallback(() => session.castAfter(parentSlotId), [session, parentSlotId])
+  const read = useCallback(
+    () => (needsContext ? session.castAfter(parentSlotId) : undefined),
+    [session, parentSlotId, needsContext]
+  )
   const positionCast = useSyncExternalStore(session.subscribePositions, read)
   // The speaker card's own fields, for `{{description}}` and the like, as the preview had them.
   const readFields = useCallback(
-    () => (version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),
-    [session, version.speakerEntityId]
+    () => (!needsContext || version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),
+    [session, version.speakerEntityId, needsContext]
   )
   const fields = useSyncExternalStore(session.subscribePositions, readFields)
   const here = useMemo(
     () => (positionCast ? castView(positionCast, [...cast.cards.values()]) : cast),
     [positionCast, cast]
   )
-  // Random and time macros show what they drew when the greeting was first shown.
-  const text = displayText(
-    version.content,
-    version.macroMode,
-    { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
-    fields ?? {},
-    version.frozenMacros ?? {}
+  const display = useDisplayContext()
+  const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
+  const input = useMemo(
+    () => ({
+      text: version.content,
+      version,
+      names: { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
+      card: fields ?? {},
+      prefs: viewer.prefs,
+      scripts: display.scripts,
+      placement,
+      depth: display.leafDepth === null ? null : Math.max(0, display.leafDepth - depth)
+    }),
+    [version, here, fields, viewer.prefs, display, depth, placement]
   )
-  return <Markdown text={text} streaming={false} />
+  const [result, setResult] = useState<{
+    input: typeof input
+    stages: typeof stages
+    text: string
+    issues: ReadonlyArray<string>
+  } | null>(null)
+  useEffect(() => {
+    let active = true
+    void applyDisplayTransforms(input, stages.entries).then((value) => {
+      if (active) setResult({ input, stages, ...value })
+    })
+    return () => {
+      active = false
+    }
+  }, [input, stages])
+  const current = result?.input === input && result.stages === stages ? result : null
+  const text =
+    current?.text ??
+    displayText(version.content, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
+  return (
+    <>
+      <Markdown text={text} streaming={false} />
+      {current?.issues.map((issue, i) => (
+        <p key={i} role="note" className="text-xs text-muted">
+          {issue}
+        </p>
+      ))}
+    </>
+  )
 }
 
 function VersionBody({
   version,
   session,
-  parentSlotId
+  parentSlotId,
+  depth,
+  placement
 }: {
   version: Version
   session: ChatSession
   parentSlotId: SlotId | null
+  depth: number
+  placement: 1 | 2
 }) {
   const live = useAtomValue(liveText(version.id))
   const waiting = useAtomValue(waitingCache(version.id))
@@ -139,8 +190,14 @@ function VersionBody({
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
         </p>
-      ) : live === null && version.macroMode === "template" ? (
-        <TemplateText version={version} session={session} parentSlotId={parentSlotId} />
+      ) : live === null && !generating ? (
+        <TemplateText
+          version={version}
+          session={session}
+          parentSlotId={parentSlotId}
+          depth={depth}
+          placement={placement}
+        />
       ) : (
         <Markdown text={text} streaming={generating} />
       )}
@@ -668,7 +725,13 @@ export const Message = memo(function Message({
             }}
           />
         ) : (
-          <VersionBody version={version} session={session} parentSlotId={entry.parentSlotId} />
+          <VersionBody
+            version={version}
+            session={session}
+            parentSlotId={entry.parentSlotId}
+            depth={entry.depth}
+            placement={model ? 2 : 1}
+          />
         )}
         {version.context !== null && version.context.issues.length > 0 && (
           // What the user should know about the context it was generated from (ARCHITECTURE §15).

@@ -61,6 +61,8 @@ const displayFields = {
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
   timeline: Schema.Literals(["originals", "summaries"]),
   coverageRail: Schema.Boolean,
+  outputMacros: Schema.Boolean,
+  displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   guidance: Schema.Boolean
 }
@@ -71,6 +73,8 @@ export const DisplayPrefsChange = Schema.Struct({
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
   timeline: Schema.optionalKey(displayFields.timeline),
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
+  outputMacros: Schema.optionalKey(displayFields.outputMacros),
+  displayRegex: Schema.optionalKey(displayFields.displayRegex),
   guidance: Schema.optionalKey(displayFields.guidance)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
@@ -79,6 +83,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   portraitSize: "default",
   timeline: "originals",
   coverageRail: false,
+  outputMacros: false,
+  displayRegex: false,
   guidance: false
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
