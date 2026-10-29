@@ -4,12 +4,16 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+let adminCookie: string
+test.beforeAll(async () => {
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
 const modelBox = (page: Page) =>
   page.getByRole("textbox", { name: "Name the model sees (leave empty to use the display name)", exact: true })
 const prompt = (page: Page) => page.getByRole("dialog", { name: "Replace the name in past messages?", exact: true })
@@ -65,6 +69,7 @@ const save = async (page: Page) => {
 }
 const shot = async (page: Page, name: string) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+  expect(await page.getByRole("dialog").evaluate((dialog) => dialog.scrollWidth - dialog.clientWidth)).toBe(0)
   if (process.env.SCREENSHOT_DIR) {
     mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
     await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, name + ".png"), animations: "disabled" })
@@ -105,6 +110,10 @@ for (const width of [1440, 390])
       await prompt(page).getByRole("button", { name: /^No\./ }).click()
       await modelBox(page).fill("Ari")
       await save(page)
+      await expect(prompt(page).getByRole("status").filter({ hasText: "Only this chat refers to:" })).toContainText(
+        "The lantern garden"
+      )
+      await shot(page, `rename-chat-target-${width}-${theme}`)
       await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
       await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
       expect(await texts(f)).toEqual([
@@ -224,4 +233,48 @@ test("a library rename can target a chosen fork instead of the current one", asy
   await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
   await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
   expect(await texts(f)).toEqual(["Aria lights the lantern.", "Ari lights the lantern.", "Aria lights the lantern."])
+})
+
+test("a recovered chat offer names its original target when opened from another chat", async ({ page }) => {
+  const f = await seed("Recovery target")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.sibling.id}&panel=cast`)
+  await page.getByRole("button", { name: "Edit Recovery target", exact: true }).click()
+  await modelBox(page).fill("Ari")
+  await save(page)
+  await expect(prompt(page)).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.goto(`${server().url}/chats/${f.other.chat.id}?panel=cast`)
+  await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
+  await expect(prompt(page).getByRole("status").filter({ hasText: "Only this chat refers to:" })).toContainText(
+    "The lantern garden · Garden sibling"
+  )
+  await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+  await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
+  expect(await texts(f)).toEqual(["Aria lights the lantern.", "Ari lights the lantern.", "Aria lights the lantern."])
+})
+
+test("using a renamed family member can replace history only in the viewed fork", async ({ page }) => {
+  const f = await seed("Family source")
+  await admin((api) =>
+    api.ForkCard({
+      refId: f.card.id,
+      name: "Family replacement",
+      nickname: "Ari",
+      characterVersion: "",
+      moveDrafts: false
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "Use another version: Family source", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Use another version", exact: true })
+    .getByRole("button", { name: /Family replacement/ })
+    .click()
+  await expect(prompt(page)).toContainText("from “Aria” to “Ari”")
+  await expect(prompt(page).getByRole("button", { name: /^Yes, in all/ })).toHaveCount(0)
+  await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+  await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
+  expect(await texts(f)).toEqual(["Ari lights the lantern.", "Aria lights the lantern.", "Aria lights the lantern."])
 })

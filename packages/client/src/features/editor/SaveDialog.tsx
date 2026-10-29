@@ -3,6 +3,7 @@ import { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { Schema } from "effect"
 import { useSearch } from "@tanstack/react-router"
 import { cardSavedContribution, type CardSaved } from "./cardSaved.ts"
+import { CardSavedFlow } from "./CardSavedFlow.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 // Saving: what changed, field by field, then one revision with an optional message
 // (DESIGN §6.2). Fields another tab or an update changed meanwhile are picked one by one.
@@ -37,7 +38,6 @@ export function SaveDialog({
   const [followup, setFollowup] = useState<{
     change: CardSaved
     saved: SavedRef
-    contribution: NonNullable<ReturnType<typeof cardSavedContribution>>
   } | null>(null)
   const ref = useEditorState(store).snapshot!.ref
   const kind = ref.kind
@@ -91,7 +91,7 @@ export function SaveDialog({
             : {})
         }
         const contribution = cardSavedContribution(change)
-        if (contribution) return setFollowup({ change, saved: result.value, contribution })
+        if (contribution) return setFollowup({ change, saved: result.value })
       }
       return onSaved(result.value)
     }
@@ -132,8 +132,7 @@ export function SaveDialog({
     })
   }
 
-  if (followup)
-    return <followup.contribution.component change={followup.change} onDone={() => onSaved(followup.saved)} />
+  if (followup) return <CardSavedFlow change={followup.change} onDone={() => onSaved(followup.saved)} />
 
   return (
     <Dialog

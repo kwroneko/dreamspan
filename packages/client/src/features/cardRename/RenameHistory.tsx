@@ -156,6 +156,13 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
               />
             </Field>
           )}
+          {change.current && targets !== null && (
+            <p role="status" className="text-sm [overflow-wrap:anywhere]">
+              Only this chat refers to:{" "}
+              {targets.find((t) => t.forkId === change.current?.forkId)?.label ??
+                "the original chat, which no longer uses this card"}
+            </p>
+          )}
           <div className="flex flex-col gap-2">
             <Button
               className="h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"

@@ -27,7 +27,6 @@ interface Continuation {
   readonly id: number
   readonly userId: string
   readonly change: CardSaved
-  readonly contribution: NonNullable<ReturnType<typeof cardSavedContribution>>
   readonly onDone: (stay?: boolean) => void
 }
 let queue: ReadonlyArray<Continuation> = []
@@ -37,7 +36,7 @@ const publish = () => listeners.forEach((listener) => listener())
 export function showCardSaved(userId: string, change: CardSaved, onDone: (stay?: boolean) => void) {
   const contribution = cardSavedContribution(change)
   if (!contribution) return onDone()
-  queue = [...queue, { id: ++sequence, userId, change, contribution, onDone }]
+  queue = [...queue, { id: ++sequence, userId, change, onDone }]
   publish()
 }
 export function useCardSaved(userId: string) {
@@ -62,6 +61,7 @@ export function useCardSaved(userId: string) {
   return {
     ...request,
     onDone: (stay?: boolean) => {
+      if (!queue.includes(request)) return
       queue = queue.filter((entry) => entry !== request)
       publish()
       request.onDone(stay)
