@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { Draft, DraftHistoryPolicy, DraftKey } from "@rp/shared/drafts.ts"
-import type { VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import type { ChatSession } from "../src/features/chat/session.ts"
 import { MessageDraft } from "../src/features/chat/messageDraft.ts"
@@ -23,7 +23,14 @@ const draft = (content: string, rowVersion = 1) =>
     historyLength: 3
   })
 
-for (const kind of ["message", "summary"] as const)
+const targetFor = (kind: string) =>
+  kind === "queue"
+    ? { _tag: "Queue" as const, chatId: "chat" as ChatId, queuedId: "queue", rowVersion: 1 }
+    : kind === "write"
+      ? { _tag: "Write" as const, slotId: "slot" as SlotId }
+      : { _tag: "Edit" as const, versionId: "version" as VersionId }
+
+for (const kind of ["message", "write", "queue", "summary"] as const)
   describe(`${kind} history`, () => {
     it("has no earlier text before the first draft is saved", async () => {
       const calls: string[] = []
@@ -39,8 +46,8 @@ for (const kind of ["message", "summary"] as const)
         })
       } as unknown as ChatSession
       const store =
-        kind === "message"
-          ? new MessageDraft(session, "user", { _tag: "Edit", versionId: "version" as VersionId }, "saved", null)
+        kind !== "summary"
+          ? new MessageDraft(session, "user", targetFor(kind), "saved", null)
           : new SummaryDraft(session, "user", {
               id: "summary",
               revisionId: "revision",
@@ -77,14 +84,8 @@ for (const kind of ["message", "summary"] as const)
         })
       } as unknown as ChatSession
       const store =
-        kind === "message"
-          ? new MessageDraft(
-              session,
-              "user",
-              { _tag: "Edit", versionId: "version" as VersionId },
-              "current",
-              draft("current")
-            )
+        kind !== "summary"
+          ? new MessageDraft(session, "user", targetFor(kind), "current", draft("current"))
           : new SummaryDraft(session, "user", {
               id: "summary",
               revisionId: "revision",

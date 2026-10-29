@@ -576,6 +576,10 @@ describe("queued edits", () => {
           })
         }
         const history = yield* api.QueueDraftHistory({ chatId: chat.id, queuedId: target.queuedId })
+        assert.deepStrictEqual(
+          yield* api.MessageDraftHistory({ target, limit: DraftHistoryPolicy.maxEntries + 1 }),
+          history
+        )
         assert.lengthOf(history, Math.min(changes, DraftHistoryPolicy.maxEntries) + 1)
         const initial = history.at(-1)!
         const oldest = Math.max(0, changes - DraftHistoryPolicy.maxEntries)
@@ -588,6 +592,13 @@ describe("queued edits", () => {
           expectedRowVersion: draft.rowVersion
         })
         assert.strictEqual(restored.content, oldest === 0 ? original : passage(oldest - 1))
+        const sharedRestore = yield* api.RestoreMessageDraft({
+          target,
+          draftId: restored.id,
+          seq: history[0]!.seq,
+          expectedRowVersion: restored.rowVersion
+        })
+        assert.strictEqual(sharedRestore.content, passage(changes - 1))
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
     )
 

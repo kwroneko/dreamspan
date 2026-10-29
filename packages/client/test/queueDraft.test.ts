@@ -55,7 +55,7 @@ it("a failed queue draft save keeps the edit and refuses Cancel until a retry su
   expect(editor.snapshot().unsaved).toBe(false)
 })
 
-it("typing during queue history restore keeps the text and its original draft base", async () => {
+it("typing during queue history restore keeps the text and rebases its next save", async () => {
   let release: (() => void) | null = null
   const bases: Array<number> = []
   const session = {
@@ -64,7 +64,7 @@ it("typing during queue history restore keeps the text and its original draft ba
       ok: true,
       value: await Effect.runPromise(
         run((tag: string, payload: { content: string; expectedRowVersion: number }) => {
-          if (tag === "RestoreQueueDraft")
+          if (tag === "RestoreMessageDraft")
             return Effect.promise(
               () =>
                 new Promise<Draft>((resolve) => {
@@ -85,7 +85,7 @@ it("typing during queue history restore keeps the text and its original draft ba
   release!()
   await restoring
   await saving
-  expect(bases).toEqual([1])
+  expect(bases).toEqual([2])
   expect(editor.snapshot().text).toBe("Typed during Restore")
   expect(editor.snapshot().unsaved).toBe(false)
 })

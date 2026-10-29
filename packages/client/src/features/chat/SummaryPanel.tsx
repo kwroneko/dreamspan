@@ -18,7 +18,6 @@ import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
-import { SlotOutlet } from "../../slots.tsx"
 import { summaryPreviews } from "./presentation.tsx"
 
 function Problem({ error }: { error: AppError | null }) {
