@@ -252,9 +252,9 @@ function Editor({
     }
   }, [session, entry.slotId, draft, source])
   const base =
-    draft.target._tag === "Write"
-      ? ""
-      : (source ?? (original?.id === draft.target.versionId ? original : undefined))?.content
+    draft.target._tag === "Edit"
+      ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.content
+      : ""
 
   return (
     <form
