@@ -268,6 +268,14 @@ function Pending({
     cardLorebooksOff: [],
     globalLorebooksOff: [],
     loreBelowHistory: true,
+    macroBindings: {},
+    macroNames: {
+      user: playing?.modelName ?? playing?.name ?? "User",
+      char: castCards
+        .filter((item) => item.entityId !== playing?.entityId)
+        .map((item) => item.modelName ?? item.name)
+        .join(", ")
+    },
     rolesProjection: null,
     roleProjections: []
   })
