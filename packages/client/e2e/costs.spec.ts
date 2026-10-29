@@ -1,11 +1,12 @@
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { expect, test } from "@playwright/test"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
+import { tmpdir } from "node:os"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const shots = "~/projects/work-folder/2026-10-28/night/bl-o/screens"
+const shots = resolve(process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-cost-screenshots"))
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`custom cost formulas ${width} ${theme}`, async ({ page }) => {
@@ -63,6 +64,12 @@ for (const width of [1440, 390])
       await page.screenshot({ path: join(shots, `costs-${width}-${theme}-rates.png`), fullPage: true })
       await page.getByRole("heading", { name: "Costs", exact: true }).scrollIntoViewIfNeeded()
       await page.screenshot({ path: join(shots, `costs-${width}-${theme}.png`), fullPage: true })
+      // Every accepted name must leave the editor and Remove action reachable on phones.
+      await page.getByLabel("Name", { exact: true }).fill("x".repeat(160))
+      await page.screenshot({ path: join(shots, `costs-${width}-${theme}-long-name.png`), fullPage: true })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width)
+      const removeBounds = await remove.boundingBox()
+      expect(removeBounds!.x + removeBounds!.width).toBeLessThanOrEqual(width)
       await page.getByRole("button", { name: "Remove formula", exact: true }).click()
       await page.getByRole("button", { name: "Save pricing", exact: true }).click()
       await expect(page.getByText("Saved. New requests use these prices; past costs stay as recorded.")).toBeVisible()

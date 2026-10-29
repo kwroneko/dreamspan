@@ -81,8 +81,9 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
       }}
     >
       <p className="text-sm text-muted">
-        Prices per million tokens. The model must match exactly. Optional conditions narrow the match; a connection wins
-        over a provider, then an upstream, then the last matching rule. Currency is a label; nothing is converted.
+        Prices per million tokens. The model must match exactly. Optional conditions narrow the match; connection
+        conditions take precedence, then upstream, then provider. The last rule breaks ties. Currency is a label;
+        nothing is converted.
       </p>
       <UserDraftStatus draft={durable} />
       {values.revision !== settings.revision && (
@@ -104,9 +105,13 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
             aria-label={`Formula ${index + 1}`}
             className="flex min-w-0 flex-col gap-4 rounded-lg border border-border p-4"
           >
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="font-semibold">{rule.name || "New formula"}</h2>
-              <Button variant="ghost" onClick={() => edit(values.rules.filter((_, i) => i !== index))}>
+            <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+              <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{rule.name || "New formula"}</h2>
+              <Button
+                variant="ghost"
+                className="shrink-0"
+                onClick={() => edit(values.rules.filter((_, i) => i !== index))}
+              >
                 Remove formula
               </Button>
             </div>
