@@ -348,10 +348,9 @@ function Compare({
         ) : (
           <div className="flex flex-col gap-1">
             <p className="text-sm text-muted">
-              From #{numberOf(pair[0].id)} to #{numberOf(pair[1].id)}: the stretch between their first and last
-              difference.
+              From #{numberOf(pair[0].id)} to #{numberOf(pair[1].id)}: complete texts with changes marked.
             </p>
-            <ValueDiff before={firstText} after={secondText} />
+            <ValueDiff before={firstText} after={secondText} rich />
           </div>
         )}
       </>

@@ -145,6 +145,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
       view.dispatch({ effects: options.reconfigure(attributes()) })
   }
   update(initial)
+  if (initial.autoFocus) view.focus()
   return {
     update,
     finishComposition() {

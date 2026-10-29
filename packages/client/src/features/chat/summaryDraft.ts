@@ -103,6 +103,11 @@ export class SummaryDraft {
   }
   readonly snapshot = () => this.view
 
+  /** Revision named by the text shown, including a recovered or stale draft. */
+  get comparisonRevisionId() {
+    return this.base.revisionId ?? this.summary.revisionId
+  }
+
   private set(change: Partial<SummaryDraftView>) {
     this.view = { ...this.view, ...change }
     for (const listener of this.listeners) listener()
@@ -130,7 +135,9 @@ export class SummaryDraft {
       text,
       changed: text !== (this.summary.content ?? ""),
       unsaved: this.local !== null,
-      outdated: this.draft?.status === "active" && this.draft.baseRevision !== this.summary.revisionId,
+      outdated:
+        (this.local !== null || this.draft?.status === "active") &&
+        this.comparisonRevisionId !== this.summary.revisionId,
       ...extra
     })
   }
@@ -228,6 +235,8 @@ export class SummaryDraft {
   }
 
   setText(text: string) {
+    // The first keystroke fixes the revision, before autosave or another tab's update.
+    if (this.base.revisionId === null) this.base = { ...this.base, revisionId: this.summary.revisionId }
     this.local = text
     this.keep(text)
     this.refresh()

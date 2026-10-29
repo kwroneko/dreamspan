@@ -6,6 +6,7 @@ export interface CodeEditorProps {
   base: string
   label: string
   fullHeight?: boolean | undefined
+  autoFocus?: boolean | undefined
   rows?: number | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined

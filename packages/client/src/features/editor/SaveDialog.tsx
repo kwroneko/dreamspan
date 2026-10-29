@@ -18,7 +18,7 @@ import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { type Choice, type Conflict, ConflictPicker, chosen } from "./conflicts.tsx"
 import { ValueDiff } from "./diff.tsx"
-import { changedFields, draftLabel, type FieldChange, fieldLabel } from "./fields.ts"
+import { draftLabel, type FieldChange, fieldLabel } from "./fields.ts"
 import { type EditorStore, useEditorState, useText } from "./store.ts"
 
 /** Whether a draft's content is text or JSON, for putting a picked value back. */
@@ -62,10 +62,7 @@ export function SaveDialog({
       .flush()
       .then(async () => {
         const working = store.working()
-        const changes =
-          kind === "card" || kind === "preset"
-            ? await store.comparisonChanges()
-            : changedFields(store.head, working.doc)
+        const changes = await store.comparisonChanges()
         setView({ working, changes })
       })
       .catch((error: AppError) => setError(error))
@@ -127,8 +124,7 @@ export function SaveDialog({
     const working = store.working()
     setView({
       working,
-      changes:
-        kind === "card" || kind === "preset" ? await store.comparisonChanges() : changedFields(store.head, working.doc)
+      changes: await store.comparisonChanges()
     })
   }
 
@@ -136,7 +132,7 @@ export function SaveDialog({
 
   return (
     <Dialog
-      wide={kind === "card" || kind === "preset"}
+      wide
       open
       onOpenChange={(open) => !open && !pending && onClose()}
       title={conflicts.length > 0 ? "Changed meanwhile" : "Save a revision"}
@@ -188,11 +184,7 @@ export function SaveDialog({
                 return (
                   <li key={label} className="flex flex-col gap-1">
                     <span className="text-sm font-medium [overflow-wrap:anywhere]">{label}</span>
-                    <ValueDiff
-                      before={change.before}
-                      after={change.after}
-                      rich={kind === "card" || kind === "preset"}
-                    />
+                    <ValueDiff before={change.before} after={change.after} rich />
                   </li>
                 )
               })}

@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 // The summary screens (DESIGN §8.1, ARCHITECTURE §16) against the production server, with
 // summaries written by fixtures as the summarizer would have: the divider where verbatim
 // history starts, the panel it opens (edit through a draft, revisions, asking for a summary
@@ -199,14 +200,14 @@ for (const [name, viewport] of [
       const row = dialog.locator(`[data-summary="${fixture.top.id}"]`)
       await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
       const box = dialog.getByRole("textbox", { name: /Text of the summary of messages 1–8/ })
-      await expect(box).toHaveValue("A flood closed the road; Mira saved the ledger.")
+      await expectTextBox(box, "A flood closed the road; Mira saved the ledger.")
       await box.fill("The road flooded. Mira saved the ledger.")
       await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
       // The draft is on the server: a reload offers it again, with the panel still open at it.
       await page.reload()
       await expect(dialog).toBeVisible()
       await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
-      await expect(box).toHaveValue("The road flooded. Mira saved the ledger.")
+      await expectTextBox(box, "The road flooded. Mira saved the ledger.")
       await dialog.getByRole("button", { name: "Save revision" }).click()
       await expect(row).toContainText("The road flooded. Mira saved the ledger.")
       await expect(row.getByText("Edited", { exact: true })).toBeVisible()
@@ -510,7 +511,7 @@ test.describe("the text of a summary's edit", () => {
     await expect
       .poll(async () => (await admin((api) => api.GetSummary({ summaryId: fixture.top.id as never }))).content)
       .toBe(submitted)
-    await expect(box(dialog)).toHaveValue(later)
+    await expectTextBox(box(dialog), later)
     await expect
       .poll(
         async () =>
@@ -615,7 +616,7 @@ test.describe("the text of a summary's edit", () => {
     )
     // The replay fails once: the box shows this browser's text; more is typed and saved.
     const dialog = await editTop(page, fixture)
-    await expect(box(dialog)).toHaveValue(offline)
+    await expectTextBox(box(dialog), offline)
     await box(dialog).fill(`${offline}!`)
     await expect
       .poll(async () => (await admin((api) => api.GetSummaryDraft({ summaryId, forkId: fixture.forkId })))?.content)

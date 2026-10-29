@@ -1,3 +1,4 @@
+import { expectTextBox } from "./support/textbox.ts"
 // What a message keeps whatever happens around it: the text typed into its editor across a
 // reload, across a closed tab while the server was down, while its version is being saved and
 // when replayed from this browser over text saved elsewhere, its version arrows on every
@@ -45,7 +46,8 @@ test("the text of a version being written, and of an edit, survives a reload and
   await page.waitForTimeout(1000)
   await page.reload()
   // The editor is open again where it was, with its text.
-  await expect(row.getByLabel("Your version", { exact: true })).toHaveValue(
+  await expectTextBox(
+    row.getByLabel("Your version", { exact: true }),
     "An irreplaceable draft assembled from several swipes."
   )
   await row.getByRole("button", { name: "Add as a new version" }).click()
@@ -59,7 +61,7 @@ test("the text of a version being written, and of an edit, survives a reload and
   await row.getByLabel("Message text", { exact: true }).fill("An edit half done.")
   await page.waitForTimeout(1000)
   await page.reload()
-  await expect(row.getByLabel("Message text", { exact: true })).toHaveValue("An edit half done.")
+  await expectTextBox(row.getByLabel("Message text", { exact: true }), "An edit half done.")
   // Cancelling closes it for good: its text goes to the recovered texts, not back into the box.
   await row.getByRole("button", { name: "Cancel" }).click()
   await expect(row.getByLabel("Message text", { exact: true })).toHaveCount(0)
@@ -93,7 +95,7 @@ test("text typed into a message editor while the server is down survives closing
   const reopened = await context.newPage()
   await reopened.goto(`${server().url}/chats/${chat.id}`)
   const again = reopened.locator("article[data-slot]").first()
-  await expect(again.getByLabel("Your version", { exact: true })).toHaveValue(text)
+  await expectTextBox(again.getByLabel("Your version", { exact: true }), text)
   // On the server now: once the version is saved, a reload doesn't bring the editor back.
   await again.getByRole("button", { name: "Add as a new version" }).click()
   await expect(again.locator(".markdown")).toHaveText(text)
@@ -176,13 +178,13 @@ for (const kind of ["Write", "Edit"] as const) {
     await expect
       .poll(async () => (await admin((api) => api.ListVersions({ slotId: entry.slotId }))).map((v) => v.content))
       .toContain(submitted)
-    await expect(box).toHaveValue(later)
+    await expectTextBox(box, later)
     await expect
       .poll(async () => (await admin((api) => api.MessageDrafts({ chatId: chat.id })))[0]?.content)
       .toBe(later)
     await expect.poll(() => copies(page)).toEqual([])
     await page.reload()
-    await expect(box).toHaveValue(later)
+    await expectTextBox(box, later)
   })
 }
 
@@ -249,7 +251,7 @@ test("text replayed from this browser that the server refused is retried on the 
   })
   await back.goto(`${server().url}/chats/${chat.id}`)
   const box = back.getByLabel("Your version", { exact: true })
-  await expect(box).toHaveValue(offline)
+  await expectTextBox(box, offline)
   await expect(back.getByRole("alert")).toContainText("The text isn’t saved as a draft yet")
   await box.fill(`${offline}!`)
   await expect
@@ -290,7 +292,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   )
   // This browser kept text typed on the first save, which never reached the server.
   await open(page, chat.id)
-  await expect(page.getByLabel("Your version", { exact: true })).toHaveValue(elsewhere)
+  await expectTextBox(page.getByLabel("Your version", { exact: true }), elsewhere)
   const offline = "Shared prefix. Typed offline here."
   const copy = makeCopy(
     me.id,
@@ -327,7 +329,7 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   )
   await page.reload()
   const box = page.getByLabel("Your version", { exact: true })
-  await expect(box).toHaveValue(offline)
+  await expectTextBox(box, offline)
   await expect.poll(() => copies(page)).toEqual([])
   const notice = page.getByRole("status").filter({ hasText: "This browser's text replaced text saved elsewhere" })
   await expect(notice).toBeVisible()
@@ -338,11 +340,11 @@ test("a replay from this browser that goes over text saved elsewhere says so unt
   await expect(notice).toBeVisible()
   await notice.getByRole("button", { name: "Use the other text" }).click()
   await expect(notice).toHaveCount(0)
-  await expect(box).toHaveValue(elsewhere)
+  await expectTextBox(box, elsewhere)
   await page.getByRole("button", { name: "Earlier draft text" }).click()
   const history = page.getByRole("dialog", { name: "Earlier draft text", exact: true })
   await history.getByRole("button", { name: "Restore draft text" }).first().click()
-  await expect(box).toHaveValue(`${offline} More.`)
+  await expectTextBox(box, `${offline} More.`)
   // Saved as a version, the other text is in the recovered texts.
   await page.getByRole("button", { name: "Add as a new version" }).click()
   await expect(box).toHaveCount(0)
