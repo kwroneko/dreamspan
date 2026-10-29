@@ -87,21 +87,22 @@ export const registerComposerControls = () => [
     id: "composer.speaker",
     order: 10,
     placement: "speaker",
-    component: ({ speaker, recent, onRecent }) => (
+    component: ({ speaker, recent, onRecent, compact }) => (
       <>
         <SpeakerSwitcher {...speaker} />
-        {recent.map(({ id, name, mediaId }) => (
-          <Tooltip key={id} label={`Speak as ${name}`}>
-            <button
-              type="button"
-              aria-label={`Speak as ${name}`}
-              onClick={() => onRecent(id)}
-              className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <Avatar id={id} name={name} mediaId={mediaId} size="md" />
-            </button>
-          </Tooltip>
-        ))}
+        {!compact &&
+          recent.map(({ id, name, mediaId }) => (
+            <Tooltip key={id} label={`Speak as ${name}`}>
+              <button
+                type="button"
+                aria-label={`Speak as ${name}`}
+                onClick={() => onRecent(id)}
+                className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <Avatar id={id} name={name} mediaId={mediaId} size="md" />
+              </button>
+            </Tooltip>
+          ))}
       </>
     )
   }),
@@ -168,19 +169,29 @@ export const registerComposerControls = () => [
     id: "composer.guidance",
     order: 10,
     placement: "guidance",
-    component: ({ guidance, prefsReady, changeGuidance, hasText, hint }) => (
+    component: ({ guidance, prefsReady, changeGuidance, hasText, hint, compact }) => (
       <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
         <span className="shrink-0 text-sm">
           <Switch checked={guidance} disabled={!prefsReady} onCheckedChange={changeGuidance}>
             Guidance
           </Switch>
         </span>
-        {(guidance || hasText) && (
+        {!compact && (guidance || hasText) && (
           <p id="composer-hint" className="min-w-0 flex-1 basis-60 pt-0.5 text-xs text-muted">
             {hint}
           </p>
         )}
       </div>
+    )
+  }),
+  composerControls.register({
+    id: "composer.help",
+    order: 10,
+    placement: "help",
+    component: ({ hint }) => (
+      <p id="composer-hint" className="text-xs text-muted">
+        {hint}
+      </p>
     )
   }),
   composerControls.register({

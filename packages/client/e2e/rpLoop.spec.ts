@@ -227,6 +227,7 @@ for (const width of [1440, 390])
       await shot("09-cast-tab-muted")
       // Never picked automatically: it's not offered to reply.
       if (width < 1024) await closePanel(page)
+      if (width < 640) await page.getByRole("button", { name: "Composer options", exact: true }).click()
       const replyFrom = page.getByRole("group", { name: "Reply from" })
       await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
       await expect(replyFrom.getByRole("status")).not.toContainText(mutedName)
@@ -235,6 +236,10 @@ for (const width of [1440, 390])
       await expect(replyFrom.getByRole("status")).toContainText(`${mutedName} replies next: your pick`)
       await replyFrom.getByRole("button", { name: "Back to turn order" }).click()
       await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
+      if (width < 640) {
+        await page.keyboard.press("Escape")
+        await expect(page.getByRole("dialog", { name: "Next reply", exact: true })).toHaveCount(0)
+      }
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
       await page.getByRole("option", { name: mutedName, exact: true }).click()

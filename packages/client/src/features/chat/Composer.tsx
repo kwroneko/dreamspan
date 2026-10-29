@@ -28,6 +28,12 @@ import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
+const subscribePhone = (notify: () => void) => {
+  const media = matchMedia("(max-width: 639px)")
+  media.addEventListener("change", notify)
+  return () => media.removeEventListener("change", notify)
+}
+
 /** A send whose text was typed on a branch the chat view has left since. */
 const BRANCH_CHANGED: AppError = {
   tag: "BranchChanged",
@@ -117,6 +123,8 @@ export function Composer({
   view: ChatView
   onSettings: (tab: "model" | "preset") => void
 }) {
+  const phone = useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
+  const [secondaryOpen, setSecondaryOpen] = useState(false)
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -303,9 +311,10 @@ export function Composer({
         ? `The model writes ${name}'s turn for you`
         : `The model writes ${name}'s turn`
   }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter). The guidance stays here." : ""}`
-  const shownError = error ?? saveError
+  const shownError = error ?? saveError ?? viewPrefs.error
 
   const controls: ComposerControlContext = {
+    compact: phone,
     recoverQueued: (withdrawn) => {
       const current = draft.snapshot().text
       draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
@@ -357,7 +366,7 @@ export function Composer({
 
   return (
     <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
-      <ComposerControls placement="settings" context={controls} />
+      {!phone && <ComposerControls placement="settings" context={controls} />}
       <ComposerControls placement="queue" context={controls} />
       {conflict && (
         <ReplayNotice
@@ -383,9 +392,29 @@ export function Composer({
       )}
       <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
-        <div className="flex min-w-0 items-center gap-1 @min-[640px]:h-11">
+        <div className="flex min-w-0 items-center gap-1 max-sm:[&>button]:max-w-32 @min-[640px]:h-11">
           <ComposerControls placement="speaker" context={controls} />
-          <span className="ml-auto @min-[640px]:hidden">
+          {phone && (
+            <>
+              <ComposerControls placement="guidance" context={controls} />
+              <Popover
+                open={secondaryOpen}
+                onOpenChange={setSecondaryOpen}
+                triggerLabel="Composer options"
+                trigger="Options"
+                title="Next reply"
+                triggerClassName={`${buttonClass("ghost")} ml-auto px-2! text-xs`}
+              >
+                <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
+                  <ComposerControls placement="settings" context={controls} />
+                  <ComposerControls placement="reply" context={controls} />
+                  <ComposerControls placement="help" context={controls} />
+                  <History draft={draft} />
+                </div>
+              </Popover>
+            </>
+          )}
+          <span className={`${phone ? "hidden" : "ml-auto"} @min-[640px]:hidden`}>
             <History draft={draft} />
           </span>
         </div>
@@ -412,7 +441,7 @@ export function Composer({
               value={text}
               readOnly={!textReady}
               aria-busy={!textReady}
-              aria-describedby={hasText || guidance ? "composer-hint" : undefined}
+              aria-describedby={(!phone || secondaryOpen) && (hasText || guidance) ? "composer-hint" : undefined}
               placeholder={
                 !textReady
                   ? "Loading…"
@@ -435,8 +464,12 @@ export function Composer({
           </div>
         </div>
       </div>
-      <ComposerControls placement="guidance" context={controls} />
-      <ComposerControls placement="reply" context={controls} />
+      {!phone && (
+        <>
+          <ComposerControls placement="guidance" context={controls} />
+          <ComposerControls placement="reply" context={controls} />
+        </>
+      )}
       {impersonationNotice && (
         <div
           role="status"
