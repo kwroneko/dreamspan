@@ -27,3 +27,10 @@ it("lists no global books until they're read", () => {
     global: []
   })
 })
+
+it("keeps global use independent of an attachment and retains its detached switch", () => {
+  const read = (attached: string[], detached: string[], globalsOff: string[]) =>
+    lorebookSections({ attached, detached, globals: ["book"], globalsOff }).global[0]
+  expect(read(["book"], [], ["book"])).toEqual({ id: "book", on: false, global: true, attached: true })
+  expect(read([], ["book"], [])).toEqual({ id: "book", on: true, global: true, attached: true })
+})
