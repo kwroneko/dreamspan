@@ -111,10 +111,11 @@ const presetSource = (
   return { kind: "preset", ref: preset.ref, revision: preset.revision, identifier, ...(condition ? { condition } : {}) }
 }
 
-const cardSource = (card: CardInput, field: string): Source => ({
+const cardSource = (assembly: Assembly, card: CardInput, field: string): Source => ({
   kind: "card",
   entity: card.entity,
   revision: card.revision,
+  ...(need(assembly, "cast").personas.some((p) => p.entity === card.entity) ? { persona: true } : {}),
   field
 })
 
@@ -731,7 +732,7 @@ const cardNewlines = (assembly: Assembly, piece: number): Text => {
 const cardText = (assembly: Assembly, card: CardInput, field: keyof CardInput["doc"], names?: Partial<Names>): Text => {
   const env = need(assembly, "macros")
   const raw = String(card.doc[field] ?? "").trim()
-  const piece = env.piece(`card:${card.entity}:${String(field)}`, cardSource(card, String(field)), raw, {
+  const piece = env.piece(`card:${card.entity}:${String(field)}`, cardSource(assembly, card, String(field)), raw, {
     withoutCard: true,
     ...(names ? { names } : {})
   })
@@ -1401,6 +1402,11 @@ const composeStage = sync("compose", (assembly) => {
       )
     }
   }
+  const joinedLabels: Readonly<Record<string, string>> = {
+    description: "descriptions",
+    personality: "personalities",
+    scenario: "scenarios"
+  }
   const joined = (id: string, parts: ReadonlyArray<Text | null>, separator = "\n"): Text | null => {
     const present = parts.filter((part): part is Text => part !== null && part.text !== "")
     if (present.length === 0) return null
@@ -1409,7 +1415,13 @@ const composeStage = sync("compose", (assembly) => {
       text,
       piece: env.verbatim(
         `cards:${id}`,
-        { kind: "assembler", what: "the characters' definitions" },
+        {
+          kind: "assembler",
+          what:
+            id === "personas"
+              ? "Personas"
+              : `The characters' ${joinedLabels[id.replace("macro:", "")] ?? "definitions"}`
+        },
         text,
         present.map((part) => part.piece)
       )
@@ -1492,7 +1504,7 @@ const composeStage = sync("compose", (assembly) => {
           ? (() => {
               const piece = env.piece(
                 `card:${card.entity}:description`,
-                cardSource(card, "description"),
+                cardSource(assembly, card, "description"),
                 card.doc.description
               )
               return cardNewlines(assembly, piece)

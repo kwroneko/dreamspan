@@ -137,6 +137,8 @@ it.live(
         )
       )
 
+      // Removing the earlier swipe renumbers the surviving swipe in this fork.
+      yield* writer.DeleteVersion({ userId: me.id, versionId: first.id, forkId: chat.currentForkId })
       const sent = yield* posted(
         api.SendMessage({
           chatId: chat.id,
@@ -176,10 +178,10 @@ it.live(
         partTexts(run, (l) => l === lore.label),
         ["The lighthouse burns whale oil."]
       )
-      // A history message and the version of it that was sent: the swipe, the second.
+      // The surviving swipe is version 1, matching the counter after deletion.
       const history = run.messages.flatMap((m) => m.sources).find((s) => s.slotId === reply.slotId)!
       assert.strictEqual(history.kind, "message")
-      assert.strictEqual(history.version, 2)
+      assert.strictEqual(history.version, 1)
       assert.deepStrictEqual(
         partTexts(run, (l) => l === history.label),
         ["The lamp gutters."]
@@ -215,11 +217,15 @@ it.live(
         }
       }
       // The persona's wrapped description is its own turn before the character's.
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === "Persona “Tobin”: description"),
+        ["Tobin draws maps."]
+      )
       const persona = blocks("Tobin's persona")
       assert.lengthOf(persona, 1)
       assert.strictEqual(persona[0]!.m.content, "<Tobin>\nTobin draws maps.\n</Tobin>")
       assert.include(
-        blocks("The characters' definitions").flatMap(({ m, g }) =>
+        blocks("The characters' descriptions").flatMap(({ m, g }) =>
           (m.groups ?? [])
             .filter((o) => o !== g && o.start >= g.start && o.end <= g.end)
             .map((o) => m.sources[o.source]!.label)
@@ -235,7 +241,7 @@ it.live(
         ]
       )
       const format = inside("Preset: personality format")
-      assert.deepStrictEqual(format.groups, ["The characters' definitions", "Mira's personality"])
+      assert.deepStrictEqual(format.groups, ["The characters' personalities", "Mira's personality"])
       assert.deepStrictEqual(
         format.parts.filter(([, , frame]) => !frame),
         [["Card “Mira”: personality", "Dry and careful.", false]]

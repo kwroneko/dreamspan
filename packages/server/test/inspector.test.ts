@@ -63,11 +63,11 @@ describe("the request inspector", () => {
           [["Preset prompt “Main Prompt”"], null],
           [
             [
-              "Card “Tobin”: description",
+              "Persona “Tobin”: description",
               "Preset: card join prefix",
               "Preset: card join suffix",
               "Tobin's persona",
-              "The characters' definitions"
+              "Personas"
             ],
             null
           ],
@@ -77,7 +77,7 @@ describe("the request inspector", () => {
               "Preset: card join prefix",
               "Preset: card join suffix",
               "Mira's description",
-              "The characters' definitions"
+              "The characters' descriptions"
             ],
             null
           ],

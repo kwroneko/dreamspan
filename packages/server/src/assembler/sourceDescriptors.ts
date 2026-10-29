@@ -44,7 +44,7 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
     }
     case "card":
       return {
-        label: `Card “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
+        label: `${source.persona ? "Persona" : "Card"} “${names.get(source.revision) ?? "unnamed"}”: ${source.field}`,
         slotId: null,
         ...linkOf(source.revision)
       }
@@ -69,7 +69,7 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
       const ordinal = ordinalOf.get(source.version)
       return {
         label: depth === undefined ? "A message" : `Message ${depth + 1}`,
-        ...(ordinal === undefined ? {} : { version: ordinal + 1 }),
+        ...(source.number === undefined && ordinal === undefined ? {} : { version: source.number ?? ordinal! + 1 }),
         slotId: source.slot as SlotId
       }
     }
