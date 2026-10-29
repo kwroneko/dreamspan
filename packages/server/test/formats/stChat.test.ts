@@ -1,3 +1,4 @@
+import { unreadChatPart } from "../../src/importer/stParse.ts"
 // ST chat files and the rest of an ST folder (formats/stChat.ts, formats/stData.ts), on
 // synthetic files. Each cap has a crafted file.
 import { describe, expect, it } from "@effect/vitest"
@@ -270,4 +271,10 @@ describe("ST settings and groups", () => {
     )
     expect(group).toEqual({ id: "g", name: "G", members: ["a.png"], disabledMembers: ["a.png"], chats: ["c1", "c2"] })
   })
+})
+
+it("an unreadable chat part cannot change the selected persona", () => {
+  const part = unreadChatPart(new Uint8Array(), null)
+  expect(part.userTurns).toBe(0)
+  expect(part.lastUserSpeaker).toBeNull()
 })

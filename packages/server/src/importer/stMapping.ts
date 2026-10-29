@@ -217,8 +217,9 @@ export const speakerMap = (
       const byName = (folder.personaNames.get(speaker.name) ?? []).filter((avatar) => folder.personas.has(avatar))
       entity =
         (speaker.avatar !== null ? folder.personas.get(speaker.avatar) : undefined) ??
+        (byName.length === 1 ? folder.personas.get(byName[0]!)! : undefined) ??
         (header?.persona ? folder.personas.get(header.persona) : undefined) ??
-        (byName.length === 1 ? folder.personas.get(byName[0]!)! : null)
+        null
       if (entity !== null) spoke.add(entity)
     } else {
       // A message names its card's avatar in group chats (and from ST's /sendas).
@@ -234,7 +235,13 @@ export const speakerMap = (
 }
 
 /** The chat's participants, lorebooks and variables as the file has them. */
-const membership = (folder: FolderContext, link: Link, header: StChatHeader | null, spoke: ReadonlySet<EntityId>) => {
+const membership = (
+  folder: FolderContext,
+  link: Link,
+  header: StChatHeader | null,
+  spoke: ReadonlySet<EntityId>,
+  selectedPersona: EntityId | null
+) => {
   const participants: Array<string> = []
   const absent: Array<string> = []
   const worlds: Array<string> = []
@@ -277,9 +284,10 @@ const membership = (folder: FolderContext, link: Link, header: StChatHeader | nu
     if (ref !== undefined) lorebooks.push(ref)
     else if (!embedded.has(name)) missingWorlds.push(name)
   }
-  const played = [...spoke]
+  const allPersonas = [...spoke]
+  const played = selectedPersona === null ? [] : [selectedPersona]
   return {
-    participants: [...participants, ...played.filter((p) => !participants.includes(p))],
+    participants: [...participants, ...allPersonas.filter((p) => !participants.includes(p))],
     absent,
     played,
     lorebooks,
@@ -380,6 +388,7 @@ export const chatStateChange = (
     readonly link: Link
     readonly header: StChatHeader | null
     readonly spoke: ReadonlySet<EntityId>
+    readonly selectedPersona?: EntityId | null
     readonly summaries: ReadonlyArray<{
       readonly index: number
       readonly text: string
@@ -392,7 +401,13 @@ export const chatStateChange = (
   /** A new chat takes all of it; a chat merged into gets only what changed. */
   isNew: boolean
 ) => {
-  const mapped = membership(folder, file.link, file.header, file.spoke)
+  const mapped = membership(
+    folder,
+    file.link,
+    file.header,
+    file.spoke,
+    file.selectedPersona === undefined ? ([...file.spoke].at(-1) ?? null) : file.selectedPersona
+  )
   const authorNote = authorNoteOf(folder, file.header)
   const summary = summaryOf(folder, file.summaries, file.messages, file.run)
   const state: { -readonly [K in keyof ChatState]: ChatState[K] } = {
@@ -416,7 +431,7 @@ export const chatStateChange = (
       events.push({ key: "presence.set", value: { entity: entity as EntityId, present: false } })
     }
   }
-  if (mapped.played.length > 0 && JSON.stringify(previous?.played ?? []) !== JSON.stringify(mapped.played)) {
+  if (JSON.stringify(previous?.played ?? []) !== JSON.stringify(mapped.played)) {
     events.push({ key: "played_by_me.set", value: { entities: mapped.played as Array<EntityId> } })
   }
   for (const entity of new Set([
