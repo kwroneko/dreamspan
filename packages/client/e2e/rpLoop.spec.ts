@@ -156,7 +156,8 @@ for (const width of [1440, 390])
       await shot("04-composer-guidance-text")
 
       // Enter generates the selected speaker's turn (the persona's here, not the reply-from
-      // character's) with the text as its direction, under the primary Write for; the text stays.
+      // character's) with the text as its direction, under the primary Write for; the text
+      // leaves the box, and the reply shows it.
       const chip = await page.getByRole("button", { name: /^Speaking as / }).getAttribute("aria-label")
       const speaker = chip!.replace(/^Speaking as /, "").replace(/\. Change the speaker$/, "")
       await expect(page.getByRole("button", { name: `Write for ${speaker}` })).toHaveClass(/bg-accent/)
@@ -168,10 +169,11 @@ for (const width of [1440, 390])
       expect(request.at(-1)!.content).toContain(direction)
       await expect(lastMessage(page)).toContainText(`Direction: ${direction}`)
       await expect(lastMessage(page).locator("header").first()).toContainText(speaker)
-      await expectTextBox(guidance, direction)
-      await shot("05-after-generate-text-stays")
+      await expectTextBox(guidance, "")
+      await shot("05-after-generate-box-cleared")
 
-      // A swipe with guidance on carries the text.
+      // A swipe reuses the guidance of the version it re-rolls, not the box's text.
+      await guidance.fill("My own next line, not guidance for this reply.")
       await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(sent + 2)
       await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
@@ -182,21 +184,21 @@ for (const width of [1440, 390])
       // The toggle is the account's: it's still on after a reload.
       await page.reload()
       await expect(guidanceSwitch(page)).toBeChecked()
-      await expectTextBox(composerBox(page), direction)
+      await expectTextBox(composerBox(page), "My own next line, not guidance for this reply.")
 
-      // Off: a swipe takes nothing from the box, and reuses nothing.
+      // Off: a swipe still reuses the re-rolled version's guidance, and takes nothing from the box.
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).not.toBeChecked()
       await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(sent + 3)
-      await expect.poll(async () => (await newestVersion()).direction).toBeNull()
-      expect(
-        provider.completions
-          .at(-1)!
-          .messages.map((m) => m.content)
-          .join("\n")
-      ).not.toContain(direction)
-      await expectTextBox(composerBox(page), direction)
+      await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
+      const swiped = provider.completions
+        .at(-1)!
+        .messages.map((m) => m.content)
+        .join("\n")
+      expect(swiped).toContain(direction)
+      expect(swiped).not.toContain("My own next line")
+      await expectTextBox(composerBox(page), "My own next line, not guidance for this reply.")
       await composerBox(page).fill("")
 
       // The request inspector for the directed reply: the direction prompt, and who it was for.
@@ -350,7 +352,7 @@ test("guidance on a touch screen: Ctrl+Enter generates, Enter is a new line", as
   await guidance.press("Control+Enter")
   await expect.poll(() => provider.completions.length).toBe(sent + 1)
   await expect.poll(async () => (await newestVersion()).direction).toBe("The rain stops.\n")
-  await expectTextBox(guidance, "The rain stops.\n")
+  await expectTextBox(guidance, "")
   await setGuidance(false)
   await context.close()
 })
@@ -375,6 +377,7 @@ test("the pending chat's Playing as is the persona control, and guidance generat
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   await expect.poll(() => provider.completions.length).toBe(sent + 1)
   expect(provider.completions.at(-1)!.messages.at(-1)!.content).toContain("Open on the docks at dawn.")
-  await expectTextBox(page.getByRole("textbox", { name: "Guidance", exact: true }), "Open on the docks at dawn.")
+  // Submitted guidance leaves the box; the chat's composer starts empty.
+  await expectTextBox(page.getByRole("textbox", { name: "Guidance", exact: true }), "")
   await setGuidance(false)
 })

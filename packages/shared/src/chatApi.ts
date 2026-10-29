@@ -420,7 +420,10 @@ export class ChatApi extends RpcGroup.make(
       expectedRowVersion: Schema.Int,
       /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
       model: Schema.optionalKey(ModelChoice),
-      /** A one-turn direction for this version (the composer's text with guidance on); none is reused. */
+      /**
+       * A one-turn direction for this version (the guidance editor's box); empty for none.
+       * Absent, the version it replaces gives its own.
+       */
       direction: Schema.optionalKey(Schema.String)
     },
     success: PathEntry,

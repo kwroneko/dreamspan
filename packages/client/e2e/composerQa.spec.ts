@@ -99,7 +99,8 @@ for (const width of [1440, 390]) {
         (entry) => entry.version.writer === "human" && entry.version.content === direction
       )
     ).toHaveLength(0)
-    await expect(box(page)).toHaveValue(direction)
+    // Submitted guidance leaves the box (DESIGN §2.2, guidance on swipes).
+    await expect(box(page)).toHaveValue("")
     await expect(toggle(page)).toBeChecked()
     // The server still has the old preference; the first write remains held.
     expect((await rpc((api) => api.GetDisplayPrefs({}))).guidance).toBe(false)
