@@ -268,3 +268,46 @@ test("family comparison reads both current saved heads and excludes drafts", asy
   await expect(diff).toContainText("The saved lighthouse keeper.")
   await expect(diff).not.toContainText("DRAFT EXCLUDED")
 })
+
+for (const width of [1440, 390]) {
+  test(`fork dialog preserves long card names at ${width}`, async ({ page }) => {
+    const theme = width === 1440 ? "light" : "dark"
+    await page.emulateMedia({ colorScheme: theme })
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const parent = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.CreateCard({ label: `Long names ${width}`, name: `Long names ${width}` })
+    )
+    await page.goto(`${server().url}/library/${parent.id}`)
+    await page.getByRole("button", { name: "Fork", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Fork card", exact: true })
+    const display = `Keeper ${width} ` + "of the lighthouse ".repeat(20)
+    const version = "The autumn storm. ".repeat(40)
+    const nickname = "Captain of the northern harbor ".repeat(25)
+    await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill(display)
+    await dialog.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(version)
+    await dialog.getByRole("textbox", { name: "In-character name", exact: true }).fill(nickname)
+    if (process.env.CF5_SCREENSHOTS) {
+      await page.screenshot({ path: `${process.env.CF5_SCREENSHOTS}/long-fork-${width}-${theme}.png` })
+    }
+    await dialog.getByRole("button", { name: "Fork card", exact: true }).click()
+    await expect(dialog).not.toBeVisible()
+    const child = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const family = yield* api.CardFamily({ entityId: parent.entityId })
+        const refId = family.members.find((m) => m.entityId !== parent.entityId)!.refId!
+        return yield* api.OpenEditor({ refId })
+      })
+    )
+    expect(child.doc.name).toBe(display.trim())
+    expect(child.doc.nickname).toBe(nickname)
+    expect(child.doc.character_version).toBe(version.trim())
+    await page.goto(`${server().url}/cards/${parent.entityId}`)
+    await page.getByRole("button", { name: "Compare with family", exact: true }).click()
+    const compare = page.getByRole("dialog", { name: "Compare with family", exact: true })
+    await expect(compare.getByLabel("Card differences")).toContainText("Keeper")
+    if (process.env.CF5_SCREENSHOTS)
+      await page.screenshot({ path: `${process.env.CF5_SCREENSHOTS}/root-compare-${width}-${theme}.png` })
+  })
+}
