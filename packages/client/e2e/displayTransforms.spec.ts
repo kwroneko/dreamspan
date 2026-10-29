@@ -161,6 +161,29 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: width < 640 ? "Close" : "Close the panel", exact: true }).click()
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `display-chat-${width}-${colorScheme}.png`) })
+      if (width === 1440 && colorScheme === "light") {
+        // Approval changes in another editor tab must reach an already open chat.
+        const editor = await context.newPage()
+        await editor.goto(`${server().url}/library/${refId}`)
+        await editor.getByRole("button", { name: "Stop them", exact: true }).click()
+        await expect(editor.getByRole("button", { name: "Allow them", exact: true })).toBeVisible()
+        await expect(reply.locator(".markdown")).toHaveText("Hi User")
+        await editor.getByRole("button", { name: "Allow them", exact: true }).click()
+        await editor.getByRole("alertdialog").getByRole("button", { name: "Allow them", exact: true }).click()
+        await expect(reply.locator(".markdown")).toHaveText("Welcome User")
+        await editor.close()
+        // A write from a separate RPC session sends no browser library signal.
+        // The server's context notification must refresh approval as well.
+        for (const approved of [false, true]) {
+          await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const opened = yield* api.OpenEditor({ refId })
+              yield* api.SetRegexApproval({ refId, approved, expectedRowVersion: opened.ref.rowVersion })
+            })
+          )
+          await expect(reply.locator(".markdown")).toHaveText(approved ? "Welcome User" : "Hi User")
+        }
+      }
       await showActions(reply)
       await reply.getByRole("button", { name: "Edit", exact: true }).click()
       await expect(reply.getByLabel("Message text")).toHaveValue("Hi {{user}}")

@@ -35,7 +35,11 @@ export const runDisplayRegex = (job: RegexJob): DisplayResult => {
     }
     if (job.depth !== null && ((min !== null && job.depth < min) || (max !== null && job.depth > max))) continue
     try {
-      const expand = (s: string) => expandForDisplay(s, "template", job.names, job.card).text
+      const expand = (s: string) => {
+        const result = expandForDisplay(s, "template", job.names, job.card)
+        if (result.issue) throw new Error(result.issue)
+        return result.text
+      }
       let source = script.find_regex
       if (source.length > 2_000 || script.replace_string.length > 200_000 || script.trim_strings.length > 100)
         throw new Error("size limit")
@@ -61,7 +65,7 @@ export const runDisplayRegex = (job: RegexJob): DisplayResult => {
       text = next
     } catch {
       issues.push(
-        `Display regex “${script.name.slice(0, 100)}” skipped: invalid pattern, unsupported scoped pattern macro, or size limit.`
+        `Display regex “${script.name.slice(0, 100)}” skipped: invalid pattern, unsupported scoped pattern macro, or macro/size limit.`
       )
     }
   }

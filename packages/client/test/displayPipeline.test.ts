@@ -142,6 +142,17 @@ it("invalid, excessive and output-amplifying scripts keep safe input with explan
   expect(regex(Array.from({ length: 101 }, () => script({ find_regex: "nomatch" }))).issues).toHaveLength(1)
 })
 
+it("a regex macro limit skips the script instead of replacing text with an unresolved macro", () => {
+  for (const fields of [
+    { replace_string: "{{space::999999999}}" },
+    { trim_strings: ["{{space::999999999}}"] },
+    { find_regex: "{{space::999999999}}", substitute_regex: "raw" as const },
+    { find_regex: "{{space::999999999}}", substitute_regex: "escaped" as const }
+  ]) {
+    expect(regex([script(fields)])).toEqual({ text: "Hi Ana", issues: [expect.stringContaining("limit")] })
+  }
+})
+
 it("capture amplification is charged before building a replacement", () => {
   expect(() => run(/a+/, "$0".repeat(50_000), [], "a".repeat(50_000), { left: 100_000 })).toThrow(OutputLimit)
 })

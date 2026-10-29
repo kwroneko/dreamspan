@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { AsyncResult, Atom } from "effect/reactivity"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -9,7 +9,9 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
+import { onLibraryChange } from "../../libraryChanges.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
+import type { ChatSession } from "./session.ts"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 const DisplayContext = createContext<{ scripts: ReadonlyArray<RegexScript>; leafDepth: number | null }>({
@@ -23,16 +25,32 @@ const presetQuery = Atom.family((key: string): Atom.Atom<AsyncResult.AsyncResult
   return AppClient.query("OpenEditor", { refId }, { reactivityKeys: ["library"] })
 })
 function PresetDisplay({
+  session,
   refId,
   leafDepth,
   children
 }: {
+  session: ChatSession
   refId: string | null
   leafDepth: number | null
   children: ReactNode
 }) {
   const userId = useSession().user.id
-  const result = useAtomValue(presetQuery(JSON.stringify([userId, refId])))
+  const query = presetQuery(JSON.stringify([userId, refId]))
+  const result = useAtomValue(query)
+  const refresh = useAtomRefresh(query)
+  useEffect(() => {
+    if (!refId) return
+    // Server context notifications include edits from other devices, even when the
+    // preset's id and prompt context did not change. Focus also refreshes after a
+    // suspended tab resumes; the library signal covers same-origin editor tabs.
+    const stopContext = session.subscribeContext(refresh)
+    const stopLibrary = onLibraryChange(refresh)
+    return () => {
+      stopContext()
+      stopLibrary()
+    }
+  }, [session, refId, refresh])
   // Only committed document content, never unsaved drafts or a previous failed read.
   const doc = AsyncResult.isSuccess(result) ? result.value?.doc : null
   const scripts = doc?.regex_approved === true ? (doc.regex as ReadonlyArray<RegexScript>) : NO_SCRIPTS
@@ -68,7 +86,7 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   }, [session, chatId, refId, loadedDepth, view.forkId, view.leafSlotId, key])
   const leafDepth = loadedDepth ?? (tip?.key === key ? tip.depth : view.leafSlotId === null ? 0 : null)
   return (
-    <PresetDisplay refId={refId} leafDepth={leafDepth}>
+    <PresetDisplay session={session} refId={refId} leafDepth={leafDepth}>
       {children}
     </PresetDisplay>
   )
