@@ -1,0 +1,227 @@
+// Synthetic cards and chats only. Exercise the UI's connection to the existing
+// fork-aware rename backend, including a name save that outlives a failed action.
+import { mkdirSync } from "node:fs"
+import { join } from "node:path"
+import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { asUser } from "./support/rpc.ts"
+import { openPanel } from "./support/panel.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile(withAdmin)
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+const modelBox = (page: Page) =>
+  page.getByRole("textbox", { name: "Name the model sees (leave empty to use the display name)", exact: true })
+const prompt = (page: Page) => page.getByRole("dialog", { name: "Replace the name in past messages?", exact: true })
+const seed = (label: string) =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const card = yield* api.CreateCard({ label, name: label, nickname: "Aria" })
+      const chats = []
+      for (const title of ["The lantern garden", "The observatory"]) {
+        const chat = yield* api.CreateChat({ title })
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+        const sent = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "Aria lights the lantern."
+        })
+        if (sent._tag !== "Posted") throw new Error("queued")
+        chats.push({ chat, slot: sent.entry.slotId })
+      }
+      const first = chats[0]!
+      const sibling = yield* api.CreateFork({
+        chatId: first.chat.id,
+        fromForkId: first.chat.currentForkId,
+        atSlotId: first.slot
+      })
+      yield* api.NameFork({ forkId: sibling.fork.id, name: "Garden sibling" })
+      return { card, first, other: chats[1]!, sibling: sibling.fork }
+    })
+  )
+type Seed = Awaited<ReturnType<typeof seed>>
+const texts = (f: Seed) =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const results = []
+      for (const target of [
+        { chatId: f.first.chat.id, forkId: f.first.chat.currentForkId!, leafSlotId: f.first.slot },
+        { chatId: f.first.chat.id, forkId: f.sibling.id, leafSlotId: f.first.slot },
+        { chatId: f.other.chat.id, forkId: f.other.chat.currentForkId!, leafSlotId: f.other.slot }
+      ]) {
+        const path = yield* api.ReadPath({ ...target, range: { _tag: "Bottom" }, limit: 10 })
+        results.push(path.entries[0]!.version.content)
+      }
+      return results
+    })
+  )
+const save = async (page: Page) => {
+  await page.getByRole("button", { name: /^Save(?: \(|$)/ }).click()
+  await page
+    .getByRole("dialog", { name: "Save a revision" })
+    .getByRole("button", { name: "Save revision", exact: true })
+    .click()
+}
+const shot = async (page: Page, name: string) => {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+  if (process.env.SCREENSHOT_DIR) {
+    mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+    await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, name + ".png"), animations: "disabled" })
+  }
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`card rename scopes and diff/undo ${width} ${theme}`, async ({ page }) => {
+      test.setTimeout(180_000)
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const f = await seed(`Library Aria ${width} ${theme}`)
+      await page.goto(`${server().url}/library/${f.card.id}`)
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe(theme)
+      // Display-only and version edits leave the effective model name unchanged.
+      await page.getByRole("textbox", { name: "Display name", exact: true }).fill(`Display Aria ${width} ${theme}`)
+      await save(page)
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+      await expect(modelBox(page)).toHaveValue("Aria")
+      await modelBox(page).fill("Ari")
+      await save(page)
+      await expect(
+        prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true })
+      ).toBeEnabled()
+      await shot(page, `rename-choices-${width}-${theme}`)
+      await prompt(page).getByRole("button", { name: "No. Past messages will keep “Aria”.", exact: true }).click()
+      expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
+      // An editor opened from a chat carries exactly that fork, even when another is current.
+      await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}`)
+      await openPanel(page, "Cast")
+      await page.getByRole("button", { name: `Edit Display Aria ${width} ${theme}`, exact: true }).click()
+      await expect(page).toHaveURL(new RegExp(`renameFork=${f.first.chat.currentForkId}`))
+      await modelBox(page).fill("Aria")
+      await save(page)
+      await prompt(page).getByRole("button", { name: /^No\./ }).click()
+      await modelBox(page).fill("Ari")
+      await save(page)
+      await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+      await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
+      expect(await texts(f)).toEqual([
+        "Ari lights the lantern.",
+        "Aria lights the lantern.",
+        "Aria lights the lantern."
+      ])
+      await shot(page, `rename-result-${width}-${theme}`)
+      await page.getByRole("link", { name: /^History diff \/ undo:/ }).click()
+      await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+      await page.getByRole("button", { name: "Undo all", exact: true }).click()
+      await expect(page.getByRole("button", { name: "Undo all", exact: true })).toBeDisabled()
+      expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
+      // Clearing nickname falls back to the display name; all includes the sibling fork.
+      await page.goto(`${server().url}/library/${f.card.id}`)
+      await modelBox(page).fill("")
+      await save(page)
+      await expect(prompt(page)).toContainText(`from “Ari” to “Display Aria ${width} ${theme}”`)
+      await prompt(page).getByRole("button", { name: /^No\./ }).click()
+      // Use a separate card to exercise a successful all-chats rename from its old model name.
+      const all = await seed(`All scope ${width} ${theme}`)
+      await page.goto(`${server().url}/library/${all.card.id}`)
+      await modelBox(page).fill("Ari")
+      await save(page)
+      await prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true }).click()
+      await expect(page.getByRole("status").filter({ hasText: "in 3 chats" })).toBeVisible()
+      expect(await texts(all)).toEqual(Array(3).fill("Ari lights the lantern."))
+      await expect(page.getByRole("list", { name: "History diffs and undo" }).getByRole("link")).toHaveCount(3)
+    })
+  }
+
+test("a failed history action survives reload without saving the card twice", async ({ page }) => {
+  const f = await seed("Recoverable rename")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  let fail = true
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = JSON.parse(String(data))
+      if (request.tag === "RenameHistory" && fail) {
+        // A real NotFound reply, as if the card had been deleted in another tab.
+        request.payload.entityId = "synthetic-missing-card"
+        upstream.send(JSON.stringify(request))
+      } else upstream.send(data)
+    })
+  })
+  await page.goto(`${server().url}/library/${f.card.id}`)
+  await modelBox(page).fill("Ari")
+  await save(page)
+  await prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true }).click()
+  await expect(prompt(page).getByRole("alert")).toBeVisible()
+  expect((await admin((api) => api.OpenEditor({ refId: f.card.id }))).doc.nickname).toBe("Ari")
+  expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
+  const revision = (await admin((api) => api.OpenEditor({ refId: f.card.id }))).ref.headRevisionId
+  await page.reload()
+  await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
+  fail = false
+  await prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true }).click()
+  await expect(page.getByRole("status").filter({ hasText: "in 3 chats" })).toBeVisible()
+  expect(await texts(f)).toEqual(Array(3).fill("Ari lights the lantern."))
+  expect((await admin((api) => api.OpenEditor({ refId: f.card.id }))).ref.headRevisionId).toBe(revision)
+  await page.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Resume history replacement", exact: true })).toHaveCount(0)
+})
+
+test("forking a card for this chat replaces history only in the viewed fork", async ({ page }) => {
+  const f = await seed("Forked Aria")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "Fork for this chat: Forked Aria", exact: true }).click()
+  const fork = page.getByRole("dialog", { name: "Fork for this chat", exact: true })
+  await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("Renamed")
+  await fork.getByRole("textbox", { name: "In-character name", exact: true }).fill("Ari")
+  await fork.getByRole("button", { name: "Fork and edit", exact: true }).click()
+  await expect(prompt(page)).toContainText("from “Aria” to “Ari”")
+  await expect(prompt(page).getByRole("button", { name: /^Yes, in all/ })).toHaveCount(0)
+  await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+  await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
+  expect(await texts(f)).toEqual(["Ari lights the lantern.", "Aria lights the lantern.", "Aria lights the lantern."])
+  await page.getByRole("link", { name: /^History diff \/ undo:/ }).click()
+  await expect(page.getByRole("dialog", { name: "History replacement finished" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Undo all", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Undo all", exact: true })).toBeDisabled()
+  expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
+})
+
+test("later name saves keep earlier outstanding history offers", async ({ page }) => {
+  const f = await seed("Repeated rename")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${f.card.id}`)
+  for (const name of ["Ari", "Ada"]) {
+    await modelBox(page).fill(name)
+    await save(page)
+    await expect(prompt(page)).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(prompt(page)).toHaveCount(0)
+  }
+  await page.reload()
+  for (const names of ["from “Aria” to “Ari”", "from “Ari” to “Ada”"]) {
+    await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
+    await expect(prompt(page)).toContainText(names)
+    await prompt(page).getByRole("button", { name: /^No\./ }).click()
+  }
+  await expect(page.getByRole("button", { name: "Resume history replacement", exact: true })).toHaveCount(0)
+  expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
+})
+
+test("a library rename can target a chosen fork instead of the current one", async ({ page }) => {
+  const f = await seed("Library fork choice")
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${f.card.id}`)
+  await modelBox(page).fill("Ari")
+  await save(page)
+  await prompt(page).getByRole("combobox", { name: "Chat for only this chat" }).click()
+  await page.getByRole("option", { name: /^The lantern garden · Garden sibling/ }).click()
+  await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+  await expect(page.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
+  expect(await texts(f)).toEqual(["Aria lights the lantern.", "Ari lights the lantern.", "Aria lights the lantern."])
+})

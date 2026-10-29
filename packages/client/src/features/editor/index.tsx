@@ -1,3 +1,5 @@
+import { appTools } from "../shell.tsx"
+import { CardSavedHost } from "./CardSavedHost.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -14,5 +16,6 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   routes.register({ id: "library.editor", parent: "app", path: "/library/$refId", component: LazyEditorPage })
 }

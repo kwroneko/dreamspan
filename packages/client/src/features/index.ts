@@ -1,5 +1,6 @@
 import * as snippets from "./snippets/index.tsx"
 // The core features, each registering its routes and slot entries the way a plugin will.
+import * as cardRename from "./cardRename/index.tsx"
 import * as cardForks from "./cardForks/index.tsx"
 import * as accounts from "./accounts.tsx"
 import * as bin from "./bin/index.ts"
@@ -17,6 +18,7 @@ import * as status from "./status.tsx"
 
 export const registerFeatures = () => {
   cardForks.register()
+  cardRename.register()
   shell.register()
   login.register()
   characters.register()
