@@ -93,6 +93,28 @@ const reply = version("v2", "s2", "generating", "The tide")
 const second = entry("s2", "s1", reply)
 
 describe("ChatSession", () => {
+  for (const state of ["visible", "hidden", "failed", "removed"] as const) {
+    it(`keeps image-only context eligibility correct on a ${state} version event`, async () => {
+      const { s, answers, receive } = session()
+      const opening = s.open(null)
+      const image = { mediaId: "synthetic-image" }
+      const original = entry("s1", null, { ...first.version, content: "", images: [image] } as Version)
+      answers[0]!(window([{ ...original, contextExcluded: state === "hidden", inContext: state !== "hidden" }]))
+      await opening
+      receive({
+        _tag: "Version",
+        version: {
+          ...original.version,
+          rowVersion: 2,
+          status: state === "failed" ? "failed" : "complete",
+          images: state === "removed" ? [] : [image]
+        } as Version
+      })
+      expect(s.snapshot().entries[0]!.inContext).toBe(state === "visible")
+      s.dispose()
+    })
+  }
+
   for (const queued of [false, true]) {
     it(`a disabled reply policy sends reply=false for ${queued ? "queued" : "immediate"} messages`, async () => {
       const { s } = session()

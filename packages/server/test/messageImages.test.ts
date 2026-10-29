@@ -230,12 +230,86 @@ describe("message images", () => {
         expectedRowVersion: selected.rowVersion
       })
       assert.deepStrictEqual(written.version.images, entry.version.images)
+      const changed = yield* api.ApplyHistoryEdits({
+        title: "Revise drawing text",
+        applications: [
+          {
+            chatId: chat.id,
+            forkId: made.fork.id,
+            edits: [
+              {
+                kind: "version_replace",
+                targetId: written.version.id,
+                beforeId: written.version.id,
+                before: written.version.content,
+                after: "History edit with the same drawing"
+              }
+            ]
+          }
+        ]
+      })
+      const historyEntry = (yield* (yield* Reader).GetSlot({ userId, slotId: entry.slotId, forkId: made.fork.id }))
+        .entry
+      assert.deepStrictEqual(historyEntry.version.images, entry.version.images)
+      assert.strictEqual(historyEntry.version.content, "History edit with the same drawing")
+      yield* api.UndoHistoryEdit({ chatId: chat.id, forkId: made.fork.id, changesetId: changed.changesetIds[0]! })
+      assert.strictEqual(
+        (yield* (yield* Reader).GetSlot({ userId, slotId: entry.slotId, forkId: made.fork.id })).entry.version.id,
+        written.version.id
+      )
       const deleted = yield* api.DeleteMessage({ slotId: entry.slotId, forkId: made.fork.id })
       yield* api.RestoreBinItem({ itemId: deleted.id })
       const restored = yield* (yield* Reader).GetSlot({ userId, slotId: entry.slotId, forkId: made.fork.id })
       assert.deepStrictEqual(restored.entry.version.images, entry.version.images)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
+
+  for (const action of ["hide", "unhide", "restore"] as const) {
+    it.live(`can write an image version after a fork-local ${action}, using the row version returned by reads`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const reader = yield* Reader
+        const userId = (yield* api.Whoami()).id
+        const image = yield* upload()
+        const chat = yield* api.CreateChat({ title: `Image ${action}` })
+        const { entry } = yield* posted(
+          api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Drawing", images: [image] })
+        )
+        const forkId = chat.currentForkId!
+        const sibling = yield* writer.CreateFork({
+          userId,
+          chatId: chat.id,
+          fromForkId: forkId,
+          atSlotId: entry.slotId
+        })
+        if (action === "restore") {
+          const deleted = yield* api.DeleteMessage({ slotId: entry.slotId, forkId })
+          yield* api.RestoreBinItem({ itemId: deleted.id })
+        } else {
+          yield* writer.SetSlotHidden({ userId, slotId: entry.slotId, forkId, hidden: true })
+          if (action === "unhide") yield* writer.SetSlotHidden({ userId, slotId: entry.slotId, forkId, hidden: false })
+        }
+        const current = (yield* reader.GetSlot({ userId, slotId: entry.slotId, forkId })).entry
+        assert.isAbove(current.rowVersion, entry.rowVersion)
+        const write = (expectedRowVersion: number) =>
+          api.WriteVersion({
+            slotId: entry.slotId,
+            forkId,
+            content: "Revised drawing",
+            expectedRowVersion
+          })
+        const stale = yield* Effect.exit(write(entry.rowVersion))
+        assert.isTrue(Exit.isFailure(stale), "visibility changes fence an older editor")
+        assert.include(JSON.stringify(stale), "StaleWrite")
+        const written = yield* write(current.rowVersion)
+        assert.deepStrictEqual(written.version.images, entry.version.images)
+        const unchanged = (yield* reader.GetSlot({ userId, slotId: entry.slotId, forkId: sibling.fork.id })).entry
+        assert.strictEqual(unchanged.rowVersion, entry.rowVersion)
+        assert.strictEqual(unchanged.version.id, entry.version.id)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+    )
+  }
 
   it.live("queues image-only messages durably and posts their images after a reply completes", () =>
     Effect.gen(function* () {
@@ -320,6 +394,25 @@ describe("message images", () => {
         snapshot.issues.map((i) => i.kind),
         "images_limited"
       )
+      const human = (yield* api.ReadPath({
+        chatId: generated.chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 20
+      })).entries.find((entry) => entry.version.writer === "human")!
+      yield* api.EditVersion({
+        slotId: human.slotId,
+        sourceVersionId: human.version.id,
+        content: "Images removed in a later edit",
+        images: [],
+        expectedRowVersion: human.rowVersion
+      })
+      const rebuilt = yield* (yield* Reader).RebuildContext({
+        userId: (yield* api.Whoami()).id,
+        snapshot: stored.snapshot as string
+      })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      if (rebuilt._tag === "Rebuilt") assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
   for (const kind of ["anthropic", "google", "openai-responses"]) {
@@ -387,6 +480,7 @@ describe("message images", () => {
             apiKey: "synthetic-key-for-images-0000"
           },
           model: { vision: true },
+          content: "",
           images: [image]
         })
         assert.strictEqual(generated.version.status, "complete", JSON.stringify(generated.version.error))

@@ -388,8 +388,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
   /**
    * A fork of the slot's chat (`forkId`, null: the current one) and the slot as that fork
    * shows it: its selection there, the version shown for it, and its row version there, which
-   * is the slot's plus the newer seq of the selection's and the replacement's overrides
-   * (`selectionIn`), so a choice made in another fork never makes this one's stale
+   * is the slot's plus the newest seq of its selection, replacement, deletion and visibility
+   * overrides (`selectionIn`), so a choice made in another fork never makes this one's stale
    * (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
    */
   const slotInFork = (userId: UserId, slotId: SlotId, forkId: ForkId | null) =>

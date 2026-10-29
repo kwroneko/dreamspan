@@ -202,18 +202,21 @@ export const nextSeq = (sql: SqlClient.SqlClient, chatId: string) =>
 
 /**
  * A slot's selection in a fork, the version shown for it there (its replacement, if any), and
- * the newest seq of the overrides that decide those (0: the slot's own). Every per-fork write
- * takes a newer seq, so the seq only grows with the fork's own choices.
+ * the newest seq of its selection, replacement, deletion and visibility overrides (0: the
+ * slot's own), matching path entries' optimistic row version. Every per-fork write takes a
+ * newer seq, so the seq only grows with the fork's own choices.
  */
 export const selectionIn = (sql: SqlClient.SqlClient, forkId: string | null, slotId: string) =>
   Effect.map(
     sql<{ version_id: string; shown_id: string; seq: number }>`
       SELECT coalesce(o.value_id, s.selected_version_id) AS version_id,
         coalesce(r.value_id, o.value_id, s.selected_version_id) AS shown_id,
-        max(coalesce(o.seq, 0), coalesce(r.seq, 0)) AS seq
+        max(coalesce(o.seq, 0), coalesce(r.seq, 0), coalesce(d.seq, 0), coalesce(h.seq, 0)) AS seq
       FROM slots s LEFT JOIN fork_overrides o ON o.id = ${effectiveOverride(sql, "select", forkId, "s.id")}
         LEFT JOIN fork_overrides r
           ON r.id = ${effectiveOverride(sql, "replace", forkId, "coalesce(o.value_id, s.selected_version_id)")}
+        LEFT JOIN fork_overrides d ON d.id = ${effectiveOverride(sql, "delete_slot", forkId, "s.id")}
+        LEFT JOIN fork_overrides h ON h.id = ${effectiveOverride(sql, "hide", forkId, "s.id")}
       WHERE s.id = ${slotId}`,
     ([row]) => row ?? null
   )

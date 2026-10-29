@@ -108,7 +108,7 @@ const withInContext = (entry: PathEntry, version: Version) =>
   ({
     ...entry,
     version,
-    inContext: versionInContext(version.status, version.content, entry.contextExcluded)
+    inContext: versionInContext(version.status, version.content, entry.contextExcluded, version.images?.length)
   }) as PathEntry
 
 export class ChatSession {
