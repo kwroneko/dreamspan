@@ -533,6 +533,64 @@ export const layer = Layer.unwrap(
       )
     )
 
+    const uploadMessageImage = Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const user = yield* CurrentUser
+      if (request.headers["content-type"] !== "application/octet-stream") {
+        return jsonError(415, "expected application/octet-stream")
+      }
+      if (Number(request.headers["content-length"]) > MAX_AVATAR_BYTES) {
+        return jsonError(413, `an image can be at most ${MAX_AVATAR_BYTES / 1024 / 1024} MB`)
+      }
+      const message = NodeHttpServerRequest.toIncomingMessage(request)
+      const limits = {
+        maxBytes: MAX_AVATAR_BYTES,
+        idleMs: BODY_IDLE_MS,
+        deadline: Date.now() + BODY_DEADLINE_MS,
+        minBytesPerSecond: BODY_MIN_BYTES_PER_SECOND,
+        rateWindowMs: BODY_RATE_WINDOW_MS
+      }
+      return yield* oneAtATime(
+        user.id,
+        Effect.gen(function* () {
+          yield* firstBytes(message, limits)
+          const taken = yield* withPermitWithin(
+            uploads,
+            limits.deadline - Date.now(),
+            Effect.gen(function* () {
+              const body = yield* readBody(message, limits)
+              const image = describeImage(body)
+              if (!INLINE_IMAGES.has(image.mime)) {
+                return jsonError(415, "an image must be a PNG, JPEG, GIF or WebP image")
+              }
+              const sha256 = createHash("sha256").update(body).digest("hex")
+              const change = yield* holding(
+                [sha256],
+                Effect.andThen(
+                  storeMedia(config.dataDir, sha256, body),
+                  writer.RecordMessageImage({
+                    userId: user.id,
+                    media: { sha256, byteSize: body.byteLength, ...image }
+                  })
+                )
+              )
+              return HttpServerResponse.jsonUnsafe({ mediaId: change })
+            })
+          )
+          return Option.getOrElse(taken, () => jsonError(503, "the server is busy with other files; try again"))
+        }).pipe(
+          Effect.catchTag("BodyRefused", ({ reason }) => {
+            const [status, text] = BODY_REFUSALS[reason]
+            return Effect.succeed(jsonError(status, text).pipe(HttpServerResponse.setHeader("connection", "close")))
+          })
+        )
+      )
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logError("an image upload failed", error).pipe(Effect.as(jsonError(500, "the upload failed")))
+      )
+    )
+
     /** A stored image the user holds a reference to, for an `<img>` on this site only. */
     const mediaFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
@@ -667,6 +725,7 @@ export const layer = Layer.unwrap(
 
     return Layer.mergeAll(
       HttpRouter.add("POST", "/library/drafts", authenticated(accounts, leavingDrafts)),
+      HttpRouter.add("POST", "/chat/image", authenticated(accounts, uploadMessageImage)),
       HttpRouter.add("POST", "/library/avatar", authenticated(accounts, uploadAvatar)),
       HttpRouter.add("GET", "/library/media", authenticated(accounts, mediaFile)),
       HttpRouter.add("POST", "/library/import", authenticated(accounts, importFile)),

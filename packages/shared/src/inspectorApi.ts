@@ -232,7 +232,9 @@ const EffectiveModel = Schema.Struct({
    * Resolved independently of whether the context can be assembled.
    */
   prefill: Schema.optionalKey(Schema.Literals(["none", "assistant", "tool_schema"])),
-  continueUnavailable: Schema.optionalKey(Schema.String)
+  continueUnavailable: Schema.optionalKey(Schema.String),
+  vision: Schema.optionalKey(Schema.Boolean),
+  maxImages: Schema.optionalKey(Schema.Int)
 })
 
 export const SummaryFill = Schema.Struct({

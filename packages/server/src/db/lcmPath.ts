@@ -41,9 +41,9 @@ export const lcmPath = (
         WHERE p.id IS NOT ${first ?? null} AND p.n < ${limit}
     ) SELECT p.id, p.parent_slot_id AS parent, p.depth,
       CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND length(v.content) > 0 THEN v.id END AS versionId,
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (length(v.content) > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
       CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
-        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN coalesce(v.content,'') ELSE '' END AS content,
+        AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN length(v.content) > 0 THEN v.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
       EXISTS(SELECT 1 FROM slot_parents m WHERE m.slot_id = p.id) AS merged,

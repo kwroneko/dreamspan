@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 32
+export const ASSEMBLER_VERSION = 33
 
 export type Role = "system" | "user" | "assistant"
 
@@ -106,7 +106,15 @@ export interface Piece {
 }
 
 /** A message of the assembled request, provider-neutral: Chat Completions' shape. */
+export interface RequestImage {
+  readonly mediaId: string
+  /** Hydrated only for dispatch; snapshots retain references, never image bytes. */
+  readonly data?: string
+  readonly mimeType?: string
+}
+
 export interface RequestMessage {
+  readonly images?: ReadonlyArray<RequestImage>
   readonly role: Role
   readonly content: string
   /** Chat Completions' `name`, which only some providers take. */
@@ -464,6 +472,7 @@ export interface Target {
 
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
+  readonly images?: ReadonlyArray<RequestImage>
   readonly slotId: string
   readonly versionId: string
   readonly depth: number
@@ -567,6 +576,8 @@ export interface ModelInput {
   /** The context window when some source reported it. */
   readonly context: number | null
   /** A reported output ceiling; absent on older snapshots. */
+  readonly vision?: boolean
+  readonly maxImages?: number
   readonly maxOutput?: number | null
   /** The model's own generation settings; absent on older snapshots. */
   readonly settings?: import("@rp/shared/modelSettings.ts").ModelSettings

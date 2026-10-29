@@ -3,7 +3,18 @@
 // anything else is NotFound.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { CastCard, Chat, ChatId, EntityId, ForkId, FrozenMacros, PathEntry, QueuedMessage, SlotId } from "./chat.ts"
+import {
+  MessageImages,
+  CastCard,
+  Chat,
+  ChatId,
+  EntityId,
+  ForkId,
+  FrozenMacros,
+  PathEntry,
+  QueuedMessage,
+  SlotId
+} from "./chat.ts"
 import { ChatNameInput, GenerationUnavailable } from "./chatApi.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { EditRefused } from "./editorApi.ts"
@@ -157,7 +168,11 @@ export class Cast extends Schema.Class<Cast>("Cast")({
 
 /** The first turn of a new chat: what turns a card's greeting into a chat. */
 export const FirstTurn = Schema.Union([
-  Schema.TaggedStruct("Send", { content: Schema.String, speakerEntityId: Schema.NullOr(EntityId) }),
+  Schema.TaggedStruct("Send", {
+    images: Schema.optionalKey(MessageImages),
+    content: Schema.String,
+    speakerEntityId: Schema.NullOr(EntityId)
+  }),
   Schema.TaggedStruct("Generate", { speakerEntityId: Schema.NullOr(EntityId), direction: Schema.String })
 ])
 export type FirstTurn = typeof FirstTurn.Type

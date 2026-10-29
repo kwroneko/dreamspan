@@ -245,6 +245,15 @@ export const baseline: ReadonlyArray<string> = [
     alt_text TEXT,
     PRIMARY KEY (version_id, ordinal)
   ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE composer_images (
+    id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
+    media_id TEXT REFERENCES media_assets(id),
+    alt_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active','sent','removed')),
+    CHECK (status <> 'active' OR media_id IS NOT NULL)
+  ) STRICT`,
+  `CREATE INDEX composer_images_draft ON composer_images(draft_id, status)`,
   `CREATE TABLE state_events (
     id TEXT PRIMARY KEY,
     chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -811,7 +820,8 @@ export const baseline: ReadonlyArray<string> = [
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT,
-    CHECK (kind = 'generate' OR length(content) > 0),
+    images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)),
+    CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
     CHECK (kind = 'generate' OR direction IS NULL),
     CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)
   ) STRICT`,

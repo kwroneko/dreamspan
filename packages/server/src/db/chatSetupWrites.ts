@@ -1,4 +1,5 @@
 import { composerKey } from "@rp/shared/drafts.ts"
+import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
 import { makeShellWriteHandlers } from "./shellWrites.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -26,14 +27,19 @@ import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts
 import { toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
-const userMessage = (content: string, speakerEntityId: EntityId | null) =>
+const userMessage = (
+  content: string,
+  speakerEntityId: EntityId | null,
+  images?: import("@rp/shared/chat.ts").MessageImages
+) =>
   new NewVersion({
     speakerEntityId,
     writer: "human",
     content,
     status: "complete",
     macroMode: "verbatim",
-    origin: "user_written"
+    origin: "user_written",
+    ...(images === undefined ? {} : { images })
   })
 
 const reply = (speakerEntityId: EntityId | null, direction: string | null) =>
@@ -187,7 +193,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             if (entry.kind === "message") {
               const message = yield* append(
                 parent,
-                userMessage(entry.content, yield* liveSpeaker(owner, entry.speaker_entity_id))
+                userMessage(
+                  entry.content,
+                  yield* liveSpeaker(owner, entry.speaker_entity_id),
+                  JSON.parse(entry.images_json)
+                )
               )
               posted.push(message.slotId)
               parent = message.slotId
@@ -205,7 +215,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const entry = waiting[0]
           const message = yield* append(
             replyParent,
-            userMessage(entry.content, yield* liveSpeaker(owner, entry.speaker_entity_id))
+            userMessage(
+              entry.content,
+              yield* liveSpeaker(owner, entry.speaker_entity_id),
+              JSON.parse(entry.images_json)
+            )
           )
           posted.push(message.slotId)
           replyParent = message.slotId
@@ -220,7 +234,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         const replySpeaker = yield* liveSpeaker(owner, first!.reply_speaker_entity_id)
         const speaker = yield* liveSpeaker(owner, first!.speaker_entity_id)
         if (first!.kind === "message") {
-          const message = yield* append(replyParent, userMessage(first!.content, speaker))
+          const message = yield* append(
+            replyParent,
+            userMessage(first!.content, speaker, JSON.parse(first!.images_json))
+          )
           posted.push(message.slotId)
           replyParent = message.slotId
         }
@@ -311,7 +328,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           }
           const version =
             first._tag === "Send"
-              ? userMessage(first.content, first.speakerEntityId)
+              ? userMessage(first.content, first.speakerEntityId, first.images)
               : reply(first.speakerEntityId, first.direction)
           const added = yield* graph
             .appendMessage({ userId, chatId, parentSlotId: root, branch: false, version, commitDraft: null })
@@ -335,12 +352,16 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         speakerEntityId,
         replySpeakerEntityId,
         noReply,
+        images,
+        imageDraftIds,
         direction,
         commitDraft
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
+          yield* graph.checkImages(userId, images ?? [])
+          yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
           yield* graph.checkSpeaker(userId, speakerEntityId)
           if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
           if (parentSlotId !== null) {
@@ -376,6 +397,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 seq: next!.n,
                 kind,
                 content: kind === "message" ? content : "",
+                images_json: JSON.stringify(images ?? []),
                 speaker_entity_id: speakerEntityId,
                 reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
                 no_reply: kind === "message" && noReply === true ? 1 : 0,
@@ -404,7 +426,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             forkId: fork.id as ForkId,
             parentSlotId,
             branch,
-            version: kind === "message" ? userMessage(content, speakerEntityId) : reply(speakerEntityId, direction),
+            version:
+              kind === "message" ? userMessage(content, speakerEntityId, images) : reply(speakerEntityId, direction),
             commitDraft
           })
           return { _tag: "Posted" as const, result }

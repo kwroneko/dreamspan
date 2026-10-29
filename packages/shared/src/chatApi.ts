@@ -5,6 +5,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { BinItem, CannotDeleteLastFork } from "./bin.ts"
 import {
+  MessageImages,
   Chat,
   ChatId,
   ChatSummary,
@@ -18,7 +19,7 @@ import {
   VersionId
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { ComposerChoice, TextTooLong } from "./composerApi.ts"
+import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
 import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
@@ -369,6 +370,8 @@ export class ChatApi extends RpcGroup.make(
       parentSlotId: Schema.NullOr(SlotId),
       branch: Schema.Boolean,
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
+      imageDraftIds: Schema.optionalKey(ComposerImageIds),
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       /**
        * Who replies to it, if it's queued: the reply then starts on the server, as the client
@@ -490,6 +493,7 @@ export class ChatApi extends RpcGroup.make(
 
       sourceVersionId: VersionId,
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       draft: DraftCommit
     },
@@ -503,6 +507,7 @@ export class ChatApi extends RpcGroup.make(
       /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       draft: DraftCommit
     },

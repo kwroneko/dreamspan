@@ -1,5 +1,5 @@
 // Concrete composer contribution points. Draft/fork handling stays in the composer host.
-import type { EntityId, PathEntry } from "@rp/shared/chat.ts"
+import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
 import type { ComponentProps, ComponentType } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -12,7 +12,7 @@ type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
   readonly compact?: boolean
-  readonly recoverQueued: (text: string) => void
+  readonly recoverQueued: (text: string, images?: MessageImages) => void
   readonly session: ChatSession
   readonly view: ChatView
   readonly onSettings: (tab: "model" | "preset") => void

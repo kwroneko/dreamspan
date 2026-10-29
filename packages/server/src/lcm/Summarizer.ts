@@ -1,3 +1,5 @@
+import { AppConfig } from "../config.ts"
+import { hydrateMessageImages } from "../chat/messageImages.ts"
 import { executionRegistry } from "../execution.ts"
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai"
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
@@ -76,6 +78,7 @@ export class Summarizer extends Context.Service<
 /** The summarizer; with `pool` false it has no background claiming, and the caller runs jobs itself (tests). */
 export function makeSummarizer(pool: boolean) {
   return Effect.gen(function* () {
+    const config = yield* AppConfig
     const execution = yield* executionRegistry
     const reader = yield* Reader,
       writer = yield* Writer,
@@ -143,7 +146,13 @@ export function makeSummarizer(pool: boolean) {
           if (!strategy)
             return yield* Effect.fail(new Error(`Summary strategy ${snapshot.summaryJob!.style} is unavailable.`))
           const output = yield* Effect.try(() => strategy.create({ job, snapshot }, tools))
-          const wire = providerRequest(generation.request, model)
+          const hydrated = yield* hydrateMessageImages(
+            generation.request,
+            model,
+            (mediaId) => reader.GetMediaFile({ userId: job.userId, mediaId }),
+            config.dataDir
+          )
+          const wire = providerRequest(hydrated, model)
           candidate = output.candidate
           let context = output.tools ? { ...wire.context, tools: output.tools } : wire.context
           const extras: Message[] = []
@@ -155,7 +164,7 @@ export function makeSummarizer(pool: boolean) {
               payload = {
                 ...payload,
                 messages: [
-                  ...generation.request.messages,
+                  ...((wire.payload?.messages as Array<unknown>) ?? []),
                   ...extras.map((m) =>
                     m.role === "assistant"
                       ? {

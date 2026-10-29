@@ -167,7 +167,7 @@ const HOST = /^[A-Za-z0-9.-]+(?::\d{1,5})?$|^\[[0-9A-Fa-f:.]+\](?::\d{1,5})?$/
 /**
  * The Content-Security-Policy on every response. Only the app's own scripts run: none
  * inline, none from elsewhere, so markup that slipped past sanitizing can't run script.
- * Images load only from the app itself, so text can't report on the chat through an
+ * Images load from the app or local attachment blobs, so text can't report on the chat through an
  * image URL (Markdown blocks them as well). Connections go to the app and its WebSocket,
  * on the host the browser used; `'self'` covers the WebSocket in current browsers, the
  * explicit origins cover older ones.
@@ -178,7 +178,7 @@ const contentSecurityPolicy = (host: string | undefined) => {
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
-    "img-src 'self'",
+    "img-src 'self' blob:",
     `connect-src 'self'${socket}`,
     "object-src 'none'",
     "base-uri 'none'",

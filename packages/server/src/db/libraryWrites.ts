@@ -457,6 +457,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       })
 
     const handlers = {
+      RecordMessageImage: ({ userId, media }) =>
+        recordMedia(userId, media).pipe(transaction(sql, "RecordMessageImage")),
       StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, position, scanLore, sourcePath }) =>
         Effect.gen(function* () {
           const [card] = yield* sql<{ n: number }>`

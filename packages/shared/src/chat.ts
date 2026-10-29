@@ -100,6 +100,8 @@ export const VersionError = Schema.Struct({ class: Schema.String, message: Schem
 export const ContextIssue = Schema.Struct({
   kind: Schema.Literals([
     "prefill_dropped",
+    "images_unsupported",
+    "images_limited",
     "macro_limit",
     "history_truncated",
     "summary_failed",
@@ -117,6 +119,15 @@ export const ContextIssue = Schema.Struct({
 })
 export type ContextIssue = typeof ContextIssue.Type
 
+/** Ordered, version-owned image references. Bytes are uploaded separately. */
+export const MessageImages = Schema.Array(
+  Schema.Struct({
+    mediaId: Schema.String,
+    altText: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(2000)))
+  })
+).check(Schema.isMaxLength(32))
+export type MessageImages = typeof MessageImages.Type
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
@@ -125,6 +136,7 @@ export class Version extends Schema.Class<Version>("Version")({
   speakerEntityId: Schema.NullOr(EntityId),
   writer: Writer,
   content: Schema.String,
+  images: Schema.optionalKey(MessageImages),
   macroMode: MacroMode,
   origin: VersionOrigin,
   sourceVersionId: Schema.NullOr(VersionId),
@@ -226,6 +238,7 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   speakerEntityId: Schema.NullOr(EntityId),
   writer: Writer,
   content: Schema.String,
+  images: Schema.optionalKey(MessageImages),
   status: VersionStatus,
   macroMode: MacroMode,
   origin: VersionOrigin,
@@ -244,8 +257,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
 }) {}
 
 /** A version is usable in context when it has text and didn't fail (invariant 2). */
-export const versionInContext = (status: VersionStatus, content: string, contextExcluded: boolean) =>
-  !contextExcluded && status !== "failed" && content.length > 0
+export const versionInContext = (status: VersionStatus, content: string, contextExcluded: boolean, imageCount = 0) =>
+  !contextExcluded && status !== "failed" && (content.length > 0 || imageCount > 0)
 
 // --- Chat setup, speakers and the send queue (DESIGN §2.1, §2.2)
 
@@ -297,6 +310,7 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   /** A message to post (then a reply to it), or a reply to generate. */
   kind: Schema.Literals(["message", "generate"]),
   content: Schema.String,
+  images: Schema.optionalKey(MessageImages),
   speakerEntityId: Schema.NullOr(EntityId),
   /** For `message`: who replies to it once it posts, as for a send made then. */
   replySpeakerEntityId: Schema.NullOr(EntityId),

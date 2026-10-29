@@ -56,9 +56,19 @@ const modelRules = (fields: Record<string, unknown>, kind: string, key: string) 
 export const chatCompletionsFields = (request: AssembledRequest, kind: string, key = ""): Record<string, unknown> => {
   const s = request.samplers
   const fields: Record<string, unknown> = {
-    messages: withPrefill(request).map(({ role, content, name }, i, all) => ({
-      role,
-      content,
+    messages: withPrefill(request).map(({ role, content, name, images }, i, all) => ({
+      role: images?.length ? "user" : role,
+      content: images?.some((image) => image.data)
+        ? [
+            { type: "text", text: content },
+            ...images
+              .filter((image) => image.data)
+              .map((image) => ({
+                type: "image_url",
+                image_url: { url: `data:${image.mimeType};base64,${image.data}` }
+              }))
+          ]
+        : content,
       ...(name ? { name } : {}),
       ...(kind === "deepseek" && request.prefill && i === all.length - 1 ? { prefix: true } : {})
     })),
@@ -129,6 +139,10 @@ export interface ProviderRequest {
   readonly breakpoints: ReadonlyArray<number>
 }
 
+const imageBlocks = (message: RequestMessage) =>
+  (message.images ?? []).flatMap((image) =>
+    image.data && image.mimeType ? [{ type: "image" as const, data: image.data, mimeType: image.mimeType }] : []
+  )
 const text = (content: string) => ({ type: "text" as const, text: content })
 
 /**
@@ -185,6 +199,7 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
     while (
       first < messages.length &&
       messages[first]!.role === "system" &&
+      !messages[first]!.images?.length &&
       first < (request.summaryStart ?? Infinity) &&
       first < pinnedAt
     )
@@ -193,8 +208,8 @@ const baseProviderRequest = (request: AssembledRequest, model: ModelInput): Prov
   // One message each: consecutive turns of a role stay apart, so a breakpoint on one
   // covers it and nothing after it; the API joins them into one turn.
   const piMessages = messages.slice(first).map((message): Message =>
-    message.role !== "assistant"
-      ? { role: "user", content: [text(named(message, request.names))], timestamp: 0 }
+    message.role !== "assistant" || !!message.images?.length
+      ? { role: "user", content: [text(named(message, request.names)), ...imageBlocks(message)], timestamp: 0 }
       : ({
           role: "assistant",
           content: [text(named(message, request.names))],
@@ -317,10 +332,20 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
   if (wire.temperature !== undefined) samplers.temperature = wire.temperature
   if (wire.maxTokens !== undefined) samplers.max_tokens = wire.maxTokens
   if (model.api === "openai-completions") {
-    return { messages: input.map((message, i) => ({ ...message, inputs: [i] })), samplers, mapping: model.mapping }
+    return {
+      messages: input.map(({ role, content, name, images }, i) => ({
+        role: images?.length ? ("user" as const) : role,
+        content,
+        ...(name ? { name } : {}),
+        inputs: [i]
+      })),
+      samplers,
+      mapping: model.mapping
+    }
   }
-  const first = wire.context.systemPrompt !== undefined ? input.findIndex((m) => m.role !== "system") : 0
-  const systemCount = Math.min(first === -1 ? input.length : first, request.summaryStart ?? Infinity)
+  // Only messages actually consumed into the system parameter leave the transcript.
+  // A system-role image stays in the transcript, as do pinned lore and summaries.
+  const systemCount = input.length - wire.context.messages.length
   const messages: Array<WireContext["messages"][number]> = []
   if (wire.context.systemPrompt) {
     messages.push({

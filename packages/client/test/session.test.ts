@@ -139,6 +139,28 @@ describe("ChatSession", () => {
     })
   }
 
+  for (const state of ["visible", "hidden", "failed", "removed"] as const) {
+    it(`keeps image-only context eligibility correct on a ${state} version event`, async () => {
+      const { s, answers, receive } = session()
+      const opening = s.open(null)
+      const image = { mediaId: "synthetic-image" }
+      const original = entry("s1", null, { ...first.version, content: "", images: [image] } as Version)
+      answers[0]!(window([{ ...original, contextExcluded: state === "hidden", inContext: state !== "hidden" }]))
+      await opening
+      receive({
+        _tag: "Version",
+        version: {
+          ...original.version,
+          rowVersion: 2,
+          status: state === "failed" ? "failed" : "complete",
+          images: state === "removed" ? [] : [image]
+        } as Version
+      })
+      expect(s.snapshot().entries[0]!.inContext).toBe(state === "visible")
+      s.dispose()
+    })
+  }
+
   it("does not let an older prompt-name save overwrite the later pin", async () => {
     const { s } = session()
     const internals = s as unknown as { call: () => Promise<unknown> }

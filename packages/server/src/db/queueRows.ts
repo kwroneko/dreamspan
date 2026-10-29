@@ -13,6 +13,7 @@ export interface QueuedRow {
   readonly fork_id: string | null
   readonly seq: number
   readonly kind: "message" | "generate"
+  readonly images_json: string
   readonly content: string
   readonly speaker_entity_id: string | null
   readonly reply_speaker_entity_id: string | null
@@ -30,6 +31,7 @@ export const toQueued = (row: QueuedRow) =>
     replySlotId: row.reply_slot_id as SlotId,
     kind: row.kind,
     content: row.content,
+    images: JSON.parse(row.images_json),
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,

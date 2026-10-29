@@ -67,10 +67,24 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           source
         )
 
-  const insertVersion = (slotId: string, ordinal: number, version: NewVersion, at: number) =>
-    Effect.andThen(
-      checkSource(slotId, version.sourceVersionId),
-      sql<VersionRow>`INSERT INTO versions ${sql.insert({
+  const checkImages = (userId: string, images: import("@rp/shared/chat.ts").MessageImages) =>
+    Effect.forEach(
+      images,
+      (image) =>
+        found(
+          sql`SELECT count(*) AS n FROM media_refs r JOIN media_assets m ON m.id=r.media_id
+        WHERE r.owner_user_id=${userId} AND r.media_id=${image.mediaId}
+          AND m.mime IN ('image/png', 'image/jpeg', 'image/gif', 'image/webp')`,
+          "media",
+          image.mediaId
+        ),
+      { discard: true }
+    )
+
+  const insertVersion = (slotId: string, ordinal: number, version: NewVersion, at: number, owner?: string) =>
+    Effect.gen(function* () {
+      yield* checkSource(slotId, version.sourceVersionId)
+      const row = yield* sql<VersionRow>`INSERT INTO versions ${sql.insert({
         id: uuidv7(),
         slot_id: slotId,
         ordinal,
@@ -88,8 +102,29 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         error_json: version.error ? JSON.stringify(version.error) : null,
         created_at: at,
         updated_at: at
-      })} RETURNING *`.pipe(Effect.map(([row]) => row!))
-    )
+      })} RETURNING *`
+      const inserted = row[0]!
+      if (version.images !== undefined) {
+        const [chat] = yield* sql<{
+          owner: string
+        }>`SELECT c.owner_user_id AS owner FROM slots s JOIN chats c ON c.id=s.chat_id WHERE s.id=${slotId}`
+        if (!chat && !owner) return yield* new NotFound({ entity: "slot", id: slotId })
+        yield* checkImages(chat?.owner ?? owner!, version.images)
+        for (const [ordinal, image] of version.images.entries())
+          yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
+            VALUES (${inserted.id}, ${ordinal}, ${image.mediaId}, 'image', ${image.altText ?? null})`
+      } else if (version.sourceVersionId) {
+        yield* sql`INSERT INTO version_attachments(version_id, ordinal, media_id, kind, alt_text)
+          SELECT ${inserted.id}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id=${version.sourceVersionId}`
+      }
+      if (version.images !== undefined || version.sourceVersionId) {
+        const [attachments] = yield* sql<{ images_json: string }>`SELECT json_group_array(json_object(
+          'mediaId', a.media_id, 'altText', coalesce(a.alt_text, ''))) AS images_json
+          FROM (SELECT * FROM version_attachments WHERE version_id=${inserted.id} ORDER BY ordinal) a`
+        return { ...inserted, images_json: attachments!.images_json }
+      }
+      return inserted
+    })
 
   /**
    * A new slot under `parent` with its first version, and `more` after it; `selected` of
@@ -112,8 +147,9 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         forkId ??
         (yield* sql<{ id: string | null }>`SELECT current_fork_id AS id FROM chats WHERE id = ${chatId}`)[0]?.id ??
         null
-      const rows = [yield* insertVersion(slotId, 0, version, at)]
-      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at))
+      const [owner] = yield* sql<{ id: string }>`SELECT owner_user_id AS id FROM chats WHERE id=${chatId}`
+      const rows = [yield* insertVersion(slotId, 0, version, at, owner!.id)]
+      for (const [i, next] of more.entries()) rows.push(yield* insertVersion(slotId, i + 1, next, at, owner!.id))
       yield* sql`INSERT INTO slots ${sql.insert({
         id: slotId,
         chat_id: chatId,
@@ -352,8 +388,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
   /**
    * A fork of the slot's chat (`forkId`, null: the current one) and the slot as that fork
    * shows it: its selection there, the version shown for it, and its row version there, which
-   * is the slot's plus the newer seq of the selection's and the replacement's overrides
-   * (`selectionIn`), so a choice made in another fork never makes this one's stale
+   * is the slot's plus the newest seq of its selection, replacement, deletion and visibility
+   * overrides (`selectionIn`), so a choice made in another fork never makes this one's stale
    * (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
    */
   const slotInFork = (userId: UserId, slotId: SlotId, forkId: ForkId | null) =>
@@ -408,6 +444,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     ownedFork,
     createFork,
     chatIn,
+    checkImages,
     checkSpeaker,
     insertVersion,
     insertSlot,

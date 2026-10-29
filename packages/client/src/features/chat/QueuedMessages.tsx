@@ -1,4 +1,6 @@
-import type { QueuedMessage } from "@rp/shared/chat.ts"
+import { SlotOutlet } from "../../slots.tsx"
+import { queuedPreviews } from "./presentation.tsx"
+import type { QueuedMessage, MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
@@ -19,7 +21,7 @@ function QueueEditor({
   editor: MessageDraft
   queued: QueuedMessage | undefined
   session: ChatSession
-  onRecovered: (text: string) => void
+  onRecovered: (text: string, images?: MessageImages) => void
 }) {
   const view = useSyncExternalStore(editor.subscribe, editor.snapshot)
   const [error, setError] = useState<AppError | null>(null)
@@ -133,7 +135,7 @@ export function QueuedMessages({
 }: {
   queue: ReadonlyArray<QueuedMessage>
   session: ChatSession
-  onRecovered: (text: string) => void
+  onRecovered: (text: string, images?: MessageImages) => void
 }) {
   const editors = useSyncExternalStore(session.subscribeEditors, session.queueEditors)
   const cast = useCast()
@@ -187,6 +189,7 @@ export function QueuedMessages({
                 </>
               )
             )}
+            {queued && <SlotOutlet slot={queuedPreviews} props={{ queued }} />}
             {queued && <Withdraw queued={queued} session={session} onRecovered={onRecovered} />}
           </li>
         )
@@ -202,7 +205,7 @@ function Withdraw({
 }: {
   queued: QueuedMessage
   session: ChatSession
-  onRecovered: (text: string) => void
+  onRecovered: (text: string, images?: MessageImages) => void
 }) {
   const [error, setError] = useState<AppError | null>(null)
   return (
@@ -212,7 +215,10 @@ function Withdraw({
         onClick={async () => {
           const result = await session.withdrawQueued(queued)
           if (result.ok)
-            onRecovered(result.value.kind === "message" ? result.value.content : (result.value.direction ?? ""))
+            onRecovered(
+              result.value.kind === "message" ? result.value.content : (result.value.direction ?? ""),
+              result.value.images
+            )
           else setError(result.error)
         }}
       >

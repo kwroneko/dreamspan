@@ -83,3 +83,5 @@ export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSessi
 export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(
   "summary.previews"
 )
+
+export const queuedPreviews = defineSlot<{ queued: import("@rp/shared/chat.ts").QueuedMessage }>("chat.queued-previews")

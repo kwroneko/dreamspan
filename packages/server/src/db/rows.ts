@@ -107,6 +107,8 @@ export interface VersionRow {
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   readonly rollout_id: string | null
+  /** Ordered image references (`versionExtras`); absent on a row just inserted without images. */
+  readonly images_json?: string
   /** How often a user-written version was amended (`versionExtras`); absent on a row just inserted. */
   readonly amend_count?: number
   /** Its rollout's context issues as JSON (`versionExtras`); absent on a row just inserted. */
@@ -118,7 +120,9 @@ export interface VersionRow {
 
 /** The columns `toVersion` reads beyond the version's own: its row version, its context's issues and its model's name. */
 export const versionExtras = (alias: string) =>
-  `(SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count,
+  `(SELECT json_group_array(json_object('mediaId', a.media_id, 'altText', coalesce(a.alt_text, '')))
+    FROM (SELECT * FROM version_attachments WHERE version_id = ${alias}.id ORDER BY ordinal) a) AS images_json,
+  (SELECT count(*) FROM version_history h WHERE h.version_id = ${alias}.id) AS amend_count,
   (SELECT r.context_issues_json FROM rollouts r WHERE r.id = ${alias}.rollout_id) AS context_issues,
   EXISTS (SELECT 1 FROM rollout_payloads p WHERE p.rollout_id = ${alias}.rollout_id
     AND p.context_snapshot_json IS NOT NULL) AS has_context,
@@ -146,6 +150,7 @@ export const toVersion = (row: VersionRow) =>
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     writer: row.writer,
     content: row.content,
+    ...(row.images_json ? { images: JSON.parse(row.images_json) } : {}),
     macroMode: row.macro_mode,
     origin: row.origin,
     sourceVersionId: row.source_version_id as VersionId | null,
@@ -212,6 +217,6 @@ export const toPathEntry = (row: PathRow) => {
     ...(row.shown_fork_id == null ? {} : { shownForkId: row.shown_fork_id as ForkId }),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
-    inContext: versionInContext(version.status, version.content, contextExcluded)
+    inContext: versionInContext(version.status, version.content, contextExcluded, version.images?.length)
   })
 }

@@ -8,9 +8,9 @@ import { ComposerControls, invokeComposerControl, type ComposerControlContext } 
 //
 // The text is a server draft per branch tip (composerDraft.ts), held in a store of its own,
 // so typing re-renders nothing else.
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { CastCard, EntityId, MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react"
 import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
@@ -114,14 +114,29 @@ function History({ draft }: { draft: ComposerDraft }) {
   )
 }
 
+export interface AttachmentInput {
+  readonly count: number
+  readonly busy: boolean
+  readonly editor: ReactNode
+  readonly restore: (images: MessageImages) => void
+  readonly capture: () => {
+    readonly images: MessageImages
+    readonly ids: readonly string[]
+    readonly begin: (from: ComposerSource) => Promise<void>
+    readonly finish: (sent: boolean) => Promise<void>
+  }
+}
+
 export function Composer({
   session,
   view,
-  onSettings
+  onSettings,
+  attachmentInput
 }: {
   session: ChatSession
   view: ChatView
   onSettings: (tab: "model" | "preset") => void
+  attachmentInput?: AttachmentInput
 }) {
   const phone = useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
   const [secondaryOpen, setSecondaryOpen] = useState(false)
@@ -155,7 +170,13 @@ export function Composer({
   const choice = useComposerChoice(session)
   useEffect(() => choices.bind(draftId), [choices, draftId])
   const turnEntries = useComposerTurn(session, view, cast)
-  const ready = textReady && choice.loaded && !choice.saving && choice.draftId === draftId && turnEntries !== null
+  const ready =
+    !attachmentInput?.busy &&
+    textReady &&
+    choice.loaded &&
+    !choice.saving &&
+    choice.draftId === draftId &&
+    turnEntries !== null
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
@@ -250,22 +271,31 @@ export function Composer({
     if (pickedReply !== null) void choices.consume(draftId, pickedReply).then(report)
   }
 
-  const send = () =>
-    text.trim() === ""
-      ? Promise.resolve()
-      : submit(async (from) => {
-          const { sent, outcome, draft, recovered } = await session.send(
-            from.text,
-            speaker,
-            replier,
-            from,
-            replyPlan.reply
-          )
-          report(outcome)
-          if (sent) replied(from.draftId)
-          // A message that was sent (or queued) is gone from the box, even if its reply failed.
-          return sent ? { sent, draft, recovered } : { sent }
-        })
+  const send = () => {
+    if (text.trim() === "" && !attachmentInput?.count) return Promise.resolve()
+    const captured = attachmentInput?.capture()
+    return submit(async (from) => {
+      await captured?.begin(from)
+      let accepted = false
+      try {
+        const { sent, outcome, draft, recovered } = await session.send(
+          from.text,
+          speaker,
+          replier,
+          from,
+          replyPlan.reply,
+          captured?.images,
+          captured?.ids
+        )
+        accepted = sent
+        report(outcome)
+        if (sent) replied(from.draftId)
+        return sent ? { sent, draft, recovered } : { sent }
+      } finally {
+        await captured?.finish(accepted)
+      }
+    })
+  }
 
   // With nothing typed, Send asks for the reply alone, as an empty send does in ST.
   const replyNow = async () => {
@@ -295,7 +325,7 @@ export function Composer({
     }
   }
 
-  const hasText = text.trim() !== ""
+  const hasText = text.trim() !== "" || !!attachmentInput?.count
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
   const sendHint = hasText
     ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (Enter; Shift+Enter for a new line)`
@@ -315,7 +345,8 @@ export function Composer({
 
   const controls: ComposerControlContext = {
     compact: phone,
-    recoverQueued: (withdrawn) => {
+    recoverQueued: (withdrawn, images) => {
+      if (images?.length) attachmentInput?.restore(images)
       const current = draft.snapshot().text
       draft.type(current === "" ? withdrawn : withdrawn === "" ? current : `${current}\n\n${withdrawn}`)
     },
@@ -464,6 +495,7 @@ export function Composer({
           </div>
         </div>
       </div>
+      {attachmentInput?.editor}
       {!phone && (
         <>
           <ComposerControls placement="guidance" context={controls} />

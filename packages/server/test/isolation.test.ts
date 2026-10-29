@@ -2305,6 +2305,29 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         }
       })
   },
+  GetComposerImages: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId])
+          yield* refused(actor.api.GetComposerImages({ chatId, draftId: owner.composerId, ids: [] }), "NotFound")
+      })
+  },
+  SetComposerImage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        for (const chatId of [owner.chat.chatId, actor.chat.chatId])
+          yield* refused(
+            actor.api.SetComposerImage({
+              chatId,
+              draftId: owner.composerId,
+              id: "foreign-image-draft",
+              mediaId: null,
+              altText: ""
+            }),
+            "NotFound"
+          )
+      })
+  },
   GetComposerChoice: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

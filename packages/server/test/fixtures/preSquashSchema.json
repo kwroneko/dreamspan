@@ -98,6 +98,12 @@
     },
     {
       "type": "index",
+      "name": "composer_images_draft",
+      "tbl_name": "composer_images",
+      "sql": "CREATE INDEX composer_images_draft ON composer_images(draft_id, status)"
+    },
+    {
+      "type": "index",
       "name": "connections_credential",
       "tbl_name": "connections",
       "sql": "CREATE INDEX connections_credential ON connections(credential_id) WHERE credential_id IS NOT NULL"
@@ -824,6 +830,12 @@
     },
     {
       "type": "table",
+      "name": "composer_images",
+      "tbl_name": "composer_images",
+      "sql": "CREATE TABLE composer_images ( id TEXT PRIMARY KEY, draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, media_id TEXT REFERENCES media_assets(id), alt_text TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('active','sent','removed')), CHECK (status <> 'active' OR media_id IS NOT NULL) ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "composer_save_receipts",
       "tbl_name": "composer_save_receipts",
       "sql": "CREATE TABLE composer_save_receipts ( chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, operation_id TEXT NOT NULL, recovered INTEGER NOT NULL CHECK (recovered IN (0, 1)), displaced_json TEXT CHECK (displaced_json IS NULL OR json_valid(displaced_json)), PRIMARY KEY (chat_id, operation_id) ) STRICT"
@@ -994,7 +1006,7 @@
       "type": "table",
       "name": "queued_messages",
       "tbl_name": "queued_messages",
-      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, CHECK (kind = 'generate' OR length(content) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
+      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)), CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
     },
     {
       "type": "table",

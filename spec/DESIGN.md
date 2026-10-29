@@ -8,6 +8,7 @@
 
 Message amendment history and message/summary draft history controls (§3.1, §6.2) are **built, obsolete as proposals** (2026-10-28); see [ARCHITECTURE §12](../ARCHITECTURE.md). The code-editor markers and full-text revision comparisons for message/summary editing and note/preset Save/history (§6.2) are **built, obsolete as proposals** (U17, 2026-10-28); see [ARCHITECTURE §14](../ARCHITECTURE.md). The remaining decisions in this document retain their status.
 **Built 2026-10-28 (U11, U13, U14):** prompt-preset creation and its forbid-overrides defaults (§1.2, §5.0), configurable bin capacities (§6.2), and optional completion sound (§10.1) are implemented; these requirements are obsolete as proposals. See ARCHITECTURE §14, §3.11 and §12. Other items retain their statuses.
+Implementation status: **U15/U16/U22 image input built**, ARCHITECTURE §§12, 16: version storage, direct attachment composer/viewer and summary image transport.
 
 Where the owner corrected an earlier proposal, the corrected version is recorded and the rejected one is noted, so it doesn't come back.
 
@@ -652,14 +653,16 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[L]** Template-bound UI: a persistent "stage" or widget whose state the model updates through tools, so only small state changes enter the context.
 
 ### 10.2a Image input (vision)
-- **[D]** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
-- **[D]** Attaching is direct: drag and drop onto the composer or the chat, paste from the clipboard, and a picker button. ST's "find the right button in a submenu" is the anti-pattern.
-- **[D]** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
-- **[P]** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
-- **[P]** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
+
+**Built (U15/U16/U22; obsolete as an implementation proposal):** ARCHITECTURE §§12, 16 describe version-owned uploads, direct attachment input, server-backed attachment drafts, thumbnails/full-size viewing, reply and summary transport and text-only refusal. Image token/cache estimates remain unimplemented. The [P] choices below retain their status.
+- **[D], built (U15/U16)** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
+- **[D], built (U16)** Attaching is direct: drag and drop onto the composer or the chat, paste from the clipboard, and a picker button. ST's "find the right button in a submenu" is the anti-pattern.
+- **[D], built (U15)** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
+- **[P], version ownership/API and thumbnail/viewer built (U15/U16)** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
+- **[P], built (U15/U16)** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
 - **[P]** Images are context like anything else, so their token cost and cache effect show in the context view.
-- **[D]** Older images: the summarizer sees the images in the range it summarizes, so the summary can describe them, and they leave the context together with the messages that range covers (owner, 2026-10-13).
-- **[D]** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one.
+- **[D], built (U22)** Older images: the summarizer sees the images in the range it summarizes, so the summary can describe them, and they leave the context together with the messages that range covers (owner, 2026-10-13).
+- **[D], built (U15/U22)** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one.
 
 ### 10.3 Chat-wide edits
 

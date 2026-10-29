@@ -1,6 +1,7 @@
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
+import { composerImages } from "./composerImages.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
@@ -188,6 +189,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* drafts.openComposer(userId, key, from)
         }).pipe(transaction("OpenComposer")),
 
+      SetComposerImage: ({ userId, chatId, draftId, id, mediaId, altText }) =>
+        composerImages(sql).set(userId, chatId, draftId, id, mediaId, altText).pipe(transaction("SetComposerImage")),
       SetComposerChoice: ({ userId, chatId, draftId, speakerEntityId, replyFromEntityId, consumeReplyFromEntityId }) =>
         drafts
           .setComposerChoice(userId, chatId, draftId, {
