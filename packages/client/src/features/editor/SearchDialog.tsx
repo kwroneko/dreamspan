@@ -1,12 +1,12 @@
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
-import { type FormEvent, type ReactNode, useMemo, useState } from "react"
+import { type FormEvent, type ReactNode, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
-import { type Searchable, searchable } from "./fields.ts"
+import { editorTextFields, type Searchable, searchable } from "./fields.ts"
 import { runSearch, type SearchResponse } from "./search.ts"
 import { type EditorStore, useWorkingDoc } from "./store.ts"
 
@@ -58,7 +58,9 @@ export function SearchDialog({
   const [pending, setPending] = useState(false)
 
   const working = useWorkingDoc(store)
-  const current = useMemo(() => searchable(store.snapshot!.ref.kind, working), [store, working])
+  // Registration changes invalidate previews, just as document changes do.
+  const contributions = useSyncExternalStore(editorTextFields.subscribe, editorTextFields.snapshot)
+  const current = searchable(store.snapshot!.ref.kind, working, contributions.entries)
   const asked = JSON.stringify([find, replace, wholeWord, preserveCase, regex, caseSensitive])
 
   const search = async (replacement: string | null) => {

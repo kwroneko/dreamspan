@@ -1,5 +1,7 @@
 // The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a). Card modules
 // are card notes (§5.0).
+import { SlotOutlet } from "../../slots.tsx"
+import { cardEditorSections } from "./cardSections.ts"
 import { valueField } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import { useEffect, useState } from "react"
@@ -276,6 +278,7 @@ export function CardEditor({
         />
         <Notes store={store} call={call} />
       </Card>
+      <SlotOutlet slot={cardEditorSections} props={{ store }} />
       <Card>
         <CardHeader title="About" />
         <div className="flex flex-col gap-4">

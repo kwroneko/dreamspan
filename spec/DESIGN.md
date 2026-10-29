@@ -1,6 +1,6 @@
 # Design: requirements and decisions
 
-**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Composer backlog U03/U06/U07 built 2026-10-28: queue edit drafts and recovery (§6.2), pending cast speaker/guidance parity (§2.2), and version-only Stop (§3.1) are implemented; those requirements are now documented in ARCHITECTURE.md §12. U18’s card-rename Save and chat-fork history offers are built (ARCHITECTURE §3.13); those portions of §4 and §10.3 are obsolete as proposals. Each item is marked:
+**Status**: Draft, 2026-10-09. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Composer backlog U03/U06/U07 built 2026-10-28: queue edit drafts and recovery (§6.2), pending cast speaker/guidance parity (§2.2), and version-only Stop (§3.1) are implemented; those requirements are now documented in ARCHITECTURE.md §12. U18’s card-rename Save and chat-fork history offers are built (ARCHITECTURE §3.13); those portions of §4 and §10.3 are obsolete as proposals. Embedded-card lorebook authoring (U19) is built; its implementation record is in ARCHITECTURE.md §14. The corresponding authoring gap under §1.1 is obsolete. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
 - **[O] Open**: needs a decision.
@@ -18,7 +18,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 **Contract [D]:** anything you do with a card or preset in ST works the same way here. Features only this harness has (e.g. summarization with the preset loaded) may need preset edits, and that's acceptable. Beyond this section, feature parity with ST is not a goal.
 
 ### 1.1 Cards
-- **[D]** Import, create and distribute ST cards as easily as in ST.
+- **[D]** Import, create and distribute ST cards as easily as in ST. **Embedded lorebook editing built** (U19, 2026-10-29; ARCHITECTURE.md §14), through the card’s field drafts and revisions.
 - **[P]** Formats: V1, V2 and V3, as JSON, PNG (`chara` and `ccv3` text chunks) or CHARX. Embedded `character_book` lorebooks. Alternate greetings.
 - **[P]** Export flattens a chosen variant plus its exportable modules (§4) into a standard V2 or V3 card.
 - **[P]** A watched import folder: drop a card file in and it becomes available. Each imported card remembers its source file and hash, and offers an update when the file changes. Files are only import and export; the internal representation is the source of truth **[D]**.
