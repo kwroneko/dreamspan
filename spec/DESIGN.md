@@ -1,6 +1,6 @@
 # Design: requirements and decisions
 
-**Status**: Draft, 2026-10-09. Each item is marked:
+**Status**: Draft, 2026-10-09. Embedded-card lorebook authoring (U19) is built; its implementation record is in ARCHITECTURE.md §14. The corresponding authoring gap under §1.1 is obsolete. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
 - **[O] Open**: needs a decision.
@@ -15,7 +15,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 **Contract [D]:** anything you do with a card or preset in ST works the same way here. Features only this harness has (e.g. summarization with the preset loaded) may need preset edits, and that's acceptable. Beyond this section, feature parity with ST is not a goal.
 
 ### 1.1 Cards
-- **[D]** Import, create and distribute ST cards as easily as in ST.
+- **[D]** Import, create and distribute ST cards as easily as in ST. **Embedded lorebook editing built** (U19, 2026-10-29; ARCHITECTURE.md §14), through the card’s field drafts and revisions.
 - **[P]** Formats: V1, V2 and V3, as JSON, PNG (`chara` and `ccv3` text chunks) or CHARX. Embedded `character_book` lorebooks. Alternate greetings.
 - **[P]** Export flattens a chosen variant plus its exportable modules (§4) into a standard V2 or V3 card.
 - **[P]** A watched import folder: drop a card file in and it becomes available. Each imported card remembers its source file and hash, and offers an update when the file changes. Files are only import and export; the internal representation is the source of truth **[D]**.
