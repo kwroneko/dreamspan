@@ -101,6 +101,7 @@ export const makeMacroEnvironment = (
   setup: {
     readonly names: Names
     readonly card: CardFields
+    readonly collapseNewlines: boolean
     readonly messages: ReadonlyArray<ChatMessage>
     readonly model: string
     readonly maxContextTokens: number
@@ -131,6 +132,7 @@ export const makeMacroEnvironment = (
 
   let base: Omit<MacroContext, "names"> = {
     card: setup.card,
+    collapseNewlines: setup.collapseNewlines,
     messages: setup.messages,
     now: request.now,
     timeZone: request.timeZone,

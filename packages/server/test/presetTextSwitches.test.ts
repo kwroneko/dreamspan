@@ -70,6 +70,50 @@ describe("ST preset text switches", () => {
       "Example question"
     )
   })
+  it("collapses card fields read through preset macros without collapsing the surrounding prompt", async () => {
+    const doc = preset()
+    const input = {
+      participants: ["mira"],
+      persona: "persona",
+      messages: [{ side: "user" as const, content: "Saved\n\nhistory" }],
+      cards: [
+        {
+          entity: "mira",
+          doc: {
+            ...cardDoc("Mira"),
+            mes_example: "<START>\nUser: Question\nMira: Example{{newline}}{{newline}}answer",
+            creator_notes: "Creator\n\nnotes",
+            first_mes: "First\n\ngreeting"
+          }
+        },
+        { entity: "persona", doc: { ...cardDoc("User"), description: "Persona\n\n{{char}}" } }
+      ],
+      preset: {
+        ...doc,
+        collapse_newlines: true,
+        prompts: doc.prompts.map((p) =>
+          p.identifier === "main"
+            ? {
+                ...p,
+                forbid_overrides: true,
+                content: "Prompt\n\n{{persona}}|{{mesExamplesRaw}}|{{mesExamples}}|{{creatorNotes}}|{{greeting}}"
+              }
+            : p
+        )
+      }
+    }
+    const on = await Effect.runPromise(assembleFixture(input))
+    const main = on.request.messages.find((m) => m.content.startsWith("Prompt"))!.content
+    expect(main).toBe(
+      "Prompt\n\nPersona\nMira|<START>\nUser: Question\nMira: Example\nanswer|" +
+        "<START>\nUser: Question\nMira: Example\nanswer\n|Creator\nnotes|First\ngreeting"
+    )
+    expect(on.request.messages.some((m) => m.content.includes("Saved\n\nhistory"))).toBe(true)
+    const off = await Effect.runPromise(
+      assembleFixture({ ...input, preset: { ...input.preset, collapse_newlines: false } })
+    )
+    expect(off.request.messages.find((m) => m.content.startsWith("Prompt"))!.content).toContain("Persona\n\nMira")
+  })
   it("strips lorebook examples too, while collapse updates their source text", async () => {
     const fixture = {
       preset: preset(),

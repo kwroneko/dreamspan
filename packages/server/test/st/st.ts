@@ -363,6 +363,7 @@ export interface Capture {
   /** Presets loaded into ST one after another, by name; none for the baseline settings. */
   readonly textSwitches?: { pin_examples: boolean; strip_examples: boolean; collapse_newlines: boolean }
   readonly multilineCard?: boolean
+  readonly fieldMacros?: boolean
   readonly overMaximum?: boolean
   readonly presets: ReadonlyArray<string>
   readonly character: string
@@ -461,6 +462,15 @@ export const captureWithSettings = async (
         { name: capture.character, tight: capture.overMaximum === true }
       )
     }
+    if (capture.fieldMacros)
+      await page.evaluate(() => {
+        const settings = SillyTavern.getContext().chatCompletionSettings
+        ;(settings as Record<string, unknown>).prompts = settings.prompts.map((p) =>
+          (p as { identifier?: string }).identifier === "main"
+            ? { ...p, content: "Field macros\n\n{{mesExamplesRaw}}", forbid_overrides: true }
+            : p
+        )
+      })
     if (capture.overMaximum)
       await page.evaluate(() => {
         const ctx = SillyTavern.getContext()

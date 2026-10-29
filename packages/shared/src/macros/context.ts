@@ -68,6 +68,8 @@ export interface MacroContext {
    */
   readonly variables?: VariableValues
   readonly card?: CardFields
+  /** ST's collapse_newlines applies to expanded card fields, including field macros. */
+  readonly collapseNewlines?: boolean
   /** The messages before the text's position, oldest first, as resolved text (never expanded again). */
   readonly messages?: ReadonlyArray<ChatMessage>
   readonly firstIncludedMessageId?: number

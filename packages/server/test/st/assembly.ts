@@ -182,6 +182,7 @@ const dropMissing = (
 interface Config {
   readonly textSwitches?: { pin_examples: boolean; strip_examples: boolean; collapse_newlines: boolean }
   readonly multilineCard?: boolean
+  readonly fieldMacros?: boolean
   readonly overMaximum?: boolean
   readonly lorebook?: boolean
   readonly name: string
@@ -501,6 +502,13 @@ export const compareAssembly = async (
       overMaximum: true,
       textSwitches: { pin_examples, strip_examples: false, collapse_newlines: false }
     })),
+    ...[false, true].map((collapse_newlines) => ({
+      name: `text switches field macros collapse=${collapse_newlines}`,
+      presets: ["default"],
+      multilineCard: true,
+      fieldMacros: true,
+      textSwitches: { pin_examples: false, strip_examples: true, collapse_newlines }
+    })),
     { name: "history over maximum, stepped target", presets: ["default"], overMaximum: true },
     ...["default", "full"].map((preset) => ({
       name: `${preset}, lorebook positions`,
@@ -690,6 +698,7 @@ export const compareAssembly = async (
         {
           ...(config.textSwitches ? { textSwitches: config.textSwitches } : {}),
           ...(config.multilineCard ? { multilineCard: true } : {}),
+          ...(config.fieldMacros ? { fieldMacros: true } : {}),
           overMaximum: config.overMaximum ?? false,
           presets: config.presets,
           character,
@@ -715,11 +724,17 @@ export const compareAssembly = async (
           ["ours", ours.body]
         ] as const) {
           const messages = messagesOf(request) ?? []
-          const examples = messages.some((m) => m.content.includes("Example question"))
+          const examples = messages.some((m) => m.name === "example_user" && m.content.includes("Example question"))
           const expected =
             !config.textSwitches.strip_examples && (!config.overMaximum || config.textSwitches.pin_examples)
           if (examples !== expected)
             differences.push(`${character}, ${config.name}: ${side} examples ${examples}, expected ${expected}`)
+          if (config.fieldMacros) {
+            const main = messages.find((m) => m.content.startsWith("Field macros"))?.content ?? ""
+            const answer = config.textSwitches.collapse_newlines ? "Example\nanswer" : "Example\n\nanswer"
+            if (!main.startsWith("Field macros\n\n<START>") || !main.includes(answer))
+              differences.push(`${character}, ${config.name}: ${side} didn't exercise card field macros`)
+          }
           const description = messages.find((m) => m.content.includes("First line"))?.content ?? ""
           if (
             !description.includes(

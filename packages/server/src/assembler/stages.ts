@@ -414,6 +414,7 @@ const macrosStage = sync("macros", (assembly) => {
   assembly.macros = makeMacroEnvironment(assembly, {
     names: namesFor(need(assembly, "state"), cast),
     card: macroCard(cast, assembly.notes),
+    collapseNewlines: preset.collapse_newlines === true,
     messages: [],
     model: assembly.model?.key ?? "",
     maxContextTokens: preset.samplers.openai_max_context,
