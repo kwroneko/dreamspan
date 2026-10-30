@@ -1,0 +1,53 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Write Mira's next reply in a fictional chat between Mira and User."
+    },
+    {
+      "role": "system",
+      "content": "[Start a new Chat]"
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome to the synthetic harbor."
+    },
+    {
+      "role": "user",
+      "content": "Where is the ledger?"
+    },
+    {
+      "role": "user",
+      "content": "[Write the next reply only as Mira.]"
+    }
+  ],
+  "prefill": null,
+  "samplers": {
+    "temperature": 1,
+    "frequency_penalty": 0,
+    "presence_penalty": 0,
+    "top_p": 1,
+    "top_k": 0,
+    "top_a": 0,
+    "min_p": 0,
+    "repetition_penalty": 1,
+    "max_tokens": 300,
+    "seed": -1
+  },
+  "useSystemPrompt": false,
+  "breakpoints": [
+    {
+      "message": 3,
+      "reason": "history"
+    },
+    {
+      "message": 1,
+      "reason": "prefix"
+    }
+  ],
+  "names": {
+    "user": "User",
+    "char": "Mira",
+    "group": []
+  }
+}

@@ -9,7 +9,8 @@ import { historyCurrent, historyFork, historySummaryRevision } from "./historySh
 import { pathSegments } from "./pathSegments.ts"
 import { displayLength, displayPositionSql, displaySlots, pathPieces, placedInsertions } from "./displayPath.ts"
 import { scanHistory } from "./historyScan.ts"
-import { stateEventsOnPath } from "./stateRead.ts"
+import { stateEventsThrough } from "./stateRead.ts"
+import { displayEndOf } from "./displayPath.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
 import type { ReadOps } from "./ops.ts"
@@ -231,7 +232,9 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
         WHERE c.owner_user_id=${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL AND f.purged_at IS NULL`
         const targets: Array<{ chatId: ChatId; forkId: ForkId }> = []
         for (const fork of forks) {
-          const events = yield* stateEventsOnPath(sql, fork.chatId, fork.tip, fork.forkId)
+          // The fork as it stands: through its display end, an inserted message after the tip included.
+          const end = yield* displayEndOf(sql, fork.chatId, { id: fork.forkId, tip_slot_id: fork.tip })
+          const events = yield* stateEventsThrough(sql, fork.chatId, end as SlotId | null, fork.forkId)
           const parsed = events.map((e) => ({
             scope: e.scope,
             data: { key: e.key, value: JSON.parse(e.value_json) }

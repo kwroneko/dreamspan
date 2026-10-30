@@ -531,6 +531,101 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("a cast change on an inserted message applies after its anchor and before the next, in its fork only", () =>
+    Effect.gen(function* () {
+      const { main, a, b, card, parent, add, state, fork, writer, reader, userId, chatId } = yield* setup
+      const before = yield* fork(main, b.slotId)
+      const anchor = yield* reader.GetSlot({ userId, slotId: a.slotId, forkId: main })
+      const x = yield* writer.InsertMessage({
+        userId,
+        chatId,
+        forkId: main,
+        anchorSlotId: a.slotId,
+        expectedRowVersion: anchor.entry.rowVersion,
+        body: { _tag: "Write", speaker: parent.entityId, content: "X" }
+      })
+      // B's leave is written first: by depth (X's equals B's) and seq the two would tie, by
+      // position X's join comes first.
+      yield* add(main, b.slotId, { key: "participant.leave", value: { entity: card.entityId } })
+      yield* add(main, x.slotId, { key: "participant.join", value: { entity: card.entityId } })
+      yield* add(main, x.slotId, { key: "var.set", value: { name: "at", value: "x" } })
+      yield* add(main, b.slotId, { key: "var.set", value: { name: "at", value: "b" } })
+      yield* add(main, x.slotId, { key: "var.set", value: { name: "fromX", value: 1 } })
+      assert.notInclude((yield* state(main, a.slotId)).participants, card.entityId)
+      assert.include((yield* state(main, x.slotId)).participants, card.entityId)
+      assert.strictEqual((yield* state(main, x.slotId)).vars.at, "x")
+      assert.notInclude((yield* state(main, b.slotId)).participants, card.entityId)
+      assert.strictEqual((yield* state(main, b.slotId)).vars.at, "b")
+      assert.strictEqual((yield* state(main, b.slotId)).vars.fromX, 1)
+      assert.isUndefined((yield* state(main, a.slotId)).vars.fromX)
+      // A fork made before the insertion never sees X or its events.
+      assert.deepStrictEqual((yield* state(before, b.slotId)).participants, [parent.entityId])
+      assert.isUndefined((yield* state(before, b.slotId)).vars.at)
+      // A fork made afterwards at X inherits X and its events up to there.
+      const later = yield* fork(main, x.slotId)
+      assert.include((yield* state(later, x.slotId)).participants, card.entityId)
+      // Without B's leave, the join holds at B: X's events fold before B's.
+      const joined = yield* fork(main, a.slotId)
+      const y = yield* writer.InsertMessage({
+        userId,
+        chatId,
+        forkId: joined,
+        anchorSlotId: a.slotId,
+        expectedRowVersion: (yield* reader.GetSlot({ userId, slotId: a.slotId, forkId: joined })).entry.rowVersion,
+        body: { _tag: "Write", speaker: parent.entityId, content: "Y" }
+      })
+      yield* add(joined, y.slotId, { key: "participant.join", value: { entity: card.entityId } })
+      assert.include((yield* state(joined, y.slotId)).participants, card.entityId)
+      assert.notInclude((yield* state(joined, a.slotId)).participants, card.entityId)
+      // An event on a message the fork doesn't show is refused there.
+      const refused = yield* add(before, x.slotId, { key: "var.set", value: { name: "no", value: 1 } }).pipe(
+        Effect.flip
+      )
+      assert.strictEqual(refused._tag, "NotFound")
+    })
+  )
+
+  it.effect("the composer reads the display end while StateEventsAt keeps the precise tip", () =>
+    Effect.gen(function* () {
+      const { api, main, b, writer, reader, userId, chatId, card, add, state, fork } = yield* setup
+      const old = yield* fork(main, b.slotId)
+      const x = yield* writer.InsertMessage({
+        userId,
+        chatId,
+        forkId: main,
+        anchorSlotId: b.slotId,
+        expectedRowVersion: (yield* reader.GetSlot({ userId, slotId: b.slotId, forkId: main })).entry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "After the tip" }
+      })
+      yield* add(main, x.slotId, { key: "participant.join", value: { entity: card.entityId } })
+      assert.notInclude((yield* state(main, b.slotId)).participants, card.entityId)
+      assert.include((yield* state(main, x.slotId)).participants, card.entityId)
+      const cast = yield* api.GetCast({ chatId, forkId: main, slotId: b.slotId })
+      assert.include(cast.participants, card.entityId)
+      const elsewhere = yield* api.GetCast({ chatId, forkId: old, slotId: b.slotId })
+      assert.notInclude(elsewhere.participants, card.entityId)
+      const changed = yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Leave", entityId: card.entityId }
+      })
+      assert.notInclude(changed.participants, card.entityId)
+      assert.notInclude((yield* state(main, x.slotId)).participants, card.entityId)
+      yield* writer.AddStateEvents({
+        userId,
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        displayEnd: true,
+        data: [{ key: "var.set", value: { name: "composer", value: "at end" } }]
+      })
+      assert.strictEqual((yield* state(main, x.slotId)).vars.composer, "at end")
+      assert.isUndefined((yield* state(main, b.slotId)).vars.composer)
+      assert.isUndefined((yield* state(old, b.slotId)).vars.composer)
+    })
+  )
+
   it.effect("the next-context preview reads the viewed fork at a shared tip", () =>
     Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(

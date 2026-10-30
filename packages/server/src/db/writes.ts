@@ -1,3 +1,4 @@
+import { displayEndOf } from "./displayPath.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
@@ -83,6 +84,18 @@ export const makeWriteHandlers = (bin: Bin) =>
       insertStateEvent,
       appendMessage
     } = makeGraphWrites(sql, drafts)
+
+    const statePosition = Effect.fnUntraced(function* (
+      userId: UserId,
+      chatId: ChatId,
+      slotId: SlotId | null,
+      forkId: ForkId | null,
+      displayEnd: boolean | undefined
+    ) {
+      if (!displayEnd) return slotId
+      const fork = yield* ownedFork(userId, chatId, forkId)
+      return fork.tip_slot_id === slotId ? ((yield* displayEndOf(sql, chatId, fork)) as SlotId | null) : slotId
+    })
 
     /** A draft's target must belong to the user. */
     const draftTargets: Record<DraftKey["targetKind"], (userId: UserId, key: DraftKey) => Count> = {
@@ -301,9 +314,16 @@ export const makeWriteHandlers = (bin: Bin) =>
           return { changed: true }
         }).pipe(transaction("SetSlotHidden")),
 
-      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, forkId }) =>
+      AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, forkId, displayEnd }) =>
         Effect.gen(function* () {
-          yield* ownedPosition(userId, chatId, slotId)
+          yield* ownedChat(userId, chatId)
+          const at =
+            versionId === null && data.key !== "lcm.settings"
+              ? yield* statePosition(userId, chatId, slotId, forkId ?? null, displayEnd)
+              : slotId
+          // The slot written to must be live: a retained deleted tip (spec/MESSAGE-INSERT.md
+          // §2.4) resolves to the live inserted message after it, where the event folds.
+          yield* ownedPosition(userId, chatId, at)
           if (versionId !== null) {
             yield* found(
               sql`SELECT count(*) AS n FROM versions WHERE id = ${versionId} AND slot_id IS ${slotId} AND deleted_at IS NULL`,
@@ -311,13 +331,24 @@ export const makeWriteHandlers = (bin: Bin) =>
               versionId
             )
           }
-          return yield* insertStateEvent(userId, chatId, slotId, versionId, scope, data, forkId ?? null)
+          return yield* insertStateEvent(userId, chatId, at, versionId, scope, data, forkId ?? null)
         }).pipe(transaction("AddStateEvent")),
 
-      AddStateEvents: ({ userId, chatId, slotId, data, forkId }) =>
+      AddStateEvents: ({ userId, chatId, slotId, data, forkId, displayEnd }) =>
         Effect.gen(function* () {
-          yield* ownedPosition(userId, chatId, slotId)
-          for (const event of data) yield* insertStateEvent(userId, chatId, slotId, null, null, event, forkId ?? null)
+          yield* ownedChat(userId, chatId)
+          const at = yield* statePosition(userId, chatId, slotId, forkId ?? null, displayEnd)
+          yield* ownedPosition(userId, chatId, at)
+          for (const event of data)
+            yield* insertStateEvent(
+              userId,
+              chatId,
+              event.key === "lcm.settings" ? slotId : at,
+              null,
+              null,
+              event,
+              forkId ?? null
+            )
         }).pipe(transaction("AddStateEvents")),
 
       // --- Chats

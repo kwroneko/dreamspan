@@ -441,13 +441,17 @@ export const eventAppliesSql = (fork: string, e: string) => `(${eventVisibleSql(
 export const eventApplies = (sql: SqlClient.SqlClient, fork: ForkRef, e: string) =>
   withFork(sql, fork, (f) => eventAppliesSql(f, e))
 
-/** Positional events first; every registered branch-owned key last, in chat sequence order. */
-export const eventOrder = (e: string) => {
+/**
+ * Positional events first, by `position` (their slot's depth; the display position, read by
+ * `displayEvents`, in a fork with insertions); every registered branch-owned key last, in chat
+ * sequence order.
+ */
+export const eventOrder = (e: string, position = `${e}.slot_depth`) => {
   const keys = stateKeys
     .list()
     .filter((key) => key.scope === "branch")
     .map((key) => `'${key.id.replaceAll("'", "''")}'`)
   const branch = keys.length === 0 ? "0" : `${e}.key IN (${keys.join(",")})`
   return `CASE WHEN ${branch} THEN 1 ELSE 0 END,
-    coalesce(${e}.slot_depth, -1), CASE WHEN ${branch} THEN coalesce(${e}.fork_seq, ${e}.seq) ELSE ${e}.seq END`
+    coalesce(${position}, -1), CASE WHEN ${branch} THEN coalesce(${e}.fork_seq, ${e}.seq) ELSE ${e}.seq END`
 }

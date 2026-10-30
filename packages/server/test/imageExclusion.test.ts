@@ -207,6 +207,118 @@ describe("image exclusion", () => {
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live(
+    "reads an inserted copy's images like any message's: the limit, the per-fork exclusion and the estimate",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const reader = yield* Reader
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id as UserId
+        const first = yield* upload(png(textChunk("fixture", "first")))
+        const second = yield* upload(png(textChunk("fixture", "second")))
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Seen."], {})))),
+          (m) => Effect.promise(() => m.close())
+        )
+        const generated = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: { vision: true, maxImages: 2, context: 32768 },
+          preset: { openai_max_context: 32768 },
+          content: "Two drawings",
+          images: [first, second]
+        })
+        const { chat } = generated
+        const fork = chat.currentForkId!
+        const path = yield* reader.GetPath({ userId, chatId: chat.id, leafSlotId: null, limit: 20, forkId: fork })
+        const message = path.entries.find((entry) => entry.version.images?.length === 2)!
+        const leaf = path.entries.at(-1)!.slotId as SlotId
+        const other = yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: fork, atSlotId: leaf })
+        // Duplicate puts a copy, with the same images, directly below the message in this fork.
+        const copy = yield* writer.InsertMessage({
+          userId,
+          chatId: chat.id,
+          forkId: fork,
+          anchorSlotId: message.slotId,
+          expectedRowVersion: message.rowVersion,
+          body: { _tag: "Duplicate", versionId: message.version.id }
+        })
+        const next = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+        // Four images, the copy's the newest two: the original's are left out by the limit.
+        assert.deepStrictEqual(
+          next.images?.images.map((image) => [image.mediaId, image.rule]),
+          [
+            [first.mediaId, "limit"],
+            [second.mediaId, "limit"]
+          ]
+        )
+        assert.strictEqual(next.imageTokens?.count, 2)
+        // The fork made before the copy doesn't see it.
+        const elsewhere = yield* api.GetNextContext({ chatId: chat.id, forkId: other.fork.id, leafSlotId: leaf })
+        assert.deepStrictEqual(elsewhere.images?.images ?? [], [])
+        assert.strictEqual(elsewhere.imageTokens?.count, 2)
+        // Taking one of the copy's images out frees a place for the original's newest.
+        yield* api.SetImageExcluded({
+          versionId: copy.version.id,
+          mediaId: second.mediaId,
+          forkId: fork,
+          excluded: true
+        })
+        const after = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+        assert.deepStrictEqual(
+          after.images?.images.map((image) => [image.mediaId, image.rule]),
+          [
+            [first.mediaId, "limit"],
+            [second.mediaId, "user"]
+          ]
+        )
+        assert.strictEqual(after.imageTokens?.count, 2)
+        // The storage projection is provider-independent; every built-in provider’s
+        // registered estimator sees the same kept original/copy images.
+        for (const [kind, key, tokens] of [
+          ["openai-chat", "gpt-4o", 510],
+          ["openai-responses", "gpt-4o", 510],
+          ["openrouter", "openai/gpt-4o", 510],
+          ["anthropic", "claude-sonnet-4-5", 2],
+          ["google", "gemini-2.5-flash", 516],
+          ["deepseek", "deepseek-v4", 2048]
+        ] as const) {
+          const connection = yield* api.CreateConnection({
+            kind,
+            apiKey: "synthetic-key",
+            settings: {
+              name: kind,
+              baseUrl: "http://127.0.0.1:9",
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            }
+          })
+          const model = yield* api.AddUserModel({
+            connectionId: connection.id,
+            key,
+            overrides: { vision: true, maxImages: 2, context: 32768 }
+          })
+          yield* api.SetGenerationDefaults({
+            defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          })
+          const view = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+          assert.strictEqual(view.imageTokens?.count, 2, kind)
+          assert.strictEqual(view.imageTokens?.tokens, tokens, kind)
+          assert.deepStrictEqual(view.imageTokens?.bases, [kind === "deepseek" ? "unknown" : "formula"], kind)
+          assert.deepStrictEqual(
+            view.images?.images.map((i) => [i.versionId, i.depth, i.rule]),
+            [
+              [message.version.id, message.position ?? message.depth, "limit"],
+              [copy.version.id, (message.position ?? message.depth) + 1, "user"]
+            ],
+            kind
+          )
+        }
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("names a model without vision and a hidden message", () =>
     Effect.gen(function* () {
       const api = yield* client()

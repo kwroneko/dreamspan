@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 38
+export const ASSEMBLER_VERSION = 39
 
 export type Role = "system" | "user" | "assistant"
 
@@ -470,11 +470,20 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
 
 /** The version being generated and where it is. */
 export interface Target {
+  /** Position-based numbering, including summarized/deleted gaps; absent on legacy snapshots and paths without insertions. */
+  readonly displayPositions?: boolean
   readonly chatId: string
   readonly slotId: string
   readonly versionId: string
+  /** Its position: the depth, or the display position in a fork with insertions (spec/MESSAGE-INSERT.md §3.2). */
   readonly depth: number
   readonly parentSlotId: string | null
+  /**
+   * The message right before the target on its fork's display path, when that isn't
+   * `parentSlotId`: an inserted message sits between them, or follows the tip. The reads of
+   * the history before the target start from it (`historyLeafOf`).
+   */
+  readonly historyLeaf?: string | null
   /** The version's place among its slot's versions: above 0, it's a new version of a reply (a swipe). */
   readonly ordinal: number
   readonly speaker: string | null
@@ -491,12 +500,19 @@ export interface HistoryImage extends RequestImage {
   readonly excluded?: true
 }
 
+/** Where the history before the target ends: the message right before it as its fork shows it. */
+export const historyLeafOf = (target: Target) =>
+  target.historyLeaf === undefined ? target.parentSlotId : target.historyLeaf
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
   readonly images?: ReadonlyArray<HistoryImage>
   readonly slotId: string
   readonly versionId: string
+  /** Its position: the depth, or the display position in a fork with insertions (spec/MESSAGE-INSERT.md §3.2). */
   readonly depth: number
+  /** An inserted message (spec/MESSAGE-INSERT.md), set only in a fork that places insertions. */
+  readonly inserted?: true
   /** The card the message belongs to, when one is recorded. */
   readonly speaker: string | null
   /**

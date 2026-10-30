@@ -31,7 +31,7 @@ import type {
   SummaryLayer,
   Target
 } from "./types.ts"
-import { ASSEMBLER_VERSION, AssemblyFailed } from "./types.ts"
+import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
 import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
 import type { CalibrationSample, ImageTokenRule } from "@rp/shared/imageTokens.ts"
 
@@ -343,7 +343,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
     const cast = need(assembly, "cast")
     const historyStart = need(assembly, "historyStart")
     const sources = yield* AssemblySources
-    const revision = yield* sources.historyRevision(target.parentSlotId, historyStart.depth)
+    const revision = yield* sources.historyRevision(historyLeafOf(target), historyStart.depth)
     let snapshot: ContextSnapshot = {
       schema: 1,
       ...(assembly.contextBudget ? { contextBudget: assembly.contextBudget } : {}),

@@ -7,9 +7,10 @@ import type { Doc } from "@rp/shared/library.ts"
 import { FoldableEvent, foldState, noteSwitches } from "@rp/shared/state.ts"
 import { Effect, Predicate, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
-import { onPath } from "./forks.ts"
+import { displayEndOf } from "./displayPath.ts"
+import { onForkPath } from "./forks.ts"
 import { NotFound } from "./ops.ts"
-import { stateEventRowsOnPath } from "./stateRead.ts"
+import { stateEventRowsThrough } from "./stateRead.ts"
 import { sharedNote } from "./sharedNotes.ts"
 
 const decodeEvent = Schema.decodeUnknownSync(FoldableEvent)
@@ -36,11 +37,18 @@ export const previewForkNotes = Effect.fnUntraced(function* (
   if (atSlotId !== null) {
     const [live] =
       yield* sql`SELECT id FROM slots WHERE id = ${atSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
-    if (!live || !(yield* onPath(sql, chatId, fork.tip_slot_id, atSlotId)))
+    if (!live || !(yield* onForkPath(sql, chatId, fork, atSlotId)))
       return yield* new NotFound({ entity: "slot", id: atSlotId })
   }
-  const thenRows = yield* stateEventRowsOnPath(sql, chatId, atSlotId, fork.id)
-  const nowRows = yield* stateEventRowsOnPath(sql, chatId, fork.tip_slot_id, fork.id)
+  // Then: through the fork point; now: through the fork's display end, which is an inserted
+  // message when one follows the tip (spec/MESSAGE-INSERT.md §2.3).
+  const thenRows = yield* stateEventRowsThrough(sql, chatId, atSlotId, fork.id)
+  const nowRows = yield* stateEventRowsThrough(
+    sql,
+    chatId,
+    (yield* displayEndOf(sql, chatId, fork)) as SlotId | null,
+    fork.id
+  )
   const events = (rows: typeof thenRows) =>
     rows.map((row) => decodeEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }))
   const earlier = new Set(thenRows.map((row) => row.id))

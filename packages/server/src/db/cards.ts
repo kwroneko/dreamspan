@@ -1,4 +1,5 @@
-import { stateEventsOnPath } from "./stateRead.ts"
+import { stateEventsThrough } from "./stateRead.ts"
+import { displayEndOf } from "./displayPath.ts"
 import { forkAt } from "./forkState.ts"
 import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -127,7 +128,16 @@ export const chatCast = Effect.fnUntraced(function* (
   chatId: ChatId,
   leaf: string | null
 ) {
-  const events = yield* stateEventsOnPath(sql, chatId, leaf as SlotId | null, yield* forkAt(sql, chatId, leaf))
+  const fork = yield* forkAt(sql, chatId, leaf)
+  // At the fork's tip, its cast as it stands: through its display end, which an inserted
+  // message after the tip is (spec/MESSAGE-INSERT.md §2.3).
+  const [tip] =
+    fork === null
+      ? []
+      : yield* sql<{ id: string; tip_slot_id: string | null }>`
+    SELECT id, tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId}`
+  const at = tip !== undefined && tip.tip_slot_id === leaf ? yield* displayEndOf(sql, chatId, tip) : leaf
+  const events = yield* stateEventsThrough(sql, chatId, at as SlotId | null, fork)
   const state = foldState(
     yield* withoutPurged(
       sql,

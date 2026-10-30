@@ -69,6 +69,7 @@ import {
   type GenerationType,
   type HistoryEntry,
   characterNoteText,
+  historyLeafOf,
   type NoteInput,
   noteCard,
   type Target,
@@ -151,7 +152,7 @@ const stateStage: AssemblerStage = {
   run: (assembly) =>
     Effect.gen(function* () {
       const sources = yield* AssemblySources
-      const events = yield* sources.events(need(assembly, "target").parentSlotId)
+      const events = yield* sources.events(historyLeafOf(need(assembly, "target")))
       assembly.events = events
       assembly.state = foldState(events.map((e) => e.event))
       return assembly
@@ -281,7 +282,7 @@ const isAuthorNote = (state: ChatState, note: NoteInput) =>
 const summaryOnPath = (notes: ReadonlyArray<NoteInput>, target: Target) =>
   Effect.gen(function* () {
     const sources = yield* AssemblySources
-    const leaf = target.parentSlotId
+    const leaf = historyLeafOf(target)
     const placed = yield* Effect.forEach(notes, (note) =>
       Effect.gen(function* () {
         if (note.doc.kind !== "imported_summary" || note.doc.source_slot_id === undefined) return [note]
@@ -464,15 +465,15 @@ const historyStage: AssemblerStage = {
       const target = need(assembly, "target")
       const cast = need(assembly, "cast")
       const runner = need(assembly, "scripts")
-      assembly.previousHistoryStart = yield* sources.historyStart(target.parentSlotId)
+      assembly.previousHistoryStart = yield* sources.historyStart(historyLeafOf(target))
       assembly.historyRevision = yield* sources.historyRevision(
-        target.parentSlotId,
+        historyLeafOf(target),
         assembly.previousHistoryStart?.depth ?? 0
       )
       const budget = contextBudget(assembly)
       const scripted = new Map<string, Scripted>()
       let entries: ReadonlyArray<HistoryEntry> = []
-      let leaf = target.parentSlotId
+      let leaf = historyLeafOf(target)
       let tokens = 0
       let depth = 0
       while (
@@ -599,6 +600,9 @@ const resolveStage: AssemblerStage = {
                 (a.depth ?? -1) - (b.depth ?? -1)
             )
       for (const entry of need(assembly, "history")) {
+        // A display path's positions include summarized history and deleted gaps. Keep
+        // numbering aligned without changing the message arrays used by older snapshots.
+        if (need(assembly, "target").displayPositions) while (messages.length < entry.depth) messages.push(omitted)
         if (!entry.inContext) {
           messages.push(omitted)
           continue

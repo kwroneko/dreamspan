@@ -150,7 +150,11 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* sql`INSERT INTO rollout_payloads ${sql.insert({ rollout_id: rolloutId, context_snapshot_json: snapshot })}`
         yield* sql`UPDATE rollouts SET
           history_start_slot_id = json_extract(${snapshot}, '$.historyStart.slotId'),
-          history_start_depth = json_extract(${snapshot}, '$.historyStart.depth'),
+          -- Structural, as the candidate walk reads it (historyStart.ts): in a fork with
+          -- insertions the snapshot's depth is the start's display position.
+          history_start_depth = coalesce((SELECT depth FROM slots
+            WHERE id = json_extract(${snapshot}, '$.historyStart.slotId') AND chat_id = ${chatId}),
+            json_extract(${snapshot}, '$.historyStart.depth')),
           history_depth = CASE WHEN json_type(${snapshot}, '$.historyStart') = 'object'
             THEN (SELECT depth FROM slots WHERE id = ${slotId}) ELSE NULL END
           WHERE id = ${rolloutId}`

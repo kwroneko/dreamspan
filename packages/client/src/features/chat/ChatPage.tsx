@@ -52,6 +52,7 @@ import type { CSSProperties } from "react"
 import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
+import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
@@ -61,24 +62,6 @@ const END_PX = 48
 const SUMMARIZED: ContextMark = {
   kind: "summarized",
   reason: "Summarized: a summary stands in for this message in the context."
-}
-
-/**
- * Where the divider between summarized and verbatim history goes: the index among `entries`
- * it goes before (entries.length: after the last), or null when the loaded window doesn't
- * hold the boundary.
- */
-export function boundaryIndex(view: ChatView): number | null {
-  const lcm = view.lcm
-  if (lcm === null || !lcm.enabled || lcm.leafSlotId !== view.leafSlotId) return null
-  const { entries } = view
-  if (entries.length === 0) return null
-  let at = entries.findIndex((e) => e.depth > lcm.cursorDepth)
-  if (at < 0) at = entries.length
-  // Before the loaded window, or after it with more below: not here.
-  if (at === 0 && view.older !== null) return null
-  if (at === entries.length && view.newer !== null) return null
-  return at
 }
 
 function MessageList({
@@ -121,12 +104,14 @@ function MessageList({
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
   const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
-  const through = lcm ? (lcm.cursorDepth < 0 ? null : lcm.cursorDepth) : (history?.summarizedThrough ?? null)
+  // The summary cursor and the history start are positions on the fork's display path.
+  const cursor = lcm === null ? null : (lcm.cursorPosition ?? lcm.cursorDepth)
+  const through = cursor === null ? (history?.summarizedThrough ?? null) : cursor < 0 ? null : cursor
   const outOfContext = (entry: PathEntry) =>
     !entry.contextExcluded &&
     history?.historyStart != null &&
-    entry.depth < history.historyStart.depth &&
-    entry.depth > (through ?? -1)
+    placeOf(entry) < history.historyStart.depth &&
+    placeOf(entry) > (through ?? -1)
   const budget = history?.budget
   /** Why a message left the context, said the same way on each (DESIGN §5.5). */
   const droppedReason = history?.historyStart
@@ -141,7 +126,7 @@ function MessageList({
   const contextOf = (entry: PathEntry): ContextMark | null =>
     entry.contextExcluded
       ? null
-      : through !== null && entry.depth <= through
+      : through !== null && placeOf(entry) <= through
         ? SUMMARIZED
         : outOfContext(entry)
           ? droppedMark
@@ -152,10 +137,12 @@ function MessageList({
   if (budget && entries.length > 0) {
     const start = history.historyStart
     if (start && (entries.some(outOfContext) || (view.older !== null && start.depth > (through ?? -1) + 1))) {
-      const at = entries.findIndex((e) => !e.contextExcluded && e.depth >= start.depth && e.depth > (through ?? -1))
-      if (at < 0) {
+      const first = entries.findIndex(
+        (e) => !e.contextExcluded && placeOf(e) >= start.depth && placeOf(e) > (through ?? -1)
+      )
+      if (first < 0) {
         if (view.newer === null) historyDivider = entries.length
-      } else if (at > 0 || entries[at]!.depth === start.depth) historyDivider = at
+      } else if (first > 0 || placeOf(entries[first]!) === start.depth) historyDivider = first
     } else if (budget.nonHistoryTokens + budget.responseReserve > budget.maximum && view.newer === null) {
       historyDivider = entries.length
     }

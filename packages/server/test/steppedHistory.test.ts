@@ -1,8 +1,15 @@
 import { assert, describe, it } from "@effect/vitest"
+import { readFileSync } from "node:fs"
+import { NewVersion, type ForkId, type SlotId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import { uuidv7 } from "@rp/shared/id.ts"
+import type { ConnectionId } from "@rp/shared/providers.ts"
 import { Effect } from "effect"
+import * as Database from "../src/db/Database.ts"
+import { tempDir } from "./support/tempDir.ts"
 import { cacheIdentity } from "../src/providers/cacheIdentity.ts"
 import { markWireSources, wireContext } from "../src/assembler/wire.ts"
-import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { type ContextSnapshot, generationOf, type Source } from "../src/assembler/types.ts"
 import { tokensOf } from "../src/assembler/st.ts"
 import { prefixChange, lastBreakpoint } from "../src/assembler/warmth.ts"
 import { importStPreset } from "../src/formats/preset.ts"
@@ -792,5 +799,237 @@ describe("stepped history", () => {
       assert.strictEqual(error._tag, "AssemblyFailed")
       if (error._tag === "AssemblyFailed") assert.strictEqual(error.reason, "budget")
     })
+  )
+})
+
+// Over the database: the sources read the display path by position (spec/MESSAGE-INSERT.md §3.2).
+const database = () =>
+  Database.layer({ dataDir: tempDir("stepped-insert"), readers: 1, allowNetworkFs: false, workers: "source" })
+const NOW = Date.UTC(2026, 0, 1)
+const storedPreset = importStPreset(
+  readFileSync(new URL("fixtures/presets/default.json", import.meta.url), "utf8")
+).document!
+
+describe("stepped history with inserted messages", () => {
+  it.live(
+    "an insertion before the start keeps the prefix; one after it cuts nothing; deleting one is a reduction",
+    () =>
+      Effect.gen(function* () {
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "ana" })).id as UserId
+        const entity = (kind: "card" | "preset", label: string, doc: object) =>
+          writer.CreateEntity({
+            userId,
+            kind,
+            label,
+            subtitle: "",
+            doc: doc as never,
+            schemaVersion: 1,
+            origin: "user",
+            sourcePath: null
+          })
+        const mira = yield* entity("card", "Mira", cardDoc("Mira"))
+        const steps = yield* entity("preset", "Steps", {
+          ...storedPreset,
+          samplers: { ...storedPreset.samplers, openai_max_context: 500, openai_max_tokens: 40 }
+        })
+        yield* writer.ChangeGenerationDefaults({ userId, change: { preset: steps.ref.id as never } })
+        const connectionId = uuidv7() as ConnectionId
+        yield* writer.CreateConnection({
+          userId,
+          connectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Steps",
+            baseUrl: null,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({ userId, connectionId, key: "steps", overrides: { context: 500 } })
+        yield* writer.ChangeGenerationDefaults({
+          userId,
+          change: { model: { connection: connectionId, model: model.id } as never }
+        })
+        const chat = yield* writer.CreateChat({
+          userId,
+          kind: "rp",
+          status: "active",
+          title: "Steps",
+          participants: [mira.entityId],
+          greeting: null
+        })
+        const main = chat.currentForkId as ForkId
+        yield* writer.AddStateEvent({
+          userId,
+          chatId: chat.id,
+          slotId: null,
+          versionId: null,
+          scope: null,
+          data: { key: "lcm.settings", value: { enabled: false } }
+        })
+        const version = (content: string, generating = false, macroMode: "verbatim" | "template" = "verbatim") =>
+          new NewVersion({
+            speakerEntityId: null,
+            writer: generating ? "model" : "human",
+            content,
+            status: generating ? "generating" : "complete",
+            macroMode,
+            origin: generating ? "generated" : "user_written"
+          })
+        const send = (
+          forkId: ForkId,
+          parent: SlotId | null,
+          content = "u".repeat(100),
+          macroMode: "verbatim" | "template" = "verbatim"
+        ) =>
+          Effect.map(
+            writer.AppendMessage({
+              userId,
+              chatId: chat.id,
+              forkId,
+              parentSlotId: parent,
+              branch: false,
+              commitDraft: null,
+              version: version(content, false, macroMode)
+            }),
+            (m) => m.slotId
+          )
+        /** A reply generated at the end of `forkId`, its context recorded as a rollout's. */
+        const generate = (forkId: ForkId, parent: SlotId) =>
+          Effect.gen(function* () {
+            const posted = yield* writer.AppendMessage({
+              userId,
+              chatId: chat.id,
+              forkId,
+              parentSlotId: parent,
+              branch: false,
+              commitDraft: null,
+              version: version("", true)
+            })
+            const { snapshot: json } = yield* reader.AssembleContext({
+              userId,
+              chatId: chat.id,
+              forkId,
+              slotId: posted.slotId,
+              versionId: posted.version.id,
+              now: NOW,
+              timeZone: "UTC",
+              frozen: null
+            })
+            const snapshot = JSON.parse(json) as ContextSnapshot
+            const gen = generationOf(snapshot)
+            const rolloutId = uuidv7()
+            yield* writer.StartRollout({
+              userId,
+              chatId: chat.id,
+              forkId,
+              slotId: posted.slotId,
+              versionId: posted.version.id,
+              rolloutId,
+              leafSlotId: parent,
+              connectionId,
+              modelId: model.id,
+              snapshot: json,
+              issues: gen.issues,
+              variables: gen.variables,
+              frozenMessages: []
+            })
+            yield* writer.SaveGeneration({
+              userId,
+              versionId: posted.version.id,
+              content: "r".repeat(100),
+              status: "complete",
+              error: null
+            })
+            yield* writer.FinishRollout({
+              userId,
+              versionId: posted.version.id,
+              rolloutId,
+              status: "completed",
+              error: null
+            })
+            return { slot: posted.slotId, snapshot }
+          })
+        const insert = (forkId: ForkId, anchor: SlotId, content: string) =>
+          Effect.gen(function* () {
+            const { entry } = yield* reader.GetSlot({ userId, slotId: anchor, forkId })
+            const made = yield* writer.InsertMessage({
+              userId,
+              chatId: chat.id,
+              forkId,
+              anchorSlotId: anchor,
+              expectedRowVersion: entry.rowVersion,
+              body: { _tag: "Write", speaker: null, content }
+            })
+            return made.slotId
+          })
+        const texts = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => m.content)
+        const labelOf = (source: Source) => ({ label: source.kind === "message" ? source.slot : source.kind })
+
+        // Grow the chat until the history is cut, and stop right after a cut, with room to spare.
+        const path: Array<SlotId> = [yield* send(main, null)]
+        let last = yield* generate(main, path[0]!)
+        path.push(last.slot)
+        while (!(last.snapshot.historyMove === "maximum" && last.snapshot.historyStart!.depth >= 4)) {
+          path.push(yield* send(main, last.slot))
+          last = yield* generate(main, path.at(-1)!)
+          path.push(last.slot)
+          assert.isBelow(path.length, 80)
+        }
+        const start = last.snapshot.historyStart!
+        assert.strictEqual(start.slotId, path[start.depth])
+        const fork = (at: SlotId) =>
+          Effect.map(writer.CreateFork({ userId, chatId: chat.id, fromForkId: main, atSlotId: at }), (f) => f.fork.id)
+
+        // Before the start: the model doesn't see it, and the start, its revision and the prefix hold.
+        const before = yield* fork(last.slot)
+        const early = yield* insert(before, path[1]!, "Inserted before the start.")
+        const held = yield* generate(before, yield* send(before, last.slot))
+        assert.strictEqual(held.snapshot.historyMove, "unchanged")
+        assert.strictEqual(held.snapshot.historyStart!.slotId, start.slotId)
+        assert.strictEqual(held.snapshot.historyStart!.depth, start.depth + 1, "the start's position")
+        assert.strictEqual(held.snapshot.historyStart!.state!.revision, start.state!.revision, "no reduction")
+        assert.notInclude(texts(held.snapshot), "Inserted before the start.")
+        assert.isNull(prefixChange(last.snapshot, held.snapshot, labelOf))
+
+        // After the start: nothing is cut, and the prefix changes from the inserted message on.
+        const after = yield* fork(last.slot)
+        const anchor = path[start.depth + 1]!
+        const late = yield* insert(after, anchor, "Inserted after the start.")
+        // A template after it numbers the messages by position: the last before it is one further on.
+        const shifted = yield* generate(after, yield* send(after, last.slot, "N={{lastMessageId}}", "template"))
+        assert.include(texts(shifted.snapshot), `N=${path.length}`)
+        assert.strictEqual(shifted.snapshot.historyMove, "unchanged")
+        assert.deepStrictEqual(shifted.snapshot.historyStart!.slotId, start.slotId)
+        assert.strictEqual(shifted.snapshot.historyStart!.depth, start.depth)
+        const sent = texts(shifted.snapshot)
+        const at = sent.indexOf("Inserted after the start.")
+        assert.isAbove(at, 0)
+        assert.deepStrictEqual(sent.slice(0, at), texts(last.snapshot).slice(0, at))
+        assert.strictEqual(prefixChange(last.snapshot, shifted.snapshot, labelOf)!.reason, `${late} was inserted.`)
+        // The inserted message is numbered by its place: the one after it moves down by one.
+        const entries = shifted.snapshot.sources!.history.flatMap((w) => w.entries)
+        const placed = entries.find((e) => e.slotId === late)!
+        assert.isTrue(placed.inserted)
+        assert.strictEqual(entries.find((e) => e.slotId === anchor)!.depth + 1, placed.depth)
+        assert.strictEqual(entries.find((e) => e.slotId === path[start.depth + 2])!.depth, placed.depth + 1)
+        // The other forks are as they were: the main fork's next reply holds its start and prefix.
+        const mainNext = yield* generate(main, yield* send(main, last.slot))
+        assert.deepStrictEqual(mainNext.snapshot.historyStart!.slotId, start.slotId)
+        assert.notInclude(texts(mainNext.snapshot), "Inserted after the start.")
+        assert.notInclude(texts(mainNext.snapshot), "Inserted before the start.")
+
+        // Deleting the message inserted before the start is a reduction there, which may restore.
+        yield* writer.DeleteMessage({ userId, slotId: early, forkId: before })
+        const reduced = yield* generate(before, yield* send(before, held.slot))
+        assert.strictEqual(reduced.snapshot.historyStart!.state!.revision, start.state!.revision + 1)
+        assert.notInclude(texts(reduced.snapshot), "Inserted before the start.")
+      }).pipe(Effect.provide(database()))
   )
 })

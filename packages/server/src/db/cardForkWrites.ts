@@ -9,9 +9,9 @@ import { Effect, Schema } from "effect"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import { noteSwitchesOnPath, stateEventsOnPath } from "./stateRead.ts"
+import { noteSwitchesOnPath, stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { onPath } from "./forks.ts"
+import { onForkPath } from "./forks.ts"
 import type { LibrarySteps } from "./editorWrites.ts"
 import { toLibraryRef } from "./library.ts"
 import { NotFound, RefOperationRefused, type WriteOps } from "./ops.ts"
@@ -146,9 +146,9 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
     ForkCardForChat: ({ userId, chatId, slotId, forkId, entityId, ...names }) =>
       Effect.gen(function* () {
         const fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
-        if (slotId !== null && !(yield* onPath(sql, chatId, fork.tip_slot_id, slotId)))
+        if (slotId !== null && !(yield* onForkPath(sql, chatId, fork, slotId)))
           return yield* new NotFound({ entity: "fork position", id: slotId })
-        const rows = yield* stateEventsOnPath(sql, chatId, slotId, fork.id)
+        const rows = yield* stateEventsThrough(sql, chatId, slotId, fork.id)
         const events = yield* Effect.forEach(rows, (row) =>
           Schema.decodeUnknownEffect(FoldableEvent)({
             scope: row.scope,
