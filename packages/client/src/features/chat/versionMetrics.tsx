@@ -3,73 +3,13 @@
 // requests behind its text (retries, and the versions it continued), from the usage ledger
 // (`GetVersionMetrics`). Its tooltip, and the panel a click opens, give time to first token,
 // reasoning time, tokens per second and the last request apart. Unknown figures say so.
-import type { PathEntry, VersionId } from "@rp/shared/chat.ts"
-import { MAX_METRICS_VERSIONS, type VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import type { PathEntry } from "@rp/shared/chat.ts"
+import type { VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Popover } from "../../ui/Popover.tsx"
 import { messageHeaderDetails } from "./presentation.tsx"
+import { MetricsLoader } from "./metricsLoader.ts"
 import type { ChatSession } from "./session.ts"
-
-/** One read per frame for the messages that asked; again when a version's status changes. */
-class MetricsLoader {
-  private readonly loaded = new Map<VersionId, { readonly key: string; readonly metrics: VersionMetrics | null }>()
-  private readonly wanted = new Map<VersionId, string>()
-  private readonly listeners = new Set<() => void>()
-  private scheduled = false
-  private readonly session: ChatSession
-  constructor(session: ChatSession) {
-    this.session = session
-  }
-
-  subscribe = (listener: () => void) => {
-    this.listeners.add(listener)
-    return () => void this.listeners.delete(listener)
-  }
-  /** Undefined until read for this key; null when the version has none. */
-  peek(id: VersionId, key: string) {
-    const entry = this.loaded.get(id)
-    return entry?.key === key ? entry.metrics : undefined
-  }
-  want(id: VersionId, key: string) {
-    if (this.loaded.get(id)?.key === key || this.wanted.get(id) === key) return
-    this.wanted.set(id, key)
-    if (this.scheduled) return
-    this.scheduled = true
-    queueMicrotask(() => void this.read())
-  }
-  /**
-   * The version can finish a moment before its ledger row closes: a read that still found
-   * the request running is read again, a few times, a second apart.
-   */
-  private readonly rereads = new Map<VersionId, number>()
-  reread(id: VersionId, key: string) {
-    const n = this.rereads.get(id) ?? 0
-    if (n >= 5) return
-    this.rereads.set(id, n + 1)
-    setTimeout(() => {
-      if (this.loaded.get(id)?.key !== key) return
-      this.loaded.delete(id)
-      this.want(id, key)
-    }, 1000)
-  }
-  private async read() {
-    this.scheduled = false
-    const batch = [...this.wanted].slice(0, MAX_METRICS_VERSIONS)
-    for (const [id] of batch) this.wanted.delete(id)
-    if (this.wanted.size > 0) {
-      this.scheduled = true
-      queueMicrotask(() => void this.read())
-    }
-    const outcome = await this.session.call((client) =>
-      client("GetVersionMetrics", { versionIds: batch.map(([id]) => id) })
-    )
-    // A failed read leaves them unread; the next status change asks again.
-    if (!outcome.ok) return
-    const found = new Map(outcome.value.map((metrics) => [metrics.versionId, metrics]))
-    for (const [id, key] of batch) this.loaded.set(id, { key, metrics: found.get(id) ?? null })
-    for (const listener of this.listeners) listener()
-  }
-}
 
 const loaders = new WeakMap<ChatSession, MetricsLoader>()
 const loaderOf = (session: ChatSession) => {
@@ -86,7 +26,7 @@ export const metricsSummary = (m: VersionMetrics) => {
   const time = m.elapsedMs === null ? "time unknown" : seconds(m.elapsedMs)
   const ended = m.requests - (m.running ? 1 : 0)
   const tokens =
-    ended > 0 && m.outputUnknown === ended
+    ended === 0 || m.outputUnknown === ended
       ? "tokens unknown"
       : `${m.estimated ? "~" : ""}${count(m.output)}${m.outputUnknown > 0 ? "+" : ""} tokens`
   return `${time} · ${tokens}`
@@ -101,13 +41,16 @@ export const metricsDetails = (m: VersionMetrics, hasReasoning: boolean): Readon
     m.streamingMs !== null && m.streamingMs > 0 && m.output > 0 && m.outputUnknown === 0
       ? `${(m.output / (m.streamingMs / 1000)).toFixed(1)} tokens/s${m.estimated ? " (estimated count)" : ""}`
       : "unknown"
+  const ended = m.requests - (m.running ? 1 : 0)
   const output =
-    m.outputUnknown > 0
-      ? `${count(m.output)} counted; ${m.outputUnknown === 1 ? "1 request" : `${m.outputUnknown} requests`} reported none`
-      : `${count(m.output)}${m.estimated ? " (estimated: the provider reported no count)" : ""}`
+    ended === 0 || m.outputUnknown === ended
+      ? "unknown (no request reported a count)"
+      : m.outputUnknown > 0
+        ? `${count(m.output)} counted${m.estimated ? " (estimated)" : ""}; ${m.outputUnknown === 1 ? "1 request" : `${m.outputUnknown} requests`} reported none`
+        : `${count(m.output)}${m.estimated ? " (estimated)" : ""}`
   const rows: Array<[string, string]> = [
     ["Generation time", m.elapsedMs === null ? "unknown" : seconds(m.elapsedMs)],
-    ["Time to first token", firstToken],
+    ["Time to first token", `${firstToken}${m.requests > 1 ? " (last request)" : ""}`],
     ["Output tokens", output],
     ["Speed", rate]
   ]
@@ -116,11 +59,13 @@ export const metricsDetails = (m: VersionMetrics, hasReasoning: boolean): Readon
     rows.push(["Reasoning time", "not recorded"])
   }
   if (m.requests > 1) {
-    rows.push(["Requests", `${m.requests} (retries and the versions it continued)`])
+    rows.push(["Requests", `${m.requests} (includes original generation, retries and continuations)`])
     rows.push([
       "Last request",
       `${last.endedAt === null ? "running" : seconds(last.endedAt - last.startedAt)}, ${
-        last.output === null ? "tokens unknown" : `${count(last.output)} tokens`
+        last.output === null
+          ? "tokens unknown"
+          : `${count(last.output)} tokens${last.usageSource === "estimated" ? " (estimated)" : ""}`
       }`
     ])
   }
@@ -137,10 +82,6 @@ function Metrics({ entry, session, generating }: { entry: PathEntry; session: Ch
   useEffect(() => {
     if (wanted) loader.want(version.id, key)
   }, [loader, wanted, version.id, key])
-  const stale = wanted && metrics?.running === true
-  useEffect(() => {
-    if (stale) loader.reread(version.id, key)
-  }, [loader, stale, version.id, key])
   if (!wanted || !metrics) return null
   const rows = metricsDetails(metrics, Boolean(version.reasoning))
   const summary = metricsSummary(metrics)
@@ -158,7 +99,7 @@ function Metrics({ entry, session, generating }: { entry: PathEntry; session: Ch
         </div>
       ))}
     >
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+      <dl className="grid min-h-0 grid-cols-2 gap-x-3 gap-y-1 overflow-y-auto text-sm">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted">{label}</dt>

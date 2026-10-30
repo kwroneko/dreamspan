@@ -26,7 +26,7 @@ describe("version metrics", () => {
       elapsedMs: 2_500 + 1_200,
       streamingMs: 2_000 + 1_000,
       output: 24,
-      reasoning: 2,
+      reasoning: null,
       outputUnknown: 0,
       estimated: true
     })
@@ -48,5 +48,10 @@ describe("version metrics", () => {
       outputUnknown: 1,
       estimated: false
     })
+  })
+  it("does not report a speed or reasoning total from incomplete request measurements", () => {
+    const metrics = versionMetricsOf(id, [request({ reasoning: 2 }), request({ firstTokenAt: null, reasoning: null })])
+    expect(metrics.streamingMs).toBeNull()
+    expect(metrics.reasoning).toBeNull()
   })
 })

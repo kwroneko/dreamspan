@@ -63,11 +63,30 @@ describe("version metrics display", () => {
     ])
     expect(metricsSummary(metrics)).toBe("16.3 s · 445 tokens")
     expect(details(metrics)).toMatchObject({
-      "Time to first token": "0.5 s",
-      Requests: "2 (retries and the versions it continued)",
+      "Time to first token": "0.5 s (last request)",
+      Requests: "2 (includes original generation, retries and continuations)",
       "Last request": "4.0 s, 100 tokens"
     })
     const partly = versionMetricsOf(id, [request(), request({ output: null, usageSource: "none" })])
     expect(metricsSummary(partly)).toBe("24.6 s · 345+ tokens")
+  })
+  it("labels a partial estimate and an estimated last request, and keeps unknown speed unknown", () => {
+    const metrics = versionMetricsOf(id, [
+      request({ output: null, firstTokenAt: null, usageSource: "none" }),
+      request({ usageSource: "estimated" })
+    ])
+    expect(details(metrics)["Output tokens"]).toContain("estimated")
+    expect(details(metrics)["Last request"]).toContain("estimated")
+    expect(details(metrics).Speed).toBe("unknown")
+    expect(details(versionMetricsOf(id, [request({ output: null, usageSource: "none" })]))["Output tokens"]).toMatch(
+      /^unknown/
+    )
+  })
+  it("does not show zero tokens while a finished version's ledger is still closing", () => {
+    const pending = versionMetricsOf(id, [
+      request({ status: "running", endedAt: null, output: null, usageSource: "none" })
+    ])
+    expect(metricsSummary(pending)).toBe("time unknown · tokens unknown")
+    expect(details(pending)["Output tokens"]).toMatch(/^unknown/)
   })
 })

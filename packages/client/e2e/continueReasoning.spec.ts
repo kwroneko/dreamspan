@@ -300,7 +300,29 @@ for (const width of [1440, 390]) {
     await metrics.click()
     const panel = page.getByRole("dialog", { name: "Generation" })
     await expect(panel).toContainText("Time to first token")
-    await expect(panel).toContainText("2 (retries and the versions it continued)")
+    await expect(panel).toContainText("2 (includes original generation, retries and continuations)")
+    expect(
+      await panel.locator("dl").evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const popup = element.closest('[role="dialog"]')!.getBoundingClientRect()
+        return (
+          rect.top >= popup.top &&
+          rect.bottom <= popup.bottom &&
+          (element.scrollHeight <= element.clientHeight ||
+            ["auto", "scroll"].includes(getComputedStyle(element).overflowY))
+        )
+      })
+    ).toBe(true)
+    const lastFigures = panel.locator("dd").last()
+    await lastFigures.scrollIntoViewIfNeeded()
+    expect(
+      await lastFigures.evaluate((element) => {
+        const row = element.getBoundingClientRect()
+        const popup = element.closest('[role="dialog"]')!.getBoundingClientRect()
+        return row.top >= popup.top && row.bottom <= popup.bottom
+      })
+    ).toBe(true)
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
     await shoot(page, "08-metrics")
     await page.keyboard.press("Escape")
     // The inspector's usage gives each request's times.
@@ -333,7 +355,7 @@ for (const width of [1440, 390]) {
       const reply = page.getByRole("article").last()
       await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
       await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
-      return reply
+      return page.locator(`article[data-slot="${await reply.getAttribute("data-slot")}"]`)
     }
     const first = await generate()
     const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
@@ -349,6 +371,7 @@ for (const width of [1440, 390]) {
     )
     await expect(page.getByRole("article")).toHaveCount(3)
     const second = await generate()
+    expect(await first.getAttribute("data-slot")).not.toBe(await second.getAttribute("data-slot"))
     for (const reply of [first, second]) {
       const toggle = reply.getByRole("button", { name: /^Reasoning/ })
       if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click()

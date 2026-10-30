@@ -164,7 +164,7 @@ export const VersionMetrics = Schema.Struct({
   running: Schema.Boolean,
   /** Sum of the ended requests' durations (start to end); null when none ended. */
   elapsedMs: Schema.NullOr(Schema.Number),
-  /** Sum of the ended requests' streaming time (first token to end), for tokens/second; null without any. */
+  /** Sum of ended requests' streaming time; null if any first-token time is missing. */
   streamingMs: Schema.NullOr(Schema.Number),
   /** Output tokens of the ended requests that have a count; reasoning tokens are part of them. */
   output: Schema.Int,
@@ -188,9 +188,11 @@ export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<R
     requests: requests.length,
     running: last.status === "running",
     elapsedMs: sum(ended.map((r) => r.endedAt! - r.startedAt)),
-    streamingMs: sum(ended.flatMap((r) => (r.firstTokenAt === null ? [] : [r.endedAt! - r.firstTokenAt]))),
+    streamingMs: ended.some((r) => r.firstTokenAt === null)
+      ? null
+      : sum(ended.map((r) => r.endedAt! - r.firstTokenAt!)),
     output: counted.reduce((total, r) => total + r.output!, 0),
-    reasoning: sum(ended.flatMap((r) => (r.reasoning === null ? [] : [r.reasoning]))),
+    reasoning: ended.some((r) => r.reasoning === null) ? null : sum(ended.map((r) => r.reasoning!)),
     outputUnknown: ended.length - counted.length,
     estimated: counted.some((r) => r.usageSource === "estimated"),
     last

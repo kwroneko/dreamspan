@@ -358,7 +358,7 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
       }).pipe(query("RunContext")),
 
     // A version's generation requests and those of the versions it continued, followed through
-    // `source_version_id` (at most 64 back). Only versions with requests of their own count:
+    // `source_version_id`. UNION deduplicates identities, including any cycle. Only roots with requests count:
     // an edit isn't timed by the reply it was made from.
     VersionMetrics: ({ userId, versionIds }) =>
       Effect.gen(function* () {
@@ -374,14 +374,14 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           reasoning: number | null
           usage_source: RequestFigures["usageSource"]
         }>`
-          WITH RECURSIVE chain(root, id, depth) AS (
-            SELECT v.id, v.id, 0 FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+          WITH RECURSIVE chain(root, id) AS (
+            SELECT v.id, v.id FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
             WHERE v.id IN ${sql.in(ids)} AND c.owner_user_id = ${userId}
               AND EXISTS (SELECT 1 FROM llm_requests q INDEXED BY llm_requests_version
                 WHERE q.version_id = v.id AND q.purpose = 'generation' AND q.owner_user_id = ${userId})
-            UNION ALL
-            SELECT chain.root, v.source_version_id, chain.depth + 1 FROM chain JOIN versions v ON v.id = chain.id
-            WHERE v.source_version_id IS NOT NULL AND chain.depth < 64
+            UNION
+            SELECT chain.root, v.source_version_id FROM chain JOIN versions v ON v.id = chain.id
+            WHERE v.source_version_id IS NOT NULL
           )
           SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
           FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id

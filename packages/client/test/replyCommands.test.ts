@@ -139,3 +139,17 @@ it("cancels an older-message search when its fork, tip, path or cast changes or 
     enable()
   }
 })
+
+it("continues a completed human edit through both the visible action and its shortcut", async () => {
+  const { context, session, view } = setup()
+  const edited = { ...entry, version: { ...entry.version, writer: "human", origin: "edited" } } as PathEntry
+  view.entries = [edited]
+  await invokeMessageAction(
+    "message.continue",
+    { entry: edited, session, report: vi.fn() } as unknown as Parameters<typeof invokeMessageAction>[1],
+    "button"
+  )
+  expect(session.continueVersion).toHaveBeenLastCalledWith(edited, true)
+  expect(runCommandShortcut(key, context)).toBe(true)
+  expect(session.continueVersion).toHaveBeenLastCalledWith(edited, false)
+})

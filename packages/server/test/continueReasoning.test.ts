@@ -258,6 +258,44 @@ describe("continue and reasoning", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("retains the original generation metrics through more than 64 edits", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(provider)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: { prefill: "assistant" }
+      })
+      let entry = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
+      for (let n = 0; n < 65; n++) {
+        entry = yield* api.EditVersion({
+          slotId: entry.slotId,
+          sourceVersionId: entry.version.id,
+          content: `Edit ${n},`,
+          expectedRowVersion: entry.rowVersion
+        })
+      }
+      const continued = yield* api.ContinueVersion({
+        versionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion
+      })
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      const metrics = yield* api.GetVersionMetrics({ versionIds: [version.id, entry.version.id, continued.version.id] })
+      assert.isUndefined(metrics.find((m) => m.versionId === entry.version.id))
+      assert.strictEqual(metrics.find((m) => m.versionId === continued.version.id)!.requests, 2)
+      assert.strictEqual(metrics.find((m) => m.versionId === continued.version.id)!.output, 20)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("continues through Anthropic's trailing assistant message and preserves whitespace in storage", () => {
     const config = testConfig()
     return Effect.gen(function* () {

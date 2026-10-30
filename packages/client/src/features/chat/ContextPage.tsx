@@ -585,7 +585,7 @@ function Inspector({ run }: { run: RunContext }) {
       <Card>
         <CardHeader
           title="Usage"
-          description="What the provider reported, per attempt, and how long each took (first token: from sending to the first text or reasoning)."
+          description="What the provider reported, per attempt, and how long each took (first token: from sending to the first text or reasoning). Reasoning time is not recorded."
         />
         <Usage requests={run.requests} />
       </Card>
