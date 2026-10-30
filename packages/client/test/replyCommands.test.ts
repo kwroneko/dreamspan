@@ -4,6 +4,7 @@ import { chatCommands, runCommandShortcut, type ChatCommandContext } from "../sr
 import { invokeMessageAction, messageActions } from "../src/features/chat/messageActions.tsx"
 import { registerReplyCommands } from "../src/features/chat/replyCommands.ts"
 import { registerMessageActions } from "../src/features/chat/registerMessageActions.tsx"
+import { messageVersions } from "../src/features/chat/presentation.tsx"
 import type { ChatSession } from "../src/features/chat/session.ts"
 
 vi.hoisted(() => {
@@ -75,4 +76,66 @@ it("editing and saving resolve registered handlers, including disablement", () =
   expect(saveMessageEdit).toHaveBeenCalledOnce()
   disposers.push(chatCommands.disable("message.save"))
   expect(runCommandShortcut({ key: "Enter", ctrlKey: true, metaKey: false }, saving)).toBe(false)
+})
+
+it("targets the current played side, including model-written personas and human-written characters", () => {
+  const { context, view } = setup()
+  const persona = {
+    ...entry,
+    slotId: "persona-turn",
+    side: "assistant",
+    version: { ...entry.version, speakerEntityId: "persona" }
+  } as unknown as PathEntry
+  const character = {
+    ...entry,
+    slotId: "character-turn",
+    side: "user",
+    version: { ...entry.version, writer: "human", speakerEntityId: "character" }
+  } as unknown as PathEntry
+  view.entries = [persona, character]
+  Object.assign(view, { cast: { participants: ["persona", "character"], playedByMe: ["persona"] } })
+  const edit = vi.fn()
+  const step = vi.fn()
+  disposers.push(messageActions.register({ ...messageActions.get("message.edit")!, run: edit }))
+  disposers.push(messageVersions.register({ id: "message.versions", order: 10, component: () => null, step }))
+  expect(runCommandShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false }, context)).toBe(true)
+  expect(edit).toHaveBeenCalledWith(expect.objectContaining({ entry: persona }), "keyboard")
+  expect(runCommandShortcut({ key: "ArrowRight", ctrlKey: false, metaKey: false }, context)).toBe(true)
+  expect(step).toHaveBeenCalledWith(expect.objectContaining({ entry: character }), 1)
+})
+
+it("finds your last message beyond the loaded window through the same registered edit action", async () => {
+  const { context, view, session } = setup()
+  const own = { ...entry, slotId: "older-own", side: "user", version: { ...entry.version, writer: "human" } }
+  Object.assign(view, { older: "older-page", pathRevision: 1, leafSlotId: "synthetic" })
+  const call = vi.fn(async () => ({ ok: true, value: { entries: [own], older: null } }))
+  Object.assign(session, { call })
+  const onJump = vi.fn()
+  const edit = vi.fn()
+  disposers.push(messageActions.register({ ...messageActions.get("message.edit")!, run: edit }))
+  expect(runCommandShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false }, { ...context, onJump })).toBe(true)
+  await vi.waitFor(() => expect(edit).toHaveBeenCalledWith(expect.objectContaining({ entry: own }), "keyboard"))
+  expect(onJump).toHaveBeenCalledWith("older-own")
+  expect(call).toHaveBeenCalledOnce()
+})
+
+it("cancels an older-message search when its fork, tip, path or cast changes or editing is disabled", async () => {
+  for (const patch of [{ forkId: "other" }, { leafSlotId: "other" }, { pathRevision: 2 }, { cast: {} }, {}]) {
+    const { context, view, session } = setup()
+    const own = { ...entry, side: "user" } as PathEntry
+    Object.assign(view, { older: "older-page", pathRevision: 1, leafSlotId: "synthetic" })
+    const read = Promise.withResolvers<{ ok: true; value: { entries: PathEntry[]; older: null } }>()
+    Object.assign(session, { call: () => read.promise })
+    const edit = vi.fn()
+    const onJump = vi.fn()
+    disposers.push(messageActions.register({ ...messageActions.get("message.edit")!, run: edit }))
+    expect(runCommandShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false }, { ...context, onJump })).toBe(true)
+    Object.assign(session, { snapshot: () => ({ ...view, ...patch }) })
+    const enable = Object.keys(patch).length === 0 ? messageActions.disable("message.edit") : () => {}
+    read.resolve({ ok: true, value: { entries: [own], older: null } })
+    await read.promise
+    expect(edit).not.toHaveBeenCalled()
+    expect(onJump).not.toHaveBeenCalled()
+    enable()
+  }
 })

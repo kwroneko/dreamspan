@@ -30,7 +30,7 @@ import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { castView, modelNameOf, useCast } from "./cast.ts"
+import { castView, messageSide, modelNameOf, useCast } from "./cast.ts"
 import { MessageActions } from "./messageActions.tsx"
 import { Reasoning } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
@@ -534,12 +534,7 @@ export const Message = memo(function Message({
   // Its side as the context reads it (stages.ts `sideOf`): a card the user plays speaks on
   // the user's side, another of the cast on the model's, else the message's own, which its
   // first version sets whichever versions are live (PathEntry.side).
-  const side =
-    speakerId !== null && cast.cast?.playedByMe.includes(speakerId)
-      ? "user"
-      : speakerId !== null && cast.cast?.participants.includes(speakerId)
-        ? "assistant"
-        : entry.side
+  const side = messageSide(entry, cast.cast, speakerId)
   const model = side === "assistant"
   // A model writes its versions: a reply, or a turn on the user's side the model wrote (an
   // impersonation), so it has Regenerate and › generates another, written as its speaker.

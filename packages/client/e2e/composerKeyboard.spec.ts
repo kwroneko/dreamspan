@@ -153,6 +153,92 @@ test("Enter sends is visible, persists and controls saved and pending composers"
   await page.getByRole("radio", { name: /^Automatic/ }).click()
 })
 
+test("edit-own and version shortcuts follow the cast like the visible message controls", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await setup()
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  await expect(page.getByRole("article").last().getByText("generating", { exact: true })).toHaveCount(0)
+  const character = await admin((api) =>
+    Effect.gen(function* () {
+      const persona = yield* api.CreateCard({ label: "Keyboard persona", name: "Keyboard persona" })
+      const character = yield* api.CreateCard({ label: "Keyboard character", name: "Keyboard character" })
+      for (const card of [persona, character])
+        yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      yield* api.ChangeCast({
+        chatId: chat.id,
+        slotId: null,
+        change: { _tag: "PlayedByMe", entityIds: [persona.entityId] }
+      })
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+      yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: path.entries.at(-1)!.slotId,
+        branch: false,
+        speakerEntityId: persona.entityId
+      })
+      return character
+    })
+  )
+  await expect(page.getByRole("article")).toHaveCount(2)
+  await expect(page.getByRole("article").last().getByText("generating", { exact: true })).toHaveCount(0)
+  await admin((api) =>
+    Effect.gen(function* () {
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: path.entries.at(-1)!.slotId,
+        branch: false,
+        speakerEntityId: character.entityId,
+        content: "A human-written character turn"
+      })
+    })
+  )
+  await expect(page.getByRole("article")).toHaveCount(3)
+  const own = page.getByRole("article").nth(1)
+  const last = page.getByRole("article").last()
+  await expect(own).toHaveAccessibleName("Your message")
+  await expect(last).toHaveAccessibleName("Reply")
+  const box = page.getByTestId("composer")
+  await box.press("Control+ArrowUp")
+  await expect(own.getByRole("textbox", { name: "Message text", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await box.focus()
+  await box.blur()
+  const requests = provider.requests.length
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(() => provider.requests.length).toBe(requests + 1)
+  await expect(last.getByText("generating", { exact: true })).toHaveCount(0)
+  await expect(last.locator(".markdown").last()).toContainText("The ledger")
+  // The persona turn must still be editable after it falls outside the initial 60-row window.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const path = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 1 })
+      let parentSlotId = path.entries.at(-1)!.slotId
+      for (let i = 0; i < 65; i++) {
+        const sent = yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId,
+          branch: false,
+          speakerEntityId: character.entityId,
+          content: `Synthetic character turn ${i}`
+        })
+        if (sent._tag !== "Posted") throw new Error("Expected a posted fixture turn")
+        parentSlotId = sent.entry.slotId
+      }
+    })
+  )
+  await page.reload()
+  await expect(page.getByRole("article").filter({ hasText: "Keyboard persona" })).toHaveCount(0)
+  await box.press("Control+ArrowUp")
+  await expect(
+    page
+      .getByRole("article", { name: "Your message", exact: true })
+      .filter({ hasText: "Keyboard persona" })
+      .getByRole("textbox", { name: "Message text", exact: true })
+  ).toBeVisible()
+})
+
 test("composer and Enter sends display at desktop and phone widths in both themes", async ({ page }) => {
   test.skip(!process.env.RP_SCREENS, "Screenshot capture requested through RP_SCREENS")
   const { mkdirSync } = await import("node:fs")

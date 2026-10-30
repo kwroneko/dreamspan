@@ -195,15 +195,15 @@ export function Composer({
   // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
   // reply order. Waiting for those reads would disable the visible button while Enter works.
   const ready =
-    editing !== null
+    viewPrefs.ready &&
+    (editing !== null
       ? !view.loading && editStillShown(editing, view)
-      : viewPrefs.ready &&
-        !attachmentInput?.busy &&
+      : !attachmentInput?.busy &&
         textReady &&
         choice.loaded &&
         !choice.saving &&
         choice.draftId === draftId &&
-        turnEntries !== null
+        turnEntries !== null)
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
