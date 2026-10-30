@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 36
+export const ASSEMBLER_VERSION = 37
 
 export type Role = "system" | "user" | "assistant"
 
@@ -322,6 +322,8 @@ export interface ContextSnapshot {
   readonly cardOverrides?: ReadonlyArray<CardOverride>
   /** Enabled preset prompts their condition left out this turn; absent in older snapshots. */
   readonly skippedPrompts?: ReadonlyArray<Source>
+  /** The path's images the request leaves out and why (`images` stage); absent in older snapshots. */
+  readonly imagesLeftOut?: import("@rp/shared/inspectorApi.ts").ImagesLeftOut
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins
@@ -476,9 +478,14 @@ export interface Target {
   readonly continues?: { readonly version: string; readonly text: string } | undefined
 }
 
+/** An image of a history message; `excluded`: the fork took it out of the context (SetImageExcluded). */
+export interface HistoryImage extends RequestImage {
+  readonly excluded?: true
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
-  readonly images?: ReadonlyArray<RequestImage>
+  readonly images?: ReadonlyArray<HistoryImage>
   readonly slotId: string
   readonly versionId: string
   readonly depth: number

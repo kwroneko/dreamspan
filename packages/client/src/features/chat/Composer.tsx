@@ -121,7 +121,10 @@ function History({ draft }: { draft: ComposerDraft }) {
 export interface AttachmentInput {
   readonly count: number
   readonly busy: boolean
+  /** What's attached, under the composer: shown only when there's something to show. */
   readonly editor: ReactNode
+  /** The control that attaches (a paperclip), in the composer's action row. */
+  readonly action?: ReactNode
   readonly restore: (images: MessageImages) => void
   readonly capture: () => {
     readonly images: MessageImages
@@ -562,6 +565,7 @@ export function Composer({
           {/* Under the text box when it's narrow, beside it otherwise. */}
           <div className="ml-auto flex items-end gap-1">
             <span className="hidden @min-[640px]:inline-flex">{history}</span>
+            {attachmentInput?.action}
             <ComposerControls placement="actions" context={controls} />
           </div>
         </div>

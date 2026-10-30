@@ -6,7 +6,7 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, MessageImages, SlotId, VersionId } from "@rp/shared/chat.ts"
 import { Branch, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -26,6 +26,7 @@ import {
   slotDeletedIn,
   versionDeletedIn,
   versionDeletedInSql,
+  imageExcludedSql,
   withFork
 } from "./forkState.ts"
 import { pathSegments } from "./pathSegments.ts"
@@ -89,6 +90,8 @@ const pathColumns = (fork: string) => `${shownVersionColumns}, s.lane_id, s.pare
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,
+  (SELECT json_group_array(a.media_id) FROM version_attachments a
+    WHERE a.version_id = v.id AND ${imageExcludedSql(fork, "o.id", "a.media_id")}) AS excluded_images,
   ${branchLabel("s")} AS branch_name, s.fork_id AS slot_fork_id, ${startsFork("s")} AS starts_fork_id,
   (s.deleted_at IS NOT NULL OR s.purged_at IS NOT NULL OR coalesce(dso.flag, 0) = 1) AS slot_deleted,
   (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL AND NOT ${versionDeletedInSql(fork, "c")})
@@ -667,8 +670,12 @@ export const makeReadHandlers = Effect.gen(function* () {
           AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND v.deleted_at IS NULL AND v.purged_at IS NULL
           AND v.writer='human'`
         if (!owned) return yield* new NotFound({ entity: "human version", id: versionId })
-        return yield* sql<{ id: number; content: string; at: number }>`SELECT id, content, replaced_at AS at
+        const rows = yield* sql<{ id: number; content: string; at: number; images_json: string | null }>`
+          SELECT id, content, replaced_at AS at, images_json
           FROM version_history WHERE version_id=${versionId} ORDER BY id DESC`
+        return rows.map(({ images_json, ...row }) =>
+          images_json === null ? row : { ...row, images: JSON.parse(images_json) as MessageImages }
+        )
       }).pipe(query("VersionAmendments")),
 
     GetVersion: ({ userId, versionId }) =>

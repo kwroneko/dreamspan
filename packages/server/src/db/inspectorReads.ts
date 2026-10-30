@@ -217,6 +217,17 @@ export const inspectionInputs = (
       const described = describe(source)
       if (!notSent.some((s) => s.id === described.id)) notSent.push(described)
     }
+    // The path's images it left out, each with its rule: "taken out by you", the last-N limit…
+    for (const image of snapshot.imagesLeftOut?.images ?? [])
+      notSent.push({
+        id: createHash("sha256")
+          .update(JSON.stringify(["image", image.versionId, image.mediaId, image.index]))
+          .digest("hex"),
+        kind: "message",
+        label: `Image ${image.index + 1} of message ${image.depth + 1}: ${image.message}`,
+        slotId: image.slotId,
+        activation: null
+      })
     // Continue's prefill, the message after the assembled ones, is the text it continues.
     const target = snapshot.sources?.target
     if (target?.continues && snapshot.request.prefill !== null) {

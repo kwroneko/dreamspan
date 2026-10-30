@@ -211,7 +211,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               : null,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
-          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth
+          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
+          ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut })
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }

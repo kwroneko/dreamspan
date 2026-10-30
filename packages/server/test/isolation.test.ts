@@ -1158,6 +1158,24 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.StopGeneration({ versionId: owner.chat.versionId }), "NotFound")
       })
   },
+  SetImageExcluded: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(
+          actor.api.SetImageExcluded({ versionId: owner.chat.versionId, mediaId: "m", excluded: true }),
+          "NotFound"
+        ),
+        refused(
+          actor.api.SetImageExcluded({
+            versionId: actor.chat.versionId,
+            mediaId: "m",
+            forkId: owner.chat.forkId,
+            excluded: true
+          }),
+          "NotFound"
+        )
+      ]).pipe(Effect.asVoid)
+  },
   SetMessageHidden: {
     probe: (actor, owner) =>
       refused(actor.api.SetMessageHidden({ slotId: owner.chat.slotId, hidden: true }), "NotFound")
