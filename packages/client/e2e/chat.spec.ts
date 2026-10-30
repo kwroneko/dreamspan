@@ -187,7 +187,9 @@ test("another user can't open someone's chat", async ({ browser }) => {
   await dana.goto(`${server().url}/chats`)
   await expect(dana.getByText(/^No chats yet\./)).toBeVisible()
   await dana.goto(`${server().url}/chats/${chat.id}`)
-  await expect(dana.getByRole("alert")).toContainText("doesn't exist")
+  // Attachment drafts can report their own load error too; check the chat's
+  // access refusal itself, while retaining the private-title assertion below.
+  await expect(dana.getByRole("alert").filter({ hasText: /^This chat doesn't exist any more\.$/ })).toBeVisible()
   await expect(dana.getByText("Private")).toHaveCount(0)
 })
 
