@@ -13,7 +13,9 @@ import { Effect } from "effect"
 import { SqlClient, type Statement } from "effect/sql"
 import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
-import { pathWindow, stateEventsOnPath } from "../src/db/reads.ts"
+import { pathPieces, placedInsertionsSql, positionOf, slotPlace } from "../src/db/displayPath.ts"
+import { pathSegments } from "../src/db/pathSegments.ts"
+import { displayWindow, pathWindow, stateEventsOnPath } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
 
 /** Branch points: below each of these path depths, the path takes the second child. */
@@ -368,4 +370,182 @@ describe("paths by chain segment", () => {
       )
     })
   )
+
+  it.live(
+    "a fork with 1,000 insertions pages by position, and its reads stay flat from 2,000 to 100,000 slots",
+    () =>
+      Effect.gen(function* () {
+        const measure = (f: Fixture) =>
+          Effect.gen(function* () {
+            const expected = withInsertions(f)
+            const tip = `p-${f.length}`
+            const { pieces, at1100 } = yield* Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const pieces = yield* pathPieces(sql, f.chatId, INSERT_FORK, tip)
+              const place = (yield* slotPlace(sql, f.chatId, "p-1100"))!
+              return { pieces, at1100: positionOf(pieces, place)! }
+            }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(f.dataDir), readonly: true })))
+            assert.strictEqual(at1100, 1100 + INSERTIONS)
+            const end = expected.length - 1
+            return {
+              expected,
+              visited: {
+                segments: yield* visits(
+                  f,
+                  (sql) => sql`${pathSegments(sql, f.chatId, tip, null)} SELECT chain_id, lo, hi FROM segments`
+                ),
+                placed: yield* visits(f, (sql) => placedInsertionsSql(sql, f.chatId, INSERT_FORK)),
+                tipWindow: yield* visits(f, (sql) => displayWindow(sql, pieces, end - 199, end, INSERT_FORK)),
+                branchyWindow: yield* visits(f, (sql) => displayWindow(sql, pieces, at1100 - 199, at1100, INSERT_FORK))
+              }
+            }
+          })
+        const small = yield* measure(yield* fixture(2_000))
+        const largeFixture = yield* fixture(100_000)
+        const large = yield* measure(largeFixture)
+        console.log(
+          `Rows visited with 1,000 insertions, 2,000 / 100,000 slots: ${JSON.stringify(small.visited)} / ${JSON.stringify(large.visited)}`
+        )
+        // The segments are the branch points, the same in both; the insertions are the fork's.
+        assert.deepStrictEqual(large.visited.segments, small.visited.segments)
+        assert.deepStrictEqual(large.visited.placed, small.visited.placed)
+        assert.deepStrictEqual(large.visited.tipWindow, small.visited.tipWindow)
+        assert.deepStrictEqual(large.visited.branchyWindow, small.visited.branchyWindow)
+        assert.strictEqual(large.visited.placed.rows, INSERTIONS)
+        // Per insertion: its row, its slot and its anchor, and the fork's row once per lineage entry.
+        assert.isBelow(large.visited.placed.visited, 4 * INSERTIONS + 10)
+        assert.strictEqual(large.visited.tipWindow.rows, 200)
+        assert.strictEqual(large.visited.branchyWindow.rows, 200)
+
+        // Paging back reconstructs the display path, at the tip and through the branch points.
+        yield* Effect.gen(function* () {
+          const reader = yield* Database.Reader
+          const read = (from: SlotId | null, limit: number) =>
+            Effect.gen(function* () {
+              const ids: Array<string> = []
+              let next: SlotId | null = from
+              let first = true
+              while (first || next !== null) {
+                first = false
+                const window: Effect.Success<ReturnType<typeof reader.GetPath>> = yield* reader.GetPath({
+                  userId: largeFixture.userId,
+                  chatId: largeFixture.chatId,
+                  forkId: INSERT_FORK as ForkId,
+                  leafSlotId: next,
+                  limit
+                })
+                window.entries.forEach((entry, i) =>
+                  assert.strictEqual(entry.position, (window.entries[0]!.position ?? 0) + i)
+                )
+                ids.unshift(...window.entries.map((e) => e.slotId))
+                next = window.olderLeafSlotId
+              }
+              return ids
+            })
+          assert.deepStrictEqual(yield* read(null, 1000), large.expected)
+          assert.deepStrictEqual(
+            yield* read("p-1100" as SlotId, 7),
+            large.expected.slice(0, large.expected.indexOf("p-1100") + 1)
+          )
+        }).pipe(Effect.provide(layer(largeFixture.dataDir)))
+
+        // The fork's insertions are found by index, never by scanning a table.
+        const [text, params] = yield* compiled(largeFixture, (sql) =>
+          placedInsertionsSql(sql, largeFixture.chatId, INSERT_FORK)
+        )
+        const db = new DatabaseSync(databaseFile(largeFixture.dataDir), { readOnly: true })
+        const plan = (
+          db.prepare(`EXPLAIN QUERY PLAN ${text}`).all(...(params as Array<string | number | null>)) as Array<{
+            detail: string
+          }>
+        ).map((row) => row.detail)
+        db.close()
+        assert.include(plan, "SEARCH o USING INDEX fork_overrides_point (fork_id=? AND kind=?)", plan.join("\n"))
+        // Scans only of the lineage's JSON and of the window function's own subquery.
+        assert.deepStrictEqual(
+          plan.filter(
+            (step) =>
+              step.startsWith("SCAN") && !step.includes("VIRTUAL TABLE") && !/^SCAN (e\b|\(subquery-\d+\))/.test(step)
+          ),
+          [],
+          plan.join("\n")
+        )
+      }),
+    300_000
+  )
 })
+
+/** The fork the insertions are made in: one made from the chat's first, inheriting its choices. */
+const INSERT_FORK = "ins"
+const INSERTIONS = 1000
+
+/**
+ * Adds fork `ins` to the fixture (once), at its tip, with 1,000 insertions anchored over the
+ * first 1,000 depths (every tenth below the one before it), the same in every fixture, and
+ * returns its display path's slot ids as built from first principles.
+ */
+const withInsertions = (f: Fixture) => {
+  const db = new DatabaseSync(databaseFile(f.dataDir))
+  try {
+    const anchors: Array<{ id: string; anchor: string; depth: number }> = []
+    for (let k = 0; k < INSERTIONS; k++) {
+      const id = `i-${String(k).padStart(4, "0")}`
+      const below = k % 10 === 9 ? anchors[k - 1]! : null
+      const depth = below === null ? (k * 7) % 1000 : below.depth + 1
+      anchors.push({ id, anchor: below === null ? `p-${depth}` : below.id, depth: below === null ? depth + 1 : depth })
+    }
+    const exists = db.prepare("SELECT 1 FROM forks WHERE id = ?").get(INSERT_FORK)
+    if (!exists) {
+      db.exec("PRAGMA foreign_keys = ON; BEGIN")
+      const lane = (db.prepare("SELECT id FROM lanes WHERE chat_id = ?").get(f.chatId) as { id: string }).id
+      let { state } = db.prepare("SELECT state_seq AS state FROM chats WHERE id = ?").get(f.chatId) as { state: number }
+      db.prepare(
+        `INSERT INTO forks (id, chat_id, parent_fork_id, branched_at, created_at, lineage_json, base_slot_id,
+          tip_slot_id) VALUES (?, ?, ?, ?, 1, ?, ?, ?)`
+      ).run(
+        INSERT_FORK,
+        f.chatId,
+        f.chatId,
+        state,
+        JSON.stringify([
+          [INSERT_FORK, null],
+          [f.chatId, state]
+        ]),
+        `p-${f.length}`,
+        `p-${f.length}`
+      )
+      const version = db.prepare(`INSERT INTO versions
+        (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+        VALUES (?, ?, 0, 'complete', 'human', 'Inserted', 'verbatim', 'user_written', 1, 1)`)
+      const slot = db.prepare(`INSERT INTO slots
+        (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted) VALUES (?, ?, ?, ?, ?, ?, 1, 1)`)
+      const place =
+        db.prepare(`INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)
+        VALUES (?, ?, ?, ?, 'insert', ?, ?, ?, 1)`)
+      for (const x of anchors) {
+        version.run(`v-${x.id}`, x.id)
+        slot.run(x.id, f.chatId, lane, x.anchor, x.depth, `v-${x.id}`)
+        place.run(`o-${x.id}`, f.chatId, INSERT_FORK, ++state, x.id, x.anchor, x.depth - 1)
+      }
+      db.prepare("UPDATE chats SET state_seq = ? WHERE id = ?").run(state, f.chatId)
+      db.exec("COMMIT")
+    }
+    // The oracle: the path, each slot followed by its gap (newest first by id, each followed by its own).
+    const children = new Map<string, Array<string>>()
+    for (const x of anchors) children.set(x.anchor, [...(children.get(x.anchor) ?? []), x.id])
+    const order: Array<string> = []
+    const gap = (anchor: string) => {
+      for (const id of [...(children.get(anchor) ?? [])].sort().reverse()) {
+        order.push(id)
+        gap(id)
+      }
+    }
+    for (let depth = 0; depth <= f.length; depth++) {
+      order.push(`p-${depth}`)
+      gap(`p-${depth}`)
+    }
+    return order
+  } finally {
+    db.close()
+  }
+}

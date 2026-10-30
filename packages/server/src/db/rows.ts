@@ -196,6 +196,8 @@ export interface PathRow extends VersionRow {
   readonly first_speaker: string | null
   /** The fork whose selections the row shows; null for a row read without one. */
   readonly shown_fork_id?: string | null
+  /** Its index on the display path read (spec/MESSAGE-INSERT.md §2.3); absent outside a path window. */
+  readonly position?: number | null
 }
 
 export const toPathEntry = (row: PathRow) => {
@@ -220,6 +222,7 @@ export const toPathEntry = (row: PathRow) => {
     ...(row.slot_fork_id === null ? {} : { forkId: row.slot_fork_id as ForkId }),
     ...(row.starts_fork_id === null ? {} : { startsForkId: row.starts_fork_id as ForkId }),
     ...(row.shown_fork_id == null ? {} : { shownForkId: row.shown_fork_id as ForkId }),
+    ...(row.position == null ? {} : { position: row.position }),
     side: row.user_side === 1 ? "user" : "assistant",
     firstSpeakerEntityId: row.first_speaker as EntityId | null,
     inContext: versionInContext(version.status, version.content, contextExcluded, version.images?.length)

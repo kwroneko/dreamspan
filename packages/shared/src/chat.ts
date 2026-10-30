@@ -28,7 +28,8 @@ const VersionOrigin = Schema.Literals([
   "greeting",
   "imported",
   "changeset",
-  "scratchpad"
+  "scratchpad",
+  "duplicate"
 ])
 
 export class Chat extends Schema.Class<Chat>("Chat")({
@@ -216,6 +217,12 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    * slot again instead of taking this one.
    */
   shownForkId: Schema.optionalKey(ForkId),
+  /**
+   * Its index on the fork's display path, from 0 at the first message: the path with the
+   * messages the fork inserted, which number from here (spec/MESSAGE-INSERT.md §2.3). `depth`
+   * stays the structural one. Set on path windows (GetPath, ReadPath); absent elsewhere.
+   */
+  position: Schema.optionalKey(Schema.Int),
   /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are

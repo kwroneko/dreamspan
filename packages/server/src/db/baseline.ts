@@ -187,6 +187,8 @@ export const baseline: ReadonlyArray<string> = [
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT,
+    -- Inserted between messages (spec/MESSAGE-INSERT.md §2.2): placed per fork by an insert override.
+    inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)),
     CHECK ((parent_slot_id IS NULL) = (depth = 0))
   ) STRICT`,
   `CREATE INDEX slots_parent ON slots(parent_slot_id)`,
@@ -213,7 +215,7 @@ export const baseline: ReadonlyArray<string> = [
     reasoning TEXT,
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
-      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad')),
+      ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')),
     source_version_id TEXT REFERENCES versions(id),
     greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)),
     direction TEXT,
@@ -1389,7 +1391,8 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'image_exclude')),
+      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event',
+      'insert', 'image_exclude')),
     -- image_exclude: the message's own version and an image of it, "<version id>:<media id>".
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
@@ -1538,6 +1541,18 @@ export const baseline: ReadonlyArray<string> = [
     AND (NEW.flag IS NOT 0 OR NEW.slot_id IS NOT NULL OR NOT EXISTS (
       SELECT 1 FROM lcm_enable_runs r WHERE r.id = NEW.target_id AND r.chat_id = NEW.chat_id))
     BEGIN ${raise("a visibility range names its chat's enable run and shows it")}; END`,
+  `CREATE TRIGGER slots_inserted_frozen BEFORE UPDATE OF inserted ON slots WHEN NEW.inserted IS NOT OLD.inserted
+    BEGIN ${raise("a slot stays inserted or not as it was inserted")}; END`,
+  `CREATE TRIGGER fork_overrides_insert BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'insert'
+    AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL
+      OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id)
+      OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id AND x.inserted = 1
+        AND x.parent_slot_id IS NEW.slot_id))
+    BEGIN ${raise("an insertion places an inserted slot of its chat below its parent")}; END`,
+  `CREATE TRIGGER fork_overrides_insert_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides
+    WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL
+      OR NEW.changeset_id IS NOT NULL)
+    BEGIN ${raise("an insertion places an inserted slot of its chat below its parent")}; END`,
   `CREATE TRIGGER fork_overrides_delete_version_own BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'delete_version'
     AND (NEW.flag IS NULL OR NOT EXISTS (SELECT 1 FROM versions o JOIN slots s ON s.id = o.slot_id
       WHERE o.id = NEW.target_id AND o.fork_id IS NULL AND s.id = NEW.slot_id AND s.depth = NEW.slot_depth))

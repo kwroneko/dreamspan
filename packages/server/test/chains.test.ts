@@ -183,4 +183,56 @@ describe("chains", () => {
       )
     }).pipe(Effect.provide(writerConnection(join(tempDir("chains"), "db.sqlite"))))
   )
+
+  it.effect(
+    "give an inserted slot a chain like any other, one level below its anchor (spec/MESSAGE-INSERT.md §2.2)",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* SqliteMigrator.run({ loader: SqliteMigrator.fromRecord(migrations) })
+        yield* sql`INSERT INTO users (id, handle, display_name, role, created_at) VALUES ('u', 'u', 'u', 'admin', 1)`
+        yield* sql`INSERT INTO chats (id, owner_user_id, kind, status, created_at) VALUES ('chat', 'u', 'rp', 'active', 1)`
+        yield* sql`INSERT INTO lanes (id, chat_id, name, created_at) VALUES ('main', 'chat', 'main', 1)`
+        const slot = (id: string, parent: string | null, depth: number, inserted = 0) =>
+          Effect.gen(function* () {
+            yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+            VALUES (${`v-${id}`}, ${id}, 0, 'complete', 'human', 'x', 'verbatim', 'user_written', 1, 1)`
+            yield* sql`INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
+            VALUES (${id}, 'chat', 'main', ${parent}, ${depth}, ${`v-${id}`}, 1, ${inserted})`
+          }).pipe(sql.withTransaction)
+        const placed = (id: string) =>
+          sql<{ chain_id: string; depth: number }>`SELECT chain_id, depth FROM slots WHERE id = ${id}`.pipe(
+            Effect.map(([r]) => r!)
+          )
+        yield* slot("r", null, 0)
+        yield* slot("a", "r", 1)
+        yield* slot("b", "a", 2)
+        // Below a message with a reply: a later child, so a chain of its own.
+        yield* slot("x", "a", 2, 1)
+        // Below the tip: the first child, so it continues the anchor's chain, and the next reply starts one.
+        yield* slot("y", "b", 3, 1)
+        yield* slot("c", "b", 3)
+        // Above the first message: a root.
+        yield* slot("top", null, 0, 1)
+        assert.deepStrictEqual(
+          [yield* placed("x"), yield* placed("y"), yield* placed("c"), yield* placed("top")],
+          [
+            { chain_id: "x", depth: 2 },
+            { chain_id: "r", depth: 3 },
+            { chain_id: "c", depth: 3 },
+            { chain_id: "top", depth: 0 }
+          ]
+        )
+        // The structural path to c doesn't hold y, though y has c's depth on c's parent's chain.
+        const segments = yield* sql<{ chain_id: string; lo: number; hi: number }>`
+        ${pathSegments(sql, "chat", "c", null)} SELECT chain_id, lo, hi FROM segments`
+        assert.deepStrictEqual(segments, [
+          { chain_id: "c", lo: 3, hi: 3 },
+          { chain_id: "r", lo: 0, hi: 2 }
+        ])
+        // An inserted slot is still one level below its parent, in its chat.
+        const refused = yield* slot("z", "a", 3, 1).pipe(Effect.exit, Effect.map(Exit.isFailure))
+        assert.isTrue(refused)
+      }).pipe(Effect.provide(writerConnection(join(tempDir("chains"), "db.sqlite"))))
+  )
 })

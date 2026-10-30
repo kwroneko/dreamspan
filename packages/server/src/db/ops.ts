@@ -211,6 +211,35 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   recovered: Schema.Int
 }) {}
 
+/**
+ * What `InsertMessage` inserts (spec/MESSAGE-INSERT.md §7): text written as a speaker (null:
+ * no card, as the composer allows), or a copy of the version the fork shows at the anchor.
+ * Generating at the insertion point is a later unit of the spec.
+ */
+export const InsertBody = Schema.Union([
+  Schema.TaggedStruct("Write", {
+    speaker: Schema.NullOr(EntityId),
+    content: Schema.String,
+    images: Schema.optionalKey(MessageImages)
+  }),
+  Schema.TaggedStruct("Duplicate", { versionId: VersionId })
+])
+export type InsertBody = typeof InsertBody.Type
+
+/** The inserted message as its fork shows it, at its position on the fork's display path. */
+export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
+  slotId: SlotId,
+  forkId: ForkId,
+  position: Schema.Int,
+  version: Version,
+  chat: Chat
+}) {}
+
+/** A version that can't be copied: still generating, or failed. */
+export class InsertRefused extends Schema.TaggedError<InsertRefused>()("InsertRefused", {
+  message: Schema.String
+}) {}
+
 /** An encrypted secret and what may be shown of it. */
 const EncryptedKey = Schema.Struct({ enc: Schema.Uint8Array, hint: Schema.String })
 /** Header values, encrypted, and the origin they were set for. */
@@ -1234,6 +1263,26 @@ export class WriteOps extends RpcGroup.make(
     },
     success: AppendResult,
     error: Schema.Union([NotFound, LeafMoved, StorageError])
+  }),
+  /**
+   * A message inserted below `anchorSlotId` (null: above the first message) in fork `forkId`
+   * (spec/MESSAGE-INSERT.md §2.4, §7): a new slot marked inserted, its first version and an
+   * `insert` row placing it in that fork, which forks made from it later inherit. The anchor
+   * must be on the fork's display path and not deleted there (`StaleWrite`); a neighbour
+   * inserted since is no conflict. `expectedRowVersion` is the anchor's as the tab saw the fork
+   * show it, reported back in the refusal. The fork is chatted in.
+   */
+  Rpc.make("InsertMessage", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      anchorSlotId: Schema.NullOr(SlotId),
+      expectedRowVersion: Schema.Int,
+      body: InsertBody
+    },
+    success: InsertResult,
+    error: Schema.Union([NotFound, StaleWrite, InsertRefused, StorageError])
   }),
   /**
    * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An
