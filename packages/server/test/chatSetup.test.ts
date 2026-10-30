@@ -127,6 +127,14 @@ describe("chat setup", () => {
       const cast = yield* api.GetCast({ chatId: started.chat.id, slotId: null })
       assert.deepStrictEqual(cast.participants, [miraId, anaId])
       assert.deepStrictEqual(cast.playedByMe, [anaId])
+      yield* api.ChangeCast({
+        chatId: started.chat.id,
+        slotId: null,
+        change: { _tag: "PlayedByMe", entityIds: [miraId, anaId] }
+      })
+      const selected = yield* api.GetCast({ chatId: started.chat.id, slotId: null })
+      assert.deepStrictEqual(selected.playedByMe, [anaId])
+      assert.strictEqual(selected.macroNames.user, "Ana")
       assert.deepStrictEqual(
         cast.cards.map((c) => [c.name, c.persona]),
         [

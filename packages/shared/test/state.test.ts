@@ -13,6 +13,13 @@ const connection = "c1" as ConnectionId
 const model = (id: string) => id as ModelId
 
 describe("foldState", () => {
+  it("selects only the last persona on events and supplied initial state", () => {
+    const state = foldState([e({ key: "played_by_me.set", value: { entities: [mira, tomas, mira] } })])
+    expect(state.playedByMe).toEqual([mira])
+    expect(foldState([], { ...state, playedByMe: [mira, tomas] }).playedByMe).toEqual([tomas])
+    expect(foldState([e({ key: "played_by_me.set", value: { entities: [] } })], state).playedByMe).toEqual([])
+  })
+
   it("unpins a macro without removing other bindings, including an explicitly empty pin", () => {
     const pinned = foldState([
       e({ key: "macro.binding", value: { name: "user", value: "Captain" } }),
