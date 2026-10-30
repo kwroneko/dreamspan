@@ -42,6 +42,22 @@ describe("preset warnings", () => {
     expect(warnings("").directionLost).toBe(true)
     expect(warnings(null).directionLost).toBe(true)
   })
+
+  it("names the switched-on prompts whose condition and generation types never meet", () => {
+    const prompts = [
+      prompt("asCardNormal", { condition: "as_user", injection_trigger: ["normal"] }),
+      prompt("asCardContinue", { condition: "as_user", injection_trigger: ["normal", "continue"] }),
+      prompt("asCharacterImpersonate", { condition: "as_character", injection_trigger: ["impersonate"] }),
+      prompt("asCharacterRegenerate", { condition: "as_character", injection_trigger: ["regenerate"] }),
+      prompt("directionQuiet", { condition: "with_direction", injection_trigger: ["quiet"] }),
+      prompt("alwaysQuiet", { injection_trigger: ["quiet"] }),
+      prompt("asCardAny", { condition: "as_user" }),
+      prompt("offNever", { condition: "as_user", injection_trigger: ["swipe"] })
+    ]
+    const order = prompts.map((p) => ({ identifier: p.identifier, enabled: p.identifier !== "offNever" }))
+    const { neverSent } = presetWarnings(new Map(prompts.map((p) => [p.identifier, p])), order)
+    expect(neverSent.map((p) => p.identifier)).toEqual(["asCardNormal", "asCharacterImpersonate", "directionQuiet"])
+  })
 })
 
 describe("the end-of-request texts", () => {

@@ -92,6 +92,15 @@ function Branch({ openDialog }: MessageActionProps) {
   )
 }
 
+/**
+ * The fork the message is viewed in, for the inspector's links back into the chat. It isn't
+ * necessarily the fork the version was generated in, nor the chat's current one.
+ */
+const viewedFork = (session: ChatSession) => {
+  const fork = session.snapshot().forkId
+  return fork === null ? {} : { fork }
+}
+
 export const registerMessageActions = () => [
   messageActions.register({
     id: "message.edit",
@@ -143,6 +152,7 @@ export const registerMessageActions = () => [
         <Link
           to="/chats/$chatId/context/$versionId"
           params={{ chatId: session.id, versionId: entry.version.id }}
+          search={viewedFork(session)}
           aria-label="Request it was generated from"
           className={iconButtonClass()}
         >
@@ -154,7 +164,11 @@ export const registerMessageActions = () => [
       <MenuLinkItem
         icon="layers"
         render={
-          <Link to="/chats/$chatId/context/$versionId" params={{ chatId: session.id, versionId: entry.version.id }} />
+          <Link
+            to="/chats/$chatId/context/$versionId"
+            params={{ chatId: session.id, versionId: entry.version.id }}
+            search={viewedFork(session)}
+          />
         }
       >
         Context it was generated from
