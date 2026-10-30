@@ -203,7 +203,7 @@ export const register = () => {
   routes.register({
     id: "settings.notifications",
     parent: "settings",
-    path: "/notifications",
+    path: "notifications",
     component: NotificationSettings,
     nav: { label: "Notifications", order: 45 }
   })

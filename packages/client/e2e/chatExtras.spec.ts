@@ -186,28 +186,34 @@ test("a reply finishing in a chat not looked at is counted in the list, the titl
   expect(await page.evaluate(() => (window as unknown as { __asked: { count: number } }).__asked.count)).toBe(0)
 })
 
-test("system notifications are asked for only when turned on in settings", async ({ page }) => {
-  // The browser's answer, as the user would give it: first no, then yes.
-  await page.addInitScript(() => {
-    const answers: Array<NotificationPermission> = ["denied", "granted"]
-    const asked = { count: 0 }
-    Object.assign(window, { __asked: asked })
-    Notification.requestPermission = () => Promise.resolve(answers[asked.count++] ?? "granted")
+for (const width of [1440, 390])
+  test("system notifications are asked for only when turned on in settings at " + width, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    // The browser's answer, as the user would give it: first no, then yes.
+    await page.addInitScript(() => {
+      const answers: Array<NotificationPermission> = ["denied", "granted"]
+      const asked = { count: 0 }
+      Object.assign(window, { __asked: asked })
+      Notification.requestPermission = () => Promise.resolve(answers[asked.count++] ?? "granted")
+    })
+    const asked = () => page.evaluate(() => (window as unknown as { __asked: { count: number } }).__asked.count)
+    await login(page)
+    await page.goto(`${server().url}/settings`)
+    await page.getByRole("link", { name: "Notifications", exact: true }).click()
+    await expect(page).toHaveURL(`${server().url}/settings/notifications`)
+    if (process.env.SCREENSHOT_DIR)
+      await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/notifications-${width}.png` })
+    const toggle = page.getByRole("switch", { name: /System notifications/ })
+    await expect(toggle).not.toBeChecked()
+    expect(await asked()).toBe(0)
+    await toggle.click()
+    await expect(page.getByText("The browser didn't allow notifications")).toBeVisible()
+    await expect(toggle).not.toBeChecked()
+    await toggle.click()
+    await expect(toggle).toBeChecked()
+    expect(await asked()).toBe(2)
+    expect(await page.evaluate(() => localStorage.getItem("rp.notifications.system"))).toBe("on")
   })
-  const asked = () => page.evaluate(() => (window as unknown as { __asked: { count: number } }).__asked.count)
-  await login(page)
-  await page.goto(`${server().url}/settings/notifications`)
-  const toggle = page.getByRole("switch", { name: /System notifications/ })
-  await expect(toggle).not.toBeChecked()
-  expect(await asked()).toBe(0)
-  await toggle.click()
-  await expect(page.getByText("The browser didn't allow notifications")).toBeVisible()
-  await expect(toggle).not.toBeChecked()
-  await toggle.click()
-  await expect(toggle).toBeChecked()
-  expect(await asked()).toBe(2)
-  expect(await page.evaluate(() => localStorage.getItem("rp.notifications.system"))).toBe("on")
-})
 
 const noSidewaysScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
