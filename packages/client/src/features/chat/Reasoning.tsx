@@ -9,6 +9,7 @@ import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
 import { useId, useState } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { MessageBody } from "../../ui/messageCopy.tsx"
 import { liveReasoning } from "./session.ts"
 
 const words = (text: string) => {
@@ -59,7 +60,9 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
       </button>
       {open && (
         <div id={id} role="region" aria-label="Reasoning" className="border-l-2 border-border pl-3 text-sm text-muted">
-          <Markdown text={text} streaming={streaming} />
+          <MessageBody text={text}>
+            <Markdown text={text} streaming={streaming} />
+          </MessageBody>
         </div>
       )}
       {viewer.error && (
