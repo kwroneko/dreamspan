@@ -79,6 +79,20 @@ for (const width of [1440, 390])
             join(process.env.FORMATTING_SCREENS, `contrast-${width}-${colorScheme}.json`),
             JSON.stringify(contrast, null, 2)
           )
+        // A fenced block is one frame, labelled with its language: nothing inside it draws
+        // a second box (Streamdown's body and the pre have no border or background).
+        const block = message.locator('[data-streamdown="code-block"]')
+        await expect(block).toHaveCount(1)
+        await expect(block.locator('[data-streamdown="code-block-header"]')).toHaveText("text")
+        await expect(block.locator("pre")).toContainText('"code stays plain"')
+        const frames = await block.evaluate((root) =>
+          [root, ...root.querySelectorAll("*")].filter((element) => {
+            const style = getComputedStyle(element)
+            const painted = !["rgba(0, 0, 0, 0)", "transparent"].includes(style.backgroundColor)
+            return painted || parseFloat(style.borderTopWidth) > 0 || parseFloat(style.borderLeftWidth) > 0
+          }).length
+        )
+        expect(frames).toBe(1)
         const quote = message.locator("q").first()
         expect(await quote.locator("em").evaluate((el) => getComputedStyle(el).color)).toBe(
           await quote.evaluate((el) => getComputedStyle(el).color)
