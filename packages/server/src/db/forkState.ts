@@ -22,7 +22,7 @@ const ForkView = Context.Reference<string | null>("rp/ForkView", { defaultValue:
 export const LINEAGE_CAP = 64
 
 /** A fork: an id bound as a parameter, or an SQL expression (`sql.literal("c.current_fork_id")`). */
-type ForkRef = string | null | Statement.Fragment
+export type ForkRef = string | null | Statement.Fragment
 
 /**
  * SQL: the id of the effective override of `kind` for `target` in the fork `fork` (both SQL

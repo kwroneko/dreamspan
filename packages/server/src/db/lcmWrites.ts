@@ -8,6 +8,8 @@ import { SqlClient } from "effect/sql"
 import { tokensOf } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { readSummary } from "./lcmReads.ts"
+import { requestImages, shownImages } from "./lcmImages.ts"
+import { lcmPath } from "./lcmPath.ts"
 import { followsInDisplay, lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { NotFound, StaleWrite, StorageError, type WriteOps } from "./ops.ts"
@@ -66,13 +68,13 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           const [rollout] = yield* sql`SELECT id FROM rollouts WHERE id = ${rolloutId} AND chat_id = ${job.chat_id}
         AND status = 'running' AND kind = ${job.level === 1 ? "summarize" : "condense"}`
           if (!rollout) return yield* new NotFound({ entity: "summary rollout", id: rolloutId })
+          let request: ContextSnapshot | undefined
           if (job.rollout_id !== null) {
             const [payload] = yield* sql<{
               context_snapshot_json: string
             }>`SELECT context_snapshot_json FROM rollout_payloads WHERE rollout_id = ${rolloutId}`
-            const frozen = payload
-              ? (JSON.parse(payload.context_snapshot_json) as ContextSnapshot).summaryJob
-              : undefined
+            request = payload ? (JSON.parse(payload.context_snapshot_json) as ContextSnapshot) : undefined
+            const frozen = request?.summaryJob
             if (
               job.rollout_id !== rolloutId ||
               frozen?.id !== jobId ||
@@ -215,6 +217,25 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
               ...children.filter((child) => !originals.has(child.summaryId)).map((child) => child.summaryId)
             )
           }
+          // What it is written with: the frozen request's images as the summarizer sends them; else
+          // (no request was frozen) what the job's fork shows. A condensation's parts carry theirs.
+          const versions = inputs.map((i) => i.versionId)
+          const images =
+            job.level > 1
+              ? null
+              : request
+                ? yield* requestImages(sql, versions, request)
+                : yield* shownImages(
+                    sql,
+                    versions,
+                    lcmPath(sql, userId, job.chat_id, job.last_slot_id, job.first_slot_id).pipe(
+                      Effect.map((path) =>
+                        path.flatMap((s) =>
+                          inputs.some((i) => i.slotId === s.id) ? s.images.map((image) => image.mediaId) : []
+                        )
+                      )
+                    )
+                  )
           const id = uuidv7(),
             revisionId = uuidv7(),
             now = Date.now()
@@ -230,7 +251,8 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             status,
             rollout_id: rolloutId,
             batch_id: job.batch_id,
-            created_at: now
+            created_at: now,
+            images_json: images
           })}`
           for (const [ordinal, input] of inputs.entries())
             yield* sql`INSERT INTO summary_inputs ${sql.insert({ summary_id: id, ordinal, slot_id: input.slotId, version_id: input.versionId, amend_count: input.amendCount })}`

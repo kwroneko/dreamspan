@@ -3,9 +3,13 @@
 // None, or read by `{{summary}}` in the preset it used), and sent only by its switch. Enabling
 // summaries switches it off in the same step, for both choices.
 import { assert } from "@effect/vitest"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
+import type { SummaryId } from "@rp/shared/lcm.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { serverPort } from "./support/config.ts"
+import { png, textChunk } from "./formats/support.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 import { BACKFILL_SUMMARY, backfillFolder } from "./support/stBackfill.ts"
 import { encode } from "./support/stFolder.ts"
@@ -193,4 +197,61 @@ lcmTest("enabling summaries switches the imported note off for both choices; re-
     assert.isTrue(kept.stored!.enabled)
     assert.strictEqual(kept.stored!.recentMax, 30_000)
   })
+)
+
+lcmTest(
+  "an adopted summary is taken as written with the images its fork sends, and goes stale where one is taken out",
+  (server) =>
+    Effect.gen(function* () {
+      const { h, open } = yield* setup(server, ["Bob - adopt"], "injected")
+      const chat = yield* open("Bob - adopt")
+      const port = yield* serverPort
+      const media = yield* Effect.promise(async () => {
+        const response = await fetch(`http://127.0.0.1:${port}/chat/image`, {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: png(textChunk("fixture", "covered"))
+        })
+        return (await response.json()) as { mediaId: string }
+      })
+      const path = yield* h.reader.GetPath({ userId: h.userId, chatId: chat.chatId, leafSlotId: null, limit: 100 })
+      const covered = path.entries[1]!
+      const edited = yield* h.api.EditVersion({
+        slotId: covered.slotId,
+        sourceVersionId: covered.version.id,
+        expectedRowVersion: covered.version.rowVersion,
+        content: covered.version.content,
+        images: [media]
+      })
+      const offer = yield* h.api.GetLcmEnableOffer({ chatId: chat.chatId, leafSlotId: chat.leaf })
+      yield* h.api.EnableLcm({ chatId: chat.chatId, leafSlotId: chat.leaf, choice: "adopt", approved: offer.adopted! })
+      const [rowRows] = yield* fixtureSql(
+        h.dataDir,
+        [{ sql: "SELECT id, images_json FROM summaries WHERE chat_id = ?", params: [chat.chatId] }],
+        { readOnly: true }
+      )
+      const row = rowRows![0]
+      assert.deepStrictEqual(JSON.parse(row!.images_json as string), {
+        limit: null,
+        sent: [media.mediaId],
+        withheld: []
+      })
+      const main = (yield* h.api.GetChat({ chatId: chat.chatId })).currentForkId as ForkId
+      const other = (yield* h.writer.CreateFork({
+        userId: h.userId,
+        chatId: chat.chatId,
+        fromForkId: main,
+        atSlotId: chat.leaf
+      })).fork.id as ForkId
+      yield* h.api.SetImageExcluded({
+        versionId: edited.version.id,
+        mediaId: media.mediaId,
+        forkId: main,
+        excluded: true
+      })
+      const fresh = (forkId: ForkId) =>
+        Effect.map(h.api.GetSummary({ summaryId: row!.id as typeof SummaryId.Type, forkId }), (s) => s.fresh)
+      assert.isFalse(yield* fresh(main))
+      assert.isTrue(yield* fresh(other))
+    })
 )
