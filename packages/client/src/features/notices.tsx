@@ -9,6 +9,7 @@ import {
   activateNoticeChannels,
   NoticeChannelSettings,
   noticeDeduplicator,
+  receiveUserNotice,
   receiveNoticeChannels
 } from "./noticeContributions.tsx"
 import { RegistryContext } from "@effect/atom-react"
@@ -105,6 +106,8 @@ export const useNotices = () => {
     document.addEventListener("keydown", activateNoticeChannels)
     const receive = (notice: Notice, client: AppClient["Service"]) =>
       Effect.gen(function* () {
+        receiveUserNotice(notice)
+        if (notice._tag !== "ReplyFinished") return
         if (!firstNotice(notice) || looking(notice.chatId)) return
         unseen.set(notice.chatId, (unseen.get(notice.chatId) ?? 0) + 1)
         render()

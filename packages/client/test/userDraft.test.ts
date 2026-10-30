@@ -280,3 +280,57 @@ it("continuing a newer replay never deletes an unrelated older copy whose replay
   await until(() => saves.length === 2)
   expect((await copiesOf(ownerId, key.targetId)).some((copy) => copy.key === old.key)).toBe(true)
 })
+
+it("a clean open editor learns a newer device draft and ignores old events", async () => {
+  const { store } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  store.receive(draft("another device", 3))
+  await until(() => store.snapshot().text === "another device")
+  expect(store.snapshot().remote).toBeNull()
+  store.receive(draft("out of order", 2))
+  store.history()
+  await until(() => store.snapshot().history !== null)
+  expect(store.snapshot().text).toBe("another device")
+})
+
+it.each([true, false])("a local unsaved draft offers an explicit remote choice (load=%s)", async (load) => {
+  const { store, handlers, saves } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline")
+  }
+  store.type("local unsaved", "original")
+  await until(() => store.snapshot().error !== null)
+  store.receive(draft("remote saved", 5))
+  await until(() => store.snapshot().remote !== null)
+  expect(store.snapshot().text).toBe("local unsaved")
+  expect(store.snapshot().remote?.content).toBe("remote saved")
+  handlers.SaveUserDraft = save
+  store.resolveRemote(load)
+  await until(() => store.snapshot().remote === null)
+  expect(store.snapshot().text).toBe(load ? "remote saved" : "local unsaved")
+  // Accepting remote first archives local text. Keeping local retains its original observed base.
+  expect(saves[0]?.content).toBe("local unsaved")
+  expect(saves[0]?.expectedRowVersion).toBe(1)
+  if (load) {
+    expect(saves[1]?.content).toBe("remote saved")
+    expect(saves[1]?.expectedRowVersion).toBe(5)
+  }
+})
+
+it("reconnect refresh retains text typed while its read was outstanding", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const held = deferred<Draft>()
+  handlers.GetUserDraft = () => held.promise
+  store.refresh()
+  store.type("local during refresh", "original")
+  held.resolve(draft("reconnected device", 4))
+  await until(() => store.snapshot().remote !== null)
+  expect(store.snapshot().text).toBe("local during refresh")
+  expect(store.snapshot().remote?.content).toBe("reconnected device")
+})

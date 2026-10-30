@@ -2401,10 +2401,16 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         Effect.gen(function* () {
           const mine: Array<Notice> = []
           yield* actor.api.SubscribeNotices().pipe(
-            Stream.runForEach((batch) => Effect.sync(() => mine.push(...batch))),
+            Stream.runForEach((batch) =>
+              Effect.sync(() => mine.push(...batch.filter((notice) => notice._tag !== "UserDraftSync")))
+            ),
             Effect.forkScoped
           )
-          const theirs = yield* owner.api.SubscribeNotices().pipe(Stream.runHead, Effect.forkScoped)
+          const theirs = yield* owner.api.SubscribeNotices().pipe(
+            Stream.filter((batch) => batch.some((notice) => notice._tag !== "UserDraftSync")),
+            Stream.runHead,
+            Effect.forkScoped
+          )
           // Both are registered once a later call on the same socket has its answer.
           yield* Effect.all([actor.api.Whoami(), owner.api.Whoami()])
           owner.notify({

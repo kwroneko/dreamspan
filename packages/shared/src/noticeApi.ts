@@ -4,6 +4,7 @@
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, SlotId, VersionId } from "./chat.ts"
+import { Draft } from "./drafts.ts"
 import { ServerError } from "./errors.ts"
 
 export const Notice = Schema.Union([
@@ -13,7 +14,10 @@ export const Notice = Schema.Union([
     slotId: SlotId,
     versionId: VersionId,
     status: Schema.Literals(["complete", "failed"])
-  })
+  }),
+  Schema.TaggedStruct("UserDraftChanged", { draft: Draft }),
+  /** Initial subscription and backlog overflow: re-read open private draft workspaces. */
+  Schema.TaggedStruct("UserDraftSync", {})
 ])
 export type Notice = typeof Notice.Type
 

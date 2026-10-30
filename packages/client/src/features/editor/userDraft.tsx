@@ -5,8 +5,21 @@ import type { Draft, DraftDisplacement, DraftState } from "@rp/shared/drafts.ts"
 import type { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
+import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
+
+const openStores = new Set<UserDraftStore>()
+export const registerUserDraftNotices = () =>
+  userNoticeReceivers.register({
+    id: "editor.user-drafts",
+    receive: (notice) => {
+      for (const store of openStores) {
+        if (notice._tag === "UserDraftSync") store.refresh()
+        else if (notice._tag === "UserDraftChanged") store.receive(notice.draft)
+      }
+    }
+  })
 
 type Run = ReturnType<typeof useAction>["run"]
 type Base = Pick<typeof UserDraftSave.Type, "draftId" | "expectedRowVersion" | "expectedSession">
@@ -30,7 +43,8 @@ export class UserDraftStore {
     error: null as string | null,
     history: null as ReadonlyArray<DraftState> | null,
     displaced: null as DraftDisplacement | null,
-    recovered: 0
+    recovered: 0,
+    remote: null as Draft | null
   }
   private userId: UserId
   private targetId: string
@@ -178,6 +192,55 @@ export class UserDraftStore {
         ready: true,
         text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
       })
+    })
+  }
+  connect = () => {
+    openStores.add(this)
+    return () => {
+      openStores.delete(this)
+    }
+  }
+  private applyRemote(draft: Draft | null) {
+    if (draft === null) return
+    if (draft.key.targetId !== this.targetId || draft.key.field !== this.field) return
+    if (draft.id === this.base.draftId && draft.rowVersion <= (this.base.expectedRowVersion ?? 0)) return
+    if (this.state.remote?.id === draft.id && draft.rowVersion <= this.state.remote.rowVersion) return
+    // A queued or refused write still belongs to the text the user actually saw.
+    if (this.copy !== null || this.pendingTypes.size > 0) {
+      this.update({ remote: draft, history: null })
+      return
+    }
+    this.draft = draft
+    this.base = baseOf(draft)
+    this.update({ text: draft.status === "active" ? draft.content : null, remote: null, history: null })
+  }
+  receive = (draft: Draft) => {
+    this.queue = this.queue.then(() => this.applyRemote(draft))
+  }
+  refresh = () => {
+    this.queue = this.queue.then(async () => {
+      const result = await this.run((client) => client("GetUserDraft", this.address()))
+      if (result.ok) this.applyRemote(result.value)
+      else this.update({ error: result.error.message })
+    })
+  }
+  resolveRemote = (load: boolean) => {
+    this.queue = this.queue.then(async () => {
+      const remote = this.state.remote
+      if (!remote) return
+      const edits = this.edits
+      // Put local text in undo history before accepting another device's text.
+      if (this.state.text !== null && !(await this.persist(this.state.text))) return
+      if (this.edits !== edits) return
+      if (load) {
+        this.update({ text: remote.content })
+        // This is an explicit choice of the observed remote version. Saving on that base
+        // keeps the local text as a displaced history step, even for similar prose.
+        this.base = baseOf(remote)
+        await this.remember(remote.content, true).kept
+        if (!(await this.persist(remote.content))) return
+      }
+      this.update({ remote: null })
     })
   }
   leave = () => {
@@ -330,9 +393,11 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
   const store = useMemo(() => new UserDraftStore(userId, targetId, field, run), [userId, targetId, field])
   const state = useSyncExternalStore(store.subscribe, store.snapshot)
   useEffect(() => {
+    const disconnect = store.connect()
     store.open()
     window.addEventListener("pagehide", store.leave)
     return () => {
+      disconnect()
       window.removeEventListener("pagehide", store.leave)
       store.leave()
     }
@@ -347,7 +412,9 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
     undo: store.undo,
     showHistory: store.history,
     restore: store.restore,
-    acknowledge: store.acknowledge
+    acknowledge: store.acknowledge,
+    loadRemote: () => store.resolveRemote(true),
+    keepLocal: () => store.resolveRemote(false)
   }
 }
 
@@ -381,6 +448,23 @@ export function UserDraftStatus({ draft }: { draft: ReturnType<typeof useUserDra
           </a>
           .
         </span>
+      )}
+      {draft.remote && (
+        <div role="status" className="flex w-full flex-col gap-2 text-text">
+          <span>Another device saved a different draft. Your unsaved text is still here.</span>
+          <details>
+            <summary>Preview the other device's text</summary>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.remote.content}</pre>
+          </details>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={draft.loadRemote}>
+              Load the other device's text
+            </Button>
+            <Button variant="ghost" onClick={draft.keepLocal}>
+              Keep my text
+            </Button>
+          </div>
+        </div>
       )}
       {draft.displaced && (
         <div role="status" className="flex w-full flex-col gap-2">
