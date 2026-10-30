@@ -1,10 +1,11 @@
+import { SearchNavigation } from "./searchNavigation.ts"
 // The preset editor (DESIGN §1.2, §6): the prompt list in order, with enable switches and
 // drag to reorder; each prompt's role, position and depth; prefill text;
 // and the regex scripts, which run only once the user allows them (ARCHITECTURE.md §9).
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type RegexScript } from "@rp/shared/docs/preset.ts"
 import { type FieldPath } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { useState } from "react"
+import { useContext, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -95,7 +96,13 @@ function ScriptPlacement({ store, path }: { store: EditorStore; path: FieldPath 
 function Script({ store, script }: { store: EditorStore; script: RegexScript }) {
   const at = ["regex", `id=${script.id}`]
   const name = useText(store, [...at, "name"]) || "Unnamed script"
+  const match = useContext(SearchNavigation)
   const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (match?.path[0] !== "regex" || match.path[1] !== `id=${script.id}`) return
+    const frame = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(frame)
+  }, [match, script.id])
   return (
     <li className="flex flex-col gap-2 py-2">
       <div className="flex items-center justify-between gap-2">

@@ -3,7 +3,7 @@
 import type { DraftState } from "@rp/shared/drafts.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -12,6 +12,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
+import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import type { CallResult } from "./caller.ts"
@@ -140,6 +141,22 @@ export function TextField({
   mono?: boolean
   readOnly?: boolean
 }) {
+  const match = useSearchMatch(path)
+  const target = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!match) return
+    for (let parent = target.current?.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true
+    }
+    const frame = requestAnimationFrame(() => {
+      const input = target.current?.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement | null
+      if (!input) return
+      input.focus({ preventScroll: true })
+      input.setSelectionRange(match.at, match.at + match.length)
+      scrollToSearchField(target.current!)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [match])
   const value = useText(store, path)
   const kind = useEditorKind(store)
   // Card, preset and note text goes in the code editor box, with its macros marked.
@@ -153,7 +170,7 @@ export function TextField({
     onBlur: () => void store.save(field)
   }
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div ref={target} className="flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
       <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
         {rows === undefined ? (
           <Input {...props} onChange={(event) => store.setText(path, event.currentTarget.value)} />

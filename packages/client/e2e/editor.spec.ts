@@ -656,3 +656,27 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
   await expect(main.getByRole("switch", { name: "Send Main Prompt" })).not.toBeChecked()
   await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
 })
+
+test("card search opens and selects code editor and single-line matches", async ({ page }) => {
+  const refId = await savedCard("Find keeper", { description: "The keeper keeps the lamp." })
+  await open(page, refId)
+  for (const label of ["Description", "Display name"]) {
+    await page.getByRole("button", { name: "Search", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Search and replace" })
+    await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("keeper")
+    await dialog.getByRole("button", { name: "Find", exact: true }).click()
+    await dialog.getByRole("button", { name: `Go to ${label}`, exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    const target = page.getByRole("textbox", { name: label, exact: true })
+    await expect(target).toBeFocused()
+    await expect
+      .poll(() =>
+        target.evaluate((e) =>
+          e instanceof HTMLInputElement
+            ? e.value.slice(e.selectionStart!, e.selectionEnd!)
+            : (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.toString()
+        )
+      )
+      .toBe("keeper")
+  }
+})

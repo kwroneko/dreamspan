@@ -1,12 +1,13 @@
 // Search and replace across an editor's text fields, as plain text or a regular expression
 // (DESIGN §6.2, §5.3). Replacing edits each field through its draft, like typing would.
-import { type FormEvent, type ReactNode, useState, useSyncExternalStore } from "react"
+import { type FormEvent, type ReactNode, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { editorTextFields, type Searchable, searchable } from "./fields.ts"
+import type { SearchMatch } from "./searchNavigation.ts"
 import { runSearch, type SearchResponse } from "./search.ts"
 import { type EditorStore, useWorkingDoc } from "./store.ts"
 
@@ -39,12 +40,15 @@ const write = (store: EditorStore, field: Searchable, text: string) => {
 export function SearchDialog({
   store,
   onClose,
+  onReveal,
   inline = false
 }: {
   store: EditorStore
   onClose?: () => void
+  onReveal: (match: SearchMatch) => void
   inline?: boolean
 }) {
+  const navigating = useRef(false)
   const [find, setFind] = useState("")
   const [replace, setReplace] = useState("")
   const [wholeWord, setWholeWord] = useState(false)
@@ -125,7 +129,12 @@ export function SearchDialog({
         {children}
       </section>
     ) : (
-      <Dialog open onOpenChange={(open) => !open && onClose?.()} title="Search and replace">
+      <Dialog
+        open
+        onOpenChange={(open) => !open && onClose?.()}
+        title="Search and replace"
+        finalFocus={() => !navigating.current}
+      >
         {children}
       </Dialog>
     )
@@ -207,10 +216,24 @@ export function SearchDialog({
             {response.matches.map((match, index) => {
               const field = found.fields[match.index]!
               const text = field.text
+              const reveal = () => {
+                navigating.current = true
+                onClose?.()
+                const target = { path: field.path, at: match.at, length: match.length }
+                // Let a modal's focus trap unmount before focusing the destination.
+                if (inline) onReveal(target)
+                else requestAnimationFrame(() => onReveal(target))
+              }
               return (
                 <li key={index} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 flex-col text-sm">
-                    <span className="font-medium [overflow-wrap:anywhere]">{field.label}</span>
+                    <button
+                      type="button"
+                      onClick={reveal}
+                      className="text-left font-medium text-accent underline-offset-4 hover:underline focus-visible:outline-focus [overflow-wrap:anywhere]"
+                    >
+                      {field.label}
+                    </button>
                     <span className="text-muted [overflow-wrap:anywhere]">
                       {match.at > AROUND && "…"}
                       {text.slice(Math.max(0, match.at - AROUND), match.at)}
@@ -219,13 +242,18 @@ export function SearchDialog({
                     </span>
                     <span className="text-success [overflow-wrap:anywhere]">→ {match.replacement}</span>
                   </div>
-                  <Button
-                    variant="ghost"
-                    aria-label={`Replace in ${field.label}`}
-                    onClick={() => void replaceIn(match.index)}
-                  >
-                    Replace in this field
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap gap-1">
+                    <Button variant="ghost" onClick={reveal} aria-label={`Go to ${field.label}`}>
+                      Go to
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      aria-label={`Replace in ${field.label}`}
+                      onClick={() => void replaceIn(match.index)}
+                    >
+                      Replace in this field
+                    </Button>
+                  </div>
                 </li>
               )
             })}
