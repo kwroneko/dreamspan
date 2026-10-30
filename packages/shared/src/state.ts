@@ -55,7 +55,8 @@ export const StateEventData = Schema.Union([
   /** Lorebook entries only below the history, whatever their position; absent is on (DESIGN §1.3). */
   event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
-  event("author_note.set", Schema.Struct({ note: EntityId }))
+  /** Which chat note is the author's note; null: none, not even an imported one. */
+  event("author_note.set", Schema.Struct({ note: Schema.NullOr(EntityId) }))
 ])
 export type StateEventData = typeof StateEventData.Type
 
@@ -64,9 +65,14 @@ export type StateEventData = typeof StateEventData.Type
  * of the same value: a ref or revision of that entity, a revision of that ref's entity, a
  * model of that connection.
  */
-/** `chatOwned` also checks a note document's owner.chat when present. */
+/** `chatOwned` checks owner.chat when present; `required` permits only this chat's own notes. */
 type IdField<F extends string> =
-  | { readonly table: "entity"; readonly kind: EntityKind; readonly chatOwned?: true; readonly allowDeleted?: true }
+  | {
+      readonly table: "entity"
+      readonly kind: EntityKind
+      readonly chatOwned?: true | "required"
+      readonly allowDeleted?: true
+    }
   | { readonly table: "ref"; readonly kind: EntityKind; readonly entity?: F }
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
@@ -137,7 +143,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.global": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.below_history": { ids: {} },
   "var.set": { ids: {} },
-  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } }
+  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: "required" } } }
 }
 
 /**
@@ -345,7 +351,11 @@ export interface ChatState {
   /** Whether lorebook entries go only below the history; null (no event) is on. */
   readonly loreBelowHistory: boolean | null
   readonly vars: Readonly<Record<string, unknown>>
-  readonly authorNote: string | null
+  /**
+   * The chat's chosen author's note; false when the chat chose none; null (no event) leaves it
+   * to an imported note of kind `author_note`.
+   */
+  readonly authorNote: string | false | null
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
 }
@@ -481,7 +491,7 @@ const applyCore = (
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
     case "author_note.set":
-      return { ...state, authorNote: data.value.note }
+      return { ...state, authorNote: data.value.note ?? false }
   }
 }
 

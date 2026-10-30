@@ -5,7 +5,9 @@ import {
   SnippetContext,
   CreateSnippetFields,
   SaveSnippetFields,
-  GlobalSnippetFields
+  GlobalSnippetFields,
+  SnippetHistoryFields,
+  RestoreSnippetFields
 } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
@@ -419,6 +421,11 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ...GlobalSnippetFields },
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  Rpc.make("RestoreSnippet", {
+    payload: { userId: UserId, ...RestoreSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
   }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
@@ -1428,14 +1435,20 @@ export class WriteOps extends RpcGroup.make(
       persona: Schema.NullOr(EntityId),
       /**
        * Who greets, in order, each as a message of its own (one of `cards`; one without
-       * greetings is skipped): the greeting picked, and each greeting's frozen values in
-       * `GetCardForChat` order (null: none to freeze).
+       * greetings is skipped): the greeting picked and the API's registered-source
+       * snapshot, with each option's nonempty card index, text and frozen values.
        */
       greeters: Schema.Array(
         Schema.Struct({
           entityId: EntityId,
           greeting: Schema.NullOr(Schema.Int),
-          frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+          options: Schema.Array(
+            Schema.Struct({
+              index: Schema.Int,
+              text: Schema.String,
+              frozen: Schema.NullOr(FrozenMacros)
+            })
+          )
         })
       ),
       first: FirstTurn,
@@ -2005,6 +2018,11 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SnippetHistory", {
+    payload: { userId: UserId, ...SnippetHistoryFields },
+    success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("PreviewForkNotes", {

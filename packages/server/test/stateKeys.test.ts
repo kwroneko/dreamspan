@@ -5,7 +5,8 @@
 // value differs between two users' things. Every key that `stateKeyIds` gives ids must
 // have an entry, so a new key gets these checks too.
 import { assert, describe, it, layer } from "@effect/vitest"
-import type { EntityId } from "@rp/shared/chat.ts"
+import { newChatNote } from "@rp/shared/editing.ts"
+import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { EntityKind, RefId, RevisionId } from "@rp/shared/library.ts"
@@ -80,7 +81,7 @@ const fixture = Layer.effect(
   Fixture,
   Effect.gen(function* () {
     const writer = yield* Database.Writer
-    const things = (userId: UserId) =>
+    const things = (userId: UserId, chatId: ChatId) =>
       Effect.gen(function* () {
         const items = yield* Effect.forEach(kinds, (kind) =>
           writer
@@ -89,7 +90,7 @@ const fixture = Layer.effect(
               kind,
               label: kind,
               subtitle: "",
-              doc: docFor(kind, kind),
+              doc: kind === "note" ? newChatNote(chatId, kind) : docFor(kind, kind),
               schemaVersion: 1,
               origin: "user",
               sourcePath: null
@@ -118,9 +119,6 @@ const fixture = Layer.effect(
       })
     const bob = (yield* writer.EnsureUser({ handle: "bob", displayName: "Bob" })).id
     const ana = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id
-    const deleted = yield* things(bob)
-    for (const kind of kinds) yield* writer.DeleteEntity({ userId: bob, entityId: deleted[kind].entity })
-    yield* writer.DeleteConnection({ userId: bob, connectionId: deleted.connection })
     const chat = yield* writer.CreateChat({
       userId: bob,
       kind: "rp",
@@ -129,6 +127,9 @@ const fixture = Layer.effect(
       participants: [],
       greeting: null
     })
+    const deleted = yield* things(bob, chat.id)
+    for (const kind of kinds) yield* writer.DeleteEntity({ userId: bob, entityId: deleted[kind].entity })
+    yield* writer.DeleteConnection({ userId: bob, connectionId: deleted.connection })
     const otherChat = yield* writer.CreateChat({
       userId: bob,
       kind: "rp",
@@ -154,10 +155,10 @@ const fixture = Layer.effect(
             Effect.map(() => "ok"),
             Effect.catch((error) => Effect.succeed(error._tag))
           ),
-      own: yield* things(bob),
-      second: yield* things(bob),
+      own: yield* things(bob, chat.id),
+      second: yield* things(bob, chat.id),
       deleted,
-      theirs: yield* things(ana)
+      theirs: yield* things(ana, otherChat.id)
     }
   })
 ).pipe(
