@@ -700,6 +700,7 @@ In proxy mode, a WebSocket keeps the identity it opened with until it disconnect
   - **Semantic tokens only.** `styles.css` defines colors by role (`canvas`, `surface`, `text`, `muted`, `accent`, `danger`, `warning`, `success`, `overlay`, …), for light and dark, with `data-theme` overrides.
   - **The default Tailwind palette is removed** (`--color-*: initial`), so a class like `bg-zinc-800` doesn't exist. Only token utilities (`bg-surface`, `text-muted`) can be written. A redesign changes token values, not components.
   - **One import path for UI components.** Feature code imports from `src/ui/`, never from Base UI directly; ESLint enforces it. Base UI carries behavior and accessibility (labels, focus traps, keyboard), and `src/ui/` carries the look: buttons, fields, select, checkbox, switch, radio group, dialogs, cards, badges, alerts, menus, tooltips and icon buttons, and line icons (`Icon.tsx`).
+  - **Portaled menus** (`ui/Menu.tsx`) use fixed viewport coordinates for both ordinary and action-menu positioners. A menu opened in a scrolled fixed phone sheet stays clickable instead of making the document scroll repeatedly under it. The notes walkthrough exercises mouse access and viewport bounds at 1440 and 390 px in both themes.
   - Inputs use 16 px text on touch screens, so iOS doesn't zoom into them. A submit the client refuses focuses the first invalid field, whose description carries the error.
 - **Message text** is Markdown through `ui/Markdown.tsx` (§12).
 - **Tests:**
