@@ -1,3 +1,4 @@
+import { composerWorkspace } from "./composerWorkspace.ts"
 import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
@@ -27,7 +28,7 @@ import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
+import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
@@ -148,7 +149,9 @@ export function Composer({
   const userId = useSession().user.id
   // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
   // page while this chat was being made comes along (composerCarry.ts).
-  const [draft] = useState(() => new ComposerDraft(session, userId))
+  const [workspace] = useState(() => composerWorkspace(session, userId))
+  const { draft, setBusy, setError } = workspace
+  const { busy, error } = useSyncExternalStore(workspace.subscribe, workspace.snapshot)
   const {
     text: draftText,
     ready: textReady,
@@ -158,8 +161,6 @@ export function Composer({
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
   // A reply's guidance being edited: the box shows it, and typing changes it, not the draft,
   // so the draft (and a reload) still has what was typed before Edit.
   const editor = guidanceEditor(session)
@@ -275,7 +276,7 @@ export function Composer({
   const onPick = useCallback(
     (card: CastCard) =>
       void choices.change({ speaker: card.entityId }).then((picked) => setError(picked.ok ? null : picked.error)),
-    [choices]
+    [choices, setError]
   )
 
   /**
