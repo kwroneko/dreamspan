@@ -11,6 +11,10 @@ export const makeInspectorHandlers = Effect.gen(function* () {
     GetRunContext: ({ versionId }) =>
       Effect.flatMap(CurrentUser, (user) => reader.RunContext({ userId: user.id, versionId })).pipe(
         internal("GetRunContext")
+      ),
+    GetVersionMetrics: ({ versionIds }) =>
+      Effect.flatMap(CurrentUser, (user) => reader.VersionMetrics({ userId: user.id, versionIds })).pipe(
+        internal("GetVersionMetrics")
       )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>
 })

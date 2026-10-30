@@ -1,6 +1,6 @@
 # Plugins: threat model and structure
 
-**Status**: Proposed, 2026-10-11. The owner's statements of 2026-10-11 are marked **[D]**. Supersedes the recommendation in [CORDIS.md](CORDIS.md), whose evaluation of Cordis itself still stands. Building the plugin system is PLAN phase 6. §8 lists what has to shape the code before then.
+**Status**: Proposed, 2026-10-11. The owner's statements of 2026-10-11 are marked **[D]**. Supersedes the recommendation in [CORDIS.md](CORDIS.md), whose evaluation of Cordis itself still stands. Building the plugin system is PLAN phase 6. §8 lists what has to shape the code before then. Implemented registry groundwork in §8 is obsolete as an implementation proposal (2026-10-30; ARCHITECTURE §3.8, §5, §6, §11, §15, §16): shared registries, provider kinds/transforms/costs, state modules in database workers, execution/planning/summary strategies, assembler stages/macros/role projections/source descriptors, format/import/export/parser workflows, and client features/routes/slots. These are swappable registrations; plugin loading/installation, consent and in-app agent authoring remain unbuilt. Built [P] details remain [P].
 
 ---
 

@@ -159,7 +159,10 @@ describe("message action contributions", () => {
   })
   const context = {
     session: { subscribe: () => () => {}, snapshot: () => ({ entries: [], newer: null }) },
-    entry: { versionCount: 1, version: { context: {} } },
+    entry: {
+      versionCount: 1,
+      version: { writer: "human", status: "complete", content: "Synthetic message.", context: {} }
+    },
     generating: false
   } as unknown as MessageActionContext
 
