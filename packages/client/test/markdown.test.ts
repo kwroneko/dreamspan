@@ -139,12 +139,20 @@ describe("ST 1.19 message formatting", () => {
     expect(render(text, streaming)).toContain("<q>&quot;unfinished&quot;</q>")
     expect(text).toBe('*unfinished\n\n"unfinished')
   })
-  it("keeps line breaks and quote formatting in literal HTML", () => {
+  it("keeps line breaks in literal HTML and protects tag attributes as ST's default encode_tags=false does", () => {
     const html = render('<div title="plain">\nfirst\nsecond\n</div>')
-    expect(html).toContain("&lt;div title=<q>&quot;plain&quot;</q>&gt;<br/>")
+    expect(html).toContain("&lt;div title=&quot;plain&quot;&gt;<br/>")
+    expect(html).not.toContain("<q>")
     expect(html).toContain("first<br/>")
     expect(html).toContain("second<br/>")
     expect(html).not.toContain("<div title=")
+  })
+  it("colours dialogue beside literal tags without pairing it with straight attribute quotes", () => {
+    const html = render('<span title="plain" data-note="other">"say *this*"</span> "outside"')
+    expect(html).toContain("&lt;span title=&quot;plain&quot; data-note=&quot;other&quot;&gt;")
+    expect(html).toContain("<q>&quot;say <em>this</em>&quot;</q>")
+    expect(html).toContain("&lt;/span&gt; <q>&quot;outside&quot;</q>")
+    expect(html.match(/<q>/g)).toHaveLength(2)
   })
   it("shows HTML as text and retains image and link protections", () => {
     const html = render(

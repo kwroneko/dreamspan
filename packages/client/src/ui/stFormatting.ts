@@ -51,7 +51,13 @@ export function stFormatting() {
       node.type === "inlineCode" ? raw(node) : node.children ? node.children.map(flat).join("") : (node.value ?? "\n")
 
     const inline = (parent: Node) => {
-      const content = parent.children!.map(flat).join("")
+      // ST's default encode_tags=false shields straight quotes inside <...> before
+      // matching dialogue. Mask only the matching view so offsets and literal text
+      // survive unchanged; no sentinel is ever emitted into the rendered message.
+      const content = parent
+        .children!.map(flat)
+        .join("")
+        .replace(/<([^>]+)>/g, (tag) => tag.replaceAll('"', "\ufffe"))
       const ranges = [...content.matchAll(quotes)]
         .filter((match) => match.slice(1).some(Boolean))
         .map((match) => [match.index, match.index + match[0].length] as const)

@@ -48,6 +48,9 @@ for (const width of [1440, 390])
       if (process.env.FORMATTING_STAGE !== "before") {
         await expect(message.locator("u")).toHaveText("A promise kept.")
         await expect(message.locator("q").first()).toHaveText('"Hello, traveler."')
+        // Six quote styles and the auto-closed sentence; the literal HTML attribute
+        // stays in the main colour, as ST's default encode_tags=false requires.
+        await expect(message.locator("q")).toHaveCount(7)
         await expect(message.locator("br")).not.toHaveCount(0)
         await expect(message.locator("span[title=synthetic]")).toHaveCount(0)
         const contrast = await message.evaluate((element) => {
