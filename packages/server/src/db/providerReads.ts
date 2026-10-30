@@ -24,6 +24,12 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
   const { ownedConnection, ownedModel, ownedCredential } = makeProviderQueries(sql)
 
   const handlers = {
+    GetImageTokenCount: ({ userId, sha256, kind, modelKey, detail }) =>
+      sql<{ tokens: number }>`SELECT tokens FROM image_token_counts WHERE owner_user_id=${userId}
+        AND sha256=${sha256} AND kind=${kind} AND model_key=${modelKey} AND detail=${detail}`.pipe(
+        Effect.map(([row]) => row?.tokens ?? null),
+        query("GetImageTokenCount")
+      ),
     GetCostSettings: ({ userId }) =>
       sql<{
         revision: number

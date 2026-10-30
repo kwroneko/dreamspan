@@ -34,6 +34,25 @@ describe("assembly over a realistic ST folder", () => {
         settings.world_info_settings.world_info.globalSelect.push("Lost Atlas")
         files.set(settingsPath, new TextEncoder().encode(JSON.stringify(settings)))
         const { report, api } = yield* importStFolder(files)
+        // Imported prompt presets do not supply model limits. This fixture tests a
+        // 128K conversation, so configure that model explicitly and preserve its preset.
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Synthetic 128K",
+            baseUrl: "http://127.0.0.1:1/v1",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+        const model = yield* api.AddUserModel({
+          connectionId: connection.id,
+          key: "synthetic-128k",
+          overrides: { context: 128000, settings: { samplers: { openai_max_tokens: 300 } } }
+        })
+        yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: model.id } } })
         const reader = yield* Reader
         const me = yield* api.Whoami()
         const userId = me.id as UserId

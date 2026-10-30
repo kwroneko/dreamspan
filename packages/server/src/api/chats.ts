@@ -714,7 +714,11 @@ export const makeChatHandlers = Effect.gen(function* () {
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>
       Effect.flatMap(userId, (id) =>
         reader.CacheWarmth({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
-      ).pipe(internal("GetNextContext")),
+      ).pipe(
+        // What to count is the server's own business (ImageTokenCounts).
+        Effect.map(({ uncounted: _, ...next }) => next),
+        internal("GetNextContext")
+      ),
 
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(

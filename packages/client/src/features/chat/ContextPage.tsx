@@ -19,6 +19,7 @@ import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { ImageEstimate } from "./imageTokens.tsx"
 import { useTitle } from "../shell.tsx"
 
 /** How much of a collapsed message shows. */
@@ -294,6 +295,13 @@ function Message({
             )}
             <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
           </span>
+          {message.images && (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              {message.images.map((image, i) => (
+                <ImageEstimate key={i} image={image} index={i} />
+              ))}
+            </span>
+          )}
           {!open && (
             <>
               <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">

@@ -581,6 +581,32 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL))
   ) STRICT`,
   `CREATE INDEX llm_requests_owner ON llm_requests(owner_user_id, started_at)`,
+  // Image token figures (ARCHITECTURE §6): a provider's exact count of one image for one model,
+  // by content hash, so an image is counted once; and ledger samples that calibrate models
+  // without a published formula.
+  `CREATE TABLE image_token_counts (
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    sha256 TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    model_key TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    tokens INTEGER NOT NULL CHECK (tokens >= 0),
+    counted_at INTEGER NOT NULL,
+    PRIMARY KEY (owner_user_id, sha256, kind, model_key, detail)
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TABLE image_token_samples (
+    id INTEGER PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE,
+    model_key TEXT NOT NULL,
+    images INTEGER NOT NULL CHECK (images > 0),
+    pixels INTEGER NOT NULL CHECK (pixels >= 0),
+    tokens INTEGER NOT NULL CHECK (tokens >= 0),
+    -- 'reported': the provider's own image figure; 'derived': reported input less the text estimate.
+    source TEXT NOT NULL CHECK (source IN ('reported', 'derived')),
+    created_at INTEGER NOT NULL
+  ) STRICT`,
+  `CREATE INDEX image_token_samples_model ON image_token_samples(owner_user_id, connection_id, model_key, id)`,
   `CREATE INDEX llm_requests_connection ON llm_requests(connection_id, started_at)`,
   `CREATE INDEX llm_requests_running ON llm_requests(status) WHERE status = 'running'`,
   `CREATE INDEX llm_requests_rollout ON llm_requests(rollout_id) WHERE rollout_id IS NOT NULL`,

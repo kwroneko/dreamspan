@@ -33,6 +33,7 @@ import type {
 } from "./types.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed } from "./types.ts"
 import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
+import type { CalibrationSample, ImageTokenRule } from "@rp/shared/imageTokens.ts"
 
 export type SourceError = AssemblyFailed | NotFound | SqlError.SqlError
 
@@ -105,6 +106,14 @@ export class AssemblySources extends Context.Service<
     readonly preset: (chain: PresetChain) => Effect.Effect<PresetInput, SourceError>
     /** The account's summarization defaults (DESIGN §8), which a chat's settings fall back to; none: built-ins. */
     readonly lcmDefaults?: () => Effect.Effect<LcmDefaults | null, SourceError>
+    /**
+     * What the ledger and the counting endpoints know about these images for this model
+     * (ARCHITECTURE §15, image tokens). Fixtures without it estimate by formula alone.
+     */
+    readonly imageTokenFacts?: (
+      model: { readonly connectionId: string; readonly kind: string; readonly modelKey: string },
+      sha256s: ReadonlyArray<string>
+    ) => Effect.Effect<ImageTokenFacts, SourceError>
   }
 >()("rp/assembler/AssemblySources") {}
 
@@ -127,6 +136,14 @@ export interface AssemblyRequest {
   readonly macros: MacroLookup
   /** The role projections in effect, by id (`roles` stage). */
   readonly projections: ProjectionRegistry
+  /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
+  readonly imageTokens?: Registry<ImageTokenRule>
+}
+
+/** Exact counts by content hash and detail, and the model's calibration samples, newest first. */
+export interface ImageTokenFacts {
+  readonly counts: ReadonlyArray<{ readonly sha256: string; readonly detail: string; readonly tokens: number }>
+  readonly samples: ReadonlyArray<CalibrationSample>
 }
 
 /** The cast of a chat at the position being generated. */

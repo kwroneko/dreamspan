@@ -43,10 +43,12 @@ describe("image exclusion", () => {
         )
         const generated = yield* generateReply(api, {
           connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-          model: { vision: true, maxImages: 2 },
+          model: { vision: true, maxImages: 2, context: 32768 },
+          preset: { openai_max_context: 32768 },
           content: "Three drawings",
           images: [first, second, third]
         })
+        assert.strictEqual(generated.version.status, "complete", JSON.stringify(generated.version.error))
         const { chat } = generated
         const fork = chat.currentForkId!
         const path = yield* reader.GetPath({ userId, chatId: chat.id, leafSlotId: null, limit: 20, forkId: fork })
@@ -73,6 +75,7 @@ describe("image exclusion", () => {
         assert.isUndefined(elsewhere.entry.excludedImages)
 
         const after = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+        assert.deepStrictEqual(after.imageTokens, { count: 2, tokens: 2048, unknown: 2, bases: ["unknown"] })
         assert.deepStrictEqual(
           after.images?.images.map((image) => [image.mediaId, image.rule, image.index]),
           [[third.mediaId, "user", 2]],

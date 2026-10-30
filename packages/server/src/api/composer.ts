@@ -5,6 +5,7 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { TextTooLong } from "@rp/shared/composerApi.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
 import { Effect } from "effect"
+import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { internal } from "./internal.ts"
@@ -13,6 +14,7 @@ export const makeComposerHandlers = Effect.gen(function* () {
   const reader = yield* Reader
   const writer = yield* Writer
   const hub = yield* ChatHub
+  const warmth = yield* CacheWarmth
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -51,9 +53,9 @@ export const makeComposerHandlers = Effect.gen(function* () {
         internal("GetComposerImages")
       ),
     SetComposerImage: (payload) =>
-      Effect.flatMap(userId, (id) => writer.SetComposerImage({ userId: id, ...payload })).pipe(
-        internal("SetComposerImage")
-      ),
+      Effect.flatMap(userId, (id) =>
+        writer.SetComposerImage({ userId: id, ...payload }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(internal("SetComposerImage")),
     GetComposerChoice: ({ chatId, draftId }) =>
       Effect.flatMap(userId, (id) => reader.GetComposerChoice({ userId: id, chatId, draftId })).pipe(
         internal("GetComposerChoice")

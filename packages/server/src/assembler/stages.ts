@@ -1,3 +1,4 @@
+import { budgetTokens } from "@rp/shared/imageTokens.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
@@ -13,6 +14,7 @@ import {
 } from "@rp/shared/endOfRequest.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
+import { imageTokensStage, limitImageEstimates } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
@@ -948,9 +950,11 @@ const chatLine = (
   const behavior = need(assembly, "preset").doc.names_behavior
   const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
   const pieces = [projected.piece]
+  const images = projected.entry.images?.length ? { images: projected.entry.images } : {}
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
     content: prefix ? `${projected.name}: ${text}` : text,
+    ...images,
     pieces,
     // A depth-bounded regex script changes it as the chat grows: it isn't part of the stable prefix.
     kind: scripted.volatile ? "volatile" : "history"
@@ -1981,7 +1985,11 @@ const composeStage = sync("compose", (assembly) => {
   const cost = (built: ReturnType<typeof compose>) => {
     const messages = built.messages.filter((message) => message.content)
     const processed = postProcess(doc.squash ? squash(messages) : messages, doc.postprocess, postNames)
-    const tokens = (messages: ReadonlyArray<StMessage>) => messages.reduce((sum, message) => sum + tokensOf(message), 0)
+    const tokens = (messages: ReadonlyArray<StMessage>) =>
+      limitImageEstimates(messages, assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES).reduce(
+        (sum, message) => sum + tokensOf(message),
+        0
+      )
     return 3 + Math.max(tokens(built.messages), tokens(processed))
   }
   const fixedCost = cost(candidate(projected.length, Number.POSITIVE_INFINITY, false, false, false))
@@ -2110,6 +2118,15 @@ const composeStage = sync("compose", (assembly) => {
     )
   }
   const earliestFit = (end: number) => {
+    // Moving Newest before History can make removing an older image admit a more
+    // expensive newest image at the cap. Those suffix costs need not be monotonic.
+    const order = actualPlacement.collection
+    const newest = order.findIndex((prompt) => prompt.identifier === "newestMessage")
+    const history = order.findIndex((prompt) => prompt.identifier === "chatHistory")
+    if (newest >= 0 && newest < history && !disabled("newestMessage") && lines.some((line) => line.images?.length)) {
+      for (let start = 0; start < end; start++) if (fits(start, target)) return start
+      return end
+    }
     let low = 0,
       high = end
     while (low < high) {
@@ -2162,6 +2179,36 @@ const composeStage = sync("compose", (assembly) => {
     }
   }
   start = normalizedStart(start)
+  // A summary must see its whole declared range, including its images; partial input
+  // would permanently replace unseen material with a summary that never described it.
+  if (assembly.request.summarizing && start > 0) {
+    const images = lines.flatMap((line) => line.images ?? []).filter((image) => image.estimate?.sent !== false)
+    const tokens = images.reduce((sum, image) => sum + budgetTokens(image.estimate), 0)
+    throw new AssemblyFailed({
+      reason: "budget",
+      message: `The summary chunk cannot fit the history limit of ${Math.max(0, budget - minimum).toLocaleString("en-US")} tokens${images.length ? `; its images need about ${tokens.toLocaleString("en-US")} tokens` : ""}. Reduce the chunk or increase the context target.`
+    })
+  }
+  // Never send a reply after cutting away the very turn it should answer.
+  if (
+    projected.length > 0 &&
+    start >= projected.length &&
+    !assembly.request.summarizing &&
+    budgetCost(projected.length - 1) > budget
+  ) {
+    const newest = lines.at(-1)!
+    const images = (newest.images ?? []).filter((image) => image.estimate?.sent !== false)
+    const imageTokens = images.reduce((sum, image) => sum + budgetTokens(image.estimate), 0)
+    const limit = Math.max(0, budget - minimum)
+    throw new AssemblyFailed({
+      reason: "budget",
+      message: images.length
+        ? `The newest message's ${images.length === 1 ? "image needs" : "images need"} about ${imageTokens.toLocaleString("en-US")} tokens; the history limit is ${limit.toLocaleString("en-US")} tokens. Reduce the images or increase the context target.`
+        : `The newest message needs about ${tokensOf(newest).toLocaleString("en-US")} tokens; the history limit is ${limit.toLocaleString("en-US")} tokens. Shorten it or increase the context target.`,
+      contextBudget: contextBudgetInfo(fixedCost),
+      preset: { ref: need(assembly, "preset").ref, scope: need(assembly, "preset").scope }
+    })
+  }
   const first = projected[start]?.entry
   const startDepth = first?.depth ?? need(assembly, "target").depth
   // Pins hold while the history's start does: when it moves (a cut, a restore, LCM's cursor),
@@ -2204,8 +2251,18 @@ const composeStage = sync("compose", (assembly) => {
       ...(belowHistory ? {} : { pinnedLore })
     }
   }
+  // The outer cut already admits the whole image-aware candidate in final request order.
+  // ST's inner chronological cut cannot repeat that decision when Newest message moves:
+  // the image it would charge can be the one dispatch leaves out by the last-N limit.
+  const imageHistory = lines.some((line) => line.images?.length)
+  const admitted = candidate(start, imageHistory ? Number.POSITIVE_INFINITY : budget)
+  if (imageHistory && cost(admitted) > budget)
+    throw new AssemblyFailed({
+      reason: "budget",
+      message: `The image-bearing history needs about ${cost(admitted).toLocaleString("en-US")} tokens; the context input limit is ${budget.toLocaleString("en-US")} tokens. Reduce the images or increase the context target.`
+    })
   const composition = {
-    ...candidate(start, budget),
+    ...admitted,
     historyBudget:
       candidate(projected.length, maximum, true, false, false).historyBudget -
       failuresBefore(start).reduce((n, failure) => n + tokensOf({ content: assembly.pieces[failure.piece]!.text }), 0),
@@ -2353,11 +2410,14 @@ const requestStage = sync("request", (assembly) => {
     })
   assembly.result = {
     ...(firstSummary >= 0 ? { summaryStart: firstSummary } : {}),
-    messages: messages.map(({ role, content, name, pieces }) => {
-      // Images the fork took out are left out here, so every limit counts only what's sent.
-      const images = messageImages(assembly, pieces).map(({ image }) => image)
-      return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
-    }),
+    messages: limitImageEstimates(
+      messages.map(({ role, content, name, pieces }) => {
+        // Images the fork took out are left out here, so every limit counts only what's sent.
+        const images = messageImages(assembly, pieces).map(({ image }) => image)
+        return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
+      }),
+      assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES
+    ),
     prefill: assembly.prefill ?? null,
     samplers: {
       temperature: s.temperature,
@@ -2431,6 +2491,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   scriptsStage,
   historyStage,
   resolveStage,
+  imageTokensStage,
   rolesStage,
   noteGateStage,
   loreScanStage,

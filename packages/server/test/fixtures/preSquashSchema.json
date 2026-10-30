@@ -302,6 +302,12 @@
     },
     {
       "type": "index",
+      "name": "image_token_samples_model",
+      "tbl_name": "image_token_samples",
+      "sql": "CREATE INDEX image_token_samples_model ON image_token_samples(owner_user_id, connection_id, model_key, id)"
+    },
+    {
+      "type": "index",
       "name": "jobs_lcm_backfill",
       "tbl_name": "jobs",
       "sql": "CREATE INDEX jobs_lcm_backfill ON jobs(json_extract(payload_json, '$.chatId')) WHERE kind = 'lcm-backfill'"
@@ -947,6 +953,18 @@
       "name": "history_changes",
       "tbl_name": "history_changes",
       "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of this reduction, retained for descendant lineage bounds. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id, seq) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "image_token_counts",
+      "tbl_name": "image_token_counts",
+      "sql": "CREATE TABLE image_token_counts ( owner_user_id TEXT NOT NULL REFERENCES users(id), sha256 TEXT NOT NULL, kind TEXT NOT NULL, model_key TEXT NOT NULL, detail TEXT NOT NULL, tokens INTEGER NOT NULL CHECK (tokens >= 0), counted_at INTEGER NOT NULL, PRIMARY KEY (owner_user_id, sha256, kind, model_key, detail) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "image_token_samples",
+      "tbl_name": "image_token_samples",
+      "sql": "CREATE TABLE image_token_samples ( id INTEGER PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE, model_key TEXT NOT NULL, images INTEGER NOT NULL CHECK (images > 0), pixels INTEGER NOT NULL CHECK (pixels >= 0), tokens INTEGER NOT NULL CHECK (tokens >= 0), -- 'reported': the provider's own image figure; 'derived': reported input less the text estimate. source TEXT NOT NULL CHECK (source IN ('reported', 'derived')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
