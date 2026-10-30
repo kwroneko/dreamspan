@@ -3,7 +3,7 @@ import { BinForkShown } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { forksShowing } from "./forks.ts"
+import { forksShowing, lastShown } from "./forks.ts"
 import { shownIn } from "./forkState.ts"
 
 export const binItemForks = (sql: SqlClient.SqlClient, userId: UserId, itemIds: ReadonlyArray<string>) =>
@@ -28,9 +28,10 @@ export const binItemForks = (sql: SqlClient.SqlClient, userId: UserId, itemIds: 
         false
       )
       for (const fork of forks) {
+        const end = yield* lastShown(sql, item.chat_id, fork)
         const [tip] = yield* sql<{ excerpt: string }>`
               SELECT substr(v.content, 1, 80) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, fork.id, "t")}
-              WHERE t.id = ${fork.tip_slot_id}`
+              WHERE t.id = ${end}`
         shown.push(
           new BinForkShown({
             itemId: item.id,

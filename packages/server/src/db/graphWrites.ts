@@ -368,8 +368,11 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       yield* checkSpeaker(userId, version.speakerEntityId)
       let parent: { id: string; depth: number; lane_id: string } | null = null
       if (parentSlotId !== null) {
+        // A deleted message is the fork's tip only while its gap still holds an inserted message
+        // the fork shows (`relocateLeaf`, spec/MESSAGE-INSERT.md §2.4): appends go below it.
         const [row] = yield* sql<{ id: string; depth: number; lane_id: string }>`
-            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId}
+              AND (deleted_at IS NULL OR id = ${fork.tip_slot_id})`
         if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
         parent = row
       }

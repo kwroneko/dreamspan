@@ -24,7 +24,7 @@ export const forkColumns = (f: string) => `${f}.*,
  * fork's view, skipping inserted ones deleted there. Costs nothing more than the lookup of the
  * fork's insertions when it places none.
  */
-const lastShown = (
+export const lastShown = (
   sql: SqlClient.SqlClient,
   chatId: string,
   fork: { readonly id: string; readonly tip_slot_id: string | null }
@@ -126,7 +126,7 @@ export const shownElsewhere = (
     // The fork's replacement of the original, as `replacedInSql` reads it, with it bound.
     const candidates = yield* sql<ForkRow>`
       SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND f.id <> ${forkId} AND ${sql.literal(reaches("t", "x"))}
+      WHERE f.chat_id = ${chatId} AND f.purged_at IS NULL AND f.id <> ${forkId} AND ${sql.literal(reaches("t", "x"))}
         AND coalesce((SELECT o.value_id FROM json_each(f.lineage_json) l CROSS JOIN fork_overrides o
           WHERE o.fork_id = l.value ->> 0 AND o.kind = 'replace' AND o.target_id = ${original}
             AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
@@ -153,7 +153,7 @@ export const forksShowing = (
   Effect.gen(function* () {
     const candidates = yield* sql<ForkRow>`
       SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND f.id IS NOT ${except} AND ${sql.literal(reaches("t", "x"))}
+      WHERE f.chat_id = ${chatId} AND f.purged_at IS NULL AND f.id IS NOT ${except} AND ${sql.literal(reaches("t", "x"))}
         AND (${liveOnly ? 1 : 0} = 0 OR f.deleted_at IS NULL)
         AND NOT ${slotDeletedIn(sql, sql.literal("f.id"), "x")}
         AND (${versionId} IS NULL OR NOT EXISTS (SELECT 1 FROM versions o WHERE o.id = ${versionId}
