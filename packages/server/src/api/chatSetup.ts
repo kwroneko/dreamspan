@@ -56,6 +56,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "lorebook.global", value: { ref: change.ref, on: change.on } }
     case "LoreBelowHistory":
       return { key: "lorebook.below_history", value: { on: change.on } }
+    case "AuthorNote":
+      return { key: "author_note.set", value: { note: change.entityId } }
   }
 }
 

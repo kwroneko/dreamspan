@@ -128,11 +128,12 @@ export type NoteDoc = typeof NoteDoc.Type
 
 /**
  * Whether a chat's note is its author's note, which what is placed at the author's note's top
- * or bottom joins (ST's floating prompt): the note the chat names with `author_note.set`, or an
+ * or bottom joins (ST's floating prompt): the note the chat names with `author_note.set` (the
+ * user's choice in its Notes tab, or an import's), none after it chose none (`false`), else an
  * imported one of kind `author_note`. The chat's notes show it ("author's note").
  */
-export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAuthorNote: string | null) =>
-  doc.kind === "author_note" || entity === chatAuthorNote
+export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAuthorNote: string | false | null) =>
+  chatAuthorNote === null ? doc.kind === "author_note" : entity === chatAuthorNote
 
 /** A note's condition, absent read as always. */
 export const noteCondition = (doc: Pick<NoteDoc, "condition">): NoteCondition => doc.condition ?? { when: "always" }
