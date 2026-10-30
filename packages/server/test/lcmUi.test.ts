@@ -65,6 +65,74 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
     const a = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [input(0), input(1)])
     const b = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [input(2), input(3)])
     const top = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [], [a, b])
+    const unknown = yield* api.GetSummaryDetails({ summaryId: top.id })
+    assert.isNull(unknown.model)
+    assert.isNull(unknown.startedAt)
+    assert.deepStrictEqual(unknown.requests, [])
+    assert.isNull(unknown.request)
+    const connection = yield* api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Synthetic summary source",
+        baseUrl: "http://127.0.0.1:1/v1",
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      }
+    })
+    const wire = {
+      display: {
+        model: {
+          connection: "Historical connection",
+          model: "Historical model",
+          kind: "openai-chat",
+          breakpoints: "none"
+        },
+        preset: { label: null, scope: "builtin" },
+        issues: []
+      },
+      messages: [{ role: "user", content: "Captured synthetic summary request", inputs: [], digest: "private-digest" }],
+      samplers: { temperature: 0.2 },
+      mapping: { secret: "private-mapping" }
+    }
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: "UPDATE rollouts SET started_at=1000,completed_at=3500 WHERE id=(SELECT rollout_id FROM summaries WHERE id=?)",
+        params: [top.id]
+      },
+      { sql: "UPDATE summarization_jobs SET attempts=2 WHERE result_summary_id=?", params: [top.id] },
+      {
+        sql: "INSERT INTO rollout_payloads(rollout_id,sent_context_json) SELECT rollout_id,? FROM summaries WHERE id=?",
+        params: [JSON.stringify(wire), top.id]
+      },
+      {
+        sql: `INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,cache_read,cache_write,output,usage_source,cost,cost_currency,cost_formula,raw_usage_json)
+          SELECT 'summary-provenance-request',?,?,chat_id,rollout_id,'summarize','openai','synthetic','writer-model','complete',1000,3500,120,30,NULL,40,'reported',0.0123,'USD','reported','{"private":"never-public"}' FROM summaries WHERE id=?`,
+        params: [user.id, connection.id, top.id]
+      }
+    ])
+    yield* fixtureSql(config.dataDir, [
+      {
+        sql: `INSERT INTO llm_requests(id,owner_user_id,connection_id,chat_id,rollout_id,purpose,api,provider,model_key,status,started_at,ended_at,input_uncached,output,usage_source)
+        SELECT 'summary-judge-request',?,?,chat_id,rollout_id,'decision','openai','synthetic','judge-model','complete',3000,3500,10,1,'reported' FROM summaries WHERE id=?`,
+        params: [user.id, connection.id, top.id]
+      }
+    ])
+    const details = yield* api.GetSummaryDetails({ summaryId: top.id })
+    assert.strictEqual(details.model, "writer-model")
+    assert.strictEqual(details.requests.length, 2)
+    assert.strictEqual(details.requests[1]!.purpose, "decision")
+    assert.strictEqual(details.attempts, 2)
+    assert.strictEqual(details.startedAt, 1000)
+    assert.strictEqual(details.endedAt, 3500)
+    assert.strictEqual(details.requests[0]!.counts.inputUncached, 120)
+    assert.isNull(details.requests[0]!.counts.cacheWrite)
+    assert.strictEqual(details.requests[0]!.cost?.amount, 0.0123)
+    assert.strictEqual(details.request?.messages[0]!.content, "Captured synthetic summary request")
+    for (const privateText of ["private-digest", "private-mapping", "never-public"])
+      assert.isFalse(JSON.stringify(details).includes(privateText))
+    assert.isNull((yield* api.GetSummaryDetails({ summaryId: a.id })).request)
     const layer = yield* state()
     // The level-2 summary stands in for both; the layer holds one.
     assert.deepStrictEqual(
@@ -127,6 +195,7 @@ it.live("the layer, coverage, revisions, reruns, the switch and the edit draft",
       commitDraft: { draftId: draft.id, session: draft.session }
     })
     assert.strictEqual(edited.summary.origin, "user")
+    assert.deepStrictEqual(yield* api.GetSummaryDetails({ summaryId: top.id }), details)
     assert.strictEqual((yield* api.GetSummaryDraft(draftKey))?.status, "committed")
     const revisions = yield* api.ListSummaryRevisions({ summaryId: top.id })
     assert.deepStrictEqual(

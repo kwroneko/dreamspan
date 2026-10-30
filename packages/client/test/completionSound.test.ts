@@ -85,7 +85,7 @@ it("replaces or disables sound settings, activation and playback together, then 
   const dispose = register()
   setSoundWanted(true)
   state = "running"
-  const notice = { status: "complete" } as Notice
+  const notice = { status: "complete" } as Extract<Notice, { _tag: "ReplyFinished" }>
   const render = () => renderToStaticMarkup(createElement(NoticeChannelSettings))
   expect(render()).toContain("Completion sound")
   activateNoticeChannels()

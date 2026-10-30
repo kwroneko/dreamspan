@@ -545,6 +545,17 @@ for (const width of [1440, 390])
     test(`${width} ${theme}: conflicting instructions stay visible and can be restored`, async ({ page, browser }) => {
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
+      let hold = false
+      let release: (() => void) | undefined
+      await page.routeWebSocket(/\/rpc$/, (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((data) => {
+          const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string }) : null
+          if (hold && request?.tag === "SaveUserDraft") release = () => upstream.send(data)
+          else upstream.send(data)
+        })
+        upstream.onMessage((data) => socket.send(data))
+      })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/settings/chats`)
       const box = page.getByLabel("Summarization instruction", { exact: true })
@@ -557,10 +568,16 @@ for (const width of [1440, 390])
         await apiLogin(device.request, server(), ADMIN.handle, ADMIN.password)
         await device.goto(`${server().url}/settings/chats`)
         await expect(device.getByLabel("Summarization instruction", { exact: true })).toHaveValue(local)
+        // Keep a save on the old observed base in flight. A clean editor now learns
+        // the other device's draft immediately, so merely editing afterwards isn't stale.
+        hold = true
+        await box.fill(`${local} Continued locally.`)
+        await expect.poll(() => !!release).toBe(true)
         const other = `Another device's instruction: retain the journey's language and the keeper's voice. ${width} ${theme}`
         await device.getByLabel("Summarization instruction", { exact: true }).fill(other)
         await expect.poll(() => draftText("Settings → Chats", "Summarization instruction")).toBe(other)
-        await box.fill(`${local} Continued locally.`)
+        hold = false
+        release!()
         await expect(page.getByText(/Another edit from .* is kept in field undo history/)).toBeVisible()
         await box.fill(`${local} Continued locally, once more.`)
         await expect

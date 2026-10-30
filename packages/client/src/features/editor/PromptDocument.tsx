@@ -11,13 +11,14 @@ import {
 } from "@rp/shared/presetConditions.ts"
 import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useContext, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
+import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
@@ -65,10 +66,24 @@ function Block({
   const byDefinitions = definitions && perFieldMarkers.includes(entry.identifier)
   const name = useText(store, [...path, "name"]) || prompt.name
   const content = useText(store, [...path, "content"])
+  const nameMatch = useSearchMatch([...path, "name"])
+  const marker = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!prompt.marker || !nameMatch) return
+    const frame = requestAnimationFrame(() => {
+      const target = marker.current
+      if (!target) return
+      target.focus({ preventScroll: true })
+      scrollToSearchField(target)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [nameMatch, prompt.marker])
   const condition = conditionOf(prompt)
   const filled = context?.blocks.find((b) => b.identifier === entry.identifier)
   return (
     <section
+      ref={marker}
+      tabIndex={-1}
       id={`prompt-${entry.identifier}`}
       data-prompt={entry.identifier}
       className="scroll-mt-[var(--preset-toolbar-height,1rem)] border-t border-border py-2"
@@ -91,7 +106,19 @@ function Block({
             <span className="sr-only">Send {name}</span>
           </Switch>
         )}
-        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">{name}</span>
+        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">
+          {prompt.marker && nameMatch ? (
+            <>
+              {name.slice(0, nameMatch.at)}
+              <mark className="bg-warning/30 text-text">
+                {name.slice(nameMatch.at, nameMatch.at + nameMatch.length)}
+              </mark>
+              {name.slice(nameMatch.at + nameMatch.length)}
+            </>
+          ) : (
+            name
+          )}
+        </span>
         {!prompt.marker && (
           <>
             <Badge>{prompt.role}</Badge>
@@ -243,10 +270,21 @@ export function PromptDocument({
   context?: PresetContext | null | undefined
   focus?: string | undefined
 }) {
+  const searchMatch = useContext(SearchNavigation)
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
   const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const order = presetOrder(prompts, savedOrder)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const [list, identity] = searchMatch?.path ?? []
+    if (list === "prompts" && typeof identity === "string" && identity.startsWith("identifier=")) {
+      const identifier = identity.slice("identifier=".length)
+      const frame = requestAnimationFrame(() =>
+        setCollapsed((current) => new Set([...current].filter((id) => id !== identifier)))
+      )
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [searchMatch])
   const root = useRef<HTMLDivElement>(null)
   const names = new Map([...prompts, newestMessage].map((p) => [p.identifier, p.name]))
   if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)

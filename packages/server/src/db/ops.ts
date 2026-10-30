@@ -16,6 +16,7 @@ import {
   LcmState,
   RerunTarget,
   Summary,
+  SummaryDetails,
   SummaryId,
   SummaryRevision,
   SummaryRevisionId,
@@ -2028,6 +2029,11 @@ export class ReadOps extends RpcGroup.make(
     success: ShellLibrary,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("GetSummaryDetails", {
+    payload: { userId: UserId, summaryId: SummaryId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("GetSummary", {
     payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, summaryId: SummaryId },
     success: Summary,
@@ -2546,6 +2552,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetRevisionDoc", {
     payload: { userId: UserId, refId: RefId, revisionId: RevisionId },
     success: Doc,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The existing first imported card note, using the same identity as ImportFile. */
+  Rpc.make("GetCardImportNote", {
+    payload: { userId: UserId, cardRefId: RefId },
+    success: Schema.NullOr(EntityId),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The notes a card owns, by their upstream refs, oldest first. */

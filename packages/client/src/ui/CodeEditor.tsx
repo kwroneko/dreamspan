@@ -4,6 +4,9 @@ export interface CodeEditorProps {
   value: string
   /** Text at the revision this draft was typed against. */
   base: string
+  /** Select and reveal a range; a fresh object requests another visit. */
+  selection?: { readonly at: number; readonly length: number } | undefined
+  onRevealSelection?: ((host: HTMLElement, top: number) => void) | undefined
   label: string
   fullHeight?: boolean | undefined
   autoFocus?: boolean | undefined
