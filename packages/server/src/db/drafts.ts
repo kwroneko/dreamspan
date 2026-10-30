@@ -693,7 +693,8 @@ export const makeDraftStore = (
     userId: UserId,
     commitDraft: CommitDraft | null,
     destination: {
-      readonly targetKind: DraftKey["targetKind"]
+      /** The kind of draft it may be; several when more than one editor can send here. */
+      readonly targetKind: DraftKey["targetKind"] | ReadonlyArray<DraftKey["targetKind"]>
       readonly targetId: string
       readonly content: string | ((field: string) => string | null)
       readonly images?: MessageImages | undefined
@@ -704,7 +705,9 @@ export const makeDraftStore = (
       yield* checkIdentity(userId, commitDraft.draftId)
       const draft = yield* byId(commitDraft.draftId)
       if (draft === null || draft.user_id !== userId) return { draft: null, recovered: 0 }
-      if (draft.target_kind !== destination.targetKind || draft.target_id !== destination.targetId)
+      const kinds: ReadonlyArray<string> =
+        typeof destination.targetKind === "string" ? [destination.targetKind] : destination.targetKind
+      if (!kinds.includes(draft.target_kind) || draft.target_id !== destination.targetId)
         return { draft: null, recovered: 0 }
       const content = typeof destination.content === "string" ? destination.content : destination.content(draft.field)
       if (

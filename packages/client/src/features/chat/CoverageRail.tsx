@@ -2,6 +2,7 @@
 // summary over them, level by level outward from the messages. A bar that is hatched is
 // stale, one in the danger color failed, a pulsing one is being written. A click opens the
 // summary. It reads only the window of the path that is loaded (GetLcmCoverage).
+import { positionOf } from "./position.ts"
 import type { PathEntry } from "@rp/shared/chat.ts"
 import type { LcmState, LcmSummary } from "@rp/shared/lcm.ts"
 import { useEffect, useState } from "react"
@@ -11,13 +12,13 @@ import type { ChatSession } from "./session.ts"
 /** Width of one level's lane, in pixels. */
 export const LANE_PX = 10
 
-/** The first index whose depth is at least `depth`, in a list ordered by depth. */
+/** The first index whose position is at least `depth`, in a list ordered by position. */
 const lowerBound = (entries: ReadonlyArray<PathEntry>, depth: number) => {
   let lo = 0
   let hi = entries.length
   while (lo < hi) {
     const mid = (lo + hi) >> 1
-    if (entries[mid]!.depth < depth) lo = mid + 1
+    if (positionOf(entries[mid]!) < depth) lo = mid + 1
     else hi = mid
   }
   return lo
@@ -32,8 +33,8 @@ export function useCoverage(
   on: boolean
 ) {
   const [coverage, setCoverage] = useState<{ leaf: string; rows: ReadonlyArray<LcmSummary> } | null>(null)
-  const first = entries[0] && (entries[0].position ?? entries[0].depth)
-  const last = entries.at(-1) && (entries.at(-1)!.position ?? entries.at(-1)!.depth)
+  const first = entries[0] && positionOf(entries[0])
+  const last = entries.at(-1) && positionOf(entries.at(-1)!)
   const leaf = lcm?.leafSlotId
   useEffect(() => {
     if (!on || first === undefined || last === undefined || leaf === undefined) return

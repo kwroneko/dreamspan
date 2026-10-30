@@ -2,6 +2,7 @@
 // the header can say which branch this is from anywhere in the chat, not only when the
 // message where it branched is loaded. The path is read once per branch shown, from its
 // leaf up, a page at a time; what's loaded since (a reply, a new branch) is merged in.
+import { positionOf } from "./position.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
@@ -60,11 +61,11 @@ export function useForks(session: ChatSession, view: ChatView): Forks {
   if (scan === null || !current) {
     return { forks: view.entries.filter(manageable), complete: false }
   }
-  // What's loaded is newer than the scan: it replaces the scan's entry at its depth.
-  const loaded = new Map(view.entries.map((e) => [e.depth, e]))
-  const byDepth = new Map(scan.forks.map((e) => [e.depth, e]))
-  for (const [depth, entry] of loaded) byDepth.set(depth, entry)
-  const forks = [...byDepth.values()]
+  // What's loaded is newer than the scan: it replaces the scan's entry for its slot. (An
+  // inserted message has the depth of the message after it, so depths don't key them.)
+  const bySlot = new Map(scan.forks.map((e) => [e.slotId, e]))
+  for (const entry of view.entries) bySlot.set(entry.slotId, entry)
+  const forks = [...bySlot.values()]
     .map((entry) => {
       const live = view.branchNames.get(entry.slotId)
       return live !== undefined && live.rowVersion >= entry.rowVersion
@@ -72,6 +73,6 @@ export function useForks(session: ChatSession, view: ChatView): Forks {
         : entry
     })
     .filter(manageable)
-    .sort((a, b) => a.depth - b.depth)
+    .sort((a, b) => positionOf(a) - positionOf(b))
   return { forks, complete: scan.complete }
 }

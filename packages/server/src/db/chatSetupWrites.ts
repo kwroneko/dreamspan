@@ -415,7 +415,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               })} RETURNING *`
               // The text waits in the queue now, and comes back to the composer if withdrawn.
               const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
-                targetKind: "composer",
+                // The composer's, or the insertion editor's below the tip, whose insertion is an append
+                // (spec/MESSAGE-INSERT.md §4.2).
+                targetKind: ["composer", "insert"],
                 targetId: chatId,
                 content: row!.kind === "generate" ? (row!.direction ?? "") : row!.content
               })

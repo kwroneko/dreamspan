@@ -49,7 +49,8 @@ export function MessageActions({ context }: { context: MessageActionContext }) {
   // Availability can depend on the path tip even when this row's entry stayed identical.
   const readTip = () => {
     const view = context.session.snapshot()
-    return `${view.forkId}:${view.loading}:${view.newer}:${view.entries.at(-1)?.slotId}`
+    // The first message shown, too: only it offers Insert message above.
+    return `${view.forkId}:${view.loading}:${view.newer}:${view.older}:${view.entries[0]?.slotId}:${view.entries.at(-1)?.slotId}`
   }
   useSyncExternalStore(context.session.subscribe, readTip, readTip)
   const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)

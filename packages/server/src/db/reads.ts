@@ -436,23 +436,25 @@ export const makeReadHandlers = Effect.gen(function* () {
         const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
         if ((yield* placedInsertions(sql, chatId, fork.id)).length === 0) {
           // No insertions: the display path is the structural one, read as before.
-          if (leaf === null) return { entries: [], olderLeafSlotId: null }
+          if (leaf === null) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
           const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
           if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
           // Deleted messages are walked through but not shown; their replies stay in place.
           return {
             entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-            olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null
+            olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null,
+            tipSlotId: fork.tip_slot_id as SlotId | null
           }
         }
         // The last `limit` positions up to the leaf, or up to the display end.
         const shown = yield* displayTo(chatId, fork, leafSlotId)
-        if (shown.end < 0) return { entries: [], olderLeafSlotId: null }
+        if (shown.end < 0) return { entries: [], olderLeafSlotId: null, tipSlotId: fork.tip_slot_id as SlotId | null }
         const first = Math.max(0, shown.end - limit + 1)
         const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
         return {
           entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-          olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null
+          olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null,
+          tipSlotId: fork.tip_slot_id as SlotId | null
         }
       }).pipe(query("GetPath")),
 

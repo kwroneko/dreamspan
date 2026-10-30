@@ -1,4 +1,5 @@
 import { useSyncExternalStore, type ReactNode } from "react"
+import { lcmCursor, positionOf } from "./position.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmState } from "@rp/shared/lcm.ts"
 import { makeRegistry } from "../../registry.ts"
@@ -41,8 +42,8 @@ export const messageRows = (entries: ReadonlyArray<PathEntry>): ReadonlyArray<Ti
   entries.map((entry) => ({
     key: entry.slotId,
     estimate: 160,
-    from: entry.depth,
-    to: entry.depth,
+    from: positionOf(entry),
+    to: positionOf(entry),
     entry,
     render: ({ renderMessage }) => renderMessage(entry)
   }))
@@ -50,7 +51,7 @@ export const messageRows = (entries: ReadonlyArray<PathEntry>): ReadonlyArray<Ti
 // Earlier transforms may insert rows, clone entries or project a range of messages.
 // Resolve a message boundary against the current rows' depth ranges, never its old index.
 const boundaryRow = (rows: ReadonlyArray<TimelineRow>, entries: ReadonlyArray<PathEntry>, index: number) => {
-  const depth = entries[index]?.depth
+  const depth = entries[index] && positionOf(entries[index])
   if (depth === undefined) return rows.length
   const at = rows.findIndex((row) => row.from <= row.to && row.to >= depth)
   return at < 0 ? rows.length : at
@@ -93,14 +94,16 @@ export const registerTimelineTransforms = () => [
         original.splice(at, 0, {
           key: "lcm-boundary",
           estimate: 44,
-          from: lcm.cursorDepth + 1,
+          from: lcmCursor(lcm) + 1,
           to: -1,
           render: ({ onOpenSummaries }) => (
             <SlotOutlet slot={timelineBoundaries} props={{ lcm, onOpen: () => onOpenSummaries(null) }} />
           )
         })
       }
-      const layer = summaries ? (lcm?.layer ?? []).filter((s) => s.from <= (entries.at(-1)?.depth ?? -1) + 1) : []
+      const layer = summaries
+        ? (lcm?.layer ?? []).filter((s) => s.from <= (entries.at(-1) ? positionOf(entries.at(-1)!) : -1) + 1)
+        : []
       const result: TimelineRow[] = []
       let next = 0
       const append = () => {
@@ -120,7 +123,8 @@ export const registerTimelineTransforms = () => [
                 renderMessage,
                 target:
                   entries.find(
-                    (entry) => entry.slotId === anchor && entry.depth >= summary.from - 1 && entry.depth < summary.to
+                    (entry) =>
+                      entry.slotId === anchor && positionOf(entry) >= summary.from - 1 && positionOf(entry) < summary.to
                   ) ?? null
               }}
             />
@@ -129,7 +133,7 @@ export const registerTimelineTransforms = () => [
       }
       for (const row of original) {
         while (next < layer.length && layer[next]!.from - 1 <= row.from) append()
-        if (!row.entry || !layer.some((s) => row.entry!.depth >= s.from - 1 && row.entry!.depth < s.to))
+        if (!row.entry || !layer.some((s) => positionOf(row.entry!) >= s.from - 1 && positionOf(row.entry!) < s.to))
           result.push(row)
       }
       while (next < layer.length) append()

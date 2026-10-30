@@ -1,4 +1,5 @@
 import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
+import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
   ChatSurfaceProviders,
@@ -7,7 +8,8 @@ import {
   chatComposerNotes,
   timelineRails,
   timelineBoundaries,
-  timelineSummaries
+  timelineSummaries,
+  messageStream
 } from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
 import { useIsPanelTab } from "./panels.tsx"
@@ -73,7 +75,7 @@ export function boundaryIndex(view: ChatView): number | null {
   if (lcm === null || !lcm.enabled || lcm.leafSlotId !== view.leafSlotId) return null
   const { entries } = view
   if (entries.length === 0) return null
-  let at = entries.findIndex((e) => e.depth > lcm.cursorDepth)
+  let at = entries.findIndex((e) => positionOf(e) > lcmCursor(lcm))
   if (at < 0) at = entries.length
   // Before the loaded window, or after it with more below: not here.
   if (at === 0 && view.older !== null) return null
@@ -121,12 +123,12 @@ function MessageList({
   useRenderCount("listRenders")
   const lcm = view.lcm?.enabled === true && view.lcm.leafSlotId === view.leafSlotId ? view.lcm : null
   const history = view.history?.leafSlotId === view.leafSlotId ? view.history : null
-  const through = lcm ? (lcm.cursorDepth < 0 ? null : lcm.cursorDepth) : (history?.summarizedThrough ?? null)
+  const through = lcm ? (lcmCursor(lcm) < 0 ? null : lcmCursor(lcm)) : (history?.summarizedThrough ?? null)
   const outOfContext = (entry: PathEntry) =>
     !entry.contextExcluded &&
     history?.historyStart != null &&
-    entry.depth < history.historyStart.depth &&
-    entry.depth > (through ?? -1)
+    positionOf(entry) < history.historyStart.depth &&
+    positionOf(entry) > (through ?? -1)
   const budget = history?.budget
   /** Why a message left the context, said the same way on each (DESIGN §5.5). */
   const droppedReason = history?.historyStart
@@ -141,7 +143,7 @@ function MessageList({
   const contextOf = (entry: PathEntry): ContextMark | null =>
     entry.contextExcluded
       ? null
-      : through !== null && entry.depth <= through
+      : through !== null && positionOf(entry) <= through
         ? SUMMARIZED
         : outOfContext(entry)
           ? droppedMark
@@ -152,10 +154,12 @@ function MessageList({
   if (budget && entries.length > 0) {
     const start = history.historyStart
     if (start && (entries.some(outOfContext) || (view.older !== null && start.depth > (through ?? -1) + 1))) {
-      const at = entries.findIndex((e) => !e.contextExcluded && e.depth >= start.depth && e.depth > (through ?? -1))
+      const at = entries.findIndex(
+        (e) => !e.contextExcluded && positionOf(e) >= start.depth && positionOf(e) > (through ?? -1)
+      )
       if (at < 0) {
         if (view.newer === null) historyDivider = entries.length
-      } else if (at > 0 || entries[at]!.depth === start.depth) historyDivider = at
+      } else if (at > 0 || positionOf(entries[at]!) === start.depth) historyDivider = at
     } else if (budget.nonHistoryTokens + budget.responseReserve > budget.maximum && view.newer === null) {
       historyDivider = entries.length
     }
@@ -164,7 +168,7 @@ function MessageList({
   const divider =
     boundarySlots.entries.length === 0
       ? -1
-      : summaries && lcm && lcm.layer.length > 0 && (entries[0]?.depth ?? -1) > lcm.cursorDepth
+      : summaries && lcm && lcm.layer.length > 0 && (entries[0] ? positionOf(entries[0]) : -1) > lcmCursor(lcm)
         ? 0
         : (boundaryIndex(view) ?? -1)
   const transforms = useTimelineTransforms()
@@ -177,7 +181,7 @@ function MessageList({
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
-    rows.findIndex((row) => entries[entry]!.depth >= row.from && entries[entry]!.depth <= row.to)
+    rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -333,7 +337,7 @@ function MessageList({
   const last = items.at(-1)?.index
   useEffect(() => {
     if (!settled.current || first === undefined || last === undefined) return
-    if (first < EDGE && (!summaries || lcm === null || (entries[0]?.depth ?? 0) > lcm.cursorDepth + 1))
+    if (first < EDGE && (!summaries || lcm === null || (entries[0] ? positionOf(entries[0]) : 0) > lcmCursor(lcm) + 1))
       void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
     if (view.newer === null && virtualizer.isAtEnd(END_PX)) session.followAtBottom()
@@ -357,16 +361,22 @@ function MessageList({
   }
 
   const renderMessage = (entry: PathEntry) => (
-    <Message
-      context={contextOf(entry)}
-      revealed={revealed === entry.slotId}
-      onReveal={setRevealed}
-      entry={entry}
-      session={session}
-      highlighted={entry.slotId === anchor}
-      branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
-      onBranch={onBranch}
-    />
+    <>
+      {view.older === null && entries[0]?.slotId === entry.slotId && (
+        <SlotOutlet slot={messageStream} props={{ entry, session, place: "above" }} />
+      )}
+      <Message
+        context={contextOf(entry)}
+        revealed={revealed === entry.slotId}
+        onReveal={setRevealed}
+        entry={entry}
+        session={session}
+        highlighted={entry.slotId === anchor || entry.slotId === view.highlight}
+        branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
+        onBranch={onBranch}
+      />
+      <SlotOutlet slot={messageStream} props={{ entry, session, place: "below" }} />
+    </>
   )
 
   return (

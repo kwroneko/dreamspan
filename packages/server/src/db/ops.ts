@@ -2228,7 +2228,15 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: Schema.NullOr(SlotId),
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
-    success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
+    success: Schema.Struct({
+      entries: Schema.Array(PathEntry),
+      olderLeafSlotId: Schema.NullOr(SlotId),
+      /**
+       * The fork's tip, which appends go below (spec/MESSAGE-INSERT.md §2.3): not always the last
+       * entry, which can be a message inserted after it.
+       */
+      tipSlotId: Schema.NullOr(SlotId)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Earlier saved text of an owned human-written version. */

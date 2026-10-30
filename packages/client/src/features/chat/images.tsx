@@ -9,6 +9,7 @@ import {
   type ComponentProps,
   type ReactNode
 } from "react"
+import { positionOf } from "./position.ts"
 import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
 import type { ImagesLeftOut } from "@rp/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
@@ -573,7 +574,7 @@ const leftOutBy = (images: ImagesLeftOut | undefined, entry: PathEntry, index: n
     (item) => item.versionId === entry.version.id && item.index === index && item.rule !== "user"
   )
   if (image) return image
-  return images?.ranges.find((range) => entry.depth >= range.from && entry.depth <= range.to) ?? null
+  return images?.ranges.find((range) => positionOf(entry) >= range.from && positionOf(entry) <= range.to) ?? null
 }
 
 /**

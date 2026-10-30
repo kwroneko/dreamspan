@@ -45,6 +45,7 @@ const { makeCopy, keepCopy, dropCopy, copiesOfUser, flushCopies } =
 const { ComposerDraft } = await import("../../../client/src/features/chat/composerDraft.ts")
 const { EditorStore } = await import("../../../client/src/features/editor/store.ts")
 const { describeCause } = await import("../../../client/src/errors.ts")
+const { MessageDraft } = await import("../../../client/src/features/chat/messageDraft.ts")
 type ComposerDraft = InstanceType<typeof ComposerDraft>
 type EditorStore = InstanceType<typeof EditorStore>
 
@@ -1685,7 +1686,221 @@ const purgeQueue = async (w: World, branch: boolean) => {
   w.check(true)
 }
 
+// --- Insert drafts (spec/MESSAGE-INSERT.md §3.1): the insertion editor's text is a message
+// editor's draft, the client's own MessageDraft, keyed by chat, fork and anchor.
+
+type InsertTarget = {
+  readonly _tag: "Insert"
+  readonly chatId: ChatId
+  readonly forkId: ForkId
+  readonly anchor: SlotId | null
+}
+
+/**
+ * What MessageDraft needs of a chat session: its id, and calls to the server as it, delivered at
+ * once. A save the server answered acknowledges this browser's copies of exactly its payload (I4).
+ */
+const draftSession = (w: World) =>
+  ({
+    id: w.chatId,
+    call: async (
+      rpc: (
+        client: (tag: string, payload: unknown) => Effect.Effect<unknown, unknown>
+      ) => Effect.Effect<unknown, unknown>
+    ) => {
+      const sent: Array<{ readonly tag: string; readonly payload: unknown }> = []
+      const exit = await Effect.runPromiseExit(
+        rpc((tag, payload) => {
+          sent.push({ tag, payload })
+          return (w.api as unknown as AnyApi)[tag]!(payload)
+        })
+      )
+      if (Exit.isSuccess(exit))
+        for (const { tag, payload } of sent)
+          if (tag === "SaveMessageDraft")
+            for (const copy of [...w.copyHistory.values(), ...idb.values()]) {
+              const save = copy.save as { kind?: string; payload?: unknown } | undefined
+              if (save?.kind === "message" && canonical(save.payload) === canonical(payload))
+                w.acknowledgedCopies.add(copy.key as string)
+            }
+      return Exit.isSuccess(exit) ? { ok: true, value: exit.value } : { ok: false, error: describeCause(exit.cause) }
+    }
+  }) as never
+
+/** The chat's first message and its fork: where the insert drafts' editors insert below. */
+const insertPlace = async (w: World) => {
+  const window = await Effect.runPromise(
+    w.api.ReadPath({ chatId: w.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+  )
+  return { forkId: window.forkId!, anchor: window.entries[0]!.slotId }
+}
+
+/** An editor of `target` as a tab opens it: with the server's draft for it, if there is one. */
+const openInsertDraft = async (w: World, target: InsertTarget) => {
+  const drafts = await Effect.runPromise(w.api.MessageDrafts({ chatId: w.chatId }))
+  const draft =
+    drafts.find((d) => d.key.targetKind === "insert" && d.key.field === `${target.forkId}:${target.anchor ?? ""}`) ??
+    null
+  return new MessageDraft(draftSession(w), USER, target, "", draft)
+}
+
+const insertedTexts = async (w: World) =>
+  (
+    await Effect.runPromise(
+      w.api.ReadPath({ chatId: w.chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 200 })
+    )
+  ).entries.map((e) => e.version.content)
+
+const INSERT_DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }> = [
+  {
+    name: "insert drafts keep every text over random typing, reloads, inserts and discards in two tabs",
+    run: async (w) => {
+      const { forkId, anchor } = await insertPlace(w)
+      for (const seed of [1, 2, 3]) {
+        const rng = mulberry(seed)
+        const target: InsertTarget = { _tag: "Insert", chatId: w.chatId, forkId, anchor: seed === 3 ? null : anchor }
+        const tabs = [await openInsertDraft(w, target), await openInsertDraft(w, target)]
+        // Each tab's last typed text, until the user inserts or discards it there.
+        const live = new Map<number, string>()
+        let typed = 0
+        for (let step = 0; step < 40; step++) {
+          const at = Math.floor(rng() * tabs.length)
+          const tab = tabs[at]!
+          const roll = rng()
+          if (roll < 0.45) {
+            const text = `seed ${seed} text ${typed++}`
+            tab.setText(text)
+            live.set(at, text)
+          } else if (roll < 0.6) await tab.save()
+          else if (roll < 0.7) {
+            await tab.save()
+            tabs[at] = await openInsertDraft(w, target)
+            // A reload shows the server's text; what this tab typed is on the server now.
+            live.delete(at)
+            const shown = tabs[at]!.snapshot().text
+            if (shown !== "") live.set(at, shown)
+          } else if (roll < 0.88) {
+            const submitted = await tab.ready()
+            if (submitted.text === "") continue
+            const row = (id: string) =>
+              w.db.prepare("SELECT status, session, content FROM drafts WHERE id = ?").get(id) as
+                { status: string; session: number; content: string } | undefined
+            const before = submitted.draft ? row(submitted.draft.draftId) : undefined
+            const result = await Effect.runPromise(
+              Effect.result(
+                w.api.InsertMessage({
+                  chatId: w.chatId,
+                  forkId,
+                  anchor: target.anchor,
+                  expectedRowVersion: 0,
+                  body: {
+                    _tag: "Write",
+                    speaker: null,
+                    content: submitted.text,
+                    ...(submitted.draft ? { draft: submitted.draft } : {})
+                  }
+                })
+              )
+            )
+            if (result._tag === "Failure") return w.fail(`I2: an insertion failed: ${JSON.stringify(result.failure)}`)
+            if (result.success.entry.version.content !== submitted.text)
+              w.fail("I2: the inserted message isn't the text submitted")
+            // I2: if this insertion ended the session it named, the draft held exactly its text.
+            if (submitted.draft && before?.status === "active") {
+              const after = row(submitted.draft.draftId)!
+              const ended = after.status !== "active" || after.session !== before.session
+              if (ended && before.content !== submitted.text) w.fail("I2: a commit ended a draft holding other text")
+              if (ended && before.session !== submitted.draft.session)
+                w.fail("I2: a commit ended a session it didn't name")
+            }
+            if (tab.committed(submitted)) {
+              if (submitted.draft === null) await tab.discard()
+              live.delete(at)
+            }
+          } else {
+            const outcome = await tab.discard()
+            if (outcome.ok) live.delete(at)
+          }
+        }
+        for (const tab of tabs) await tab.save()
+        const messages = await insertedTexts(w)
+        const recovered = (await Effect.runPromise(w.api.ListRecoveredTexts({ limit: 500, before: null }))).map(
+          (t) => t.content
+        )
+        const drafts = (await Effect.runPromise(w.api.MessageDrafts({ chatId: w.chatId }))).map((d) => d.content)
+        const fields = tabs.map((tab) => tab.snapshot().text)
+        for (const text of live.values())
+          if (![messages, recovered, drafts, fields].some((place) => place.includes(text)))
+            w.fail(`I1: "${text}" was typed and is nowhere`)
+        // Cleared for the next seed. The tabs share one draft: once one discards it, the other's
+        // discard is stale, and refused.
+        for (const tab of tabs) await tab.discard()
+      }
+    }
+  },
+  {
+    name: "an insert draft is the user's own: another chat's or fork's key is refused, and inserting commits it",
+    run: async (w) => {
+      const { forkId, anchor } = await insertPlace(w)
+      const tab = await openInsertDraft(w, { _tag: "Insert", chatId: w.chatId, forkId, anchor })
+      tab.setText("inserted from the editor")
+      await tab.save()
+      const submitted = await tab.ready()
+      if (submitted.draft === null) w.fail("I3: the save named no draft")
+      // The fork of this chat under another chat's id: no such draft target.
+      const foreign = await Effect.runPromise(
+        Effect.result(
+          w.api.SaveMessageDraft({
+            target: { _tag: "Insert", chatId: w.otherChatId, forkId, anchor },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          })
+        )
+      )
+      if (foreign._tag !== "Failure") w.fail("an insert draft was saved for a fork of another chat")
+      // Typed more after the insertion took its text: the draft isn't committed, and keeps it.
+      tab.setText("inserted from the editor, and more")
+      await tab.save()
+      await Effect.runPromise(
+        w.api.InsertMessage({
+          chatId: w.chatId,
+          forkId,
+          anchor,
+          expectedRowVersion: 0,
+          body: { _tag: "Write", speaker: null, content: submitted.text, draft: submitted.draft! }
+        })
+      )
+      const row = w.db.prepare("SELECT status, content FROM drafts WHERE id = ?").get(submitted.draft!.draftId) as {
+        status: string
+        content: string
+      }
+      if (row.status !== "active" || row.content !== "inserted from the editor, and more")
+        w.fail("I2: an insertion committed a draft holding other text")
+      if (tab.committed(submitted)) w.fail("the editor closed with text typed while it was inserted")
+      // Inserted with exactly its text: committed.
+      const again = await tab.ready()
+      await Effect.runPromise(
+        w.api.InsertMessage({
+          chatId: w.chatId,
+          forkId,
+          anchor,
+          expectedRowVersion: 0,
+          body: { _tag: "Write", speaker: null, content: again.text, draft: again.draft! }
+        })
+      )
+      const done = w.db.prepare("SELECT status FROM drafts WHERE id = ?").get(again.draft!.draftId) as {
+        status: string
+      }
+      if (done.status !== "committed") w.fail("I2: inserting the draft's exact text didn't commit it")
+      if (!tab.committed(again)) w.fail("the editor kept text it inserted")
+    }
+  }
+]
+
 const DIRECTED: ReadonlyArray<{ name: string; run: (w: World) => Promise<void> }> = [
+  ...INSERT_DIRECTED,
   ...(["composer", "editor"] as const).flatMap((kind) =>
     (["acknowledged", "switched"] as const).map((choice) => ({
       name: `${kind} replay keeps a displaced-text notice until ${choice}`,

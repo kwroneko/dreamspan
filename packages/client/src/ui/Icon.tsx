@@ -32,6 +32,9 @@ const paths = {
     "m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"
   ],
   more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
+  /** A line with a plus: a message put in between others. */
+  insert: ["M4 6h16", "M4 18h16", "M12 9v6", "M9 12h6"],
+  duplicate: ["M9 9h11v11H9z", "M5 15H4V4h11v1"],
   left: ["m15 18-6-6 6-6"],
   right: ["m9 18 6-6-6-6"],
   down: ["m6 9 6 6 6-6"],
