@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react"
+import { chatCommands } from "./commands.tsx"
 import { QueuedMessages } from "./QueuedMessages.tsx"
 import { pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -9,6 +11,19 @@ import { GenerateIcon, RegenerateIcon, SendIcon } from "./icons.tsx"
 import { ReplyFrom } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { composerControls } from "./composerControls.tsx"
+
+function ShortcutList() {
+  const commands = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot)
+  return (
+    <ul className="list-inside list-disc space-y-1 pt-1">
+      {commands.entries
+        .filter((command) => command.shortcut)
+        .map((command) => (
+          <li key={command.id}>{command.label}</li>
+        ))}
+    </ul>
+  )
+}
 
 export const registerComposerControls = () => [
   composerControls.register({
@@ -50,7 +65,7 @@ export const registerComposerControls = () => [
         variant={context.guidance ? "primary" : "secondary"}
         aria-label={`Generate ${context.speakerName}`}
         pending={context.busy}
-        disabled={context.busy}
+        disabled={context.busy || !context.prefsReady}
         className="min-w-0 max-w-52 sm:max-w-56"
         onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
       >
@@ -68,10 +83,10 @@ export const registerComposerControls = () => [
       context.guidance ? null : (
         <SquareIconButton
           label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
-          hint={`${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (Enter; Shift+Enter for a new line)`}
+          hint={`${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`}
           variant="primary"
           pending={context.busy}
-          disabled={context.busy || !context.hasText}
+          disabled={context.busy || !context.prefsReady || !context.hasText}
           onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
         >
           <SendIcon />
@@ -152,7 +167,7 @@ export const registerComposerControls = () => [
     order: 40,
     placement: "actions",
     available: ({ guidance }) => !guidance,
-    run: ({ hasText, send, replyNow }, source) => (source === "keyboard" || hasText ? send() : replyNow()),
+    run: ({ hasText, send, replyNow }) => (hasText ? send() : replyNow()),
     component: ({ sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
       <SquareIconButton
         label={sendLabel}
@@ -189,10 +204,14 @@ export const registerComposerControls = () => [
     id: "composer.help",
     order: 10,
     placement: "help",
-    component: ({ hint }) => (
-      <p id="composer-hint" className="text-xs text-muted">
-        {hint}
-      </p>
+    component: ({ hint, compact }) => (
+      <div className="text-xs text-muted">
+        {compact && <p id="composer-hint">{hint}</p>}
+        <details>
+          <summary className="cursor-pointer">Keyboard shortcuts</summary>
+          <ShortcutList />
+        </details>
+      </div>
     )
   }),
   composerControls.register({

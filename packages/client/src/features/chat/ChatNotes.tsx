@@ -20,7 +20,9 @@ import { Alert } from "../../ui/Surface.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
 import { AddNoteMenu, type NoteCard, NoteEditor, NoteRow, SharedNotePicker } from "../editor/notes.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
+import { chatNoteActions } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
 /**
@@ -69,9 +71,14 @@ function ChatNoteRow({
   onDeleted,
   onRelinked,
   summary,
-  summarizing
+  summarizing,
+  session,
+  onChanged
 }: {
   note: ChatNote
+  session: ChatSession
+  /** Reads the notes again after an action changed them. */
+  onChanged: () => void
   cards: ReadonlyArray<NoteCard>
   /** What `{{summary}}` fills in for the next reply, for a summary note's line about it. */
   summary: SummaryFill | undefined
@@ -110,6 +117,7 @@ function ChatNoteRow({
         </Switch>
       }
     >
+      <SlotOutlet slot={chatNoteActions} props={{ note, session, onChanged }} />
       <NoteEditor
         key={`${position.forkId ?? ""}:${card === null ? (position.slotId ?? "start") : note.ref.id}:${generation}`}
         noteRef={note.ref}
@@ -263,6 +271,8 @@ export function NotesTab({
                   onRelinked={refresh}
                   summary={summaryFill}
                   summarizing={summarizing}
+                  session={session}
+                  onChanged={refresh}
                 />
               ))}
             </ul>

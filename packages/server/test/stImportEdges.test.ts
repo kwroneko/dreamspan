@@ -195,10 +195,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       // Kept, for what rides on the author's note, but off: ST sends nothing of an empty one.
       const state = yield* stateAtLeaf(chatOf(path))
       assert.lengthOf(state.activeNotes, 0)
-      assert.isNotNull(state.authorNote)
+      assert.isString(state.authorNote)
       const doc = query(
         "SELECT doc_json FROM entity_revisions WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1",
-        state.authorNote!
+        state.authorNote as string
       )[0]!
       assert.strictEqual((JSON.parse(doc.doc_json as string) as { content: string }).content, "")
     })

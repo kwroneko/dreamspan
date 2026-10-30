@@ -27,7 +27,7 @@ import { rememberPanel, useWide } from "./ChatPanels.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { type ReactNode } from "react"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { composerKeyDown } from "./composerKeys.ts"
+import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -357,7 +357,7 @@ function Pending({
   }
 
   const start = async (first: "send" | "generate") => {
-    if (action.pending || (first === "send" && text.trim() === "")) return
+    if (!viewPrefs.ready || action.pending || (first === "send" && text.trim() === "")) return
     const personaId = playing?.entityId ?? null
     // A sent message, or guidance for the first reply, leaves the box as it's sent; whatever
     // is typed while the chat is being made goes along to its composer, and a failure puts
@@ -431,6 +431,7 @@ function Pending({
   const controls: PendingComposerContext = {
     speaker: { speaker: speakerId, recent: [], pending: true, onPick: (picked) => setSelectedSpeaker(picked.entityId) },
     speakerName,
+    submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
     guidance,
     prefsReady: viewPrefs.ready,
     changeGuidance: (next) => void viewPrefs.change({ guidance: next }),
@@ -630,6 +631,7 @@ function Pending({
             </label>
             <AutoGrowTextarea
               id="composer"
+              data-testid="composer"
               value={text}
               // Short, so it fits one line on a phone, as the chat's composer does.
               placeholder={guidance ? "Direction for the next message…" : "Write a message…"}
@@ -637,7 +639,7 @@ function Pending({
               onKeyDown={(event) =>
                 composerKeyDown(async () => {
                   await invokePendingComposer(controls)
-                })(event)
+                }, viewPrefs.prefs.enterSends)(event)
               }
               onChange={(event) => {
                 const value = event.currentTarget.value

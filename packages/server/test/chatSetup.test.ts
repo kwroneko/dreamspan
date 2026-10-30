@@ -862,4 +862,55 @@ describe("queued edits", () => {
       assert.strictEqual((yield* api.MessageDrafts({ chatId: started.chat.id }))[0]!.content, late.content)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
   )
+  it.live("the user chooses which chat note is the author's note, or none, from a message on", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Wren", name: "Wren" })
+      const cardNote = yield* api.CreateCardNote({ cardRefId: card.id, title: "Wren's note" })
+      const started = yield* api.StartChat({
+        cards: [card.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Hello.", speakerEntityId: null }
+      })
+      const chatId = started.chat.id
+      const first = started.entry.slotId
+      const scene = yield* api.CreateChatNote({ chatId, title: "Scene" })
+      const mood = yield* api.CreateChatNote({ chatId, title: "Mood" })
+      const authorNotes = (slotId: typeof first) =>
+        Effect.map(api.ListChatNotes({ chatId, slotId }), (notes) =>
+          notes.filter((n) => n.authorNote).map((n) => n.ref.label)
+        )
+      const choose = (slotId: typeof first, entityId: EntityId | null) =>
+        api.ChangeCast({ chatId, slotId, change: { _tag: "AuthorNote", entityId } })
+      assert.deepStrictEqual(yield* authorNotes(first), [])
+      yield* choose(first, scene.entityId)
+      assert.deepStrictEqual(yield* authorNotes(first), ["Scene"])
+      // Choosing another replaces it; there is only ever one.
+      yield* choose(first, mood.entityId)
+      assert.deepStrictEqual(yield* authorNotes(first), ["Mood"])
+      // From a later message on: the earlier message keeps its choice.
+      const later = yield* api.SendMessage({
+        chatId,
+        forkId: started.chat.currentForkId,
+        parentSlotId: first,
+        branch: false,
+        content: "Later."
+      })
+      assert.strictEqual(later._tag, "Posted")
+      if (later._tag !== "Posted") return
+      yield* choose(later.entry.slotId, null)
+      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), [])
+      assert.deepStrictEqual(yield* authorNotes(first), ["Mood"])
+      // Only a chat's own notes can be its author's note. A refused choice keeps the old one.
+      yield* choose(later.entry.slotId, mood.entityId)
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, cardNote.entityId)), "NotFound")
+      const shared = yield* api.CreateSnippet({ chatId, forkId: null, title: "Shared", content: "Fog." })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, shared.ref.entityId)), "NotFound")
+      const other = yield* api.CreateChat({ title: "Other" })
+      const foreign = yield* api.CreateChatNote({ chatId: other.id, title: "Elsewhere" })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, foreign.entityId)), "NotFound")
+      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), ["Mood"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
 })
