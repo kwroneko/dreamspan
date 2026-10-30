@@ -294,7 +294,19 @@ function Editor({
           switchText={() => draft.switchConflict()}
         />
       )}
-      {base !== undefined && <SlotOutlet slot={messageEditorTools} props={{ draft, base }} />}
+      {base !== undefined && (
+        <SlotOutlet
+          slot={messageEditorTools}
+          props={{
+            draft,
+            base,
+            images:
+              (draft.target._tag === "Edit"
+                ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
+                : entry.version.images) ?? []
+          }}
+        />
+      )}
       <div className="flex gap-2">
         <Button type="submit" variant="primary">
           <Icon name="check" />
@@ -745,10 +757,11 @@ export const Message = memo(function Message({
               if (target._tag === "Edit" && source === undefined) return
               const submitted = await editor.ready()
               const { text, draft } = submitted
+              const { images } = editor.snapshot()
               const outcome =
                 editing === "edit"
-                  ? await session.edit({ ...entry, version: source! }, text, draft)
-                  : await session.writeVersion(entry, text, draft)
+                  ? await session.edit({ ...entry, version: source! }, text, draft, images)
+                  : await session.writeVersion(entry, text, draft, images)
               report(outcome)
               if (!outcome.ok) return
               // Text typed while it was being saved stays in the editor, which stays open.

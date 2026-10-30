@@ -1358,6 +1358,8 @@ export class WriteOps extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft)

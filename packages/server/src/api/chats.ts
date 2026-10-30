@@ -576,7 +576,7 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An amend another fork shows gives this fork a copy in its place: its message changed
     // here only, and tabs on other forks read it again as theirs shows it.
-    AmendVersion: ({ versionId, forkId, content, expectedRowVersion, draft }) =>
+    AmendVersion: ({ versionId, forkId, content, images, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const version = yield* writer.AmendVersion({
@@ -584,6 +584,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId,
           forkId: forkId ?? null,
           content,
+          ...(images === undefined ? {} : { images }),
           expectedRowVersion,
           commitDraft: draft ?? null
         })

@@ -234,7 +234,9 @@ export const baseline: ReadonlyArray<string> = [
     id INTEGER PRIMARY KEY,
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    replaced_at INTEGER NOT NULL
+    replaced_at INTEGER NOT NULL,
+    -- The version's images before an amend that changed them, as JSON; null: that amend kept them.
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,
   `CREATE INDEX version_history_version ON version_history(version_id, id)`,
   `CREATE TABLE version_attachments (

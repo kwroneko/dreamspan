@@ -3,6 +3,7 @@ import { asUser } from "./support/rpc.ts"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { showActions } from "./support/message.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 const openChat = async (page: Page, title: string) => {
@@ -388,6 +389,47 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(message.getByRole("button", { name: "Put image 2 back into the context" })).toBeVisible()
       await message.getByRole("button", { name: "Put image 2 back into the context" }).click()
       await expect(limited).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      await context.close()
+    })
+  }
+}
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`editing a message keeps, adds or removes its images ${width} ${colorScheme}`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme })
+      const page = await context.newPage()
+      await openChat(page, `Edit images ${width} ${colorScheme}`)
+      const buffer = await drawing(page)
+      await page.getByLabel("Message", { exact: true }).fill("A study to revise.")
+      await page.getByLabel("Choose images").setInputFiles({ name: "study.png", mimeType: "image/png", buffer })
+      await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      const message = page.getByRole("article", { name: "Your message" })
+      await expect(message.getByRole("button", { name: "View image 1" })).toBeVisible()
+      await showActions(message)
+      await message.getByRole("button", { name: "Edit", exact: true }).click()
+      const images = message.getByRole("list", { name: "Images of this version" })
+      await expect(images.getByRole("img")).toHaveCount(1)
+      // The editor's own controls stand in for the message's images while it's open.
+      await expect(message.getByRole("button", { name: "View image 1" })).toHaveCount(0)
+      await message.getByLabel("Choose images for this version").setInputFiles({
+        name: "revision.png",
+        mimeType: "image/png",
+        buffer: Buffer.concat([buffer, Buffer.from("revision")])
+      })
+      await expect(images.getByRole("img")).toHaveCount(2)
+      await images.getByRole("button", { name: "Remove study.png" }).click()
+      await expect(images.getByRole("img")).toHaveCount(1)
+      const screenshots = process.env.SCREENSHOT_DIR
+      if (screenshots) await page.screenshot({ path: join(screenshots, `edit-images-${width}-${colorScheme}.png`) })
+      await message.getByRole("button", { name: "Save", exact: true }).click()
+      await expect(images).toHaveCount(0)
+      await expect(message.getByRole("button", { name: /^View image/ })).toHaveCount(1)
+      await expect(message.getByRole("img", { name: "revision.png" })).toBeVisible()
+      // The composer's attachments were never touched by the editor.
+      await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
       await context.close()
     })

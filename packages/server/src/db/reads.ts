@@ -6,7 +6,7 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, MessageImages, SlotId, VersionId } from "@rp/shared/chat.ts"
 import { Branch, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -670,8 +670,12 @@ export const makeReadHandlers = Effect.gen(function* () {
           AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND v.deleted_at IS NULL AND v.purged_at IS NULL
           AND v.writer='human'`
         if (!owned) return yield* new NotFound({ entity: "human version", id: versionId })
-        return yield* sql<{ id: number; content: string; at: number }>`SELECT id, content, replaced_at AS at
+        const rows = yield* sql<{ id: number; content: string; at: number; images_json: string | null }>`
+          SELECT id, content, replaced_at AS at, images_json
           FROM version_history WHERE version_id=${versionId} ORDER BY id DESC`
+        return rows.map(({ images_json, ...row }) =>
+          images_json === null ? row : { ...row, images: JSON.parse(images_json) as MessageImages }
+        )
       }).pipe(query("VersionAmendments")),
 
     GetVersion: ({ userId, versionId }) =>

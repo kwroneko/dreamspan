@@ -1,4 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from "react"
+import type { MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import type { VersionAmendment } from "@rp/shared/chatApi.ts"
 import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
@@ -11,7 +12,12 @@ import type { MessageDraft } from "./messageDraft.ts"
 import type { SummaryDraft } from "./summaryDraft.ts"
 import { messageActions, type MessageActionProps } from "./messageActions.tsx"
 
-export const messageEditorTools = defineSlot<{ draft: MessageDraft; base: string }>("message.editor.tools")
+export const messageEditorTools = defineSlot<{
+  draft: MessageDraft
+  base: string
+  /** The images the version saved starts from: the edited source's, or the shown version's for one the user writes. */
+  images: MessageImages
+}>("message.editor.tools")
 export const summaryEditorTools = defineSlot<{ draft: SummaryDraft; base: string }>("summary.editor.tools")
 
 export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-editor")

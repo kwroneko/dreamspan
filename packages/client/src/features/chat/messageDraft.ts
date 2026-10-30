@@ -1,3 +1,4 @@
+import type { MessageImages } from "@rp/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
 // keyed by the version edited or the slot written to, so it outlives the row (the message
@@ -53,6 +54,11 @@ export interface MessageDraftView {
   readonly error: AppError | null
   /** A replay of this browser's text went over text saved elsewhere: kept until acknowledged or switched. */
   readonly conflict: ReplayConflict | null
+  /**
+   * The images the saved version will have, once the editor changed them; absent: its
+   * source's. Kept in this tab only, not in the server draft.
+   */
+  readonly images?: MessageImages
 }
 
 /** What the text a save sends was typed on (§3.10, "a field's base"): the draft as the tab had it. */
@@ -217,6 +223,11 @@ export class MessageDraft {
   private cancelTimer() {
     if (this.timer !== null) clearTimeout(this.timer)
     this.timer = null
+  }
+
+  /** The images the saved version will have (the editor's attachment controls). */
+  setImages(images: MessageImages) {
+    this.set({ images })
   }
 
   setText(text: string) {

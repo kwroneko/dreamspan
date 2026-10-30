@@ -26,7 +26,13 @@ import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
 
 /** Earlier saved text of a human-written version, newest first. */
-export const VersionAmendment = Schema.Struct({ id: Schema.Int, content: Schema.String, at: Schema.Number })
+export const VersionAmendment = Schema.Struct({
+  id: Schema.Int,
+  content: Schema.String,
+  at: Schema.Number,
+  /** The images it had before this amend, when the amend changed them. */
+  images: Schema.optionalKey(MessageImages)
+})
 export type VersionAmendment = typeof VersionAmendment.Type
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
@@ -555,6 +561,8 @@ export class ChatApi extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       draft: DraftCommit
     },
