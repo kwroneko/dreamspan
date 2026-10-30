@@ -91,8 +91,9 @@ export type LcmJob = typeof LcmJob.Type
 
 /**
  * What stands in for older history on the path to a leaf (DESIGN §8): the layer in use,
- * in path order; failed summaries and jobs on the path; and the cursor, the depth of the last
- * message the layer covers (-1: none).
+ * in path order; failed summaries and jobs on the path; and the cursor, the last message the
+ * layer covers: its slot, its position on the fork's display path (spec/MESSAGE-INSERT.md §3.4)
+ * and its depth (-1: none). Summaries' and jobs' `from` and `to` are one-based positions.
  */
 export class LcmState extends Schema.Class<LcmState>("LcmState")({
   chatId: ChatId,
@@ -101,7 +102,10 @@ export class LcmState extends Schema.Class<LcmState>("LcmState")({
   layer: Schema.Array(LcmSummary),
   failed: Schema.Array(LcmSummary),
   jobs: Schema.Array(LcmJob),
-  cursorDepth: Schema.Int
+  cursorDepth: Schema.Int,
+  cursorSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
+  /** The cursor's position on the display path; its depth in a fork without insertions. */
+  cursorPosition: Schema.optionalKey(Schema.Int)
 }) {}
 
 /** Every summary on the path overlapping a range of message depths, for the coverage rail. */
@@ -376,7 +380,11 @@ export class LcmApi extends RpcGroup.make(
     success: LcmState,
     error: Schema.Union([NotFound, ServerError])
   }),
-  /** Summaries overlapping message depths `fromDepth`..`toDepth` on the path, outermost levels included. */
+  /**
+   * Summaries overlapping message positions `fromPosition`..`toPosition` on the fork's display
+   * path, outermost levels included. Without them, `fromDepth`..`toDepth` are read as positions
+   * (the same numbers in a fork without insertions).
+   */
   Rpc.make("GetLcmCoverage", {
     payload: {
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
@@ -384,7 +392,9 @@ export class LcmApi extends RpcGroup.make(
       leafSlotId: SlotId,
       includeResolved: Schema.optionalKey(Schema.Boolean),
       fromDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      toDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+      toDepth: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      fromPosition: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      toPosition: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
     },
     success: LcmCoverage,
     error: Schema.Union([NotFound, ServerError])

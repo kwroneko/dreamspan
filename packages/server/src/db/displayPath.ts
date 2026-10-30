@@ -166,14 +166,52 @@ const splice = (
  */
 export const pathPieces = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null, tipSlotId: string | null) =>
   Effect.gen(function* () {
-    const segments =
-      tipSlotId === null
-        ? []
-        : (yield* sql<{ chain_id: string; lo: number; hi: number }>`
-            ${pathSegments(sql, chatId, tipSlotId, null)} SELECT chain_id, lo, hi FROM segments`).toReversed()
+    const segments = yield* segmentsOf(sql, chatId, tipSlotId)
     const placed = forkId === null ? [] : yield* placedInsertions(sql, chatId, forkId)
     return splice(segments, placed)
   })
+
+/** The structural segments of the path to `tipSlotId`, oldest first. */
+const segmentsOf = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: string | null) =>
+  tipSlotId === null
+    ? Effect.succeed([])
+    : Effect.map(
+        sql<{ chain_id: string; lo: number; hi: number }>`
+          ${pathSegments(sql, chatId, tipSlotId, null)} SELECT chain_id, lo, hi FROM segments`,
+        (rows) => rows.toReversed()
+      )
+
+/**
+ * Fork `forkId`'s display path, to its tip, when it shows an inserted slot; else null, and the
+ * fork reads as its structural path, by the code that predates insertions. That costs one probe
+ * of `fork_overrides_point` per lineage entry. Shared by readers that keep their structural
+ * path for forks without insertions (LCM, spec/MESSAGE-INSERT.md §3.4).
+ */
+export const insertionPieces = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
+  Effect.gen(function* () {
+    if (forkId === null) return null
+    const placed = yield* placedInsertions(sql, chatId, forkId)
+    if (placed.length === 0) return null
+    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
+      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+    if (fork === undefined) return null
+    const pieces = splice(yield* segmentsOf(sql, chatId, fork.tip_slot_id), placed)
+    return pieces.some((piece) => piece.kind === "inserted") ? pieces : null
+  })
+
+/** The inserted slot at `position` (0 is the first message), or null when a structural run holds it or it's past the end. */
+export const insertedAt = (pieces: ReadonlyArray<PathPiece>, position: number) => {
+  const piece = pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+  return piece?.kind === "inserted" ? piece.slotId : null
+}
+
+/** Whether every position strictly between `a` and `b` holds an inserted slot (true when there are none). */
+export const onlyInsertedBetween = (pieces: ReadonlyArray<PathPiece>, a: number, b: number) =>
+  pieces.every((p) => p.kind === "inserted" || Math.max(p.start, a + 1) > Math.min(p.start + pieceLength(p) - 1, b - 1))
+
+/** The inserted slots at positions `0` to `last`, in order. */
+export const insertedThrough = (pieces: ReadonlyArray<PathPiece>, last: number) =>
+  pieces.flatMap((p) => (p.kind === "inserted" && p.start <= last ? [p.slotId] : []))
 
 /** The index in `pieces` of the piece holding `slot`, or -1. */
 const pieceOf = (pieces: ReadonlyArray<PathPiece>, slot: SlotPlace) =>

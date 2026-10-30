@@ -13,20 +13,29 @@ import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
+import { positionOf } from "./displayPath.ts"
+import { lcmView, type LcmView } from "./lcmDisplay.ts"
 
 export const readSummary = (
   sql: SqlClient.SqlClient,
   userId: UserId,
   id: string,
   revision?: string,
-  memo = new Map<string, Summary>()
+  memo = new Map<string, Summary>(),
+  view?: LcmView
 ) => {
+  let views = view === undefined ? [] : [view]
   const read = (summaryId: string): Effect.Effect<Summary, NotFound | import("effect/sql").SqlError.SqlError> =>
     Effect.gen(function* () {
       const cached = memo.get(summaryId)
       if (cached) return cached
       const [owner] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM summaries WHERE id=${summaryId}`
       const fork = yield* viewAt(sql, owner?.chat_id ?? "", null)
+      let shown = views.find((v) => v.fork === fork)
+      if (shown === undefined) {
+        shown = yield* lcmView(sql, owner?.chat_id ?? "", fork)
+        views = [...views, shown]
+      }
       const [row] = yield* sql<{
         id: string
         chat_id: string
@@ -46,7 +55,9 @@ export const readSummary = (
         revision_number: number
         first_depth: number
         last_depth: number
-      }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth
+        first_chain: string
+        last_chain: string
+      }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth, a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           LEFT JOIN fork_overrides ro ON ro.id=${effectiveOverride(sql, "summary_revision", fork, "s.id")}
           LEFT JOIN fork_overrides co ON co.id=${effectiveOverride(sql, "summary_choice", fork, "s.id")}
@@ -105,14 +116,32 @@ export const readSummary = (
             : []
         fresh &&= parent.fresh && (parent.revisionId === child.parent_revision_id || sameGroup !== undefined)
       }
+      // In a fork that shows inserted slots, its numbers are positions, and a slot shown between
+      // its first and last that it doesn't cover is an insertion inside it: stale, as after an
+      // edit there (spec/MESSAGE-INSERT.md §3.4).
+      let from = row.first_depth + 1,
+        to = row.last_depth + 1
+      if (shown.pieces !== null) {
+        const first = positionOf(shown.pieces, {
+          id: row.first_slot_id,
+          chainId: row.first_chain,
+          depth: row.first_depth
+        })
+        const last = positionOf(shown.pieces, { id: row.last_slot_id, chainId: row.last_chain, depth: row.last_depth })
+        if (first !== null && last !== null && last >= first) {
+          from = first + 1
+          to = last + 1
+          if (to - from + 1 > row.slot_count) fresh = false
+        }
+      }
       const summary = Schema.decodeUnknownSync(Summary)({
         id: row.id,
         chatId: row.chat_id,
         level: row.level,
         firstSlotId: row.first_slot_id,
         lastSlotId: row.last_slot_id,
-        from: row.first_depth + 1,
-        to: row.last_depth + 1,
+        from,
+        to,
         slotCount: row.slot_count,
         revisionNumber: row.revision_number,
         revisionId: row.revision_id,
