@@ -1355,7 +1355,8 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')),
+      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'image_exclude')),
+    -- image_exclude: the message's own version and an image of it, "<version id>:<media id>".
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
     slot_id TEXT,

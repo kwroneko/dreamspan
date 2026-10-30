@@ -902,7 +902,8 @@ export class ChatSession {
           ...(event.presetContext === undefined ? {} : { presetContext: event.presetContext }),
           ...(event.budget === undefined ? {} : { budget: event.budget }),
           ...(event.preset === undefined ? {} : { preset: event.preset }),
-          ...(event.model === undefined ? {} : { model: event.model })
+          ...(event.model === undefined ? {} : { model: event.model }),
+          ...(event.images === undefined ? {} : { images: event.images })
         }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&
@@ -1314,6 +1315,13 @@ export class ChatSession {
   setHidden(entry: PathEntry, hidden: boolean): Promise<Outcome<PathEntry>> {
     return this.slotWrite(entry.slotId, (client) =>
       client("SetMessageHidden", { slotId: entry.slotId, forkId: this.view.forkId, hidden })
+    )
+  }
+
+  /** Takes an image of the message's version out of the context in the fork shown, or puts it back. */
+  setImageExcluded(entry: PathEntry, mediaId: string, excluded: boolean): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("SetImageExcluded", { versionId: entry.version.id, mediaId, forkId: this.view.forkId, excluded })
     )
   }
 

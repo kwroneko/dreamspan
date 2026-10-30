@@ -87,3 +87,41 @@ export function SquareIconButton({
     </Tooltip>
   )
 }
+
+/**
+ * An icon button that toggles (`pressed`), with its label as its name and tooltip. Disabled,
+ * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
+ * `className` places it and sets when it shows.
+ */
+export function ToggleIconButton({
+  label,
+  icon,
+  pressed,
+  disabled = false,
+  className = "",
+  onClick
+}: {
+  label: string
+  icon: IconName
+  pressed: boolean
+  disabled?: boolean
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip label={label}>
+      <BaseButton
+        aria-label={label}
+        aria-pressed={pressed}
+        disabled={disabled}
+        focusableWhenDisabled
+        onClick={onClick}
+        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-disabled:cursor-not-allowed ${
+          pressed ? "text-text" : "text-muted"
+        } ${className}`}
+      >
+        <Icon name={icon} />
+      </BaseButton>
+    </Tooltip>
+  )
+}

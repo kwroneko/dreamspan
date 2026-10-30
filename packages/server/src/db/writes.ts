@@ -18,7 +18,16 @@ import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
 import { forkColumns, forkThrough, shownElsewhere } from "./forks.ts"
-import { forkAt, insertFork, versionAsShown, writeOverride, writeSelect } from "./forkState.ts"
+import {
+  forkAt,
+  imageExcludedSql,
+  imageTarget,
+  insertFork,
+  versionAsShown,
+  withFork,
+  writeOverride,
+  writeSelect
+} from "./forkState.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
@@ -445,6 +454,33 @@ export const makeWriteHandlers = (bin: Bin) =>
             version: toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
           }
         }).pipe(transaction("SetVersionFlags")),
+
+      // Taking an image out of the context is the fork's, on the message's own version (§2.2).
+      SetImageExcluded: ({ userId, versionId, mediaId, forkId, excluded }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          const images = JSON.parse(row.images_json ?? "[]") as ReadonlyArray<{ mediaId: string }>
+          if (!images.some((image) => image.mediaId === mediaId))
+            return yield* new NotFound({ entity: "image", id: mediaId })
+          const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
+          const original = (row.fork_id === null ? row.id : row.source_version_id)!
+          const [effective] = yield* sql<{ excluded: number }>`
+            SELECT ${withFork(sql, fork.id, (f) => imageExcludedSql(f, "o.id", "m.id"))} AS excluded
+            FROM versions o, (SELECT ${mediaId} AS id) m WHERE o.id = ${original}`
+          if ((effective!.excluded === 1) !== excluded)
+            yield* writeOverride(
+              sql,
+              { id: fork.id, chatId: slot.chat_id },
+              {
+                kind: "image_exclude",
+                targetId: imageTarget(original, mediaId),
+                slotId: row.slot_id,
+                valueId: null,
+                flag: excluded ? 1 : 0
+              }
+            )
+          return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, slotId: row.slot_id as SlotId }
+        }).pipe(transaction("SetImageExcluded")),
 
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {

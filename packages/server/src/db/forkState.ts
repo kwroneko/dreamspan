@@ -116,6 +116,21 @@ export const withFork = (sql: SqlClient.SqlClient, fork: ForkRef, sqlText: (fork
 export const effectiveOverride = (sql: SqlClient.SqlClient, kind: string, fork: ForkRef, target: string) =>
   withFork(sql, fork, (f) => effectiveOverrideSql(kind, f, target))
 
+/**
+ * SQL: whether the fork `fork` took image `media` (a media id) of version `o`, one of its
+ * message's own, out of the context (an `image_exclude` override with flag 1). A copy's images
+ * are its original's, so an amend keeps the choice for the images it keeps.
+ */
+export const imageExcludedSql = (fork: string, o: string, media: string) =>
+  `coalesce((SELECT flag FROM fork_overrides WHERE id = ${effectiveOverrideSql("image_exclude", fork, `${o} || ':' || ${media}`)}), 0) = 1`
+
+/** `imageExcludedSql` for a fork bound as a parameter or given as a fragment. */
+export const imageExcludedIn = (sql: SqlClient.SqlClient, fork: ForkRef, o: string, media: string) =>
+  withFork(sql, fork, (f) => imageExcludedSql(f, o, media))
+
+/** The override target of image `mediaId` of version `original`, one of its message's own. */
+export const imageTarget = (original: string, mediaId: string) => `${original}:${mediaId}`
+
 /** `slotDeletedInSql` for a fork bound as a parameter or given as a fragment. */
 export const slotDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, s: string) =>
   withFork(sql, fork, (f) => slotDeletedInSql(f, s))
@@ -232,6 +247,7 @@ interface OverrideValue {
     | "delete_version"
     | "hide"
     | "suppress_event"
+    | "image_exclude"
     | "snippet_revision"
     | "summary_revision"
     | "summary_choice"

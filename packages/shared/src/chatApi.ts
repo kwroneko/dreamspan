@@ -492,6 +492,21 @@ export class ChatApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
+   * Takes an image of a message out of the context, or puts it back, in fork `forkId` (absent
+   * or null: the fork through its message): it stays in the message, marked, and isn't sent.
+   * Like any edit it never starts a generation. Returns the message as that fork shows it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
+  }),
+  /**
    * Hides a message from the model, or shows it to the model again (ST's ghost toggle): it
    * stays in the chat, marked, and isn't sent. Like any edit it never starts a generation.
    */

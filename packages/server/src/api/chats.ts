@@ -436,6 +436,20 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* publishSlot(id, slotId, forkId ?? null)
       }).pipe(Effect.uninterruptible, internal("SetMessageHidden")),
 
+    // Taking an image out is an edit too: it changes what's sent next and starts nothing.
+    SetImageExcluded: ({ versionId, mediaId, forkId, excluded }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const written = yield* writer.SetImageExcluded({
+          userId: id,
+          versionId,
+          mediaId,
+          forkId: forkId ?? null,
+          excluded
+        })
+        return yield* publishSlot(id, written.slotId, written.forkId)
+      }).pipe(Effect.uninterruptible, internal("SetImageExcluded")),
+
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
     EditVersion: ({ images, slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>

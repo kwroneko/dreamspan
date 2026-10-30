@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentProps } from "react"
-import type { MessageImages } from "@rp/shared/chat.ts"
+import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
+import { ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
+import type { ChatSession } from "./session.ts"
 import {
   chatComposer,
   chatSurfaceProviders,
@@ -377,29 +379,105 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
     />
   )
 }
-function ImageThumbnails({ images }: { images: MessageImages }) {
+/**
+ * A message image's corner button: takes it out of the context or puts it back. Shown on
+ * hover (always on touch screens); always shown while it's out. An image a rule leaves out
+ * shows it toggled and disabled, and hovering says which rule.
+ */
+function ContextToggle({
+  index,
+  excluded,
+  rule,
+  busy,
+  onToggle
+}: {
+  index: number
+  excluded: boolean
+  rule: string | null
+  busy: boolean
+  onToggle: () => void
+}) {
+  const out = excluded || rule !== null
+  const label =
+    rule !== null
+      ? `Image ${index + 1} isn’t sent to the model: ${rule}`
+      : excluded
+        ? `Put image ${index + 1} back into the context`
+        : `Take image ${index + 1} out of the context`
+  return (
+    <ToggleIconButton
+      label={label}
+      icon={out ? "eyeOff" : "eye"}
+      pressed={out}
+      disabled={rule !== null || busy}
+      onClick={onToggle}
+      className={`absolute top-1 right-1 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${
+        out ? "" : "opacity-0 group-hover:opacity-100"
+      }`}
+    />
+  )
+}
+
+function ImageThumbnails({
+  images,
+  controls
+}: {
+  images: MessageImages
+  /** A message's images: the context toggle and why each one isn't sent. */
+  controls?: { entry: PathEntry; session: ChatSession }
+}) {
   const [selected, setSelected] = useState<{ mediaId: string; altText?: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   if (!images.length) return null
   return (
     <>
       <div className="flex flex-wrap gap-2" aria-label="Message images">
-        {images.map((image, index) => (
-          <button
-            key={`${image.mediaId}:${index}`}
-            type="button"
-            aria-label={`View image ${index + 1}`}
-            onClick={() => setSelected(image)}
-            className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <ContentImage
-              src={mediaUrl(image.mediaId, 320)}
-              alt={image.altText || `Image ${index + 1}`}
-              loading="lazy"
-              className="max-h-48 max-w-full rounded-md object-contain"
-            />
-          </button>
-        ))}
+        {images.map((image, index) => {
+          const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
+          const left = null as { message: string } | null
+          const reason = excluded ? "taken out of the context by you" : null
+          const view = (
+            <button
+              type="button"
+              aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
+              onClick={() => setSelected(image)}
+              className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <ContentImage
+                src={mediaUrl(image.mediaId, 320)}
+                alt={image.altText || `Image ${index + 1}`}
+                loading="lazy"
+                className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
+              />
+            </button>
+          )
+          return (
+            <div key={`${image.mediaId}:${index}`} className="group relative" data-image-sent={reason ? "no" : "yes"}>
+              {reason ? <Tooltip label={`Not sent to the model: ${reason}`}>{view}</Tooltip> : view}
+              {controls && (
+                <ContextToggle
+                  index={index}
+                  excluded={excluded}
+                  rule={left ? left.message : null}
+                  busy={busy}
+                  onToggle={async () => {
+                    setBusy(true)
+                    const outcome = await controls.session.setImageExcluded(controls.entry, image.mediaId, !excluded)
+                    setBusy(false)
+                    setError(outcome.ok ? null : outcome.error.message)
+                  }}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
       <Dialog
         open={selected !== null}
         onOpenChange={(open) => {
@@ -426,7 +504,9 @@ export const registerImages = () => [
   messagePreviews.register({
     id: "message.images",
     order: 20,
-    component: ({ entry }) => <ImageThumbnails images={entry.version.images ?? []} />
+    component: ({ entry, session }) => (
+      <ImageThumbnails images={entry.version.images ?? []} controls={{ entry, session }} />
+    )
   }),
   queuedPreviews.register({
     id: "queued.images",

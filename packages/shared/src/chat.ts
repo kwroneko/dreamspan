@@ -191,6 +191,8 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
   contextExcluded: Schema.Boolean,
   /** Excluded because the user hid it here (SetMessageHidden), not because an import brought it hidden. */
   hiddenByUser: Schema.Boolean,
+  /** The media ids of its version's images taken out of the context here (SetImageExcluded); absent: none. */
+  excludedImages: Schema.optionalKey(Schema.Array(Schema.String)),
   version: Version,
   versionCount: Schema.Int,
   /**

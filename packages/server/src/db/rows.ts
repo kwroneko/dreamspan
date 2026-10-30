@@ -181,6 +181,8 @@ export interface PathRow extends VersionRow {
   readonly row_version: number
   readonly context_excluded: number
   readonly hidden_by_user: number
+  /** Media ids of the shown version's images the fork took out, as a JSON array; absent on older reads. */
+  readonly excluded_images?: string
   readonly branch_name: string | null
   readonly slot_fork_id: string | null
   readonly starts_fork_id: string | null
@@ -207,6 +209,9 @@ export const toPathEntry = (row: PathRow) => {
     rowVersion: row.row_version,
     contextExcluded,
     hiddenByUser: contextExcluded && row.hidden_by_user === 1,
+    ...(row.excluded_images && row.excluded_images !== "[]"
+      ? { excludedImages: JSON.parse(row.excluded_images) as Array<string> }
+      : {}),
     version,
     versionCount: row.version_count,
     branchCount: row.branch_count,

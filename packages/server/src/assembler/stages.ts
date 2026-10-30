@@ -24,6 +24,7 @@ import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
+import { DEFAULT_MAX_IMAGES, imagesStage, messageImages } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
@@ -2349,14 +2350,11 @@ const requestStage = sync("request", (assembly) => {
       reason: "invalid_document",
       message: "This preset has no enabled placement for its summaries."
     })
-  const imagesByVersion = new Map(assembly.resolved?.map(({ entry }) => [entry.versionId, entry.images ?? []]))
   assembly.result = {
     ...(firstSummary >= 0 ? { summaryStart: firstSummary } : {}),
     messages: messages.map(({ role, content, name, pieces }) => {
-      const images = pieces.flatMap((p) => {
-        const source = assembly.pieces[p]?.source
-        return source?.kind === "message" ? (imagesByVersion.get(source.version) ?? []) : []
-      })
+      // Images the fork took out are left out here, so every limit counts only what's sent.
+      const images = messageImages(assembly, pieces).map(({ image }) => image)
       return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
     }),
     prefill: assembly.prefill ?? null,
@@ -2382,10 +2380,10 @@ const requestStage = sync("request", (assembly) => {
       kind: "images_unsupported",
       message: "This model cannot see images. Choose a vision model before replying."
     })
-  if (imageCount > (assembly.model?.maxImages ?? 4))
+  if (imageCount > (assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES))
     assembly.issues.push({
       kind: "images_limited",
-      message: `Only the last ${assembly.model?.maxImages ?? 4} images will be sent.`
+      message: `Only the last ${assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES} images will be sent.`
     })
   const mark = (piece: number, i: number) => {
     const record = assembly.pieces[piece]!
@@ -2439,7 +2437,8 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   composeStage,
   messagesStage,
   breakpointsStage,
-  requestStage
+  requestStage,
+  imagesStage
 ]
 
 export const registerBuiltinStages = (registry: StageRegistry): Effect.Effect<void, never, Scope.Scope> =>

@@ -1,0 +1,103 @@
+import { assert, describe, it } from "@effect/vitest"
+import { Effect } from "effect"
+import type { SlotId } from "@rp/shared/chat.ts"
+import type { UserId } from "@rp/shared/domain.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
+import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { eventually, finished, generateReply } from "./support/generation.ts"
+import { png, textChunk } from "./formats/support.ts"
+import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
+
+const upload = (bytes: Uint8Array) =>
+  Effect.gen(function* () {
+    const port = yield* serverPort
+    const response = yield* Effect.promise(() =>
+      fetch(`http://127.0.0.1:${port}/chat/image`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      })
+    )
+    assert.strictEqual(response.status, 200)
+    return (yield* Effect.promise(() => response.json())) as { mediaId: string }
+  })
+
+const imageCount = (body: unknown) => JSON.stringify(body).split('"type":"image_url"').length - 1
+
+describe("image exclusion", () => {
+  it.live(
+    "takes an image out in one fork only, leaves it out of the request and its limit, and the inspector says so",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const reader = yield* Reader
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id as UserId
+        const first = yield* upload(png(textChunk("fixture", "first")))
+        const second = yield* upload(png(textChunk("fixture", "second")))
+        const third = yield* upload(png(textChunk("fixture", "third")))
+        const mock = yield* Effect.acquireRelease(
+          Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Seen."], {})))),
+          (m) => Effect.promise(() => m.close())
+        )
+        const generated = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: { vision: true, maxImages: 2 },
+          content: "Three drawings",
+          images: [first, second, third]
+        })
+        const { chat } = generated
+        const fork = chat.currentForkId!
+        const path = yield* reader.GetPath({ userId, chatId: chat.id, leafSlotId: null, limit: 20, forkId: fork })
+        const message = path.entries.find((entry) => entry.version.images?.length === 3)!
+        const leaf = path.entries.at(-1)!.slotId as SlotId
+        const other = yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: fork, atSlotId: leaf })
+
+        const taken = yield* api.SetImageExcluded({
+          versionId: message.version.id,
+          mediaId: third.mediaId,
+          forkId: fork,
+          excluded: true
+        })
+        assert.deepStrictEqual(taken.excludedImages, [third.mediaId])
+        // The other fork, made before, keeps every image in its context.
+        const elsewhere = yield* reader.GetSlot({ userId, slotId: message.slotId, forkId: other.fork.id })
+        assert.isUndefined(elsewhere.entry.excludedImages)
+
+        const after = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+        assert.deepStrictEqual(
+          after.images?.images.map((image) => [image.mediaId, image.rule, image.index]),
+          [[third.mediaId, "user", 2]]
+        )
+        const otherNext = yield* api.GetNextContext({ chatId: chat.id, forkId: other.fork.id, leafSlotId: leaf })
+        assert.deepStrictEqual(otherNext.images?.images, [])
+
+        // The next reply sends the two kept images, and the inspector says the third was taken out.
+        const { entry } = yield* posted(
+          api.Generate({ chatId: chat.id, parentSlotId: leaf, branch: false, forkId: fork })
+        )
+        yield* eventually(() => finished(generated.events, entry.version.id) !== undefined)
+        const bodies = mock.requests().filter((r) => r.path === "/v1/chat/completions")
+        const body = JSON.stringify(bodies.at(-1)!.body)
+        assert.strictEqual(imageCount(bodies.at(-1)!.body), 2)
+        assert.notInclude(body, Buffer.from(png(textChunk("fixture", "third"))).toString("base64"))
+        const inspected = yield* api.GetRunContext({ versionId: entry.version.id })
+        assert.isTrue(
+          (inspected.notSent ?? []).some(
+            (source) =>
+              source.label.includes("Image 3 of message") && source.label.includes("Taken out of the context by you")
+          ),
+          JSON.stringify(inspected.notSent)
+        )
+
+        // Putting it back; a second write of the same value changes nothing.
+        const back = yield* api.SetImageExcluded({
+          versionId: message.version.id,
+          mediaId: third.mediaId,
+          forkId: fork,
+          excluded: false
+        })
+        assert.isUndefined(back.excludedImages)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+})

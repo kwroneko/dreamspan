@@ -1399,6 +1399,22 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Takes image `mediaId` of a live version out of the context in fork `forkId` (absent or
+   * null: the fork through its slot), or puts it back; one write, of that fork's only. The
+   * choice is on the message's own version, so a fork's copy of it shares it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
   Rpc.make("MarkVersion", {
     payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },

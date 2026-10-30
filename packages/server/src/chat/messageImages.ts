@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import type { AssembledRequest, ModelInput, RequestImage } from "../assembler/types.ts"
+import { DEFAULT_MAX_IMAGES, newestImages } from "../assembler/images.ts"
 import { readMedia } from "../importer/mediaFiles.ts"
 import { GenerationFailed } from "./Generator.ts"
 
@@ -18,13 +19,13 @@ export const hydrateMessageImages = (
         class: "images_unsupported",
         message: "This model cannot see images. Choose a vision model before replying."
       })
-    let remaining = model.maxImages ?? 4
+    const newest = newestImages(request.messages, model.maxImages ?? DEFAULT_MAX_IMAGES)
     const cache = new Map<string, RequestImage>()
     const messages = []
-    for (const message of request.messages.toReversed()) {
+    for (const [m, message] of request.messages.entries()) {
       const images = []
-      for (const image of (message.images ?? []).toReversed()) {
-        if (remaining-- <= 0) {
+      for (const [i, image] of (message.images ?? []).entries()) {
+        if (!newest.has(`${m}:${i}`)) {
           // Keep the reference for consistent role/source projection, without its bytes.
           images.push({ mediaId: image.mediaId })
           continue
@@ -51,7 +52,7 @@ export const hydrateMessageImages = (
         }
         images.push(hydrated)
       }
-      messages.push({ ...message, images: images.reverse() })
+      messages.push({ ...message, images })
     }
-    return { ...request, messages: messages.reverse() }
+    return { ...request, messages }
   })
