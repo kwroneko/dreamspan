@@ -303,23 +303,31 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           // and assembly to resolve against the chat's state (DESIGN §5.6).
           let root: SlotId | null = null
           let depth = -1
-          for (const { entityId, greeting, frozen } of greeters) {
+          for (const { entityId, greeting, options } of greeters) {
             const greeter = byId.get(entityId)!
-            if (greeter.greetings.length === 0) continue
-            const greetingVersion = (i: number) =>
-              new NewVersion({
+            if (options.length === 0) continue
+            const greetingVersion = (i: number) => {
+              const option = options[i]!
+              const originalIndex = greeter.greetingIndexes[option.index]
+              return new NewVersion({
                 speakerEntityId: greeter.card.entityId,
                 writer: "model",
-                content: greeter.greetings[i]!,
+                content: options[i]!.text,
                 status: "complete",
                 macroMode: "template",
                 origin: "greeting",
-                greetingRef: { entity: greeter.card.entityId, index: greeter.greetingIndexes[i]! },
-                ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
+                ...(originalIndex === undefined
+                  ? {}
+                  : { greetingRef: { entity: greeter.card.entityId, index: originalIndex } }),
+                ...(option.frozen && Object.keys(option.frozen).length > 0 ? { frozenMacros: option.frozen } : {})
               })
+            }
             const parent = root === null ? null : { id: root, depth }
-            const more = greeter.greetings.slice(1).map((_, i) => greetingVersion(i + 1))
-            const picked = greeting !== null && greeting > 0 && greeting < greeter.greetings.length ? greeting : 0
+            const more = options.slice(1).map((_, i) => greetingVersion(i + 1))
+            const picked = Math.max(
+              0,
+              options.findIndex((option) => option.index === greeting)
+            )
             const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at, null, more, picked)
             const slotId = inserted.slotId as SlotId
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`

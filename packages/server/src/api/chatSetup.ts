@@ -1,3 +1,4 @@
+import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
 import { EditRefused } from "@rp/shared/editorApi.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import type { RevisionId } from "@rp/shared/library.ts"
@@ -215,10 +216,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         // the values it saw in the preview are kept, and any it didn't send are drawn now.
         const drawn = yield* Effect.forEach(asked, (greeter) =>
           Effect.map(reader.GetCardForChat({ userId: id, entityId: greeter.entityId }), (card) => {
+            const options = offeredGreetings(card, new Set(cards.filter((entity) => entity !== persona)).size)
             const picked =
               greeters === undefined && cards.length > 1 && !(greeter.entityId === cards[0] && greeting !== null)
-                ? Math.floor(Math.random() * card.greetings.length)
-                : greeter.greeting
+                ? (options[Math.floor(Math.random() * options.length)]?.index ?? 0)
+                : (greetingPick(options, greeter.greeting)?.index ?? 0)
             const fields = { description: card.description, personality: card.personality, scenario: card.scenario }
             const names = {
               user: player?.modelName ?? player?.name ?? "User",
@@ -228,9 +230,18 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
               entityId: greeter.entityId,
               // A single card's greeting as asked, or a group's preview/random choice.
               greeting: picked,
-              frozen: card.greetings.map((text, i) =>
-                freezeTemplate(text, fields, names, i === picked ? (greeter.frozen ?? {}) : {})
-              )
+              // Resolve the registry once: workers persist this trusted snapshot instead
+              // of consulting a separate registry in another isolate.
+              options: options.map((option) => ({
+                index: option.index,
+                text: option.text,
+                frozen: freezeTemplate(
+                  option.text,
+                  fields,
+                  names,
+                  option.index === picked ? (greeter.frozen ?? {}) : {}
+                )
+              }))
             }
           })
         )

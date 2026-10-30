@@ -26,6 +26,8 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   card: CastCard,
   /** `first_mes`, then the alternate greetings; empty ones left out. */
   greetings: Schema.Array(Schema.String),
+  /** CCv3 group-only greetings, offered only with two or more character cards. */
+  groupGreetings: Schema.Array(Schema.String),
   description: Schema.String,
   personality: Schema.String,
   scenario: Schema.String
