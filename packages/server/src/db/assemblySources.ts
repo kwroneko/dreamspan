@@ -87,6 +87,7 @@ interface HistoryRow {
   readonly slot_deleted: number
   readonly version_id: string
   readonly ordinal: number
+  readonly version_number: number
   readonly status: string
   readonly speaker_entity_id: string | null
   readonly content: string
@@ -442,6 +443,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           )
           SELECT s.id AS slot_id, s.parent_slot_id, s.depth, ${contextExcludedIn(sql, fork)} AS context_excluded,
             ${slotDeletedIn(sql, fork, "s")} AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
+            (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
+              AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT json_group_array(json_object('mediaId', a.media_id)) FROM
               (SELECT media_id FROM version_attachments WHERE version_id=v.id ORDER BY ordinal) a) AS images_json,
@@ -475,6 +478,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             sentAt: row.created_at,
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
+            versionNumber: row.version_number,
             amends: row.amend_count
           }))
         const older = rows[0]?.parent_slot_id === after ? null : (rows[0]?.parent_slot_id ?? null)

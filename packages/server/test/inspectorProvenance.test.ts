@@ -7,7 +7,7 @@ import type { EntityId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { ContextMessage, RunContext } from "@rp/shared/inspectorApi.ts"
 import type { StateEventData } from "@rp/shared/state.ts"
 import { Effect } from "effect"
-import { Writer } from "../src/db/Database.ts"
+import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -137,6 +137,12 @@ it.live(
         )
       )
 
+      // Removing the earlier swipe renumbers the surviving swipe in this fork.
+      const removed = yield* writer.DeleteVersion({
+        userId: me.id,
+        versionId: first.id,
+        forkId: chat.currentForkId
+      })
       const sent = yield* posted(
         api.SendMessage({
           chatId: chat.id,
@@ -176,10 +182,10 @@ it.live(
         partTexts(run, (l) => l === lore.label),
         ["The lighthouse burns whale oil."]
       )
-      // A history message and the version of it that was sent: the swipe, the second.
+      // The surviving swipe is version 1, matching the counter after deletion.
       const history = run.messages.flatMap((m) => m.sources).find((s) => s.slotId === reply.slotId)!
       assert.strictEqual(history.kind, "message")
-      assert.strictEqual(history.version, 2)
+      assert.strictEqual(history.version, 1)
       assert.deepStrictEqual(
         partTexts(run, (l) => l === history.label),
         ["The lamp gutters."]
@@ -215,11 +221,15 @@ it.live(
         }
       }
       // The persona's wrapped description is its own turn before the character's.
+      assert.deepStrictEqual(
+        partTexts(run, (l) => l === "Persona “Tobin”: description"),
+        ["Tobin draws maps."]
+      )
       const persona = blocks("Tobin's persona")
       assert.lengthOf(persona, 1)
       assert.strictEqual(persona[0]!.m.content, "<Tobin>\nTobin draws maps.\n</Tobin>")
       assert.include(
-        blocks("The characters' definitions").flatMap(({ m, g }) =>
+        blocks("The characters' descriptions").flatMap(({ m, g }) =>
           (m.groups ?? [])
             .filter((o) => o !== g && o.start >= g.start && o.end <= g.end)
             .map((o) => m.sources[o.source]!.label)
@@ -235,7 +245,7 @@ it.live(
         ]
       )
       const format = inside("Preset: personality format")
-      assert.deepStrictEqual(format.groups, ["The characters' definitions", "Mira's personality"])
+      assert.deepStrictEqual(format.groups, ["The characters' personalities", "Mira's personality"])
       assert.deepStrictEqual(
         format.parts.filter(([, , frame]) => !frame),
         [["Card “Mira”: personality", "Dry and careful.", false]]
@@ -268,6 +278,35 @@ it.live(
         partTexts(impersonated, (l) => l === "Note “Tobin's leg”"),
         ["Tobin limps."]
       )
+
+      // Restoring a preceding swipe changes today's counter, never an earlier capture or
+      // its pinned reconstruction. A later capture uses the restored counter instead.
+      yield* api.RestoreBinItem({ itemId: removed.id })
+      const versions = yield* api.ListVersions({ slotId: reply.slotId, forkId: chat.currentForkId })
+      assert.strictEqual(versions.findIndex((v) => v.id === swipe.version.id) + 1, 2)
+      assert.deepStrictEqual(yield* api.GetRunContext({ versionId: next.entry.version.id }), run)
+      const [payloads] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT context_snapshot_json FROM rollout_payloads WHERE rollout_id = (SELECT rollout_id FROM versions WHERE id = ?)",
+            params: [next.entry.version.id]
+          }
+        ],
+        { readOnly: true }
+      )
+      const snapshot = payloads![0]!.context_snapshot_json as string
+      const rebuilt = yield* (yield* Reader).RebuildContext({ userId: me.id, snapshot })
+      assert.strictEqual(rebuilt._tag, "Rebuilt")
+      if (rebuilt._tag === "Rebuilt") assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), JSON.parse(snapshot))
+      const restoredReply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: yield* leaf(), branch: false }))
+      const restoredRun = yield* done(restoredReply.entry.version.id)
+      assert.strictEqual(
+        restoredRun.messages.flatMap((m) => m.sources).find((s) => s.slotId === reply.slotId)!.version,
+        2
+      )
+      yield* writer.DeleteVersion({ userId: me.id, versionId: first.id, forkId: chat.currentForkId })
+      assert.deepStrictEqual(yield* api.GetRunContext({ versionId: restoredReply.entry.version.id }), restoredRun)
 
       // A capture from before parts were recorded still opens, verbatim, with its sources.
       yield* fixtureSql(config.dataDir, [

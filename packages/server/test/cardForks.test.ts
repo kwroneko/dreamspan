@@ -79,6 +79,21 @@ const fork = (api: Api, refId: RefId, characterVersion: string, moveDrafts = fal
   })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("card forks", (it) => {
+  it.effect("fork names accept the same unbounded strings as card fields", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const parent = yield* card(api, "Long name parent")
+      const name = "N".repeat(301)
+      const nickname = "I".repeat(601)
+      const characterVersion = "V".repeat(601)
+      const fork = yield* api.ForkCard({ refId: parent.ref.id, name, nickname, characterVersion, moveDrafts: false })
+      const opened = yield* api.OpenEditor({ refId: fork.id })
+      assert.strictEqual(opened.doc.name, name)
+      assert.strictEqual(opened.doc.nickname, nickname)
+      assert.strictEqual(opened.doc.character_version, characterVersion)
+    })
+  )
+
   it.effect("cards refuse the shared variant and chat override operations", () =>
     Effect.gen(function* () {
       const api = yield* client()

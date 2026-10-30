@@ -25,13 +25,12 @@ export const lorebookSections = (input: {
   )
   return {
     added: added.map((id): LorebookRow => ({ id, on: input.attached.includes(id), global: false, attached: true })),
-    // A global book is listed once, here, even when it's also attached to this chat: attached,
-    // it's used whatever the global switch says, so it's on while either holds.
+    // Listed once, with independent switches for global use and a manual attachment.
     global: globals.map((id): LorebookRow => ({
       id,
-      on: input.attached.includes(id) || !input.globalsOff.includes(id),
+      on: !input.globalsOff.includes(id),
       global: true,
-      attached: input.attached.includes(id)
+      attached: input.attached.includes(id) || input.detached.includes(id)
     }))
   }
 }

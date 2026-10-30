@@ -270,7 +270,10 @@ describe("card usage", () => {
         }
       ])
       // Warm the reader once (statement cache, page cache), then time it.
+      const coldStart = performance.now()
       yield* api.ListCardUsage()
+      const coldTook = performance.now() - coldStart
+      assert.isBelow(coldTook, 2000, "the cold query must also seek participants before chats")
       const started = performance.now()
       const usage = yield* api.ListCardUsage()
       const took = performance.now() - started

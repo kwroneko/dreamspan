@@ -369,22 +369,33 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
                 >
                   <Switch
                     checked={on}
-                    onCheckedChange={async (next) => {
-                      // Added by hand too, it's used until that's taken off as well.
-                      if (!next && alsoAdded)
-                        await change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: false })
-                      await change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next })
-                    }}
+                    onCheckedChange={(next) =>
+                      void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next })
+                    }
                     description={
                       on
                         ? alsoAdded
-                          ? "Used in every chat · also added to this chat"
+                          ? "Global use · also has a separate chat attachment"
                           : "Used in every chat"
                         : "Used in every chat, but off in this one"
                     }
                   >
                     {name}
                   </Switch>
+                  {alsoAdded && (
+                    <div className="mt-3">
+                      <Switch
+                        checked={attached.includes(id as LibraryRef["id"])}
+                        onCheckedChange={(next) => {
+                          setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
+                          void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
+                        }}
+                        description="Independent of global use. Either use can send this book's entries."
+                      >
+                        Added to this chat: {name}
+                      </Switch>
+                    </div>
+                  )}
                 </Row>
               )
             })}
