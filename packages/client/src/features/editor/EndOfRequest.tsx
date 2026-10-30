@@ -15,7 +15,11 @@ export function EndOfRequest({ store }: { store: EditorStore }) {
       />
       <div className="flex flex-col gap-4">
         {END_OF_REQUEST.map((text) => (
-          <section key={text.identifier} data-end-of-request={text.identifier} className="flex flex-col gap-1">
+          <section
+            key={text.identifier}
+            data-end-of-request={text.identifier}
+            className="scroll-mt-[var(--preset-toolbar-height,1rem)] flex flex-col gap-1"
+          >
             <TextField
               store={store}
               path={["prompts", `identifier=${text.identifier}`, "content"]}

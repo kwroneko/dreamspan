@@ -290,6 +290,8 @@ for (const width of [1440, 390])
       await expect(types.getByRole("checkbox", { name: "Normal" })).not.toBeChecked()
       await style.scrollIntoViewIfNeeded()
       await shot("11-editor-conditions")
+      await end.scrollIntoViewIfNeeded()
+      await shot("11a-editor-end-of-request")
       const directionText = direct.getByRole("textbox", { name: /^When you give a direction/ })
       const original = await directionText.textContent()
       await directionText.fill("[What happens next.]")
@@ -299,6 +301,15 @@ for (const width of [1440, 390])
       await shot("12-editor-warnings")
       await warnings.getByRole("button", { name: "Go to the text" }).click()
       await expect(direct).toBeInViewport()
+      const toolbarBottom = await editor.getByRole("textbox", { name: "Find", exact: true }).evaluate((element) => {
+        let at: HTMLElement | null = element as HTMLElement
+        while (at && getComputedStyle(at).position !== "sticky") at = at.parentElement
+        return at!.getBoundingClientRect().bottom
+      })
+      await expect
+        .poll(() => directionText.evaluate((element) => element.getBoundingClientRect().top))
+        .toBeGreaterThanOrEqual(toolbarBottom)
+      await shot("12a-editor-direction-jump")
       // Put it back as it was (the drafts are this account's).
       await directionText.fill(original ?? "")
       await expect(warnings).toHaveCount(0)

@@ -50,7 +50,7 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
   )
 }
 
-// The group nudge and impersonation prompt are prompts in the list, with conditions (DESIGN §2.2).
+// The group nudge, impersonation prompt and direction have their fixed End of request section (DESIGN §2.2).
 const UTILITY: ReadonlyArray<readonly [key: string, label: string]> = [
   ["new_chat_prompt", "New chat"],
   ["new_group_chat_prompt", "New group chat"],

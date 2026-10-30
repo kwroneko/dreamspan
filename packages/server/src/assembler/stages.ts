@@ -1864,6 +1864,13 @@ const composeStage = sync("compose", (assembly) => {
   let actualPlacement = placement(notes)
   let reservedPlacement = actualPlacement
   const lines = projected.map((p, i) => chatLine(assembly, p, groupNames, scripted[i]!))
+  // The registered end stage owns the renderer. Expand after prompts/notes so its reads see
+  // their writes, and its writes cannot change the prefix. Prefill may read its writes next.
+  if (assembly.renderEndOfRequest) {
+    const end = assembly.renderEndOfRequest()
+    if (end) assembly.endOfRequest = end
+    else delete assembly.endOfRequest
+  }
   prefill(assembly)
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
   const schemaReserve =
@@ -2243,27 +2250,30 @@ const composeStage = sync("compose", (assembly) => {
  * request's last, with the speaker's turn text (when your card speaks if the speaker is one you
  * play, else when a character speaks) and, when the version has a direction, the direction text
  * on a new line. Neither conditions nor ST's triggers apply to them. A summary request puts its
- * instruction there instead (`summary-request`), so it sends none. `compose` budgets it and
+ * instruction there instead (`summary-request`), so it sends none. Expansion is deferred until
+ * `compose` has prepared ordinary prompts and notes; `compose` budgets it and
  * `messages` sends it; without this stage the fallback alone applies.
  */
 const endOfRequestStage = sync("end-of-request", (assembly) => {
   if (assembly.request.summarizing) return
-  const doc = need(assembly, "preset").doc
-  const { speaker, personas } = need(assembly, "cast")
-  const turn = speaker !== null && personas.includes(speaker) ? IMPERSONATION_PROMPT : GROUP_NUDGE
-  const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []
-  const parts = [turn, ...direction].flatMap((identifier) => {
-    const content = doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
-    if (content.trim() === "") return []
-    const text = presetText(assembly, identifier, content)
-    return text.text.trim() === "" ? [] : [text]
-  })
-  if (parts.length === 0) return
-  assembly.endOfRequest = {
-    role: "user",
-    content: parts.map((t) => t.text).join("\n"),
-    pieces: parts.map((t) => t.piece),
-    kind: "volatile"
+  assembly.renderEndOfRequest = () => {
+    const doc = need(assembly, "preset").doc
+    const { speaker, personas } = need(assembly, "cast")
+    const turn = speaker !== null && personas.includes(speaker) ? IMPERSONATION_PROMPT : GROUP_NUDGE
+    const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []
+    const parts = [turn, ...direction].flatMap((identifier) => {
+      const content = doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
+      if (content.trim() === "") return []
+      const text = presetText(assembly, identifier, content)
+      return text.text.trim() === "" ? [] : [text]
+    })
+    if (parts.length === 0) return
+    return {
+      role: "user",
+      content: parts.map((t) => t.text).join("\n"),
+      pieces: parts.map((t) => t.piece),
+      kind: "volatile"
+    }
   }
 })
 
@@ -2291,22 +2301,15 @@ const messagesStage = sync("messages", (assembly) => {
     }
   })
   messages = messages.filter((m) => m.content)
-  // The end-of-request message is the request's last (DESIGN §2.2); squashing and
-  // post-processing treat it as any user message, so a merging mode can join it to the one before.
-  const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
-  if (end) messages.push({ ...end, kind: "volatile" })
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
+  // DESIGN §2.2 requires one separate final user message, even in merging/single modes.
+  const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
+  if (end) messages.push({ ...end, kind: "volatile" })
   // The only fallback (DESIGN §2.2): without an end-of-request message, a request that would end
   // on an assistant message, with no prefill to continue it, asks for the speaker's message.
-  // Decided on the final request; system messages after it don't count, since some providers
-  // move them out of the turns.
-  if (
-    !end &&
-    !assembly.request.summarizing &&
-    !assembly.prefill &&
-    messages.findLast((m) => m.role !== "system")?.role === "assistant"
-  ) {
+  // Decided on the whole final request, including trailing system prompts.
+  if (!end && !assembly.request.summarizing && !assembly.prefill && messages.at(-1)?.role === "assistant") {
     const env = need(assembly, "macros")
     const piece = env.piece(
       "assembler:last-turn",

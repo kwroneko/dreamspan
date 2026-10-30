@@ -212,7 +212,7 @@ for (const width of [1440, 390]) {
       .click()
     const linked = tab.getByRole("region", { name: "Note Harbor weather" }).last()
     await expect(linked.getByText(/Shared note “Harbor weather”: edits change it in \d+ place/)).toBeVisible()
-    await expect(linked.getByRole("link", { name: "Open shared note" })).toBeVisible()
+    await expect(linked.getByRole("button", { name: "Open in Snippets", exact: true })).toBeVisible()
     // Unlink: its own copy of the text, the link gone.
     await linked.getByRole("button", { name: "Unlink" }).click()
     await expect(

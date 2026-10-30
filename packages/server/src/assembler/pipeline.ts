@@ -241,6 +241,8 @@ export interface Assembly {
   /** Speakers of those messages who have left the cast, by entity: their messages keep their names. */
   departed?: ReadonlyMap<string, CardInput>
   projected?: ReadonlyArray<ProjectedEntry>
+  /** Installed by the registered end stage; compose expands it after other text, before prefill. */
+  renderEndOfRequest?: () => StMessage | undefined
   /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
   endOfRequest?: StMessage
   composition?: Composition

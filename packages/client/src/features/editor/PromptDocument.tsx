@@ -459,7 +459,10 @@ export function PromptDocument({
  */
 export function PresetWarnings({ store }: { store: EditorStore }) {
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
-  const { directionLost } = presetWarnings(new Map(prompts.map((p) => [p.identifier, p])))
+  const direction = useText(store, ["prompts", `identifier=${DIRECTION_PROMPT}`, "content"])
+  const { directionLost } = presetWarnings(
+    new Map(prompts.map((p) => [p.identifier, p.identifier === DIRECTION_PROMPT ? { ...p, content: direction } : p]))
+  )
   if (!directionLost) return null
   const jump = () =>
     document

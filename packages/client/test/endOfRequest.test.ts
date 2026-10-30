@@ -94,6 +94,17 @@ describe("the preset warnings", () => {
     expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(defaults) }))).toBe("")
   })
 
+  it("reads the field's current draft instead of the saved prompts array", () => {
+    const store = storeOf(defaults)
+    const saved = store.text.bind(store)
+    store.text = (path) => (path[1] === "identifier=directionPrompt" ? "[Next.]" : saved(path))
+    const changed = renderToStaticMarkup(createElement(PresetWarnings, { store }))
+    expect(changed).toContain("doesn&#x27;t contain {{direction}}")
+    // Restoring the macro clears the warning without a revision save or structural change.
+    store.text = saved
+    expect(renderToStaticMarkup(createElement(PresetWarnings, { store }))).toBe("")
+  })
+
   it("warn when the direction text would lose the direction, with a link to it", () => {
     const lost = defaults.map((p) => (p.identifier === "directionPrompt" ? { ...p, content: "[Next.]" } : p))
     const html = renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(lost) }))

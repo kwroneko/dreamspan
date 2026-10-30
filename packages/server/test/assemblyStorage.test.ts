@@ -1186,12 +1186,12 @@ describe("context assembly from the database", () => {
       assert.notInclude(texts(off).join("\n"), "flooded twice")
       yield* state({ key: "note.activate", value: { note: summary.entityId as EntityId } })
       const on = yield* assemble()
-      // ST's default preset's group nudge ends the request, as for any reply a character writes.
+      // The built-in preset's character instruction ends the request.
       assert.deepStrictEqual(texts(on).slice(-4), [
         "assistant: *Mira looks up.* Late again, Tobin.",
         "system: [Summary: The road flooded twice.]",
         "user: The road flooded.",
-        "user: [Write the next reply only as Mira.]"
+        "user: [Write Mira's next message. Write only for Mira.]"
       ])
     }).pipe(Effect.provide(database()))
   )

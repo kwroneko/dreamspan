@@ -2174,6 +2174,189 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       expect(continued.request.prefill).toBe("Mira looks up")
     })
 
+    it.each(["none", "merge", "merge_tools", "semi", "semi_tools", "strict", "strict_tools", "single"] as const)(
+      "keeps the end-of-request message separate and verbatim after %s post-processing",
+      async (postprocess) => {
+        const note = tailNote("TAIL USER NOTE", "user")
+        const snapshot = await assembled(
+          chat({
+            preset: { ...preset(), postprocess },
+            notes: [note],
+            events: [activate(note)],
+            target: { speaker: "mira", direction: "Rain." }
+          })
+        )
+        expect(snapshot.request.messages.at(-1)).toEqual({
+          role: "user",
+          content: "[Write Mira's next message. Write only for Mira.]\n[What happens next: Rain.]"
+        })
+        expect(snapshot.request.messages.at(-2)!.content).toContain("TAIL USER NOTE")
+        const last = snapshot.request.messages.length - 1
+        expect(snapshot.pieces.find((p) => p.id === "preset:groupNudge")!.messages).toEqual([last])
+        expect(snapshot.pieces.find((p) => p.id === "preset:directionPrompt")!.messages).toEqual([last])
+      }
+    )
+
+    for (const withPreset of [true, false])
+      for (const midChatSystem of [undefined, true, false])
+        for (const style of ["direct", "tool"])
+          it(`ends a ${style} summary with one user instruction (preset ${withPreset}, midChatSystem ${midChatSystem})`, async () => {
+            const snapshot = await assembled(
+              chat({
+                target: { speaker: "mira", direction: "NOT FOR THE SUMMARY" },
+                preset: preset({ assistant_prefill: "NOT A SUMMARY PREFIX" }),
+                model: model({
+                  prefill: "assistant",
+                  mapping: {
+                    ...(midChatSystem === undefined ? {} : { midChatSystem }),
+                    reasoning: false,
+                    supportsDeveloperRole: true,
+                    revision: "synthetic"
+                  }
+                })
+              }),
+              {
+                summarizing: true,
+                summaryJob: {
+                  id: "synthetic-summary",
+                  clipTokens: 1000,
+                  inputs: [],
+                  tail: "Summarize the material.",
+                  style,
+                  withPreset
+                }
+              }
+            )
+            expect(snapshot.request.messages.at(-1)).toEqual({ role: "user", content: "Summarize the material." })
+            expect(snapshot.request.messages.filter((m) => m.content === "Summarize the material.")).toHaveLength(1)
+            expect(snapshot.request.prefill).toBeNull()
+            expect(contents(snapshot).join("\n")).not.toContain("NOT FOR THE SUMMARY")
+            expect(contents(snapshot).join("\n")).not.toContain("NOT A SUMMARY PREFIX")
+            const instruction = snapshot.pieces.find((p) => p.id === "lcm:instruction")!
+            expect(instruction.messages).toEqual([snapshot.request.messages.length - 1])
+            expect(snapshot.request.breakpoints.every((b) => b.message < snapshot.request.messages.length - 1)).toBe(
+              true
+            )
+            const wire = chatCompletionsFields(snapshot.request, "openai-chat") as {
+              messages: Array<{ role: string; content: string }>
+            }
+            expect(wire.messages.at(-1)).toEqual({ role: "user", content: "Summarize the material." })
+          })
+
+    it("sends either nonempty part alone and falls back only when expansion leaves both empty", async () => {
+      const withTexts = (turn: string, direction: string) => {
+        const doc = emptied(preset())
+        return {
+          ...doc,
+          prompts: doc.prompts.map((p) => ({
+            ...p,
+            content: p.identifier === "groupNudge" ? turn : p.identifier === "directionPrompt" ? direction : p.content
+          }))
+        }
+      }
+      const onlyDirection = await assembled(
+        chat({ preset: withTexts("", "Next: {{direction}}"), target: { direction: "Rain." } })
+      )
+      expect(contents(onlyDirection).at(-1)).toBe("user: Next: Rain.")
+      const onlyTurn = await assembled(
+        chat({ preset: withTexts("Only {{speaker}}.", ""), target: { direction: "Rain." } })
+      )
+      expect(contents(onlyTurn).at(-1)).toBe("user: Only Mira.")
+      const ending = [{ side: "assistant", content: "The ferry leaves." }] as const
+      const empty = await assembled(chat({ preset: withTexts("{{direction}}", "  "), messages: ending }))
+      expect(contents(empty).at(-1)).toBe("user: [Write Mira's next message.]")
+      const prefill = await assembled(
+        chat({
+          preset: withTexts("{{direction}}", ""),
+          messages: ending,
+          model: model({ prefill: "assistant" }),
+          target: { continues: { version: "version-0", text: "The ferry leaves." } }
+        })
+      )
+      expect(contents(prefill).at(-1)).toBe("assistant: The ferry leaves.")
+      expect(prefill.request.prefill).toBe("The ferry leaves.")
+    })
+
+    it("places the instruction after below-history lore and tail notes", async () => {
+      const book = {
+        id: "book",
+        entity: "entity-book",
+        revision: "rev-book",
+        doc: loreBook([loreEntry({ constant: true, content: "TAIL LORE", position: "after_char" })]).document
+      }
+      const note = tailNote("TAIL NOTE", "assistant")
+      const snapshot = await assembled(
+        chat({
+          lorebooks: [book],
+          globalLorebooks: ["book"],
+          notes: [note],
+          events: [activate(note)]
+        })
+      )
+      const sent = contents(snapshot)
+      const last = sent.length - 1
+      expect(sent.at(-1)).toBe(MIRA_TURN)
+      for (const text of ["TAIL LORE", "TAIL NOTE"]) expect(sent.findIndex((m) => m.includes(text))).toBeLessThan(last)
+      expect(sent.some((m) => m.includes("TAIL LORE"))).toBe(true)
+    })
+
+    it("treats regenerate as swipe and quiet as summary for ordinary prompts", async () => {
+      const doc = preset()
+      const template = doc.prompts.find((p) => p.identifier === "main")!
+      const prompts = ["regenerate", "swipe", "quiet"].map((trigger) => ({
+        ...template,
+        identifier: `trigger-${trigger}`,
+        content: `TRIGGER ${trigger}`,
+        system_prompt: false,
+        injection_trigger: [trigger]
+      }))
+      const own = {
+        ...doc,
+        prompts: [...doc.prompts, ...prompts],
+        order: [...doc.order, ...prompts.map((p) => ({ identifier: p.identifier, enabled: true }))]
+      }
+      const swipe = await assembled(chat({ preset: own, target: { ordinal: 1 } }))
+      expect(contents(swipe).join("\n")).toContain("TRIGGER regenerate")
+      expect(contents(swipe).join("\n")).toContain("TRIGGER swipe")
+      expect(contents(swipe).join("\n")).not.toContain("TRIGGER quiet")
+      const summary = await assembled(chat({ preset: own }), { summarizing: true })
+      expect(summary.inputs.type).toBe("quiet")
+      expect(contents(summary).join("\n")).toContain("TRIGGER quiet")
+      expect(contents(summary).join("\n")).not.toContain("TRIGGER regenerate")
+      expect(contents(summary).join("\n")).not.toContain("TRIGGER swipe")
+    })
+
+    it("expands end macros after ordinary prompts, without letting end writes affect the prefix, and before prefill", async () => {
+      const own = (main: string, turn: string, prefill = "") => {
+        const doc = preset({
+          assistant_prefill: prefill,
+          prompts: [{ identifier: "main", role: "system", content: main }]
+        })
+        return {
+          ...doc,
+          prompts: doc.prompts.map((p) => (p.identifier === "groupNudge" ? { ...p, content: turn } : p))
+        }
+      }
+      const read = await assembled(
+        chat({ preset: own("{{setvar::place::harbor}}MAIN", "Next at {{getvar::place}} for {{speaker}}.") })
+      )
+      expect(contents(read).at(-1)).toBe("user: Next at harbor for Mira.")
+      const write = await assembled(
+        chat({
+          preset: own(
+            "Location:{{getvar::place}}",
+            "[Write {{speaker}}.{{setvar::place::harbor}}]",
+            "{{getvar::place}}"
+          ),
+          model: model({ prefill: "assistant" })
+        })
+      )
+      expect(contents(write)[0]).toBe("system: Location:")
+      expect(contents(write).at(-1)).toBe("user: [Write Mira.]")
+      expect(write.request.prefill).toBe("harbor")
+      expect(write.request.breakpoints.some((b) => b.reason === "history")).toBe(true)
+    })
+
     it("leaves its place to the summary instruction in a summary request", async () => {
       const summary = await assembled(chat({ target: { speaker: "mira", direction: "Rain." } }), {
         summarizing: true
@@ -2203,11 +2386,11 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
         what: "end of request fallback: who writes next"
       })
       expect(bare.issues).toEqual([])
-      // Decided on the whole request: a system prompt after the model's message doesn't hide it.
+      // Decided on the whole request: a trailing system message is not an assistant ending.
       const after = await ending({
         preset: emptied(preset({ prompts: [{ identifier: "jailbreak", role: "system", content: "Stay sharp." }] }))
       })
-      expect(contents(after).slice(-2)).toEqual(["system: Stay sharp.", "user: [Write Mira's next message.]"])
+      expect(contents(after).slice(-2)).toEqual(["assistant: Ferry's shut.", "system: Stay sharp."])
       // A chat ending on the user's message needs none.
       const user = await ending({ messages: [{ side: "user", content: "Listen." }] })
       expect(contents(user).at(-1)).toBe("user: Listen.")

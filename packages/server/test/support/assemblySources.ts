@@ -168,6 +168,7 @@ export const assembleFixture = (
     readonly loreFallback?: ContextSnapshot["loreFallback"]
     /** A summary's request: written as no one, with no direction. */
     readonly summarizing?: boolean
+    readonly summaryJob?: ContextSnapshot["summaryJob"]
     /** An assembler of the test's own, to register plugin parts in a scope of its own. */
     readonly assembler?: Assembler
   } = {}
@@ -179,6 +180,7 @@ export const assembleFixture = (
       frozen: options.frozen ?? {},
       ...(options.loreFallback ? { loreFallback: options.loreFallback } : {}),
       ...(options.summarizing ? { summarizing: true } : {}),
+      ...(options.summaryJob ? { summaryJob: options.summaryJob } : {}),
       random: options.random ?? (() => 0.5)
     })
     .pipe(Effect.provide(fixtureSources(fixture)))

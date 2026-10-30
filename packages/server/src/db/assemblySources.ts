@@ -60,8 +60,10 @@ const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
 const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
-/** ST's default chat-completion preset: what generation uses when nothing chooses one. */
-export const builtinPreset = forbidCardOverrides(importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!)
+/** The built-in preset uses our end-of-request defaults; ST imports retain their own wording. */
+export const builtinPreset = forbidCardOverrides(
+  importStPreset(JSON.stringify({ frequency_penalty: 0, group_nudge_prompt: "", impersonation_prompt: "" })).document!
+)
 
 const invalid = (what: string) =>
   new AssemblyFailed({
