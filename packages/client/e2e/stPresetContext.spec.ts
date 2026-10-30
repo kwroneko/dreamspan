@@ -2,6 +2,8 @@
 // prompt preset without changing the budget, which the model's own context size restores.
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
+import { mkdirSync } from "node:fs"
+import { join } from "node:path"
 import { card, encode, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -9,9 +11,10 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 const server = serverPerFile(withAdmin)
 
 for (const chars of [14_000, 20_000]) {
-  test(`explains an empty history with a ${chars / 4}-token card and restores it with the model's context size`, async ({
+  test(`explains a refused request with a ${chars / 4}-token card and restores it with the model's context size`, async ({
     page
   }) => {
+    test.setTimeout(120_000)
     const { importId, model } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       Effect.gen(function* () {
         const connection = yield* api.CreateConnection({
@@ -77,18 +80,40 @@ for (const chars of [14_000, 20_000]) {
         }
       })
     )
-    expect(next.historyStart?.depth ?? null).toBe(chars === 14_000 ? 50 : null)
+    // daaa81f refuses dropping the newest message rather than sending empty history.
+    expect(next.historyStart).toBeNull()
+    expect(next.assemblyError).toMatch(chars === 14_000 ? /newest message/ : /fixed context.*maximum context size/)
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
     const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the model’s context" })
-    await expect(explanation).toBeVisible()
-    await expect(explanation).toContainText("budget allows 4,095 tokens")
-    await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")
-    await expect(explanation).toContainText(`take ~${next.budget!.nonHistoryTokens.toLocaleString()}`)
+    const refusal = page.getByRole("alert").filter({ hasText: "Can't prepare the next reply" })
+    await expect(refusal).toContainText(next.assemblyError!)
+    if (chars === 20_000) {
+      await expect(explanation).toBeVisible()
+      await expect(explanation).toContainText("budget allows 4,095 tokens")
+      await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")
+      await expect(explanation).toContainText(`take ~${next.budget!.nonHistoryTokens.toLocaleString()}`)
+    } else await expect(explanation).toHaveCount(0)
     const last = page.locator(`article[data-slot="${entries.at(-1)!.slotId}"]`)
     await expect(last).toBeVisible()
-    expect((await explanation.boundingBox())!.y).toBeGreaterThan((await last.boundingBox())!.y)
-    if (chars === 14_000) await expect(last).toHaveAttribute("data-out-of-context", "true")
+    if (chars === 20_000) expect((await explanation.boundingBox())!.y).toBeGreaterThan((await last.boundingBox())!.y)
+    await expect(last).not.toHaveAttribute("data-out-of-context")
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: 960 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+        await page.reload()
+        await expect(refusal).toContainText(next.assemblyError!)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+        if (process.env.SCREENSHOT_DIR) {
+          mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+          await page.screenshot({
+            path: join(process.env.SCREENSHOT_DIR, `assembly-refusal-${chars}-${width}-${theme}.png`)
+          })
+        }
+      }
+    await page.setViewportSize({ width: 1440, height: 960 })
     // The composer names the prompt preset in effect: ST's selected one isn't imported yet.
     const preset = page.getByRole("combobox", { name: "Prompt preset", exact: true })
     await expect(preset).toHaveText("Default (built-in)")
@@ -97,8 +122,11 @@ for (const chars of [14_000, 20_000]) {
     await page.reload()
     await expect(preset).toHaveText("Roomy")
     await expect(last).toBeVisible()
-    await expect(explanation).toBeVisible()
-    await expect(explanation).toContainText("budget allows 4,095 tokens")
+    await expect(refusal).toContainText(next.assemblyError!)
+    if (chars === 20_000) {
+      await expect(explanation).toBeVisible()
+      await expect(explanation).toContainText("budget allows 4,095 tokens")
+    }
     // The model's own context size brings the whole history back.
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.EditModel({
@@ -111,6 +139,12 @@ for (const chars of [14_000, 20_000]) {
     await expect(last).toBeVisible()
     await expect(last).not.toHaveAttribute("data-out-of-context")
     await expect(explanation).toHaveCount(0)
+    await expect(refusal).toHaveCount(0)
     await expect(page.locator('[data-out-of-context="true"]')).toHaveCount(0)
+    const restored = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+    )
+    expect(restored.assemblyError).toBeNull()
+    expect(restored.historyStart?.depth).toBe(0)
   })
 }

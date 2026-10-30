@@ -311,6 +311,16 @@ describe("ChatSession", () => {
     expect(s.snapshot().history?.presetContext).toEqual(next)
   })
 
+  it("shows a failed next assembly and clears its refusal after a successful estimate", () => {
+    const { s, receive } = session()
+    const base = { _tag: "Cache", leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null } as const
+    receive({ ...base, assemblyError: "The newest message cannot fit." })
+    expect(s.snapshot().history?.assemblyError).toBe("The newest message cannot fit.")
+    receive({ ...base, assemblyError: null })
+    expect(s.snapshot().history?.assemblyError).toBeNull()
+    s.dispose()
+  })
+
   it("appends reasoning to a continuation's saved reasoning independently of text", async () => {
     vi.stubGlobal("requestAnimationFrame", () => 1)
     vi.stubGlobal("cancelAnimationFrame", () => {})

@@ -13,6 +13,7 @@ import {
   summaryPreviews,
   queuedPreviews,
   chatComposer,
+  chatComposerNotes,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -74,6 +75,7 @@ acceptsAlternative(messagePreviews)
 acceptsAlternative(summaryPreviews)
 acceptsAlternative(queuedPreviews)
 acceptsAlternative(chatComposer)
+acceptsAlternative(chatComposerNotes)
 acceptsAlternative(chatOverlays)
 acceptsAlternative(chatSettingSections)
 acceptsAlternative(accountSettingSections)
