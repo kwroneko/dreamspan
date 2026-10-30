@@ -148,6 +148,10 @@ export const makeLcmHandlers = Effect.gen(function* () {
       warmth.refreshUser(id)
     )
   return {
+    GetSummaryDetails: (params) =>
+      Effect.flatMap(CurrentUser, (user) => reader.GetSummaryDetails({ userId: user.id, ...params })).pipe(
+        internal("GetSummaryDetails")
+      ),
     GetSummary: (params) =>
       Effect.flatMap(CurrentUser, (user) => reader.GetSummary({ userId: user.id, ...params })).pipe(
         internal("GetSummary")

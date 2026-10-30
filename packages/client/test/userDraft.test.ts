@@ -66,6 +66,10 @@ const harness = (initial = draft("original")) => {
       current = draft(save.content, current.rowVersion + 1)
       return current
     },
+    EndUserDraft: async () => {
+      current = { ...draft("", current.rowVersion + 1), status: "discarded" as const }
+      return current
+    },
     UserDraftHistory: async () => [
       new DraftState({ seq: 1, at: 2, length: 8, removed: "", inserted: "original", kind: "edit" }),
       new DraftState({ seq: 0, at: 1, length: 8, removed: "", inserted: "starting", kind: "initial" })
@@ -279,4 +283,173 @@ it("continuing a newer replay never deletes an unrelated older copy whose replay
   store.type("Newer legacy copy continued", "original")
   await until(() => saves.length === 2)
   expect((await copiesOf(ownerId, key.targetId)).some((copy) => copy.key === old.key)).toBe(true)
+})
+
+it("a clean open editor learns a newer device draft and ignores old events", async () => {
+  const { store } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  store.receive(draft("another device", 3))
+  await until(() => store.snapshot().text === "another device")
+  expect(store.snapshot().remote).toBeNull()
+  store.receive(draft("out of order", 2))
+  store.history()
+  await until(() => store.snapshot().history !== null)
+  expect(store.snapshot().text).toBe("another device")
+})
+
+it.each([true, false])("a local unsaved draft offers an explicit remote choice (load=%s)", async (load) => {
+  const { store, handlers, saves } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline")
+  }
+  store.type("local unsaved", "original")
+  await until(() => store.snapshot().error !== null)
+  store.receive(draft("remote saved", 5))
+  await until(() => store.snapshot().remote !== null)
+  expect(store.snapshot().text).toBe("local unsaved")
+  expect(store.snapshot().remote?.content).toBe("remote saved")
+  handlers.SaveUserDraft = save
+  store.resolveRemote(load)
+  await until(() => store.snapshot().remote === null)
+  expect(store.snapshot().text).toBe(load ? "remote saved" : "local unsaved")
+  // Accepting remote first archives local text. Keeping local retains its original observed base.
+  expect(saves[0]?.content).toBe("local unsaved")
+  expect(saves[0]?.expectedRowVersion).toBe(1)
+  if (load) {
+    expect(saves[1]?.content).toBe("remote saved")
+    expect(saves[1]?.expectedRowVersion).toBe(5)
+  }
+})
+
+it("reconnect refresh retains text typed while its read was outstanding", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  const held = deferred<Draft>()
+  handlers.GetUserDraft = () => held.promise
+  store.refresh()
+  store.type("local during refresh", "original")
+  held.resolve(draft("reconnected device", 4))
+  await until(() => store.snapshot().remote !== null)
+  expect(store.snapshot().text).toBe("local during refresh")
+  expect(store.snapshot().remote?.content).toBe("reconnected device")
+})
+
+it.each(["committed", "discarded"] as const)(
+  "a remote %s ending never replaces a form with empty draft storage",
+  async (status) => {
+    const original = JSON.stringify({ name: "Saved name" })
+    const { store } = harness(draft(original))
+    store.open()
+    await until(() => store.snapshot().ready)
+    store.receive({ ...draft("", 3), status })
+    store.history()
+    await until(() => store.snapshot().history !== null)
+    expect(store.snapshot().text).toBe(original)
+    expect(store.snapshot().remote?.status).toBe(status)
+  }
+)
+
+it("loading an ended remote draft recovers local text before requesting the saved value", async () => {
+  const { store, handlers, saves } = harness(draft('{"name":"Original"}'))
+  const settleChoice = async () => {
+    const history = handlers.UserDraftHistory
+    let read = false
+    handlers.UserDraftHistory = async () => {
+      read = true
+      return history()
+    }
+    store.history()
+    await until(() => read)
+    handlers.UserDraftHistory = history
+  }
+  store.open()
+  await until(() => store.snapshot().ready)
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline")
+  }
+  store.type('{"name":"Only in this browser"}', '{"name":"Original"}')
+  await until(() => store.snapshot().error !== null)
+  store.receive({ ...draft("", 5), status: "committed" })
+  await until(() => store.snapshot().remote !== null)
+  // A refused save leaves the form, the conflict and its browser copy in place.
+  await store.resolveRemote(true)
+  await settleChoice()
+  expect(store.snapshot().text).toBe('{"name":"Only in this browser"}')
+  expect((await copiesOf(ownerId, key.targetId)).some((copy) => copy.content.includes("Only in this browser"))).toBe(
+    true
+  )
+  handlers.SaveUserDraft = save
+  let ended = 0
+  const end = handlers.EndUserDraft
+  handlers.EndUserDraft = async () => {
+    ended++
+    return end()
+  }
+  await store.resolveRemote(true)
+  await settleChoice()
+  expect(() => JSON.parse(store.snapshot().text ?? '{"name":"Saved"}')).not.toThrow()
+  expect(saves.map((save) => save.content)).toEqual(['{"name":"Only in this browser"}'])
+  expect(ended).toBe(1)
+  expect(store.snapshot().text).toBeNull()
+  expect(await copiesOf(ownerId, key.targetId)).toEqual([])
+})
+
+it("typing during a remote-ending choice keeps the new text and its browser copy instead of reloading", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  store.receive({ ...draft("", 5), status: "discarded" })
+  await until(() => store.snapshot().remote !== null)
+  const ending = deferred<Draft>()
+  let endingStarted = false
+  handlers.EndUserDraft = () => {
+    endingStarted = true
+    return ending.promise
+  }
+  const choice = store.resolveRemote(true)
+  await until(() => endingStarted)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline")
+  }
+  store.type("Typed while reloading", "original")
+  ending.resolve({ ...draft("", 7), status: "discarded" })
+  expect(await choice).toBe(false)
+  await until(() => store.snapshot().error !== null)
+  expect(store.snapshot().text).toBe("Typed while reloading")
+  const copy = (await copiesOf(ownerId, key.targetId)).find((copy) => copy.content === "Typed while reloading")!
+  expect(copy.save.kind === "userDraft" && copy.save.payload.expectedRowVersion).toBe(7)
+})
+
+it("closing a conflicted editor sends the refused local copy with the base it was typed on", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () => {
+    throw new Error("offline")
+  }
+  store.type("Local text as the page closes", "original")
+  await until(() => store.snapshot().error !== null)
+  store.receive(draft("Other device text", 5))
+  await until(() => store.snapshot().remote !== null)
+  const fetch = vi.fn(async () => new Response(null, { status: 204 }))
+  vi.stubGlobal("fetch", fetch)
+  try {
+    store.leave()
+    const init = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init[0]).toBe("/library/drafts")
+    expect(init[1].keepalive).toBe(true)
+    expect(JSON.parse(init[1].body as string).userDrafts).toEqual([payload("Local text as the page closes")])
+    expect(
+      (await copiesOf(ownerId, key.targetId)).some((copy) => copy.content === "Local text as the page closes")
+    ).toBe(true)
+  } finally {
+    vi.unstubAllGlobals()
+    vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
+  }
 })

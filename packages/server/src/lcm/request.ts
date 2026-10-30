@@ -13,18 +13,22 @@ const summaryTail = (snapshot: ContextSnapshot): ContextSnapshot => {
   const request = snapshot.request
   return {
     ...snapshot,
+    pieces: [
+      ...snapshot.pieces,
+      {
+        id: "lcm:instruction",
+        source: { kind: "assembler", what: "summary instruction" },
+        text: job.tail,
+        messages: [request.messages.length]
+      }
+    ],
     request: {
       ...request,
       prefill: null,
       messages: [
         ...request.messages,
         {
-          role:
-            snapshot.inputs.model?.mapping?.midChatSystem === true ||
-            (snapshot.inputs.model?.mapping?.midChatSystem === undefined &&
-              snapshot.inputs.model?.api === "openai-completions")
-              ? "system"
-              : "user",
+          role: "user",
           content: job.tail
         }
       ],
@@ -42,9 +46,10 @@ const element = (p: Piece) =>
 const block = (pieces: ReadonlyArray<Piece>) => `<summaries>\n${pieces.map(element).join("\n")}\n</summaries>`
 
 /**
- * A summary request without the preset (DESIGN §8; ST's "Raw"): the instruction as the system
- * message, the earlier coverage as continuity, one message per summary, then the material: a
- * level-1 job's messages in their roles, or a condensation's parts as one block. Built from the
+ * A summary request without the preset (DESIGN §8; ST's "Raw"): the earlier coverage as
+ * continuity, one message per summary, then the material, then the instruction as the final
+ * user message (DESIGN §2.2). The material is a level-1 job's messages in their roles, or a
+ * condensation's parts as one block. Built from the
  * assembled context, so the chunk is exactly the one the full-preset path would render and clip;
  * nothing of the preset, cards or notes is sent. It shares no prefix with the chat: its own
  * breakpoint after the continuity lets the next chunk read it back, since that chunk's request
@@ -58,7 +63,7 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
   const parts = job.children?.length ?? 0
   const continuity = summaries.slice(0, summaries.length - parts)
   const material = parts ? summaries.slice(-parts) : []
-  const messages: Array<RequestMessage> = [{ role: "system", content: job.tail }]
+  const messages: Array<RequestMessage> = []
   const placed = new Map<number, Array<number>>()
   const place = (pieces: ReadonlyArray<number>) => {
     messages.push({ role: "user", content: block(pieces.map((at) => snapshot.pieces[at]!)) })
@@ -79,6 +84,8 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
         messages.push(message)
       }
     })
+  const instructionAt = messages.length
+  messages.push({ role: "user", content: job.tail })
   // Every piece keeps its index (a piece's `parts` name others by it); unsent ones hold no message.
   const pieces: Array<Piece> = [
     ...snapshot.pieces.map((p, at) => ({
@@ -89,7 +96,7 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
       id: "lcm:instruction",
       source: { kind: "assembler", what: "summary instruction" },
       text: job.tail,
-      messages: [0]
+      messages: [instructionAt]
     }
   ]
   const { summaryStart: _start, ...rest } = request
@@ -100,8 +107,8 @@ const rawSummary = (snapshot: ContextSnapshot): ContextSnapshot => {
       ...rest,
       prefill: null,
       messages,
-      ...(continuity.length ? { summaryStart: 1 } : {}),
-      breakpoints: [{ message: cached, reason: continuity.length ? "summary" : "prefix" }]
+      ...(continuity.length ? { summaryStart: 0 } : {}),
+      breakpoints: continuity.length ? [{ message: cached, reason: "summary" }] : []
     }
   }
 }

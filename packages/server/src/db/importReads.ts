@@ -30,6 +30,13 @@ export const makeImportReadHandlers = Effect.gen(function* () {
         )
 
   const handlers = {
+    GetCardImportNote: ({ userId, cardRefId }) =>
+      Effect.gen(function* () {
+        const card = yield* lib.ownedRef(userId, cardRefId)
+        const note = yield* lib.cardNote(userId, card.entity_id)
+        return note === null ? null : toLibraryRef(note).entityId
+      }).pipe(query("GetCardImportNote")),
+
     ExportSource: ({ userId, refId }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)

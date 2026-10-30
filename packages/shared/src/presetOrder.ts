@@ -1,4 +1,5 @@
 import type { PresetPrompt, PromptOrderEntry } from "./docs/preset.ts"
+import { endOfRequestText } from "./endOfRequest.ts"
 
 /** Main always has a slot, even in files and old revisions that left it out. */
 export const mainPrompt: PresetPrompt = {
@@ -83,16 +84,19 @@ export const sentOutsideTheOrder = [
   "personaDescription"
 ]
 
-/** Older revisions remain readable without rewriting them. Off prompts keep their place. */
+/**
+ * Older revisions remain readable without rewriting them. Off prompts keep their place. The
+ * end-of-request texts are never in the order (DESIGN §2.2).
+ */
 export function presetOrder(prompts: ReadonlyArray<PresetPrompt>, order: ReadonlyArray<PromptOrderEntry>) {
-  const next = [...withMain({ prompts, order }).order]
+  const next = withMain({ prompts, order }).order.filter((e) => !endOfRequestText(e.identifier))
   const included = new Set(next.map((e) => e.identifier))
   if (!included.has(newestMessage.identifier)) {
     const history = next.findIndex((e) => e.identifier === "chatHistory")
     next.splice(history < 0 ? next.length : history + 1, 0, { identifier: newestMessage.identifier, enabled: true })
     included.add(newestMessage.identifier)
   }
-  const outside = new Set(prompts.map((p) => p.identifier).filter((id) => !included.has(id)))
+  const outside = new Set(prompts.map((p) => p.identifier).filter((id) => !included.has(id) && !endOfRequestText(id)))
   for (const identifier of sentOutsideTheOrder) if (outside.delete(identifier)) next.push({ identifier, enabled: true })
   for (const identifier of outside) next.push({ identifier, enabled: false })
   return next

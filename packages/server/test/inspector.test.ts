@@ -84,7 +84,7 @@ describe("the request inspector", () => {
           [["Preset: new chat prompt"], "prefix"],
           [["Message 1"], null],
           [["Message 2"], "history"],
-          [["Preset prompt “Group nudge” (sent when writing as a character)"], null]
+          [["End of request: when a character speaks"], null]
         ]
       )
       assert.deepStrictEqual(
