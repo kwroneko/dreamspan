@@ -1,4 +1,5 @@
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
+import { Writer, layer as databaseLayer } from "../../server/src/db/Database.ts"
 import type { WireContext } from "../../server/src/assembler/types.ts"
 // The request inspector and the cache-warmth indicator (DESIGN §5.5, §7.4), against the
 // production server, which generates through the context assembler and the provider
@@ -91,6 +92,69 @@ const shoot = async (page: Page, name: string) => {
 }
 
 const reply = (page: Page) => page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
+
+test("inserted history keeps its displayed numbers in the inspector at desktop and phone sizes", async ({ page }) => {
+  const seeded = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const mira = (yield* api.ListCards()).find((card) => card.label === "Mira")!
+      const started = yield* api.StartChat({
+        cards: [mira.entityId as EntityId],
+        persona: null,
+        greeting: 0,
+        first: { _tag: "Send", content: "A synthetic tide report.", speakerEntityId: null }
+      })
+      return { started, userId: (yield* api.Whoami()).id, speaker: mira.entityId as EntityId }
+    })
+  )
+  // Unit 4 has no insertion RPC yet. Stop the server to respect its instance lock,
+  // seed through the real worker operation, then reopen it for generation and display.
+  await server().pause()
+  const inserted = await Effect.runPromise(
+    Effect.gen(function* () {
+      const writer = yield* Writer
+      return yield* writer.InsertMessage({
+        userId: seeded.userId,
+        chatId: seeded.started.chat.id,
+        forkId: seeded.started.chat.currentForkId!,
+        anchorSlotId: seeded.started.entry.slotId,
+        expectedRowVersion: seeded.started.entry.rowVersion,
+        body: { _tag: "Write", speaker: seeded.speaker, content: "A lantern marks the inserted turn." }
+      })
+    }).pipe(
+      Effect.provide(databaseLayer({ dataDir: server().dataDir, readers: 1, allowNetworkFs: false, workers: "source" }))
+    )
+  )
+  await server().restart()
+  const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const generated = yield* api.Generate({
+        chatId: seeded.started.chat.id,
+        forkId: seeded.started.chat.currentForkId!,
+        parentSlotId: seeded.started.entry.slotId,
+        branch: false
+      })
+      if (generated._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
+      return { chatId: seeded.started.chat.id, version: generated.entry.version.id, inserted: inserted.slotId }
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.goto(`${server().url}/chats/${made.chatId}/context/${made.version}`)
+      const messages = page.getByRole("region", { name: "Messages" })
+      await expect(messages.getByRole("link", { name: /^Message 3(?:,|$)/ })).toHaveAttribute(
+        "href",
+        new RegExp(`slot=${made.inserted}`)
+      )
+      await expect(messages.getByText("A lantern marks the inserted turn.", { exact: true })).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      await shoot(page, `inspector-inserted-${width}-${theme}`)
+      await messages.getByRole("region", { name: "Message 3", exact: true }).scrollIntoViewIfNeeded()
+      await shoot(page, `inspector-inserted-message-${width}-${theme}`)
+    }
+})
 
 test("usage headers fit without clipping on a 390px phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })

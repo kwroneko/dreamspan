@@ -273,6 +273,49 @@ describe("image exclusion", () => {
           ]
         )
         assert.strictEqual(after.imageTokens?.count, 2)
+        // The storage projection is provider-independent; every built-in provider’s
+        // registered estimator sees the same kept original/copy images.
+        for (const [kind, key, tokens] of [
+          ["openai-chat", "gpt-4o", 510],
+          ["openai-responses", "gpt-4o", 510],
+          ["openrouter", "openai/gpt-4o", 510],
+          ["anthropic", "claude-sonnet-4-5", 2],
+          ["google", "gemini-2.5-flash", 516],
+          ["deepseek", "deepseek-v4", 2048]
+        ] as const) {
+          const connection = yield* api.CreateConnection({
+            kind,
+            apiKey: "synthetic-key",
+            settings: {
+              name: kind,
+              baseUrl: "http://127.0.0.1:9",
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            }
+          })
+          const model = yield* api.AddUserModel({
+            connectionId: connection.id,
+            key,
+            overrides: { vision: true, maxImages: 2, context: 32768 }
+          })
+          yield* api.SetGenerationDefaults({
+            defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          })
+          const view = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+          assert.strictEqual(view.imageTokens?.count, 2, kind)
+          assert.strictEqual(view.imageTokens?.tokens, tokens, kind)
+          assert.deepStrictEqual(view.imageTokens?.bases, [kind === "deepseek" ? "unknown" : "formula"], kind)
+          assert.deepStrictEqual(
+            view.images?.images.map((i) => [i.versionId, i.depth, i.rule]),
+            [
+              [message.version.id, message.position ?? message.depth, "limit"],
+              [copy.version.id, (message.position ?? message.depth) + 1, "user"]
+            ],
+            kind
+          )
+        }
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 

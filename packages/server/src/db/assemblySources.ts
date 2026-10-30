@@ -233,6 +233,18 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     Effect.gen(function* () {
       const leaf = next ? target.parentSlotId : target.slotId
       const shown = yield* display(leaf)
+      // A fork with no structural tip can still have insertions above the first message.
+      if (shown === null && next && leaf === null) {
+        const fork = yield* viewAt(sql, chatId, leaf)
+        const pieces = yield* pathPieces(sql, chatId, fork, null)
+        if (pieces.length > 0)
+          return {
+            ...target,
+            depth: displayLength(pieces),
+            historyLeaf: displayEnd(pieces, null),
+            displayPositions: true
+          }
+      }
       if (shown === null) return target
       let depth = next ? shown.end + 1 : shown.end
       let before = next ? leaf : shown.end === 0 ? null : yield* slotAtPosition(sql, shown.pieces, shown.end - 1)
@@ -245,7 +257,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           before = displayEnd(pieces, leaf)
         }
       }
-      return { ...target, depth, ...(before === target.parentSlotId ? {} : { historyLeaf: before }) } satisfies Target
+      return {
+        ...target,
+        depth,
+        displayPositions: true,
+        ...(before === target.parentSlotId ? {} : { historyLeaf: before })
+      } satisfies Target
     })
   /** A revision of an entity of this kind the user owns and hasn't deleted. */
   const revisionDoc = (revisionId: string, kind: string, entity?: string, binned = false) =>

@@ -87,7 +87,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
    */
   const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null) =>
     Effect.gen(function* () {
-      const events = yield* reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null })
+      const events = yield* reader.StateEventsAt({
+        userId: user,
+        chatId,
+        slotId,
+        forkId: forkId ?? null,
+        displayEnd: true
+      })
       const state = foldState(events)
       // Departed cards still name the messages they wrote, including old personas and
       // impersonated turns. Retain their faces without adding them to the active cast.
@@ -275,7 +281,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ListChatCards: ({ chatId, slotId, entityIds, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const state = foldState(yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null }))
+        const state = foldState(
+          yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null, displayEnd: true })
+        )
         return yield* reader.ChatCards({ userId: id, chatId, entityIds, bindings: bindingsOf(state) })
       }).pipe(internal("ListChatCards")),
 
@@ -301,7 +309,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         if (["Model", "Preset", "DefaultModel", "DefaultPreset"].includes(change._tag)) {
-          yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null })
+          yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null, displayEnd: true })
           const selection =
             change._tag === "Model"
               ? { model: { connection: change.connection, model: change.model } }
@@ -323,6 +331,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             chatId,
             forkId: forkId ?? null,
             slotId,
+            displayEnd: true,
             data: [
               ...(before.participants.includes(change.entityId)
                 ? []
@@ -339,6 +348,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
             chatId,
             forkId: forkId ?? null,
             slotId,
+            displayEnd: true,
             versionId: null,
             scope: null,
             data: toEvent(change)
@@ -352,7 +362,13 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     ListChatNotes: ({ chatId, slotId, forkId }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const events = yield* reader.StateEventsAt({ userId: id, chatId, slotId, forkId: forkId ?? null })
+        const events = yield* reader.StateEventsAt({
+          userId: id,
+          chatId,
+          slotId,
+          forkId: forkId ?? null,
+          displayEnd: true
+        })
         const state = foldState(events)
         // Every card of the cast, the ones the user plays included: a persona note is a card's note.
         const cards = [...state.participants, ...state.playedByMe.filter((e) => !state.participants.includes(e))]
