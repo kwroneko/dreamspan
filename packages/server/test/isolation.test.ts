@@ -1128,7 +1128,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.gen(function* () {
         const before = yield* actor.api.GetDisplayPrefs({})
         const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
-        yield* owner.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        yield* owner.api.SetDisplayPrefs({ prefs: { reasoning: flipped, quoteTextColor: "#123456" } })
         assert.deepStrictEqual(yield* actor.api.GetDisplayPrefs({}), before)
       })
   },
@@ -1146,7 +1146,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       Effect.gen(function* () {
         const before = yield* owner.api.GetDisplayPrefs({})
         const flipped = before.reasoning === "expanded" ? "collapsed" : "expanded"
-        yield* actor.api.SetDisplayPrefs({ prefs: { reasoning: flipped } })
+        yield* actor.api.SetDisplayPrefs({ prefs: { reasoning: flipped, mainTextColor: "#654321" } })
         assert.deepStrictEqual(yield* owner.api.GetDisplayPrefs({}), before)
       })
   },

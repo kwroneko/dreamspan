@@ -112,6 +112,7 @@ export class StChatPart extends Schema.Class<StChatPart>("StChatPart")({
   batches: Schema.Array(Schema.Struct({ messagesJson: Schema.String, speakers: Schema.Array(Schema.String) })),
   messages: Schema.Int,
   userTurns: Schema.Int,
+  lastUserSpeaker: Schema.NullOr(Schema.String),
   leadingHidden: Schema.Int,
   speakers: Schema.Array(StSpeaker),
   greeting: Schema.NullOr(Schema.String),
@@ -138,6 +139,7 @@ const StTextSwitches = Schema.Struct({
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
   textSwitches: Schema.optionalKey(StTextSwitches),
   selectedPreset: Schema.NullOr(Schema.String),
+  defaultPersona: Schema.NullOr(Schema.String),
   personas: Schema.Array(StPersona),
   globalWorlds: Schema.Array(Schema.String),
   characterWorlds: Schema.Array(Schema.Struct({ card: Schema.String, worlds: Schema.Array(Schema.String) })),

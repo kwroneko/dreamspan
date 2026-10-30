@@ -13,6 +13,8 @@ import { onLibraryChange } from "../../libraryChanges.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
+import { MessageColorSettings } from "./MessageColors.tsx"
+
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 const DisplayContext = createContext<{ scripts: ReadonlyArray<RegexScript>; leafDepth: number | null }>({
   scripts: [],
@@ -94,35 +96,38 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
 export function DisplaySettings() {
   const viewer = useViewPrefs()
   return (
-    <Fieldset
-      legend="Display transformations"
-      description="These account choices change what you see in chats. Stored text, editing, copying, and future requests keep the original text. Streaming replies stay as written until they finish."
-    >
-      <Switch
-        checked={viewer.prefs.outputMacros}
-        disabled={!viewer.ready || viewer.pending}
-        onCheckedChange={(outputMacros) => void viewer.change({ outputMacros })}
-        description="Resolve macros such as {{user}} in finished model output. Human messages stay as written."
+    <div className="flex flex-col gap-6">
+      <MessageColorSettings />
+      <Fieldset
+        legend="Display transformations"
+        description="These account choices change what you see in chats. Stored text, editing, copying, and future requests keep the original text. Streaming replies stay as written until they finish."
       >
-        Expand macros in model output
-      </Switch>
-      <Switch
-        checked={viewer.prefs.displayRegex}
-        disabled={!viewer.ready || viewer.pending}
-        onCheckedChange={(displayRegex) => void viewer.change({ displayRegex })}
-        description="Use display-only scripts from the current prompt preset, after macros. The preset's scripts must also be approved in its editor. Rules can apply to human and model messages; prompt-only and storage rewrite scripts are excluded."
-      >
-        Use preset display regex
-      </Switch>
-      <p className="text-sm text-muted">
-        Slow or oversized rules are skipped with an explanation beside the message. Turn these switches off to see the
-        original text.
-      </p>
-      {viewer.error && (
-        <p role="alert" className="text-sm text-danger">
-          {viewer.error.message}
+        <Switch
+          checked={viewer.prefs.outputMacros}
+          disabled={!viewer.ready || viewer.pending}
+          onCheckedChange={(outputMacros) => void viewer.change({ outputMacros })}
+          description="Resolve macros such as {{user}} in finished model output. Human messages stay as written."
+        >
+          Expand macros in model output
+        </Switch>
+        <Switch
+          checked={viewer.prefs.displayRegex}
+          disabled={!viewer.ready || viewer.pending}
+          onCheckedChange={(displayRegex) => void viewer.change({ displayRegex })}
+          description="Use display-only scripts from the current prompt preset, after macros. The preset's scripts must also be approved in its editor. Rules can apply to human and model messages; prompt-only and storage rewrite scripts are excluded."
+        >
+          Use preset display regex
+        </Switch>
+        <p className="text-sm text-muted">
+          Slow or oversized rules are skipped with an explanation beside the message. Turn these switches off to see the
+          original text.
         </p>
-      )}
-    </Fieldset>
+        {viewer.error && (
+          <p role="alert" className="text-sm text-danger">
+            {viewer.error.message}
+          </p>
+        )}
+      </Fieldset>
+    </div>
   )
 }

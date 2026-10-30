@@ -171,6 +171,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
   const insertEvent = (userId: UserId, chatId: string, slotId: string | null, data: StateEventData, forkId: string) =>
     Effect.gen(function* () {
       yield* checkStateReferences(sql, userId, chatId, data, null)
+      if (data.key === "played_by_me.set") data = { ...data, value: { entities: data.value.entities.slice(-1) } }
       const [next] = yield* sql<{ n: number }>`
         SELECT coalesce(max(seq), -1) + 1 AS n FROM state_events WHERE chat_id = ${chatId} AND slot_id IS ${slotId}`
       yield* sql`INSERT INTO state_events ${sql.insert({

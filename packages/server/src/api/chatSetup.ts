@@ -107,6 +107,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         entityIds: ids as Array<Cast["participants"][number]>,
         chat: { chatId, bindings: bindingsOf(state) }
       })
+      const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
       return new Cast({
         slotId,
         participants: state.participants as Cast["participants"],
@@ -124,15 +125,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         loreBelowHistory: state.loreBelowHistory ?? true,
         macroBindings: state.macroBindings,
         macroNames: {
-          user:
-            state.macroBindings.user ??
-            (state.playedByMe
-              .flatMap((id) => {
-                const card = cards.find((c) => c.entityId === id)
-                return card ? [card.modelName ?? card.name] : []
-              })
-              .join(", ") ||
-              "User"),
+          user: state.macroBindings.user ?? ((persona?.modelName ?? persona?.name) || "User"),
           char:
             state.macroBindings.char ??
             state.participants
