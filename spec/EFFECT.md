@@ -1,6 +1,6 @@
 # Effect across the stack
 
-**Status**: Partially implemented, 2026-10-10. Validated by a spike (§5). The phase 0 scaffold implements the server shape of §3: Effect HTTP and RPC over a WebSocket, Effect RPC to the database worker threads, services and layers, Schema-based contracts in `@rp/shared`, and the client's `AtomRpc` data layer. See ARCHITECTURE.md §1–§5. Still proposed: the conventions in §4 beyond what CLAUDE.md now states, and the pi-ai and tool-schema boundary (§3). The owner wants Effect strongly considered, because "if used properly, it might make the final product substantially more solid in terms of error handling and more reliable". Nothing here is Decided.
+**Status**: Implemented portions obsolete as proposals (2026-10-30): Effect 4 HTTP/RPC, worker RPC, services/layers, schemas, client atoms and the pi-ai streaming boundary are built; see ARCHITECTURE §1–§6 and §16. `node:sqlite` through Effect’s driver is built (§3), superseding the open driver choice in §4. General pi-agent-core integration and its tool-schema boundary remain Phase 4 proposals; summary tool output already works through the registered summary strategies (§16). Other conventions in §4 remain proposals beyond what CLAUDE.md requires. Original proposal/spike: 2026-10-10. Implementation is not owner confirmation; nothing is newly Decided here.
 **Related**: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md), DESIGN §10.4, PLAN phase 0.
 
 ---
