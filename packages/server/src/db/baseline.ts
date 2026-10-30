@@ -953,7 +953,7 @@ export const baseline: ReadonlyArray<string> = [
     sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT REFERENCES rollouts(id),
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
-    -- The images a level-1 summary was written with (db/lcmImages.ts): {"limit": N|null, "sent": [media ids]}.
+    -- The images a level-1 summary was written with (db/lcmImages.ts): {"limit": N|null, "sent": [media ids], "withheld": [media ids]}.
     -- NULL when its inputs' versions had no images, so freshness needs no image read.
     images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,

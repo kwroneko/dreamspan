@@ -7,6 +7,7 @@ import type { ForkId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import type { SummaryId } from "@rp/shared/lcm.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { AssemblyModules } from "../src/assembler/modules.ts"
 import { serverPort } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { lcmHarness, lcmTest, requestsTo } from "./support/lcmHarness.ts"
@@ -138,7 +139,8 @@ lcmTest("forks sharing inputs with an image taken out in one each get their own 
     const [inG] = yield* t.summaries
     assert.deepStrictEqual(JSON.parse(inG!.images_json!), {
       limit: 4,
-      sent: [t.first.mediaId, t.second.mediaId]
+      sent: [t.first.mediaId, t.second.mediaId],
+      withheld: []
     })
     assert.isTrue(yield* t.fresh(inG!.id, t.g))
     assert.isFalse(yield* t.fresh(inG!.id, t.f))
@@ -149,7 +151,11 @@ lcmTest("forks sharing inputs with an image taken out in one each get their own 
     assert.include(body, base64("first"))
     assert.notInclude(body, base64("second"))
     const [, inF] = yield* t.summaries
-    assert.deepStrictEqual(JSON.parse(inF!.images_json!).sent, [t.first.mediaId])
+    assert.deepStrictEqual(JSON.parse(inF!.images_json!), {
+      limit: 4,
+      sent: [t.first.mediaId],
+      withheld: [t.second.mediaId]
+    })
     assert.isTrue(yield* t.fresh(inF!.id, t.f))
     assert.isFalse(yield* t.fresh(inF!.id, t.g))
     assert.isTrue(yield* t.fresh(inG!.id, t.g))
@@ -209,7 +215,7 @@ lcmTest("an image the limit leaves out counts as not sent, like one taken out", 
     assert.include(body, base64("second"))
     assert.notInclude(body, base64("first"))
     const [inG] = yield* t.summaries
-    assert.deepStrictEqual(JSON.parse(inG!.images_json!), { limit: 1, sent: [t.second.mediaId] })
+    assert.deepStrictEqual(JSON.parse(inG!.images_json!), { limit: 1, sent: [t.second.mediaId], withheld: [] })
 
     // Taking out the drawing the limit already left out changes nothing F would send: still fresh.
     yield* t.exclude(t.f, t.first)
@@ -226,7 +232,11 @@ lcmTest("an image the limit leaves out counts as not sent, like one taken out", 
     assert.include(fBody, base64("first"))
     assert.notInclude(fBody, base64("second"))
     const [, inF] = yield* t.summaries
-    assert.deepStrictEqual(JSON.parse(inF!.images_json!), { limit: 1, sent: [t.first.mediaId] })
+    assert.deepStrictEqual(JSON.parse(inF!.images_json!), {
+      limit: 1,
+      sent: [t.first.mediaId],
+      withheld: [t.second.mediaId]
+    })
     assert.isTrue(yield* t.fresh(inF!.id, t.f))
     assert.isFalse(yield* t.fresh(inF!.id, t.g))
   }).pipe(Effect.scoped)
@@ -297,6 +307,104 @@ lcmTest("a summary over an image-only message is fresh where it was written", (s
     )
     const summary = summaryRows![0]
     assert.isTrue(yield* t.fresh(summary!.id as typeof SummaryId.Type, t.f))
+    assert.lengthOf(yield* t.plan(t.f), 0)
+  }).pipe(Effect.scoped)
+)
+
+lcmTest("a plugin's own image rule doesn't make a summary stale where it was written", (server) =>
+  Effect.gen(function* () {
+    const t = yield* setup(server, 4)
+    // A plugin stage that sends only the first image of each message, in every request.
+    const modules = yield* AssemblyModules
+    yield* modules.register({
+      id: "synthetic-image-rule",
+      module: new URL("./support/imageRulePlugin.ts", import.meta.url).href,
+      exportName: "install"
+    })
+    // An image taken out somewhere in the chat, so freshness reads images at all.
+    yield* t.exclude(t.g, t.second)
+
+    assert.isDefined(yield* t.summarize(t.f))
+    const body = t.lastBody()
+    assert.include(body, base64("first"))
+    assert.notInclude(body, base64("second"))
+    const [inF] = yield* t.summaries
+    assert.deepStrictEqual(JSON.parse(inF!.images_json!).sent, [t.first.mediaId])
+    // Fresh where it was written, so no reply plans it again; and in G, which sends the same.
+    assert.isTrue(yield* t.fresh(inF!.id, t.f))
+    assert.lengthOf(yield* t.plan(t.f), 0)
+    assert.lengthOf(yield* t.plan(t.f), 0)
+    assert.isTrue(yield* t.fresh(inF!.id, t.g))
+
+    // Taking out the image it sent still makes it stale, and the rewrite is fresh and final.
+    yield* t.exclude(t.f, t.first)
+    assert.isFalse(yield* t.fresh(inF!.id, t.f))
+    assert.lengthOf(yield* t.plan(t.f), 1)
+    yield* t.h.drain
+    const fBody = t.lastBody()
+    assert.include(fBody, base64("second"))
+    assert.notInclude(fBody, base64("first"))
+    const [, again] = yield* t.summaries
+    assert.isTrue(yield* t.fresh(again!.id, t.f))
+    assert.lengthOf(yield* t.plan(t.f), 0)
+    assert.isFalse(yield* t.fresh(again!.id, t.g))
+  }).pipe(Effect.scoped)
+)
+
+lcmTest("an image a plugin adds from outside the inputs doesn't make a summary stale where it was written", (server) =>
+  Effect.gen(function* () {
+    const t = yield* setup(server, 4)
+    const port = yield* serverPort
+    const portrait = yield* Effect.promise(async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/chat/image`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: png(textChunk("fixture", "portrait"))
+      })
+      return (await response.json()) as { mediaId: string }
+    })
+    const modules = yield* AssemblyModules
+    const url = new URL("./support/imageRulePlugin.ts", import.meta.url)
+    url.searchParams.set("media", portrait.mediaId)
+    yield* modules.register({ id: "synthetic-portrait", module: url.href, exportName: "portrait" })
+    yield* t.exclude(t.g, t.second)
+
+    assert.isDefined(yield* t.summarize(t.f))
+    assert.include(t.lastBody(), base64("portrait"))
+    const [inF] = yield* t.summaries
+    assert.deepStrictEqual(JSON.parse(inF!.images_json!), {
+      limit: 4,
+      sent: [t.first.mediaId, t.second.mediaId],
+      withheld: []
+    })
+    assert.isTrue(yield* t.fresh(inF!.id, t.f))
+    assert.lengthOf(yield* t.plan(t.f), 0)
+    assert.isFalse(yield* t.fresh(inF!.id, t.g))
+  }).pipe(Effect.scoped)
+)
+
+lcmTest("an image taken out of one message but sent with another doesn't make a summary stale", (server) =>
+  Effect.gen(function* () {
+    const t = yield* setup(server, 4)
+    // The first drawing is also on the message before; F takes it out of the later one only.
+    const row = t.h.rows[0]!
+    yield* t.h.api.EditVersion({
+      slotId: row.slotId,
+      sourceVersionId: row.version.id,
+      expectedRowVersion: 1,
+      content: "One drawing.",
+      images: [t.first],
+      forkId: t.f
+    })
+    yield* t.exclude(t.f, t.first)
+    assert.isDefined(yield* t.summarize(t.f))
+    const [inF] = yield* t.summaries
+    assert.deepStrictEqual(JSON.parse(inF!.images_json!), {
+      limit: 4,
+      sent: [t.first.mediaId, t.second.mediaId],
+      withheld: []
+    })
+    assert.isTrue(yield* t.fresh(inF!.id, t.f))
     assert.lengthOf(yield* t.plan(t.f), 0)
   }).pipe(Effect.scoped)
 )

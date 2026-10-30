@@ -14,7 +14,7 @@ import {
   slotDeletedIn,
   viewAt
 } from "./forkState.ts"
-import type { SummaryImages } from "./lcmImages.ts"
+import { gatheredImages } from "./lcmImages.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -101,6 +101,7 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
               merged: number
               generating: number
               images_json: string | null
+              withheld_json: string | null
               attached: number
             }>`
               WITH RECURSIVE chain(id, parent, depth, n) AS (
@@ -113,6 +114,8 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
                 coalesce(v.status = 'generating', 0) AS generating,
                 CASE WHEN ${effective(sql, fork)} THEN (SELECT json_group_array(a.media_id) FROM (SELECT media_id FROM version_attachments
                   WHERE version_id = v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS images_json,
+                CASE WHEN ${effective(sql, fork)} THEN (SELECT json_group_array(a.media_id) FROM (SELECT media_id FROM version_attachments
+                  WHERE version_id = v.id AND ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "media_id")} ORDER BY ordinal) a) END AS withheld_json,
                 CASE WHEN ${effective(sql, fork)} THEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) ELSE 0 END AS attached
               FROM chain c JOIN slots s ON s.id = c.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
               ORDER BY c.depth DESC`
@@ -124,11 +127,14 @@ export const makeLcmEnableWriteHandlers = (bin: Bin) =>
             yield* sql`INSERT INTO lcm_enable_slots ${sql.insert(rows.map((r) => ({ run_id: runId, ordinal: r.depth, slot_id: r.id, version_id: r.version_id, amend_count: r.amend_count })))}`
             // The images the imported summary is taken as written with: what this fork sends for its range.
             if (run.images_json !== null || rows.some((r) => r.attached)) {
-              const earlier = rows
-                .toReversed()
-                .flatMap((r) => (r.images_json ? (JSON.parse(r.images_json) as string[]) : []))
-              const later = run.images_json ? (JSON.parse(run.images_json) as SummaryImages).sent : []
-              yield* sql`UPDATE lcm_enable_runs SET images_json = ${JSON.stringify({ limit: null, sent: [...earlier, ...later] } satisfies SummaryImages)} WHERE id = ${runId}`
+              const earlier = rows.toReversed()
+              const list = (json: string | null) => (json ? (JSON.parse(json) as Array<string>) : [])
+              const images = gatheredImages(
+                run.images_json,
+                earlier.flatMap((r) => list(r.images_json)),
+                earlier.flatMap((r) => list(r.withheld_json))
+              )
+              yield* sql`UPDATE lcm_enable_runs SET images_json = ${images} WHERE id = ${runId}`
             }
             const last = rows.at(-1)!
             const gathered = run.gathered + rows.length

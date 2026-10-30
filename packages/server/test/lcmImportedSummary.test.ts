@@ -231,7 +231,11 @@ lcmTest(
         { readOnly: true }
       )
       const row = rowRows![0]
-      assert.deepStrictEqual(JSON.parse(row!.images_json as string), { limit: null, sent: [media.mediaId] })
+      assert.deepStrictEqual(JSON.parse(row!.images_json as string), {
+        limit: null,
+        sent: [media.mediaId],
+        withheld: []
+      })
       const main = (yield* h.api.GetChat({ chatId: chat.chatId })).currentForkId as ForkId
       const other = (yield* h.writer.CreateFork({
         userId: h.userId,
