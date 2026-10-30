@@ -214,7 +214,12 @@ export const maintain = (
             s.revisionId,
             choices.find((c) => c.summary_id === s.id)?.chosen_id ?? null,
             s.level === 1
-              ? path.slice(s.from - 1, s.to).map(slotInput)
+              ? path
+                  .slice(s.from - 1, s.to)
+                  // The images a slot sends are part of what a later pass may not repair unauthorized.
+                  .map((slot) =>
+                    slot.images.length ? [slotInput(slot), slot.images.map((i) => i.mediaId)] : slotInput(slot)
+                  )
               : s.children.map((c) => {
                   const child = byId.get(c.summaryId)
                   return child ? signature(child) : c.revisionId

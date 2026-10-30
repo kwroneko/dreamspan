@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { ownedModel } from "./generationSettings.ts"
 import { readSummary } from "./lcmReads.ts"
+import { shownImages } from "./lcmImages.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 
 /** How a job failed, as its error and its failed summary record it (the class and reason of a failed version). */
@@ -101,7 +102,16 @@ export const recordFailedSummary = (
       error_json: JSON.stringify(error),
       rollout_id: rolloutId,
       batch_id: job.batch_id,
-      created_at: now
+      created_at: now,
+      // A failed range holds while the fork shows what it failed over, images included.
+      images_json:
+        job.level === 1
+          ? yield* shownImages(
+              sql,
+              chain.map((s) => s.versionId),
+              Effect.succeed(chain.flatMap((s) => s.images.map((image) => image.mediaId)))
+            )
+          : null
     })}`
     if (job.level === 1)
       for (const [ordinal, s] of chain.entries()) {

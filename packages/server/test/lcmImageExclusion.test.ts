@@ -73,8 +73,8 @@ lcmTest("an image excluded in a fork is left out of its LCM path and summary req
     assert.deepStrictEqual(yield* imagesIn(main), [kept.mediaId])
     assert.deepStrictEqual(yield* imagesIn(other), [kept.mediaId, hidden.mediaId])
 
-    // The summary request over the message, in each fork. A summary is shared by its inputs, so
-    // the other fork's is asked for as a rewrite, which the first one doesn't make redundant.
+    // The summary request over the message, in each fork. The first fork's summary, written
+    // without the image, doesn't cover the other fork, which sends it (lcmSummaryImages.test.ts).
     for (const forkId of [main, other]) {
       const path = yield* h.reader.GetPath({ userId: h.userId, chatId: h.chat.id, forkId, leafSlotId: null, limit: 10 })
       const [job] = yield* h.writer.EnqueueSummaries({
@@ -86,7 +86,6 @@ lcmTest("an image excluded in a fork is left out of its LCM path and summary req
         chunks: [
           {
             target: 100,
-            ...(forkId === main ? {} : { refresh: true }),
             inputs: path.entries
               .slice(0, 2)
               .map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: e.version.rowVersion - 1 }))

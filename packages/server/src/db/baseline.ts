@@ -952,7 +952,10 @@ export const baseline: ReadonlyArray<string> = [
     status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'truncated', 'superseded', 'failed')),
     sealed INTEGER NOT NULL DEFAULT 0 CHECK (sealed IN (0, 1)), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), batch_id TEXT, rollout_id TEXT REFERENCES rollouts(id),
     row_version INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    -- The images a level-1 summary was written with (db/lcmImages.ts): {"limit": N|null, "sent": [media ids]}.
+    -- NULL when its inputs' versions had no images, so freshness needs no image read.
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,
   `CREATE INDEX summaries_chat_level ON summaries(chat_id, level)`,
   `CREATE INDEX summaries_last_slot ON summaries(last_slot_id)`,
@@ -1147,7 +1150,7 @@ export const baseline: ReadonlyArray<string> = [
     NEW.first_slot_id IS NOT OLD.first_slot_id OR NEW.last_slot_id IS NOT OLD.last_slot_id OR
     NEW.slot_count IS NOT OLD.slot_count OR NEW.audience_json IS NOT OLD.audience_json OR
     NEW.rollout_id IS NOT OLD.rollout_id OR NEW.error_json IS NOT OLD.error_json OR
-    NEW.batch_id IS NOT OLD.batch_id OR NEW.created_at IS NOT OLD.created_at OR
+    NEW.batch_id IS NOT OLD.batch_id OR NEW.created_at IS NOT OLD.created_at OR NEW.images_json IS NOT OLD.images_json OR
     (NEW.status IS NOT OLD.status AND NEW.status <> 'superseded')
     BEGIN SELECT RAISE(ABORT, 'only summary selection, supersession and row version can change'); END`,
   `CREATE TRIGGER summaries_retained BEFORE DELETE ON summaries
@@ -1198,7 +1201,9 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE lcm_enable_runs (
     id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     payload_json TEXT NOT NULL CHECK(json_valid(payload_json)), cursor TEXT, gathered INTEGER NOT NULL DEFAULT 0,
-    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0
+    copied INTEGER NOT NULL DEFAULT 0, phase TEXT NOT NULL DEFAULT 'gather', published INTEGER NOT NULL DEFAULT 0,
+    -- The imported summary's images as gathered so far (db/lcmImages.ts), NULL while none was attached.
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,
   `CREATE UNIQUE INDEX lcm_enable_one_staging ON lcm_enable_runs(chat_id) WHERE published = 0 AND phase <> 'cancelled'`,
   `CREATE TABLE lcm_enable_slots (
@@ -1456,7 +1461,7 @@ export const baseline: ReadonlyArray<string> = [
     BEGIN SELECT RAISE(ABORT, 'a snippet binding names its chat note revision'); END`,
   `CREATE TRIGGER snippet_bindings_gc AFTER DELETE ON entity_revisions
     BEGIN DELETE FROM fork_overrides WHERE target_id = OLD.entity_id AND kind = 'snippet_revision' AND value_id = OLD.id; END`,
-  `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id)`,
+  `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id, kind)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
   `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,
   `CREATE INDEX fork_overrides_target ON fork_overrides(target_id, kind)`,

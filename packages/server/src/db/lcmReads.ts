@@ -15,6 +15,7 @@ import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 import { positionOf } from "./displayPath.ts"
 import { lcmView, type LcmView } from "./lcmDisplay.ts"
+import { imagesMatch } from "./lcmImages.ts"
 
 export const readSummary = (
   sql: SqlClient.SqlClient,
@@ -57,6 +58,7 @@ export const readSummary = (
         last_depth: number
         first_chain: string
         last_chain: string
+        images_json: string | null
       }>`SELECT s.*, max(s.row_version,coalesce(ro.seq,0),coalesce(co.seq,0)) AS row_version, r.id AS revision_id, r.content, r.token_count, r.origin, (SELECT count(*) FROM summary_revisions p WHERE p.summary_id = s.id AND p.seq <= r.seq) AS revision_number, a.depth AS first_depth, b.depth AS last_depth, a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summaries s JOIN chats c ON c.id = s.chat_id
           LEFT JOIN fork_overrides ro ON ro.id=${effectiveOverride(sql, "summary_revision", fork, "s.id")}
@@ -94,6 +96,8 @@ export const readSummary = (
           (i.version_id === i.effective && (i.version_id === null || i.amend_count === i.current_amends)) ||
           (i.effective !== null && i.replaced_with_summaries === 1 && i.current_amends === 0)
       )
+      // Written with other images than this fork sends for the same inputs: stale here, as after an edit.
+      if (fresh && !(yield* imagesMatch(sql, row.chat_id, row.id, row.images_json, fork))) fresh = false
       // An explicit rerun establishes an active generated replacement. Old lineage remains
       // pinned for replay, while live generated ancestors must incorporate the replacement.
       const [replacement] = yield* sql`SELECT 1 FROM summarization_jobs j JOIN summaries s ON s.id=j.result_summary_id
