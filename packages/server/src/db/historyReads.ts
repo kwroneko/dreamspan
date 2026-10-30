@@ -7,6 +7,7 @@ import { SqlClient } from "effect/sql"
 import { shownIn, shownVersionDeletedIn, selectedIn, shownJoin, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
 import { historyCurrent, historyFork, historySummaryRevision } from "./historyShared.ts"
 import { pathSegments } from "./pathSegments.ts"
+import { displayLength, displayPositionSql, displaySlots, pathPieces, placedInsertions } from "./displayPath.ts"
 import { scanHistory } from "./historyScan.ts"
 import { stateEventsOnPath } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -16,10 +17,21 @@ import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 
 export const makeHistoryReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
+  /**
+   * The display path of a fork that places insertions (spec/MESSAGE-INSERT.md §3.3); null for
+   * any other, which is read by the structural code as before, where positions are depths.
+   */
+  const displayPieces = (chatId: string, forkId: string, tipSlotId: string | null) =>
+    Effect.gen(function* () {
+      if ((yield* placedInsertions(sql, chatId, forkId)).length === 0) return null
+      return yield* pathPieces(sql, chatId, forkId, tipSlotId)
+    })
   return {
     PreviewHistory: ({ userId, chatId, forkId, search, cursor }) =>
       Effect.gen(function* () {
         const fork = yield* historyFork(sql, userId, chatId, forkId)
+        // With insertions, the windows, hits and cursor are positions on the display path.
+        const pieces = yield* displayPieces(chatId, forkId, fork.tip_slot_id)
         // Validate patterns even when the scope is empty.
         yield* scanHistory([], search)
         const hits: HistoryHit[] = []
@@ -39,48 +51,60 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
             !search.regex && search.wholeWord && search.pairs.every((p) => /^[A-Za-z]+$/.test(p.find))
               ? search.pairs.map((p) => '"' + p.find + '"').join(" OR ")
               : null
+          type Row = {
+            seq: number
+            targetId: string
+            beforeId: string
+            before: string
+            slotId: string
+            depth: number
+            toDepth: number
+            selected: number
+            level: number
+          }
+          const versionFilters = sql`AND NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${versionDeletedIn(sql, forkId, "o")}
+            AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status <> 'generating'
+            AND (CASE WHEN o.id=${selectedIn(sql, forkId, "s")} THEN ${search.messages ? 1 : 0} ELSE ${search.swipes ? 1 : 0} END)
+            AND (${term} IS NULL OR v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${term ?? '""'}) OR v.content GLOB '*[^ -~]*')`
+          const summaryRows = sql`SELECT r.seq, s.id AS targetId, r.id AS beforeId, r.content AS before, a.id AS slotId,
+            ${sql.literal(pieces === null ? "a.depth" : displayPositionSql("a"))} AS depth,
+            ${sql.literal(pieces === null ? "b.depth" : displayPositionSql("b"))} AS toDepth, 1 AS selected, s.level
+          FROM summaries s JOIN slots a ON a.id=s.first_slot_id JOIN slots b ON b.id=s.last_slot_id
+            JOIN summary_revisions r ON r.id=${historySummaryRevision(sql, forkId, "s")}
+          WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status <> 'superseded' AND r.seq>${afterSeq}`
+          const summaryTerm = sql`(${term} IS NULL OR r.seq IN (SELECT rowid FROM summary_revisions_fts WHERE summary_revisions_fts MATCH ${term ?? '""'}) OR r.content GLOB '*[^ -~]*')`
           const rows =
-            kind === "version_replace"
-              ? yield* sql<{
-                  seq: number
-                  targetId: string
-                  beforeId: string
-                  before: string
-                  slotId: string
-                  depth: number
-                  toDepth: number
-                  selected: number
-                  level: number
-                }>`
+            pieces !== null
+              ? kind === "version_replace"
+                ? // The window's positions, inserted messages included, in display order.
+                  yield* sql<Row>`
+          ${displaySlots(sql, pieces, fromDepth, throughDepth)}
+          SELECT o.seq, o.id AS targetId, v.id AS beforeId, v.content AS before, s.id AS slotId, d.position AS depth, d.position AS toDepth,
+            o.id=${selectedIn(sql, forkId, "s")} AS selected, 0 AS level
+          FROM display_slots d JOIN slots s ON s.id=d.id AND s.chat_id=${chatId}
+          JOIN versions o ON o.slot_id=s.id AND o.fork_id IS NULL ${shownJoin(sql, forkId)}
+          WHERE (d.position>${fromDepth} OR o.seq>${afterSeq}) ${versionFilters}
+          ORDER BY d.position, o.seq LIMIT 101`
+                : // A summary is in the fork's history when its first and last messages are shown.
+                  yield* sql<Row>`
+          ${displaySlots(sql, pieces, 0, displayLength(pieces) - 1)}
+          SELECT * FROM (${summaryRows} AND ${summaryTerm}) WHERE depth IS NOT NULL AND toDepth IS NOT NULL
+          ORDER BY seq LIMIT 101`
+              : kind === "version_replace"
+                ? yield* sql<Row>`
           ${pathSegments(sql, chatId, fork.tip_slot_id, null)}
           SELECT o.seq, o.id AS targetId, v.id AS beforeId, v.content AS before, s.id AS slotId, s.depth, s.depth AS toDepth,
             o.id=${selectedIn(sql, forkId, "s")} AS selected, 0 AS level
           FROM segments g CROSS JOIN slots s ON s.chat_id=${chatId} AND s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo, ${fromDepth}) AND min(g.hi, ${throughDepth})
           JOIN versions o ON o.slot_id=s.id AND o.fork_id IS NULL ${shownJoin(sql, forkId)}
-          WHERE (s.depth>${fromDepth} OR o.seq>${afterSeq}) AND NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${versionDeletedIn(sql, forkId, "o")}
-            AND v.deleted_at IS NULL AND v.purged_at IS NULL AND v.status <> 'generating'
-            AND (CASE WHEN o.id=${selectedIn(sql, forkId, "s")} THEN ${search.messages ? 1 : 0} ELSE ${search.swipes ? 1 : 0} END)
-            AND (${term} IS NULL OR v.seq IN (SELECT rowid FROM versions_fts WHERE versions_fts MATCH ${term ?? '""'}) OR v.content GLOB '*[^ -~]*')
+          WHERE (s.depth>${fromDepth} OR o.seq>${afterSeq}) ${versionFilters}
           ORDER BY s.depth, o.seq LIMIT 101`
-              : yield* sql<{
-                  seq: number
-                  targetId: string
-                  beforeId: string
-                  before: string
-                  slotId: string
-                  depth: number
-                  toDepth: number
-                  selected: number
-                  level: number
-                }>`
+                : yield* sql<Row>`
           ${pathSegments(sql, chatId, fork.tip_slot_id, null)}
-          SELECT r.seq, s.id AS targetId, r.id AS beforeId, r.content AS before, a.id AS slotId, a.depth, b.depth AS toDepth, 1 AS selected, s.level
-          FROM summaries s JOIN slots a ON a.id=s.first_slot_id JOIN slots b ON b.id=s.last_slot_id
-            JOIN summary_revisions r ON r.id=${historySummaryRevision(sql, forkId, "s")}
-          WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status <> 'superseded' AND r.seq>${afterSeq}
+          ${summaryRows}
             AND EXISTS(SELECT 1 FROM segments WHERE chain_id=a.chain_id AND a.depth BETWEEN lo AND hi)
             AND EXISTS(SELECT 1 FROM segments WHERE chain_id=b.chain_id AND b.depth BETWEEN lo AND hi)
-            AND (${term} IS NULL OR r.seq IN (SELECT rowid FROM summary_revisions_fts WHERE summary_revisions_fts MATCH ${term ?? '""'}) OR r.content GLOB '*[^ -~]*')
+            AND ${summaryTerm}
           ORDER BY r.seq LIMIT 101`
           const page = rows.slice(0, 100)
           if (page.some((r) => r.before.length > 2_000_000))
@@ -103,7 +127,10 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
                 ...(kind === "version_replace" ? { depth: page.at(-1)!.depth } : {})
               }
             }
-          if (kind === "version_replace") {
+          if (kind === "version_replace" && pieces !== null) {
+            if (displayLength(pieces) - 1 > throughDepth)
+              return { hits, next: { kind, seq: 0, depth: throughDepth + 1 } }
+          } else if (kind === "version_replace") {
             const [tip] = yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id=${fork.tip_slot_id}`
             if (tip && tip.depth > throughDepth) return { hits, next: { kind, seq: 0, depth: throughDepth + 1 } }
           }
@@ -172,9 +199,17 @@ export const makeHistoryReadHandlers = Effect.gen(function* () {
     HistoryEditCost: ({ userId, chatId, forkId, fromDepth, retainedDepth, summaryIds }) =>
       Effect.gen(function* () {
         const fork = yield* historyFork(sql, userId, chatId, forkId)
+        // With insertions, `fromDepth` and `retainedDepth` are positions on the display path.
+        const pieces = yield* displayPieces(chatId, forkId, fork.tip_slot_id)
+        const from = Math.max(fromDepth, retainedDepth)
         const [messages] = yield* sql<{ messages: number; tokens: number }>`
-        ${pathSegments(sql, chatId, fork.tip_slot_id, null)} SELECT count(*) AS messages,coalesce(sum((length(CAST(v.content AS BLOB))+3)/4+4),0) AS tokens
-        FROM segments g CROSS JOIN slots s ON s.chat_id=${chatId} AND s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo,${Math.max(fromDepth, retainedDepth)}) AND g.hi
+        ${pieces === null ? pathSegments(sql, chatId, fork.tip_slot_id, null) : displaySlots(sql, pieces, from, displayLength(pieces) - 1)}
+        SELECT count(*) AS messages,coalesce(sum((length(CAST(v.content AS BLOB))+3)/4+4),0) AS tokens
+        FROM ${
+          pieces === null
+            ? sql`segments g CROSS JOIN slots s ON s.chat_id=${chatId} AND s.chain_id=g.chain_id AND s.depth BETWEEN max(g.lo,${from}) AND g.hi`
+            : sql`display_slots d JOIN slots s ON s.id=d.id AND s.chat_id=${chatId}`
+        }
         JOIN versions v ON v.id=${shownIn(sql, forkId, "s")} WHERE NOT ${slotDeletedIn(sql, forkId, "s")} AND NOT ${shownVersionDeletedIn(sql, forkId, "v")}
         AND ${contextExcludedIn(sql, forkId)}=0 AND v.status <> 'generating'`
         const [summaries] = yield* sql<{ summaries: number; tokens: number }>`

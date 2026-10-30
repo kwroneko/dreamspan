@@ -266,3 +266,33 @@ export const windowPieces = (pieces: ReadonlyArray<PathPiece>, first: number, la
         : [[piece.chainId, piece.lo + from - piece.start, piece.lo + to - piece.start, null, from]]
     })
   )
+
+/**
+ * SQL: CTEs over positions `first` to `last` of a display path, for reads that join what a
+ * fork shows: `display_pieces(chain_id, lo, hi, slot_id, start)` (`windowPieces`' rows), and
+ * `display_slots(id, position)`, one row per slot there, by one range of `slots_chain` per
+ * structural stretch. A slot's position through the pieces alone, without listing the slots,
+ * is `displayPositionSql`.
+ */
+export const displaySlots = (
+  sql: SqlClient.SqlClient,
+  pieces: ReadonlyArray<PathPiece>,
+  first: number,
+  last: number
+) => sql`
+  WITH display_pieces(chain_id, lo, hi, slot_id, start) AS (
+    SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4 FROM json_each(${windowPieces(pieces, first, last)})
+  ), display_slots(id, position) AS (
+    SELECT s.id, p.start + s.depth - p.lo FROM display_pieces p CROSS JOIN slots s ON s.chain_id = p.chain_id
+      AND s.depth BETWEEN p.lo AND p.hi WHERE p.slot_id IS NULL
+    UNION ALL
+    SELECT p.slot_id, p.start FROM display_pieces p WHERE p.slot_id IS NOT NULL
+  )`
+
+/**
+ * SQL, inside `displaySlots`: the position of slot alias `s` on the display path, or null when
+ * the pieces don't hold it. A run holds a slot by chain and depth, an inserted piece by id.
+ */
+export const displayPositionSql = (s: string) =>
+  `(SELECT p.start + ${s}.depth - p.lo FROM display_pieces p WHERE p.chain_id = ${s}.chain_id
+    AND ${s}.depth BETWEEN p.lo AND p.hi AND (p.slot_id IS NULL OR p.slot_id = ${s}.id))`

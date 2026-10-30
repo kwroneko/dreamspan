@@ -15,6 +15,7 @@ import {
 } from "./forkState.ts"
 import { pathEvents, pathSegments } from "./pathSegments.ts"
 import { forkImportSlot } from "./stImportFork.ts"
+import { placedInsertions } from "./displayPath.ts"
 import type { ForkRow } from "./rows.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
@@ -447,6 +448,19 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           const changedSuffix = Effect.fnUntraced(function* (depth: number) {
             const prior = payload.prior ?? payload.end ?? payload.last ?? null
             if (prior === null || (yield* ownedSlot(chatId, prior)).depth < depth) return false
+            // A message the user inserted in the fork where the replaced suffix starts (below its
+            // parent, or above the first message) or inside it: the fork stays on the path that
+            // shows it (spec/MESSAGE-INSERT.md §3.3). Deleted ones count, as a deletion does.
+            const inserted = (yield* placedInsertions(sql, chatId, fileFork.id)).filter((x) =>
+              x.anchorDepth === null ? depth === 0 : x.anchorDepth >= depth - 1
+            )
+            if (inserted.length > 0) {
+              const [row] = yield* sql<{ n: number }>`
+                ${pathSegments(sql, chatId, prior, null)}
+                SELECT count(*) AS n FROM slots a JOIN segments g ON g.chain_id = a.chain_id AND a.depth BETWEEN g.lo AND g.hi
+                WHERE a.id IN (SELECT value FROM json_each(${JSON.stringify(inserted.map((x) => x.anchorId))}))`
+              if (inserted.some((x) => x.anchorId === null) || row!.n > 0) return true
+            }
             const [row] = yield* sql<{ changed: number }>`
               ${pathSegments(sql, chatId, prior, null)}, changed(slot_id) AS (
                 SELECT o.slot_id FROM forks f CROSS JOIN json_each(f.lineage_json) l
@@ -545,6 +559,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                     v.content) AS original
                 FROM slots s JOIN versions v ON v.slot_id = s.id AND v.fork_id IS NULL
                 WHERE ${parent === null ? sql`s.chat_id = ${chatId} AND s.depth = 0` : sql`s.parent_slot_id = ${parent.id}`}
+                  AND s.inserted = 0
                 ORDER BY s.id, v.ordinal`
               const same = (row: (typeof children)[number], version: (typeof message.versions)[number]) =>
                 row.version_purged === 0 &&
