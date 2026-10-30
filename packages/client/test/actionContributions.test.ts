@@ -157,6 +157,7 @@ describe("message action contributions", () => {
     for (const close of dispose.reverse()) close()
   })
   const context = {
+    session: { subscribe: () => () => {}, snapshot: () => ({ entries: [], newer: null }) },
     entry: { versionCount: 1, version: { context: {} } },
     generating: false
   } as unknown as MessageActionContext

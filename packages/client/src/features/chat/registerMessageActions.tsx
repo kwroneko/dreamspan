@@ -8,7 +8,7 @@ import { MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
-import { ContinueAction } from "./ContinueAction.tsx"
+import { canContinue, ContinueAction, runContinue } from "./ContinueAction.tsx"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import { messageActions, type MessageActionProps } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
@@ -125,7 +125,13 @@ export const registerMessageActions = () => [
         </MenuItem>
       ) : null
   }),
-  messageActions.register({ id: "message.continue", order: 30, toolbar: ContinueAction }),
+  messageActions.register({
+    id: "message.continue",
+    order: 30,
+    available: canContinue,
+    run: runContinue,
+    toolbar: ContinueAction
+  }),
   messageActions.register({
     id: "message.context",
     order: 40,

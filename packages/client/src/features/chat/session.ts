@@ -1280,8 +1280,8 @@ export class ChatSession {
    * end, sent as the start of the reply to models that take one (DESIGN §7.5), with the
    * composer's guidance as its direction.
    */
-  async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
-    const direction = this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? ""
+  async continueVersion(entry: PathEntry, useComposerGuidance = true): Promise<Outcome<unknown>> {
+    const direction = useComposerGuidance ? (this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? "") : ""
     return this.slotWrite(entry.slotId, (client) =>
       client("ContinueVersion", {
         versionId: entry.version.id,

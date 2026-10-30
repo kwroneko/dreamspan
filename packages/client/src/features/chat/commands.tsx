@@ -23,7 +23,8 @@ interface ChatCommand {
   /** Hide the command and its shortcut while its target panel is absent or unavailable. */
   readonly panel?: string
   readonly available?: (context: ChatCommandContext) => boolean
-  readonly shortcut?: { readonly key: string; readonly mod: boolean }
+  readonly shortcut?: { readonly key: string; readonly mod: boolean; readonly alt?: boolean }
+  readonly acceptsKey?: (event: CommandKeyEvent, context: ChatCommandContext) => boolean
   readonly run: (context: ChatCommandContext) => void
 }
 
@@ -68,16 +69,20 @@ export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
   )
 }
 
+export type CommandKeyEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey"> &
+  Partial<Pick<KeyboardEvent, "altKey" | "shiftKey" | "isComposing" | "defaultPrevented" | "target" | "repeat">>
+
 /** Keyboard invocation resolves the same effective, available command as the menu. */
-export const runCommandShortcut = (
-  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey">,
-  context: ChatCommandContext
-) => {
+export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandContext) => {
+  if (event.defaultPrevented || event.isComposing || event.repeat || event.shiftKey) return false
+  if (typeof document !== "undefined" && document.querySelector('[role="dialog"], [role="alertdialog"]')) return false
   const command = availableCommands(context).find(
     (entry) =>
       entry.shortcut &&
       entry.shortcut.key.toLowerCase() === event.key.toLowerCase() &&
-      entry.shortcut.mod === (event.ctrlKey || event.metaKey)
+      entry.shortcut.mod === (event.ctrlKey || event.metaKey) &&
+      !!entry.shortcut.alt === !!event.altKey &&
+      entry.acceptsKey?.(event, context) !== false
   )
   if (!command) return false
   command.run(context)
