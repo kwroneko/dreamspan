@@ -98,7 +98,17 @@ test("usage headers fit without clipping on a 390px phone", async ({ page }) => 
   await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
   const usage = page.getByLabel("Usage by attempt")
   const labels = usage.locator("dt")
-  await expect(labels).toHaveText(["Attempt", "Input", "Cache read", "Cache write", "Output", "Cost"])
+  await expect(labels).toHaveText([
+    "Attempt",
+    "Input",
+    "Cache read",
+    "Cache write",
+    "Output",
+    "Cost",
+    "Time",
+    "First token",
+    "Tokens/s"
+  ])
   const values = usage.locator("dd")
   const wrapping = await values.evaluateAll((nodes) =>
     nodes.map((node) => {

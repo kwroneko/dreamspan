@@ -186,6 +186,116 @@ describe("continue and reasoning", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("continues an edited reply (a version the user wrote) into a new generated version", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(provider)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: { prefill: "assistant" }
+      })
+      const reply = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
+      const edited = yield* api.EditVersion({
+        slotId: reply.slotId,
+        sourceVersionId: version.id,
+        content: "The ledger agrees,",
+        expectedRowVersion: reply.rowVersion
+      })
+      assert.strictEqual(edited.version.writer, "human")
+      const continued = yield* api.ContinueVersion({
+        versionId: edited.version.id,
+        expectedRowVersion: edited.rowVersion
+      })
+      assert.strictEqual(continued.version.writer, "model")
+      assert.strictEqual(continued.version.sourceVersionId, edited.version.id)
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      const done = finished(events, continued.version.id)!
+      assert.strictEqual(done.status, "complete")
+      assert.strictEqual(done.content, "The ledger agrees, and the tide is late.")
+      // The edit went as the start of the reply.
+      const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
+      assert.deepStrictEqual(messagesOf(sent.at(-1)!).at(-1), { role: "assistant", content: "The ledger agrees," })
+      // The generated original and the edit stay as they were.
+      const versions = yield* api.ListVersions({ slotId: reply.slotId })
+      assert.deepStrictEqual(
+        versions.map((v) => [v.writer, v.content]),
+        [
+          ["model", "The ledger says otherwise,"],
+          ["human", "The ledger agrees,"],
+          ["model", "The ledger agrees, and the tide is late."]
+        ]
+      )
+      // Metrics: the continuation counts the reply it was continued from (through the edit),
+      // the edit has none of its own, the original only its request.
+      const metrics = yield* api.GetVersionMetrics({ versionIds: versions.map((v) => v.id) })
+      const of = (id: string) => metrics.find((m) => m.versionId === id)
+      assert.strictEqual(metrics.length, 2)
+      assert.strictEqual(of(edited.version.id), undefined)
+      assert.strictEqual(of(version.id)!.requests, 1)
+      assert.strictEqual(of(version.id)!.output, 10)
+      const total = of(continued.version.id)!
+      assert.strictEqual(total.requests, 2)
+      assert.strictEqual(total.output, 20)
+      assert.strictEqual(total.outputUnknown, 0)
+      assert.isFalse(total.running)
+      assert.isFalse(total.estimated)
+      assert.strictEqual(total.last.output, 10)
+      assert.isNotNull(total.last.firstTokenAt)
+      assert.isAtLeast(total.elapsedMs!, total.last.endedAt! - total.last.startedAt)
+      // The inspector's usage carries the request's times.
+      const run = yield* api.GetRunContext({ versionId: continued.version.id })
+      assert.strictEqual(run.requests[0]!.startedAt, total.last.startedAt)
+      assert.strictEqual(run.requests[0]!.endedAt, total.last.endedAt)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("retains the original generation metrics through more than 64 edits", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(provider)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: { prefill: "assistant" }
+      })
+      let entry = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
+      for (let n = 0; n < 65; n++) {
+        entry = yield* api.EditVersion({
+          slotId: entry.slotId,
+          sourceVersionId: entry.version.id,
+          content: `Edit ${n},`,
+          expectedRowVersion: entry.rowVersion
+        })
+      }
+      const continued = yield* api.ContinueVersion({
+        versionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion
+      })
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      const metrics = yield* api.GetVersionMetrics({ versionIds: [version.id, entry.version.id, continued.version.id] })
+      assert.isUndefined(metrics.find((m) => m.versionId === entry.version.id))
+      assert.strictEqual(metrics.find((m) => m.versionId === continued.version.id)!.requests, 2)
+      assert.strictEqual(metrics.find((m) => m.versionId === continued.version.id)!.output, 20)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("continues through Anthropic's trailing assistant message and preserves whitespace in storage", () => {
     const config = testConfig()
     return Effect.gen(function* () {
@@ -274,10 +384,21 @@ describe("continue and reasoning", () => {
       // Only the first reply reached the provider.
       assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
 
-      // Only a finished model-written version with text can be continued.
-      const user = window.entries.at(-2)!
+      // Only a finished version with text can be continued.
+      const now = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
+      const blank = yield* api.EditVersion({
+        slotId: now.slotId,
+        sourceVersionId: now.version.id,
+        content: "  ",
+        expectedRowVersion: now.rowVersion
+      })
       const refused = yield* Effect.flip(
-        api.ContinueVersion({ versionId: user.version.id, expectedRowVersion: user.rowVersion })
+        api.ContinueVersion({ versionId: blank.version.id, expectedRowVersion: blank.rowVersion })
       )
       assert.strictEqual(refused._tag, "NotContinuable")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))

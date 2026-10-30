@@ -262,3 +262,133 @@ for (const width of [1440, 390]) {
     await shoot(page, "10-model-capabilities")
   })
 }
+
+for (const width of [1440, 390]) {
+  test(`an edited reply can be continued into a new generated version at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { chat } = await setup()
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    await page
+      .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+      .last()
+      .click()
+    const reply = page.getByRole("article").last()
+    await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+    await showActions(reply)
+    await reply.getByRole("button", { name: "Edit", exact: true }).click()
+    await reply.getByLabel("Message text").fill("The ledger is wrong,")
+    await reply.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(reply.locator(".markdown").last()).toHaveText("The ledger is wrong,")
+    await showActions(reply)
+    await shoot(page, "07-edited-continue")
+    await reply.getByRole("button", { name: /^Continue:/ }).click()
+    await expect(reply.locator(".markdown").last()).toContainText("The ledger is wrong," + MORE.trimEnd())
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+    expect(provider.requests.at(-1)!.messages.at(-1)).toEqual({ role: "assistant", content: "The ledger is wrong," })
+    const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api
+        .ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        .pipe(Effect.flatMap((path) => api.ListVersions({ slotId: path.entries.at(-1)!.slotId })))
+    )
+    expect(versions.map((v) => v.writer)).toEqual(["model", "human", "model"])
+    // Its header shows the time and tokens of both requests behind its text; a click opens
+    // the details the tooltip also gives.
+    const metrics = reply.getByRole("button", { name: /^Generation: \d+\.\d s · / })
+    await expect(metrics).toBeVisible()
+    await metrics.click()
+    const panel = page.getByRole("dialog", { name: "Generation" })
+    await expect(panel).toContainText("Time to first token")
+    await expect(panel).toContainText("2 (includes original generation, retries and continuations)")
+    expect(
+      await panel.locator("dl").evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const popup = element.closest('[role="dialog"]')!.getBoundingClientRect()
+        return (
+          rect.top >= popup.top &&
+          rect.bottom <= popup.bottom &&
+          (element.scrollHeight <= element.clientHeight ||
+            ["auto", "scroll"].includes(getComputedStyle(element).overflowY))
+        )
+      })
+    ).toBe(true)
+    const lastFigures = panel.locator("dd").last()
+    await lastFigures.scrollIntoViewIfNeeded()
+    expect(
+      await lastFigures.evaluate((element) => {
+        const row = element.getBoundingClientRect()
+        const popup = element.closest('[role="dialog"]')!.getBoundingClientRect()
+        return row.top >= popup.top && row.bottom <= popup.bottom
+      })
+    ).toBe(true)
+    expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await shoot(page, "08-metrics")
+    await page.keyboard.press("Escape")
+    // The inspector's usage gives each request's times.
+    await messageMenu(reply, "Context it was generated from")
+    await expect(page.getByText("First token", { exact: true }).locator("visible=true")).toBeVisible()
+    await expect(page.getByText("Tokens/s", { exact: true }).locator("visible=true")).toBeVisible()
+    await page.getByText("Tokens/s", { exact: true }).locator("visible=true").scrollIntoViewIfNeeded()
+    await shoot(page, "09-inspector-timings")
+  })
+}
+
+for (const width of [1440, 390]) {
+  test(`reasoning headers copy the raw reasoning and collapse every block at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.addInitScript(() => {
+      const copied: Array<string> = []
+      Object.assign(window, { copied })
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async (text: string) => void copied.push(text) }
+      })
+    })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { chat } = await setup()
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const generate = async () => {
+      await page
+        .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+        .last()
+        .click()
+      const reply = page.getByRole("article").last()
+      await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+      await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
+      return page.locator(`article[data-slot="${await reply.getAttribute("data-slot")}"]`)
+    }
+    const first = await generate()
+    const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+    )
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: path.entries.at(-1)!.slotId,
+        branch: false,
+        content: "And the bridge?"
+      })
+    )
+    await expect(page.getByRole("article")).toHaveCount(3)
+    const second = await generate()
+    expect(await first.getAttribute("data-slot")).not.toBe(await second.getAttribute("data-slot"))
+    for (const reply of [first, second]) {
+      const toggle = reply.getByRole("button", { name: /^Reasoning/ })
+      if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click()
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    }
+    await shoot(page, "10-reasoning-actions")
+    await second.getByRole("button", { name: "Copy reasoning", exact: true }).click()
+    expect(await page.evaluate(() => (window as unknown as { copied: Array<string> }).copied)).toEqual([THOUGHT])
+    await expect(page.getByText("Reasoning copied")).toBeVisible()
+    await second.getByRole("button", { name: "Collapse all", exact: true }).click()
+    for (const reply of [first, second])
+      await expect(reply.getByRole("button", { name: /^Reasoning/ })).toHaveAttribute("aria-expanded", "false")
+    await expect(page.getByRole("region", { name: "Reasoning" })).toHaveCount(0)
+    await shoot(page, "11-reasoning-collapsed-all")
+    // Collapse all is a view action: the streaming preference stays as it was.
+    expect(await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetDisplayPrefs({}))).toMatchObject({
+      reasoning: "expanded"
+    })
+  })
+}

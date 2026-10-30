@@ -1523,8 +1523,22 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.notInclude(JSON.stringify(own), '"digest"')
         assert.strictEqual(own.requests.length, 1)
         for (const request of own.requests) {
-          assert.deepStrictEqual(Object.keys(request).sort(), ["id", "status", "counts", "usageSource", "cost"].sort())
+          assert.deepStrictEqual(
+            Object.keys(request).sort(),
+            ["id", "status", "startedAt", "firstTokenAt", "endedAt", "counts", "usageSource", "cost"].sort()
+          )
         }
+      })
+  },
+  GetVersionMetrics: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another user's version is left out, as if it had no metrics.
+        assert.deepStrictEqual(yield* actor.api.GetVersionMetrics({ versionIds: [owner.chat.generatingId] }), [])
+        const own = yield* owner.api.GetVersionMetrics({ versionIds: [owner.chat.generatingId] })
+        assert.strictEqual(own.length, 1)
+        assert.strictEqual(own[0]!.versionId, owner.chat.generatingId)
+        assert.strictEqual(own[0]!.requests, 1)
       })
   },
   // --- Chat setup, speakers and the send queue (chatSetupApi.ts).

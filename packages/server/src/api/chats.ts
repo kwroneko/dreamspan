@@ -331,7 +331,8 @@ export const makeChatHandlers = Effect.gen(function* () {
       }).pipe(Effect.uninterruptible, internal("Regenerate")),
 
     // Continue (ST's, DESIGN §7.5): a new version that starts as the text continued and
-    // streams on from its end, the old version left as it was. The slot is published before
+    // streams on from its end, the old version left as it was. Whoever wrote the version
+    // continued (an edit is the user's), the new one is the model's. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
     ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction }) =>
       Effect.gen(function* () {
@@ -339,7 +340,6 @@ export const makeChatHandlers = Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId })
         const refuse = (message: string) => Effect.fail(new NotContinuable({ versionId, message }))
-        if (source.writer !== "model") return yield* refuse("Only a reply the model wrote can be continued.")
         if (source.status === "generating") return yield* refuse("It's still being written.")
         if (source.content.trim() === "") return yield* refuse("It has no text to continue.")
         const { chatId, entry: before } = yield* reader.GetSlot({

@@ -26,6 +26,97 @@ const upload = (bytes: Uint8Array) =>
 const imageCount = (body: unknown) => JSON.stringify(body).split('"type":"image_url"').length - 1
 
 describe("image exclusion", () => {
+  it.live("keeps image exclusions and ordered duplicate attachments in display windows with insertions", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const writer = yield* Writer
+      const userId = (yield* api.Whoami()).id as UserId
+      const first = yield* upload(png(textChunk("fixture", "display first")))
+      const second = yield* upload(png(textChunk("fixture", "display second")))
+      const chat = yield* api.CreateChat({ title: "Synthetic display images" })
+      const forkId = chat.currentForkId!
+      const { entry: source } = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          forkId,
+          branch: false,
+          content: "Two drawings",
+          images: [
+            { ...first, altText: "First" },
+            { ...second, altText: "Second" }
+          ],
+          reply: false
+        })
+      )
+      const plain = yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: forkId, atSlotId: source.slotId })
+      const inserted = yield* writer.InsertMessage({
+        userId,
+        chatId: chat.id,
+        forkId,
+        anchorSlotId: source.slotId,
+        expectedRowVersion: source.rowVersion,
+        body: { _tag: "Duplicate", versionId: source.version.id }
+      })
+      assert.deepStrictEqual(inserted.version.images, source.version.images)
+      yield* writer.SetImageExcluded({
+        userId,
+        forkId,
+        versionId: source.version.id,
+        mediaId: first.mediaId,
+        excluded: true
+      })
+      yield* writer.SetImageExcluded({
+        userId,
+        forkId,
+        versionId: inserted.version.id,
+        mediaId: second.mediaId,
+        excluded: true
+      })
+      const inherited = yield* writer.CreateFork({
+        userId,
+        chatId: chat.id,
+        fromForkId: forkId,
+        atSlotId: inserted.slotId
+      })
+      // Source is a structural run; the duplicate is a single inserted piece in the
+      // parent and a structural slot in the child. Both must retain their own exclusions.
+      for (const view of [forkId, inherited.fork.id]) {
+        const get = yield* reader.GetPath({ userId, chatId: chat.id, forkId: view, leafSlotId: null, limit: 10 })
+        const bottom = yield* reader.ReadPath({
+          userId,
+          chatId: chat.id,
+          forkId: view,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 10
+        })
+        for (const entries of [get.entries, bottom.entries]) {
+          assert.deepStrictEqual(
+            entries.map((e) => [e.slotId, e.position, e.excludedImages]),
+            [
+              [source.slotId, 0, [first.mediaId]],
+              [inserted.slotId, 1, [second.mediaId]]
+            ]
+          )
+          for (const entry of entries) assert.deepStrictEqual(entry.version.images, source.version.images)
+        }
+      }
+      const unchanged = yield* reader.GetPath({
+        userId,
+        chatId: chat.id,
+        forkId: plain.fork.id,
+        leafSlotId: null,
+        limit: 10
+      })
+      assert.deepStrictEqual(
+        unchanged.entries.map((e) => [e.slotId, e.excludedImages]),
+        [[source.slotId, undefined]]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live(
     "takes an image out in one fork only, leaves it out of the request and its limit, and says why for each rule",
     () =>

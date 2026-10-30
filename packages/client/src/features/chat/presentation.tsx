@@ -26,6 +26,17 @@ export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")
 export const timelineRails = defineSlot<ComponentProps<typeof CoverageRail>>("chat.timeline-rails")
 export const messageRetries = defineSlot<ComponentProps<typeof RetryWith>>("message.retry")
+/** In a message's header, after its name, time, number and model: details such as generation time and tokens. */
+export const messageHeaderDetails = defineSlot<{ entry: PathEntry; session: ChatSession; generating: boolean }>(
+  "message.header-details"
+)
+/** In a reply's reasoning header, beside its toggle: Copy reasoning, Collapse all (Reasoning.tsx). */
+export const reasoningActions = defineSlot<{
+  readonly version: import("@rp/shared/chat.ts").Version
+  /** The reasoning as stored, or as streamed so far: never the rendered Markdown. */
+  readonly text: string
+  readonly streaming: boolean
+}>("message.reasoning-actions")
 /** Under a reply: the guidance it was written with (guidanceEdit.tsx). */
 export const messageDirections = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.direction")
 interface VersionNavigationContext {

@@ -52,36 +52,13 @@ import {
 } from "./commands.tsx"
 import {
   messageDirections,
+  messageHeaderDetails,
   messageRetries,
   messageVersions,
   messagePreviews,
   useVersionNavigation
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
-import type { RefId } from "@rp/shared/library.ts"
-
-/** Issues the preset's prompt order causes, which the preset editor fixes (DESIGN §2.2). */
-const PRESET_ISSUES: ReadonlySet<string> = new Set(["direction_prompt_missing"])
-
-/** Opens the current preset in the editor beside the chat, where there is one to edit. */
-function OpenPreset({ session }: { session: ChatSession }) {
-  const workspace = usePresetWorkspace() as ReturnType<typeof usePresetWorkspace> | null
-  const ref = session.snapshot().history?.preset?.ref
-  if (!workspace || !ref) return null
-  return (
-    <>
-      {" "}
-      <button
-        type="button"
-        className="text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        onClick={() => workspace.open(ref as RefId)}
-      >
-        Open the preset editor
-      </button>
-    </>
-  )
-}
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -488,6 +465,17 @@ const useEditor = (session: ChatSession, key: MessageEditorKey) =>
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
 
+/**
+ * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
+ * (a CodeMirror editor's contenteditable, any textbox), where a drag moves the caret or selects.
+ */
+const swipeCanStart = (target: EventTarget | null) =>
+  !onControl(target) &&
+  !(
+    target instanceof Element &&
+    target.closest("[contenteditable]:not([contenteditable='false']), [role='textbox'], .cm-editor, label")
+  )
+
 export const Message = memo(function Message({
   entry,
   session,
@@ -579,13 +567,19 @@ export const Message = memo(function Message({
   // The version picker, its sheet and its dialogs are portals: their events reach this
   // article through React, but a drag or a tap in them is no swipe or tap on the message.
   const outside = (event: PointerEvent | MouseEvent) => !event.currentTarget.contains(event.target as Node)
+  // Never while the message is being edited, nor from an editor or a control in it; a text
+  // selection made by the drag, or a cancelled pointer (the browser scrolled), is no swipe.
   const onPointerDown = (event: PointerEvent) => {
-    if (event.pointerType === "touch" && !outside(event)) swipeStart.current = { x: event.clientX, y: event.clientY }
+    swipeStart.current =
+      event.pointerType === "touch" && !editing && !outside(event) && swipeCanStart(event.target)
+        ? { x: event.clientX, y: event.clientY }
+        : null
   }
+  const onPointerCancel = () => void (swipeStart.current = null)
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
     swipeStart.current = null
-    if (!start) return
+    if (!start || editing || window.getSelection()?.toString()) return
     const dx = event.clientX - start.x
     swiped.current = Math.abs(dx) > SWIPE_PX && Math.abs(dx) > 2 * Math.abs(event.clientY - start.y)
     if (swiped.current) void swipe(dx < 0 ? 1 : -1)
@@ -665,6 +659,7 @@ export const Message = memo(function Message({
       }`}
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onClick={onClick}
     >
       <Avatar
@@ -677,7 +672,7 @@ export const Message = memo(function Message({
       />
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
-          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:truncate">
+          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
             {name}
           </span>
           <Tooltip label={fullTime.format(version.createdAt)}>
@@ -704,6 +699,7 @@ export const Message = memo(function Message({
           {version.origin === "user_written" && model && (
             <span className="shrink-0 text-xs text-muted">written by you</span>
           )}
+          <SlotOutlet slot={messageHeaderDetails} props={{ entry, session, generating }} />
           {(version.status === "stopped" || version.status === "interrupted") && (
             <Badge tone="warning">{version.status}</Badge>
           )}
@@ -811,10 +807,7 @@ export const Message = memo(function Message({
             </summary>
             <ul className="mt-1 list-disc pl-5">
               {version.context.issues.map((issue, i) => (
-                <li key={i}>
-                  {issue.message}
-                  {PRESET_ISSUES.has(issue.kind) && <OpenPreset session={session} />}
-                </li>
+                <li key={i}>{issue.message}</li>
               ))}
             </ul>
           </details>

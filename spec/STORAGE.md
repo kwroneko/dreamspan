@@ -1,6 +1,6 @@
 # Storage engine: SQLite vs Turso
 
-**Status**: Partially implemented, 2026-10-10. The engine choice (§3: `node:sqlite` through Effect's driver) is implemented and documented in ARCHITECTURE.md §3, together with the connection and locking design that came out of implementing it. The Turso evaluation (§1–§2) stays here as the record for revisiting it. Original status: proposal, 2026-10-10. The owner asked for Turso Database (the Rust rewrite of SQLite) to be considered before the Effect spike (EFFECT.md §5). The recommendation is **SQLite now, behind a thin database layer, revisiting Turso later**. Nothing here is Decided.
+**Status**: Engine choice implemented; obsolete as an implementation proposal (2026-10-30). ARCHITECTURE §3 documents `node:sqlite` through Effect’s driver, FTS5, reader/writer workers, instance locking and the connection design. The Turso evaluation (§1–§2) remains a reference for revisiting it, not an implemented alternative. Original proposal: 2026-10-10; the owner asked that Turso be considered before the Effect spike. The recommendation remains SQLite behind a thin database layer, revisiting Turso later. Nothing here is newly Decided.
 **Related**: DATA-MODEL.md (§12 search), EFFECT.md §4 (driver choice), DESIGN §8 (memory retrieval).
 
 ---
