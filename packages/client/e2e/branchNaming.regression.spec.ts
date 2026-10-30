@@ -83,7 +83,8 @@ for (const width of [1440, 390]) {
     await branch.click()
     await expect(page.getByRole("menuitem", { name: "Rename “Old road”…" })).toBeVisible()
     await expect(page.getByRole("menuitemradio")).toHaveCount(0)
-    await expect(page.getByRole("menuitem", { name: "Delete this fork: “Old road”" })).toBeVisible()
+    await expect(page.getByRole("menuitem", { name: "Delete this fork: “Old road”" })).toBeDisabled()
+    await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
     await shot(page, "single-named-menu", width)
     await page.keyboard.press("Escape")
     await page.reload()
@@ -95,10 +96,9 @@ for (const width of [1440, 390]) {
     await expect(branch).toHaveAccessibleName(/Only road/)
     await shot(page, "single-named-reloaded-renamed", width)
     await branch.click()
-    await page.getByRole("menuitem", { name: "Delete this fork: “Only road”" }).click()
-    await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toHaveCount(0)
-    await page.getByRole("button", { name: "Undo", exact: true }).click()
-    await expect(branch).toHaveAccessibleName(/Only road/)
+    await expect(page.getByRole("menuitem", { name: "Delete this fork: “Only road”" })).toBeDisabled()
+    await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
+    await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
   })
 }
 
