@@ -295,9 +295,10 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
-        // A swipe keeps the speaker of the version it replaces. Its direction is only the one
-        // given now (DESIGN §2.2, the guidance toggle): nothing is reused implicitly.
+        // A swipe keeps the speaker and the direction of the version it replaces (DESIGN §2.2,
+        // guidance on swipes), unless a direction is given now: an empty one is none.
         const { chatId, entry: before } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
+        const guidance = direction ?? before.version.direction
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
@@ -311,7 +312,7 @@ export const makeChatHandlers = Effect.gen(function* () {
               before,
               before.version.speakerEntityId ?? (yield* speakerOf(id, chatId, before))
             ),
-            ...(direction?.trim() ? { direction } : {})
+            ...(guidance?.trim() ? { direction: guidance } : {})
           },
           expectedRowVersion,
           ...(model ? { model } : {})

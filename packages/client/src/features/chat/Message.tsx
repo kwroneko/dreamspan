@@ -42,7 +42,13 @@ import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
 import { stepFrom } from "./VersionControls.tsx"
-import { messageRetries, messageVersions, messagePreviews, useVersionNavigation } from "./presentation.tsx"
+import {
+  messageDirections,
+  messageRetries,
+  messageVersions,
+  messagePreviews,
+  useVersionNavigation
+} from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import type { RefId } from "@rp/shared/library.ts"
@@ -777,11 +783,7 @@ export const Message = memo(function Message({
             </ul>
           </details>
         )}
-        {version.writer === "model" && version.direction && (
-          <p className="text-xs text-muted">
-            <span className="font-medium">Direction:</span> {version.direction}
-          </p>
-        )}
+        <SlotOutlet slot={messageDirections} props={{ entry, session }} />
         {generated &&
           (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
             <SlotOutlet
