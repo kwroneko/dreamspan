@@ -436,6 +436,17 @@ const useEditor = (session: ChatSession, key: MessageEditorKey) =>
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
 
+/**
+ * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
+ * (a CodeMirror editor's contenteditable, any textbox), where a drag moves the caret or selects.
+ */
+const swipeCanStart = (target: EventTarget | null) =>
+  !onControl(target) &&
+  !(
+    target instanceof Element &&
+    target.closest("[contenteditable]:not([contenteditable='false']), [role='textbox'], .cm-editor, label")
+  )
+
 export const Message = memo(function Message({
   entry,
   session,
@@ -543,13 +554,19 @@ export const Message = memo(function Message({
   // The version picker, its sheet and its dialogs are portals: their events reach this
   // article through React, but a drag or a tap in them is no swipe or tap on the message.
   const outside = (event: PointerEvent | MouseEvent) => !event.currentTarget.contains(event.target as Node)
+  // Never while the message is being edited, nor from an editor or a control in it; a text
+  // selection made by the drag, or a cancelled pointer (the browser scrolled), is no swipe.
   const onPointerDown = (event: PointerEvent) => {
-    if (event.pointerType === "touch" && !outside(event)) swipeStart.current = { x: event.clientX, y: event.clientY }
+    swipeStart.current =
+      event.pointerType === "touch" && !editing && !outside(event) && swipeCanStart(event.target)
+        ? { x: event.clientX, y: event.clientY }
+        : null
   }
+  const onPointerCancel = () => void (swipeStart.current = null)
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
     swipeStart.current = null
-    if (!start) return
+    if (!start || editing || window.getSelection()?.toString()) return
     const dx = event.clientX - start.x
     swiped.current = Math.abs(dx) > SWIPE_PX && Math.abs(dx) > 2 * Math.abs(event.clientY - start.y)
     if (swiped.current) void swipe(dx < 0 ? 1 : -1)
@@ -629,6 +646,7 @@ export const Message = memo(function Message({
       }`}
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onClick={onClick}
     >
       <Avatar
