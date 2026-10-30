@@ -237,6 +237,7 @@ interface OverrideValue {
     | "summary_choice"
     | "summary_rerun"
     | "summary_superseded"
+    | "insert"
   readonly targetId: string
   readonly slotId: string | null
   readonly valueId: string | null
@@ -275,6 +276,29 @@ export const writeOverride = (
       VALUES (${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, ${value.slotId},
         (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${value.summariesDone ? 1 : 0}, ${origin})`
     return seq
+  })
+
+/**
+ * Fork `fork` places inserted slot `slotId` below its anchor (flag 1), or doesn't (0), from
+ * now on (`writeOverride`; spec/MESSAGE-INSERT.md §2.2). The row names the anchor, its parent.
+ */
+export const writeInsert = (
+  sql: SqlClient.SqlClient,
+  fork: { readonly id: string; readonly chatId: string },
+  slotId: string,
+  flag: 0 | 1
+) =>
+  Effect.gen(function* () {
+    const [slot] = yield* sql<{ anchor: string | null }>`
+      SELECT parent_slot_id AS anchor FROM slots WHERE id = ${slotId} AND chat_id = ${fork.chatId}`
+    if (slot === undefined) return yield* new NotFound({ entity: "slot", id: slotId })
+    return yield* writeOverride(sql, fork, {
+      kind: "insert",
+      targetId: slotId,
+      slotId: slot.anchor,
+      valueId: null,
+      flag
+    })
   })
 
 /** Fork `fork` shows `versionId` at `slotId` from now on (`writeOverride`). */

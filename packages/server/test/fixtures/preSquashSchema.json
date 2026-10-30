@@ -934,7 +934,7 @@
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'insert')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
     },
     {
       "type": "table",
@@ -1060,7 +1060,7 @@
       "type": "table",
       "name": "slots",
       "tbl_name": "slots",
-      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
+      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, -- Inserted between messages (spec/MESSAGE-INSERT.md \u00a72.2): placed per fork by an insert override. inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)), CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
     },
     {
       "type": "table",
@@ -1168,7 +1168,7 @@
       "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1547,6 +1547,18 @@
       "name": "fork_overrides_identity_fixed",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_identity_fixed BEFORE UPDATE OF id, chat_id, fork_id, kind, target_id, slot_id, slot_depth ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_insert",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_insert BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id AND x.inserted = 1 AND x.parent_slot_id IS NEW.slot_id)) BEGIN SELECT RAISE(ABORT, 'an insertion places an inserted slot of its chat below its parent'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_insert_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_insert_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'an insertion places an inserted slot of its chat below its parent'); END"
     },
     {
       "type": "trigger",
@@ -1997,6 +2009,12 @@
       "name": "slots_hide_frozen",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_hide_frozen BEFORE UPDATE OF context_excluded, hidden_by_user ON slots WHEN NEW.context_excluded IS NOT OLD.context_excluded OR NEW.hidden_by_user IS NOT OLD.hidden_by_user BEGIN SELECT RAISE(ABORT, 'a slot keeps the visibility it was inserted with; a fork hides with an override'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "slots_inserted_frozen",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER slots_inserted_frozen BEFORE UPDATE OF inserted ON slots WHEN NEW.inserted IS NOT OLD.inserted BEGIN SELECT RAISE(ABORT, 'a slot stays inserted or not as it was inserted'); END"
     },
     {
       "type": "trigger",

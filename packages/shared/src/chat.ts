@@ -28,7 +28,8 @@ const VersionOrigin = Schema.Literals([
   "greeting",
   "imported",
   "changeset",
-  "scratchpad"
+  "scratchpad",
+  "duplicate"
 ])
 
 export class Chat extends Schema.Class<Chat>("Chat")({

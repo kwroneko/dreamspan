@@ -1106,3 +1106,116 @@ describe("fork-scoped state events", () => {
     insert(null, null, c.chatId)
   })
 })
+
+describe("inserted messages (spec/MESSAGE-INSERT.md §2.2)", () => {
+  /** A slot inserted below `anchor` (null: above the first message), with one version of `origin`. */
+  const inserted = (c: { chatId: string; laneId: string }, anchor: { slotId: string; depth: number } | null) => {
+    const slotId = id("x")
+    const versionId = id("v")
+    tx(() => {
+      run(
+        `INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
+         VALUES (?, ?, 0, 'complete', 'model', 'copy', 'verbatim', 'duplicate', ?, ?)`,
+        versionId,
+        slotId,
+        now(),
+        now()
+      )
+      run(
+        `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at, inserted)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        slotId,
+        c.chatId,
+        c.laneId,
+        anchor?.slotId ?? null,
+        anchor === null ? 0 : anchor.depth + 1,
+        versionId,
+        now()
+      )
+    })
+    return { slotId, versionId, depth: anchor === null ? 0 : anchor.depth + 1 }
+  }
+  const placeRow = (
+    rowId: string,
+    chatId: string,
+    forkId: string,
+    target: string,
+    anchor: string | null,
+    flag: number | null,
+    extra: { valueId?: string } = {}
+  ) =>
+    run(
+      `INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, value_id, flag)
+       VALUES (?, ?, ?, ?, 'insert', ?, ?, (SELECT depth FROM slots WHERE id = ?), ?, ?)`,
+      rowId,
+      chatId,
+      forkId,
+      ++n,
+      target,
+      anchor,
+      anchor,
+      extra.valueId ?? null,
+      flag
+    )
+
+  it("keeps a slot inserted or not as it was inserted", () => {
+    const c = chat(user())
+    const a = slot(c, null)
+    const x = inserted(c, a)
+    expect(get<{ inserted: number }>("SELECT inserted FROM slots WHERE id = ?", a.slotId).inserted).toBe(0)
+    expect(() => run("UPDATE slots SET inserted = 1 WHERE id = ?", a.slotId)).toThrow(/stays inserted or not/)
+    expect(() => run("UPDATE slots SET inserted = 0 WHERE id = ?", x.slotId)).toThrow(/stays inserted or not/)
+    expect(() => run("UPDATE slots SET inserted = 2 WHERE id = ?", x.slotId)).toThrow(/stays inserted or not|CHECK/)
+    run("UPDATE slots SET inserted = 1 WHERE id = ?", x.slotId) // unchanged
+    // A duplicate's version keeps its origin like any other.
+    expect(() => run("UPDATE versions SET origin = 'user_written' WHERE id = ?", x.versionId)).toThrow()
+  })
+
+  it("places only an inserted slot of the override's chat, below the anchor the row names", () => {
+    const owner = user()
+    const c = chat(owner)
+    const other = chat(owner)
+    const a = slot(c, null)
+    const b = slot(c, a)
+    const x = inserted(c, a)
+    const top = inserted(c, null)
+    const elsewhere = inserted(other, slot(other, null))
+    const message = /an insertion places an inserted slot/
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, b.slotId, a.slotId, 1)).toThrow(message) // not inserted
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, x.slotId, b.slotId, 1)).toThrow(message) // anchor ≠ parent
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, x.slotId, null, 1)).toThrow(message)
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, top.slotId, a.slotId, 1)).toThrow(message)
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, elsewhere.slotId, null, 1)).toThrow(message) // another chat
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, x.slotId, a.slotId, null)).toThrow(message) // no flag
+    expect(() => placeRow(id("o"), c.chatId, c.chatId, x.slotId, a.slotId, 1, { valueId: x.versionId })).toThrow(
+      message
+    )
+    // The anchor's depth is the row's, as for every slot-keyed override.
+    expect(() =>
+      run(
+        `INSERT INTO fork_overrides (id, chat_id, fork_id, seq, kind, target_id, slot_id, slot_depth, flag)
+         VALUES (?, ?, ?, ?, 'insert', ?, ?, 5, 1)`,
+        id("o"),
+        c.chatId,
+        c.chatId,
+        ++n,
+        x.slotId,
+        a.slotId
+      )
+    ).toThrow(message)
+    expect(() => placeRow(id("o"), other.chatId, other.chatId, x.slotId, a.slotId, 1)).toThrow(/fork's chat|insertion/)
+
+    const placed = id("o")
+    placeRow(placed, c.chatId, c.chatId, x.slotId, a.slotId, 1)
+    placeRow(id("o"), c.chatId, c.chatId, top.slotId, null, 0)
+    run("UPDATE fork_overrides SET flag = 0, seq = ? WHERE id = ?", ++n, placed)
+    expect(() => run("UPDATE fork_overrides SET flag = NULL WHERE id = ?", placed)).toThrow(message)
+    expect(() => run("UPDATE fork_overrides SET value_id = ? WHERE id = ?", x.versionId, placed)).toThrow(message)
+    expect(() => run("UPDATE fork_overrides SET target_id = ? WHERE id = ?", top.slotId, placed)).toThrow(
+      /keeps its fork, kind and target/
+    )
+    expect(() => run("UPDATE fork_overrides SET kind = 'hide' WHERE id = ?", placed)).toThrow(
+      /keeps its fork, kind and target/
+    )
+  })
+})
