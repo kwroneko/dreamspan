@@ -21,24 +21,30 @@ export const REPLY = "The bridge holds."
 const chunk = (body: Record<string, unknown>) =>
   `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "fake-small", ...body })}\n\n`
 
-export const startProvider = async (): Promise<FakeProvider> => {
+export const startProvider = async (options: { holdAfterText?: boolean } = {}): Promise<FakeProvider> => {
   const keys: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
   let holding = false
+  let holdingText = options.holdAfterText ?? false
   const held: Array<() => void> = []
   const respond = (response: ServerResponse) => {
     response.writeHead(200, { "content-type": "text/event-stream" })
     response.write(
       chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] })
     )
-    response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
-    response.write(
-      chunk({
-        choices: [],
-        usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
-      })
-    )
-    response.end("data: [DONE]\n\n")
+    const finish = () => {
+      if (response.destroyed) return
+      response.write(chunk({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }))
+      response.write(
+        chunk({
+          choices: [],
+          usage: { prompt_tokens: 120, completion_tokens: 6, prompt_tokens_details: { cached_tokens: 100 } }
+        })
+      )
+      response.end("data: [DONE]\n\n")
+    }
+    if (holdingText) held.push(finish)
+    else finish()
   }
   const server = createServer((request, response) => {
     const auth = request.headers.authorization
@@ -78,6 +84,7 @@ export const startProvider = async (): Promise<FakeProvider> => {
     },
     release: () => {
       holding = false
+      holdingText = false
       for (const send of held.splice(0)) send()
     },
     stop: () =>
