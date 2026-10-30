@@ -902,7 +902,8 @@ export class ChatSession {
           ...(event.presetContext === undefined ? {} : { presetContext: event.presetContext }),
           ...(event.budget === undefined ? {} : { budget: event.budget }),
           ...(event.preset === undefined ? {} : { preset: event.preset }),
-          ...(event.model === undefined ? {} : { model: event.model })
+          ...(event.model === undefined ? {} : { model: event.model }),
+          ...(event.images === undefined ? {} : { images: event.images })
         }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&
@@ -1280,8 +1281,8 @@ export class ChatSession {
    * end, sent as the start of the reply to models that take one (DESIGN §7.5), with the
    * composer's guidance as its direction.
    */
-  async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
-    const direction = this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? ""
+  async continueVersion(entry: PathEntry, useComposerGuidance = true): Promise<Outcome<unknown>> {
+    const direction = useComposerGuidance ? (this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? "") : ""
     return this.slotWrite(entry.slotId, (client) =>
       client("ContinueVersion", {
         versionId: entry.version.id,
@@ -1317,10 +1318,22 @@ export class ChatSession {
     )
   }
 
+  /** Takes an image of the message's version out of the context in the fork shown, or puts it back. */
+  setImageExcluded(entry: PathEntry, mediaId: string, excluded: boolean): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("SetImageExcluded", { versionId: entry.version.id, mediaId, forkId: this.view.forkId, excluded })
+    )
+  }
+
   /** A finished version the user wrote changes in place; anything else gets a new version. */
-  async edit(entry: PathEntry, content: string, draft: DraftCommit | null = null): Promise<Outcome<unknown>> {
+  async edit(
+    entry: PathEntry,
+    content: string,
+    draft: DraftCommit | null = null,
+    images?: import("@rp/shared/chat.ts").MessageImages
+  ): Promise<Outcome<unknown>> {
     const { version } = entry
-    const commit = draft === null ? {} : { draft }
+    const commit = { ...(draft === null ? {} : { draft }), ...(images === undefined ? {} : { images }) }
     if (version.writer === "human" && version.status !== "generating") {
       const result = await this.call((client) =>
         client("AmendVersion", {
@@ -1350,14 +1363,20 @@ export class ChatSession {
   }
 
   /** "Write your own version" (DESIGN §3.1): a new version of the user's, selected. */
-  writeVersion(entry: PathEntry, content: string, draft: DraftCommit | null = null): Promise<Outcome<unknown>> {
+  writeVersion(
+    entry: PathEntry,
+    content: string,
+    draft: DraftCommit | null = null,
+    images?: import("@rp/shared/chat.ts").MessageImages
+  ): Promise<Outcome<unknown>> {
     return this.slotWrite(entry.slotId, (client) =>
       client("WriteVersion", {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         content,
         expectedRowVersion: entry.rowVersion,
-        ...(draft === null ? {} : { draft })
+        ...(draft === null ? {} : { draft }),
+        ...(images === undefined ? {} : { images })
       })
     )
   }

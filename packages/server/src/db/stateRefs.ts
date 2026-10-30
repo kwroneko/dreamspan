@@ -22,7 +22,7 @@ type Reference =
       readonly table: "entity"
       readonly id: string
       readonly kind: EntityKind
-      readonly chatOwned?: true
+      readonly chatOwned?: true | "required"
       readonly allowDeleted?: true
     }
   /** A ref of `entity` when given; a chat override only of this chat. */
@@ -66,7 +66,7 @@ const referencesOf = (declared: Declared, of: unknown): ReadonlyArray<Reference>
             table: "entity",
             id,
             kind: declaration.kind,
-            ...(declaration.chatOwned ? { chatOwned: true } : {}),
+            ...(declaration.chatOwned ? { chatOwned: declaration.chatOwned } : {}),
             ...(declaration.allowDeleted ? { allowDeleted: true } : {})
           }
         case "ref":
@@ -121,7 +121,11 @@ export const checkStateReferences = (
                 SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.id = r.head_revision_id
                 WHERE r.entity_id = ${reference.id} AND r.ref_kind = 'upstream'
                   AND json_extract(v.doc_json, '$.owner.chat') IS NOT NULL
-                  AND json_extract(v.doc_json, '$.owner.chat') <> ${chatId}))`
+                  AND json_extract(v.doc_json, '$.owner.chat') <> ${chatId}))
+              AND (${reference.chatOwned === "required" ? 1 : 0} = 0 OR EXISTS (
+                SELECT 1 FROM entity_refs r JOIN entity_revisions v ON v.id = r.head_revision_id
+                WHERE r.entity_id = ${reference.id} AND r.ref_kind = 'upstream'
+                  AND json_extract(v.doc_json, '$.owner.chat') = ${chatId}))`
           case "ref":
             return sql<{ n: number }>`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
               WHERE r.id = ${reference.id} AND e.owner_user_id = ${userId} AND e.kind = ${reference.kind}

@@ -5,7 +5,7 @@ import { composerImages } from "./composerImages.ts"
 import { recordHistoryReduction, recordReduction } from "./historyChanges.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 // Write operation handlers. They run inside the writer worker, each as one transaction.
-import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, MessageImages, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
@@ -18,7 +18,16 @@ import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
 import { forkColumns, forkThrough, shownElsewhere } from "./forks.ts"
-import { forkAt, insertFork, versionAsShown, writeOverride, writeSelect } from "./forkState.ts"
+import {
+  forkAt,
+  imageExcludedSql,
+  imageTarget,
+  insertFork,
+  versionAsShown,
+  withFork,
+  writeOverride,
+  writeSelect
+} from "./forkState.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
@@ -67,6 +76,7 @@ export const makeWriteHandlers = (bin: Bin) =>
       createFork,
       chatIn,
       checkSpeaker,
+      checkImages,
       insertVersion,
       insertSlot,
       insertStateEvent,
@@ -166,18 +176,20 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toChat(row!)
         }).pipe(transaction("CreateChat")),
 
-      SaveDraft: ({ userId, key, draftId, content, expectedRowVersion, expectedSession, baseRevision }) =>
-        drafts
-          .save({
+      SaveDraft: ({ userId, key, draftId, content, images, expectedRowVersion, expectedSession, baseRevision }) =>
+        Effect.gen(function* () {
+          if (images !== undefined) yield* checkImages(userId, images)
+          return yield* drafts.save({
             userId,
             key,
             draftId,
             content,
             base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
             baseRevision,
-            checkTarget: draftTarget(userId, key)
+            checkTarget: draftTarget(userId, key),
+            images
           })
-          .pipe(transaction("SaveDraft")),
+        }).pipe(transaction("SaveDraft")),
 
       OpenComposer: ({ userId, chatId, forkId, copyFrom }) =>
         Effect.gen(function* () {
@@ -223,8 +235,11 @@ export const makeWriteHandlers = (bin: Bin) =>
           .restoreComposer(userId, chatId, draftId, seq, expectedRowVersion, content)
           .pipe(transaction("RestoreComposer")),
 
-      RestoreDraftState: ({ userId, key, draftId, seq, expectedRowVersion, content }) =>
-        drafts.restore(userId, key, draftId, seq, expectedRowVersion, content).pipe(transaction("RestoreDraftState")),
+      RestoreDraftState: ({ userId, key, draftId, seq, expectedRowVersion, content, images }) =>
+        Effect.gen(function* () {
+          if (images !== undefined) yield* checkImages(userId, images)
+          return yield* drafts.restore(userId, key, draftId, seq, expectedRowVersion, content, images)
+        }).pipe(transaction("RestoreDraftState")),
 
       ClearDraft: ({ userId, key, draftId, outcome, expectedRowVersion }) =>
         drafts.clear(userId, key, draftId, outcome, expectedRowVersion).pipe(transaction("ClearDraft")),
@@ -249,7 +264,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "version_edit",
             targetId: version.sourceVersionId ?? "",
-            content: row.content
+            content: row.content,
+            images: toVersion(row).images ?? []
           })
           return toVersion(row)
         }).pipe(transaction("AddVersion")),
@@ -336,13 +352,23 @@ export const makeWriteHandlers = (bin: Bin) =>
             userId,
             commitDraft ?? null,
             version.sourceVersionId
-              ? { targetKind: "version_edit", targetId: version.sourceVersionId, content: row.content }
-              : { targetKind: "scratchpad", targetId: slotId, content: row.content }
+              ? {
+                  targetKind: "version_edit",
+                  targetId: version.sourceVersionId,
+                  content: row.content,
+                  images: toVersion(row).images ?? []
+                }
+              : {
+                  targetKind: "scratchpad",
+                  targetId: slotId,
+                  content: row.content,
+                  images: toVersion(row).images ?? []
+                }
           )
           return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
-      AmendVersion: ({ userId, versionId, forkId, content, expectedRowVersion, commitDraft }) =>
+      AmendVersion: ({ userId, versionId, forkId, content, images, expectedRowVersion, commitDraft }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
           if (row.writer !== "human") return yield* new NotAmendable({ versionId })
@@ -363,9 +389,23 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* drafts.commit(userId, commitDraft ?? null, {
             targetKind: "version_edit",
             targetId: versionId,
-            content
+            content,
+            images: images ?? (JSON.parse(row.images_json ?? "[]") as MessageImages)
           })
-          if (content === row.content) return toVersion(shown)
+          // The images it had, as its history keeps them, when this amend changes them.
+          const had = JSON.parse(row.images_json ?? "[]") as MessageImages
+          const normal = (list: MessageImages) =>
+            JSON.stringify(list.map((image) => ({ mediaId: image.mediaId, altText: image.altText ?? "" })))
+          const before = images !== undefined && normal(images) !== normal(had) ? normal(had) : null
+          if (content === row.content && before === null) return toVersion(shown)
+          if (before !== null) yield* checkImages(userId, images!)
+          const attach = (target: string) =>
+            Effect.forEach(
+              images!,
+              (image, ordinal) => sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
+                VALUES (${target}, ${ordinal}, ${image.mediaId}, 'image', ${image.altText || null})`,
+              { discard: true }
+            )
           // Changeset before/after identities are durable snapshots too: a later undo may
           // restore a version no fork currently shows. Preserve that row by copying here.
           const [retained] = yield* sql`SELECT 1 FROM changeset_items WHERE target_kind='version_replace'
@@ -373,7 +413,21 @@ export const makeWriteHandlers = (bin: Bin) =>
           if (!retained && !(yield* shownElsewhere(sql, slot.chat_id, fork.id, row.slot_id, original, versionId))) {
             // No other fork shows it: the trigger keeps the previous text in version_history (DESIGN §3.1).
             yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
-            yield* sql`UPDATE versions SET content = ${content}, updated_at = ${Date.now()} WHERE id = ${versionId}`
+            const at = Date.now()
+            if (content !== row.content)
+              yield* sql`UPDATE versions SET content = ${content}, updated_at = ${at} WHERE id = ${versionId}`
+            if (before !== null) {
+              if (content === row.content) yield* sql`UPDATE versions SET updated_at = ${at} WHERE id = ${versionId}`
+              // The trigger kept the earlier text, if it changed; that entry keeps the earlier images too.
+              if (content !== row.content)
+                yield* sql`UPDATE version_history SET images_json = ${before}
+                  WHERE id = (SELECT max(id) FROM version_history WHERE version_id = ${versionId})`
+              else
+                yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
+                  VALUES (${versionId}, ${row.content}, ${at}, ${before})`
+              yield* sql`DELETE FROM version_attachments WHERE version_id = ${versionId}`
+              yield* attach(versionId)
+            }
             return toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
           }
           // Another fork shows it, so this fork gets a copy with the new text, standing in for
@@ -392,11 +446,14 @@ export const makeWriteHandlers = (bin: Bin) =>
              FROM versions v WHERE v.id = ?`,
             [copy, content, original, fork.id, at, at, versionId]
           )
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at)
-            SELECT ${copy}, content, replaced_at FROM version_history WHERE version_id = ${versionId} ORDER BY id`
-          yield* sql`INSERT INTO version_history (version_id, content, replaced_at) VALUES (${copy}, ${row.content}, ${at})`
-          yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
-            SELECT ${copy}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${versionId}`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
+            SELECT ${copy}, content, replaced_at, images_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
+          yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
+            VALUES (${copy}, ${row.content}, ${at}, ${normal(had)})`
+          if (before !== null) yield* attach(copy)
+          else
+            yield* sql`INSERT INTO version_attachments (version_id, ordinal, media_id, kind, alt_text)
+              SELECT ${copy}, ordinal, media_id, kind, alt_text FROM version_attachments WHERE version_id = ${versionId}`
           // Shorter than what the fork showed, before the fork shows the copy.
           yield* recordHistoryReduction(sql, row.slot_id, content, null, fork.id)
           yield* writeOverride(
@@ -445,6 +502,33 @@ export const makeWriteHandlers = (bin: Bin) =>
             version: toVersion((yield* versionAsShown(sql, fork.id, versionId))!)
           }
         }).pipe(transaction("SetVersionFlags")),
+
+      // Taking an image out of the context is the fork's, on the message's own version (§2.2).
+      SetImageExcluded: ({ userId, versionId, mediaId, forkId, excluded }) =>
+        Effect.gen(function* () {
+          const row = yield* ownedVersion(userId, versionId, true)
+          const images = JSON.parse(row.images_json ?? "[]") as ReadonlyArray<{ mediaId: string }>
+          if (!images.some((image) => image.mediaId === mediaId))
+            return yield* new NotFound({ entity: "image", id: mediaId })
+          const { slot, fork } = yield* slotInFork(userId, row.slot_id as SlotId, yield* forkOf(row.slot_id, forkId))
+          const original = (row.fork_id === null ? row.id : row.source_version_id)!
+          const [effective] = yield* sql<{ excluded: number }>`
+            SELECT ${withFork(sql, fork.id, (f) => imageExcludedSql(f, "o.id", "m.id"))} AS excluded
+            FROM versions o, (SELECT ${mediaId} AS id) m WHERE o.id = ${original}`
+          if ((effective!.excluded === 1) !== excluded)
+            yield* writeOverride(
+              sql,
+              { id: fork.id, chatId: slot.chat_id },
+              {
+                kind: "image_exclude",
+                targetId: imageTarget(original, mediaId),
+                slotId: row.slot_id,
+                valueId: null,
+                flag: excluded ? 1 : 0
+              }
+            )
+          return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, slotId: row.slot_id as SlotId }
+        }).pipe(transaction("SetImageExcluded")),
 
       MarkVersion: ({ userId, versionId, mark }) =>
         Effect.gen(function* () {

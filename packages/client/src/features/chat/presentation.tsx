@@ -1,6 +1,7 @@
 // Fine-grained chat surfaces. Defaults and plugins use the same reversible registries.
 import { useSyncExternalStore, type ComponentProps, type ComponentType, type ReactNode } from "react"
 import type { PathEntry } from "@rp/shared/chat.ts"
+import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
 import { makeRegistry } from "../../registry.ts"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import type { ChatCardActionProps } from "./CardForkDialogs.tsx"
@@ -16,6 +17,10 @@ export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
+/** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
+export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
+  "chat.note-actions"
+)
 export const summarySettingFields = defineSlot<ComponentProps<typeof LcmFields>>("chat.summary-setting-fields")
 export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>("chat.timeline-boundaries")
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")

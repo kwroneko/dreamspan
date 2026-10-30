@@ -3,6 +3,7 @@
 // can step back to any earlier state, and a destructive change (Ctrl-A plus a stray key)
 // always leaves the state before it restorable.
 import { Schema } from "effect"
+import { MessageImages } from "./chat.ts"
 
 export const DraftTargetKind = Schema.Literals([
   "composer",
@@ -40,13 +41,16 @@ const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 /** Text this write displaced, as recorded by the writer; reads return null. */
 export class DraftDisplacement extends Schema.Class<DraftDisplacement>("DraftDisplacement")({
   at: Schema.Number,
-  content: Schema.String
+  content: Schema.String,
+  images: Schema.optionalKey(MessageImages)
 }) {}
 
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
   content: Schema.String,
+  /** Message editor attachments; absent means the source version's set. */
+  images: Schema.optionalKey(MessageImages),
   status: DraftStatus,
   /** What the draft was started from, for conflict detection on commit. */
   baseRevision: Schema.NullOr(Schema.String),
@@ -151,5 +155,6 @@ export const excerpt = (text: string, max = 80) =>
 export const DraftRestore = {
   seq: Schema.Int,
   expectedRowVersion: Schema.Int,
-  content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DraftHistoryPolicy.maxContentChars)))
+  content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DraftHistoryPolicy.maxContentChars))),
+  images: Schema.optionalKey(MessageImages)
 }

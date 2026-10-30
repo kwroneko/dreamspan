@@ -27,6 +27,7 @@ export const baseline: ReadonlyArray<string> = [
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)),
     -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key.
     base_revision TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
@@ -234,7 +235,9 @@ export const baseline: ReadonlyArray<string> = [
     id INTEGER PRIMARY KEY,
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
-    replaced_at INTEGER NOT NULL
+    replaced_at INTEGER NOT NULL,
+    -- The version's complete image set before this amendment.
+    images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json))
   ) STRICT`,
   `CREATE INDEX version_history_version ON version_history(version_id, id)`,
   `CREATE TABLE version_attachments (
@@ -385,7 +388,10 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions
     WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content
     BEGIN
-      INSERT INTO version_history (version_id, content, replaced_at) VALUES (OLD.id, OLD.content, NEW.updated_at);
+      INSERT INTO version_history (version_id, content, replaced_at, images_json)
+      VALUES (OLD.id, OLD.content, NEW.updated_at, (SELECT json_group_array(json_object(
+        'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM
+        (SELECT media_id, alt_text FROM version_attachments WHERE version_id = OLD.id ORDER BY ordinal)));
     END`,
   `CREATE TRIGGER versions_identity_fixed BEFORE UPDATE OF id, slot_id, ordinal, writer, origin ON versions
     WHEN NEW.id IS NOT OLD.id OR NEW.slot_id IS NOT OLD.slot_id OR NEW.ordinal IS NOT OLD.ordinal
@@ -448,6 +454,8 @@ export const baseline: ReadonlyArray<string> = [
     at INTEGER NOT NULL,
     start INTEGER NOT NULL CHECK (start >= 0),
     removed TEXT NOT NULL,
+    images_before_json TEXT,
+    images_after_json TEXT,
     inserted TEXT NOT NULL, displaced INTEGER NOT NULL DEFAULT 0 CHECK (displaced IN (0, 1)),
     PRIMARY KEY (draft_id, seq)
   ) STRICT, WITHOUT ROWID`,
@@ -1355,7 +1363,8 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')),
+      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'image_exclude')),
+    -- image_exclude: the message's own version and an image of it, "<version id>:<media id>".
     target_id TEXT NOT NULL,
     -- The slot the row is about, and its depth, for reading a window of a path.
     slot_id TEXT,

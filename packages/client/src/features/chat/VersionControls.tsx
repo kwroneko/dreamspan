@@ -55,6 +55,7 @@ export function Versions({
     <div className="flex shrink-0 items-center" role="group" aria-label="Versions">
       <IconButton
         label="Previous version"
+        hint="Previous version (ArrowLeft outside inputs, on the last reply)"
         icon="left"
         className="max-sm:size-7"
         disabled={entry.versionCount <= 1 || !before}
@@ -74,6 +75,7 @@ export function Versions({
       )}
       <IconButton
         label={generated && (position === -1 || !after) ? "Generate another version" : "Next version"}
+        hint="Next version (ArrowRight outside inputs, on the last reply; generates past last)"
         icon="right"
         className="max-sm:size-7"
         disabled={!generated && (entry.versionCount <= 1 || !after)}

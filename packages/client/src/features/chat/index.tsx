@@ -7,6 +7,7 @@ import { registerMessageActions } from "./registerMessageActions.tsx"
 import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
 import { registerVersionMetrics } from "./versionMetrics.tsx"
+import { registerReplyCommands } from "./replyCommands.ts"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
 import { lazy, Suspense } from "react"
@@ -67,6 +68,7 @@ export const register = () => {
   registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()
+  registerReplyCommands()
   routes.register({
     id: "chats",
     parent: "app",

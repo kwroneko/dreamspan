@@ -66,7 +66,7 @@ for (const width of [1440, 390]) {
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     // Other entries stay compact until opened; large books do not mount every text editor.
     await expect(page.getByRole("group", { name: /^Lorebook entry/ })).toHaveCount(1)
-    const lamp = page.locator("summary").filter({ hasText: /^Lamp$/ })
+    const lamp = page.locator("summary").filter({ hasText: /^Lamp/ })
     await lamp.click()
     await expectTextBox(
       page
@@ -270,7 +270,7 @@ test("card search and replace includes embedded lore and keys in closed entries"
   await page.getByRole("textbox", { name: "Primary keys", exact: true }).fill("harbour\n/harbour,a/iu")
   await page
     .locator("summary")
-    .filter({ hasText: /^Harbour tides$/ })
+    .filter({ hasText: /^Harbour tides/ })
     .click()
   await page.getByRole("button", { name: "Search", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Search and replace" })

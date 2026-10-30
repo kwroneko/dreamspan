@@ -42,3 +42,22 @@ it("accepts only hex colour values or a reset, keeping CSS out of saved preferen
   assert.strictEqual(decode({ quoteTextColor: "#Aa1234" })._tag, "Some")
   assert.strictEqual(decode({ quoteTextColor: null })._tag, "Some")
 })
+
+it.live("Enter sends patches persist per account and do not reset unrelated display choices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).enterSends, "automatic")
+    yield* alice.SetDisplayPrefs({ prefs: { enterSends: "never", guidance: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { reasoning: "collapsed" } })
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).enterSends, "automatic")
+    yield* bob.SetDisplayPrefs({ prefs: { enterSends: "always" } })
+    const reconnect = yield* client({ "Remote-User": "alice" })
+    const prefs = yield* reconnect.GetDisplayPrefs({})
+    assert.strictEqual(prefs.enterSends, "never")
+    assert.strictEqual(prefs.guidance, true)
+    assert.strictEqual(prefs.reasoning, "collapsed")
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).enterSends, "always")
+    assert.strictEqual(Schema.decodeUnknownOption(DisplayPrefsChange)({ enterSends: "sometimes" })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)

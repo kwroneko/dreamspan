@@ -342,6 +342,35 @@ export const PresetContext = Schema.Struct({
 export type PresetContext = typeof PresetContext.Type
 
 /** The next request boundary, also available before a first send or without a cache TTL. */
+/**
+ * An image of the path that the request leaves out, and why, as the assembler's registered
+ * `images` stage (or a plugin's stage after it) decided (ARCHITECTURE §15).
+ */
+export const ImageLeftOut = Schema.Struct({
+  slotId: SlotId,
+  versionId: VersionId,
+  mediaId: Schema.String,
+  depth: Schema.Int,
+  /** Its place among its message's images, from 0. */
+  index: Schema.Int,
+  /**
+   * The rule: `user` (taken out by the user), `hidden` (its message isn't sent), `history` (its
+   * message doesn't fit), `vision`, `limit` (the last-N limit), or a plugin's `<plugin>/<rule>`.
+   */
+  rule: Schema.String,
+  /** Why, for the user: "Only the last 4 images are sent to this model". */
+  message: Schema.String
+})
+export type ImageLeftOut = typeof ImageLeftOut.Type
+
+/** The images a request leaves out: each one it read, and depth ranges of messages it never read. */
+export const ImagesLeftOut = Schema.Struct({
+  images: Schema.Array(ImageLeftOut),
+  /** Every image of a message at a depth from `from` to `to` (inclusive): summarized, or too far back. */
+  ranges: Schema.Array(Schema.Struct({ from: Schema.Int, to: Schema.Int, rule: Schema.String, message: Schema.String }))
+})
+export type ImagesLeftOut = typeof ImagesLeftOut.Type
+
 export const NextContext = Schema.Struct({
   /** Which fork the estimate describes, including when two forks share a tip. */
   forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
@@ -361,7 +390,9 @@ export const NextContext = Schema.Struct({
   warmth: Schema.NullOr(CacheWarmth),
   leafSlotId: Schema.NullOr(Schema.String),
   historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int })),
-  summarizedThrough: Schema.NullOr(Schema.Int)
+  summarizedThrough: Schema.NullOr(Schema.Int),
+  /** The images the next request leaves out and why; absent when it can't be assembled. */
+  images: Schema.optionalKey(ImagesLeftOut)
 })
 export type NextContext = typeof NextContext.Type
 

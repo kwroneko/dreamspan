@@ -26,6 +26,8 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   card: CastCard,
   /** `first_mes`, then the alternate greetings; empty ones left out. */
   greetings: Schema.Array(Schema.String),
+  /** CCv3 group-only greetings, offered only with two or more character cards. */
+  groupGreetings: Schema.Array(Schema.String),
   description: Schema.String,
   personality: Schema.String,
   scenario: Schema.String
@@ -206,7 +208,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
-  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
+  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean }),
+  /** Which of the chat's own notes is its author's note; null for none. */
+  Schema.TaggedStruct("AuthorNote", { entityId: Schema.NullOr(EntityId) })
 ])
 export type CastChange = typeof CastChange.Type
 

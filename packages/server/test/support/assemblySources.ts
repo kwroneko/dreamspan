@@ -21,6 +21,7 @@ export interface FixtureMessage {
   readonly content: string
   readonly speaker?: string
   readonly macroMode?: "template" | "verbatim"
+  readonly images?: HistoryEntry["images"]
   readonly inContext?: boolean
   readonly frozen?: Readonly<Record<string, string>>
   /** A template whose variable writes are recorded already. */
@@ -71,7 +72,8 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     macroMode: m.macroMode ?? "verbatim",
     frozen: m.frozen ?? null,
     written: m.written ?? false,
-    inContext: m.inContext ?? m.content.length > 0,
+    inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
+    ...(m.images === undefined ? {} : { images: m.images }),
     sentAt: 0,
     versions: 1,
     selectedOrdinal: 0
