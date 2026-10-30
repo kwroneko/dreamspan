@@ -10,7 +10,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkRecency, forksShowing, onForkPath, sharedDepth } from "./forks.ts"
+import { forkRecency, forksShowing, lastShown, onForkPath, sharedDepth } from "./forks.ts"
 import { onDisplayPath, pathPieces, placedInsertions, type SlotPlace } from "./displayPath.ts"
 import {
   effectiveOverride,
@@ -439,8 +439,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         slots: counted!.slots + added.slots - kept.slots,
         bytes: counted!.bytes + added.bytes - kept.bytes
       }
+      const end = yield* lastShown(sql, fork.chat_id, fork)
       const [tip] = yield* sql<{ content: string }>`
-        SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${fork.tip_slot_id}`
+        SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${end}`
       const itemId = yield* insertItem({
         userId,
         kind: "branch",
