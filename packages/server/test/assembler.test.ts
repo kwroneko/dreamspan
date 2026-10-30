@@ -487,19 +487,29 @@ describe("the context assembler", () => {
       ])
     })
 
-    it("names the author's note by its state event as well as by its kind", async () => {
+    it("uses the chosen author's note ahead of an imported kind, and clears that choice explicitly", async () => {
       const plain = chatNote("note-z-plain", "Last.", { mode: "depth", depth: 0, role: "system" })
       const named = chatNote("note-zz-named", "First.", { mode: "depth", depth: 0, role: "system" })
-      const snapshot = await assembled(
-        chat({
-          notes: [plain, named],
-          events: [
-            ...on("note-z-plain", "note-zz-named"),
-            at(null, { key: "author_note.set", value: { note: "note-zz-named" as never } })
-          ]
-        })
+      const imported = chatNote(
+        "note-y-imported",
+        "Imported.",
+        { mode: "depth", depth: 0, role: "system" },
+        { kind: "author_note" }
       )
-      expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
+      for (const choice of ["note-zz-named", null]) {
+        const snapshot = await assembled(
+          chat({
+            notes: [plain, named, imported],
+            events: [
+              ...on("note-z-plain", "note-zz-named", "note-y-imported"),
+              at(null, { key: "author_note.set", value: { note: choice as EntityId | null } })
+            ]
+          })
+        )
+        expect(contents(snapshot).at(-1)).toBe(
+          choice === null ? "system: Imported.\nLast.\nFirst." : "system: First.\nImported.\nLast."
+        )
+      }
     })
 
     it("puts a note at the tail at depth 0, with its role", async () => {

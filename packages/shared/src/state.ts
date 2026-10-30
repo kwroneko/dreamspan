@@ -65,9 +65,14 @@ export type StateEventData = typeof StateEventData.Type
  * of the same value: a ref or revision of that entity, a revision of that ref's entity, a
  * model of that connection.
  */
-/** `chatOwned` also checks a note document's owner.chat when present. */
+/** `chatOwned` checks owner.chat when present; `required` permits only this chat's own notes. */
 type IdField<F extends string> =
-  | { readonly table: "entity"; readonly kind: EntityKind; readonly chatOwned?: true; readonly allowDeleted?: true }
+  | {
+      readonly table: "entity"
+      readonly kind: EntityKind
+      readonly chatOwned?: true | "required"
+      readonly allowDeleted?: true
+    }
   | { readonly table: "ref"; readonly kind: EntityKind; readonly entity?: F }
   | { readonly table: "revision"; readonly kind: EntityKind; readonly entity?: F; readonly ref?: F }
   | { readonly table: "connection" }
@@ -138,7 +143,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.global": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.below_history": { ids: {} },
   "var.set": { ids: {} },
-  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: true } } }
+  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: "required" } } }
 }
 
 /**

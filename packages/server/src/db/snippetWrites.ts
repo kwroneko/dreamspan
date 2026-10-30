@@ -92,12 +92,28 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
         if (current.revision !== expectedRevision)
           return yield* new StaleWrite({ entity: "snippet", id: refId, expected: 0, actual: 1 })
         const key = snippetKey(ref.id, current.global ? null : fork)
+        // An inherited snippet or an existing shared note has no draft here yet. Seed
+        // it from the resolved revision before recording the first edit, so Undo can
+        // recover that text after a reload, without sharing another fork's history.
+        let draft =
+          current.draft ??
+          (yield* drafts.save({
+            userId,
+            key,
+            draftId: null,
+            content: current.content,
+            base: null,
+            baseRevision: current.revision,
+            checkTarget: Effect.void
+          }))
+        if (draft.content !== current.content)
+          draft = yield* drafts.restore(userId, key, draft.id, 0, draft.rowVersion, current.content)
         yield* drafts.save({
           userId,
           key,
-          draftId: current.draft?.id ?? null,
+          draftId: draft.id,
           content,
-          base: current.draft ? { rowVersion: current.draft.rowVersion, session: current.draft.session } : null,
+          base: { rowVersion: draft.rowVersion, session: draft.session },
           baseRevision: current.revision,
           checkTarget: Effect.void
         })
@@ -124,6 +140,8 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
             message: "Made snippet global"
           })
           yield* steps.moveHead(ref.id, revision, null)
+          // Promotion keeps this view's undo history with the now-global text.
+          if (current.draft) yield* sql`UPDATE drafts SET field = '' WHERE id = ${current.draft.id}`
           yield* steps.changed(ref.id)
         }
         return (yield* readSnippet(sql, userId, yield* steps.reload(toLibraryRef(ref).id), chatId, fork))!
@@ -139,7 +157,13 @@ export const makeSnippetWrites = (steps: LibrarySteps) => {
         if (current.revision !== expectedRevision)
           return yield* new StaleWrite({ entity: "snippet", id: refId, expected: 0, actual: 1 })
         const key = snippetKey(ref.id, current.global ? null : fork)
-        const restored = yield* drafts.restore(userId, key, current.draft.id, seq, current.draft.rowVersion)
+        // Preserve a revision changed in the other note editor before restoring snippet
+        // history. A restore entry cannot coalesce away the state the user selected.
+        const draft =
+          current.draft.content === current.content
+            ? current.draft
+            : yield* drafts.restore(userId, key, current.draft.id, 0, current.draft.rowVersion, current.content)
+        const restored = yield* drafts.restore(userId, key, draft.id, seq, draft.rowVersion)
         yield* commit(
           ref,
           current,

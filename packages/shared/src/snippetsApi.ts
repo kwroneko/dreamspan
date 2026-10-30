@@ -52,7 +52,7 @@ export class SnippetsApi extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
-  /** The snippet's earlier texts, newest first, kept on the server across reloads. */
+  /** The snippet's texts, newest first. A current library revision not yet in its draft has seq -1; only earlier states are restore targets. */
   Rpc.make("SnippetHistory", {
     payload: SnippetHistoryFields,
     success: Schema.Array(DraftState),

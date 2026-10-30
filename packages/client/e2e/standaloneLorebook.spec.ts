@@ -6,6 +6,7 @@ import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
+import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -41,7 +42,21 @@ for (const width of [1440, 390]) {
     const {
       library: { ref }
     } = await response.json()
-    await page.goto(`${server().url}/library/${ref.id}`)
+    const chat = await admin((api) =>
+      Effect.gen(function* () {
+        const made = yield* api.CreateChat({ title: `Lorebook links ${width}` })
+        yield* api.ChangeCast({
+          chatId: made.id,
+          slotId: null,
+          change: { _tag: "Lorebook", ref: ref.id, active: true }
+        })
+        return made
+      })
+    )
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const panel = await openPanel(page, "Lorebooks")
+    await panel.getByRole("link", { name: `Open Saltmarsh ${width}`, exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`/library/${ref.id}$`))
     await expect(page.getByText("Lorebooks can't be edited here yet")).toHaveCount(0)
     await expect(page.getByRole("switch", { name: /Use in every chat/ })).toBeVisible()
     // The first entry opens; the others show their keys and the start of their text.

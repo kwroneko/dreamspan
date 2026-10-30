@@ -14,10 +14,11 @@ interface State {
   readonly error: string | null
   readonly saving: boolean
   readonly floating: boolean
+  readonly deleting: RefId | null
 }
 /** The workspace outlives its panel: switching tabs never cancels pending text. */
 export class SnippetWorkspace {
-  private state: State = { items: [], selected: null, error: null, saving: false, floating: false }
+  private state: State = { items: [], selected: null, error: null, saving: false, floating: false, deleting: null }
   private listeners = new Set<() => void>()
   private scope: Scope = { chatId: null, forkId: null }
   private openPanel: (() => void) | null = null
@@ -127,6 +128,7 @@ export class SnippetWorkspace {
     if (this.edit(ref, fields)) void this.save(ref)
   }
   private edit(ref: RefId, fields: { title?: string; content?: string }) {
+    if (this.state.deleting === ref) return false
     const item = this.state.items.find((i) => i.ref.id === ref)
     if (!item) return false
     const next = { ...item, ...fields }
@@ -208,7 +210,19 @@ export class SnippetWorkspace {
       ["library"]
     )
     if (!result.ok) return this.update({ error: result.error.message })
-    this.update({ error: null, items: this.state.items.map((i) => (i.ref.id === ref ? result.value : i)) })
+    // Typing can continue while the restore is on its way. Keep it on the acknowledged
+    // revision so its queued save does not replace it with the restored response.
+    const latest = this.state.items.find((i) => i.ref.id === ref)
+    this.update({
+      error: null,
+      items: this.state.items.map((i) =>
+        i.ref.id !== ref
+          ? i
+          : latest && this.dirty.has(ref)
+            ? { ...result.value, title: latest.title, content: latest.content }
+            : result.value
+      )
+    })
   }
   /** How many notes in cards and chats show the snippet, which deleting it leaves showing nothing. */
   usedBy = async (ref: RefId) => {
@@ -221,24 +235,30 @@ export class SnippetWorkspace {
   /** Deletes the snippet to the bin, its pending text first, so Undo brings back what was typed. */
   remove = async (ref: RefId) => {
     let deleted: BinItem | null = null
-    await this.enqueue(async () => {
-      await this.saveNow(ref)
-      const result = await this.call((api) => api("DeleteNote", { noteRefId: ref }), ["library"])
-      if (!result.ok) return this.update({ error: result.error.message })
-      this.dirty.delete(ref)
-      try {
-        localStorage.removeItem(this.key(ref))
-      } catch {
-        /* The bin has its text. */
-      }
-      const items = this.state.items.filter((i) => i.ref.id !== ref)
-      this.update({
-        error: null,
-        items,
-        selected: this.state.selected === ref ? (items[0]?.ref.id ?? null) : this.state.selected
+    this.update({ deleting: ref })
+    try {
+      await this.enqueue(async () => {
+        await this.saveNow(ref)
+        if (this.dirty.has(ref)) return
+        const result = await this.call((api) => api("DeleteNote", { noteRefId: ref }), ["library"])
+        if (!result.ok) return this.update({ error: result.error.message })
+        this.dirty.delete(ref)
+        try {
+          localStorage.removeItem(this.key(ref))
+        } catch {
+          /* The bin has its text. */
+        }
+        const items = this.state.items.filter((i) => i.ref.id !== ref)
+        this.update({
+          error: null,
+          items,
+          selected: this.state.selected === ref ? (items[0]?.ref.id ?? null) : this.state.selected
+        })
+        deleted = result.value
       })
-      deleted = result.value
-    })
+    } finally {
+      this.update({ deleting: null })
+    }
     return deleted
   }
   send = (text: string) => {

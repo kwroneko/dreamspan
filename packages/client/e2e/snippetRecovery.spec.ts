@@ -21,6 +21,57 @@ const shoot = async (page: Page, name: string) => {
 }
 
 for (const width of [1440, 390]) {
+  test(`an inherited snippet's first edit is undoable after reload and promotion at ${width}`, async ({ page }) => {
+    test.setTimeout(120_000)
+    await page.setViewportSize({ width, height: 1000 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const chat = await admin((api) => api.CreateChat({ title: `Inherited snippet ${width}` }))
+    const original = "The harbour is quiet before dawn."
+    const made = await admin((api) =>
+      api.CreateSnippet({ chatId: chat.id, forkId: chat.currentForkId, title: `Inherited ${width}`, content: original })
+    )
+    try {
+      const child = await admin((api) =>
+        api.CreateFork({ chatId: chat.id, fromForkId: chat.currentForkId, atSlotId: null })
+      )
+      const scope = { chatId: chat.id, forkId: child.fork.id }
+      await page.goto(`${server().url}/chats/${chat.id}`)
+      let panel = await openPanel(page, "Snippets")
+      const select = () =>
+        panel
+          .getByRole("list", { name: "Snippets" })
+          .getByRole("button", { name: new RegExp(`^Inherited ${width}`) })
+          .click()
+      await select()
+      const editor = () => panel.getByRole("textbox", { name: "Snippet text" })
+      await expect(editor()).toHaveText(original)
+      await editor().fill("Replacement.")
+      await expect.poll(async () => (await admin((api) => api.ListSnippets(scope)))[0]?.content).toBe("Replacement.")
+      await page.reload()
+      panel = await openPanel(page, "Snippets")
+      await select()
+      await panel.getByRole("button", { name: `Undo Inherited ${width}`, exact: true }).click()
+      await expect(editor()).toHaveText(original)
+      await panel.getByRole("button", { name: "Make global", exact: true }).click()
+      await expect(panel.getByRole("button", { name: "Make global", exact: true })).toHaveCount(0)
+      await page.reload()
+      panel = await openPanel(page, "Snippets")
+      await select()
+      await panel.getByRole("button", { name: `Earlier text of Inherited ${width}`, exact: true }).click()
+      const dialog = page.getByRole("dialog", { name: `Earlier text of Inherited ${width}` })
+      const replacement = dialog.getByRole("listitem").filter({ hasText: "12 characters" })
+      await expect(replacement).toHaveCount(1)
+      await shoot(page, `snippet-promoted-history-${width}`)
+      await replacement.getByRole("button", { name: "Restore" }).click()
+      await expect(editor()).toHaveText("Replacement.")
+      const parent = (await admin((api) => api.ListSnippets({ chatId: chat.id, forkId: chat.currentForkId })))[0]!
+      expect(parent.global).toBe(true)
+      expect(parent.content).toBe("Replacement.")
+    } finally {
+      await admin((api) => api.DeleteNote({ noteRefId: made.ref.id }))
+    }
+  })
+
   test(`a snippet's earlier text survives a reload and comes back with Undo or Earlier text at ${width}`, async ({
     page
   }) => {

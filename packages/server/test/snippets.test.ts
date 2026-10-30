@@ -6,6 +6,78 @@ import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { client, outcome, testConfig, withServer } from "./support/config.ts"
 
 describe("snippets", () => {
+  it.live("keeps the current library revision when restoring a shared note's snippet history", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const scope = { chatId: null, forkId: null }
+      const made = yield* api.CreateSnippet({ ...scope, title: "Shared history", content: "First text." })
+      yield* api.SaveSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: made.revision,
+        title: made.title,
+        content: "Second passage."
+      })
+      const opened = yield* api.OpenEditor({ refId: made.ref.id })
+      yield* api.RestoreRevision({
+        refId: made.ref.id,
+        revisionId: made.revision,
+        expectedRowVersion: opened.ref.rowVersion
+      })
+      const current = (yield* api.ListSnippets(scope))[0]!
+      const history = yield* api.SnippetHistory({ ...scope, refId: made.ref.id, limit: 10 })
+      assert.deepStrictEqual(
+        history.map((state) => state.length),
+        ["First text.".length, "Second passage.".length, "First text.".length]
+      )
+      yield* api.RestoreSnippet({
+        ...scope,
+        refId: made.ref.id,
+        expectedRevision: current.revision,
+        seq: history[1]!.seq
+      })
+      assert.strictEqual((yield* api.ListSnippets(scope))[0]!.content, "Second passage.")
+      const after = yield* api.SnippetHistory({ ...scope, refId: made.ref.id, limit: 10 })
+      assert.strictEqual(after[1]!.length, "First text.".length)
+      assert.strictEqual(after[1]!.kind, "restore")
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+  it.live("keeps the inherited or existing shared text before a snippet's first edit", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Inherited recovery" })
+      const originalScope = { chatId: chat.id, forkId: chat.currentForkId }
+      const made = yield* api.CreateSnippet({ ...originalScope, title: "Weather", content: "Rain before the fork." })
+      const child = (yield* api.CreateFork({ ...originalScope, fromForkId: originalScope.forkId, atSlotId: null })).fork
+      const old = yield* api.CreateSharedNote({ title: "Existing shared note", content: "Existing shared text." })
+      for (const [scope, refId] of [
+        [{ chatId: chat.id, forkId: child.id }, made.ref.id],
+        [{ chatId: null, forkId: null }, old.id]
+      ] as const) {
+        const before = (yield* api.ListSnippets(scope)).find((item) => item.ref.id === refId)!
+        const saved = yield* api.SaveSnippet({
+          ...scope,
+          refId,
+          expectedRevision: before.revision,
+          title: before.title,
+          content: "Replacement."
+        })
+        const history = yield* api.SnippetHistory({ ...scope, refId, limit: 10 })
+        assert.strictEqual(history.length, 2)
+        const restored = yield* api.RestoreSnippet({
+          ...scope,
+          refId,
+          expectedRevision: saved.revision,
+          seq: history[1]!.seq
+        })
+        assert.strictEqual(restored.content, before.content)
+      }
+      assert.strictEqual(
+        (yield* api.ListSnippets(originalScope)).find((item) => item.ref.id === made.ref.id)!.content,
+        made.content
+      )
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
   it.live("a snippet's earlier text is listed and restored from the server, in its own fork only", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -52,6 +124,15 @@ describe("snippets", () => {
       const after = yield* api.SnippetHistory({ ...scope, refId: made.ref.id, limit: 10 })
       assert.strictEqual(after[0]!.kind, "restore")
       assert.isTrue(after.some((state) => state.length === "Replaced.".length))
+      const global = yield* api.MakeSnippetGlobal({ ...scope, refId: made.ref.id, expectedRevision: restored.revision })
+      const outside = { chatId: null, forkId: null, refId: made.ref.id }
+      assert.deepStrictEqual(yield* api.SnippetHistory({ ...outside, limit: 10 }), after)
+      const globalRestore = yield* api.RestoreSnippet({
+        ...outside,
+        expectedRevision: global.revision,
+        seq: history[0]!.seq
+      })
+      assert.strictEqual(globalRestore.content, "Replaced.")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
   it.live("assembles linked snippets from the viewed fork and rebuilds the pinned text", () =>

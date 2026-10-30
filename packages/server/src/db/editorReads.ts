@@ -3,6 +3,7 @@ import { readSnippet, snippetFork, snippetKey } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { DraftState } from "@rp/shared/drafts.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
@@ -41,7 +42,23 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         const current = yield* readSnippet(sql, userId, yield* lib.ownedRef(userId, refId), chatId, fork)
         if (!current) return yield* new NotFound({ entity: "snippet", id: refId })
         const draft = yield* drafts.find(userId, snippetKey(refId, current.global ? null : fork))
-        return draft === null ? [] : yield* drafts.history(draft, limit)
+        if (draft === null) return []
+        const history = yield* drafts.history(draft, limit)
+        // The shared note can also change through the library editor or revision restore.
+        // Its current revision is "Now"; every state of the older snippet draft is earlier.
+        return draft.content === current.content
+          ? history
+          : [
+              new DraftState({
+                seq: -1,
+                at: current.ref.updatedAt,
+                length: current.content.length,
+                removed: "",
+                inserted: "",
+                kind: "edit"
+              }),
+              ...history
+            ].slice(0, limit)
       }).pipe(query("SnippetHistory")),
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {

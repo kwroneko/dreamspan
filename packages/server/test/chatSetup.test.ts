@@ -800,11 +800,15 @@ describe("queued edits", () => {
       yield* choose(later.entry.slotId, null)
       assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), [])
       assert.deepStrictEqual(yield* authorNotes(first), ["Mood"])
-      // A card's note is the card's, in every chat: naming one leaves the chat without an
-      // author's note rather than making it one (the listing and the assembler skip card notes).
+      // Only a chat's own notes can be its author's note. A refused choice keeps the old one.
       yield* choose(later.entry.slotId, mood.entityId)
-      yield* choose(later.entry.slotId, cardNote.entityId)
-      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), [])
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, cardNote.entityId)), "NotFound")
+      const shared = yield* api.CreateSnippet({ chatId, forkId: null, title: "Shared", content: "Fog." })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, shared.ref.entityId)), "NotFound")
+      const other = yield* api.CreateChat({ title: "Other" })
+      const foreign = yield* api.CreateChatNote({ chatId: other.id, title: "Elsewhere" })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, foreign.entityId)), "NotFound")
+      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), ["Mood"])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 })
