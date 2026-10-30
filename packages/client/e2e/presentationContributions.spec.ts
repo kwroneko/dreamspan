@@ -131,7 +131,10 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await plugin(page, "close")
   await expect(page.getByText("Plugin row", { exact: true })).toHaveCount(0)
   await plugin(page, "providers")
-  await expect(page.locator("[data-plugin-provider]")).toHaveCount(3)
+  // As many as are registered (six since display, images and snippets added theirs).
+  const providers = Number(await page.locator("body").getAttribute("data-plugin-provider-count"))
+  expect(providers).toBeGreaterThanOrEqual(3)
+  await expect(page.locator("[data-plugin-provider]")).toHaveCount(providers)
   await plugin(page, "close")
   await expect(page.locator("[data-plugin-provider]")).toHaveCount(0)
   await plugin(page, "composer")

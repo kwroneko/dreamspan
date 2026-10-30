@@ -87,6 +87,8 @@ export const install = async (mode: "surfaces" | "fields" | "rows" | "hide" | "p
       await own(registry.disable(id))
   }
   if (mode === "providers") {
+    // Every registered provider is wrapped; the test checks each one mounts.
+    document.body.dataset.pluginProviderCount = String(chatSurfaceProviders.list().length)
     for (const entry of chatSurfaceProviders.list())
       await own(
         chatSurfaceProviders.register({
