@@ -1,5 +1,6 @@
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { BinItem } from "@rp/shared/bin.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { Caller } from "../editor/caller.ts"
 
@@ -208,6 +209,37 @@ export class SnippetWorkspace {
     )
     if (!result.ok) return this.update({ error: result.error.message })
     this.update({ error: null, items: this.state.items.map((i) => (i.ref.id === ref ? result.value : i)) })
+  }
+  /** How many notes in cards and chats show the snippet, which deleting it leaves showing nothing. */
+  usedBy = async (ref: RefId) => {
+    const { chatId, forkId } = this.scope
+    const result = await this.call((api) =>
+      api("ListSharedNotes", { refId: ref, ...(chatId === null ? {} : { chatNote: { chatId, forkId, slotId: null } }) })
+    )
+    return result.ok ? (result.value[0]?.usedBy ?? 0) : 0
+  }
+  /** Deletes the snippet to the bin, its pending text first, so Undo brings back what was typed. */
+  remove = async (ref: RefId) => {
+    let deleted: BinItem | null = null
+    await this.enqueue(async () => {
+      await this.saveNow(ref)
+      const result = await this.call((api) => api("DeleteNote", { noteRefId: ref }), ["library"])
+      if (!result.ok) return this.update({ error: result.error.message })
+      this.dirty.delete(ref)
+      try {
+        localStorage.removeItem(this.key(ref))
+      } catch {
+        /* The bin has its text. */
+      }
+      const items = this.state.items.filter((i) => i.ref.id !== ref)
+      this.update({
+        error: null,
+        items,
+        selected: this.state.selected === ref ? (items[0]?.ref.id ?? null) : this.state.selected
+      })
+      deleted = result.value
+    })
+    return deleted
   }
   send = (text: string) => {
     this.open()

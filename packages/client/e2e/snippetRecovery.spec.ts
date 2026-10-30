@@ -63,3 +63,51 @@ for (const width of [1440, 390]) {
     await expect.poll(content).toBe("Replaced.")
   })
 }
+
+for (const width of [1440, 390]) {
+  test(`a snippet is deleted to the bin with Undo, and a shared one says what shows it at ${width}`, async ({
+    page
+  }) => {
+    test.setTimeout(120_000)
+    await page.setViewportSize({ width, height: 1000 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const chat = await admin((api) => api.CreateChat({ title: `Snippet tidy ${width}` }))
+    const scope = { chatId: chat.id, forkId: null }
+    await admin((api) => api.CreateSnippet({ ...scope, title: `Empty ${width}`, content: "" }))
+    const linked = await admin((api) => api.CreateSnippet({ ...scope, title: `Shown ${width}`, content: "Fog." }))
+    await admin((api) =>
+      api.CreateChatNote({ chatId: chat.id, forkId: chat.currentForkId, title: "Weather", link: linked.ref.entityId })
+    )
+    const titles = async () =>
+      (await admin((api) => api.ListSnippets(scope))).map((item) => item.title).filter((t) => t.endsWith(`${width}`))
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const panel = await openPanel(page, "Snippets")
+    const list = panel.getByRole("list", { name: "Snippets" })
+
+    // An unused snippet goes straight to the bin; the toast's Undo brings it back.
+    await list.getByRole("button", { name: new RegExp(`^Empty ${width}`) }).click()
+    await panel.getByRole("button", { name: `Delete Empty ${width}`, exact: true }).click()
+    await expect(page.getByText(`Deleted: Empty ${width}`)).toBeVisible()
+    await expect(list.getByRole("button", { name: new RegExp(`^Empty ${width}`) })).toHaveCount(0)
+    await expect.poll(titles).toEqual([`Shown ${width}`])
+    await shoot(page, `snippet-deleted-${width}`)
+    await page.getByRole("button", { name: "Undo", exact: true }).click()
+    await expect(list.getByRole("button", { name: new RegExp(`^Empty ${width}`) })).toBeVisible()
+    await expect.poll(titles).toEqual([`Empty ${width}`, `Shown ${width}`])
+
+    // A snippet a chat note shows asks first, and says so.
+    await list.getByRole("button", { name: new RegExp(`^Shown ${width}`) }).click()
+    await panel.getByRole("button", { name: `Delete Shown ${width}`, exact: true }).click()
+    const confirm = page.getByRole("alertdialog", { name: `Delete Shown ${width}?` })
+    await expect(confirm).toContainText("1 note in a card or chat shows it")
+    await shoot(page, `snippet-delete-shared-${width}`)
+    await confirm.getByRole("button", { name: "Cancel" }).click()
+    await expect.poll(titles).toEqual([`Empty ${width}`, `Shown ${width}`])
+    await panel.getByRole("button", { name: `Delete Shown ${width}`, exact: true }).click()
+    await confirm.getByRole("button", { name: "Delete snippet" }).click()
+    await expect(page.getByText(`Deleted: Shown ${width}`)).toBeVisible()
+    await expect.poll(titles).toEqual([`Empty ${width}`])
+    const bin = await admin((api) => api.ListBin({ limit: 50, before: null }))
+    expect(bin.some((item) => item.kind === "entity" && item.title === `Shown ${width}`)).toBe(true)
+  })
+}

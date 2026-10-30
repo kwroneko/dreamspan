@@ -11,6 +11,7 @@ import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { DeleteSnippet } from "./delete.tsx"
 import { SnippetHistory } from "./history.tsx"
 import { snippetTools } from "./slots.ts"
 import { SnippetWorkspace } from "./workspace.ts"
@@ -173,6 +174,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
 }
 export const register = () => [
   snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
+  snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
   appTools.register({ id: "snippets.tools", order: 20, component: Tools }),
   chatSurfaceProviders.register({ id: "snippets.scope", order: 20, component: Scope }),
   chatPanels.register({
