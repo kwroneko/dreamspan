@@ -14,7 +14,7 @@ It stays compatible with what users already have: ST cards, chat-completion pres
 
 ## Status
 
-Phase 0 (foundations). The scaffold runs: a typed RPC server over WebSocket, SQLite in worker threads, auth, and a placeholder client. [ARCHITECTURE.md](ARCHITECTURE.md) describes what's implemented.
+Built through the Phase 3 LCM implementation (2026-10-30): ST imports, streaming roleplay chats, independent forks and message versions, library editors, protected drafts, image input and context estimates, and hierarchical summarization. Agentic RP and workshop features remain planned. [ARCHITECTURE.md](ARCHITECTURE.md) describes what's implemented.
 
 ```bash
 npm install

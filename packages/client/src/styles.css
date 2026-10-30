@@ -221,6 +221,39 @@ main:has(> [data-fill]) {
   padding: 0;
   background: none;
 }
+/* Streamdown wraps a fenced block in a frame with a language header around a framed body:
+   one frame here, the `.markdown pre` look, with the language as its quiet label. Its border
+   keeps it visible on a message drawn on the same raised surface (the user's). */
+.markdown [data-streamdown="code-block"] {
+  display: block;
+  margin: 0;
+  padding: 0.5em 1em 0.75em;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+}
+.markdown > [data-streamdown="code-block"] + *,
+.markdown > * + [data-streamdown="code-block"] {
+  margin-top: 0.75em;
+}
+.markdown [data-streamdown="code-block-header"] {
+  height: auto;
+  margin-bottom: 0.25em;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.markdown [data-streamdown="code-block-header"] > span {
+  margin: 0;
+}
+.markdown [data-streamdown="code-block-body"],
+.markdown [data-streamdown="code-block"] pre {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}
 .markdown table {
   display: block;
   max-width: 100%;

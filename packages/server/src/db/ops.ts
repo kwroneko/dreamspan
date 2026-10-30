@@ -114,7 +114,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
-import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
+import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -2765,6 +2765,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, versionId: VersionId },
     success: RunContext,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */
+  Rpc.make("VersionMetrics", {
+    payload: { userId: UserId, versionIds: Schema.Array(VersionId) },
+    success: Schema.Array(VersionMetrics),
+    error: StorageError
   }),
   /** Whether a prior request covers the entire requested provider cache endpoint. */
   Rpc.make("CachePrefixWarm", {

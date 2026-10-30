@@ -407,6 +407,7 @@ describe("paths by chain segment", () => {
           `Rows visited with 1,000 insertions, 2,000 / 100,000 slots: ${JSON.stringify(small.visited)} / ${JSON.stringify(large.visited)}`
         )
         // The segments are the branch points, the same in both; the insertions are the fork's.
+        assert.deepStrictEqual(large.visited.segments, small.visited.segments)
         assert.deepStrictEqual(large.visited.placed, small.visited.placed)
         assert.deepStrictEqual(large.visited.tipWindow, small.visited.tipWindow)
         assert.deepStrictEqual(large.visited.branchyWindow, small.visited.branchyWindow)
