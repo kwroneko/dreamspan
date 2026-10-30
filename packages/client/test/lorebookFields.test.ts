@@ -2,7 +2,7 @@ import { expect, it } from "vitest"
 import { applyDrafts, getAt, textField, valueField } from "@rp/shared/editing.ts"
 import { editorTextFields, searchable } from "../src/features/editor/fields.ts"
 import { emptyBook, emptyEntry } from "../src/features/editor/lorebookDefaults.ts"
-import { lorebookFields } from "../src/features/editor/lorebookFields.ts"
+import { entryMatches, lorebookFields, standaloneLorebookFields } from "../src/features/editor/lorebookFields.ts"
 import { searchTexts } from "../src/features/editor/searchCore.ts"
 
 it("registered embedded lore search writes valid drafts by uid and preserves other data", () => {
@@ -63,4 +63,41 @@ it("registered embedded lore search writes valid drafts by uid and preserves oth
   } finally {
     undo()
   }
+})
+
+it("a standalone lorebook's search covers the whole document, by uid, and the entry filter reads titles, keys and text", () => {
+  const entry = {
+    ...emptyEntry(9),
+    comment: "Docks",
+    content: "Tar and rope",
+    keys: ["pier"],
+    secondary_keys: ["gull"]
+  }
+  const doc = { ...emptyBook(), name: "Port book", entries: [entry, emptyEntry(3)] }
+  const undo = editorTextFields.register({ id: "lorebook.entries", kind: "lorebook", fields: standaloneLorebookFields })
+  try {
+    const fields = searchable("lorebook", doc)
+    expect(fields.map((field) => field.path)).toContainEqual(["entries", "uid=9", "content"])
+    expect(fields.find((field) => field.text === "pier")).toMatchObject({
+      path: ["entries", "uid=9", "keys", 0],
+      inList: { path: ["entries", "uid=9", "keys"], index: 0 }
+    })
+    const applied = applyDrafts("lorebook", doc, [
+      { field: textField(["entries", "uid=9", "content"]), content: "Tar, rope and salt" }
+    ])
+    expect(applied.problems).toEqual([])
+    expect((applied.doc as typeof doc).entries[0]).toMatchObject({ uid: 9, content: "Tar, rope and salt" })
+    // Card search is unaffected by the standalone contribution.
+    expect(searchable("card", { character_book: doc })).toEqual([])
+  } finally {
+    undo()
+  }
+  expect(["docks", "PIER", "gull", "rope", ""].map((filter) => entryMatches(entry, filter))).toEqual([
+    true,
+    true,
+    true,
+    true,
+    true
+  ])
+  expect(entryMatches(entry, "lantern")).toBe(false)
 })

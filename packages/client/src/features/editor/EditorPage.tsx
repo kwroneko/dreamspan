@@ -8,11 +8,12 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
-import { GlobalLorebook } from "./GlobalLorebook.tsx"
+import { lorebookEditorSections } from "./cardSections.ts"
+import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
-import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Button } from "../../ui/Button.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { AppClient } from "../../rpc.ts"
@@ -305,20 +306,7 @@ export function Editor({
             <NoteFields store={store} />
           </Card>
         )}
-        {ref.kind === "lorebook" && (
-          <Card>
-            <GlobalLorebook refId={ref.id} call={call} />
-          </Card>
-        )}
-        {ref.kind === "lorebook" && (
-          <Alert title="Lorebooks can't be edited here yet">
-            <p>
-              <Link to="/library" className={buttonClass("ghost")}>
-                Back to the library
-              </Link>
-            </p>
-          </Alert>
-        )}
+        {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
 
         {open === "save" && (
           <SaveDialog

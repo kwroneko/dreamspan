@@ -33,7 +33,8 @@ export const useDeletedToast = () => {
   const registry = useContext(RegistryContext)
   const navigate = useNavigate()
   return useCallback(
-    (item: BinItem) =>
+    /** `onRestored`: for a view that doesn't read the restored lists again by itself. */
+    (item: BinItem, onRestored?: () => void) =>
       showToast({
         title: `Deleted: ${binTitle(item)}`,
         ...(item.excerpt && item.kind !== "entity" && item.kind !== "connection" ? { description: item.excerpt } : {}),
@@ -43,6 +44,7 @@ export const useDeletedToast = () => {
             onClick: () =>
               void restoreItem(registry, item.id).then((exit) => {
                 if (exit._tag === "Failure") showToast({ title: describeCause(exit.cause).message })
+                else onRestored?.()
               })
           },
           { label: "Open the bin", onClick: () => void navigate({ to: "/bin" }) }

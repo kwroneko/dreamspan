@@ -1,5 +1,6 @@
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import type { BinItem } from "@rp/shared/bin.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { Caller } from "../editor/caller.ts"
 
@@ -13,10 +14,11 @@ interface State {
   readonly error: string | null
   readonly saving: boolean
   readonly floating: boolean
+  readonly deleting: RefId | null
 }
 /** The workspace outlives its panel: switching tabs never cancels pending text. */
 export class SnippetWorkspace {
-  private state: State = { items: [], selected: null, error: null, saving: false, floating: false }
+  private state: State = { items: [], selected: null, error: null, saving: false, floating: false, deleting: null }
   private listeners = new Set<() => void>()
   private scope: Scope = { chatId: null, forkId: null }
   private openPanel: (() => void) | null = null
@@ -126,6 +128,7 @@ export class SnippetWorkspace {
     if (this.edit(ref, fields)) void this.save(ref)
   }
   private edit(ref: RefId, fields: { title?: string; content?: string }) {
+    if (this.state.deleting === ref) return false
     const item = this.state.items.find((i) => i.ref.id === ref)
     if (!item) return false
     const next = { ...item, ...fields }
@@ -179,6 +182,84 @@ export class SnippetWorkspace {
             : { ...result.value, title: latest.title, content: latest.content }
       )
     })
+  }
+  /** The snippet's earlier texts on the server, newest first; pending typing is saved first. */
+  history = (ref: RefId, limit = 50) =>
+    this.enqueue(() => this.saveNow(ref)).then(() =>
+      this.call((api) => api("SnippetHistory", { ...this.scope, refId: ref, limit }))
+    )
+  /** Restores state `seq` of the text history as the snippet's text. */
+  restore = (ref: RefId, seq: number) => this.enqueue(() => this.restoreNow(ref, seq))
+  /** One step back in the server's text history, so it works after a reload too. */
+  undo = (ref: RefId) =>
+    this.enqueue(async () => {
+      await this.saveNow(ref)
+      if (this.dirty.has(ref)) return
+      const result = await this.call((api) => api("SnippetHistory", { ...this.scope, refId: ref, limit: 2 }))
+      if (!result.ok) return this.update({ error: result.error.message })
+      const earlier = result.value[1]
+      if (earlier === undefined) return this.update({ error: "There's no earlier text to go back to." })
+      await this.restoreNow(ref, earlier.seq)
+    })
+  private restoreNow = async (ref: RefId, seq: number) => {
+    await this.saveNow(ref)
+    const item = this.state.items.find((i) => i.ref.id === ref)
+    if (!item || this.dirty.has(ref)) return
+    const result = await this.call(
+      (api) => api("RestoreSnippet", { ...this.scope, refId: ref, seq, expectedRevision: item.revision }),
+      ["library"]
+    )
+    if (!result.ok) return this.update({ error: result.error.message })
+    // Typing can continue while the restore is on its way. Keep it on the acknowledged
+    // revision so its queued save does not replace it with the restored response.
+    const latest = this.state.items.find((i) => i.ref.id === ref)
+    this.update({
+      error: null,
+      items: this.state.items.map((i) =>
+        i.ref.id !== ref
+          ? i
+          : latest && this.dirty.has(ref)
+            ? { ...result.value, title: latest.title, content: latest.content }
+            : result.value
+      )
+    })
+  }
+  /** How many notes in cards and chats show the snippet, which deleting it leaves showing nothing. */
+  usedBy = async (ref: RefId) => {
+    const { chatId, forkId } = this.scope
+    const result = await this.call((api) =>
+      api("ListSharedNotes", { refId: ref, ...(chatId === null ? {} : { chatNote: { chatId, forkId, slotId: null } }) })
+    )
+    return result.ok ? (result.value[0]?.usedBy ?? 0) : 0
+  }
+  /** Deletes the snippet to the bin, its pending text first, so Undo brings back what was typed. */
+  remove = async (ref: RefId) => {
+    let deleted: BinItem | null = null
+    this.update({ deleting: ref })
+    try {
+      await this.enqueue(async () => {
+        await this.saveNow(ref)
+        if (this.dirty.has(ref)) return
+        const result = await this.call((api) => api("DeleteNote", { noteRefId: ref }), ["library"])
+        if (!result.ok) return this.update({ error: result.error.message })
+        this.dirty.delete(ref)
+        try {
+          localStorage.removeItem(this.key(ref))
+        } catch {
+          /* The bin has its text. */
+        }
+        const items = this.state.items.filter((i) => i.ref.id !== ref)
+        this.update({
+          error: null,
+          items,
+          selected: this.state.selected === ref ? (items[0]?.ref.id ?? null) : this.state.selected
+        })
+        deleted = result.value
+      })
+    } finally {
+      this.update({ deleting: null })
+    }
+    return deleted
   }
   send = (text: string) => {
     this.open()

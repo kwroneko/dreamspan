@@ -208,7 +208,9 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
-  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
+  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean }),
+  /** Which of the chat's own notes is its author's note; null for none. */
+  Schema.TaggedStruct("AuthorNote", { entityId: Schema.NullOr(EntityId) })
 ])
 export type CastChange = typeof CastChange.Type
 
