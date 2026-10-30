@@ -2188,6 +2188,16 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
     expect(contents(snapshot)[0]).toBe(
       "system: All: <Mira>\nMira keeps the ledger for Tobin.\n</Mira>\n<Rook>\nRook counts boats.\n</Rook>"
     )
+    for (const [field, title] of [
+      ["description", "descriptions"],
+      ["personality", "personalities"],
+      ["scenario", "scenarios"]
+    ] as const) {
+      expect(snapshot.pieces.find((piece) => piece.id === `cards:macro:${field}`)?.source).toEqual({
+        kind: "assembler",
+        what: `The characters' ${title}`
+      })
+    }
   })
 
   it("keeps a muted member's definition, and puts card notes at the top of their card's part", async () => {
