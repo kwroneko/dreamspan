@@ -227,3 +227,12 @@ export const displayEnd = (pieces: ReadonlyArray<PathPiece>, tipSlotId: string |
   const last = pieces.at(-1)
   return last?.kind === "inserted" ? last.slotId : tipSlotId
 }
+
+/** A slot's place, read by id, and whether it was inserted; null when it isn't the chat's. */
+export const slotPlace = (sql: SqlClient.SqlClient, chatId: string, slotId: string) =>
+  Effect.map(
+    sql<{ id: string; chain_id: string; depth: number; inserted: number }>`
+      SELECT id, chain_id, depth, inserted FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`,
+    ([row]): (SlotPlace & { readonly inserted: boolean }) | null =>
+      row === undefined ? null : { id: row.id, chainId: row.chain_id, depth: row.depth, inserted: row.inserted === 1 }
+  )

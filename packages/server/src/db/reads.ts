@@ -59,7 +59,9 @@ const decodeStateEvent = Schema.decodeUnknownEffect(FoldableEvent)
  */
 const siblingCount = (also = "") => {
   const reachable = `x.lane_id = s.lane_id ${also} AND ${reachableSlot("x")}`
-  return `CASE WHEN s.parent_slot_id IS NULL
+  // An inserted message is the only one at its place (spec/MESSAGE-INSERT.md §2.4).
+  return `CASE WHEN s.inserted = 1 THEN ${also === "" ? 1 : 0}
+    WHEN s.parent_slot_id IS NULL
     THEN (SELECT count(*) FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = s.chat_id AND x.depth = 0 AND ${reachable})
     ELSE (SELECT count(*) FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = s.parent_slot_id AND ${reachable}) END`
 }
@@ -618,8 +620,13 @@ export const makeReadHandlers = Effect.gen(function* () {
     // The siblings SwitchBranch counts, in its order, with each one's name and first words.
     ListBranches: ({ userId, slotId, forkId }) =>
       Effect.gen(function* () {
-        const [slot] = yield* sql<{ chat_id: string; parent_slot_id: string | null; lane_id: string }>`
-          SELECT s.chat_id, s.parent_slot_id, s.lane_id FROM slots s JOIN chats c ON c.id = s.chat_id
+        const [slot] = yield* sql<{
+          chat_id: string
+          parent_slot_id: string | null
+          lane_id: string
+          inserted: number
+        }>`
+          SELECT s.chat_id, s.parent_slot_id, s.lane_id, s.inserted FROM slots s JOIN chats c ON c.id = s.chat_id
           WHERE s.id = ${slotId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`
         if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
         // Each alternate's first words as the fork named shows them, else the fork through it.
@@ -629,13 +636,17 @@ export const makeReadHandlers = Effect.gen(function* () {
         const columns = sql`x.id, ${sql.literal(branchLabel("x"))} AS branch_name, CASE WHEN NOT ${slotDeletedIn(sql, shown, "x")}
           THEN substr((SELECT v.content FROM versions v WHERE v.id = ${shownIn(sql, shown, "x")}), 1, 160)
           ELSE '' END AS preview`
+        // An inserted message has no alternates: it's the only one at its place.
         const rows =
-          slot.parent_slot_id === null
+          slot.inserted === 1
             ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+                SELECT ${columns} FROM slots x WHERE x.id = ${slotId}`
+            : slot.parent_slot_id === null
+              ? yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${slot.chat_id}
                   AND x.depth = 0 AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`
-            : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
+              : yield* sql<{ id: SlotId; branch_name: string | null; preview: string }>`
                 SELECT ${columns} FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
                   AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                 ORDER BY x.id`

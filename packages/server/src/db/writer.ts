@@ -1,5 +1,6 @@
 import { stateModuleHandlers } from "./stateModules.ts"
 import { makeHistoryWriteHandlers } from "./historyWrites.ts"
+import { makeInsertWriteHandlers } from "./insertWrites.ts"
 import { makeLcmQueueHandlers } from "./lcmQueue.ts"
 import { makeLcmEnableWriteHandlers } from "./lcmEnableWrites.ts"
 import { makeLcmUiWriteHandlers } from "./lcmUiWrites.ts"
@@ -59,6 +60,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
         return WriteOps.of(
           stateModuleHandlers({
             ...(yield* makeHistoryWriteHandlers),
+            ...(yield* makeInsertWriteHandlers(bin)),
             ...graph,
             ...library,
             ...binOps,

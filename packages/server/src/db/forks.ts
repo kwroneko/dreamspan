@@ -1,9 +1,11 @@
 // Forks (spec/FORK-INDEPENDENCE-DELTA.md §2.1; schema/forks.ts): what readers and the writer
 // share. A slot is on a fork's path iff a chain segment of its tip holds it (pathSegments.ts),
-// so the checks here cost the path's branch points, not its length.
+// so the checks here cost the path's branch points, not its length. What a fork shows is its
+// display path (displayPath.ts), which adds the inserted slots it places (`onForkPath`).
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
 import { shownInSql, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
+import { onDisplayPath, pathPieces, slotPlace } from "./displayPath.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
 
@@ -26,6 +28,27 @@ export const onPath = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: stri
         WHERE g.chain_id = x.chain_id AND x.depth BETWEEN g.lo AND g.hi`.pipe(Effect.map(([row]) => row!.n > 0))
 
 /**
+ * Whether fork `fork` shows `slotId`: it's on its display path (displayPath.ts). Only an
+ * inserted slot can be shown off the structural path, and a structural one is shown iff it's
+ * on it, so for any other slot this is `onPath`, at its cost.
+ */
+export const onForkPath = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  fork: { readonly id: string; readonly tip_slot_id: string | null },
+  slotId: string
+) =>
+  Effect.gen(function* () {
+    const place = yield* slotPlace(sql, chatId, slotId)
+    if (place === null) return false
+    if (!place.inserted) return yield* onPath(sql, chatId, fork.tip_slot_id, slotId)
+    return onDisplayPath(yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id), place)
+  })
+
+/** SQL: whether fork tip `t` (left-joined) can reach slot `x` on a display path: an inserted slot can sit below the tip. */
+const reaches = (t: string, x: string) => `(${x}.inserted = 1 OR ${t}.depth >= ${x}.depth)`
+
+/**
  * The live fork whose path holds `slotId` that was current most recently, preferring
  * `prefer` when its path holds it too; null when no live fork's does. Most recent first, so
  * the usual case checks one or two forks.
@@ -33,10 +56,10 @@ export const onPath = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: stri
 export const forkThrough = (sql: SqlClient.SqlClient, chatId: string, slotId: string, prefer: string | null = null) =>
   Effect.gen(function* () {
     const candidates = yield* sql<ForkRow>`
-      SELECT f.* FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND t.depth >= x.depth
+      SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
+      WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND ${sql.literal(reaches("t", "x"))}
       ORDER BY f.id = ${prefer} DESC, ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
-    for (const fork of candidates) if (yield* onPath(sql, chatId, fork.tip_slot_id, slotId)) return fork
+    for (const fork of candidates) if (yield* onForkPath(sql, chatId, fork, slotId)) return fork
     return null
   })
 
@@ -57,14 +80,14 @@ export const shownElsewhere = (
   Effect.gen(function* () {
     // The fork's replacement of the original, as `replacedInSql` reads it, with it bound.
     const candidates = yield* sql<ForkRow>`
-      SELECT f.* FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND f.id <> ${forkId} AND t.depth >= x.depth
+      SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
+      WHERE f.chat_id = ${chatId} AND f.id <> ${forkId} AND ${sql.literal(reaches("t", "x"))}
         AND coalesce((SELECT o.value_id FROM json_each(f.lineage_json) l CROSS JOIN fork_overrides o
           WHERE o.fork_id = l.value ->> 0 AND o.kind = 'replace' AND o.target_id = ${original}
             AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
           ORDER BY l.key, o.seq DESC LIMIT 1), ${original}) = ${versionId}
       ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
-    for (const fork of candidates) if (yield* onPath(sql, chatId, fork.tip_slot_id, slotId)) return true
+    for (const fork of candidates) if (yield* onForkPath(sql, chatId, fork, slotId)) return true
     return false
   })
 
@@ -84,15 +107,15 @@ export const forksShowing = (
 ) =>
   Effect.gen(function* () {
     const candidates = yield* sql<ForkRow>`
-      SELECT f.* FROM forks f JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
-      WHERE f.chat_id = ${chatId} AND f.id IS NOT ${except} AND t.depth >= x.depth
+      SELECT f.* FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id JOIN slots x ON x.id = ${slotId}
+      WHERE f.chat_id = ${chatId} AND f.id IS NOT ${except} AND ${sql.literal(reaches("t", "x"))}
         AND (${liveOnly ? 1 : 0} = 0 OR f.deleted_at IS NULL)
         AND NOT ${slotDeletedIn(sql, sql.literal("f.id"), "x")}
         AND (${versionId} IS NULL OR NOT EXISTS (SELECT 1 FROM versions o WHERE o.id = ${versionId}
           AND ${versionDeletedIn(sql, sql.literal("f.id"), "o")}))
       ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
     const shown: Array<ForkRow> = []
-    for (const fork of candidates) if (yield* onPath(sql, chatId, fork.tip_slot_id, slotId)) shown.push(fork)
+    for (const fork of candidates) if (yield* onForkPath(sql, chatId, fork, slotId)) shown.push(fork)
     return shown
   })
 

@@ -65,6 +65,7 @@ export const makeWriteHandlers = (bin: Bin) =>
       ownedVersion,
       ownedFork,
       createFork,
+      placeAsShown,
       chatIn,
       checkSpeaker,
       insertVersion,
@@ -548,16 +549,21 @@ export const makeWriteHandlers = (bin: Bin) =>
       SwitchBranch: ({ userId, chatId, slotId, index, forkId }) =>
         Effect.gen(function* () {
           const shown = yield* ownedFork(userId, chatId, forkId)
-          const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string }>`
-            SELECT parent_slot_id, lane_id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
+          const [slot] = yield* sql<{ parent_slot_id: string | null; lane_id: string; inserted: number }>`
+            SELECT parent_slot_id, lane_id, inserted FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`
           if (!slot) return yield* new NotFound({ entity: "slot", id: slotId })
+          // An inserted message has no alternates (ListBranches): index 0 is itself.
           const [sibling] =
-            slot.parent_slot_id === null
-              ? yield* sql<{ id: SlotId }>`
+            slot.inserted === 1
+              ? index === 0
+                ? [{ id: slotId }]
+                : []
+              : slot.parent_slot_id === null
+                ? yield* sql<{ id: SlotId }>`
                   SELECT x.id FROM slots x INDEXED BY slots_chat_depth WHERE x.chat_id = ${chatId} AND x.depth = 0
                     AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                   ORDER BY x.id LIMIT 1 OFFSET ${index}`
-              : yield* sql<{ id: SlotId }>`
+                : yield* sql<{ id: SlotId }>`
                   SELECT x.id FROM slots x INDEXED BY slots_parent WHERE x.parent_slot_id = ${slot.parent_slot_id}
                     AND x.lane_id = ${slot.lane_id} AND ${sql.literal(reachableSlot("x"))}
                   ORDER BY x.id LIMIT 1 OFFSET ${index}`
@@ -582,6 +588,7 @@ export const makeWriteHandlers = (bin: Bin) =>
               tipSlotId: tip!.id,
               at: Date.now()
             })
+            yield* placeAsShown(chatId, shown, slot.parent_slot_id, fork)
           }
           const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return { slotId: sibling.id, fork: yield* forkOut(fork!.id), chat: toChat(chat!) }
