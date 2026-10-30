@@ -1,6 +1,6 @@
 # Phase 1 decisions and the next work (2026-10-28)
 
-Status: the owner's answers of 2026-10-28 on the Phase 1 build (deployed 2026-10-27, master b129497), plus the defaults the coordinator settled where the owner left the choice open (marked **default**). The full question write-ups, with file:line references to the built code, are in `work-folder/2026-10-27/DECISIONS.md`; where that file and this one differ, this one wins. Each item names what to change; "keep" means the build already does it.
+Status: the owner's answers of 2026-10-28 on the Phase 1 build (deployed 2026-10-27, master b129497), plus the defaults the coordinator settled where the owner left the choice open (marked **default**). The full question write-ups, with file:line references to the built code, are in `work-folder/2026-10-27/DECISIONS.md`; where that file and this one differ, this one wins. Each item names what to change; "keep" means the build already does it. Implementation status 2026-10-30: the implemented requirements in §1–§7 are obsolete as implementation plans; see ARCHITECTURE §3.8, §9, §12–§16. The later end-of-request decision supersedes the historical closing-turn/direction-import rules as noted below. “Keep” requirements are unchanged. §8–§9 are historical validation/work-order instructions, not evidence of a fresh fidelity-gate run or deployment.
 
 Once built, each item moves into ARCHITECTURE.md and the matching DESIGN.md item becomes **Decided** (owner-stated items) in the same commit.
 

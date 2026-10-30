@@ -7,6 +7,8 @@
 Session notes are not kept in the repository.
 
 ## Phase 0: Foundations
+**Status (2026-10-30): built.** Foundations, schema and invariants, typed RPC and subscriptions, optimistic writes, isolated database workers, users with login and proxy auth, the provider layer and settings, user cost formulas, ledger rollups, host-bound keys and exposure password handling (ARCHITECTURE). Cache controls are provider-specific; card variants and overrides were superseded by independent forks.
+
 **Progress (2026-10-10):** the scaffold is done (ARCHITECTURE.md): repo, tooling, CI, Docker image, server skeleton with typed RPC over a WebSocket, the database worker architecture, and proxy/single-user auth. Client framework decided (React), server framework implemented on Effect's HTTP server. The full schema with database-enforced invariants, the message-graph operations and the library operations (variants, chat overrides, three-way merge on re-import) drafts with server-side undo history, and the recycle bin followed. The provider layer followed (ARCHITECTURE.md §6): encrypted connection secrets, the outbound proxy with bypass list and per-connection routes, model lists merged with pi-ai's catalog, streaming with typed errors and retries before the first token, the usage ledger with normalized counts and cost, explicit Anthropic breakpoints, and the client RPCs. The Cordis evaluation is written ([CORDIS.md](CORDIS.md)). Then (2026-10-11) the review fixes, host-bound credentials and the provider registry. Remaining: see "Next session" above.
 
 - ~~Repo, tooling, CI, Docker image. Node LTS, TypeScript ESM.~~ Done.
@@ -18,6 +20,8 @@ Session notes are not kept in the repository.
 - ~~Exposure safety~~ (DESIGN §11): built, except the password branch, which comes with built-in login.
 
 ## Phase 1: Import and compatibility core
+**Status (2026-10-30): built.** Card formats and export, preset import (model settings imported separately and explicitly), macros, lorebook import, the full ST folder mapping with its report, and the stock-ST differential harness (`npm run test:st`). Folder import doesn't import keys or connection settings.
+
 - Card parsing and export: V1, V2 and V3 as JSON, PNG and CHARX (reference-harness already uses `character-card-utils` and the PNG chunk libraries).
 - Preset import: chat-completion presets, the prompt manager model, markers, injections, regex, sampler mapping, plus the import report.
 - Macro engine with expansion based on where text came from.
@@ -31,6 +35,8 @@ Session notes are not kept in the repository.
 - **Differential test harness**: stock ST in a container plus a mock endpoint that records requests, and synthetic fixtures. This is the fidelity gate for the assembler.
 
 ## Phase 2: Non-agentic chat that can replace ST (first milestone)
+**Status (2026-10-30): built, awaiting the owner's daily-use trial (the exit criterion).** Everything listed below is built, except where owner decisions overtook it: the Members/Personas/All cards speaker panel became the cast speaker with a separate persona choice, and the preset scope chain and overlays became global model/preset selection with three-way re-import. Not complete: general library-text search, a multi-swipe composition scratchpad, and inserting messages anywhere (spec/MESSAGE-INSERT.md, units in progress).
+
 - The context assembler in ST-compatible mode, passing the differential tests. Card layout modes. Role projection strategies. Cache breakpoints.
 - Chat UI:
   - chat list, library, lazy chat creation
@@ -53,6 +59,8 @@ Session notes are not kept in the repository.
 - **Exit criterion:** the owner moves their daily RP from ST to this.
 
 ## Phase 3: LCM
+**Status (2026-10-30): built.** Summary storage and lineage, planning and worker execution, direct and tool output, refusal handling, condensation, stale repair, editable revisions, the boundary, rail and request views, and explicit enable/adopt/approved backfill with estimates. Not built: per-summary model and cost, and access to the summary rollout panel; a dedicated summarizer model stays open.
+
 - Port the reference-harness §9b design: tiers, eager thresholds, worker pool, condensation, lineage, failure placeholders. Summaries over path segments.
 - Summarization with the preset loaded and a summarization tail prompt. Idle-time jobs while the cache is warm.
 - Stale handling on edits. Editable summaries with versions.

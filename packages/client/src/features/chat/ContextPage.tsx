@@ -436,6 +436,21 @@ function NotSent({ run }: { run: RunContext }) {
   )
 }
 
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
+/** A request's times from the ledger: how long it took, its first token and its speed. */
+const timings = (request: InspectorUsage) => {
+  const { startedAt, firstTokenAt, endedAt } = request
+  const output = request.counts.output
+  return {
+    time: endedAt !== null ? seconds(endedAt - startedAt) : request.status === "running" ? "running" : "unknown",
+    firstToken: firstTokenAt !== null ? seconds(firstTokenAt - startedAt) : "unknown",
+    speed:
+      output !== null && firstTokenAt !== null && endedAt !== null && endedAt > firstTokenAt
+        ? `${(output / ((endedAt - firstTokenAt) / 1000)).toFixed(1)}/s`
+        : "unknown"
+  }
+}
+
 function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
   if (requests.length === 0) return <p className="text-sm text-muted">No request was sent.</p>
   return (
@@ -452,7 +467,10 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
               ["Cache read", count(request.counts.cacheRead)],
               ["Cache write", count(request.counts.cacheWrite)],
               ["Output", count(request.counts.output)],
-              ["Cost", request.cost ? `${request.cost.amount.toFixed(4)} ${request.cost.currency}` : "unknown"]
+              ["Cost", request.cost ? `${request.cost.amount.toFixed(4)} ${request.cost.currency}` : "unknown"],
+              ["Time", timings(request).time],
+              ["First token", timings(request).firstToken],
+              ["Tokens/s", timings(request).speed]
             ].map(([label, value]) => (
               <div key={label} className={label === "Attempt" ? "col-span-2" : ""}>
                 <dt className="text-muted">{label}</dt>
@@ -470,7 +488,10 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
             <th className="py-1 pr-3 font-medium">Cache read</th>
             <th className="py-1 pr-3 font-medium">Cache write</th>
             <th className="py-1 pr-3 font-medium">Output</th>
-            <th className="py-1 font-medium">Cost</th>
+            <th className="py-1 pr-3 font-medium">Cost</th>
+            <th className="py-1 pr-3 font-medium">Time</th>
+            <th className="py-1 pr-3 font-medium">First token</th>
+            <th className="py-1 font-medium">Tokens/s</th>
           </tr>
         </thead>
         <tbody>
@@ -484,9 +505,12 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
               <td className="py-1 pr-3">{count(request.counts.cacheRead)}</td>
               <td className="py-1 pr-3">{count(request.counts.cacheWrite)}</td>
               <td className="py-1 pr-3">{count(request.counts.output)}</td>
-              <td className="py-1">
+              <td className="py-1 pr-3">
                 {request.cost ? `${request.cost.amount.toFixed(4)} ${request.cost.currency}` : "unknown"}
               </td>
+              <td className="py-1 pr-3">{timings(request).time}</td>
+              <td className="py-1 pr-3">{timings(request).firstToken}</td>
+              <td className="py-1">{timings(request).speed}</td>
             </tr>
           ))}
         </tbody>
@@ -622,7 +646,10 @@ function Inspector({ run }: { run: RunContext }) {
       </section>
       <NotSent run={run} />
       <Card>
-        <CardHeader title="Usage" description="What the provider reported, per attempt." />
+        <CardHeader
+          title="Usage"
+          description="What the provider reported, per attempt, and how long each took (first token: from sending to the first text or reasoning). Reasoning time is not recorded."
+        />
         <Usage requests={run.requests} />
       </Card>
     </div>

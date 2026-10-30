@@ -1,6 +1,6 @@
 # Overview
 
-**Status**: Design draft, 2026-10-09. Distilled from the initial planning session. Details are in [DESIGN.md](DESIGN.md), phases in [PLAN.md](PLAN.md).
+**Status**: Design draft, 2026-10-09. Distilled from the initial planning session. Details are in [DESIGN.md](DESIGN.md), phases in [PLAN.md](PLAN.md). Implementation status 2026-10-30: the foundations, ST compatibility, non-agentic chat and LCM portions are built and obsolete as implementation proposals; ARCHITECTURE.md is the current implementation record. Agentic RP, workshop and plugin installation remain future work. The original proposed stack labels below record provenance, not missing implementations.
 
 ## Why
 

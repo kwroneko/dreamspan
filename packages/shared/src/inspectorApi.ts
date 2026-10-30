@@ -153,10 +153,18 @@ export const ContextMessage = Schema.Struct({
 })
 export type ContextMessage = typeof ContextMessage.Type
 
+/** When a request ran, epoch ms: sent, first streamed token (text or reasoning), ended; null until then. */
+const RequestTimes = {
+  startedAt: Schema.Number,
+  firstTokenAt: Schema.NullOr(Schema.Number),
+  endedAt: Schema.NullOr(Schema.Number)
+}
+
 /** Only the usage fields the inspector displays; provider metadata never crosses this boundary. */
 export const InspectorUsage = Schema.Struct({
   id: LlmRequestId,
   status: RequestStatus,
+  ...RequestTimes,
   counts: Schema.Struct({
     inputUncached: Schema.NullOr(Schema.Int),
     cacheRead: Schema.NullOr(Schema.Int),
@@ -167,6 +175,65 @@ export const InspectorUsage = Schema.Struct({
   cost: Schema.NullOr(Schema.Struct({ amount: Schema.Number, currency: Schema.String }))
 })
 export type InspectorUsage = typeof InspectorUsage.Type
+
+/** One generation request's figures, for a version's metrics. */
+export const RequestFigures = Schema.Struct({
+  status: RequestStatus,
+  ...RequestTimes,
+  output: Schema.NullOr(Schema.Int),
+  reasoning: Schema.NullOr(Schema.Int),
+  /** `estimated`: the app counted the tokens; `none`: nobody did (the counts are null). */
+  usageSource: UsageSource
+})
+export type RequestFigures = typeof RequestFigures.Type
+
+/**
+ * A version's generation time and tokens (parity finding 5): summed over every generation
+ * request behind its text, its own attempts and those of the versions it continued (through
+ * `sourceVersionId`), with the last request's figures apart. A version none was made for
+ * (a user's, an edit, an import) has none. Unknown is null or counted, never zero.
+ */
+export const VersionMetrics = Schema.Struct({
+  versionId: VersionId,
+  requests: Schema.Int,
+  /** The last request is still running. */
+  running: Schema.Boolean,
+  /** Sum of the ended requests' durations (start to end); null when none ended. */
+  elapsedMs: Schema.NullOr(Schema.Number),
+  /** Sum of ended requests' streaming time; null if any first-token time is missing. */
+  streamingMs: Schema.NullOr(Schema.Number),
+  /** Output tokens of the ended requests that have a count; reasoning tokens are part of them. */
+  output: Schema.Int,
+  reasoning: Schema.NullOr(Schema.Int),
+  /** Ended requests without an output count: `output` leaves them out. */
+  outputUnknown: Schema.Int,
+  /** Some count is the app's estimate, not the provider's. */
+  estimated: Schema.Boolean,
+  last: RequestFigures
+})
+export type VersionMetrics = typeof VersionMetrics.Type
+
+/** Projects a version's requests, oldest first (at least one), into its metrics. */
+export const versionMetricsOf = (versionId: VersionId, requests: ReadonlyArray<RequestFigures>): VersionMetrics => {
+  const ended = requests.filter((r) => r.endedAt !== null)
+  const sum = (values: ReadonlyArray<number>) => (values.length === 0 ? null : values.reduce((a, b) => a + b, 0))
+  const counted = ended.filter((r) => r.output !== null)
+  const last = requests.at(-1)!
+  return {
+    versionId,
+    requests: requests.length,
+    running: last.status === "running",
+    elapsedMs: sum(ended.map((r) => r.endedAt! - r.startedAt)),
+    streamingMs: ended.some((r) => r.firstTokenAt === null)
+      ? null
+      : sum(ended.map((r) => r.endedAt! - r.firstTokenAt!)),
+    output: counted.reduce((total, r) => total + r.output!, 0),
+    reasoning: ended.some((r) => r.reasoning === null) ? null : sum(ended.map((r) => r.reasoning!)),
+    outputUnknown: ended.length - counted.length,
+    estimated: counted.some((r) => r.usageSource === "estimated"),
+    last
+  }
+}
 
 /** The complete display projection sanitized at final capture, excluding storage identities and usage. */
 export const ContextDisplay = Schema.Struct({
@@ -377,11 +444,20 @@ export const NextContext = Schema.Struct({
 })
 export type NextContext = typeof NextContext.Type
 
+/** Versions one metrics read takes. */
+export const MAX_METRICS_VERSIONS = 200
+
 export class InspectorApi extends RpcGroup.make(
   /** The context a version was generated from, as sent; NotFound without one. */
   Rpc.make("GetRunContext", {
     payload: { versionId: VersionId },
     success: RunContext,
     error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Generation time and tokens of these versions; versions without any, or not the caller's, are left out. */
+  Rpc.make("GetVersionMetrics", {
+    payload: { versionIds: Schema.Array(VersionId).check(Schema.isMaxLength(MAX_METRICS_VERSIONS)) },
+    success: Schema.Array(VersionMetrics),
+    error: ServerError
   })
 ) {}
