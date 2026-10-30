@@ -20,11 +20,13 @@ import {
   AssemblyFailed,
   type ContextSnapshot,
   type WireContext,
-  generationOf
+  generationOf,
+  historyLeafOf
 } from "../assembler/types.ts"
 import type { RequestImage } from "../assembler/types.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
-import { previousHistoryStart } from "./historyStart.ts"
+import { previousStartIn } from "./historyStart.ts"
+import { displayThrough } from "./displayPath.ts"
 import { readDefaults, readGlobalLorebooks } from "./generationSettings.ts"
 import { readCardPromptUse } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
@@ -152,10 +154,17 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
             Effect.map((built): ContextSnapshot => ({ ...built, sources: sources.pins() })),
             Effect.catchTag("AssemblyFailed", (error) => Effect.succeed(error))
           )
-        const [recorded] =
+        const leaf = historyLeafOf(sources.pins().target)
+        const recorded =
           next instanceof AssemblyFailed
-            ? yield* previousHistoryStart(sql, userId, chatId, sources.pins().target.parentSlotId)
-            : []
+            ? yield* previousStartIn(
+                sql,
+                userId,
+                chatId,
+                leaf,
+                yield* displayThrough(sql, chatId, yield* viewAt(sql, chatId, leaf), leaf)
+              )
+            : undefined
         const fallback = recorded
           ? { slotId: recorded.slot_id, depth: recorded.depth }
           : (sources.pins().historyStart ?? null)

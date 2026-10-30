@@ -9,6 +9,7 @@ import type { makeLibraryQueries, RefRow } from "./library.ts"
 import { SUMMARY_HISTORY, summaryOnPath } from "../assembler/summary.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { NotFound } from "./ops.ts"
+import { displayEvents, displayThrough } from "./displayPath.ts"
 
 export const noteAt = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
@@ -34,7 +35,18 @@ export const noteAt = Effect.fnUntraced(function* (
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
-  const [binding] = yield* sql<{ revision: string }>`
+  // In a fork with insertions, the binding nearest before the slot in display order.
+  const shown = yield* displayThrough(sql, chatId, fork, slotId)
+  const [binding] = shown
+    ? yield* sql<{ revision: string }>`
+      ${displayEvents(sql, chatId, shown.pieces)}
+      SELECT json_extract(e.value_json, '$.revision') AS revision FROM path_events e LEFT JOIN slots s ON s.id = e.slot_id
+      WHERE e.key = 'note.binding' AND json_extract(e.value_json, '$.note') = ${ref.entity_id}
+        AND ${eventApplies(sql, fork, "e")}
+        AND (e.slot_id IS NULL OR NOT ${slotDeletedIn(sql, fork, "s")})
+        AND ${attachedApplies(sql, fork, "s", "e.version_id")}
+      ORDER BY coalesce(e.position, -1) DESC, e.seq DESC LIMIT 1`
+    : yield* sql<{ revision: string }>`
       WITH RECURSIVE path(id) AS (
         SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}
         UNION ALL

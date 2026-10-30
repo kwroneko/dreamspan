@@ -6,7 +6,7 @@ import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
 import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
-import { characterNoteText, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
+import { characterNoteText, historyLeafOf, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
@@ -58,7 +58,7 @@ export const lorebooksStage: AssemblerStage = {
       )
       assembly.lorebooks = [...attached, ...embedded]
       assembly.loreMessageCount = assembly.lorebooks.length
-        ? yield* sources.messageCount(need(assembly, "target").parentSlotId)
+        ? yield* sources.messageCount(historyLeafOf(need(assembly, "target")))
         : 0
       assembly.loreScanDepth = assembly.lorebooks.reduce(
         (depth, book) =>

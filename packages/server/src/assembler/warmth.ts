@@ -36,7 +36,8 @@ const messageReason = (
   last: ContextSnapshot,
   next: ContextSnapshot,
   source: Extract<Source, { kind: "message" }>,
-  label: string
+  label: string,
+  describe: Describe
 ) => {
   const sent = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === source.slot)
   if (sent?.source.kind === "message" && sent.messages.length === 0) return budgetReason(next)
@@ -54,6 +55,15 @@ const messageReason = (
     const newHistory = history(next)
     if (oldHistory[0] !== newHistory[0] || oldHistory.some((slot) => !newHistory.includes(slot)))
       return budgetReason(next)
+    // A message inserted before this one moved it (spec/MESSAGE-INSERT.md §3.2): name it.
+    const inserted = new Set(
+      (next.sources?.history ?? []).flatMap((w) => w.entries.flatMap((e) => (e.inserted ? [e.slotId] : [])))
+    )
+    const first = newHistory
+      .slice(0, newHistory.indexOf(source.slot))
+      .find((slot) => inserted.has(slot) && !oldHistory.includes(slot))
+    const piece = next.pieces.find((p) => p.source.kind === "message" && p.source.slot === first)
+    if (first !== undefined && piece !== undefined) return `${describe(piece.source).label} was inserted.`
     const notes = (snapshot: ContextSnapshot) =>
       snapshot.pieces
         .filter((p) => p.source.kind === "note" && p.messages.length > 0)
@@ -100,7 +110,7 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
     case "summary":
       return `Summary of messages ${source.from}–${source.to} replaced.`
     case "message":
-      return messageReason(last, next, source, label)
+      return messageReason(last, next, source, label, describe)
     case "preset":
       return last.inputs.preset.revision !== next.inputs.preset.revision ? "The preset changed." : varies
     case "card":

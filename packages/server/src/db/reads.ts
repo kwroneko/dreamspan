@@ -1,7 +1,7 @@
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
-import { stateEventsOnPath } from "./stateRead.ts"
+import { stateEventsThrough } from "./stateRead.ts"
 export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
@@ -483,7 +483,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         if (slotId !== null) yield* liveSlot(chatId, slotId)
         if (leafSlotId != null) yield* liveSlot(chatId, leafSlotId)
         const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, leafSlotId ?? slotId)
-        const rows = yield* stateEventsOnPath(sql, chatId, slotId, fork)
+        const rows = yield* stateEventsThrough(sql, chatId, slotId, fork)
         const events = yield* Effect.forEach(rows, (row) =>
           decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.mapError(

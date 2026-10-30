@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { AssemblySources, need, type AssemblerStage } from "./pipeline.ts"
+import { historyLeafOf } from "./types.ts"
 
 /** One summary as its own message's text (DESIGN §8: separate blocks placed like the history). */
 export const summaryBlock = (s: Pick<Summary, "level" | "from" | "to" | "content">) =>
@@ -17,7 +18,7 @@ export const lcmStage: AssemblerStage = {
         need(assembly, "state").lcm,
         sources.lcmDefaults ? yield* sources.lcmDefaults() : null
       )
-      assembly.lcm = yield* sources.summaryLayer(need(assembly, "target").parentSlotId)
+      assembly.lcm = yield* sources.summaryLayer(historyLeafOf(need(assembly, "target")))
       assembly.lcmPieces = assembly.lcm.summaries.map((summary) => {
         assembly.pieces.push({
           id: `summary:${summary.firstSlotId}:${summary.lastSlotId}`,

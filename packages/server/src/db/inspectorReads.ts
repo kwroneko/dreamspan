@@ -93,6 +93,12 @@ export const describer = (
             SELECT s.id, s.depth FROM slots s JOIN chats c ON c.id = s.chat_id
             WHERE s.id IN ${sql.in(slots)} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
     const depthOf = new Map(depths.map((row) => [row.id, row.depth]))
+    // A message is numbered by its position as the request read it (in a fork with
+    // insertions, its display position, spec/MESSAGE-INSERT.md §3.2), which its pinned history
+    // records; by its depth when that isn't pinned. Without insertions the two are the same.
+    for (const snapshot of snapshots)
+      for (const window of snapshot.sources?.history ?? [])
+        for (const entry of window.entries) depthOf.set(entry.slotId, entry.depth)
 
     const linkOf = (revision: string) => {
       const ref = refs.get(revision)

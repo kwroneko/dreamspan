@@ -1,4 +1,4 @@
-import { stateEventsOnPath } from "./stateRead.ts"
+import { stateEventsThrough } from "./stateRead.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 // What the writer's chat operations share (writes.ts, chatSetupWrites.ts): ownership
 // checks, inserting versions, slots and state events, and appending a message. Each runs
@@ -12,7 +12,7 @@ import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
-import { forkThrough, onForkPath, onPath } from "./forks.ts"
+import { forkThrough, onForkPath } from "./forks.ts"
 import { hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
 import {
   forkAt,
@@ -195,7 +195,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         tip_slot_id: string | null
       }>`SELECT tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId} AND deleted_at IS NULL`
       if (!owned) return yield* new NotFound({ entity: "fork", id: fork })
-      if (slotId !== null && !(yield* onPath(sql, chatId, owned.tip_slot_id, slotId))) {
+      if (slotId !== null && !(yield* onForkPath(sql, chatId, { id: fork, tip_slot_id: owned.tip_slot_id }, slotId))) {
         // Until import unit 9 gives every ST path a fork row, its reads return the
         // current fork as a fallback. Preserve positional edits addressed by that ID too.
         if (branchOwned.has(data.key) || fork !== (yield* forkAt(sql, chatId, slotId)))
@@ -231,7 +231,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
           "lorebook.embedded"
         ].includes(data.key)
       ) {
-        const rows = yield* stateEventsOnPath(sql, chatId as ChatId, slotId as SlotId | null, fork)
+        const rows = yield* stateEventsThrough(sql, chatId as ChatId, slotId as SlotId | null, fork)
         const events = yield* withoutPurged(
           sql,
           rows.map((e) => ({
