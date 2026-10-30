@@ -521,6 +521,28 @@ describe("a job claimed before an insertion", () => {
   )
 })
 
+const rawSummary = (h: Harness, slots: ReadonlyArray<SlotId>, status: "complete" | "failed" = "complete") => {
+  const id = uuidv7(),
+    revision = uuidv7()
+  return Effect.exit(
+    fixtureSql(h.dataDir, [
+      {
+        sql: "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES(?,?,'s',1,'generated',1)",
+        params: [revision, id]
+      },
+      {
+        sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,created_at) VALUES(?,?,1,?,?,?,?,?,1)",
+        params: [id, h.chatId, revision, slots[0]!, slots.at(-1)!, slots.length, status]
+      },
+      ...slots.map((slot, ordinal) => ({
+        sql: "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id,amend_count) VALUES(?,?,?,NULL,0)",
+        params: [id, ordinal, slot]
+      })),
+      { sql: "UPDATE summaries SET sealed = 1 WHERE id = ?", params: [id] }
+    ])
+  )
+}
+
 describe("the summary triggers", () => {
   it.effect(
     "take a range with inserted messages in display order and refuse one that skips a message that wasn't inserted",
@@ -530,38 +552,211 @@ describe("the summary triggers", () => {
           const [m0, m1, m2] = yield* messages(h, 3)
           const x = yield* h.insert(h.main, m1!, "x")
           const y = yield* h.insert(h.main, x, "y")
-          const write = (slots: ReadonlyArray<SlotId>) => {
-            const id = uuidv7(),
-              revision = uuidv7()
-            return Effect.exit(
-              fixtureSql(h.dataDir, [
-                {
-                  sql: "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES(?,?,'s',1,'generated',1)",
-                  params: [revision, id]
-                },
-                {
-                  sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,created_at) VALUES(?,?,1,?,?,?,?,'complete',1)",
-                  params: [id, h.chatId, revision, slots[0]!, slots.at(-1)!, slots.length]
-                },
-                ...slots.map((slot, ordinal) => ({
-                  sql: "INSERT INTO summary_inputs(summary_id,ordinal,slot_id,version_id,amend_count) VALUES(?,?,?,NULL,0)",
-                  params: [id, ordinal, slot]
-                })),
-                { sql: "UPDATE summaries SET sealed = 1 WHERE id = ?", params: [id] }
-              ])
-            )
-          }
           // m0, m1, x, y, m2 is the main fork's display order: x below m1, y below x.
-          assert.isTrue(Exit.isSuccess(yield* write([m0!, m1!, x, y, m2!])))
-          assert.isTrue(Exit.isSuccess(yield* write([y, m2!])))
-          assert.isTrue(Exit.isSuccess(yield* write([m1!, m2!])))
-          const skipped = yield* write([m0!, m2!])
+          assert.isTrue(Exit.isSuccess(yield* rawSummary(h, [m0!, m1!, x, y, m2!])))
+          assert.isTrue(Exit.isSuccess(yield* rawSummary(h, [y, m2!])))
+          assert.isTrue(Exit.isSuccess(yield* rawSummary(h, [m1!, m2!])))
+          const skipped = yield* rawSummary(h, [m0!, m2!])
           assert.isTrue(Exit.isFailure(skipped))
-          assert.include(String(skipped), "summary inputs must follow their declared chain in order")
-          assert.isTrue(Exit.isFailure(yield* write([m2!, x])))
+          assert.match(String(skipped), /summary (inputs must follow their declared chain|endpoints must form)/)
+          assert.isTrue(Exit.isFailure(yield* rawSummary(h, [m2!, x])))
         })
       ),
     60_000
+  )
+})
+
+describe("display lineage regressions", () => {
+  it.effect(
+    "refuses reverse inserted siblings and an ordinary branch that returns to the old path",
+    () =>
+      run((h) =>
+        Effect.gen(function* () {
+          const [a, b] = yield* messages(h, 2)
+          const x = yield* h.insert(h.main, a!, "older")
+          const y = yield* h.insert(h.main, a!, "newer")
+          assert.isTrue(Exit.isSuccess(yield* rawSummary(h, [a!, y, x, b!])))
+          assert.isTrue(Exit.isFailure(yield* rawSummary(h, [a!, x, y, b!])), "siblings must be newest first")
+          const atX = yield* h.fork(h.main, x)
+          const reply = yield* h.append(atX, "ordinary reply below x")
+          assert.isTrue(
+            Exit.isFailure(yield* rawSummary(h, [a!, y, x, reply, b!])),
+            "cannot return from an ordinary branch"
+          )
+          const merged = yield* h.insert(h.main, a!, "merged insertion")
+          yield* fixtureSql(h.dataDir, [
+            {
+              sql: "INSERT INTO slot_parents(slot_id,parent_slot_id,ordinal) VALUES(?,?,0)",
+              params: [merged, b!]
+            }
+          ])
+          assert.isTrue(Exit.isFailure(yield* rawSummary(h, [a!, merged, b!])), "merged inputs remain forbidden")
+        })
+      ),
+    60_000
+  )
+
+  it.effect(
+    "refuses reversed condensation children and reversed header endpoints",
+    () =>
+      run((h) =>
+        Effect.gen(function* () {
+          const [a, b] = yield* messages(h, 2)
+          const x = yield* h.insert(h.main, a!, "older")
+          const y = yield* h.insert(h.main, a!, "newer")
+          const parts = yield* Effect.forEach([a!, x, y, b!], (slot) => h.summarize(h.main, [slot]))
+          const id = uuidv7(),
+            revision = uuidv7()
+          const result = yield* Effect.exit(
+            fixtureSql(h.dataDir, [
+              {
+                sql: "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES(?,?,'s',1,'generated',1)",
+                params: [revision, id]
+              },
+              {
+                sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,created_at) VALUES(?,?,2,?,?,?,4,'complete',1)",
+                params: [id, h.chatId, revision, a!, b!]
+              },
+              ...parts.map((part, ordinal) => ({
+                sql: "INSERT INTO summary_parents(summary_id,ordinal,parent_id,parent_revision_id) VALUES(?,?,?,?)",
+                params: [id, ordinal, part.id, part.revisionId]
+              })),
+              { sql: "UPDATE summaries SET sealed=1 WHERE id=?", params: [id] }
+            ])
+          )
+          assert.isTrue(Exit.isFailure(result))
+          assert.include(String(result), "summary children must partition")
+          const badHeader = yield* Effect.exit(
+            fixtureSql(h.dataDir, [
+              {
+                sql: "INSERT INTO summary_revisions(id,summary_id,content,token_count,origin,created_at) VALUES(?,?,'s',1,'generated',1)",
+                params: [revision, id]
+              },
+              {
+                sql: "INSERT INTO summaries(id,chat_id,level,selected_revision_id,first_slot_id,last_slot_id,slot_count,status,created_at) VALUES(?,?,1,?,?,?,2,'complete',1)",
+                params: [id, h.chatId, revision, x, y]
+              }
+            ])
+          )
+          assert.isTrue(Exit.isFailure(badHeader))
+          assert.include(String(badHeader), "summary endpoints must form")
+        })
+      ),
+    60_000
+  )
+
+  it.effect(
+    "claims L1 work in display order when insertion depths put it after a later range",
+    () =>
+      run((h) =>
+        Effect.gen(function* () {
+          const [a, b] = yield* messages(h, 3)
+          const x = yield* h.insert(h.main, a!, "x")
+          const y = yield* h.insert(h.main, x, "y")
+          const z = yield* h.insert(h.main, y, "z")
+          const enqueue = (slot: SlotId) =>
+            Effect.gen(function* () {
+              const inputs = yield* h.inputsOf(h.main, [slot])
+              const [job] = yield* h.writer.EnqueueSummaries({
+                userId: h.userId,
+                chatId: h.chatId,
+                forkId: h.main,
+                leafSlotId: (yield* h.tip(h.main))!,
+                chunks: [{ inputs, target: 600, clipTokens: 6000, refresh: false }],
+                requestClass: "interactive"
+              })
+              return { job: job!, inputs }
+            })
+          const later = yield* enqueue(b!)
+          const earlier = yield* enqueue(z)
+          const first = yield* h.writer.ClaimSummaryJob({ userId: h.userId })
+          assert.strictEqual(first?.id, earlier.job.id)
+          assert.isNull(yield* h.writer.ClaimSummaryJob({ userId: h.userId }), "one L1 job per fork at a time")
+          yield* claimAndComplete(h, first!.id, earlier.inputs)
+          assert.strictEqual((yield* h.writer.ClaimSummaryJob({ userId: h.userId }))?.id, later.job.id)
+        })
+      ),
+    60_000
+  )
+
+  it.effect(
+    "repairs deletion, restore and fork-local edits once, then stays settled",
+    () =>
+      run((h) =>
+        Effect.gen(function* () {
+          const [a, b, c, d] = yield* messages(h, 4)
+          const left = yield* h.summarize(h.main, [a!, b!])
+          const right = yield* h.summarize(h.main, [c!, d!])
+          yield* h.condense(h.main, [left, right])
+          const x = yield* h.insert(h.main, b!, "x")
+          const atX = yield* h.fork(h.main, x)
+          yield* h.append(atX, "after x")
+          // This fork has x on the structural chain and also inherits other placed insertions.
+          yield* h.insert(atX, a!, "before b")
+          const settle = (fork: ForkId) =>
+            Effect.gen(function* () {
+              for (let pass = 0; pass < 5; pass++) {
+                const plan = yield* h.planIn(fork)
+                if (!plan.refresh.length && !plan.condensations.length) {
+                  const layer = yield* h.layerIn(fork)
+                  assert.isAbove(layer.summaries.length, 0, "repair retains coverage")
+                  assert.isTrue(
+                    layer.summaries.every((summary) => summary.fresh),
+                    "repair leaves fresh coverage"
+                  )
+                  for (let reply = 0; reply < 3; reply++) {
+                    const next = yield* h.planIn(fork)
+                    assert.deepStrictEqual([next.refresh, next.condensations], [[], []], "settled on later replies")
+                  }
+                  return
+                }
+                for (const chunk of plan.refresh) {
+                  const [job] = yield* h.writer.EnqueueSummaries({
+                    userId: h.userId,
+                    chatId: h.chatId,
+                    forkId: fork,
+                    leafSlotId: (yield* h.tip(fork))!,
+                    chunks: [chunk],
+                    requestClass: "interactive"
+                  })
+                  assert.isDefined(job, "repair must enqueue")
+                  yield* claimAndComplete(h, job!.id, chunk.inputs)
+                }
+                for (const condensation of plan.condensations) {
+                  const [job] = yield* h.writer.EnqueueCondensations({
+                    userId: h.userId,
+                    chatId: h.chatId,
+                    forkId: fork,
+                    leafSlotId: (yield* h.tip(fork))!,
+                    jobs: [condensation],
+                    requestClass: "interactive"
+                  })
+                  assert.isDefined(job, "repair must enqueue")
+                  const parts = yield* Effect.forEach(condensation.children, (id) => h.summaryIn(fork, id))
+                  yield* claimAndComplete(h, job!.id, [], parts)
+                }
+              }
+              assert.fail("repair kept asking for paid work")
+            })
+          yield* settle(h.main)
+          const bin = yield* h.writer.DeleteMessage({ userId: h.userId, slotId: x, forkId: h.main })
+          yield* settle(h.main)
+          yield* h.writer.RestoreBinItem({ userId: h.userId, itemId: bin.id })
+          yield* settle(h.main)
+          yield* h.summarize(atX, [a!, (yield* h.display(atX))[1]!, b!, x])
+          const before = yield* h.reader.GetSlot({ userId: h.userId, slotId: x, forkId: atX })
+          yield* h.writer.AmendVersion({
+            userId: h.userId,
+            versionId: before.entry.version.id,
+            forkId: atX,
+            content: "edited in the fork at x",
+            expectedRowVersion: before.entry.version.rowVersion
+          })
+          yield* settle(atX)
+          yield* settle(h.main)
+        })
+      ),
+    120_000
   )
 })
 
@@ -578,6 +773,42 @@ describe("a summary that includes an inserted message", () => {
           const later = yield* h.fork(h.main, m3!)
           assert.isFalse(yield* h.validIn(g, s.id))
           assert.deepStrictEqual((yield* h.layerIn(g)).summaries, [])
+          assert.isTrue(Exit.isSuccess(yield* rawSummary(h, [m0!, m1!, x, m2!, m3!], "failed")))
+          const failures = (forkId: ForkId) =>
+            Effect.map(
+              h.reader.GetLcmState({
+                userId: h.userId,
+                chatId: h.chatId,
+                forkId,
+                leafSlotId: m3!
+              }),
+              (state) => state.failed
+            )
+          assert.deepStrictEqual(yield* failures(g), [], "failed coverage also requires all its inputs in the fork")
+          assert.lengthOf(yield* failures(h.main), 1)
+          const coverage = (forkId: ForkId) =>
+            h.reader.GetLcmCoverage({
+              userId: h.userId,
+              chatId: h.chatId,
+              forkId,
+              leafSlotId: m3!,
+              fromDepth: 0,
+              toDepth: 10
+            })
+          assert.deepStrictEqual(
+            (yield* coverage(g)).summaries,
+            [],
+            "coverage ignores a summary containing an absent insertion"
+          )
+          yield* h.insert(g, m0!, "only in g")
+          assert.deepStrictEqual(yield* failures(g), [], "an unrelated insertion cannot validate the failure")
+          assert.deepStrictEqual((yield* coverage(g)).summaries, [], "another displayed insertion cannot validate x")
+          assert.deepStrictEqual(
+            (yield* coverage(h.main)).summaries
+              .filter((row) => row.status !== "failed")
+              .map((row) => [row.id, row.from, row.to]),
+            [[s.id, 1, 4]]
+          )
           assert.isTrue(yield* h.validIn(later, s.id))
           assert.deepStrictEqual(
             (yield* h.layerIn(later)).summaries.map((t) => [t.id, t.from, t.to, t.fresh]),

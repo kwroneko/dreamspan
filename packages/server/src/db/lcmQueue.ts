@@ -21,7 +21,7 @@ import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
 import { pathView, placesOf, positionIn } from "./lcmDisplay.ts"
-import type { PathPiece } from "./displayPath.ts"
+import { insertionPieces, positionOf, type PathPiece } from "./displayPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -399,8 +399,37 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
                 CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
               FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),
             'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`, `${job}.fork_id`)})`
+        // Depth orders structural paths. Insertions can put a deep slot before a shallow
+        // one; resolve the handful of live L1 starts by display position in those forks only.
+        const starts = yield* sql<{
+          id: string
+          chat_id: string
+          fork_id: string
+          slot_id: string
+          chain_id: string
+          depth: number
+        }>`
+          SELECT j.id, j.chat_id, j.fork_id, s.id AS slot_id, s.chain_id, s.depth
+          FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id JOIN slots s ON s.id = j.first_slot_id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.fork_id IS NOT NULL
+            AND j.level = 1 AND j.status IN ('pending','processing')`
+        const positions: Array<readonly [string, number]> = []
+        for (const fork of new Set(starts.map((j) => j.fork_id))) {
+          const jobs = starts.filter((j) => j.fork_id === fork)
+          const pieces = yield* insertionPieces(sql, jobs[0]!.chat_id, fork)
+          if (pieces)
+            for (const job of jobs) {
+              const position = positionOf(pieces, { id: job.slot_id, chainId: job.chain_id, depth: job.depth })
+              if (position !== null) positions.push([job.id, position])
+            }
+        }
+        const displayOrder = positions.length > 0
+        const startOrder = displayOrder ? "coalesce(jo.position,start.depth)" : "start.depth"
+        const busyOrder = displayOrder ? "coalesce(bo.position,bs.depth)" : "bs.depth"
         const [next] = yield* sql.unsafe<{ id: string }>(
-          `SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
+          `${displayOrder ? "WITH display_jobs AS (SELECT value ->> 0 AS id, value ->> 1 AS position FROM json_each(?))" : ""}
+        SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
+        ${displayOrder ? "LEFT JOIN display_jobs jo ON jo.id = j.id" : ""}
         JOIN slots start ON start.id = j.first_slot_id
         WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'pending'
         AND (j.fork_id IS NULL OR EXISTS(SELECT 1 FROM forks jf WHERE jf.id=j.fork_id AND jf.deleted_at IS NULL))
@@ -409,13 +438,14 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         AND (SELECT count(*) FROM summarization_jobs busy JOIN chats bc ON bc.id = busy.chat_id
           WHERE bc.owner_user_id = ? AND busy.status = 'processing') < 2
         AND (j.level > 1 OR NOT EXISTS (SELECT 1 FROM summarization_jobs busy JOIN slots bs ON bs.id = busy.first_slot_id
+          ${displayOrder ? "LEFT JOIN display_jobs bo ON bo.id = busy.id" : ""}
           WHERE busy.chat_id = j.chat_id AND busy.fork_id IS j.fork_id AND busy.level = 1 AND
             (busy.status = 'processing' OR (busy.status = 'pending'
              AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR ${spends("busy")}
                OR busy.last_slot_id IN (WITH RECURSIVE ancestors(id) AS (SELECT j.last_slot_id UNION ALL SELECT s.parent_slot_id FROM slots s JOIN ancestors a ON a.id=s.id WHERE s.parent_slot_id IS NOT NULL) SELECT id FROM ancestors))
-             AND (bs.depth < start.depth OR (bs.depth = start.depth AND busy.id < j.id))))))
+             AND (${busyOrder} < ${startOrder} OR (${busyOrder} = ${startOrder} AND busy.id < j.id))))))
         ORDER BY CASE j.request_class WHEN 'interactive' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, j.created_at, j.id LIMIT 1`,
-          [userId, userId, userId, userId]
+          [...(displayOrder ? [JSON.stringify(positions)] : []), userId, userId, userId, userId]
         )
         if (!next) return null
         yield* sql`UPDATE summarization_jobs SET status = 'processing', attempts = attempts + 1, claim_epoch = claim_epoch + 1, rollout_id = NULL,

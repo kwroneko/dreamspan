@@ -8,7 +8,7 @@ import { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { lineageValidator, selectSummaryLayer } from "./lcmLayer.ts"
-import { insertedOnPath, pathView } from "./lcmDisplay.ts"
+import { insertedOnPath, pathView, type LcmView } from "./lcmDisplay.ts"
 import { positionOf, type PathPiece } from "./displayPath.ts"
 import { readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
@@ -170,6 +170,20 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         .map((r) => ({ id: r.id, created_at: r.created_at }))
     })
 
+  /** A shared last endpoint alone cannot establish membership after insertions. */
+  const onViewedPath = Effect.fnUntraced(function* (
+    userId: UserId,
+    summaries: ReadonlyArray<Summary>,
+    view: LcmView | null
+  ) {
+    const valid = lineageValidator(sql, userId, view ?? undefined)
+    const kept: Array<Summary> = []
+    for (const summary of summaries)
+      if (view?.pieces ? yield* valid(summary.id) : summary.to - summary.from + 1 === summary.slotCount)
+        kept.push(summary)
+    return kept
+  })
+
   return {
     ListSummaryRevisions: ({ userId, summaryId, forkId }) =>
       Effect.gen(function* () {
@@ -271,9 +285,13 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           if (shown) for (const id of JSON.parse(insertedOnPath(shown)) as Array<string>) onPath.add(id)
         }
         const memo = new Map<string, Summary>()
-        const allFailed = yield* Effect.forEach(
-          failedRows.filter((r) => onPath.has(r.last_slot_id)),
-          (r) => readSummary(sql, userId, r.id, undefined, memo, shown ?? undefined)
+        const allFailed = yield* onViewedPath(
+          userId,
+          yield* Effect.forEach(
+            failedRows.filter((r) => onPath.has(r.last_slot_id)),
+            (r) => readSummary(sql, userId, r.id, undefined, memo, shown ?? undefined)
+          ),
+          shown
         )
         const fresh =
           allFailed.length || jobRows.some((j) => j.status === "failed")
@@ -348,8 +366,10 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               AND path.depth >= ${fromDepth} AND first.depth <= ${toDepth}
             ORDER BY s.level, first.depth LIMIT ${MAX_COVERAGE}`
         const memo = new Map<string, Summary>()
-        const summaries = yield* Effect.forEach(ids, ({ id }) =>
-          readSummary(sql, userId, id, undefined, memo, shown ?? undefined)
+        const summaries = yield* onViewedPath(
+          userId,
+          yield* Effect.forEach(ids, ({ id }) => readSummary(sql, userId, id, undefined, memo, shown ?? undefined)),
+          shown
         )
         const fresh = summaries.some((s) => s.status === "failed") ? yield* freshRanges(userId, chatId, leafSlotId) : []
         const rows = yield* toRows(
