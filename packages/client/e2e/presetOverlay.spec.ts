@@ -266,3 +266,102 @@ for (const width of [1440, 390])
         "A draft kept while closing the preset."
       )
     })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Find reveals and highlights a marker name (${width}px ${theme})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const chatId = await setUp(page, `Marker navigation ${width} ${theme}`, false)
+      const overlay = await open(page, chatId)
+      await overlay.getByRole("textbox", { name: "Find", exact: true }).fill("History")
+      await overlay.getByRole("button", { name: "Find", exact: true }).click()
+      const result = overlay
+        .getByRole("list", { name: "Matches", exact: true })
+        .getByRole("button", { name: "Go to Prompt “Chat History”: Name", exact: true })
+      await result.click()
+      const marker = overlay.locator('[data-prompt="chatHistory"]')
+      await expect(marker).toBeFocused()
+      await expect(marker.locator("mark")).toHaveText("History")
+      await page.screenshot({ path: join(shots, `marker-navigation-${width}-${theme}.png`) })
+      const bar = overlay
+        .getByRole("button", { name: /^Save/ })
+        .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      await expect
+        .poll(
+          async () =>
+            (await marker.boundingBox())!.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)
+        )
+        .toBeGreaterThanOrEqual(0)
+    })
+
+test("Find reveals closed utility prompts and regex script fields", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const chatId = await setUp(page, "Utility navigation", false)
+  const overlay = await open(page, chatId)
+  const find = overlay.getByRole("textbox", { name: "Find", exact: true })
+  const submit = overlay.getByRole("button", { name: "Find", exact: true })
+  await find.fill("new story")
+  await submit.click()
+  await overlay.getByRole("button", { name: "Go to Utility prompts: New chat prompt", exact: true }).click()
+  const utility = overlay.getByRole("textbox", { name: "New chat", exact: true })
+  await expect(utility).toBeFocused()
+  await expect
+    .poll(() =>
+      utility.evaluate((e) =>
+        (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.toString()
+      )
+    )
+    .toBe("new story")
+
+  await overlay.getByRole("button", { name: "Add a script", exact: true }).click()
+  await overlay.getByRole("button", { name: "Edit New script", exact: true }).click()
+  const pattern = overlay.getByRole("textbox", { name: /^Find \(a regular expression\)/ })
+  await pattern.fill("harbour-pattern")
+  await overlay.getByRole("button", { name: "Edit New script", exact: true }).click()
+  await expect(pattern).toHaveCount(0)
+  await find.fill("pattern")
+  await submit.click()
+  await overlay.getByRole("button", { name: "Go to Regex script “New script”: Find regex", exact: true }).click()
+  await expect(pattern).toBeFocused()
+  await expect
+    .poll(() =>
+      pattern.evaluate((e) => {
+        const input = e as HTMLInputElement
+        return input.value.slice(input.selectionStart!, input.selectionEnd!)
+      })
+    )
+    .toBe("pattern")
+})
+
+test("Find reveals an offscreen range inside a long prompt", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  const chatId = await setUp(page, "Long prompt navigation", false)
+  const overlay = await open(page, chatId)
+  const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+  await main.fill(`${"A synthetic line of prompt text.\n".repeat(200)}select this distant range\nLast line.`)
+  await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
+  await overlay.getByRole("textbox", { name: "Find", exact: true }).fill("select this distant range")
+  await overlay.getByRole("button", { name: "Find", exact: true }).click()
+  await overlay.getByRole("button", { name: "Go to Prompt “Main Prompt”: Content", exact: true }).click()
+  await expect(main).toBeFocused()
+  const bar = overlay
+    .getByRole("button", { name: /^Save/ })
+    .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+  await expect
+    .poll(async () => {
+      const selected = await main.evaluate((e) => {
+        const selection = (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()
+        const bounds = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null
+        return { text: selection?.toString(), top: bounds?.top ?? -1, bottom: bounds?.bottom ?? -1 }
+      })
+      const toolbar = (await bar.boundingBox())!
+      return (
+        selected.text === "select this distant range" &&
+        selected.top >= toolbar.y + toolbar.height &&
+        selected.bottom <= 900
+      )
+    })
+    .toBe(true)
+})

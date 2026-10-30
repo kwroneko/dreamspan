@@ -18,7 +18,7 @@ import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
-import { SearchNavigation } from "./searchNavigation.ts"
+import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
@@ -66,10 +66,24 @@ function Block({
   const byDefinitions = definitions && perFieldMarkers.includes(entry.identifier)
   const name = useText(store, [...path, "name"]) || prompt.name
   const content = useText(store, [...path, "content"])
+  const nameMatch = useSearchMatch([...path, "name"])
+  const marker = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!prompt.marker || !nameMatch) return
+    const frame = requestAnimationFrame(() => {
+      const target = marker.current
+      if (!target) return
+      target.focus({ preventScroll: true })
+      scrollToSearchField(target)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [nameMatch, prompt.marker])
   const condition = conditionOf(prompt)
   const filled = context?.blocks.find((b) => b.identifier === entry.identifier)
   return (
     <section
+      ref={marker}
+      tabIndex={-1}
       id={`prompt-${entry.identifier}`}
       data-prompt={entry.identifier}
       className="scroll-mt-[var(--preset-toolbar-height,1rem)] border-t border-border py-2"
@@ -92,7 +106,19 @@ function Block({
             <span className="sr-only">Send {name}</span>
           </Switch>
         )}
-        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">{name}</span>
+        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">
+          {prompt.marker && nameMatch ? (
+            <>
+              {name.slice(0, nameMatch.at)}
+              <mark className="bg-warning/30 text-text">
+                {name.slice(nameMatch.at, nameMatch.at + nameMatch.length)}
+              </mark>
+              {name.slice(nameMatch.at + nameMatch.length)}
+            </>
+          ) : (
+            name
+          )}
+        </span>
         {!prompt.marker && (
           <>
             <Badge>{prompt.role}</Badge>

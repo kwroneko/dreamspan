@@ -17,11 +17,12 @@ const EMPTY_KEYS: ReadonlyArray<string> = []
 function Keys({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
   const match = useContext(SearchNavigation)
   const target = useRef<HTMLTextAreaElement>(null)
+  const revealed = useRef<typeof match>(null)
   const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
   const pathKey = JSON.stringify(path)
   useEffect(() => {
-    if (!match || JSON.stringify(match.path.slice(0, -1)) !== pathKey) return
+    if (!match || revealed.current === match || JSON.stringify(match.path.slice(0, -1)) !== pathKey) return
     const input = target.current!
     for (let parent = input.parentElement; parent; parent = parent.parentElement) {
       if (parent instanceof HTMLDetailsElement) parent.open = true
@@ -29,6 +30,8 @@ function Keys({ store, path, label }: { store: EditorStore; path: FieldPath; lab
     const index = Number(match.path.at(-1))
     const offset = keys.slice(0, index).reduce((n, key) => n + key.length + 1, 0)
     const frame = requestAnimationFrame(() => {
+      // Apply a visit once; subsequent typing must retain the user's new caret.
+      revealed.current = match
       input.focus({ preventScroll: true })
       input.setSelectionRange(offset + match.at, offset + match.at + match.length)
       scrollToSearchField(input)

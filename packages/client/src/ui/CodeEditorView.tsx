@@ -143,9 +143,10 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
       const anchor = Math.min(selection.at, view.state.doc.length)
       const head = Math.min(anchor + selection.length, view.state.doc.length)
       view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(head, { y: "center" }) })
-      view.focus()
       requestAnimationFrame(() => {
         if (!host.isConnected) return
+        // The host may reveal a closed details section in its effects first.
+        view.focus()
         view.requestMeasure({
           read: () => view.coordsAtPos(anchor)?.top,
           write: (top) => {
