@@ -1,3 +1,4 @@
+import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
 import { composerImages } from "./composerImages.ts"
 import { newChatLcmSettings } from "./generationSettings.ts"
@@ -305,21 +306,22 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           let depth = -1
           for (const { entityId, greeting, frozen } of greeters) {
             const greeter = byId.get(entityId)!
-            if (greeter.greetings.length === 0) continue
+            const options = offeredGreetings(greeter, new Set(cards.filter((entity) => entity !== persona)).size)
+            if (options.length === 0) continue
             const greetingVersion = (i: number) =>
               new NewVersion({
                 speakerEntityId: greeter.card.entityId,
                 writer: "model",
-                content: greeter.greetings[i]!,
+                content: options[i]!.text,
                 status: "complete",
                 macroMode: "template",
                 origin: "greeting",
-                greetingRef: { entity: greeter.card.entityId, index: greeter.greetingIndexes[i]! },
+                greetingRef: { entity: greeter.card.entityId, index: greeter.greetingIndexes[options[i]!.index]! },
                 ...(frozen[i] && Object.keys(frozen[i]).length > 0 ? { frozenMacros: frozen[i] } : {})
               })
             const parent = root === null ? null : { id: root, depth }
-            const more = greeter.greetings.slice(1).map((_, i) => greetingVersion(i + 1))
-            const picked = greeting !== null && greeting > 0 && greeting < greeter.greetings.length ? greeting : 0
+            const more = options.slice(1).map((_, i) => greetingVersion(i + 1))
+            const picked = options.indexOf(greetingPick(options, greeting)!)
             const inserted = yield* graph.insertSlot(chatId, laneId, parent, greetingVersion(0), at, null, more, picked)
             const slotId = inserted.slotId as SlotId
             yield* sql`UPDATE chats SET active_leaf_slot_id = ${slotId}, last_message_at = ${at} WHERE id = ${chatId}`

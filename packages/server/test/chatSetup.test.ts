@@ -48,6 +48,43 @@ const pathOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("chat setup", () => {
+  it.live("group-only greetings are saved in groups and fall back with only one character, excluding persona", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", {
+        ...mira,
+        group_only_greetings: ["", "Mira greets the crew at {{time}}."]
+      })
+      const tobin = yield* card(api, "Tobin", { first_mes: "Tobin nods." })
+      const ana = yield* card(api, "Ana", {}, true)
+      const preview = yield* api.GetCardForChat({ entityId: miraId })
+      assert.deepStrictEqual(preview.groupGreetings, ["Mira greets the crew at {{time}}."])
+      const frozen = freezeTemplate("Mira greets the crew at {{time}}.", {}, { user: "Ana", char: "Mira" }, {})
+      assert.ok(frozen)
+      const start = (cards: ReadonlyArray<EntityId>) =>
+        api.StartChat({
+          cards,
+          persona: ana,
+          greeting: 2,
+          greeters: [{ entityId: miraId, greeting: 2, frozen }],
+          first: { _tag: "Send", content: "Hello", speakerEntityId: ana }
+        })
+      const group = yield* start([miraId, tobin])
+      const [groupGreeting] = yield* pathOf(api, group.chat.id)
+      assert.strictEqual(groupGreeting!.version.content, "Mira greets the crew at {{time}}.")
+      assert.strictEqual(groupGreeting!.versionCount, 3)
+      assert.deepStrictEqual(groupGreeting!.version.frozenMacros, frozen)
+      const single = yield* start([miraId])
+      const [singleGreeting] = yield* pathOf(api, single.chat.id)
+      assert.strictEqual(singleGreeting!.version.content, mira.first_mes)
+      assert.strictEqual(singleGreeting!.versionCount, 2)
+      const duplicate = yield* start([miraId, miraId])
+      assert.strictEqual((yield* pathOf(api, duplicate.chat.id))[0]!.version.content, mira.first_mes)
+      const personaInCards = yield* start([miraId, ana])
+      assert.strictEqual((yield* pathOf(api, personaInCards.chat.id))[0]!.version.content, mira.first_mes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("reads, pins and unpins stable prompt names on their own fork", () =>
     Effect.gen(function* () {
       const api = yield* client()

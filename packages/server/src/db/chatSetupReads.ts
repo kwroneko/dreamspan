@@ -334,8 +334,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const [found] = yield* loadCards(sql, userId, [entityId])
         if (found === undefined || found.card.inBin) return yield* new NotFound({ entity: "card", id: entityId })
-        const { card, greetings, description, personality, scenario } = found
-        return new CardForChat({ card, greetings, description, personality, scenario })
+        const { card, greetings, groupGreetings, description, personality, scenario } = found
+        return new CardForChat({ card, greetings, groupGreetings, description, personality, scenario })
       }).pipe(query("GetCardForChat")),
 
     ListQueued: ({ userId, chatId }) =>

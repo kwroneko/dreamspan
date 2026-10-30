@@ -1,3 +1,4 @@
+import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import {
   PendingComposerControls,
@@ -82,16 +83,19 @@ function Greeting({
   card,
   index,
   onIndex,
-  text
+  text,
+  groupOnly,
+  count
 }: {
   card: CardForChat
   index: number
   onIndex: (index: number) => void
   /** The greeting shown, its macros expanded. */
   text: string
+  groupOnly: boolean
+  count: number
 }) {
   const name = card.card.name
-  const count = card.greetings.length
   return (
     <article
       aria-label={`Greeting from ${name}`}
@@ -124,6 +128,7 @@ function Greeting({
           </div>
         )}
       </header>
+      {groupOnly && <span className="text-xs text-muted">group greeting</span>}
       <Markdown text={text} streaming={false} />
     </article>
   )
@@ -153,12 +158,42 @@ function Pending({
   // No chat yet: the switcher names cards from the list, and there are no members to join.
   const pendingView = useMemo(() => castView(null, cards), [cards])
   // Who greets: the card, or each of the group's characters in turn; the greeting picked of each.
-  const greeters = group?.cards ?? [card]
+  const [greeters, setGreeters] = useState<ReadonlyArray<CardForChat>>(group?.cards ?? [card])
+  const [fallbackNote, setFallbackNote] = useState("")
+  const characterCount = new Set(
+    greeters.filter((item) => item.card.entityId !== persona).map((item) => item.card.entityId)
+  ).size
+  const options = greeters.map((item) => offeredGreetings(item, characterCount))
   const [picks, setPicks] = useState<ReadonlyArray<number>>(() =>
-    greeters.map((greeter) => (group === null ? 0 : Math.floor(Math.random() * Math.max(1, greeter.greetings.length))))
+    greeters.map((greeter) =>
+      group === null
+        ? 0
+        : (offeredGreetings(greeter, characterCount)[
+            Math.floor(Math.random() * Math.max(1, offeredGreetings(greeter, characterCount).length))
+          ]?.index ?? 0)
+    )
   )
-  const greeting = picks[0] ?? 0
-  const members = group?.group.members ?? null
+  const effectivePicks = options.map((list, at) => greetingPick(list, picks[at] ?? 0)?.index ?? -1)
+  const changePendingCast = (next: ReadonlyArray<CardForChat>, nextPersona = persona, nextPicks = picks) => {
+    const count = new Set(next.filter((item) => item.card.entityId !== nextPersona).map((item) => item.card.entityId))
+      .size
+    const adjusted = next.map(
+      (item, at) => greetingPick(offeredGreetings(item, count), nextPicks[at] ?? 0)?.index ?? -1
+    )
+    if (
+      next.some(
+        (item, at) =>
+          item.groupGreetings.length > 0 &&
+          (nextPicks[at] ?? -1) >= item.greetings.length &&
+          adjusted[at] !== nextPicks[at]
+      )
+    ) {
+      setFallbackNote("The selected group greeting is no longer available. Using the card’s first greeting.")
+    }
+    setGreeters(next)
+    setPicks(adjusted)
+  }
+  const members = group === null ? null : greeters.map((item) => item.card)
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).
   const [selectedSpeaker, setSelectedSpeaker] = useState<EntityId | null>(null)
   const [replier, setReplier] = useState<string>(card.card.entityId)
@@ -246,7 +281,7 @@ function Pending({
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
   const title = group?.group.name ?? name
-  const replyId = (members === null ? entityId : replier) as EntityId
+  const replyId = (greeters.some((item) => item.card.entityId === replier) ? replier : entityId) as EntityId
   const castCards = [
     ...new Map(
       [...greeters.map((greeter) => greeter.card), ...(playing ? [playing] : [])].map((item) => [item.entityId, item])
@@ -281,7 +316,12 @@ function Pending({
   })
   // What each greeting's random and time macros drew when first shown, by greeter and
   // greeting: the chat keeps them, so a greeting reads the same after the send (DESIGN §5.6).
-  const [frozen] = useState(() => greeters.map(() => new Map<number, FrozenValues>()))
+  const [frozen] = useState(() => new Map<string, Map<number, FrozenValues>>())
+  const draws = (at: number) => {
+    const id = greeters[at]!.card.entityId
+    if (!frozen.has(id)) frozen.set(id, new Map())
+    return frozen.get(id)!
+  }
   const expandGreeting = (at: number, index: number) => {
     const greeter = greeters[at]!
     const fields = {
@@ -290,13 +330,13 @@ function Pending({
       scenario: greeter.scenario
     }
     const result = expandForDisplay(
-      greeter.greetings[index]!,
+      options[at]!.find((option) => option.index === index)!.text,
       "template",
       { user: playing?.modelName ?? playing?.name ?? "User", char: greeter.card.modelName ?? greeter.card.name },
       fields,
-      frozen[at]!.get(index) ?? {}
+      draws(at).get(index) ?? {}
     )
-    frozen[at]!.set(index, result.frozen)
+    draws(at).set(index, result.frozen)
     return result.text
   }
 
@@ -311,33 +351,23 @@ function Pending({
     const sent = first === "send" || guidance
     sending.current = sent ? submitted : ""
     if (sent) setText("")
-    const shownFrozen = card.greetings.length > 0 ? frozen[0]!.get(greeting) : undefined
     const result = await action.run(
       (client) =>
         Effect.gen(function* () {
           const started = yield* client("StartChat", {
             // The greeting card leads; a group's chat has all its characters, under its name.
-            cards: members === null ? [entityId] : members.map((member) => member.entityId),
+            cards: greeters.map((greeter) => greeter.card.entityId),
             persona: personaId,
-            ...(group === null
-              ? {
-                  greeting: card.greetings.length > 0 ? greeting : null,
-                  // The picked greeting as it was shown; the server freezes the rest itself.
-                  ...(shownFrozen === undefined ? {} : { frozen: shownFrozen })
-                }
-              : {
-                  title: group.group.name,
-                  greeting: null,
-                  // Each member greets in turn, with the greeting picked as it was shown.
-                  greeters: group.cards.map((greeter, at) => {
-                    const shown = frozen[at]!.get(picks[at] ?? 0)
-                    return {
-                      entityId: greeter.card.entityId,
-                      greeting: picks[at] ?? 0,
-                      ...(shown === undefined ? {} : { frozen: shown })
-                    }
-                  })
-                }),
+            greeting: null,
+            ...(group === null ? {} : { title: group.group.name }),
+            greeters: greeters.map((greeter, at) => {
+              const shown = draws(at).get(effectivePicks[at] ?? 0)
+              return {
+                entityId: greeter.card.entityId,
+                greeting: Math.max(0, effectivePicks[at] ?? 0),
+                ...(shown === undefined ? {} : { frozen: shown })
+              }
+            }),
             first:
               first === "send"
                 ? { _tag: "Send", content: submitted, speakerEntityId: speakerId }
@@ -445,10 +475,12 @@ function Pending({
                 persona
                 pending
                 onPick={(picked) => {
+                  changePendingCast(greeters, picked.entityId)
                   setPersona(picked.entityId)
                   savePersona(picked.entityId)
                 }}
                 onNone={() => {
+                  changePendingCast(greeters, NONE)
                   setPersona(NONE)
                   savePersona(NONE)
                 }}
@@ -458,7 +490,7 @@ function Pending({
           {members !== null && (
             <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
               <Select
-                items={members.map((member) => ({
+                items={greeters.map(({ card: member }) => ({
                   value: member.entityId as string,
                   label: `${member.name}${member.subtitle ? ` · ${member.subtitle}` : ""}`
                 }))}
@@ -469,15 +501,65 @@ function Pending({
           )}
         </div>
       </header>
+      <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2" aria-label="Pending cast">
+        {greeters.map((item, at) => (
+          <span key={item.card.entityId} className="flex items-center gap-1 text-sm">
+            {item.card.name}
+            {at > 0 && (
+              <Button
+                variant="ghost"
+                aria-label={`Remove ${item.card.name} from pending cast`}
+                onClick={() => {
+                  changePendingCast(
+                    greeters.filter((_, index) => index !== at),
+                    persona,
+                    picks.filter((_, index) => index !== at)
+                  )
+                }}
+              >
+                Remove
+              </Button>
+            )}
+          </span>
+        ))}
+        <Field label="Add character" className="w-full sm:w-56">
+          <Select
+            value={null}
+            items={cards
+              .filter(
+                (item) =>
+                  item.entityId !== persona && !greeters.some((greeter) => greeter.card.entityId === item.entityId)
+              )
+              .map((item) => ({ value: item.entityId, label: item.name }))}
+            placeholder="Add character"
+            onValueChange={(id) => {
+              void action
+                .run((client) => client("GetCardForChat", { entityId: id as EntityId }))
+                .then((result) => {
+                  if (result.ok) {
+                    if (!greeters.some((item) => item.card.entityId === result.value.card.entityId)) {
+                      changePendingCast([...greeters, result.value], persona, [...picks, 0])
+                    }
+                  }
+                })
+            }}
+          />
+        </Field>
+      </div>
+      {fallbackNote && (
+        <p role="status" className="mx-auto w-full max-w-3xl text-sm text-muted">
+          {fallbackNote}
+        </p>
+      )}
       <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3 overflow-y-auto py-2">
-        {greeters.every((greeter) => greeter.greetings.length === 0) && (
+        {options.every((list) => list.length === 0) && (
           <p className="text-sm text-muted">
             {members === null ? `${name} has no greeting.` : "None of them has a greeting."} Your first message starts
             the chat.
           </p>
         )}
         {greeters.map((greeter, at) =>
-          greeter.greetings.length === 0 ? (
+          options[at]!.length === 0 ? (
             members !== null && (
               <p key={greeter.card.entityId} className="text-sm text-muted">
                 {greeter.card.name} has no greeting.
@@ -487,9 +569,14 @@ function Pending({
             <Greeting
               key={greeter.card.entityId}
               card={greeter}
-              index={picks[at] ?? 0}
-              onIndex={(index) => setPicks((current) => current.map((pick, i) => (i === at ? index : pick)))}
-              text={expandGreeting(at, picks[at] ?? 0)}
+              count={options[at]!.length}
+              groupOnly={greetingPick(options[at]!, effectivePicks[at]!)!.groupOnly}
+              index={options[at]!.findIndex((option) => option.index === effectivePicks[at])}
+              onIndex={(index) => {
+                setFallbackNote("")
+                setPicks(effectivePicks.map((pick, i) => (i === at ? options[at]![index]!.index : pick)))
+              }}
+              text={expandGreeting(at, effectivePicks[at]!)}
             />
           )
         )}
