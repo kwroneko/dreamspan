@@ -12,7 +12,8 @@ import type { install, close } from "./support/chatContributions.ts"
 const server = serverPerFile(withAdmin)
 let vite: ViteDevServer
 let url: string
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000)
   vite = await createServer({
     root: resolve(import.meta.dirname, ".."),
     server: {
@@ -26,6 +27,18 @@ test.beforeAll(async () => {
   })
   await vite.listen()
   url = vite.resolvedUrls!.local[0]!.replace(/\/$/, "")
+  // Compile the dev application's lazy chat/Markdown modules and the synthetic
+  // plugin before timing individual interactions. Production suites use a build;
+  // this file needs Vite's live module graph to exercise registry replacement.
+  const warm = await browser.newPage()
+  try {
+    await setup(warm, 120_000)
+    await expect(warm.locator("article .markdown")).toHaveText("A synthetic message.")
+    await contribution(warm, "install", "cards")
+    await contribution(warm, "close", "cards")
+  } finally {
+    await warm.close()
+  }
 })
 test.afterAll(async () => {
   await vite?.close()
@@ -42,7 +55,7 @@ const contribution = (page: Page, operation: "install" | "close", id: Parameters
     { operation, id }
   )
 
-const setup = async (page: Page) => {
+const setup = async (page: Page, timeout = 30_000) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
@@ -54,7 +67,7 @@ const setup = async (page: Page) => {
     })
   )
   await page.goto(`${url}/chats/${chat.id}`)
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout: 30_000 })
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout })
 }
 
 test("scoped contributions update mounted panels, controls, commands and dialogs, then disappear", async ({ page }) => {
