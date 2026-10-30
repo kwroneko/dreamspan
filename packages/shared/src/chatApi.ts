@@ -70,6 +70,7 @@ const displayFields = {
   outputMacros: Schema.Boolean,
   displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
+  enterSends: Schema.Literals(["automatic", "always", "never"]),
   guidance: Schema.Boolean
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
@@ -85,6 +86,7 @@ export const DisplayPrefsChange = Schema.Struct({
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
+  enterSends: Schema.optionalKey(displayFields.enterSends),
   guidance: Schema.optionalKey(displayFields.guidance)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
@@ -99,6 +101,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   coverageRail: false,
   outputMacros: false,
   displayRegex: false,
+  enterSends: "automatic",
   guidance: false
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type

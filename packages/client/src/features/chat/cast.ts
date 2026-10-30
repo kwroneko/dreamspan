@@ -33,6 +33,18 @@ export const useCast = () => useContext(CastContext)
 
 export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? null : (view.cards.get(id)?.name ?? null))
 
+/** Cast membership determines a turn's side; its original writer is only a fallback. */
+export const messageSide = (
+  entry: PathEntry,
+  cast: Cast | null,
+  speaker = entry.version.speakerEntityId ?? entry.firstSpeakerEntityId
+) =>
+  speaker != null && cast?.playedByMe.includes(speaker)
+    ? "user"
+    : speaker != null && cast?.participants.includes(speaker)
+      ? "assistant"
+      : entry.side
+
 /**
  * The faces Reply from offers: the candidates and the muted characters, who are never next in
  * turn but can still be picked to reply (DESIGN §3.5), in the cast's order.

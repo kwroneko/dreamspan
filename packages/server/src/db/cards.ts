@@ -25,7 +25,8 @@ export interface CardText {
   readonly card: CastCard
   /** `first_mes` then the alternate greetings, empty ones left out. */
   readonly greetings: ReadonlyArray<string>
-  /** Where each of `greetings` is in the card (0: `first_mes`), for a version's `greeting_ref`. */
+  readonly groupGreetings: ReadonlyArray<string>
+  /** Where each nonempty ordinary + group greeting is in the card (0: `first_mes`), for a version's `greeting_ref`. */
   readonly greetingIndexes: ReadonlyArray<number>
   readonly description: string
   readonly personality: string
@@ -43,7 +44,9 @@ const parse = (row: CardRow): CardText => {
     // A document is valid JSON by the schema's CHECK; anything else reads as empty.
   }
   const alternates = Array.isArray(doc.alternate_greetings) ? doc.alternate_greetings.map(text) : []
-  const all = [text(doc.first_mes), ...alternates]
+  const groups = Array.isArray(doc.group_only_greetings) ? doc.group_only_greetings.map(text) : []
+  const ordinary = [text(doc.first_mes), ...alternates]
+  const all = [...ordinary, ...groups]
   const greetingIndexes = all.flatMap((greeting, index) => (greeting.trim() === "" ? [] : [index]))
   const names = cardNames(doc)
   const book =
@@ -65,7 +68,8 @@ const parse = (row: CardRow): CardText => {
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
       avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
     }),
-    greetings: greetingIndexes.map((index) => all[index]!),
+    greetings: greetingIndexes.filter((index) => index < ordinary.length).map((index) => all[index]!),
+    groupGreetings: greetingIndexes.filter((index) => index >= ordinary.length).map((index) => all[index]!),
     greetingIndexes,
     description: text(doc.description),
     personality: text(doc.personality),

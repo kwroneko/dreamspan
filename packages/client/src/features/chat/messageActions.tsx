@@ -28,6 +28,7 @@ export interface MessageAction {
   readonly id: string
   readonly order: number
   readonly available?: (context: MessageActionContext) => boolean
+  readonly run?: (context: MessageActionContext, source: "button" | "keyboard") => void | Promise<void>
   readonly toolbar?: ComponentType<MessageActionProps>
   readonly menu?: ComponentType<MessageActionProps>
   readonly dialog?: ComponentType<MessageActionProps>
@@ -37,7 +38,20 @@ export const messageActions = makeRegistry<MessageAction>()
 export const availableMessageActions = (context: MessageActionContext, snapshot = messageActions.snapshot()) =>
   [...snapshot.entries].sort((a, b) => a.order - b.order).filter((entry) => entry.available?.(context) !== false)
 
+/** Resolve the effective action, including plugin disablement and availability. */
+export const invokeMessageAction = (id: string, context: MessageActionContext, source: "button" | "keyboard") => {
+  const action = messageActions.get(id)
+  if (action?.available?.(context) === false) return
+  return action?.run?.(context, source)
+}
+
 export function MessageActions({ context }: { context: MessageActionContext }) {
+  // Availability can depend on the path tip even when this row's entry stayed identical.
+  const readTip = () => {
+    const view = context.session.snapshot()
+    return `${view.forkId}:${view.loading}:${view.newer}:${view.entries.at(-1)?.slotId}`
+  }
+  useSyncExternalStore(context.session.subscribe, readTip, readTip)
   const snapshot = useSyncExternalStore(messageActions.subscribe, messageActions.snapshot, messageActions.snapshot)
   const actions = availableMessageActions(context, snapshot)
   const [dialog, setDialog] = useState<MessageAction | null>(null)

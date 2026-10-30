@@ -8,6 +8,7 @@ import {
   chatComposer,
   chatComposerNotes,
   chatCardActions,
+  chatNoteActions,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
@@ -22,6 +23,7 @@ import {
   timelineSummaries
 } from "./presentation.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
+import { AuthorNoteAction } from "./AuthorNoteAction.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
@@ -89,6 +91,7 @@ export const registerPresentation = () => [
     )
   }),
   chatCardActions.register({ id: "card.edit", order: 10, component: EditChatCard }),
+  chatNoteActions.register({ id: "note.author-note", order: 10, component: AuthorNoteAction }),
   chatCardActions.register({ id: "card.fork-for-chat", order: 20, component: ForkChatCard }),
   chatCardActions.register({ id: "card.choose-version", order: 30, component: ChooseChatCard }),
   chatSettingSections.register({

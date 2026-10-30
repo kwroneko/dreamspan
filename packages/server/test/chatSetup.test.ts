@@ -6,6 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Chat, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { DraftHistoryPolicy } from "@rp/shared/drafts.ts"
+import { greetingSources } from "@rp/shared/greetings.ts"
 import { Effect } from "effect"
 import { foldState } from "@rp/shared/state.ts"
 import { Generator } from "../src/chat/Generator.ts"
@@ -48,6 +49,107 @@ const pathOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("chat setup", () => {
+  for (const dbWorkers of ["source", "bundle"] as const) {
+    it.live(`greeting source overrides, disablement and restoration reach ${dbWorkers} storage`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const miraId = yield* card(api, "Mira", {
+          ...mira,
+          group_only_greetings: ["Together at {{time}}."]
+        })
+        const tobin = yield* card(api, "Tobin", { first_mes: "Tobin nods." })
+        const start = (greeting = 2) =>
+          api
+            .StartChat({
+              cards: [miraId, tobin],
+              persona: null,
+              greeting,
+              greeters: [{ entityId: miraId, greeting }],
+              first: { _tag: "Send", content: "Hello", speakerEntityId: null }
+            })
+            .pipe(
+              Effect.flatMap(({ chat }) => pathOf(api, chat.id)),
+              Effect.map((path) => path[0]!)
+            )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.disable("greetings.group-only")
+            const greeting = yield* start()
+            assert.strictEqual(greeting.version.content, mira.first_mes)
+            assert.strictEqual(greeting.versionCount, 2)
+          })
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.disable("greetings.ordinary")
+            const group = greetingSources.get("greetings.group-only")!
+            yield* greetingSources.register({
+              ...group,
+              offer: (card, count) =>
+                group.offer(card, count).map((option) => ({ ...option, text: `Custom ${option.text}` }))
+            })
+            const greeting = yield* start()
+            assert.strictEqual(greeting.version.content, "Custom Together at {{time}}.")
+            assert.strictEqual(greeting.versionCount, 1)
+            assert.ok(greeting.version.frozenMacros)
+          })
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.register({
+              id: "synthetic/greeting",
+              offer: () => [{ index: 99, text: "Plugin at {{time}}.", groupOnly: false }]
+            })
+            const greeting = yield* start(99)
+            assert.strictEqual(greeting.version.content, "Plugin at {{time}}.")
+            assert.strictEqual(greeting.versionCount, 4)
+            assert.ok(greeting.version.frozenMacros)
+          })
+        )
+        const restored = yield* start()
+        assert.strictEqual(restored.version.content, "Together at {{time}}.")
+        assert.strictEqual(restored.versionCount, 3)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ dbWorkers }), Generator.none)))
+    )
+  }
+
+  it.live("group-only greetings are saved in groups and fall back with only one character, excluding persona", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const miraId = yield* card(api, "Mira", {
+        ...mira,
+        group_only_greetings: ["", "Mira greets the crew at {{time}}."]
+      })
+      const tobin = yield* card(api, "Tobin", { first_mes: "Tobin nods." })
+      const ana = yield* card(api, "Ana", {}, true)
+      const preview = yield* api.GetCardForChat({ entityId: miraId })
+      assert.deepStrictEqual(preview.groupGreetings, ["Mira greets the crew at {{time}}."])
+      const frozen = freezeTemplate("Mira greets the crew at {{time}}.", {}, { user: "Ana", char: "Mira" }, {})
+      assert.ok(frozen)
+      const start = (cards: ReadonlyArray<EntityId>) =>
+        api.StartChat({
+          cards,
+          persona: ana,
+          greeting: 2,
+          greeters: [{ entityId: miraId, greeting: 2, frozen }],
+          first: { _tag: "Send", content: "Hello", speakerEntityId: ana }
+        })
+      const group = yield* start([miraId, tobin])
+      const [groupGreeting] = yield* pathOf(api, group.chat.id)
+      assert.strictEqual(groupGreeting!.version.content, "Mira greets the crew at {{time}}.")
+      assert.strictEqual(groupGreeting!.versionCount, 3)
+      assert.deepStrictEqual(groupGreeting!.version.frozenMacros, frozen)
+      const single = yield* start([miraId])
+      const [singleGreeting] = yield* pathOf(api, single.chat.id)
+      assert.strictEqual(singleGreeting!.version.content, mira.first_mes)
+      assert.strictEqual(singleGreeting!.versionCount, 2)
+      const duplicate = yield* start([miraId, miraId])
+      assert.strictEqual((yield* pathOf(api, duplicate.chat.id))[0]!.version.content, mira.first_mes)
+      const personaInCards = yield* start([miraId, ana])
+      assert.strictEqual((yield* pathOf(api, personaInCards.chat.id))[0]!.version.content, mira.first_mes)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("reads, pins and unpins stable prompt names on their own fork", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -759,5 +861,56 @@ describe("queued edits", () => {
       assert.strictEqual(path.at(-1)!.version.content, "Posted original")
       assert.strictEqual((yield* api.MessageDrafts({ chatId: started.chat.id }))[0]!.content, late.content)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), slow)))
+  )
+  it.live("the user chooses which chat note is the author's note, or none, from a message on", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Wren", name: "Wren" })
+      const cardNote = yield* api.CreateCardNote({ cardRefId: card.id, title: "Wren's note" })
+      const started = yield* api.StartChat({
+        cards: [card.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "Hello.", speakerEntityId: null }
+      })
+      const chatId = started.chat.id
+      const first = started.entry.slotId
+      const scene = yield* api.CreateChatNote({ chatId, title: "Scene" })
+      const mood = yield* api.CreateChatNote({ chatId, title: "Mood" })
+      const authorNotes = (slotId: typeof first) =>
+        Effect.map(api.ListChatNotes({ chatId, slotId }), (notes) =>
+          notes.filter((n) => n.authorNote).map((n) => n.ref.label)
+        )
+      const choose = (slotId: typeof first, entityId: EntityId | null) =>
+        api.ChangeCast({ chatId, slotId, change: { _tag: "AuthorNote", entityId } })
+      assert.deepStrictEqual(yield* authorNotes(first), [])
+      yield* choose(first, scene.entityId)
+      assert.deepStrictEqual(yield* authorNotes(first), ["Scene"])
+      // Choosing another replaces it; there is only ever one.
+      yield* choose(first, mood.entityId)
+      assert.deepStrictEqual(yield* authorNotes(first), ["Mood"])
+      // From a later message on: the earlier message keeps its choice.
+      const later = yield* api.SendMessage({
+        chatId,
+        forkId: started.chat.currentForkId,
+        parentSlotId: first,
+        branch: false,
+        content: "Later."
+      })
+      assert.strictEqual(later._tag, "Posted")
+      if (later._tag !== "Posted") return
+      yield* choose(later.entry.slotId, null)
+      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), [])
+      assert.deepStrictEqual(yield* authorNotes(first), ["Mood"])
+      // Only a chat's own notes can be its author's note. A refused choice keeps the old one.
+      yield* choose(later.entry.slotId, mood.entityId)
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, cardNote.entityId)), "NotFound")
+      const shared = yield* api.CreateSnippet({ chatId, forkId: null, title: "Shared", content: "Fog." })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, shared.ref.entityId)), "NotFound")
+      const other = yield* api.CreateChat({ title: "Other" })
+      const foreign = yield* api.CreateChatNote({ chatId: other.id, title: "Elsewhere" })
+      assert.strictEqual(yield* outcome(choose(later.entry.slotId, foreign.entityId)), "NotFound")
+      assert.deepStrictEqual(yield* authorNotes(later.entry.slotId), ["Mood"])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 })

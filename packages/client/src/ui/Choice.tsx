@@ -84,6 +84,7 @@ export function RadioGroup<Value extends string>({
   value: Value
   onValueChange: (value: Value) => void
   options: ReadonlyArray<{ value: Value; label: ReactNode; description?: ReactNode }>
+  disabled?: boolean
   "aria-labelledby"?: string
 }) {
   return (

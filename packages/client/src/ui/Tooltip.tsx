@@ -50,17 +50,18 @@ export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
 /** A button that's just an icon: `label` is its accessible name and its tooltip. */
 export function IconButton({
   label,
+  hint,
   icon,
   tone = "muted",
   filled = false,
   className = "",
   ...props
-}: { label: string; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
+}: { label: string; hint?: ReactNode; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
   ComponentProps<typeof BaseButton>,
   "children" | "aria-label"
 >) {
   return (
-    <Tooltip label={label}>
+    <Tooltip label={hint ?? label}>
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
         <Icon name={icon} filled={filled} />
       </BaseButton>
