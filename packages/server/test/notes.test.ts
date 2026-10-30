@@ -148,7 +148,8 @@ describe("note positions (DESIGN §4.1)", () => {
         expect(tailEnd).toBeLessThan(newest)
       } else {
         expect(newest).toBeLessThan(tailStart)
-        expect(tailEnd).toBe(sent.length - 1)
+        // Only the end-of-request message follows it (DESIGN §2.2).
+        expect(tailEnd).toBe(sent.length - 2)
       }
     })
   }

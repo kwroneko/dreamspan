@@ -103,6 +103,12 @@ const commitOf = ({ draftId, session, text }: ComposerSource) => ({ draftId, ses
 /** The draft an edit's text was typed into, to commit with it (messageDraft.ts). */
 type DraftCommit = { readonly draftId: string; readonly session: number }
 
+/** What a new version or Continue of a slot asks the composer for its guidance. */
+export interface GuidanceRequest {
+  readonly slotId: SlotId
+  readonly kind: "version" | "continue"
+}
+
 export type Outcome<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
 const withInContext = (entry: PathEntry, version: Version) =>
@@ -1226,41 +1232,45 @@ export class ChatSession {
     return this.call((client) => client("ImpersonationNotice", {}))
   }
 
-  /** What the composer holds as guidance; nothing while guidance is off or no composer is open. */
-  private guidanceText: () => string = () => ""
+  /** Where guidance comes from; nothing here until a composer says (DESIGN §2.2). */
+  private guidanceText: (request: GuidanceRequest) => string | undefined = () => undefined
 
   /**
-   * The composer says what its guidance is (DESIGN §2.2): its text while the guidance toggle is
-   * on, else nothing. A swipe and Continue read it as they're asked for. Returns the undo.
+   * The composer says what guidance a new version or Continue of a slot is asked with (DESIGN
+   * §2.2, guidance on swipes), read as each is asked for: a text (empty for none), or
+   * undefined for a new version that reuses the guidance of the version it re-rolls. Returns
+   * the undo.
    */
-  provideGuidance(read: () => string): () => void {
+  provideGuidance(read: (request: GuidanceRequest) => string | undefined): () => void {
     this.guidanceText = read
     return () => {
-      if (this.guidanceText === read) this.guidanceText = () => ""
+      if (this.guidanceText === read) this.guidanceText = () => undefined
     }
   }
 
-  /** The direction a swipe or Continue asked for now carries: the composer's guidance, if any. */
-  guidance(): string {
-    return this.guidanceText().trim() === "" ? "" : this.guidanceText()
+  /** The direction asked for now: undefined to reuse the re-rolled version's, "" for none. */
+  guidance(request: GuidanceRequest): string | undefined {
+    const text = this.guidanceText(request)
+    return text === undefined || text.trim() !== "" ? text : ""
   }
 
   /**
    * A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's.
-   * It carries the composer's guidance as its direction; nothing else is reused.
+   * It's written with the guidance of the version it re-rolls, unless the composer gives
+   * this slot's guidance explicitly (the guidance editor's box, guidanceEdit.tsx).
    */
   async regenerate(
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
   ): Promise<Outcome<unknown>> {
-    const direction = this.guidance()
+    const direction = this.guidance({ slotId: entry.slotId, kind: "version" })
     return this.slotWrite(entry.slotId, (client) =>
       client("Regenerate", {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
         ...(model ? { model } : {}),
-        ...(direction ? { direction } : {})
+        ...(direction === undefined ? {} : { direction })
       })
     )
   }
@@ -1271,7 +1281,7 @@ export class ChatSession {
    * composer's guidance as its direction.
    */
   async continueVersion(entry: PathEntry): Promise<Outcome<unknown>> {
-    const direction = this.guidance()
+    const direction = this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? ""
     return this.slotWrite(entry.slotId, (client) =>
       client("ContinueVersion", {
         versionId: entry.version.id,

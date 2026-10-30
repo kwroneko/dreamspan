@@ -154,3 +154,50 @@ for (const width of [1440, 390]) {
     }
   })
 }
+
+test("find results go to a standalone entry's text and keys, even past the entry filter", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const response = await page.request.post(`${server().url}/library/import?name=Saltmarsh find.json`, {
+    headers: { "content-type": "application/octet-stream", origin: server().url },
+    data: Buffer.from(JSON.stringify(worldInfo("Saltmarsh find")))
+  })
+  expect(response.status()).toBe(200)
+  const {
+    library: { ref }
+  } = await response.json()
+  await page.goto(`${server().url}/library/${ref.id}`)
+  // Hide the Lamp entry; going to its match must show it again.
+  await page.getByRole("searchbox", { name: "Filter entries" }).fill("fog")
+  await expect(page.locator("summary").filter({ hasText: /^Lamp/ })).toHaveCount(0)
+  const dialog = page.getByRole("dialog", { name: "Search and replace" })
+  const find = async (text: string, target: RegExp) => {
+    await page.getByRole("button", { name: "Search", exact: true }).click()
+    await dialog.getByRole("textbox", { name: "Find", exact: true }).fill(text)
+    await dialog.getByRole("button", { name: "Find", exact: true }).click()
+    await dialog.getByRole("button", { name: target }).click()
+  }
+  await find("blue", /^Go to .*: Content$/)
+  const content = page
+    .getByRole("group", { name: "Lorebook entry 1" })
+    .getByRole("textbox", { name: "Entry content", exact: true })
+  await expect(content).toBeFocused()
+  await expect
+    .poll(() =>
+      content.evaluate((e) =>
+        (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.toString()
+      )
+    )
+    .toBe("blue")
+  await page.getByRole("searchbox", { name: "Filter entries" }).fill("fog")
+  await find("lantern", /^Go to .*: Primary key 2$/)
+  const keys = page.getByRole("group", { name: "Lorebook entry 1" }).getByRole("textbox", { name: "Primary keys" })
+  await expect(keys).toBeFocused()
+  await expect
+    .poll(() =>
+      keys.evaluate((e) => {
+        const input = e as HTMLTextAreaElement
+        return { text: input.value.slice(input.selectionStart, input.selectionEnd), start: input.selectionStart }
+      })
+    )
+    .toEqual({ text: "lantern", start: 5 })
+})

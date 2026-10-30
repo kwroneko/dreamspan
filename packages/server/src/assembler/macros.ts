@@ -231,7 +231,12 @@ export const makeMacroEnvironment = (
     verbatim: (id, source, text, parts) => record(id, source, text, parts),
     message: (entry, before, at) => {
       const id = `message:${entry.versionId}`
-      const source: Source = { kind: "message", slot: entry.slotId, version: entry.versionId }
+      const source: Source = {
+        kind: "message",
+        slot: entry.slotId,
+        version: entry.versionId,
+        ...(entry.versionNumber === undefined ? {} : { number: entry.versionNumber })
+      }
       if (entry.macroMode !== "template") return record(id, source, entry.content)
       // A message of the chat keeps `{{speaker}}` and `{{direction}}` as written: they're this
       // generation's, not the message's.

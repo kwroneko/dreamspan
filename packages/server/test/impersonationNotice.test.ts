@@ -1,6 +1,7 @@
 // The one-time impersonation notice (DESIGN §2.2): asked as the user generates as a card they
-// play, it's shown once per preset per account, and only for a preset with no prompt sent
-// when the model writes as {{user}} (ST's impersonation prompt, imported, counts).
+// play, it's shown once per preset per account, and only for a preset with no prompt of its
+// order sent only when the model writes as {{user}}. ST's impersonation prompt is the
+// end-of-request text "when your card speaks", outside the order, so it doesn't count.
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -12,10 +13,18 @@ import { presetDoc } from "./support/docs.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
-const preset = (api: Api, label: string, impersonation: string) =>
+const preset = (api: Api, label: string, impersonation: string, asUser = false) =>
   Effect.gen(function* () {
     const me = yield* api.Whoami()
-    const doc = presetDoc()
+    const base = presetDoc()
+    const marked = base.prompts[0]!
+    const doc = asUser
+      ? {
+          ...base,
+          prompts: [...base.prompts, { ...marked, identifier: "as-user", condition: "as_user" as const }],
+          order: [...base.order, { identifier: "as-user", enabled: true }]
+        }
+      : base
     const created = yield* (yield* Writer).CreateEntity({
       userId: me.id as UserId,
       kind: "preset",
@@ -33,7 +42,7 @@ describe("the impersonation notice", () => {
   it.live("is said once per preset, and only where no prompt is sent when writing as {{user}}", () =>
     Effect.gen(function* () {
       const api = yield* client()
-      // ST's built-in default has its impersonation prompt.
+      // No preset chosen: nothing to say.
       assert.deepStrictEqual(yield* api.ImpersonationNotice({}), { show: false, preset: null })
 
       const bare = yield* preset(api, "Bare", "")
@@ -42,11 +51,14 @@ describe("the impersonation notice", () => {
       // Once: asking again, or from another tab, says nothing.
       assert.deepStrictEqual(yield* api.ImpersonationNotice({}), { show: false, preset: bare })
 
-      // A preset saved before conditions, with ST's impersonation prompt: it reads as a prompt
-      // conditioned on writing as {{user}}, so there's nothing to say.
+      // ST's impersonation prompt alone is the end-of-request text, which doesn't count.
       const withPrompt = yield* preset(api, "With its prompt", "[Write as {{user}}.]")
       yield* api.ChangeGenerationDefaults({ change: { preset: withPrompt } })
-      assert.deepStrictEqual(yield* api.ImpersonationNotice({}), { show: false, preset: withPrompt })
+      assert.deepStrictEqual(yield* api.ImpersonationNotice({}), { show: true, preset: withPrompt })
+      // A prompt of the order marked for writing as {{user}}: nothing to say.
+      const marked = yield* preset(api, "Marked", "", true)
+      yield* api.ChangeGenerationDefaults({ change: { preset: marked } })
+      assert.deepStrictEqual(yield* api.ImpersonationNotice({}), { show: false, preset: marked })
 
       // Another bare preset has its own notice.
       const other = yield* preset(api, "Other", "")

@@ -278,6 +278,38 @@ test("card search and replace includes embedded lore and keys in closed entries"
   await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("port")
   await dialog.getByRole("button", { name: "Find", exact: true }).click()
   await expect(dialog.getByRole("status")).toHaveText("6 matches.")
+  await dialog.getByRole("button", { name: /Go to Lorebook entry .*: Content$/ }).click()
+  const content = page.getByRole("textbox", { name: "Entry content", exact: true })
+  await expect(content).toBeFocused()
+  await expect
+    .poll(() =>
+      content.evaluate((e) =>
+        (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.toString()
+      )
+    )
+    .toBe("Harbour")
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Harbour tides$/ })
+    .click()
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
+  await dialog.getByRole("button", { name: /Go to Lorebook entry .*: Primary key 2$/ }).click()
+  const keys = page.getByRole("textbox", { name: "Primary keys", exact: true })
+  await expect(keys).toBeFocused()
+  await expect
+    .poll(() =>
+      keys.evaluate((e) => {
+        const input = e as HTMLTextAreaElement
+        return { text: input.value.slice(input.selectionStart, input.selectionEnd), start: input.selectionStart }
+      })
+    )
+    .toEqual({ text: "harbour", start: 9 })
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("port")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
   await dialog.getByRole("button", { name: "Replace all", exact: true }).click()
   await expect(dialog.getByRole("status")).toHaveText("No matches.")
   await dialog.press("Escape")
@@ -289,4 +321,25 @@ test("card search and replace includes embedded lore and keys in closed entries"
     description: "port guide",
     entries: [{ comment: "port tides", content: "port tide", keys: ["port", "/port,a/iu"] }]
   })
+})
+
+test("typing after a key search visit keeps the new caret position", async ({ page }) => {
+  const card = await admin((api) => api.CreateCard({ label: "Key caret", name: "Key caret" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  await page.getByRole("button", { name: "Add lorebook entry" }).click()
+  const keys = page.getByRole("textbox", { name: "Primary keys", exact: true })
+  await keys.fill("first\nharbour")
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Search and replace" })
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
+  await dialog.getByRole("button", { name: /Go to Lorebook entry .*: Primary key 2$/ }).click()
+  await expect(keys).toBeFocused()
+  await keys.press("p")
+  // Wait for the controlled field to settle before continuing the user's edit.
+  await expect(keys).toHaveValue("first\np")
+  await expect.poll(() => keys.evaluate((e) => (e as HTMLTextAreaElement).selectionStart)).toBe(7)
+  await keys.press("o")
+  await expect(keys).toHaveValue("first\npo")
 })

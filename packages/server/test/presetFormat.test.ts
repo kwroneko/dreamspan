@@ -1,5 +1,6 @@
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { conditionOf, editedDoc, triggersFor, withConditions } from "@rp/shared/presetConditions.ts"
+import { conditionOf, editedDoc, triggersFor, withEndOfRequest } from "@rp/shared/presetConditions.ts"
+import { DIRECTION_TEXT, endOfRequestText, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -54,21 +55,15 @@ describe("importing an ST chat-completion preset", () => {
       "dialogueExamples",
       "chatHistory",
       "newestMessage",
-      "groupNudge",
-      "jailbreak",
-      "impersonationPrompt",
-      "direction"
+      "jailbreak"
     ])
     expect(doc.order.find((e) => e.identifier === "enhanceDefinitions")?.enabled).toBe(false)
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
     expect(prompt(doc, "main")).toMatchObject({ content: "You narrate a story starring {{char}} and {{user}}." })
     expect(prompt(doc, "chatHistory")).toMatchObject({ marker: true, system_prompt: true, role: "system" })
-    // ST's impersonation prompt is a conditioned prompt now, with {{user}} as {{speaker}}.
+    // ST's impersonation prompt is an end-of-request text now, with {{user}} as {{speaker}}.
     expect(doc.utility_prompts.impersonation_prompt).toBe("")
-    expect(prompt(doc, "impersonationPrompt")).toMatchObject({
-      content: "[Reply as {{speaker}} this time.]",
-      condition: "as_user"
-    })
+    expect(prompt(doc, "impersonationPrompt")).toMatchObject({ content: "[Reply as {{speaker}} this time.]" })
     // Fields left at ST's defaults, or with no effect on what's sent, raise no warnings.
     expect(codes(result, "warning")).toEqual([])
     expect(doc.unsupported).toEqual({
@@ -229,12 +224,10 @@ describe("ST's prompt and order sanitizing", () => {
       "charDescription",
       "charPersonality",
       "scenario",
-      "personaDescription",
-      "groupNudge",
-      "impersonationPrompt",
-      "direction"
+      "personaDescription"
     ])
-    expect(fromPartial.order).toHaveLength(fromPartial.prompts.length)
+    // Every prompt but the end-of-request texts, which are never in the order.
+    expect(fromPartial.order).toHaveLength(fromPartial.prompts.length - 3)
   })
 
   it("treats a prompt without `system_prompt` as ST does: not sent from the order", () => {
@@ -302,8 +295,8 @@ describe("ST's prompt and order sanitizing", () => {
 
   it("uses ST's default order when the preset has no global order", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100000, order: [] }] })
-    // ST's twelve, the newest-message marker, the group nudge, the impersonation prompt and the direction.
-    expect(result.doc.order).toHaveLength(16)
+    // ST's twelve and the newest-message marker; the end-of-request texts are outside the order.
+    expect(result.doc.order).toHaveLength(13)
     expect(codes(result, "warning")).toContain("preset.no_global_order")
     expect(issue(result, "preset.prompt_orders_dropped")?.message).toContain("100000")
   })
@@ -434,8 +427,8 @@ describe("exporting to an ST chat-completion preset", () => {
     const { doc } = load(fixture("default"))
     const file = exportStPreset({ ...doc, unsupported: { ...doc.unsupported, temperature: 2, prompts: [] } })
     expect(file.temperature).toBe(1)
-    // The group nudge and impersonation prompt go back to ST's utility prompts.
-    expect(file.prompts).toHaveLength(doc.prompts.length - 2)
+    // The turn texts go back to ST's utility prompts; ST has no field for the direction text.
+    expect(file.prompts).toHaveLength(doc.prompts.length - 3)
   })
 
   it("writes the document's enums back as ST's values", () => {
@@ -714,7 +707,7 @@ describe("cases where ST's behaviour is easy to miss", () => {
 
   it("says where a global order without a list differs from ST", () => {
     const result = load({ prompts: [], prompt_order: [{ character_id: 100001 }] })
-    expect(result.doc.order).toHaveLength(16)
+    expect(result.doc.order).toHaveLength(13)
     expect(issue(result, "preset.no_global_order")?.message).toContain("ST would send none")
   })
 
@@ -756,7 +749,12 @@ describe("the document order", () => {
       ]
     })
     expect(result.doc.order.find((e) => e.identifier === "parked")).toEqual({ identifier: "parked", enabled: false })
-    expect(result.doc.order.map((e) => e.identifier).sort()).toEqual(result.doc.prompts.map((p) => p.identifier).sort())
+    expect(result.doc.order.map((e) => e.identifier).sort()).toEqual(
+      result.doc.prompts
+        .map((p) => p.identifier)
+        .filter((id) => !endOfRequestText(id))
+        .sort()
+    )
     expect(issue(result, "preset.prompts_appended_off")?.message).toContain("Parked prompt")
     // ST still sends the markers its order leaves out, after the other prompts: they stay on.
     expect(result.doc.order.find((e) => e.identifier === "charDescription")).toEqual({
@@ -819,7 +817,7 @@ describe("conditions (DESIGN §2.2)", () => {
     expect(sentFor([])).toEqual(types)
   })
 
-  it("turns ST's group nudge and impersonation prompt into conditioned prompts where ST sends them", () => {
+  it("turns ST's group nudge and impersonation prompt into end-of-request texts, outside the order", () => {
     const result = load(
       preset({
         group_nudge_prompt: "[Only {{char}} speaks; not {{ CHAR }}'s rival.]",
@@ -834,52 +832,33 @@ describe("conditions (DESIGN §2.2)", () => {
     )
     const { doc } = result
     expect(prompt(doc, "groupNudge")).toMatchObject({
-      role: "system",
-      condition: "as_character",
-      system_prompt: false,
+      role: "user",
+      name: "When a character speaks",
       content: "[Only {{speaker}} speaks; not {{speaker}}'s rival.]"
     })
-    expect(prompt(doc, "impersonationPrompt")).toMatchObject({
-      role: "system",
-      condition: "as_user",
-      content: "[Write as {{speaker}}.]"
-    })
+    expect(prompt(doc, "groupNudge")!.condition).toBeUndefined()
+    expect(prompt(doc, "impersonationPrompt")).toMatchObject({ role: "user", content: "[Write as {{speaker}}.]" })
+    expect(prompt(doc, "directionPrompt")).toMatchObject({ role: "user", content: DIRECTION_TEXT })
     expect(doc.utility_prompts.group_nudge_prompt).toBe("")
     expect(doc.utility_prompts.impersonation_prompt).toBe("")
-    // The nudge at the end of the history; the impersonation prompt last, after the
-    // post-history instructions (ST: "always positioned last"), before the direction prompt.
     const ids = doc.order.map((e) => e.identifier)
-    expect(ids.slice(ids.indexOf("chatHistory"), ids.indexOf("chatHistory") + 4)).toEqual([
-      "chatHistory",
-      "newestMessage",
-      "groupNudge",
-      "jailbreak"
-    ])
-    expect(ids.slice(-2)).toEqual(["impersonationPrompt", "direction"])
-    expect(codes(result)).toEqual(
-      expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt", "preset.direction_prompt"])
-    )
-    // Empty ones add nothing.
+    expect(ids.slice(0, 4)).toEqual(["main", "chatHistory", "newestMessage", "jailbreak"])
+    for (const id of ["groupNudge", "impersonationPrompt", "directionPrompt"]) expect(ids).not.toContain(id)
+    expect(codes(result)).toEqual(expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt"]))
+    // Empty ones keep our defaults.
     const none = load(preset({ group_nudge_prompt: "", impersonation_prompt: "" })).doc
-    expect(none.prompts.map((p) => p.identifier)).not.toContain("groupNudge")
-    expect(none.prompts.map((p) => p.identifier)).not.toContain("impersonationPrompt")
+    expect(prompt(none, "groupNudge")!.content).toBe(TURN_TEXT)
+    expect(prompt(none, "impersonationPrompt")!.content).toBe(TURN_TEXT)
   })
 
-  it("appends the default direction prompt last, once, and not again on a reimport", () => {
+  it("gives every import the end-of-request texts once, and not again on a reimport", () => {
     const { doc } = load(fixture("full"))
-    expect(doc.order.at(-1)).toEqual({ identifier: "direction", enabled: true })
-    expect(prompt(doc, "direction")).toMatchObject({
-      role: "user",
-      condition: "with_direction",
-      added_on_import: true,
-      content:
-        "[The user has written a direction for {{speaker}}'s next message. It is not part of the story; follow it closely: {{direction}}]"
-    })
+    for (const id of ["groupNudge", "impersonationPrompt", "directionPrompt"])
+      expect(doc.prompts.filter((p) => p.identifier === id)).toHaveLength(1)
     const again = load(exportStPreset(doc)).doc
-    expect(again.prompts.filter((p) => p.identifier === "direction")).toHaveLength(1)
     expect(again).toEqual(doc)
     // Converted already, it comes back as it is.
-    expect(withConditions(doc).doc).toBe(doc)
+    expect(withEndOfRequest(doc).doc).toBe(doc)
   })
 
   it("exports conditions as ST has them, and reimports the same document", () => {
@@ -912,11 +891,12 @@ describe("conditions (DESIGN §2.2)", () => {
     expect(file.impersonation_prompt).toBe("[As {{user}}.]")
     const prompts = file.prompts as Array<Record<string, unknown>>
     expect(prompts.map((p) => p.identifier)).not.toContain("groupNudge")
+    // ST has no field for the direction text: it isn't written.
+    expect(prompts.map((p) => p.identifier)).not.toContain("directionPrompt")
+    expect(JSON.stringify(file)).not.toContain(DIRECTION_TEXT)
     expect(prompts.find((p) => p.identifier === "a")!.injection_trigger).toEqual(["normal"])
     expect(prompts.find((p) => p.identifier === "b")!.injection_trigger).toEqual(["impersonate"])
-    // ST would send a direction prompt every turn: it goes out off.
     const order = (file.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>)[0]!.order
-    expect(order.find((e) => e.identifier === "direction")?.enabled).toBe(false)
     expect(order.map((e) => e.identifier)).not.toContain("impersonationPrompt")
     expect(prompts.find((p) => p.identifier === "b")!.condition).toBe("as_user")
     expect(load(file).doc).toEqual({
@@ -935,17 +915,26 @@ describe("conditions (DESIGN §2.2)", () => {
     const a = (both.prompts as Array<Record<string, unknown>>).find((p) => p.identifier === "a")!
     expect(a.injection_trigger).toEqual(["normal"])
     expect(a.condition).toBe("as_character")
-    // A nudge turned off is no nudge in ST.
+    // A prompt sent only with a direction, which ST would send every turn, goes out off.
+    const directed = exportStPreset({
+      ...edited,
+      prompts: edited.prompts.map((p) => (p.identifier === "a" ? { ...p, condition: "with_direction" as const } : p))
+    })
+    const directedOrder = (
+      directed.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>
+    )[0]!.order
+    expect(directedOrder.find((e) => e.identifier === "a")?.enabled).toBe(false)
+    // An emptied nudge is an empty one in ST.
     const off = exportStPreset({
       ...edited,
-      order: edited.order.map((e) => (e.identifier === "groupNudge" ? { ...e, enabled: false } : e))
+      prompts: edited.prompts.map((p) => (p.identifier === "groupNudge" ? { ...p, content: "" } : p))
     })
     expect(off.group_nudge_prompt).toBe("")
   })
 
-  it("reads a preset saved before conditions as the import would make it now, without rewriting it", () => {
+  it("reads a preset saved before the end-of-request texts as the import would make it now, without rewriting it", () => {
     const fresh = load(preset({ group_nudge_prompt: "[Only {{char}}.]", impersonation_prompt: "[As {{user}}.]" })).doc
-    const moved = new Set(["groupNudge", "impersonationPrompt", "direction"])
+    const moved = new Set(["groupNudge", "impersonationPrompt", "directionPrompt"])
     const stored = {
       ...fresh,
       prompts: fresh.prompts.filter((p) => !moved.has(p.identifier)),
@@ -957,7 +946,7 @@ describe("conditions (DESIGN §2.2)", () => {
       }
     }
     const before = JSON.stringify(stored)
-    expect(withConditions(stored).doc).toEqual(fresh)
+    expect(withEndOfRequest(stored).doc).toEqual(fresh)
     expect(editedDoc("preset", stored)).toEqual(fresh)
     expect(editedDoc("card", stored)).toBe(stored)
     expect(JSON.stringify(stored)).toBe(before)

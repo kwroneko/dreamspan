@@ -303,12 +303,12 @@ function Pending({
   const start = async (first: "send" | "generate") => {
     if (action.pending || (first === "send" && text.trim() === "")) return
     const personaId = playing?.entityId ?? null
-    // A sent message leaves the box as it's sent; whatever is typed while the chat is being
-    // made goes along to its composer, and a failure puts the sent text back. Generating
-    // leaves the text where it is, and it goes along too: with guidance on it's the first
-    // reply's direction, with guidance off it isn't used.
+    // A sent message, or guidance for the first reply, leaves the box as it's sent; whatever
+    // is typed while the chat is being made goes along to its composer, and a failure puts
+    // the submitted text back. With guidance off, Generate doesn't use the text, which stays
+    // in the box and goes along too.
     const submitted = text
-    const sent = first === "send"
+    const sent = first === "send" || guidance
     sending.current = sent ? submitted : ""
     if (sent) setText("")
     const shownFrozen = card.greetings.length > 0 ? frozen[0]!.get(greeting) : undefined
@@ -547,7 +547,7 @@ function Pending({
         {(guidance || text.trim() !== "") && (
           <p id="composer-hint" className="text-xs text-muted">
             {guidance
-              ? `Guidance: a one-turn direction for ${speakerName}'s first reply. It stays in the box.`
+              ? `Guidance: a one-turn direction for ${speakerName}'s first reply. It leaves the box when you submit it.`
               : "Generate doesn't use this text: turn guidance on to direct the reply with it."}
           </p>
         )}

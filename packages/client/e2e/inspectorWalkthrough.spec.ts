@@ -390,7 +390,12 @@ for (const [width, height] of [
       const personality = await scrollTo(page, "Preset: personality format")
       await expect(personality.getByRole("region", { name: "Card “Mira Ashdown”: personality" })).toBeVisible()
       await expect(personality.getByRole("region", { name: "Card “Bram Holt”: personality" })).toBeVisible()
+      await expect(
+        personality.getByRole("region", { name: "The characters' personalities", exact: true })
+      ).toBeVisible()
       await shootList(page, `${tag}-3b-personality`)
+      await expect(await scrollTo(page, "Persona “Sam Reed”: description")).toContainText("Sam")
+      await shootList(page, `${tag}-3c-persona`)
       const summary = await scrollTo(page, /^Summary, level 1/)
       await expect(summary).toContainText("Sam arrived at the Lantern Quay in a storm")
       await shootList(page, `${tag}-4-summary`)

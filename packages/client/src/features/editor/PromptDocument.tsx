@@ -2,22 +2,18 @@ import { writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { charDefinitions, newestMessage, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
-import {
-  CONDITION_LABELS,
-  conditionOf,
-  directionPrompt,
-  presetWarnings,
-  TRIGGERS
-} from "@rp/shared/presetConditions.ts"
+import { CONDITION_LABELS, conditionOf, presetWarnings, TRIGGERS } from "@rp/shared/presetConditions.ts"
+import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useContext, useEffect, useRef, useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
+import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
@@ -65,10 +61,24 @@ function Block({
   const byDefinitions = definitions && perFieldMarkers.includes(entry.identifier)
   const name = useText(store, [...path, "name"]) || prompt.name
   const content = useText(store, [...path, "content"])
+  const nameMatch = useSearchMatch([...path, "name"])
+  const marker = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!prompt.marker || !nameMatch) return
+    const frame = requestAnimationFrame(() => {
+      const target = marker.current
+      if (!target) return
+      target.focus({ preventScroll: true })
+      scrollToSearchField(target)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [nameMatch, prompt.marker])
   const condition = conditionOf(prompt)
   const filled = context?.blocks.find((b) => b.identifier === entry.identifier)
   return (
     <section
+      ref={marker}
+      tabIndex={-1}
       id={`prompt-${entry.identifier}`}
       data-prompt={entry.identifier}
       className="scroll-mt-[var(--preset-toolbar-height,1rem)] border-t border-border py-2"
@@ -91,7 +101,19 @@ function Block({
             <span className="sr-only">Send {name}</span>
           </Switch>
         )}
-        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">{name}</span>
+        <span className="min-w-0 flex-1 basis-40 text-sm font-medium break-words">
+          {prompt.marker && nameMatch ? (
+            <>
+              {name.slice(0, nameMatch.at)}
+              <mark className="bg-warning/30 text-text">
+                {name.slice(nameMatch.at, nameMatch.at + nameMatch.length)}
+              </mark>
+              {name.slice(nameMatch.at + nameMatch.length)}
+            </>
+          ) : (
+            name
+          )}
+        </span>
         {!prompt.marker && (
           <>
             <Badge>{prompt.role}</Badge>
@@ -104,7 +126,6 @@ function Block({
                   .join(", ") || "never"}
               </Badge>
             )}
-            {prompt.added_on_import && <Badge>added on import</Badge>}
           </>
         )}
         {prompt.marker && !entry.enabled && <Badge>off</Badge>}
@@ -221,8 +242,7 @@ function Block({
           />
           <div className="flex flex-wrap items-center justify-between gap-2">
             <SwitchField store={store} path={[...path, "forbid_overrides"]} label="A card can't replace it" />
-            {/* Added on import, it would come back on the next read: it's turned off instead. */}
-            {entry.identifier !== "main" && !prompt.system_prompt && !prompt.added_on_import && (
+            {entry.identifier !== "main" && !prompt.system_prompt && (
               <Button variant="ghost" onClick={remove}>
                 Delete the prompt
               </Button>
@@ -243,10 +263,21 @@ export function PromptDocument({
   context?: PresetContext | null | undefined
   focus?: string | undefined
 }) {
+  const searchMatch = useContext(SearchNavigation)
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
   const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const order = presetOrder(prompts, savedOrder)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const [list, identity] = searchMatch?.path ?? []
+    if (list === "prompts" && typeof identity === "string" && identity.startsWith("identifier=")) {
+      const identifier = identity.slice("identifier=".length)
+      const frame = requestAnimationFrame(() =>
+        setCollapsed((current) => new Set([...current].filter((id) => id !== identifier)))
+      )
+      return () => cancelAnimationFrame(frame)
+    }
+  }, [searchMatch])
   const root = useRef<HTMLDivElement>(null)
   const names = new Map([...prompts, newestMessage].map((p) => [p.identifier, p.name]))
   if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)
@@ -461,61 +492,29 @@ export function PromptDocument({
 }
 
 /**
- * What would go wrong when sending with this preset (DESIGN §2.2): its prompts after the
- * history ending on an assistant prompt without a prefill (the app then adds a user turn), and
- * no prompt carrying a direction (the default direction prompt is then added). Each links to
- * the prompt it's about, or adds the missing one.
+ * What would go wrong when sending with this preset (DESIGN §2.2): the direction text doesn't
+ * read `{{direction}}`, so a direction you give would be lost. It links to the text.
  */
 export function PresetWarnings({ store }: { store: EditorStore }) {
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
-  const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
-  const prefill = useValue<string>(store, ["prefill", "assistant"]) ?? ""
-  const order = presetOrder(prompts, savedOrder)
-  const byId = new Map(prompts.map((p) => [p.identifier, p]))
-  const { endsOn, direction } = presetWarnings(order, byId, prefill)
-  const jump = (identifier: string) =>
-    document.querySelector<HTMLElement>(`[data-prompt="${CSS.escape(identifier)}"]`)?.scrollIntoView({ block: "start" })
-  const addDirection = () => {
-    const { added_on_import: _added, ...prompt } = directionPrompt
-    const identifier = byId.has(prompt.identifier) ? uuidv7() : prompt.identifier
-    store.setValue(at(identifier), { ...prompt, identifier })
-    writePresetOrder(store, [...order, { identifier, enabled: true }])
-  }
-  if (endsOn === null && direction) return null
+  const direction = useText(store, ["prompts", `identifier=${DIRECTION_PROMPT}`, "content"])
+  const { directionLost } = presetWarnings(
+    new Map(prompts.map((p) => [p.identifier, p.identifier === DIRECTION_PROMPT ? { ...p, content: direction } : p]))
+  )
+  if (!directionLost) return null
+  const jump = () =>
+    document
+      .querySelector<HTMLElement>(`[data-end-of-request="${DIRECTION_PROMPT}"]`)
+      ?.scrollIntoView({ block: "start" })
   return (
     <div className="flex flex-col gap-2" aria-label="Preset warnings" role="group">
-      {endsOn !== null && (
-        <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
-          The prompts after the chat history end on an assistant prompt, “{endsOn.name || endsOn.identifier}”, and the
-          preset doesn't prefill: a user turn asking for the next message will be added after it.{" "}
-          <button
-            type="button"
-            className="text-accent underline-offset-4 hover:underline"
-            onClick={() => jump(endsOn.identifier)}
-          >
-            Go to the prompt
-          </button>
-        </div>
-      )}
-      {!direction && (
-        <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
-          No prompt that&apos;s on sends the direction ({"{{direction}}"}): a direction you give will be sent with the
-          default direction prompt at the end.{" "}
-          {byId.get("direction") ? (
-            <button
-              type="button"
-              className="text-accent underline-offset-4 hover:underline"
-              onClick={() => jump("direction")}
-            >
-              Go to the direction prompt
-            </button>
-          ) : (
-            <button type="button" className="text-accent underline-offset-4 hover:underline" onClick={addDirection}>
-              Add the direction prompt
-            </button>
-          )}
-        </div>
-      )}
+      <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
+        The end-of-request text for a direction doesn&apos;t contain {"{{direction}}"}: a direction you give won&apos;t
+        be sent.{" "}
+        <button type="button" className="text-accent underline-offset-4 hover:underline" onClick={jump}>
+          Go to the text
+        </button>
+      </div>
     </div>
   )
 }

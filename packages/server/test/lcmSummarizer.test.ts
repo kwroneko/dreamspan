@@ -285,7 +285,7 @@ for (const mode of ["direct", "tool", "refused", "partial", "gap"] as const) {
           (liveRequest.messages as unknown[]).slice(0, boundary + 1),
           "same wire prefix through the layer"
         )
-        assert.strictEqual((summaryRequest.messages as Array<{ role: string }>).at(-1)!.role, "system")
+        assert.strictEqual((summaryRequest.messages as Array<{ role: string }>).at(-1)!.role, "user")
         assert.isFalse(summarySnapshot.request.breakpoints.some((b) => b.reason === "history"))
         assert.strictEqual(summaryRows[0]!.status, "completed")
         assert.strictEqual(summaryRows[0]!.request_class, "idle")

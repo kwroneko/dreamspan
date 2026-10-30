@@ -1,4 +1,4 @@
-// The caller's notices (@rp/shared/noticeApi.ts): only ever their own, from any of their chats.
+// The caller's notices (@rp/shared/noticeApi.ts): only their own replies and private draft updates.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { Effect, Stream } from "effect"
 import { Notices } from "../chat/Notices.ts"
@@ -10,7 +10,7 @@ export const makeNoticeHandlers = Effect.gen(function* () {
       Stream.unwrap(
         Effect.map(
           Effect.flatMap(CurrentUser, (user) => notices.subscribe(user.id)),
-          Stream.fromQueue
+          (queue) => Stream.concat(Stream.succeed([{ _tag: "UserDraftSync" as const }]), Stream.fromQueue(queue))
         )
       )
   } satisfies Partial<Parameters<typeof AppApi.of>[0]>

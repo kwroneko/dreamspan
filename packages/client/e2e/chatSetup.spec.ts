@@ -189,26 +189,26 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   // Recent speakers are one tap away.
   await page.getByRole("button", { name: "Speak as Mira" }).click()
 
-  // With guidance on, the box is a one-turn direction, and it stays (DESIGN §2.2).
+  // With guidance on, the box is a one-turn direction, and it leaves the box (DESIGN §2.2).
   await setGuidance(page, true)
   const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
   await guidance.fill("Mira tells a story about the storm.")
   await page.getByRole("button", { name: "Write for Mira" }).click()
   const reply = replies(page).last()
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
-  await expect(guidance).toHaveValue("Mira tells a story about the storm.")
+  await expect(guidance).toHaveValue("")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await shoot(page, "generate-with-direction")
-  // A swipe takes the guidance too.
+  // A swipe reuses the guidance of the version it re-rolls.
   await reply.getByRole("button", { name: "Generate another version" }).click()
   await expect(reply.getByRole("group", { name: "Versions" })).toContainText("2/2")
   await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  // With guidance off, nothing is reused: neither by a swipe nor by the next turn.
+  // With guidance off too; the next turn doesn't get it.
   await setGuidance(page, false)
   await reply.getByRole("button", { name: "Generate another version" }).click()
   await expect(reply.getByRole("group", { name: "Versions" })).toContainText("3/3")
-  await expect(reply).not.toContainText("Direction:")
+  await expect(reply).toContainText("Direction: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await page.getByRole("button", { name: "Write for Mira" }).click()
   await expect(replies(page).last()).not.toContainText("Direction:")

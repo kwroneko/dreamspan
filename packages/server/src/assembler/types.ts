@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 35
+export const ASSEMBLER_VERSION = 36
 
 export type Role = "system" | "user" | "assistant"
 
@@ -53,7 +53,13 @@ export type Source =
       /** The generation types a prompt skipped by its ST triggers is sent for (inspector's "not sent" list only). */
       readonly triggers?: ReadonlyArray<string>
     }
-  | { readonly kind: "card"; readonly entity: string; readonly revision: string; readonly field: string }
+  | {
+      readonly kind: "card"
+      readonly entity: string
+      readonly revision: string
+      readonly field: string
+      readonly persona?: boolean
+    }
   | {
       readonly kind: "lorebook"
       readonly book: string
@@ -67,7 +73,7 @@ export type Source =
       readonly revision: string
       readonly activation?: Extract<SourceActivation, { kind: "note" }> | undefined
     }
-  | { readonly kind: "message"; readonly slot: string; readonly version: string }
+  | { readonly kind: "message"; readonly slot: string; readonly version: string; readonly number?: number }
   /** Text from the version being generated: its one-turn direction (DESIGN §2.2). */
   | { readonly kind: "direction"; readonly version: string }
   /** Text the assembler wrote itself, such as a card's label or ST's placeholder. */
@@ -494,6 +500,8 @@ export interface HistoryEntry {
   readonly sentAt: number
   readonly versions: number
   readonly selectedOrdinal: number
+  /** One-based position among this fork’s undeleted swipes, frozen for the inspector. */
+  readonly versionNumber?: number
 }
 
 /** A window of the path, root first, ending where it was asked to. */

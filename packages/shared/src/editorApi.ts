@@ -252,7 +252,13 @@ export class EditorApi extends RpcGroup.make(
    * its names. `EditRefused` for a display name and version another card has.
    */
   Rpc.make("ForkCard", {
-    payload: { refId: RefId, name: Label, nickname: Subtitle, characterVersion: Subtitle, moveDrafts: Schema.Boolean },
+    payload: {
+      refId: RefId,
+      name: Schema.String.check(Schema.isMinLength(1)),
+      nickname: Schema.String,
+      characterVersion: Schema.String,
+      moveDrafts: Schema.Boolean
+    },
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),

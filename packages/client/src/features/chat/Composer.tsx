@@ -1,8 +1,10 @@
 import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
-// on, the text is guidance instead: a one-turn direction for Generate, a swipe or Continue,
-// never sent as a message, and kept after generating. A send while a reply is still being
+// on, the text is guidance instead: a one-turn direction for Generate or Continue, never sent
+// as a message, and it leaves the box as it's submitted. While a reply's guidance is being
+// edited (guidanceEdit.tsx), the box holds that instead, and any submit makes a new version
+// of the reply; the draft stays as it was underneath. A send while a reply is still being
 // written is queued by the server and shows here, pending, until it posts; it can be edited
 // or taken back.
 //
@@ -26,6 +28,7 @@ import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
+import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 const subscribePhone = (notify: () => void) => {
@@ -147,7 +150,7 @@ export function Composer({
   // page while this chat was being made comes along (composerCarry.ts).
   const [draft] = useState(() => new ComposerDraft(session, userId))
   const {
-    text,
+    text: draftText,
     ready: textReady,
     restored,
     conflict,
@@ -157,11 +160,28 @@ export function Composer({
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
-  // The guidance toggle, per account (DESIGN §2.2). Swipes and Continue read the guidance
-  // from the session as they're asked for.
+  // A reply's guidance being edited: the box shows it, and typing changes it, not the draft,
+  // so the draft (and a reload) still has what was typed before Edit.
+  const editor = guidanceEditor(session)
+  const editing = useGuidanceEdit(session)
+  const text = editing === null ? draftText : editing.text
+  // The guidance toggle, per account (DESIGN §2.2), shown on while a reply's guidance is
+  // edited, and as it was after. New versions and Continue ask the session for their guidance
+  // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
-  const guidance = viewPrefs.prefs.guidance
-  useEffect(() => session.provideGuidance(() => (guidance ? draft.snapshot().text : "")), [session, draft, guidance])
+  const guidance = viewPrefs.prefs.guidance || editing !== null
+  const toggleOn = viewPrefs.prefs.guidance
+  useEffect(
+    () =>
+      session.provideGuidance(
+        composerGuidance(
+          editor,
+          () => toggleOn,
+          () => draft.snapshot().text
+        )
+      ),
+    [session, draft, editor, toggleOn]
+  )
   // Said once per preset when writing for a card the user plays (DESIGN §2.2).
   const [impersonationNotice, setImpersonationNotice] = useState(false)
   // The speaker and the reply picked here or with "Write as" in the Cast tab, kept on the
@@ -170,13 +190,17 @@ export function Composer({
   const choice = useComposerChoice(session)
   useEffect(() => choices.bind(draftId), [choices, draftId])
   const turnEntries = useComposerTurn(session, view, cast)
+  // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
+  // reply order. Waiting for those reads would disable the visible button while Enter works.
   const ready =
-    !attachmentInput?.busy &&
-    textReady &&
-    choice.loaded &&
-    !choice.saving &&
-    choice.draftId === draftId &&
-    turnEntries !== null
+    editing !== null
+      ? !view.loading && editStillShown(editing, view)
+      : !attachmentInput?.busy &&
+        textReady &&
+        choice.loaded &&
+        !choice.saving &&
+        choice.draftId === draftId &&
+        turnEntries !== null
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
@@ -213,6 +237,11 @@ export function Composer({
     draft.setFork(forkId, session.takeBranchStart(forkId))
   }, [draft, session])
   useEffect(syncFork, [syncFork, view.forkId, view.leafSlotId, view.loading])
+
+  // The bar closes when its reply is deleted, or the chat view goes to another fork.
+  useEffect(() => {
+    if (editing !== null && !view.loading && !editStillShown(editing, view)) editor.close()
+  }, [editor, editing, view])
 
   // Leaving the chat saves what's typed; closing or reloading the tab with text not on the
   // server asks first, and sends it as the page goes (the editors' rules, editor/store.ts).
@@ -309,20 +338,46 @@ export function Composer({
 
   /**
    * The model writes the speaker's turn (an impersonation when it's a card the user plays). With
-   * guidance on, it's Enter and the primary action, and the text is its one-turn direction and
-   * stays in the box, so a swipe can use it again; with guidance off, the text isn't used.
-   * Guidance changes who writes, never which character (DESIGN §2.2).
+   * guidance on, it's Enter and the primary action, and the text is its one-turn direction: it
+   * leaves the box as a send's does, and the reply shows it; with guidance off, the text isn't
+   * used and stays. Guidance changes who writes, never which character (DESIGN §2.2).
    */
   const generate = async () => {
+    if (editing !== null) return reviseGuidance()
     if (busy || !ready) return
-    setBusy(true)
-    const outcome = await session.generate(session.snapshot().leafSlotId, speaker, guidance ? text : "")
-    report(outcome)
-    setBusy(false)
+    let outcome: Outcome<unknown> | undefined
+    if (guidance && text.trim() !== "") {
+      await submit(async (from) => {
+        const result = await session.generate(session.snapshot().leafSlotId, speaker, from.text, from)
+        outcome = result
+        return result.ok
+          ? { sent: true, draft: result.value.draft, recovered: result.value.recovered }
+          : { sent: false }
+      })
+      if (outcome === undefined) return
+      report(outcome)
+    } else {
+      setBusy(true)
+      outcome = await session.generate(session.snapshot().leafSlotId, speaker)
+      report(outcome)
+      setBusy(false)
+    }
     if (outcome.ok && speaker !== null && cast?.playedByMe.includes(speaker)) {
       const notice = await session.impersonationNotice()
       if (notice.ok && notice.value.show) setImpersonationNotice(true)
     }
+  }
+
+  /**
+   * While a reply's guidance is edited, every submit is a new version of that reply with the
+   * box's text (none when it's empty), which stays in the box for the next one.
+   */
+  const reviseGuidance = async () => {
+    const entry = editing === null ? undefined : view.entries.find((e) => e.slotId === editing.slotId)
+    if (busy || !ready || entry === undefined) return
+    setBusy(true)
+    report(await session.regenerate(entry))
+    setBusy(false)
   }
 
   const hasText = text.trim() !== "" || !!attachmentInput?.count
@@ -333,15 +388,21 @@ export function Composer({
       ? `${replierName} replies now, with nothing sent from you`
       : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
-  const generateText = name ? `Write for ${name}` : "Reply"
-  const generateHint = `${
-    name === null
-      ? "The model writes the next turn"
-      : speakerPlayed
-        ? `The model writes ${name}'s turn for you`
-        : `The model writes ${name}'s turn`
-  }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter). The guidance stays here." : ""}`
+  const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
+  const generateText = editing !== null ? "New version" : name ? `Write for ${name}` : "Reply"
+  const generateHint =
+    editing !== null
+      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (Enter). The guidance stays here.`
+      : `${
+          name === null
+            ? "The model writes the next turn"
+            : speakerPlayed
+              ? `The model writes ${name}'s turn for you`
+              : `The model writes ${name}'s turn`
+        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter)" : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
+  // The draft's earlier text, while the box shows the draft.
+  const history = editing === null && <History draft={draft} />
 
   const controls: ComposerControlContext = {
     compact: phone,
@@ -361,13 +422,17 @@ export function Composer({
     })),
     onRecent: setPicked,
     guidance,
-    prefsReady: viewPrefs.ready,
+    // While a reply's guidance is edited, the box is guidance whatever the toggle says.
+    prefsReady: viewPrefs.ready && editing === null,
     changeGuidance: (next) => {
       void viewPrefs.change({ guidance: next })
     },
-    hint: guidance
-      ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter), a new version or Continue. It stays here until you change it.`
-      : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
+    hint:
+      editing !== null
+        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (Enter) makes a new version of it with this text, and its regenerate uses it too. ✕ above goes back to your draft.`
+        : guidance
+          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
+          : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
     reply: {
       candidates: faces,
       muted: cast?.absent ?? [],
@@ -398,6 +463,7 @@ export function Composer({
   return (
     <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
       {!phone && <ComposerControls placement="settings" context={controls} />}
+      <ComposerControls placement="banner" context={controls} />
       <ComposerControls placement="queue" context={controls} />
       {conflict && (
         <ReplayNotice
@@ -440,14 +506,12 @@ export function Composer({
                   <ComposerControls placement="settings" context={controls} />
                   <ComposerControls placement="reply" context={controls} />
                   <ComposerControls placement="help" context={controls} />
-                  <History draft={draft} />
+                  {history}
                 </div>
               </Popover>
             </>
           )}
-          <span className={`${phone ? "hidden" : "ml-auto"} @min-[640px]:hidden`}>
-            <History draft={draft} />
-          </span>
+          <span className={`${phone ? "hidden" : "ml-auto"} @min-[640px]:hidden`}>{history}</span>
         </div>
         <div
           data-guidance={guidance || undefined}
@@ -470,27 +534,29 @@ export function Composer({
               id="composer"
               data-testid="composer"
               value={text}
-              readOnly={!textReady}
-              aria-busy={!textReady}
+              readOnly={editing === null && !textReady}
+              aria-busy={editing === null && !textReady}
               aria-describedby={(!phone || secondaryOpen) && (hasText || guidance) ? "composer-hint" : undefined}
               placeholder={
-                !textReady
-                  ? "Loading…"
-                  : guidance
-                    ? "Direction for the next message…"
-                    : leafGenerating
-                      ? "Queue…"
-                      : "Message…"
+                editing !== null
+                  ? "Guidance for this reply…"
+                  : !textReady
+                    ? "Loading…"
+                    : guidance
+                      ? "Direction for the next message…"
+                      : leafGenerating
+                        ? "Queue…"
+                        : "Message…"
               }
-              onChange={(event) => draft.type(event.currentTarget.value)}
+              onChange={(event) =>
+                editing === null ? draft.type(event.currentTarget.value) : editor.type(event.currentTarget.value)
+              }
               onKeyDown={onKeyDown}
             />
           </div>
           {/* Under the text box when it's narrow, beside it otherwise. */}
           <div className="ml-auto flex items-end gap-1">
-            <span className="hidden @min-[640px]:inline-flex">
-              <History draft={draft} />
-            </span>
+            <span className="hidden @min-[640px]:inline-flex">{history}</span>
             <ComposerControls placement="actions" context={controls} />
           </div>
         </div>

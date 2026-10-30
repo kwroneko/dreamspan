@@ -13,6 +13,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import { RpcClientError } from "effect/rpc"
+import { Notices } from "../chat/Notices.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { CacheWarmth } from "../chat/CacheWarmth.ts"
 import { Reader, Writer } from "../db/Database.ts"
@@ -71,6 +72,7 @@ const checkField = (field: string) =>
     : Effect.void
 
 export const makeEditorHandlers = Effect.gen(function* () {
+  const notices = yield* Notices
   const hub = yield* ChatHub
   const reader = yield* Reader
   const writer = yield* Writer
@@ -87,6 +89,10 @@ export const makeEditorHandlers = Effect.gen(function* () {
     Effect.flatMap(userId, (id) =>
       id === ownerId ? Effect.succeed(id) : Effect.fail(new NotFound({ entity: "draft owner", id: ownerId }))
     )
+  const draftChanged =
+    (id: UserId) =>
+    <E, R>(effect: Effect.Effect<import("@rp/shared/drafts.ts").Draft, E, R>) =>
+      Effect.tap(effect, (draft) => Effect.sync(() => notices.publish(id, { _tag: "UserDraftChanged", draft })))
   const handlers = {
     ListSnippets: (args) =>
       Effect.flatMap(userId, (id) => reader.ListSnippets({ userId: id, ...args })).pipe(settle("ListSnippets")),
@@ -114,7 +120,9 @@ export const makeEditorHandlers = Effect.gen(function* () {
       ),
     SaveUserDraft: ({ ownerId, targetId, field, ...save }) =>
       Effect.flatMap(draftOwner(ownerId), (id) =>
-        writer.SaveDraft({ userId: id, key: userKey(targetId, field), ...save, baseRevision: null })
+        writer
+          .SaveDraft({ userId: id, key: userKey(targetId, field), ...save, baseRevision: null })
+          .pipe(draftChanged(id))
       ).pipe(settle("SaveUserDraft")),
     UserDraftHistory: ({ ownerId, targetId, field }) =>
       Effect.flatMap(draftOwner(ownerId), (id) =>
@@ -122,11 +130,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
       ).pipe(settle("UserDraftHistory")),
     RestoreUserDraft: ({ ownerId, targetId, field, ...restore }) =>
       Effect.flatMap(draftOwner(ownerId), (id) =>
-        writer.RestoreDraftState({ userId: id, key: userKey(targetId, field), ...restore })
+        writer.RestoreDraftState({ userId: id, key: userKey(targetId, field), ...restore }).pipe(draftChanged(id))
       ).pipe(settle("RestoreUserDraft")),
     EndUserDraft: ({ ownerId, targetId, field, ...end }) =>
       Effect.flatMap(draftOwner(ownerId), (id) =>
-        writer.ClearDraft({ userId: id, key: userKey(targetId, field), ...end })
+        writer.ClearDraft({ userId: id, key: userKey(targetId, field), ...end }).pipe(draftChanged(id))
       ).pipe(settle("EndUserDraft")),
     OpenEditor: ({ refId, chatNote }) =>
       Effect.flatMap(userId, (id) => reader.OpenEditor({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })).pipe(

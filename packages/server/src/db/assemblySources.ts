@@ -16,7 +16,7 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { withConditions } from "@rp/shared/presetConditions.ts"
+import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -60,8 +60,10 @@ const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
 const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
-/** ST's default chat-completion preset: what generation uses when nothing chooses one. */
-export const builtinPreset = forbidCardOverrides(importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!)
+/** The built-in preset uses our end-of-request defaults; ST imports retain their own wording. */
+export const builtinPreset = forbidCardOverrides(
+  importStPreset(JSON.stringify({ frequency_penalty: 0, group_nudge_prompt: "", impersonation_prompt: "" })).document!
+)
 
 const invalid = (what: string) =>
   new AssemblyFailed({
@@ -87,6 +89,7 @@ interface HistoryRow {
   readonly slot_deleted: number
   readonly version_id: string
   readonly ordinal: number
+  readonly version_number: number
   readonly status: string
   readonly speaker_entity_id: string | null
   readonly content: string
@@ -228,7 +231,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         decodePreset({ ...builtinPreset, ...JSON.parse(row.doc_json) }),
         "The preset"
       )
-      return { ref: row.ref, revision: row.revision, scope, doc: withConditions(doc).doc } satisfies PresetInput
+      return { ref: row.ref, revision: row.revision, scope, doc: withEndOfRequest(doc).doc } satisfies PresetInput
     })
 
   let layerPins: SourcePins["lcm"]
@@ -442,6 +445,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           )
           SELECT s.id AS slot_id, s.parent_slot_id, s.depth, ${contextExcludedIn(sql, fork)} AS context_excluded,
             ${slotDeletedIn(sql, fork, "s")} AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
+            (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
+              AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT json_group_array(json_object('mediaId', a.media_id)) FROM
               (SELECT media_id FROM version_attachments WHERE version_id=v.id ORDER BY ordinal) a) AS images_json,
@@ -475,6 +480,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             sentAt: row.created_at,
             versions: row.version_count,
             selectedOrdinal: row.ordinal,
+            versionNumber: row.version_number,
             amends: row.amend_count
           }))
         const older = rows[0]?.parent_slot_id === after ? null : (rows[0]?.parent_slot_id ?? null)
@@ -896,7 +902,7 @@ const replaySources = (
           revision,
           scope,
           doc: withModelSettings(
-            withConditions(doc).doc,
+            withEndOfRequest(doc).doc,
             inputs.model?.settings ?? {},
             inputs.model?.context,
             inputs.model?.maxOutput

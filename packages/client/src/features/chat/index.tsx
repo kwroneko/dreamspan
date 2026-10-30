@@ -1,8 +1,10 @@
+import { registerSummaryDetails } from "./SummaryDetails.tsx"
 import { registerEditorHistory } from "./editorHistory.tsx"
 import { registerDisplay } from "./registerDisplay.tsx"
 import { registerPresentation } from "./registerPresentation.tsx"
 import { registerComposerControls } from "./registerComposerControls.tsx"
 import { registerMessageActions } from "./registerMessageActions.tsx"
+import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
 import { lazy, Suspense } from "react"
@@ -52,11 +54,13 @@ function LazyStartChatPage() {
 }
 
 export const register = () => {
+  registerSummaryDetails()
   registerEditorHistory()
   registerDisplay()
   registerPresentation()
   registerComposerControls()
   registerMessageActions()
+  registerGuidanceEdit()
   registerPanels()
   registerHistoryCommands()
   routes.register({

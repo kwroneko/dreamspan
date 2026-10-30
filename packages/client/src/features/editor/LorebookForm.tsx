@@ -1,6 +1,6 @@
 // The lorebook document's form (DATA-MODEL §3.3), shared by the card's embedded book and the
 // standalone lorebook editor. Every edit is a field draft in the owning entry's EditorStore.
-import { useState } from "react"
+import { useContext, useEffect, useRef, useState } from "react"
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -9,16 +9,41 @@ import { Select } from "../../ui/Select.tsx"
 import { FieldTools, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
 import { emptyBook, emptyEntry } from "./lorebookDefaults.ts"
 import { entryMatches } from "./lorebookFields.ts"
+import { SearchNavigation, scrollToSearchField } from "./searchNavigation.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
+
+const EMPTY_KEYS: ReadonlyArray<string> = []
 
 /** One key per line: commas in a /pattern/flags key must survive unchanged. */
 function Keys({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
-  const keys = useValue<ReadonlyArray<string>>(store, path) ?? []
+  const match = useContext(SearchNavigation)
+  const target = useRef<HTMLTextAreaElement>(null)
+  const revealed = useRef<typeof match>(null)
+  const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
+  const pathKey = JSON.stringify(path)
+  useEffect(() => {
+    if (!match || revealed.current === match || JSON.stringify(match.path.slice(0, -1)) !== pathKey) return
+    const input = target.current!
+    for (let parent = input.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true
+    }
+    const index = Number(match.path.at(-1))
+    const offset = keys.slice(0, index).reduce((n, key) => n + key.length + 1, 0)
+    const frame = requestAnimationFrame(() => {
+      // Apply a visit once; subsequent typing must retain the user's new caret.
+      revealed.current = match
+      input.focus({ preventScroll: true })
+      input.setSelectionRange(offset + match.at, offset + match.at + match.length)
+      scrollToSearchField(input)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [match, pathKey, keys])
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Field label={label} description="One key per line. Regular expressions use /pattern/flags.">
         <Textarea
+          ref={target}
           rows={2}
           value={keys.join("\n")}
           onChange={(event) =>
@@ -80,9 +105,17 @@ function Entry({
   entry: LorebookEntry
   initiallyOpen: boolean
 }) {
+  const match = useContext(SearchNavigation)
   const [open, setOpen] = useState(initiallyOpen)
   const uid = entry.uid
   const path = [...root, "entries", `uid=${uid}`]
+  const pathKey = JSON.stringify(path)
+  const depth = path.length
+  useEffect(() => {
+    if (!match || JSON.stringify(match.path.slice(0, depth)) !== pathKey) return
+    const frame = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(frame)
+  }, [match, pathKey, depth])
   const title = useText(store, [...path, "comment"]) || "Untitled entry"
   return (
     <details
@@ -233,6 +266,14 @@ export function LorebookForm({ store, root, absent }: { store: EditorStore; root
   const book = useValue<LorebookDoc | undefined>(store, root)
   const [addedUid, setAddedUid] = useState<number | null>(null)
   const [filter, setFilter] = useState("")
+  const match = useContext(SearchNavigation)
+  const entriesKey = JSON.stringify([...root, "entries"])
+  useEffect(() => {
+    // A search visit to an entry the filter hides shows every entry again.
+    if (!match || JSON.stringify(match.path.slice(0, root.length + 1)) !== entriesKey) return
+    const frame = requestAnimationFrame(() => setFilter(""))
+    return () => cancelAnimationFrame(frame)
+  }, [match, entriesKey, root.length])
   // Titles and text match as typed, including unsaved drafts.
   const working = (entry: LorebookEntry): LorebookEntry => {
     const path = [...root, "entries", `uid=${entry.uid}`]

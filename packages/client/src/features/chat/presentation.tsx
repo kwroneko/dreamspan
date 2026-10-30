@@ -26,6 +26,8 @@ export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")
 export const timelineRails = defineSlot<ComponentProps<typeof CoverageRail>>("chat.timeline-rails")
 export const messageRetries = defineSlot<ComponentProps<typeof RetryWith>>("message.retry")
+/** Under a reply: the guidance it was written with (guidanceEdit.tsx). */
+export const messageDirections = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.direction")
 interface VersionNavigationContext {
   readonly entry: PathEntry
   readonly session: ChatSession

@@ -156,7 +156,8 @@ for (const width of [1440, 390])
       await shot("04-composer-guidance-text")
 
       // Enter generates the selected speaker's turn (the persona's here, not the reply-from
-      // character's) with the text as its direction, under the primary Write for; the text stays.
+      // character's) with the text as its direction, under the primary Write for; the text
+      // leaves the box, and the reply shows it.
       const chip = await page.getByRole("button", { name: /^Speaking as / }).getAttribute("aria-label")
       const speaker = chip!.replace(/^Speaking as /, "").replace(/\. Change the speaker$/, "")
       await expect(page.getByRole("button", { name: `Write for ${speaker}` })).toHaveClass(/bg-accent/)
@@ -168,10 +169,11 @@ for (const width of [1440, 390])
       expect(request.at(-1)!.content).toContain(direction)
       await expect(lastMessage(page)).toContainText(`Direction: ${direction}`)
       await expect(lastMessage(page).locator("header").first()).toContainText(speaker)
-      await expectTextBox(guidance, direction)
-      await shot("05-after-generate-text-stays")
+      await expectTextBox(guidance, "")
+      await shot("05-after-generate-box-cleared")
 
-      // A swipe with guidance on carries the text.
+      // A swipe reuses the guidance of the version it re-rolls, not the box's text.
+      await guidance.fill("My own next line, not guidance for this reply.")
       await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(sent + 2)
       await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
@@ -182,21 +184,21 @@ for (const width of [1440, 390])
       // The toggle is the account's: it's still on after a reload.
       await page.reload()
       await expect(guidanceSwitch(page)).toBeChecked()
-      await expectTextBox(composerBox(page), direction)
+      await expectTextBox(composerBox(page), "My own next line, not guidance for this reply.")
 
-      // Off: a swipe takes nothing from the box, and reuses nothing.
+      // Off: a swipe still reuses the re-rolled version's guidance, and takes nothing from the box.
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).not.toBeChecked()
       await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(sent + 3)
-      await expect.poll(async () => (await newestVersion()).direction).toBeNull()
-      expect(
-        provider.completions
-          .at(-1)!
-          .messages.map((m) => m.content)
-          .join("\n")
-      ).not.toContain(direction)
-      await expectTextBox(composerBox(page), direction)
+      await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
+      const swiped = provider.completions
+        .at(-1)!
+        .messages.map((m) => m.content)
+        .join("\n")
+      expect(swiped).toContain(direction)
+      expect(swiped).not.toContain("My own next line")
+      await expectTextBox(composerBox(page), "My own next line, not guidance for this reply.")
       await composerBox(page).fill("")
 
       // The request inspector for the directed reply: the direction prompt, and who it was for.
@@ -264,21 +266,23 @@ for (const width of [1440, 390])
           .join("\n")
       ).toContain(`[Write ${personaName}'s next reply in their voice`)
       await expect.poll(async () => (await newestVersion()).status).toBe("complete")
-      // Night RP 3.1 has its impersonation prompt: no notice.
+      // Night RP 3.1 has a prompt only for impersonation: no notice.
       await expect(page.getByText(/may need “not when writing as/)).toHaveCount(0)
       await page.goto(`${server().url}/chats/${inn}/context/${(await newestVersion()).id}`)
-      await inspectorEnd(page, "sent when writing as {{user}}")
+      await inspectorEnd(page, "End of request: when your card speaks")
       await shot("10-inspector-impersonation")
 
-      // The preset editor: conditions, the import's prompt, and both warnings.
+      // The preset editor: conditions, the end-of-request texts, and the direction warning.
       await page.goto(`${server().url}/library`)
       await page.getByRole("button", { name: "Edit Night RP 3.1", exact: true }).click()
       const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
       await expect(editor).toBeVisible()
-      const direct = editor.locator('[data-prompt="direction"]')
-      await expect(direct).toContainText("added on import")
-      await expect(direct).toContainText("with a direction")
-      await expect(direct.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+      // The end-of-request texts are outside the order: no prompt blocks, a fixed section.
+      await expect(editor.locator('[data-prompt="groupNudge"]')).toHaveCount(0)
+      const end = editor.getByRole("heading", { name: "End of request" })
+      await expect(end).toBeVisible()
+      const direct = editor.locator('[data-end-of-request="directionPrompt"]')
+      await expect(direct).toContainText("When you give a direction (added after the turn text)")
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")
@@ -288,38 +292,35 @@ for (const width of [1440, 390])
       await expect(types.getByRole("checkbox", { name: "Normal" })).not.toBeChecked()
       await style.scrollIntoViewIfNeeded()
       await shot("11-editor-conditions")
-      const nudge = editor.locator('[data-prompt="groupNudge"]')
-      await nudge.getByRole("combobox", { name: "Role" }).click()
-      await page.getByRole("option", { name: "assistant", exact: true }).click()
+      await end.scrollIntoViewIfNeeded()
+      await shot("11a-editor-end-of-request")
+      const directionText = direct.getByRole("textbox", { name: /^When you give a direction/ })
+      const original = await directionText.textContent()
+      await directionText.fill("[What happens next.]")
       const warnings = editor.getByRole("group", { name: "Preset warnings" })
-      // The direction prompt after it is sent only with a direction: a plain turn ends on the nudge.
-      await expect(warnings).toContainText("end on an assistant prompt, “Group nudge”")
-      await direct.getByRole("switch", { name: "Send Direction" }).click()
-      await expect(warnings).toContainText("No prompt that's on sends the direction")
+      await expect(warnings).toContainText("doesn't contain {{direction}}")
       await editor.getByTestId("preset-scroll").evaluate((e) => (e.scrollTop = 0))
       await shot("12-editor-warnings")
-      await warnings.getByRole("button", { name: "Go to the prompt" }).click()
-      await expect(nudge).toBeInViewport()
-      // Put both back as they were (the drafts are this account's).
-      await nudge.getByRole("combobox", { name: "Role" }).click()
-      await page.getByRole("option", { name: "system", exact: true }).click()
-      await direct.getByRole("switch", { name: "Send Direction" }).click()
+      await warnings.getByRole("button", { name: "Go to the text" }).click()
+      await expect(direct).toBeInViewport()
+      const toolbarBottom = await editor.getByRole("textbox", { name: "Find", exact: true }).evaluate((element) => {
+        let at: HTMLElement | null = element as HTMLElement
+        while (at && getComputedStyle(at).position !== "sticky") at = at.parentElement
+        return at!.getBoundingClientRect().bottom
+      })
+      await expect
+        .poll(() => directionText.evaluate((element) => element.getBoundingClientRect().top))
+        .toBeGreaterThanOrEqual(toolbarBottom)
+      await shot("12a-editor-direction-jump")
+      // Put it back as it was (the drafts are this account's).
+      await directionText.fill(original ?? "")
       await expect(warnings).toHaveCount(0)
       await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
 
-      // The one-time notice, with a preset whose impersonation prompt is off.
+      // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
       if (theme === "light") {
         const label = width > 500 ? "Celia 4.2" : "Pixijb v18"
         await usePreset(label)
-        await page.goto(`${server().url}/library`)
-        await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
-        await editor.getByRole("switch", { name: "Send Impersonation prompt" }).click()
-        await editor.getByRole("button", { name: /^Save \(/ }).click()
-        await page
-          .getByRole("dialog", { name: "Save a revision" })
-          .getByRole("button", { name: "Save revision" })
-          .click()
-        await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
         await page.goto(`${server().url}/chats/${inn}`)
         const write = page.getByRole("button", { name: `Write for ${personaName}`, exact: true })
         await write.click()
@@ -350,7 +351,7 @@ test("guidance on a touch screen: Ctrl+Enter generates, Enter is a new line", as
   await guidance.press("Control+Enter")
   await expect.poll(() => provider.completions.length).toBe(sent + 1)
   await expect.poll(async () => (await newestVersion()).direction).toBe("The rain stops.\n")
-  await expectTextBox(guidance, "The rain stops.\n")
+  await expectTextBox(guidance, "")
   await setGuidance(false)
   await context.close()
 })
@@ -375,6 +376,7 @@ test("the pending chat's Playing as is the persona control, and guidance generat
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
   await expect.poll(() => provider.completions.length).toBe(sent + 1)
   expect(provider.completions.at(-1)!.messages.at(-1)!.content).toContain("Open on the docks at dawn.")
-  await expectTextBox(page.getByRole("textbox", { name: "Guidance", exact: true }), "Open on the docks at dawn.")
+  // Submitted guidance leaves the box; the chat's composer starts empty.
+  await expectTextBox(page.getByRole("textbox", { name: "Guidance", exact: true }), "")
   await setGuidance(false)
 })

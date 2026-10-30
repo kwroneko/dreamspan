@@ -37,12 +37,6 @@ const DOCUMENTED: ReadonlyArray<{
     matches: (line, config) => config.overMaximum === true && line.startsWith("messages")
   },
   { why: "we always stream (ST sends the preset's stream_openai)", matches: (line) => line.startsWith("stream:") },
-  {
-    // Unit P1-1's owner question 3; ARCHITECTURE §15 "Conditions".
-    why: "the group nudge is a prompt after the history, sent whenever the model writes as a character, one or many (ST: in group chats only)",
-    matches: (line) =>
-      line.startsWith("messages") && /\[Write the next reply only as |speaks next\.\]|\[As [^\]]+ only\.\]/.test(line)
-  },
   { why: "no multi-swipe requests (ST sends the preset's n above 1)", matches: (line) => line.startsWith("n:") },
   {
     why: "a note goes every turn (DESIGN §4.1): ST skips its author's note on the turns its frequency doesn't fall on, and never sends one at frequency 0 that a chat had on",
@@ -65,8 +59,12 @@ const DOCUMENTED: ReadonlyArray<{
   },
   {
     why: "on an impersonation the post-history instruction is the speaking card's (the persona: none), so the preset's own stands where ST puts the chat character's in its place",
-    matches: (line, config) =>
-      config.generate === "impersonate" && /^messages\[\d+\]\.content: "Write only [^"]+'s next reply\./.test(line)
+    matches: (line, config, settings) =>
+      config.generate === "impersonate" &&
+      (/^messages\[\d+\]\.content: "Write only [^"]+'s next reply\./.test(line) ||
+        // ST's replacement taken out (`dropMissing`), the preset's own is left over at the end.
+        (/^messages\[\d+\]: \(absent\) ≠ /.test(line) &&
+          line.endsWith(` ≠ ${JSON.stringify({ role: "system", content: postHistory(settings) })}`)))
   },
   {
     why: "the preset's send_if_empty is expanded when it fills the user's turn (ST sends it as written before an impersonation)",
@@ -77,79 +75,77 @@ const DOCUMENTED: ReadonlyArray<{
   }
 ]
 
+/** The preset's own post-history instructions, as ST had them in force. */
+const postHistory = (settings: Record<string, unknown>) =>
+  (settings.prompts as ReadonlyArray<{ identifier?: unknown; content?: unknown }> | undefined)?.find(
+    (p) => p.identifier === "jailbreak"
+  )?.content
+
 /** The messages of a request body, when it has them. */
 type Messages = ReadonlyArray<{ role: string; content: string; name?: string }>
 const messagesOf = (body: unknown): Messages | undefined => (body as { messages?: Messages } | null)?.messages
 
-/** The group nudge's wording in the fixture presets, whole or inside a longer message. */
-const NUDGE_TEXT = /\[(?:Write the next reply only as [^\]]+|As [^\]]+ only|[^\]]*speaks next)\.\]/
-// The poison preset appends its marker to every prompt it holds, the nudge included.
-const NUDGE_SEGMENT = new RegExp(`\\n?(?:${NUDGE_TEXT.source})(?: \\[poison\\])?`, "g")
-const CLOSING_TURN = /^\[Write .+'s next message\.\]$/
-
 type Message = Messages[number]
 
-/**
- * Differences that add a message, or text inside one. Taking them out of our request before
- * the diff keeps every later message at the index ST has it, so an extra message isn't
- * reported as a shift of all that follow. Each is recorded with its explanation, as the line
- * matchers' are. Something of ours is taken out only when ST has no message left that equals
- * ours as it stands (or, for text inside a message, as it would be without that text).
- */
-const STRUCTURAL: ReadonlyArray<{
-  readonly why: string
-  /** Our message without the difference, or null when the message goes entirely. `undefined`: not this difference. */
-  readonly without: (message: Message) => Message | null | undefined
-}> = [
-  {
-    // Unit P1-1's owner question 3; ARCHITECTURE §15 "Conditions".
-    why: "the group nudge is in every chat's request, whenever the model writes as a character: a message of its own, or a line of the post-history message it joins (ST: in group chats only)",
-    without: (message) => {
-      const content = message.content.replace(NUDGE_SEGMENT, "")
-      return content === message.content ? undefined : content.trim() === "" ? null : { ...message, content }
+/** ARCHITECTURE §15 "End-of-request instruction" (DESIGN §2.2, owner 2026-10-29). */
+const END_OF_REQUEST =
+  "the end-of-request instruction is one user message, the request's last, with the speaker's turn text (the group nudge whenever the model writes as a character, the impersonation prompt when it writes as the persona) and the direction; ST sends the nudge only in groups, at its prompt position, and the impersonation prompt at its marker"
+
+/** Our pieces that make the end-of-request message, in the order they end it. */
+const END_PIECES = ["preset:groupNudge", "preset:impersonationPrompt", "preset:directionPrompt", "assembler:last-turn"]
+
+/** The message with each text taken off its end, or null when nothing else is left. */
+const withoutTexts = (message: Message, texts: ReadonlyArray<string>): Message | null => {
+  let content = message.content
+  let cut = false
+  for (const text of texts.toReversed()) {
+    const end = content.trimEnd()
+    if (end.endsWith(text)) {
+      content = end.slice(0, end.length - text.length)
+      cut = true
     }
-  },
-  {
-    // Unit P1-1 (fb-rp); ARCHITECTURE §15 "Conditions".
-    why: "a chat ending on the model's side gets a closing user turn right after the last chat message, impersonation included (ST adds none)",
-    without: (message) => (message.role === "user" && CLOSING_TURN.test(message.content) ? null : undefined)
   }
-]
+  content = content.trimEnd()
+  // ST's "single" post-processing names each merged message: the name left on its own line goes too.
+  if (cut) content = content.replace(/\n*[^\n:]{1,80}:$/, "").trimEnd()
+  return content === "" ? null : { ...message, content }
+}
 
-const messageKey = (message: Message) => JSON.stringify([message.role, message.content, message.name])
-
-/** Our body without the differences that add to a message list, and what was taken out. */
-const dropExtras = (
+/**
+ * Both requests without the end-of-request instruction: ours without its texts (a message of
+ * its own, or the end of the one a merging post-processing mode joined it to), and ST's
+ * without the same turn text where ST sends it (the impersonation prompt, at the end), so later
+ * messages aren't reported as shifted. What's taken out is recorded with the explanation.
+ */
+const dropEndOfRequest = (
   st: unknown,
-  ours: unknown
-): { readonly body: unknown; readonly dropped: ReadonlyArray<string> } => {
+  ours: unknown,
+  texts: ReadonlyArray<string>
+): { readonly st: unknown; readonly ours: unknown; readonly dropped: ReadonlyArray<string> } => {
   const stMessages = messagesOf(st)
   const ourMessages = messagesOf(ours)
-  if (!stMessages || !ourMessages) return { body: ours, dropped: [] }
-  const available = new Map<string, number>()
-  const take = (message: Message) => {
-    const left = available.get(messageKey(message)) ?? 0
-    if (left > 0) available.set(messageKey(message), left - 1)
-    return left > 0
-  }
-  for (const message of stMessages) available.set(messageKey(message), (available.get(messageKey(message)) ?? 0) + 1)
+  if (!stMessages || !ourMessages || texts.length === 0) return { st, ours, dropped: [] }
   const dropped: Array<string> = []
-  // A message equal to one of ST's is never touched; the rest are checked against the list.
-  const equal = ourMessages.map(take)
-  const kept = ourMessages.flatMap((message, i) => {
-    if (equal[i]) return [message]
-    for (const difference of STRUCTURAL) {
-      const without = difference.without(message)
-      if (without === undefined) continue
-      if (without !== null && !take(without)) continue
-      dropped.push(
-        `messages: our ${message.role} message ${JSON.stringify(message.content)} ${without === null ? "has no counterpart in ST" : "carries text ST doesn't"} [${difference.why}]`
-      )
-      return without === null ? [] : [without]
-    }
-    return [message]
-  })
-  return { body: { ...(ours as object), messages: kept }, dropped }
+  const last = ourMessages.length - 1
+  const ourLast = withoutTexts(ourMessages[last]!, texts)
+  dropped.push(
+    `messages: our ${JSON.stringify(texts.join("\n"))} at the end has no counterpart in ST [${END_OF_REQUEST}]`
+  )
+  const keptOurs = [...ourMessages.slice(0, last), ...(ourLast ? [ourLast] : [])]
+  // ST's impersonation prompt, always positioned last, maybe merged into the message before.
+  const turn = texts[0]!
+  const at = stMessages.findLastIndex((m) => m.content.trimEnd().endsWith(turn))
+  let keptSt = stMessages
+  if (at >= 0 && at >= stMessages.length - 2) {
+    const without = withoutTexts(stMessages[at]!, [turn])
+    keptSt = [...stMessages.slice(0, at), ...(without ? [without] : []), ...stMessages.slice(at + 1)]
+    dropped.push(`messages: ST's ${JSON.stringify(turn)} at its marker is our end-of-request text [${END_OF_REQUEST}]`)
+  }
+  return {
+    st: { ...(st as object), messages: keptSt },
+    ours: { ...(ours as object), messages: keptOurs },
+    dropped
+  }
 }
 
 const CARD_POST_HISTORY = /^Write only .+'s next reply\.$/
@@ -358,9 +354,10 @@ const ourRequest = async (
   character: string,
   config: Config,
   settings: Record<string, unknown>
-): Promise<{ readonly body: unknown; readonly problem?: string }> => {
+): Promise<{ readonly body: unknown; readonly endOfRequest: ReadonlyArray<string>; readonly problem?: string }> => {
   const parsed = importStPreset(JSON.stringify(settings)).document
-  if (parsed === null) return { body: null, problem: "our importer didn't take the settings ST had in force" }
+  if (parsed === null)
+    return { body: null, endOfRequest: [], problem: "our importer didn't take the settings ST had in force" }
   // The harness allows the fixture presets' regex scripts in ST, as a user would.
   // ST joins no wrapper around a single character's fields: the gate compares with them empty.
   const document = {
@@ -469,7 +466,15 @@ const ourRequest = async (
       }
     })
   )
-  return { body: { model: MOCK_MODEL, stream: true, ...chatCompletionsFields(snapshot.request, "openai-chat") } }
+  // The end-of-request texts as sent (and the fallback), in the order they end the request.
+  const endOfRequest = snapshot.pieces
+    .filter((p) => p.messages.length > 0 && END_PIECES.includes(p.id))
+    .toSorted((a, b) => END_PIECES.indexOf(a.id) - END_PIECES.indexOf(b.id))
+    .map((p) => p.text)
+  return {
+    body: { model: MOCK_MODEL, stream: true, ...chatCompletionsFields(snapshot.request, "openai-chat") },
+    endOfRequest
+  }
 }
 
 /**
@@ -792,9 +797,10 @@ export const compareAssembly = async (
           )
       }
       let unexpected = 0
-      const missing = dropMissing(body, ours.body, config)
-      const aligned = dropExtras(missing.body, ours.body)
-      for (const line of [...missing.dropped, ...aligned.dropped]) documented.push(`${label}: ${line}`)
+      const end = dropEndOfRequest(body, ours.body, ours.endOfRequest)
+      const missing = dropMissing(end.st, end.ours, config)
+      const aligned = { body: end.ours }
+      for (const line of [...end.dropped, ...missing.dropped]) documented.push(`${label}: ${line}`)
       for (const line of diffJson(missing.body, aligned.body)) {
         const known = DOCUMENTED.find((difference) => difference.matches(line, config, settings))
         if (known) documented.push(`${label}: ${line} [${known.why}]`)
@@ -817,7 +823,8 @@ export const compareAssembly = async (
     {
       title: "Context assembler: documented differences",
       notes: [
-        ...STRUCTURAL.map((difference) => difference.why),
+        END_OF_REQUEST,
+        "in a group {{char}} in preset text is every character but the persona (DESIGN §5.3; ST: the current speaker); the gate's chats have one character, where both are its name",
         "on an impersonation the post-history instruction is the speaking card's (the persona: none); ST sends the chat character's",
         ...DOCUMENTED.map((difference) => difference.why)
       ],

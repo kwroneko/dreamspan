@@ -1,5 +1,7 @@
 // Lorebook attachment through the real browser and workers to a synthetic provider.
+import { mkdirSync } from "node:fs"
 import { expect, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -93,28 +95,57 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
     .getByRole("list", { name: "Lorebooks to add" })
     .getByRole("button", { name: /Lantern lore/ })
     .click()
-  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  await expect(inChat.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toBeChecked()
   // The chat stays usable beside the panel.
   expect(await send(page, "Where is the lantern?")).toContain("The watch lights seven lanterns.")
-  await inChat.getByRole("switch", { name: "Lantern lore" }).click()
-  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).not.toBeChecked()
+  await inChat.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  await expect(inChat.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).not.toBeChecked()
   expect(await send(page, "And the lantern now?")).not.toContain("The watch lights seven lanterns.")
 
   // A book that's both added here and global is listed once, under Global, with the switch for this chat.
-  await inChat.getByRole("switch", { name: "Lantern lore" }).click()
-  await expect(inChat.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  await inChat.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  await expect(inChat.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toBeChecked()
   await tab.getByRole("button", { name: "Use Lantern lore in every chat" }).click()
   const globals = tab.getByRole("list", { name: "Global lorebooks" })
-  await expect(globals.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
-  await expect(tab.getByRole("switch", { name: "Lantern lore" })).toHaveCount(1)
-  await expect(globals).toContainText("also added to this chat")
+  await expect(globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toBeChecked()
+  await expect(tab.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toHaveCount(1)
+  await expect(globals.getByRole("switch", { name: /^Added to this chat: Lantern lore/ })).toBeChecked()
   expect(await send(page, "The lantern, again?")).toContain("The watch lights seven lanterns.")
-  // Off in this chat takes both off; on brings the global use back.
-  await globals.getByRole("switch", { name: "Lantern lore" }).click()
-  await expect(globals.getByRole("switch", { name: "Lantern lore" })).not.toBeChecked()
-  await expect(tab.getByRole("switch", { name: "Lantern lore" })).toHaveCount(1)
-  expect(await send(page, "The lantern, off?")).not.toContain("The watch lights seven lanterns.")
-  await globals.getByRole("switch", { name: "Lantern lore" }).click()
-  await expect(globals.getByRole("switch", { name: "Lantern lore" })).toBeChecked()
+  // Global use never changes the separate attachment.
+  await globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  await expect(globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).not.toBeChecked()
+  await expect(tab.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toHaveCount(1)
+  const book = (await admin((api) => api.ListLibrary({ kind: "lorebook" })))[0]!
+  const cast = () =>
+    admin((api) =>
+      Effect.gen(function* () {
+        const chat = yield* api.GetChat({ chatId: chatId as never })
+        return yield* api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId, forkId: chat.currentForkId })
+      })
+    )
+  expect((await cast()).lorebooks).toContain(book.id)
+  expect(await send(page, "The lantern, global off but attached?")).toContain("The watch lights seven lanterns.")
+  await globals.getByRole("switch", { name: /^Added to this chat: Lantern lore/ }).click()
+  expect(await send(page, "The lantern, both off?")).not.toContain("The watch lights seven lanterns.")
+  await globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  await expect(globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toBeChecked()
   expect(await send(page, "The lantern, on?")).toContain("The watch lights seven lanterns.")
+  expect((await cast()).lorebooks).not.toContain(book.id)
+  await globals.getByRole("switch", { name: /^Added to this chat: Lantern lore/ }).click()
+  expect((await cast()).lorebooks).toContain(book.id)
+  await globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  expect((await cast()).lorebooks).toContain(book.id)
+  await globals.getByRole("switch", { name: /^Lantern lore(?: |$)/ }).click()
+  expect((await cast()).lorebooks).toContain(book.id)
+  if (process.env.SCREENSHOT_DIR) {
+    mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme)
+        await globals.scrollIntoViewIfNeeded()
+        await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/lorebooks-${width}-${theme}.png` })
+      }
+  }
 })
