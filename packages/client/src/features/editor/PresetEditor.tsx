@@ -264,15 +264,16 @@ export function PresetEditor({
   context?: PresetContext | null | undefined
   focus?: string | undefined
 }) {
+  const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   return (
     <>
-      <PresetWarnings store={store} />
+      <PresetWarnings store={store} onGoTo={(identifier) => setGoTo({ identifier })} />
       <Card>
         <CardHeader
           title="Prompts"
           description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
         />
-        <PromptDocument store={store} context={context} focus={focus} />
+        <PromptDocument store={store} context={context} focus={focus} goTo={goTo} />
       </Card>
       <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>

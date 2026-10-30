@@ -257,11 +257,14 @@ function Block({
 export function PromptDocument({
   store,
   context,
-  focus
+  focus,
+  goTo
 }: {
   store: EditorStore
   context?: PresetContext | null | undefined
   focus?: string | undefined
+  /** A prompt to open and scroll to, asked for again by a new object (a warning's link). */
+  goTo?: { readonly identifier: string } | null | undefined
 }) {
   const searchMatch = useContext(SearchNavigation)
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
@@ -298,6 +301,11 @@ export function PromptDocument({
     const frame = requestAnimationFrame(() => jump(focus))
     return () => cancelAnimationFrame(frame)
   }, [focus])
+  useEffect(() => {
+    if (!goTo) return
+    const frame = requestAnimationFrame(() => jump(goTo.identifier))
+    return () => cancelAnimationFrame(frame)
+  }, [goTo])
   const setOrder = (next: ReadonlyArray<PromptOrderEntry>) => writePresetOrder(store, next)
   const move = (from: number, to: number) => {
     const next = [...order]
@@ -493,28 +501,47 @@ export function PromptDocument({
 
 /**
  * What would go wrong when sending with this preset (DESIGN §2.2): the direction text doesn't
- * read `{{direction}}`, so a direction you give would be lost. It links to the text.
+ * read `{{direction}}`, so a direction you give would be lost; a switched-on prompt whose
+ * condition and generation types never meet is never sent. Each links to its text.
  */
-export function PresetWarnings({ store }: { store: EditorStore }) {
+export function PresetWarnings({ store, onGoTo }: { store: EditorStore; onGoTo: (identifier: string) => void }) {
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
+  const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const direction = useText(store, ["prompts", `identifier=${DIRECTION_PROMPT}`, "content"])
-  const { directionLost } = presetWarnings(
-    new Map(prompts.map((p) => [p.identifier, p.identifier === DIRECTION_PROMPT ? { ...p, content: direction } : p]))
+  const { directionLost, neverSent } = presetWarnings(
+    new Map(prompts.map((p) => [p.identifier, p.identifier === DIRECTION_PROMPT ? { ...p, content: direction } : p])),
+    presetOrder(prompts, savedOrder)
   )
-  if (!directionLost) return null
+  if (!directionLost && neverSent.length === 0) return null
   const jump = () =>
     document
       .querySelector<HTMLElement>(`[data-end-of-request="${DIRECTION_PROMPT}"]`)
       ?.scrollIntoView({ block: "start" })
+  const link = "text-accent underline-offset-4 hover:underline"
   return (
     <div className="flex flex-col gap-2" aria-label="Preset warnings" role="group">
-      <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
-        The end-of-request text for a direction doesn&apos;t contain {"{{direction}}"}: a direction you give won&apos;t
-        be sent.{" "}
-        <button type="button" className="text-accent underline-offset-4 hover:underline" onClick={jump}>
-          Go to the text
-        </button>
-      </div>
+      {directionLost && (
+        <div role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
+          The end-of-request text for a direction doesn&apos;t contain {"{{direction}}"}: a direction you give
+          won&apos;t be sent.{" "}
+          <button type="button" className={link} onClick={jump}>
+            Go to the text
+          </button>
+        </div>
+      )}
+      {neverSent.map((prompt) => (
+        <div key={prompt.identifier} role="alert" className="rounded-md border border-warning/40 px-3 py-2 text-sm">
+          “{prompt.name || prompt.identifier}” is never sent: it&apos;s sent{" "}
+          {CONDITION_LABELS[conditionOf(prompt)].toLowerCase()}, but only for{" "}
+          {TRIGGERS.filter((t) => prompt.injection_trigger.includes(t.value))
+            .map((t) => t.label)
+            .join(", ")}
+          , and the two never meet. Exported to SillyTavern, it&apos;s switched off.{" "}
+          <button type="button" className={link} onClick={() => onGoTo(prompt.identifier)}>
+            Go to the prompt
+          </button>
+        </div>
+      ))}
     </div>
   )
 }

@@ -43,8 +43,11 @@ const prompt = (identifier: string, content: string): PresetPrompt => ({
 })
 
 /** The store reads the section and the warning use, over one document. */
-const storeOf = (prompts: ReadonlyArray<PresetPrompt>) => {
-  const doc = { prompts, order: [] }
+const storeOf = (
+  prompts: ReadonlyArray<PresetPrompt>,
+  order: ReadonlyArray<{ identifier: string; enabled: boolean }> = []
+) => {
+  const doc = { prompts, order }
   const at = (path: FieldPath): unknown => {
     let value: unknown = doc
     for (const key of path) {
@@ -90,26 +93,46 @@ describe("the End of request section", () => {
 })
 
 describe("the preset warnings", () => {
+  const onGoTo = () => {}
+
   it("say nothing while the direction text reads {{direction}}", () => {
-    expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(defaults) }))).toBe("")
+    expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(defaults), onGoTo }))).toBe("")
   })
 
   it("reads the field's current draft instead of the saved prompts array", () => {
     const store = storeOf(defaults)
     const saved = store.text.bind(store)
     store.text = (path) => (path[1] === "identifier=directionPrompt" ? "[Next.]" : saved(path))
-    const changed = renderToStaticMarkup(createElement(PresetWarnings, { store }))
+    const changed = renderToStaticMarkup(createElement(PresetWarnings, { store, onGoTo }))
     expect(changed).toContain("doesn&#x27;t contain {{direction}}")
     // Restoring the macro clears the warning without a revision save or structural change.
     store.text = saved
-    expect(renderToStaticMarkup(createElement(PresetWarnings, { store }))).toBe("")
+    expect(renderToStaticMarkup(createElement(PresetWarnings, { store, onGoTo }))).toBe("")
   })
 
   it("warn when the direction text would lose the direction, with a link to it", () => {
     const lost = defaults.map((p) => (p.identifier === "directionPrompt" ? { ...p, content: "[Next.]" } : p))
-    const html = renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(lost) }))
+    const html = renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(lost), onGoTo }))
     expect(html).toContain('role="alert"')
     expect(html).toContain("doesn&#x27;t contain {{direction}}")
     expect(html).toContain("Go to the text")
+  })
+
+  it("name a switched-on prompt whose condition and generation types never meet, with a link to it", () => {
+    const never = { ...prompt("asCard", "[Stay in voice.]"), name: "As your card", condition: "as_user" as const }
+    const prompts = [...defaults, { ...never, injection_trigger: ["normal"] }]
+    const on = [
+      { identifier: "main", enabled: true },
+      { identifier: "asCard", enabled: true }
+    ]
+    const html = renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(prompts, on), onGoTo }))
+    expect(html).toContain("“As your card” is never sent")
+    expect(html).toContain("only for Normal")
+    expect(html).toContain("Go to the prompt")
+    // Switched off, or with a generation type the condition meets, it says nothing.
+    const off = on.map((e) => ({ ...e, enabled: e.identifier !== "asCard" }))
+    expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(prompts, off), onGoTo }))).toBe("")
+    const meets = [...defaults, { ...never, injection_trigger: ["normal", "impersonate"] }]
+    expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(meets, on), onGoTo }))).toBe("")
   })
 })

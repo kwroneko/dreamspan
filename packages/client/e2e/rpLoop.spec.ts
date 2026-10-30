@@ -315,6 +315,19 @@ for (const width of [1440, 390])
       // Put it back as it was (the drafts are this account's).
       await directionText.fill(original ?? "")
       await expect(warnings).toHaveCount(0)
+      // A condition its generation types never meet: never sent here, and named in the warnings (inv A2).
+      const condition = style.getByRole("combobox", { name: "Condition" })
+      await condition.click()
+      await page.getByRole("option", { name: "When writing as a character" }).click()
+      const never = warnings.getByRole("alert").filter({ hasText: "is never sent" })
+      await expect(never).toContainText("only for Impersonate")
+      await editor.getByTestId("preset-scroll").evaluate((e) => (e.scrollTop = 0))
+      await shot("12b-editor-gates-never-meet")
+      await never.getByRole("button", { name: "Go to the prompt" }).click()
+      await expect(style).toBeInViewport()
+      await condition.click()
+      await page.getByRole("option", { name: "Always" }).click()
+      await expect(warnings).toHaveCount(0)
       await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
 
       // The one-time notice, with a preset that marks no prompt for writing as {{user}}.

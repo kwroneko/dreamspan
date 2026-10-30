@@ -4,7 +4,7 @@
 // instruction (`endOfRequest.ts`, owner 2026-10-29): three texts of the preset outside the order.
 // ST's group nudge and impersonation prompt map onto two of them; the import and every read of a
 // stored preset go through the same conversion.
-import type { PresetDoc, PresetPrompt, PromptCondition } from "./docs/preset.ts"
+import type { PresetDoc, PresetPrompt, PromptCondition, PromptOrderEntry } from "./docs/preset.ts"
 import {
   DIRECTION_PROMPT,
   END_OF_REQUEST,
@@ -53,7 +53,8 @@ export const triggersFor = (prompt: PresetPrompt, type: string): boolean => {
 /**
  * The triggers that carry a condition to ST, which has none: the generation types the prompt
  * is sent for under its condition and its own triggers. A condition triggers can't express
- * (with a direction) keeps the prompt's own.
+ * (with a direction) keeps the prompt's own, as do triggers that never meet the condition: the
+ * export turns such a prompt off instead (`gatesNeverMeet`, ARCHITECTURE §9).
  */
 export const triggersWithCondition = (prompt: PresetPrompt): Array<string> => {
   const condition = conditionOf(prompt)
@@ -64,6 +65,28 @@ export const triggersWithCondition = (prompt: PresetPrompt): Array<string> => {
   const both = prompt.injection_trigger.filter((t) => types.includes(t))
   return both.length > 0 ? both : [...prompt.injection_trigger]
 }
+
+/**
+ * The generation types a condition can hold for here (the assembler's `conditionHolds`): writing
+ * as the user's card is an impersonation or a Continue of one; as a character, a reply, a new
+ * version or a Continue; a direction comes with any but a summary (ST's quiet), which sends only
+ * prompts sent always.
+ */
+const HOLDS_FOR: Readonly<Record<PromptCondition, ReadonlyArray<string>>> = {
+  always: TRIGGERS.map((t) => t.value),
+  as_user: ["impersonate", "continue"],
+  as_character: ["normal", "swipe", "regenerate", "continue"],
+  with_direction: ["normal", "continue", "impersonate", "swipe", "regenerate"]
+}
+
+/**
+ * The prompt's condition and its generation types never meet: no generation sends it here
+ * (writing as your card with only Normal, say). The end-of-request texts have neither.
+ */
+export const gatesNeverMeet = (prompt: PresetPrompt): boolean =>
+  !endOfRequestText(prompt.identifier) &&
+  prompt.injection_trigger.length > 0 &&
+  !prompt.injection_trigger.some((t) => HOLDS_FOR[conditionOf(prompt)].includes(t))
 
 /** A prompt's text reads the direction, so it carries one wherever it's sent. */
 const readsDirection = (text: string) => /\{\{\s*direction\s*\}\}/i.test(text)
@@ -129,10 +152,18 @@ export const withEndOfRequest = <D extends ConditionedDoc>(doc: D): { doc: D; ch
 
 /**
  * What the preset editor warns about (DESIGN §2.2): the direction text doesn't read
- * `{{direction}}`, so a direction the user gives would be lost.
+ * `{{direction}}`, so a direction the user gives would be lost; and the prompts switched on in
+ * `order` whose condition and generation types never meet (`gatesNeverMeet`), in order.
  */
-export const presetWarnings = (prompts: ReadonlyMap<string, PresetPrompt>): { directionLost: boolean } => ({
-  directionLost: !readsDirection(prompts.get(DIRECTION_PROMPT)?.content ?? "")
+export const presetWarnings = (
+  prompts: ReadonlyMap<string, PresetPrompt>,
+  order: ReadonlyArray<Pick<PromptOrderEntry, "identifier" | "enabled">> = []
+): { directionLost: boolean; neverSent: Array<PresetPrompt> } => ({
+  directionLost: !readsDirection(prompts.get(DIRECTION_PROMPT)?.content ?? ""),
+  neverSent: order.flatMap((e) => {
+    const prompt = prompts.get(e.identifier)
+    return e.enabled && prompt && gatesNeverMeet(prompt) ? [prompt] : []
+  })
 })
 
 /** The editor's names for the conditions; the inspector says which one admitted a prompt. */
