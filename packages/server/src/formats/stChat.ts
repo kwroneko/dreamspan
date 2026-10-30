@@ -146,6 +146,8 @@ export interface StChatPart {
   readonly batches: ReadonlyArray<{ readonly messagesJson: string; readonly speakers: ReadonlyArray<string> }>
   readonly messages: number
   readonly userTurns: number
+  /** The last user message’s speaker key; null for no user turn or an unnamed speaker. */
+  readonly lastUserSpeaker: string | null
   /** Hidden messages from the part's first message on, before the first shown one. */
   readonly leadingHidden: number
   readonly speakers: ReadonlyArray<StSpeaker>
@@ -259,6 +261,7 @@ export const parseStChatPart = (
   let lastAt = options.carryAt
   let index = options.firstIndex
   let userTurns = 0
+  let lastUserSpeaker: string | null = null
   let leadingHidden = 0
   let shownYet = false
   let greeting: string | null = null
@@ -362,7 +365,10 @@ export const parseStChatPart = (
       } else unspoken++
     }
 
-    if (user) userTurns++
+    if (user) {
+      userTurns++
+      lastUserSpeaker = speaker
+    }
     if (!shownYet && hidden) leadingHidden++
     else shownYet = true
     if (index === 0 && !user) greeting = bounded(mes, stChatLimits.maxGreetingChars)
@@ -411,6 +417,7 @@ export const parseStChatPart = (
     batches,
     messages: index - options.firstIndex,
     userTurns,
+    lastUserSpeaker,
     leadingHidden,
     speakers: [...speakers.values()],
     greeting,

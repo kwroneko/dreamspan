@@ -36,6 +36,7 @@ import { Report } from "./stReport.ts"
 import {
   type CardInfo,
   chatStateChange,
+  defaultPersona,
   type ChatState,
   type FolderContext,
   HIDDEN_RUN_MIN,
@@ -176,6 +177,7 @@ interface ChatProgress {
   /** The budget the summaries hold, given back when the chat is done. */
   summaryChars: number
   readonly spoke: Set<EntityId>
+  selectedPersona: EntityId | null
   readonly partHashes: Array<string>
   added: number
   updated: number
@@ -681,6 +683,7 @@ export class StImports extends Context.Service<
               link: progress.link,
               header: progress.header,
               spoke: progress.spoke,
+              selectedPersona: progress.selectedPersona,
               summaries: progress.summaries,
               messages: progress.index,
               run
@@ -945,6 +948,7 @@ export class StImports extends Context.Service<
           summaries: [],
           summaryChars: 0,
           spoke: new Set(),
+          selectedPersona: defaultPersona(session, header),
           partHashes: [],
           added: 0,
           updated: 0,
@@ -1023,6 +1027,9 @@ export class StImports extends Context.Service<
           // card (DESIGN §1.4): skipped, whether or not an earlier import has it. Its first
           // message waits until a second one comes or the file ends, however its parts fall.
           const speakers = speakerMap(session, progress.link, progress.header, part.speakers, progress.spoke)
+          if (part.userTurns > 0)
+            progress.selectedPersona =
+              part.lastUserSpeaker === null ? null : (speakers.get(part.lastUserSpeaker) ?? null)
           if (!progress.decided) {
             if (progress.index <= 1 && !request.last) {
               progress.pending.push(...part.batches.map((batch) => ({ batch, speakers })))

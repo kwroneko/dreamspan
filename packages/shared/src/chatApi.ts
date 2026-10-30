@@ -57,7 +57,12 @@ export const ReasoningDisplay = Schema.Literals(["expanded", "collapsed"])
 export type ReasoningDisplay = typeof ReasoningDisplay.Type
 
 /** The user's display choices that follow them across devices (`user_prefs`). */
+const messageColor = Schema.NullOr(Schema.String.check(Schema.isPattern(/^#[\da-f]{6}$/i)))
 const displayFields = {
+  mainTextColor: messageColor,
+  italicsTextColor: messageColor,
+  underlineTextColor: messageColor,
+  quoteTextColor: messageColor,
   reasoning: ReasoningDisplay,
   portraitSize: Schema.Literals(["small", "default", "large", "largest"]),
   timeline: Schema.Literals(["originals", "summaries"]),
@@ -70,6 +75,10 @@ const displayFields = {
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
 export const DisplayPrefsChange = Schema.Struct({
+  mainTextColor: Schema.optionalKey(displayFields.mainTextColor),
+  italicsTextColor: Schema.optionalKey(displayFields.italicsTextColor),
+  underlineTextColor: Schema.optionalKey(displayFields.underlineTextColor),
+  quoteTextColor: Schema.optionalKey(displayFields.quoteTextColor),
   reasoning: Schema.optionalKey(displayFields.reasoning),
   portraitSize: Schema.optionalKey(displayFields.portraitSize),
   timeline: Schema.optionalKey(displayFields.timeline),
@@ -80,6 +89,10 @@ export const DisplayPrefsChange = Schema.Struct({
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
+  mainTextColor: null,
+  italicsTextColor: null,
+  underlineTextColor: null,
+  quoteTextColor: null,
   reasoning: "expanded",
   portraitSize: "default",
   timeline: "originals",

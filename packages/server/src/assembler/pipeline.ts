@@ -133,7 +133,7 @@ export interface AssemblyRequest {
 export interface Cast {
   /** Participants the user doesn't play, in join order. */
   readonly characters: ReadonlyArray<CardInput>
-  /** Participants the user plays (the "played by me" set), in its order. */
+  /** The selected persona, zero or one; the array type is retained for stage compatibility. */
   readonly personas: ReadonlyArray<CardInput>
   readonly absent: ReadonlySet<string>
   /** Whose turn it is. Null only in a chat without characters. */
