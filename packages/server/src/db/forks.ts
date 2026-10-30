@@ -4,8 +4,8 @@
 // display path (displayPath.ts), which adds the inserted slots it places (`onForkPath`).
 import type { SqlClient } from "effect/sql"
 import { Effect } from "effect"
-import { shownInSql, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
-import { onDisplayPath, pathPieces, slotPlace } from "./displayPath.ts"
+import { shownIn, shownInSql, slotDeletedIn, versionDeletedIn } from "./forkState.ts"
+import { onDisplayPath, pathPieces, placedInsertions, slotPlace } from "./displayPath.ts"
 import { pathSegments } from "./pathSegments.ts"
 import type { ForkRow } from "./rows.ts"
 
@@ -17,6 +17,51 @@ export const forkColumns = (f: string) => `${f}.*,
   (SELECT substr(v.content, 1, 160) FROM slots t JOIN versions v ON v.id = ${shownInSql(`${f}.id`, "t")}
     WHERE t.id = ${f}.tip_slot_id) AS tip_excerpt,
   (SELECT c.current_fork_id = ${f}.id FROM chats c WHERE c.id = ${f}.chat_id) AS current`
+
+/**
+ * The last message fork `forkId` shows (spec/MESSAGE-INSERT.md §2.3, the display end): its tip,
+ * or an inserted slot after it when everything structural after its anchor is gone from the
+ * fork's view, skipping inserted ones deleted there. Costs nothing more than the lookup of the
+ * fork's insertions when it places none.
+ */
+const lastShown = (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  fork: { readonly id: string; readonly tip_slot_id: string | null }
+) =>
+  Effect.gen(function* () {
+    if ((yield* placedInsertions(sql, chatId, fork.id)).length === 0) return fork.tip_slot_id
+    const pieces = yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id)
+    for (let i = pieces.length - 1; i >= 0; i--) {
+      const piece = pieces[i]!
+      if (piece.kind === "run") break
+      const [row] = yield* sql<{ deleted: number }>`
+        SELECT ${slotDeletedIn(sql, fork.id, "s")} AS deleted FROM slots s WHERE s.id = ${piece.slotId}`
+      if (row?.deleted === 0) return piece.slotId
+    }
+    return fork.tip_slot_id
+  })
+
+/** A fork row read with `forkColumns`, its tip text taken from the last message it shows (`lastShown`). */
+export const withDisplayEnd = <
+  A extends {
+    readonly id: string
+    readonly chat_id: string
+    readonly tip_slot_id: string | null
+    readonly tip_excerpt: string | null
+  }
+>(
+  sql: SqlClient.SqlClient,
+  row: A
+) =>
+  Effect.gen(function* () {
+    const end = yield* lastShown(sql, row.chat_id, row)
+    if (end === row.tip_slot_id || end === null) return row
+    const [text] = yield* sql<{ excerpt: string | null }>`
+      SELECT substr(v.content, 1, 160) AS excerpt FROM slots t JOIN versions v ON v.id = ${shownIn(sql, row.id, "t")}
+      WHERE t.id = ${end}`
+    return { ...row, tip_excerpt: text?.excerpt ?? row.tip_excerpt }
+  })
 
 /** Whether `slotId` is on the path from the root to `tipSlotId`. */
 export const onPath = (sql: SqlClient.SqlClient, chatId: string, tipSlotId: string | null, slotId: string) =>

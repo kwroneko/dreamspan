@@ -7,7 +7,7 @@ import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
-import { Branch, PathWindow } from "@rp/shared/chatApi.ts"
+import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
 import { FoldableEvent } from "@rp/shared/state.ts"
@@ -16,7 +16,17 @@ import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
 import { binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkColumns, forkRecency, forkThrough } from "./forks.ts"
+import { forkColumns, forkRecency, forkThrough, withDisplayEnd } from "./forks.ts"
+import {
+  displayLength,
+  type PathPiece,
+  pathPieces,
+  placedInsertions,
+  positionOf,
+  slotAtPosition,
+  slotPlace,
+  windowPieces
+} from "./displayPath.ts"
 import {
   effectiveOverride,
   forkAt,
@@ -132,6 +142,39 @@ export const pathWindow = (
     ${viewJoin(sql, fork)}
     ORDER BY s.depth`
 
+/**
+ * Positions `first` to `last` of a display path (spec/MESSAGE-INSERT.md §2.3), as fork `fork`
+ * shows them, deleted ones included, in order, each with its `position`: one range of
+ * `slots_chain` per structural stretch and one lookup per inserted slot, from the pieces
+ * overlapping the window (`windowPieces`), which drive the join.
+ */
+export const displayWindow = (
+  sql: SqlClient.SqlClient,
+  pieces: ReadonlyArray<PathPiece>,
+  first: number,
+  last: number,
+  fork: string
+) => {
+  const parts = windowPieces(pieces, first, last)
+  return sql<PathRow>`
+    WITH w(chain_id, lo, hi, slot_id, start) AS (
+      SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4 FROM json_each(${parts})
+    )
+    SELECT ${withFork(sql, fork, pathColumns)}, ${fork} AS shown_fork_id, w.start + s.depth - w.lo AS position
+    FROM w CROSS JOIN slots s ON s.chain_id = w.chain_id AND s.depth BETWEEN w.lo AND w.hi
+    ${viewJoin(sql, fork)}
+    WHERE w.slot_id IS NULL
+    UNION ALL
+    SELECT ${withFork(sql, fork, pathColumns)}, ${fork} AS shown_fork_id, w.start AS position
+    FROM w CROSS JOIN slots s ON s.id = w.slot_id
+    ${viewJoin(sql, fork)}
+    WHERE w.slot_id IS NOT NULL
+    ORDER BY position`
+}
+
+/** Rows of a structural window, numbered by depth: without insertions, a path's positions are its depths. */
+const byDepth = (rows: ReadonlyArray<PathRow>) => rows.map((row) => ({ ...row, position: row.depth }))
+
 interface SlotPosition {
   readonly id: SlotId
   readonly depth: number
@@ -183,9 +226,9 @@ export const walkTowards = (sql: SqlClient.SqlClient, leaf: SlotPosition, after:
         WITH RECURSIVE down(id, depth, n) AS (
           SELECT ${current.id}, ${current.depth}, 0
           UNION ALL
-          SELECT c.id, c.depth, d.n + 1 FROM down d JOIN slots c ON c.parent_slot_id = d.id
+          SELECT c.id, c.depth, d.n + 1 FROM down d JOIN slots c ON c.parent_slot_id = d.id AND c.inserted = 0
           WHERE d.n < ${remaining} AND d.id <> ${leaf.id}
-            AND (SELECT count(*) FROM slots x WHERE x.parent_slot_id = d.id) = 1
+            AND (SELECT count(*) FROM slots x WHERE x.parent_slot_id = d.id AND x.inserted = 0) = 1
         )
         SELECT id, depth FROM down WHERE n > 0 ORDER BY n`
       if (run.length > 0) {
@@ -217,7 +260,26 @@ export const makeReadHandlers = Effect.gen(function* () {
     )
 
   const windowEndingAt = (chatId: ChatId, leaf: SlotId, limit: number, fork: string | null) =>
-    pathWindow(sql, chatId, leaf, limit, fork)
+    Effect.map(pathWindow(sql, chatId, leaf, limit, fork), byDepth)
+
+  /**
+   * The display path read in fork `fork` up to `leaf` (spec/MESSAGE-INSERT.md §2.3): the fork's
+   * own to its display end when `leaf` is null, else to `leaf` where the fork shows it (its tip
+   * included: a window named by it ends there, so paging back from an inserted display end
+   * moves on), else the path to `leaf` with the fork's insertions on it. `end` is the last position
+   * (-1: empty). NotFound for a leaf not of the chat.
+   */
+  const displayTo = (chatId: ChatId, fork: { id: string; tip_slot_id: string | null }, leaf: string | null) =>
+    Effect.gen(function* () {
+      const pieces = yield* pathPieces(sql, chatId, fork.id, fork.tip_slot_id)
+      if (leaf === null) return { pieces, end: displayLength(pieces) - 1 }
+      const place = yield* slotPlace(sql, chatId, leaf)
+      if (place === null) return yield* new NotFound({ entity: "slot", id: leaf })
+      const shown = positionOf(pieces, place)
+      if (shown !== null) return { pieces, end: shown }
+      const own = yield* pathPieces(sql, chatId, fork.id, leaf)
+      return { pieces: own, end: positionOf(own, place) ?? -1 }
+    })
 
   /** A slot of this chat, deleted or not: paths walk through deleted messages. */
   const slotIn = (chatId: ChatId, slotId: SlotId) =>
@@ -257,6 +319,103 @@ export const makeReadHandlers = Effect.gen(function* () {
       )
     )
 
+  /**
+   * ReadPath by position on a fork's display path (spec/MESSAGE-INSERT.md §2.3), for a fork
+   * that places insertions: the same ranges as by depth, with the cursors (`older`, `newer`)
+   * the slots at the positions next to the window, which may be inserted ones.
+   */
+  const readDisplay = (chatId: ChatId, fork: ForkRow, leafSlotId: SlotId | null, range: PathRange, limit: number) =>
+    Effect.gen(function* () {
+      const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
+      let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
+      const shown = yield* displayTo(chatId, fork, leafSlotId)
+      const read = (pieces: ReadonlyArray<PathPiece>, first: number, last: number, view: string) =>
+        last < first ? Effect.succeed([] as ReadonlyArray<PathRow>) : displayWindow(sql, pieces, first, last, view)
+      const at = (pieces: ReadonlyArray<PathPiece>, position: number) =>
+        Effect.map(slotAtPosition(sql, pieces, position), (id) => id as SlotId | null)
+      const positionIn = (pieces: ReadonlyArray<PathPiece>, slotId: SlotId) =>
+        Effect.map(slotPlace(sql, chatId, slotId), (place) => (place === null ? null : positionOf(pieces, place)))
+      // Deleted messages are walked through but not shown; their replies stay in place.
+      const window = (
+        leafId: SlotId | null,
+        rows: ReadonlyArray<PathRow>,
+        older: SlotId | null,
+        newer: SlotId | null
+      ) =>
+        new PathWindow({
+          leafSlotId: leafId,
+          forkId: shownFork,
+          entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+          older,
+          newer
+        })
+      switch (range._tag) {
+        case "Bottom": {
+          const first = Math.max(0, shown.end - limit + 1)
+          return window(
+            leaf,
+            yield* read(shown.pieces, first, shown.end, fork.id),
+            yield* at(shown.pieces, first - 1),
+            null
+          )
+        }
+        case "Older": {
+          yield* slotIn(chatId, range.from)
+          let pieces = shown.pieces
+          let end = yield* positionIn(pieces, range.from)
+          if (end === null) {
+            // Not on this path: the path to it, as the fork shows it.
+            pieces = yield* pathPieces(sql, chatId, fork.id, range.from)
+            end = (yield* positionIn(pieces, range.from)) ?? -1
+          }
+          const first = Math.max(0, end - limit + 1)
+          return window(leaf, yield* read(pieces, first, end, fork.id), yield* at(pieces, first - 1), null)
+        }
+        case "Newer": {
+          yield* slotIn(chatId, range.after)
+          const after = yield* positionIn(shown.pieces, range.after)
+          if (after === null || after >= shown.end) return window(leaf, [], null, null)
+          const last = Math.min(shown.end, after + limit)
+          const rows = yield* read(shown.pieces, after + 1, last, fork.id)
+          return window(leaf, rows, null, last === shown.end ? null : yield* at(shown.pieces, last))
+        }
+        case "Around": {
+          yield* slotIn(chatId, range.slot)
+          let { pieces, end } = shown
+          let pathLeaf = leaf
+          let view = fork.id
+          let anchor = yield* positionIn(pieces, range.slot)
+          if (anchor === null) {
+            // A slot on another path opens the fork through it that was current most
+            // recently, or with none, the path through it on its latest replies.
+            const through = yield* forkThrough(sql, chatId, range.slot)
+            shownFork = (through?.id ?? null) as ForkId | null
+            if (through !== null) {
+              view = through.id
+              pathLeaf = through.tip_slot_id as SlotId | null
+              ;({ pieces, end } = yield* displayTo(chatId, through, null))
+            } else {
+              pathLeaf = yield* latestDescendant(range.slot)
+              pieces = yield* pathPieces(sql, chatId, view, pathLeaf)
+              end = (yield* positionIn(pieces, pathLeaf)) ?? -1
+            }
+            anchor = (yield* positionIn(pieces, range.slot)) ?? 0
+          }
+          // The anchor and about half the window above it, the rest below, filled up from the
+          // other side near the root or the end.
+          const top = Math.max(0, anchor - Math.ceil(limit / 2) + 1)
+          const last = Math.min(end, top + limit - 1)
+          const first = Math.max(0, last - limit + 1)
+          return window(
+            pathLeaf,
+            yield* read(pieces, first, last, view),
+            yield* at(pieces, first - 1),
+            last === end ? null : yield* at(pieces, last)
+          )
+        }
+      }
+    })
+
   const handlers = {
     GetBinLimits: ({ userId }) => readBinLimits(sql, userId, binLimits).pipe(query("GetBinLimits")),
     FindUserByHandle: ({ handle }) =>
@@ -272,13 +431,25 @@ export const makeReadHandlers = Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         const fork = yield* liveFork(chat, forkId ?? null)
         const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
-        if (leaf === null) return { entries: [], olderLeafSlotId: null }
-        const rows = yield* pathWindow(sql, chatId, leaf, limit, fork.id)
-        if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
-        // Deleted messages are walked through but not shown; their replies stay in place.
+        if ((yield* placedInsertions(sql, chatId, fork.id)).length === 0) {
+          // No insertions: the display path is the structural one, read as before.
+          if (leaf === null) return { entries: [], olderLeafSlotId: null }
+          const rows = byDepth(yield* pathWindow(sql, chatId, leaf, limit, fork.id))
+          if (rows.length === 0) return yield* new NotFound({ entity: "slot", id: leaf })
+          // Deleted messages are walked through but not shown; their replies stay in place.
+          return {
+            entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
+            olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null
+          }
+        }
+        // The last `limit` positions up to the leaf, or up to the display end.
+        const shown = yield* displayTo(chatId, fork, leafSlotId)
+        if (shown.end < 0) return { entries: [], olderLeafSlotId: null }
+        const first = Math.max(0, shown.end - limit + 1)
+        const rows = yield* displayWindow(sql, shown.pieces, first, shown.end, fork.id)
         return {
           entries: rows.filter((row) => row.slot_deleted === 0).map(toPathEntry),
-          olderLeafSlotId: rows[0]!.parent_slot_id as SlotId | null
+          olderLeafSlotId: (yield* slotAtPosition(sql, shown.pieces, first - 1)) as SlotId | null
         }
       }).pipe(query("GetPath")),
 
@@ -551,6 +722,9 @@ export const makeReadHandlers = Effect.gen(function* () {
         const leaf = (leafSlotId ?? fork.tip_slot_id) as SlotId | null
         let shownFork = (leafSlotId === null ? fork.id : null) as ForkId | null
         let view: string = fork.id
+        // A fork with insertions is read by position on its display path.
+        if ((yield* placedInsertions(sql, chatId, fork.id)).length > 0)
+          return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
         if (leaf === null)
           return new PathWindow({ leafSlotId: null, forkId: shownFork, entries: [], older: null, newer: null })
         // Deleted messages are walked through but not shown; their replies stay in place.
@@ -591,6 +765,8 @@ export const makeReadHandlers = Effect.gen(function* () {
               // A slot on another path opens the fork through it that was current most
               // recently, or with none, the path through it on its latest replies.
               const through = yield* forkThrough(sql, chatId, anchor.id)
+              if (through !== null && (yield* placedInsertions(sql, chatId, through.id)).length > 0)
+                return yield* readDisplay(chatId, fork, leafSlotId, range, limit)
               shownFork = (through?.id ?? null) as ForkId | null
               view = through?.id ?? view
               pathLeaf = yield* slotIn(chatId, (through?.tip_slot_id ?? (yield* latestDescendant(anchor.id))) as SlotId)
@@ -614,7 +790,8 @@ export const makeReadHandlers = Effect.gen(function* () {
         const rows = yield* sql<Parameters<typeof toFork>[0]>`
           SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
-        return rows.map(toFork)
+        // Each fork's tip text is the last message it shows (an inserted one can follow the tip).
+        return (yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))).map(toFork)
       }).pipe(query("ListForks")),
 
     // The siblings SwitchBranch counts, in its order, with each one's name and first words.

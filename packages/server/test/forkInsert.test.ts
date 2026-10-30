@@ -98,29 +98,33 @@ const setup = (dataDir: string) =>
     const fork = (from: ForkId, at: SlotId | null) =>
       Effect.map(writer.CreateFork({ userId, chatId, fromForkId: from, atSlotId: at }), (made) => made.fork.id)
 
-    /** The texts `forkId` shows, in display order, without what it deleted. */
-    const shows = (forkId: ForkId) =>
+    /** Every slot on `forkId`'s display path, in order, with its text there and whether it's deleted there. */
+    const display = (forkId: ForkId) =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const [row] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${forkId}`
-        const texts: Array<string> = []
+        const slots: Array<{ id: SlotId; content: string; deleted: number }> = []
         for (const piece of yield* pathPieces(sql, chatId, forkId, row!.tip)) {
           const found =
             piece.kind === "inserted"
-              ? yield* sql<{ content: string; deleted: number }>`
-                  SELECT (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
+              ? yield* sql<{ id: SlotId; content: string; deleted: number }>`
+                  SELECT s.id, (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
                     ${slotDeletedIn(sql, forkId, "s")} AS deleted FROM slots s WHERE s.id = ${piece.slotId}`
-              : yield* sql<{ content: string; deleted: number }>`
-                  SELECT (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
+              : yield* sql<{ id: SlotId; content: string; deleted: number }>`
+                  SELECT s.id, (SELECT content FROM versions WHERE id = ${shownIn(sql, forkId, "s")}) AS content,
                     ${slotDeletedIn(sql, forkId, "s")} AS deleted
                   FROM slots s WHERE s.chain_id = ${piece.chainId} AND s.depth BETWEEN ${piece.lo} AND ${piece.hi}
                   ORDER BY s.depth`
-          for (const slot of found) if (!slot.deleted) texts.push(slot.content)
+          slots.push(...found)
         }
-        return texts
+        return slots
       }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
+    /** The texts `forkId` shows, in display order, without what it deleted. */
+    const shows = (forkId: ForkId) =>
+      Effect.map(display(forkId), (slots) => slots.filter((slot) => !slot.deleted).map((slot) => slot.content))
 
     return {
+      display,
       writer,
       reader,
       userId,
@@ -464,6 +468,139 @@ describe("inserting messages in forks", () => {
           const atAnchor = yield* t.fork(current, anchor)
           assert.deepStrictEqual(yield* t.shows(atAnchor), expected.slice(0, -2))
           assert.deepStrictEqual(yield* t.shows(t.main), ["m0", "x0", "m1"])
+        })
+      ),
+    120_000
+  )
+
+  it.live(
+    "reads a fork's path by position: windows page through it in both directions without gaps or repeats",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const ms: Array<SlotId> = []
+          let previous: SlotId | null = null
+          for (let i = 0; i < 10; i++) {
+            previous = yield* t.append(t.main, previous, `m${i}`, i % 2 ? "model" : "human")
+            ms.push(previous)
+          }
+          const plain = yield* t.fork(t.main, ms[9]!)
+          yield* t.insert(t.main, ms[2]!, "x1")
+          const x2 = yield* t.insert(t.main, ms[2]!, "x2")
+          yield* t.insert(t.main, x2, "x3")
+          yield* t.insert(t.main, null, "top")
+          const x5 = yield* t.insert(t.main, ms[5]!, "x5")
+          const gone = yield* t.insert(t.main, ms[7]!, "gone")
+          yield* t.writer.DeleteMessage({ userId: t.userId, slotId: gone, forkId: t.main })
+          const end = yield* t.insert(t.main, ms[9]!, "end")
+
+          const all = yield* t.display(t.main)
+          const shown = all.filter((slot) => !slot.deleted).map((slot) => slot.id)
+          const positions = new Map(all.map((slot, i) => [slot.id as string, i]))
+          assert.deepStrictEqual(
+            (yield* t.shows(t.main)).join(" "),
+            "top m0 m1 m2 x2 x3 x1 m3 m4 m5 x5 m6 m7 m8 m9 end"
+          )
+          const check = (entries: ReadonlyArray<{ slotId: SlotId; position?: number | undefined }>) => {
+            for (const entry of entries) assert.strictEqual(entry.position, positions.get(entry.slotId), entry.slotId)
+          }
+
+          // GetPath, paging back from the display end.
+          for (const limit of [1, 2, 3, 7, 100]) {
+            const ids: Array<SlotId> = []
+            let leaf: SlotId | null = null
+            let first = true
+            while (first || leaf !== null) {
+              first = false
+              const window: Effect.Success<ReturnType<typeof t.reader.GetPath>> = yield* t.reader.GetPath({
+                userId: t.userId,
+                chatId: t.chatId,
+                forkId: t.main,
+                leafSlotId: leaf,
+                limit
+              })
+              check(window.entries)
+              ids.unshift(...window.entries.map((e) => e.slotId))
+              leaf = window.olderLeafSlotId
+            }
+            assert.deepStrictEqual(ids, shown, `GetPath by ${limit}`)
+          }
+
+          // ReadPath: older from the bottom, newer from around a slot, both ways from it.
+          const read = (range: Parameters<typeof t.reader.ReadPath>[0]["range"], limit: number) =>
+            t.reader.ReadPath({ userId: t.userId, chatId: t.chatId, forkId: t.main, leafSlotId: null, range, limit })
+          for (const limit of [1, 3, 5]) {
+            const ids: Array<SlotId> = []
+            let window = yield* read({ _tag: "Bottom" }, limit)
+            ids.unshift(...window.entries.map((e) => e.slotId))
+            while (window.older !== null) {
+              window = yield* read({ _tag: "Older", from: window.older }, limit)
+              check(window.entries)
+              ids.unshift(...window.entries.map((e) => e.slotId))
+            }
+            assert.deepStrictEqual(ids, shown, `Older by ${limit}`)
+
+            const around = yield* read({ _tag: "Around", slot: x5 }, limit)
+            check(around.entries)
+            assert.include(
+              around.entries.map((e) => e.slotId),
+              x5
+            )
+            const both = around.entries.map((e) => e.slotId)
+            let down = around
+            while (down.newer !== null) {
+              down = yield* read({ _tag: "Newer", after: down.newer }, limit)
+              check(down.entries)
+              both.push(...down.entries.map((e) => e.slotId))
+            }
+            let up = around
+            while (up.older !== null) {
+              up = yield* read({ _tag: "Older", from: up.older }, limit)
+              both.unshift(...up.entries.map((e) => e.slotId))
+            }
+            assert.deepStrictEqual(both, shown, `Around and Newer by ${limit}`)
+          }
+          // Around a slot this fork doesn't show opens a fork that does.
+          const elsewhere = yield* t.reader.ReadPath({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: plain,
+            leafSlotId: null,
+            range: { _tag: "Around", slot: x5 },
+            limit: 3
+          })
+          assert.strictEqual(elsewhere.forkId, t.main)
+          assert.deepStrictEqual(
+            elsewhere.entries.map((e) => e.slotId),
+            [ms[5]!, x5, ms[6]!]
+          )
+
+          // A fork without insertions numbers by depth, as before.
+          const plainPath = yield* t.reader.GetPath({
+            userId: t.userId,
+            chatId: t.chatId,
+            forkId: plain,
+            leafSlotId: null,
+            limit: 100
+          })
+          assert.deepStrictEqual(
+            plainPath.entries.map((e) => [e.slotId, e.position]),
+            ms.map((id, i) => [id, i])
+          )
+
+          // The forks' tip texts are the last message each shows.
+          const tips = (yield* t.reader.ListForks({ userId: t.userId, chatId: t.chatId })).map((f) => [
+            f.id,
+            f.tipExcerpt
+          ])
+          assert.deepInclude(tips, [t.main, "end"])
+          assert.deepInclude(tips, [plain, "m9"])
+          yield* t.writer.DeleteMessage({ userId: t.userId, slotId: end, forkId: t.main })
+          assert.deepInclude(
+            (yield* t.reader.ListForks({ userId: t.userId, chatId: t.chatId })).map((f) => [f.id, f.tipExcerpt]),
+            [t.main, "m9"]
+          )
         })
       ),
     120_000

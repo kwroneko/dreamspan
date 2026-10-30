@@ -65,35 +65,37 @@ export const displayLength = (pieces: ReadonlyArray<PathPiece>) => {
  * `fork_overrides_point` on `(fork_id, kind)` per lineage entry, so it costs the fork's
  * insertions, not the chat's length.
  */
-const placedInsertions = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
-  Effect.map(
-    sql<{
-      id: string
-      chain_id: string
-      depth: number
-      anchor_id: string | null
-      anchor_chain_id: string | null
-      anchor_depth: number | null
-    }>`
-      SELECT x.id, x.chain_id, x.depth, x.parent_slot_id AS anchor_id, a.chain_id AS anchor_chain_id,
-        a.depth AS anchor_depth
-      FROM (
-        SELECT o.target_id, o.flag, row_number() OVER (PARTITION BY o.target_id ORDER BY l.key, o.seq DESC) AS n
-        FROM forks f CROSS JOIN json_each(f.lineage_json) l CROSS JOIN fork_overrides o
-        WHERE f.id = ${forkId} AND f.chat_id = ${chatId} AND o.fork_id = l.value ->> 0 AND o.kind = 'insert'
-          AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
-      ) e CROSS JOIN slots x ON x.id = e.target_id LEFT JOIN slots a ON a.id = x.parent_slot_id
-      WHERE e.n = 1 AND e.flag = 1 AND x.chat_id = ${chatId}`,
-    (rows) =>
-      rows.map((row): Placed => ({
-        id: row.id,
-        chainId: row.chain_id,
-        depth: row.depth,
-        anchorId: row.anchor_id,
-        anchorChainId: row.anchor_chain_id,
-        anchorDepth: row.anchor_depth
-      }))
+export const placedInsertions = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
+  Effect.map(placedInsertionsSql(sql, chatId, forkId), (rows) =>
+    rows.map((row): Placed => ({
+      id: row.id,
+      chainId: row.chain_id,
+      depth: row.depth,
+      anchorId: row.anchor_id,
+      anchorChainId: row.anchor_chain_id,
+      anchorDepth: row.anchor_depth
+    }))
   )
+
+/** `placedInsertions`' statement, which the scale test measures. */
+export const placedInsertionsSql = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
+  sql<{
+    id: string
+    chain_id: string
+    depth: number
+    anchor_id: string | null
+    anchor_chain_id: string | null
+    anchor_depth: number | null
+  }>`
+    SELECT x.id, x.chain_id, x.depth, x.parent_slot_id AS anchor_id, a.chain_id AS anchor_chain_id,
+      a.depth AS anchor_depth
+    FROM (
+      SELECT o.target_id, o.flag, row_number() OVER (PARTITION BY o.target_id ORDER BY l.key, o.seq DESC) AS n
+      FROM forks f CROSS JOIN json_each(f.lineage_json) l CROSS JOIN fork_overrides o
+      WHERE f.id = ${forkId} AND f.chat_id = ${chatId} AND o.fork_id = l.value ->> 0 AND o.kind = 'insert'
+        AND o.seq <= coalesce(l.value ->> 1, 9223372036854775807)
+    ) e CROSS JOIN slots x ON x.id = e.target_id LEFT JOIN slots a ON a.id = x.parent_slot_id
+    WHERE e.n = 1 AND e.flag = 1 AND x.chat_id = ${chatId}`
 
 /**
  * The display path from structural segments, oldest first, and the placed insertions: the
@@ -235,4 +237,32 @@ export const slotPlace = (sql: SqlClient.SqlClient, chatId: string, slotId: stri
       SELECT id, chain_id, depth, inserted FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}`,
     ([row]): (SlotPlace & { readonly inserted: boolean }) | null =>
       row === undefined ? null : { id: row.id, chainId: row.chain_id, depth: row.depth, inserted: row.inserted === 1 }
+  )
+
+/** The slot at `position` on the display path (null past either end). */
+export const slotAtPosition = (sql: SqlClient.SqlClient, pieces: ReadonlyArray<PathPiece>, position: number) =>
+  Effect.gen(function* () {
+    const piece = pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+    if (piece === undefined) return null
+    if (piece.kind === "inserted") return piece.slotId
+    const [row] = yield* sql<{ id: string }>`
+      SELECT id FROM slots WHERE chain_id = ${piece.chainId} AND depth = ${piece.lo + position - piece.start}`
+    return row?.id ?? null
+  })
+
+/**
+ * The pieces of positions `first` to `last` as JSON for a window read (`displayWindow` in
+ * reads.ts): `[chain, lo, hi, null, start]` for a stretch of a run, `[chain, depth, depth,
+ * slot, start]` for an inserted slot.
+ */
+export const windowPieces = (pieces: ReadonlyArray<PathPiece>, first: number, last: number) =>
+  JSON.stringify(
+    pieces.flatMap((piece) => {
+      const from = Math.max(first, piece.start)
+      const to = Math.min(last, piece.start + pieceLength(piece) - 1)
+      if (from > to) return []
+      return piece.kind === "inserted"
+        ? [[piece.chainId, piece.depth, piece.depth, piece.slotId, piece.start]]
+        : [[piece.chainId, piece.lo + from - piece.start, piece.lo + to - piece.start, null, from]]
+    })
   )

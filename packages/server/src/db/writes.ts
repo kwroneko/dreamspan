@@ -17,7 +17,7 @@ import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { NotFound, StaleWrite, WriteOps } from "./ops.ts"
 import { newChatLcmSettings, ownedModel } from "./generationSettings.ts"
-import { forkColumns, forkThrough, shownElsewhere } from "./forks.ts"
+import { forkColumns, forkThrough, shownElsewhere, withDisplayEnd } from "./forks.ts"
 import { forkAt, insertFork, versionAsShown, writeOverride, writeSelect } from "./forkState.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { type ChatRow, type ForkRow, toChat, toFork, toVersion } from "./rows.ts"
@@ -138,7 +138,9 @@ export const makeWriteHandlers = (bin: Bin) =>
       sql<
         Parameters<typeof toFork>[0]
       >`SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.id = ${forkId}`.pipe(
-        Effect.map(([row]) => toFork(row!))
+        // Its tip text is the last message it shows (an inserted one can follow the tip).
+        Effect.flatMap(([row]) => withDisplayEnd(sql, row!)),
+        Effect.map(toFork)
       )
 
     const handlers = {
