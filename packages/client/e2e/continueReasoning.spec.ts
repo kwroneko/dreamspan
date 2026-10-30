@@ -262,3 +262,36 @@ for (const width of [1440, 390]) {
     await shoot(page, "10-model-capabilities")
   })
 }
+
+for (const width of [1440, 390]) {
+  test(`an edited reply can be continued into a new generated version at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { chat } = await setup()
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    await page
+      .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+      .last()
+      .click()
+    const reply = page.getByRole("article").last()
+    await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+    await showActions(reply)
+    await reply.getByRole("button", { name: "Edit", exact: true }).click()
+    await reply.getByLabel("Message text").fill("The ledger is wrong,")
+    await reply.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(reply.locator(".markdown").last()).toHaveText("The ledger is wrong,")
+    await showActions(reply)
+    await shoot(page, "07-edited-continue")
+    await reply.getByRole("button", { name: /^Continue:/ }).click()
+    await expect(reply.locator(".markdown").last()).toContainText("The ledger is wrong," + MORE.trimEnd())
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+    expect(provider.requests.at(-1)!.messages.at(-1)).toEqual({ role: "assistant", content: "The ledger is wrong," })
+    const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }).pipe(
+        Effect.flatMap((path) => api.ListVersions({ slotId: path.entries.at(-1)!.slotId }))
+      )
+    )
+    expect(versions.map((v) => v.writer)).toEqual(["model", "human", "model"])
+  })
+}

@@ -1,6 +1,7 @@
-// Continue (ST's, DESIGN §7.5): on the latest message, when the model wrote the version shown
-// and it's finished with text (stopped, interrupted, cut off or complete), a new version that
-// starts as its text and streams on from its end. The old version stays. It needs a model
+// Continue (ST's, DESIGN §7.5): on the latest message, when the version shown is finished with
+// text (stopped, interrupted, cut off or complete), whoever wrote it (an edit of a reply is
+// the user's), a new generated version that starts as its text and streams on from its end.
+// The old version stays. It needs a model
 // that takes the start of its reply (a prefill); with another, the button says why it isn't
 // available, and a click (or a tap, where there's no tooltip) shows the reason in full.
 import type { PathEntry } from "@rp/shared/chat.ts"
@@ -33,7 +34,7 @@ export function ContinueAction({
   report: (outcome: Outcome<unknown>) => void
 }) {
   const { version } = entry
-  if (version.writer !== "model" || version.status === "generating" || version.content.trim() === "") return null
+  if (version.status === "generating" || version.content.trim() === "") return null
   return <ContinueButton entry={entry} session={session} report={report} />
 }
 
