@@ -178,3 +178,57 @@ test("Find's matches go when the question or the text changes", async ({ page })
   await overlay.getByRole("button", { name: "Find", exact: true }).click()
   await expect(matches).toBeVisible()
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Find opens and selects its match (${width}px ${theme})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const chatId = await setUp(page, `Find navigation ${width} ${theme}`, false)
+      const overlay = await open(page, chatId)
+      await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
+      const find = overlay.getByRole("textbox", { name: "Find", exact: true })
+      await find.fill("narrate")
+      await overlay.getByRole("button", { name: "Find", exact: true }).click()
+      const matches = overlay.getByRole("list", { name: "Matches", exact: true })
+      await matches
+        .getByRole("button", { name: /^Go to / })
+        .first()
+        .click()
+      const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+      await expect(main).toBeFocused()
+      await expect
+        .poll(() =>
+          main.evaluate((e) =>
+            (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null })
+              .getSelection()
+              ?.toString()
+              .toLowerCase()
+          )
+        )
+        .toBe("narrate")
+      const bar = overlay
+        .getByRole("button", { name: /^Save/ })
+        .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      await expect
+        .poll(
+          async () => (await main.boundingBox())!.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)
+        )
+        .toBeGreaterThanOrEqual(0)
+      await page.screenshot({ path: join(shots, `find-navigation-${width}-${theme}.png`) })
+      // The result label is also an action; revisiting the same match selects it again.
+      await main.press("ArrowRight")
+      await matches.getByRole("button", { name: /^Prompt .*Main Prompt.*Content$/ }).click()
+      await expect
+        .poll(() =>
+          main.evaluate((e) =>
+            (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null })
+              .getSelection()
+              ?.toString()
+              .toLowerCase()
+          )
+        )
+        .toBe("narrate")
+      await expect(overlay.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+    })

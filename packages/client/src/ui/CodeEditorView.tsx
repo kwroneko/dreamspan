@@ -124,6 +124,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
       applying = false
     }
   }
+  let selection: CodeEditorProps["selection"]
   let base: string | null = null
   const update = (next: CodeEditorProps) => {
     const oldProps = props
@@ -136,6 +137,22 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
       // An equal-text echo also supersedes any earlier queued external value.
       deferred = null
       replace(next.value)
+    }
+    if (next.selection && selection !== next.selection) {
+      selection = next.selection
+      const anchor = Math.min(selection.at, view.state.doc.length)
+      const head = Math.min(anchor + selection.length, view.state.doc.length)
+      view.dispatch({ selection: { anchor, head }, effects: EditorView.scrollIntoView(head, { y: "center" }) })
+      view.focus()
+      requestAnimationFrame(() => {
+        if (!host.isConnected) return
+        view.requestMeasure({
+          read: () => view.coordsAtPos(anchor)?.top,
+          write: (top) => {
+            if (top !== undefined && host.isConnected) props.onRevealSelection?.(host, top)
+          }
+        })
+      })
     }
     if (base !== next.base) {
       base = next.base

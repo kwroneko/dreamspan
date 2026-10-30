@@ -278,6 +278,38 @@ test("card search and replace includes embedded lore and keys in closed entries"
   await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("port")
   await dialog.getByRole("button", { name: "Find", exact: true }).click()
   await expect(dialog.getByRole("status")).toHaveText("6 matches.")
+  await dialog.getByRole("button", { name: /Go to Lorebook entry .*: Content$/ }).click()
+  const content = page.getByRole("textbox", { name: "Entry content", exact: true })
+  await expect(content).toBeFocused()
+  await expect
+    .poll(() =>
+      content.evaluate((e) =>
+        (e.getRootNode() as ShadowRoot & { getSelection: () => Selection | null }).getSelection()?.toString()
+      )
+    )
+    .toBe("Harbour")
+  await page
+    .locator("summary")
+    .filter({ hasText: /^Harbour tides$/ })
+    .click()
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
+  await dialog.getByRole("button", { name: /Go to Lorebook entry .*: Primary key 2$/ }).click()
+  const keys = page.getByRole("textbox", { name: "Primary keys", exact: true })
+  await expect(keys).toBeFocused()
+  await expect
+    .poll(() =>
+      keys.evaluate((e) => {
+        const input = e as HTMLTextAreaElement
+        return { text: input.value.slice(input.selectionStart, input.selectionEnd), start: input.selectionStart }
+      })
+    )
+    .toEqual({ text: "harbour", start: 9 })
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("harbour")
+  await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("port")
+  await dialog.getByRole("button", { name: "Find", exact: true }).click()
   await dialog.getByRole("button", { name: "Replace all", exact: true }).click()
   await expect(dialog.getByRole("status")).toHaveText("No matches.")
   await dialog.press("Escape")

@@ -27,6 +27,7 @@ import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { SaveDialog } from "./SaveDialog.tsx"
+import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
 import { UpdateDialog } from "./UpdateDialog.tsx"
@@ -84,6 +85,7 @@ export function Editor({
   const call = useCaller()
   const userId = useSession().user.id
   const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
+  const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
   const [open, setOpen] = useState<Open>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -141,195 +143,203 @@ export function Editor({
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2">
-        {onClose ? (
-          <Button onClick={onClose}>Close preset editor</Button>
-        ) : ref.chatId !== null ? (
-          <span className="text-sm">
-            <OverrideChat chatId={ref.chatId} prefix="← Back to " />
-          </span>
-        ) : (
-          <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
-            ← Library
-          </Link>
-        )}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
-          <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>
-          {ref.kind !== "card" && (
-            <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-              {ref.refKind === "variant" ? "variant" : ref.refKind === "upstream" ? "original" : "edited for this chat"}
-            </Badge>
-          )}
-        </div>
-        {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
-        {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
-        {ref.kind === "preset" ? (
-          <p className="text-sm">
-            Saving updates this prompt preset everywhere. Choose the current prompt preset in the composer; it applies
-            across your chats.
-          </p>
-        ) : ref.chatId !== null ? (
-          // A chat override (DESIGN §4): this chat's own version of the entry.
-          <p className="text-sm">
-            <strong>Edited for this chat.</strong> This version of the {KINDS[ref.kind]} is used only in{" "}
-            <OverrideChat chatId={ref.chatId} />, and saving changes it only there; other chats keep the original.
-            Changes to the original still reach it where you haven't edited the same text.
-          </p>
-        ) : (
-          <p className="text-sm">
-            Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
-            <strong>used by {plural(usedByChats, "chat", "chats")}</strong>.
-            {ref.kind === "card"
-              ? " To change it for some chats only, fork it."
-              : ref.kind !== "note" && " To change it for some chats only, make a variant."}
-          </p>
-        )}
-        {ref.kind !== "card" && variants.length > 1 && (
-          <nav aria-label="Variants" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-            <span className="text-muted">Variants:</span>
-            {variants.map((variant) =>
-              variant.id === ref.id ? (
-                <span key={variant.id} aria-current="page" className="font-medium">
-                  {variant.label}
-                  {variant.subtitle ? ` · ${variant.subtitle}` : ""}
-                </span>
-              ) : (
-                <Link
-                  key={variant.id}
-                  to="/library/$refId"
-                  params={{ refId: variant.id }}
-                  className="text-accent underline-offset-4 hover:underline"
-                >
-                  {variant.label}
-                  {variant.subtitle ? ` · ${variant.subtitle}` : ""}
-                </Link>
-              )
-            )}
-          </nav>
-        )}
-      </header>
-
-      <div
-        ref={toolbar}
-        className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 -mx-4 flex flex-col gap-2 border-b border-border bg-canvas/95 px-4 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-3"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
-            Save{dirty > 0 ? ` (${dirty})` : ""}
-          </Button>
-          {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
-          <Button onClick={() => setOpen("history")}>History</Button>
-          {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
-          {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
-            <Button onClick={() => setOpen("fork")}>Make a variant</Button>
-          )}
-          {ref.kind !== "card" && (
-            <Button variant="ghost" onClick={() => setOpen("rename")}>
-              Rename
-            </Button>
-          )}
-        </div>
-        {clash && (
-          <p role="status" className="text-sm text-muted">
-            {clash}
-          </p>
-        )}
-        {ref.kind === "preset" && <SearchDialog store={store} inline />}
-        <p role="status" className="text-sm text-muted">
-          {state.saving
-            ? "Keeping your changes…"
-            : dirty === 0
-              ? "Everything is saved."
-              : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
-        </p>
-      </div>
-
-      {state.saveError && (
-        <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
-      )}
-      {uploadError && (
-        <Alert tone="danger" title="The avatar wasn't changed">
-          <p>{uploadError}</p>
-        </Alert>
-      )}
-      <RestoredNotice count={state.restored} />
-      <RecoveredNotice count={state.recovered} />
-      {notice && (
-        <Alert
-          tone="success"
-          actions={
-            <Button variant="ghost" onClick={() => setNotice(null)}>
-              Dismiss
-            </Button>
-          }
-        >
-          <p>{notice}</p>
-        </Alert>
-      )}
-      {ref.updateAvailable && (
-        <Alert
-          tone="warning"
-          title={
-            ref.refKind === "upstream"
-              ? "A newer version of the file was imported"
-              : "What this variant follows changed"
-          }
-          actions={<Button onClick={() => setOpen("update")}>Review the update</Button>}
-        >
-          <p>It isn't in this {KINDS[ref.kind]} yet.</p>
-        </Alert>
-      )}
-
-      {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} />}
-      {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
-      {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
-      {ref.kind === "note" && (
-        <Card>
-          <NoteFields store={store} />
-        </Card>
-      )}
-      {ref.kind === "lorebook" && (
-        <Card>
-          <GlobalLorebook refId={ref.id} call={call} />
-        </Card>
-      )}
-      {ref.kind === "lorebook" && (
-        <Alert title="Lorebooks can't be edited here yet">
-          <p>
-            <Link to="/library" className={buttonClass("ghost")}>
-              Back to the library
+    <SearchNavigation value={searchMatch}>
+      <div className="flex flex-col gap-6">
+        <header className="flex flex-col gap-2">
+          {onClose ? (
+            <Button onClick={onClose}>Close preset editor</Button>
+          ) : ref.chatId !== null ? (
+            <span className="text-sm">
+              <OverrideChat chatId={ref.chatId} prefix="← Back to " />
+            </span>
+          ) : (
+            <Link to="/library" className="text-sm text-muted underline-offset-4 hover:text-text hover:underline">
+              ← Library
             </Link>
-          </p>
-        </Alert>
-      )}
+          )}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
+            <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>
+            {ref.kind !== "card" && (
+              <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
+                {ref.refKind === "variant"
+                  ? "variant"
+                  : ref.refKind === "upstream"
+                    ? "original"
+                    : "edited for this chat"}
+              </Badge>
+            )}
+          </div>
+          {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
+          {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
+          {ref.kind === "preset" ? (
+            <p className="text-sm">
+              Saving updates this prompt preset everywhere. Choose the current prompt preset in the composer; it applies
+              across your chats.
+            </p>
+          ) : ref.chatId !== null ? (
+            // A chat override (DESIGN §4): this chat's own version of the entry.
+            <p className="text-sm">
+              <strong>Edited for this chat.</strong> This version of the {KINDS[ref.kind]} is used only in{" "}
+              <OverrideChat chatId={ref.chatId} />, and saving changes it only there; other chats keep the original.
+              Changes to the original still reach it where you haven't edited the same text.
+            </p>
+          ) : (
+            <p className="text-sm">
+              Saving changes this {ref.refKind === "variant" ? "variant" : KINDS[ref.kind]} everywhere it's used:{" "}
+              <strong>used by {plural(usedByChats, "chat", "chats")}</strong>.
+              {ref.kind === "card"
+                ? " To change it for some chats only, fork it."
+                : ref.kind !== "note" && " To change it for some chats only, make a variant."}
+            </p>
+          )}
+          {ref.kind !== "card" && variants.length > 1 && (
+            <nav aria-label="Variants" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+              <span className="text-muted">Variants:</span>
+              {variants.map((variant) =>
+                variant.id === ref.id ? (
+                  <span key={variant.id} aria-current="page" className="font-medium">
+                    {variant.label}
+                    {variant.subtitle ? ` · ${variant.subtitle}` : ""}
+                  </span>
+                ) : (
+                  <Link
+                    key={variant.id}
+                    to="/library/$refId"
+                    params={{ refId: variant.id }}
+                    className="text-accent underline-offset-4 hover:underline"
+                  >
+                    {variant.label}
+                    {variant.subtitle ? ` · ${variant.subtitle}` : ""}
+                  </Link>
+                )
+              )}
+            </nav>
+          )}
+        </header>
 
-      {open === "save" && (
-        <SaveDialog
-          store={store}
-          onClose={() => setOpen(null)}
-          onSaved={(saved) => {
-            setOpen(null)
-            setNotice(savedNotice(saved))
-          }}
-        />
-      )}
-      {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
-      {open === "search" && <SearchDialog store={store} onClose={() => setOpen(null)} />}
-      {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
-      {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
-      {open === "rename" && (
-        <RenameDialog
-          store={store}
-          onClose={() => setOpen(null)}
-          onRenamed={() => {
-            setOpen(null)
-            void store.refresh()
-          }}
-        />
-      )}
-    </div>
+        <div
+          ref={toolbar}
+          className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 -mx-4 flex flex-col gap-2 border-b border-border bg-canvas/95 px-4 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-3"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
+              Save{dirty > 0 ? ` (${dirty})` : ""}
+            </Button>
+            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
+            <Button onClick={() => setOpen("history")}>History</Button>
+            {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
+            {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
+              <Button onClick={() => setOpen("fork")}>Make a variant</Button>
+            )}
+            {ref.kind !== "card" && (
+              <Button variant="ghost" onClick={() => setOpen("rename")}>
+                Rename
+              </Button>
+            )}
+          </div>
+          {clash && (
+            <p role="status" className="text-sm text-muted">
+              {clash}
+            </p>
+          )}
+          {ref.kind === "preset" && <SearchDialog store={store} inline onReveal={setSearchMatch} />}
+          <p role="status" className="text-sm text-muted">
+            {state.saving
+              ? "Keeping your changes…"
+              : dirty === 0
+                ? "Everything is saved."
+                : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
+          </p>
+        </div>
+
+        {state.saveError && (
+          <ErrorAlert
+            error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
+          />
+        )}
+        {uploadError && (
+          <Alert tone="danger" title="The avatar wasn't changed">
+            <p>{uploadError}</p>
+          </Alert>
+        )}
+        <RestoredNotice count={state.restored} />
+        <RecoveredNotice count={state.recovered} />
+        {notice && (
+          <Alert
+            tone="success"
+            actions={
+              <Button variant="ghost" onClick={() => setNotice(null)}>
+                Dismiss
+              </Button>
+            }
+          >
+            <p>{notice}</p>
+          </Alert>
+        )}
+        {ref.updateAvailable && (
+          <Alert
+            tone="warning"
+            title={
+              ref.refKind === "upstream"
+                ? "A newer version of the file was imported"
+                : "What this variant follows changed"
+            }
+            actions={<Button onClick={() => setOpen("update")}>Review the update</Button>}
+          >
+            <p>It isn't in this {KINDS[ref.kind]} yet.</p>
+          </Alert>
+        )}
+
+        {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} />}
+        {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
+        {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
+        {ref.kind === "note" && (
+          <Card>
+            <NoteFields store={store} />
+          </Card>
+        )}
+        {ref.kind === "lorebook" && (
+          <Card>
+            <GlobalLorebook refId={ref.id} call={call} />
+          </Card>
+        )}
+        {ref.kind === "lorebook" && (
+          <Alert title="Lorebooks can't be edited here yet">
+            <p>
+              <Link to="/library" className={buttonClass("ghost")}>
+                Back to the library
+              </Link>
+            </p>
+          </Alert>
+        )}
+
+        {open === "save" && (
+          <SaveDialog
+            store={store}
+            onClose={() => setOpen(null)}
+            onSaved={(saved) => {
+              setOpen(null)
+              setNotice(savedNotice(saved))
+            }}
+          />
+        )}
+        {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
+        {open === "search" && <SearchDialog store={store} onClose={() => setOpen(null)} onReveal={setSearchMatch} />}
+        {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
+        {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
+        {open === "rename" && (
+          <RenameDialog
+            store={store}
+            onClose={() => setOpen(null)}
+            onRenamed={() => {
+              setOpen(null)
+              void store.refresh()
+            }}
+          />
+        )}
+      </div>
+    </SearchNavigation>
   )
 }
 
