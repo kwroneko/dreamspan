@@ -62,7 +62,7 @@ const imageFiles = (files: Iterable<File>) => Array.from(files).filter((file) =>
  * The paperclip: a picker for images, one tap. Its tooltip says pasting and dropping work too.
  * The composer and the message editor use it.
  */
-export function AttachButton({
+function AttachButton({
   disabled,
   onFiles,
   pickerLabel = "Choose images",
@@ -103,7 +103,7 @@ export function AttachButton({
 }
 
 /** Removable thumbnails of attached images; the composer and the message editor use it. */
-export function AttachmentList({
+function AttachmentList({
   label,
   items,
   onRemove
@@ -518,7 +518,6 @@ function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {
 }
 function ImageComposer(props: ComponentProps<typeof Composer>) {
   const state = useContext(ImagesContext)
-  const picker = useRef<HTMLInputElement>(null)
   if (!state) return <Composer {...props} />
   const vision = props.view.history?.model?.vision
   const maxImages = props.view.history?.model?.maxImages ?? 4
@@ -530,63 +529,38 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
         busy: !state.ready || state.busy || state.entries.some((entry) => !entry.mediaId || !entry.saved),
         capture: state.capture,
         restore: state.restore,
-        editor: (
-          <div className="flex flex-col gap-2" aria-label="Image attachments">
-            <input
-              ref={picker}
-              className="sr-only"
-              disabled={!state.ready || state.busy}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              multiple
-              aria-label="Choose images"
-              onChange={(event) => {
-                state.add(Array.from(event.currentTarget.files ?? []))
-                event.currentTarget.value = ""
-              }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button disabled={!state.ready || state.busy} onClick={() => picker.current?.click()}>
-                Attach images
-              </Button>
-              <span className="text-xs text-muted">Paste an image or drop it anywhere in the chat.</span>
-            </div>
-            {state.entries.length > 0 && (
-              <>
-                <ul className="flex flex-wrap gap-2" aria-label="Attached images">
-                  {state.entries.map((entry) => (
-                    <li key={entry.id} className="rounded-md border border-border p-1">
-                      <DraftThumbnail entry={entry} />
-                      {entry.sending ? (
-                        <span className="text-xs text-muted">Sending…</span>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          aria-label={`Remove ${entry.name}`}
-                          onClick={() => state.remove(entry.id)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
-                  {vision === false
-                    ? "This model cannot see images. Choose a vision model before replying."
-                    : vision === undefined
-                      ? "Choose a vision model to reply to these images."
-                      : `The model sees up to the last ${maxImages} images in context.`}
+        action: <AttachButton disabled={!state.ready || state.busy} onFiles={state.add} />,
+        editor:
+          state.entries.length > 0 || state.error ? (
+            <div className="flex flex-col gap-2" aria-label="Image attachments">
+              {state.entries.length > 0 && (
+                <>
+                  <AttachmentList
+                    label="Attached images"
+                    items={state.entries.map((entry) => ({
+                      id: entry.id,
+                      name: entry.name,
+                      thumbnail: <DraftThumbnail entry={entry} />,
+                      ...(entry.sending ? { sending: true } : {})
+                    }))}
+                    onRemove={state.remove}
+                  />
+                  <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
+                    {vision === false
+                      ? "This model cannot see images. Choose a vision model before replying."
+                      : vision === undefined
+                        ? "Choose a vision model to reply to these images."
+                        : `The model sees up to the last ${maxImages} images in context.`}
+                  </p>
+                </>
+              )}
+              {state.error && (
+                <p role="alert" className="text-sm text-danger">
+                  {state.error} Remove an image or reload to retry.
                 </p>
-              </>
-            )}
-            {state.error && (
-              <p role="alert" className="text-sm text-danger">
-                {state.error} Remove an image or reload to retry.
-              </p>
-            )}
-          </div>
-        )
+              )}
+            </div>
+          ) : null
       }}
     />
   )
