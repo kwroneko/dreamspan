@@ -232,3 +232,37 @@ for (const width of [1440, 390])
         .toBe("narrate")
       await expect(overlay.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
     })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Close and preset identity stay in the toolbar (${width}px ${theme})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      const name = `Sticky identity ${width} ${theme}`
+      const chatId = await setUp(page, name, false)
+      const overlay = await open(page, chatId)
+      const scroll = overlay.getByTestId("preset-scroll")
+      await scroll.evaluate((e) => {
+        e.scrollTop = e.scrollHeight
+      })
+      const close = overlay.getByRole("button", { name: "Close preset editor", exact: true })
+      const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      await expect(bar.getByText(name, { exact: true })).toBeVisible()
+      await expect(bar.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+      const box = (await close.boundingBox())!
+      expect(box.y).toBeGreaterThanOrEqual(0)
+      expect(box.y + box.height).toBeLessThan(900)
+      expect(box.x + box.width).toBeLessThanOrEqual(width)
+      await page.screenshot({ path: join(shots, `sticky-close-${width}-${theme}.png`) })
+      const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
+      await main.fill("A draft kept while closing the preset.")
+      await expect(bar.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+      await close.click()
+      await expect(overlay).toHaveCount(0)
+      await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
+      const reopened = await open(page, chatId)
+      await expect(reopened.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })).toContainText(
+        "A draft kept while closing the preset."
+      )
+    })

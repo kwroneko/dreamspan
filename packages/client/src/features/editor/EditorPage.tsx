@@ -146,9 +146,7 @@ export function Editor({
     <SearchNavigation value={searchMatch}>
       <div className="flex flex-col gap-6">
         <header className="flex flex-col gap-2">
-          {onClose ? (
-            <Button onClick={onClose}>Close preset editor</Button>
-          ) : ref.chatId !== null ? (
+          {onClose ? null : ref.chatId !== null ? (
             <span className="text-sm">
               <OverrideChat chatId={ref.chatId} prefix="← Back to " />
             </span>
@@ -222,6 +220,14 @@ export function Editor({
           ref={toolbar}
           className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 -mx-4 flex flex-col gap-2 border-b border-border bg-canvas/95 px-4 py-2 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-3"
         >
+          {onClose && (
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{ref.label}</span>
+              <Button className="shrink-0" onClick={onClose}>
+                Close preset editor
+              </Button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
               Save{dirty > 0 ? ` (${dirty})` : ""}
