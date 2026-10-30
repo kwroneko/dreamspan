@@ -234,6 +234,12 @@ export const speakerMap = (
   return map
 }
 
+/** Before any user message, prefer the chat's lock, then ST's default persona. */
+export const defaultPersona = (folder: FolderContext, header: StChatHeader | null): EntityId | null =>
+  (header?.persona ? folder.personas.get(header.persona) : undefined) ??
+  (folder.settings?.defaultPersona ? folder.personas.get(folder.settings.defaultPersona) : undefined) ??
+  null
+
 /** The chat's participants, lorebooks and variables as the file has them. */
 const membership = (
   folder: FolderContext,
@@ -284,7 +290,7 @@ const membership = (
     if (ref !== undefined) lorebooks.push(ref)
     else if (!embedded.has(name)) missingWorlds.push(name)
   }
-  const allPersonas = [...spoke]
+  const allPersonas = [...new Set([...spoke, ...(selectedPersona === null ? [] : [selectedPersona])])]
   const played = selectedPersona === null ? [] : [selectedPersona]
   return {
     participants: [...participants, ...allPersonas.filter((p) => !participants.includes(p))],
@@ -406,7 +412,9 @@ export const chatStateChange = (
     file.link,
     file.header,
     file.spoke,
-    file.selectedPersona === undefined ? ([...file.spoke].at(-1) ?? null) : file.selectedPersona
+    file.selectedPersona === undefined
+      ? ([...file.spoke].at(-1) ?? defaultPersona(folder, file.header))
+      : file.selectedPersona
   )
   const authorNote = authorNoteOf(folder, file.header)
   const summary = summaryOf(folder, file.summaries, file.messages, file.run)

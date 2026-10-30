@@ -139,6 +139,7 @@ const StTextSwitches = Schema.Struct({
 export class StSettings extends Schema.Class<StSettings>("StSettings")({
   textSwitches: Schema.optionalKey(StTextSwitches),
   selectedPreset: Schema.NullOr(Schema.String),
+  defaultPersona: Schema.NullOr(Schema.String),
   personas: Schema.Array(StPersona),
   globalWorlds: Schema.Array(Schema.String),
   characterWorlds: Schema.Array(Schema.Struct({ card: Schema.String, worlds: Schema.Array(Schema.String) })),

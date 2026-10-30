@@ -36,6 +36,7 @@ import { Report } from "./stReport.ts"
 import {
   type CardInfo,
   chatStateChange,
+  defaultPersona,
   type ChatState,
   type FolderContext,
   HIDDEN_RUN_MIN,
@@ -947,7 +948,7 @@ export class StImports extends Context.Service<
           summaries: [],
           summaryChars: 0,
           spoke: new Set(),
-          selectedPersona: null,
+          selectedPersona: defaultPersona(session, header),
           partHashes: [],
           added: 0,
           updated: 0,
