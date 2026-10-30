@@ -21,6 +21,7 @@ import { readDefaults } from "./generationSettings.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
+import { pathView } from "./lcmDisplay.ts"
 import { readSummary } from "./lcmReads.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
@@ -135,12 +136,12 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
               budget: built.lcm?.layerBudget ?? { target: Number.MAX_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }
             })
           : { condensations: [], refresh: [], flagged: [] }
-        const raw = path.filter((s) => s.depth > layer.cursorDepth)
+        const raw = path.filter((s) => s.position > layer.cursorDepth)
         const cost = slotCost
         const total = raw.reduce((n, s) => n + cost(s), 0)
         const partialBatch = total > windowMax
         const available = partialBatch ? yield* selectSummaryLayer(sql, userId, chatId, leafSlotId, true) : layer
-        const remaining = path.filter((s) => s.depth > available.cursorDepth)
+        const remaining = path.filter((s) => s.position > available.cursorDepth)
         const settled = (r: {
           chunks: ReadonlyArray<unknown>
           refresh: ReadonlyArray<unknown>
@@ -160,8 +161,9 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           jobs: active.filter((j) => j.firstSlotId === remaining[0]?.id)
         }
         if (active.length) return { ...result, backfill: settled(result) }
-        const held = yield* failedHold(sql, userId, chatId, path)
-        const covered = yield* completedCoverage(sql, userId, chatId, path)
+        const shown = (yield* pathView(sql, chatId, leafSlotId)) ?? undefined
+        const held = yield* failedHold(sql, userId, chatId, path, shown)
+        const covered = yield* completedCoverage(sql, userId, chatId, path, shown)
         const chunks = [
           ...leafPlanner.plan({
             raw,
@@ -205,14 +207,24 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
                 )
               )
             )
+          // In a fork that shows inserted slots, parts may have only inserted slots between them: a
+          // job claimed before such an insertion still condenses its parts (spec/MESSAGE-INSERT.md §3.4).
+          const shown = (yield* pathView(sql, job.chatId, job.lastSlotId)) !== null
           let at = 0
           for (const child of children) {
-            if (child.status === "failed" || child.firstSlotId !== chain[at]?.id)
+            const first = shown ? chain.findIndex((s, n) => n >= at && s.id === child.firstSlotId) : at
+            const last = shown ? chain.findIndex((s, n) => n >= first && s.id === child.lastSlotId) : 0
+            if (
+              child.status === "failed" ||
+              first < 0 ||
+              child.firstSlotId !== chain[first]?.id ||
+              (shown && (last < 0 || chain.slice(at, first).some((s) => !s.inserted)))
+            )
               return yield* new AssemblyFailed({
                 reason: "invalid_document",
                 message: "The condensation's parts do not follow the job's chain."
               })
-            at += child.slotCount
+            at = shown ? last + 1 : at + child.slotCount
           }
           if (children.length < 2 || at !== chain.length || children.at(-1)!.lastSlotId !== job.lastSlotId)
             return yield* new AssemblyFailed({
@@ -225,10 +237,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           chatId: job.chatId,
           next: true,
           cut: job.lastSlotId,
-          summaryBefore: { slot: chain[0]!.parent, depth: chain[0]!.depth - 1 },
+          summaryBefore: { slot: chain[0]!.previous, depth: chain[0]!.position - 1 },
           partialBatch: true,
           ...(job.level > 1
-            ? { condense: { children, cursor: job.lastSlotId, cursorDepth: chain.at(-1)!.depth } }
+            ? { condense: { children, cursor: job.lastSlotId, cursorDepth: chain.at(-1)!.position } }
             : {}),
           ...(job.modelJson
             ? { modelOverride: JSON.parse(job.modelJson) as { connection: string; model: string } }

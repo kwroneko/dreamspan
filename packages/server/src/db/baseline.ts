@@ -1092,9 +1092,16 @@ export const baseline: ReadonlyArray<string> = [
     WHERE s.id = NEW.summary_id AND s.level > 1 AND child.level < s.level AND child.id <> s.id
       AND child.sealed = 1 AND child.status <> 'failed'
       AND NEW.ordinal >= 0 AND NEW.ordinal = (SELECT count(*) FROM summary_parents WHERE summary_id = s.id)
-      AND CASE WHEN NEW.ordinal = 0 THEN child.first_slot_id = s.first_slot_id ELSE
-        first.parent_slot_id = (SELECT prev.last_slot_id FROM summary_parents p JOIN summaries prev ON prev.id = p.parent_id
-          WHERE p.summary_id = s.id AND p.ordinal = NEW.ordinal - 1) END
+      AND CASE WHEN NEW.ordinal = 0 THEN child.first_slot_id = s.first_slot_id
+      WHEN first.parent_slot_id = (SELECT prev.last_slot_id FROM summary_parents p JOIN summaries prev ON prev.id = p.parent_id
+          WHERE p.summary_id = s.id AND p.ordinal = NEW.ordinal - 1) THEN 1
+      ELSE EXISTS (WITH RECURSIVE up(id, parent_slot_id, inserted, depth) AS (
+          SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = (SELECT prev.last_slot_id FROM summary_parents p JOIN summaries prev ON prev.id = p.parent_id
+            WHERE p.summary_id = NEW.summary_id AND p.ordinal = NEW.ordinal - 1)
+          UNION ALL SELECT a.id, a.parent_slot_id, a.inserted, a.depth FROM slots a JOIN up ON a.id = up.parent_slot_id
+            WHERE up.depth > (SELECT depth FROM slots WHERE id = child.first_slot_id)
+        ) SELECT 1 FROM up WHERE up.inserted = 1 AND up.id <> child.first_slot_id
+          AND up.parent_slot_id IS (SELECT parent_slot_id FROM slots WHERE id = child.first_slot_id)) END
     ) BEGIN SELECT RAISE(ABORT, 'summary children must partition its chain at strictly lower levels'); END`,
   `CREATE TRIGGER summaries_seal BEFORE UPDATE OF sealed ON summaries WHEN OLD.sealed = 0 AND NEW.sealed = 1 AND NOT coalesce((
     CASE WHEN NEW.level = 1 THEN
@@ -1207,13 +1214,20 @@ export const baseline: ReadonlyArray<string> = [
     SELECT 1 FROM summaries s JOIN slots i ON i.id = NEW.slot_id
     WHERE s.id = NEW.summary_id AND s.level = 1 AND NEW.ordinal >= 0 AND NEW.ordinal < s.slot_count
       AND NEW.ordinal = coalesce((SELECT ordinal + 1 FROM summary_inputs WHERE summary_id = s.id ORDER BY ordinal DESC LIMIT 1), 0)
-      AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id ELSE
-        i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) END
+      AND CASE WHEN NEW.ordinal = 0 THEN NEW.slot_id = s.first_slot_id
+      WHEN i.parent_slot_id = (SELECT slot_id FROM summary_inputs WHERE summary_id = s.id AND ordinal = NEW.ordinal - 1) THEN 1
+      ELSE EXISTS (WITH RECURSIVE up(id, parent_slot_id, inserted, depth) AS (
+          SELECT id, parent_slot_id, inserted, depth FROM slots WHERE id = (SELECT slot_id FROM summary_inputs WHERE summary_id = NEW.summary_id AND ordinal = NEW.ordinal - 1)
+          UNION ALL SELECT a.id, a.parent_slot_id, a.inserted, a.depth FROM slots a JOIN up ON a.id = up.parent_slot_id
+            WHERE up.depth > (SELECT depth FROM slots WHERE id = NEW.slot_id)
+        ) SELECT 1 FROM up WHERE up.inserted = 1 AND up.id <> NEW.slot_id
+          AND up.parent_slot_id IS (SELECT parent_slot_id FROM slots WHERE id = NEW.slot_id)) END
     ) BEGIN SELECT RAISE(ABORT, 'summary inputs must follow their declared chain in order'); END`,
   `CREATE TRIGGER summaries_chain BEFORE INSERT ON summaries WHEN NOT EXISTS (SELECT 1 FROM lcm_enable_runs r
     WHERE r.id = NEW.id AND r.chat_id = NEW.chat_id AND r.phase = 'copy' AND r.gathered = NEW.slot_count
       AND json_extract(r.payload_json, '$.imported.firstSlotId') = NEW.first_slot_id
       AND json_extract(r.payload_json, '$.imported.lastSlotId') = NEW.last_slot_id)
+    AND NOT EXISTS (SELECT 1 FROM forks f JOIN fork_overrides o ON o.fork_id = f.id AND o.kind = 'insert' WHERE f.chat_id = NEW.chat_id)
     AND NOT EXISTS (
     WITH RECURSIVE chain(id, parent_slot_id, n) AS (
       SELECT id, parent_slot_id, 1 FROM slots WHERE id = NEW.last_slot_id AND chat_id = NEW.chat_id

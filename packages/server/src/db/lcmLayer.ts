@@ -4,9 +4,28 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { readSummary } from "./lcmReads.ts"
+import {
+  followsInDisplay,
+  insertedOnPath,
+  pathView,
+  placesOf,
+  positionIn,
+  seamStale,
+  type LcmView
+} from "./lcmDisplay.ts"
+import { Summary as SummaryClass } from "@rp/shared/lcm.ts"
 
-/** Recheck stored lineage before freshness recursion or advancing past originals. */
-export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId) => {
+/** A summary as a layer walk sees it at a seam: covering the gap after it (or before it), stale. */
+const extend = (s: Summary, change: Partial<Summary>) => new SummaryClass({ ...s, ...change })
+
+/**
+ * Recheck stored lineage before freshness recursion or advancing past originals. With a view of
+ * a fork that shows inserted slots, a summary's range is a stretch of that fork's display path
+ * (spec/MESSAGE-INSERT.md §3.4): its inputs, or its parts, follow one another there in order with
+ * only inserted slots between them, which makes it stale, not inconsistent. A summary with an
+ * input the fork doesn't show is inconsistent there and ignored.
+ */
+export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId, view?: LcmView) => {
   const memo = new Map<string, boolean>()
   const valid = (id: string): Effect.Effect<boolean, import("effect/sql").SqlError.SqlError> =>
     Effect.gen(function* () {
@@ -24,6 +43,11 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId) => {
       WHERE s.id=${id} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND s.sealed=1
         AND EXISTS(SELECT 1 FROM summary_revisions r WHERE r.id=s.selected_revision_id AND r.summary_id=s.id)`
       if (!summary) return false
+      if (view?.pieces) {
+        const ok = yield* displayValid({ ...summary, id })
+        if (ok) memo.set(id, true)
+        return ok
+      }
       const chain = yield* sql<{ id: string; parent_slot_id: string | null; merged: number }>`
       WITH RECURSIVE chain(id,parent_slot_id,n) AS (
         SELECT id,parent_slot_id,1 FROM slots WHERE id=${summary.last_slot_id} AND chat_id=${summary.chat_id}
@@ -78,6 +102,81 @@ export const lineageValidator = (sql: SqlClient.SqlClient, userId: UserId) => {
       memo.set(id, true)
       return true
     })
+  const displayValid = (summary: {
+    id: string
+    chat_id: string
+    level: number
+    first_slot_id: string
+    last_slot_id: string
+    slot_count: number
+  }) =>
+    Effect.gen(function* () {
+      const pieces = view!.pieces!
+      const inputs = yield* sql<{ ordinal: number; slot_id: string; version_valid: number; merged: number }>`
+        SELECT i.ordinal, i.slot_id, i.version_id IS NULL OR EXISTS(SELECT 1 FROM versions v WHERE v.id=i.version_id AND v.slot_id=i.slot_id) AS version_valid,
+          EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id=i.slot_id) AS merged
+        FROM summary_inputs i WHERE i.summary_id=${summary.id} ORDER BY i.ordinal`
+      const children = yield* sql<{
+        ordinal: number
+        parent_id: string
+        level: number
+        first_slot_id: string
+        last_slot_id: string
+        slot_count: number
+        chat_id: string
+        status: string
+        revision_valid: number
+      }>`
+        SELECT p.ordinal,p.parent_id,c.level,c.first_slot_id,c.last_slot_id,c.slot_count,c.chat_id,c.status,
+          EXISTS(SELECT 1 FROM summary_revisions r WHERE r.id=p.parent_revision_id AND r.summary_id=c.id) AS revision_valid
+        FROM summary_parents p LEFT JOIN summaries c ON c.id=p.parent_id WHERE p.summary_id=${summary.id} ORDER BY p.ordinal`
+      const places = yield* placesOf(sql, summary.chat_id, [
+        summary.first_slot_id,
+        summary.last_slot_id,
+        ...inputs.map((i) => i.slot_id),
+        ...children.flatMap((c) => (c.first_slot_id ? [c.first_slot_id, c.last_slot_id] : []))
+      ])
+      const at = (slot: string) => positionIn(pieces, places.get(slot))
+      const start = at(summary.first_slot_id),
+        end = at(summary.last_slot_id)
+      if (summary.level === 1)
+        return (
+          !children.length &&
+          inputs.length === summary.slot_count &&
+          inputs.every((i, n) => i.ordinal === n && i.version_valid && !i.merged) &&
+          inputs[0]?.slot_id === summary.first_slot_id &&
+          inputs.at(-1)?.slot_id === summary.last_slot_id &&
+          followsInDisplay(
+            pieces,
+            inputs.map((i) => [at(i.slot_id), at(i.slot_id)] as const),
+            start,
+            end
+          )
+        )
+      if (inputs.length || !children.length) return false
+      let count = 0
+      for (const [n, child] of children.entries()) {
+        if (
+          child.ordinal !== n ||
+          child.level >= summary.level ||
+          child.chat_id !== summary.chat_id ||
+          child.status === "failed" ||
+          !child.revision_valid ||
+          !(yield* valid(child.parent_id))
+        )
+          return false
+        count += child.slot_count
+      }
+      return (
+        count === summary.slot_count &&
+        followsInDisplay(
+          pieces,
+          children.map((c) => [at(c.first_slot_id), at(c.last_slot_id)] as const),
+          start,
+          end
+        )
+      )
+    })
   return valid
 }
 
@@ -93,26 +192,35 @@ export const selectSummaryLayer = (
       present: number
     }>`SELECT EXISTS(SELECT 1 FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.chat_id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND s.sealed = 1 AND s.status IN ('complete', 'truncated')) AS present`
     if (!any?.present) return { summaries: [], cursor: null, cursorDepth: -1 }
+    // In a fork that shows inserted slots, the path is its display path, and the numbers are positions.
+    const shown = yield* pathView(sql, chatId, leaf)
     const candidates = yield* sql<{ id: string }>`WITH RECURSIVE path(id) AS (
       SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
-    ) SELECT s.id FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
+    ) SELECT s.id FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
+      JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = path.id
       WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status IN ('complete', 'truncated')
         AND (${partialBatch ? 1 : 0} OR s.batch_id IS NULL OR NOT EXISTS (SELECT 1 FROM summarization_jobs j INDEXED BY summarization_jobs_batch
           WHERE j.chat_id = s.chat_id AND j.batch_id = s.batch_id AND j.status IN ('pending', 'processing')))`
 
-    const valid = lineageValidator(sql, userId)
+    const valid = lineageValidator(sql, userId, shown ?? undefined)
     const memo = new Map<string, Summary>()
-    const ending = new Map<number, Array<Summary>>()
+    const found: Array<Summary> = []
     for (const candidate of candidates) {
       if (!(yield* valid(candidate.id))) continue
-      const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo)
+      const summary = yield* readSummary(sql, userId, candidate.id, undefined, memo, shown ?? undefined)
       if (
         summary.status === "superseded" ||
-        summary.to - summary.from + 1 !== summary.slotCount ||
+        (shown
+          ? summary.to - summary.from + 1 < summary.slotCount
+          : summary.to - summary.from + 1 !== summary.slotCount) ||
         (summary.content === "" && !summary.fresh)
       )
         continue
+      found.push(summary)
+    }
+    const ending = new Map<number, Array<Summary>>()
+    for (const summary of shown ? seamStale(found, shown.pieces, shown.end + 1, extend) : found) {
       const options = ending.get(summary.to) ?? []
       options.push(summary)
       ending.set(summary.to, options)
@@ -178,6 +286,7 @@ export const selectSummaryLayer = (
     }
     if (expected !== 0) selected = []
     const newest = selected.at(-1)
+    // `cursorDepth` is the cursor's position on the display path: its depth in a fork without insertions.
     return { summaries: selected, cursor: newest?.lastSlotId ?? null, cursorDepth: newest ? newest.to - 1 : -1 }
   })
 
@@ -193,17 +302,19 @@ export const selectFailedRanges = (
     const [any] = yield* sql<{ present: number }>`SELECT EXISTS(SELECT 1 FROM summaries s JOIN chats c ON c.id=s.chat_id
       WHERE s.chat_id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL AND s.sealed=1 AND s.level=1 AND s.status='failed') AS present`
     if (!any?.present) return []
+    const shown = yield* pathView(sql, chatId, leaf)
     const rows = yield* sql<{ id: string }>`WITH RECURSIVE path(id) AS (
       SELECT s.id FROM slots s JOIN chats c ON c.id=s.chat_id
         WHERE s.id=${leaf} AND c.id=${chatId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON s.id=p.id WHERE s.parent_slot_id IS NOT NULL
-    ) SELECT s.id FROM path JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
+    ) SELECT s.id FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
+      JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id=path.id
       WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.level=1 AND s.status='failed'`
-    const valid = lineageValidator(sql, userId),
+    const valid = lineageValidator(sql, userId, shown ?? undefined),
       failures: Array<{ id: string; revision: string; from: number; to: number }> = []
     for (const row of rows) {
       if (!(yield* valid(row.id))) continue
-      const summary = yield* readSummary(sql, userId, row.id)
+      const summary = yield* readSummary(sql, userId, row.id, undefined, undefined, shown ?? undefined)
       if (summary.fresh && summary.from > cursorDepth + 1)
         failures.push({ id: summary.id, revision: summary.revisionId, from: summary.from, to: summary.to })
     }

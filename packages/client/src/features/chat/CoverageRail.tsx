@@ -32,8 +32,8 @@ export function useCoverage(
   on: boolean
 ) {
   const [coverage, setCoverage] = useState<{ leaf: string; rows: ReadonlyArray<LcmSummary> } | null>(null)
-  const first = entries[0]?.depth
-  const last = entries.at(-1)?.depth
+  const first = entries[0] && (entries[0].position ?? entries[0].depth)
+  const last = entries.at(-1) && (entries.at(-1)!.position ?? entries.at(-1)!.depth)
   const leaf = lcm?.leafSlotId
   useEffect(() => {
     if (!on || first === undefined || last === undefined || leaf === undefined) return

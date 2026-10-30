@@ -8,6 +8,8 @@ import { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { lineageValidator, selectSummaryLayer } from "./lcmLayer.ts"
+import { insertedOnPath, pathView } from "./lcmDisplay.ts"
+import { positionOf, type PathPiece } from "./displayPath.ts"
 import { readSummary } from "./lcmReads.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
@@ -85,16 +87,18 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
 
   const freshRanges = (userId: UserId, chatId: string, leaf: string) =>
     Effect.gen(function* () {
+      const shown = yield* pathView(sql, chatId, leaf)
       const rows = yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id) AS (
       SELECT ${leaf} UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id=s.id WHERE s.parent_slot_id IS NOT NULL
-    ) SELECT s.id,s.created_at FROM path JOIN summaries s ON s.last_slot_id=path.id
+    ) SELECT s.id,s.created_at FROM ${shown ? sql`(SELECT id FROM path UNION SELECT value FROM json_each(${insertedOnPath(shown)})) path` : sql`path`}
+      JOIN summaries s ON s.last_slot_id=path.id
       WHERE s.chat_id=${chatId} AND s.sealed=1 AND s.status IN ('complete','truncated')`
       const memo = new Map<string, Summary>(),
-        valid = lineageValidator(sql, userId)
+        valid = lineageValidator(sql, userId, shown ?? undefined)
       const ranges: Array<Summary & { createdAt: number }> = []
       for (const row of rows)
         if (yield* valid(row.id)) {
-          const s = yield* readSummary(sql, userId, row.id, undefined, memo)
+          const s = yield* readSummary(sql, userId, row.id, undefined, memo, shown ?? undefined)
           if (s.fresh) ranges.push({ ...s, createdAt: row.created_at })
         }
       return ranges
@@ -115,6 +119,56 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
     }
     return false
   }
+
+  /**
+   * GetLcmCoverage's rows in a fork that shows inserted slots: the summaries ending on its
+   * display path at or after position `from` and starting at or before `to`. The structural walk
+   * stops at the depth `from` less the fork's insertions, below which no slot reaches `from`.
+   */
+  const coverageInDisplay = (
+    userId: UserId,
+    chatId: string,
+    leaf: string,
+    shown: { readonly pieces: ReadonlyArray<PathPiece>; readonly end: number; readonly fork: string | null },
+    from: number,
+    to: number
+  ) =>
+    Effect.gen(function* () {
+      const inserted = JSON.parse(insertedOnPath(shown)) as Array<string>
+      const floor = from - inserted.length
+      const rows = yield* sql<{
+        id: string
+        created_at: number
+        first_chain: string
+        first_depth: number
+        first_slot_id: string
+        last_chain: string
+        last_depth: number
+        last_slot_id: string
+        level: number
+      }>`
+        WITH RECURSIVE path(id, depth) AS (
+          SELECT id, depth FROM slots WHERE id = ${leaf}
+          UNION ALL SELECT s.id, s.depth FROM slots s JOIN path p ON s.id = (SELECT parent_slot_id FROM slots WHERE id = p.id)
+            WHERE s.depth >= ${floor}
+        ), shown(id) AS (SELECT id FROM path UNION SELECT value FROM json_each(${JSON.stringify(inserted)}))
+        SELECT s.id, s.created_at, s.level, s.first_slot_id, s.last_slot_id, first.chain_id AS first_chain, first.depth AS first_depth,
+          last.chain_id AS last_chain, last.depth AS last_depth
+        FROM shown JOIN summaries s INDEXED BY summaries_last_slot ON s.last_slot_id = shown.id
+          JOIN slots first ON first.id = s.first_slot_id JOIN slots last ON last.id = s.last_slot_id
+        WHERE s.chat_id = ${chatId} AND s.sealed = 1 AND s.status <> 'superseded'
+          AND ${effectiveOverride(sql, "summary_superseded", shown.fork, "s.id")} IS NULL`
+      return rows
+        .map((r) => ({
+          ...r,
+          start: positionOf(shown.pieces, { id: r.first_slot_id, chainId: r.first_chain, depth: r.first_depth }),
+          end: positionOf(shown.pieces, { id: r.last_slot_id, chainId: r.last_chain, depth: r.last_depth })
+        }))
+        .filter((r) => r.start !== null && r.end !== null && r.end >= from && r.end <= shown.end && r.start <= to)
+        .sort((a, b) => a.level - b.level || a.start! - b.start!)
+        .slice(0, MAX_COVERAGE)
+        .map((r) => ({ id: r.id, created_at: r.created_at }))
+    })
 
   return {
     ListSummaryRevisions: ({ userId, summaryId, forkId }) =>
@@ -159,6 +213,8 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         if (!enabled)
           return new LcmState({ chatId, leafSlotId, enabled, layer: [], failed: [], jobs: [], cursorDepth: -1 })
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
+        // In a fork that shows inserted slots, numbers are positions on its display path (spec/MESSAGE-INSERT.md §3.4).
+        const shown = yield* pathView(sql, chatId, leafSlotId)
 
         // Failures and unfinished work: a handful of rows per chat, then which are on the path.
         const failedRows = yield* sql<{
@@ -168,7 +224,7 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
         }>`SELECT id, last_slot_id, created_at FROM summaries
           WHERE chat_id = ${chatId} AND status = 'failed' AND sealed = 1`
         const fork = yield* viewAt(sql, chatId, leafSlotId)
-        const jobRows = yield* sql<{
+        const rawJobs = yield* sql<{
           id: string
           level: number
           first_slot_id: string
@@ -177,11 +233,28 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
           error: string | null
           first_depth: number
           last_depth: number
+          first_chain: string
+          last_chain: string
           updated_at: number
-        }>`SELECT j.updated_at,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth
+        }>`SELECT j.updated_at,j.id, j.level, j.first_slot_id, j.last_slot_id, j.status, j.error, a.depth AS first_depth, b.depth AS last_depth,
+            a.chain_id AS first_chain, b.chain_id AS last_chain
           FROM summarization_jobs j JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
           WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing', 'failed')
           ORDER BY a.depth, j.level, j.id`
+        // A job's range as positions (zero-based, as depths are): its ends' depths without insertions.
+        const jobRows = shown
+          ? rawJobs
+              .map((j) => ({
+                ...j,
+                first_depth:
+                  positionOf(shown.pieces, { id: j.first_slot_id, chainId: j.first_chain, depth: j.first_depth }) ??
+                  j.first_depth,
+                last_depth:
+                  positionOf(shown.pieces, { id: j.last_slot_id, chainId: j.last_chain, depth: j.last_depth }) ??
+                  j.last_depth
+              }))
+              .sort((a, b) => a.first_depth - b.first_depth || a.level - b.level || a.id.localeCompare(b.id))
+          : rawJobs
         const candidates = [
           ...new Set([...failedRows.map((r) => r.last_slot_id), ...jobRows.map((r) => r.last_slot_id)])
         ]
@@ -195,11 +268,12 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             [leafSlotId, ...candidates]
           )
           for (const row of found) onPath.add(row.id)
+          if (shown) for (const id of JSON.parse(insertedOnPath(shown)) as Array<string>) onPath.add(id)
         }
         const memo = new Map<string, Summary>()
         const allFailed = yield* Effect.forEach(
           failedRows.filter((r) => onPath.has(r.last_slot_id)),
-          (r) => readSummary(sql, userId, r.id, undefined, memo)
+          (r) => readSummary(sql, userId, r.id, undefined, memo, shown ?? undefined)
         )
         const fresh =
           allFailed.length || jobRows.some((j) => j.status === "failed")
@@ -231,14 +305,39 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
             error: j.error,
             rerun: reruns.has(j.id)
           })),
-          cursorDepth: layer.cursorDepth
+          cursorDepth:
+            shown && layer.cursor !== null
+              ? ((yield* sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${layer.cursor}`)[0]?.depth ?? -1)
+              : layer.cursorDepth,
+          cursorSlotId: layer.cursor as LcmState["leafSlotId"] | null,
+          cursorPosition: layer.cursorDepth
         })
       }).pipe(inFork(sql, chatId, forkId, leafSlotId), query("GetLcmState")),
 
-    GetLcmCoverage: ({ userId, chatId, forkId, leafSlotId, fromDepth, toDepth, includeResolved }) =>
+    GetLcmCoverage: ({
+      userId,
+      chatId,
+      forkId,
+      leafSlotId,
+      fromDepth,
+      toDepth,
+      fromPosition,
+      toPosition,
+      includeResolved
+    }) =>
       Effect.gen(function* () {
         yield* owned(sql, userId, chatId, leafSlotId)
-        const ids = yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id, depth) AS (
+        const shown = yield* pathView(sql, chatId, leafSlotId)
+        const ids = shown
+          ? yield* coverageInDisplay(
+              userId,
+              chatId,
+              leafSlotId,
+              shown,
+              fromPosition ?? fromDepth,
+              toPosition ?? toDepth
+            )
+          : yield* sql<{ id: string; created_at: number }>`WITH RECURSIVE path(id, depth) AS (
             SELECT id, depth FROM slots WHERE id = ${leafSlotId}
             UNION ALL SELECT s.id, s.depth FROM slots s JOIN path p ON s.id = (SELECT parent_slot_id FROM slots WHERE id = p.id)
               WHERE s.depth >= ${fromDepth}
@@ -249,7 +348,9 @@ export const makeLcmUiReadHandlers = Effect.gen(function* () {
               AND path.depth >= ${fromDepth} AND first.depth <= ${toDepth}
             ORDER BY s.level, first.depth LIMIT ${MAX_COVERAGE}`
         const memo = new Map<string, Summary>()
-        const summaries = yield* Effect.forEach(ids, ({ id }) => readSummary(sql, userId, id, undefined, memo))
+        const summaries = yield* Effect.forEach(ids, ({ id }) =>
+          readSummary(sql, userId, id, undefined, memo, shown ?? undefined)
+        )
         const fresh = summaries.some((s) => s.status === "failed") ? yield* freshRanges(userId, chatId, leafSlotId) : []
         const rows = yield* toRows(
           summaries.filter((s) => s.status !== "superseded"),
