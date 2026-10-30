@@ -57,13 +57,14 @@ test.beforeAll(async () => {
   const cass = (await card("Cassandra Ilse Marchetti")).entityId
   const me = await admin((api) => api.Whoami())
   const now = Date.now()
-  // Many chats the card is in, older than the rest, with no messages read.
+  // Many chats the card is in, older than the rest, with no messages read. Without messages,
+  // the shell orders a chat's fork by its creation, so those differ too (shellReads.ts).
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
       {
         sql: `INSERT INTO chats(id,owner_user_id,kind,status,title,created_at,last_message_at)
           WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<${MANY - 1})
-          SELECT printf('scale-%03d',i),?,'rp','active',printf('Scale chat %03d',i),?,?+i FROM n`,
+          SELECT printf('scale-%03d',i),?,'rp','active',printf('Scale chat %03d',i),?+i,?+i FROM n`,
         params: [me.id, now - 1_000_000, now - 1_000_000]
       },
       {

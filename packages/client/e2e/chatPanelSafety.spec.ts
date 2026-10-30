@@ -6,6 +6,7 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
 import type { SummaryId } from "@rp/shared/lcm.ts"
@@ -51,14 +52,15 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   const field = page.getByLabel("Summarization instruction", { exact: true })
   await expect(field).toBeEnabled()
   await field.fill("A long unsaved instruction draft must remain reachable.")
-  await expect(page.getByText("Not saved yet: kept in this browser until you save it.")).toBeVisible()
+  await expect(page.getByText("Not saved yet: kept as a server draft until you save it.")).toBeVisible()
   await page.getByRole("link", { name: "Connections", exact: true }).click()
   await page.getByRole("link", { name: "Chats", exact: true }).click()
   await expect(field).toBeEnabled()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
   await page.reload()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
-  await expect(page.getByText("Typed earlier and not saved yet: kept in this browser until you save it.")).toBeVisible()
+  // A server draft since 4d72162: after a reload it's the same unsaved draft, not a browser copy.
+  await expect(page.getByText("Not saved yet: kept as a server draft until you save it.")).toBeVisible()
   // Saved, the browser's copy goes: the field shows the saved text, with nothing pending.
   await page.getByRole("button", { name: "Save summarization instruction" }).click()
   await expect(page.getByRole("status").filter({ hasText: "Saved." })).toBeVisible()
@@ -67,7 +69,7 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   )
   await page.reload()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
-  await expect(page.getByText(/kept in this browser/)).toHaveCount(0)
+  await expect(page.getByText(/kept as a server draft/)).toHaveCount(0)
 })
 
 test("switching tabs saves text typed while a summary draft save was in flight", async ({ page }) => {
@@ -103,7 +105,7 @@ test("switching tabs saves text typed while a summary draft save was in flight",
     )
     .toBe("The latest text typed before switching tabs.")
   await page.getByRole("tab", { name: "Summaries", exact: true }).click()
-  await expect(box).toHaveValue("The latest text typed before switching tabs.")
+  await expectTextBox(box, "The latest text typed before switching tabs.")
 })
 
 test("summary text survives a failed save and switching to another tab", async ({ page }) => {
@@ -118,14 +120,14 @@ test("summary text survives a failed save and switching to another tab", async (
   await page.getByRole("tab", { name: "Notes", exact: true }).click()
   // The edit is still there behind the other tab.
   await page.getByRole("tab", { name: "Summaries", exact: true }).click()
-  await expect(box).toHaveValue("Offline text must survive switching tabs.")
+  await expectTextBox(box, "Offline text must survive switching tabs.")
   await page.getByRole("tab", { name: "Notes", exact: true }).click()
   await server().restart()
   // A reload too: the copy in this browser goes to the server when the edit opens again.
   await page.goto(`${server().url}/chats/${chat.id}?panel=summaries`)
   await row.getByRole("button", { name: /^Edit / }).click()
   await expect(box).toBeEnabled()
-  await expect(box).toHaveValue("Offline text must survive switching tabs.")
+  await expectTextBox(box, "Offline text must survive switching tabs.")
   await expect
     .poll(
       async () =>

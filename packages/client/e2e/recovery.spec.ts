@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 const copies = (page: Page) =>
@@ -125,7 +126,7 @@ test("expired A session retains its unsaved copy through B login and B logout", 
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${card.id}`)
-  await expect(page.getByRole("textbox", { name: /^Description/ })).toHaveValue(text)
+  await expectTextBox(page.getByRole("textbox", { name: /^Description/ }), text)
   await expect.poll(() => copies(page)).toEqual([])
 })
 
@@ -263,7 +264,7 @@ test("reverting a field links to its recovered text", async ({ page }) => {
     .poll(() => admin((api) => api.OpenEditor({ refId: card.id })).then((x) => x.drafts[0]?.content))
     .toBe("N5 REVERT RECOVERY 857194")
   await page.getByRole("button", { name: "Revert Description", exact: true }).click()
-  await expect(box).toHaveValue("")
+  await expectTextBox(box, "")
   const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 10, before: null }))
   expect(recovered.some((x) => x.content === "N5 REVERT RECOVERY 857194")).toBe(true)
   const links = await page.locator('a[href="/bin?section=recovered"]').count()

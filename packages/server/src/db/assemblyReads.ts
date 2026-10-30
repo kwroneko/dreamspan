@@ -227,6 +227,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           imagePreview = nextImages({ request: { messages }, inputs: { model: resolved } })
         }
         const boundary = {
+          assemblyError: next instanceof AssemblyFailed ? next.message : null,
           forkId: nextFork,
           presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
           ...(chosen === undefined

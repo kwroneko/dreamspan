@@ -201,6 +201,22 @@ for (const width of [1440, 390])
       await expectTextBox(mine.getByLabel("Message text"), oldText)
       // Closing a portaled history must not bubble Escape into Cancel on the editor.
       await mine.getByRole("button", { name: "Earlier draft text" }).click()
+      await expect(history).toBeVisible()
+      // Focus can still be on the trigger before the modal's focus effect runs. Send
+      // Escape from there deterministically, rather than relying on machine timing.
+      await page
+        .locator("article")
+        .first()
+        .getByRole("button", { name: "Earlier draft text", includeHidden: true })
+        .evaluate((trigger) => {
+          trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+        })
+      await expectTextBox(mine.getByLabel("Message text"), oldText)
+      await expect(mine.getByRole("button", { name: "Save", exact: true })).toBeVisible()
+      await expect(history).toBeHidden()
+      await mine.getByRole("button", { name: "Earlier draft text" }).click()
+      await expect(history).toBeVisible()
+      await history.getByRole("button", { name: "Close history", exact: true }).focus()
       await page.keyboard.press("Escape")
       await expectTextBox(mine.getByLabel("Message text"), oldText)
       await mine.getByRole("button", { name: "Save", exact: true }).click()

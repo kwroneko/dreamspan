@@ -151,7 +151,6 @@ export function ChatDefaultsPage() {
           type,
           unsaved,
           saved,
-          restored: false,
           saveTail,
           pending: action.pending,
           error: action.error
@@ -172,7 +171,6 @@ export interface SummaryDefaultsProps {
   type: (text: string) => void
   unsaved: boolean
   saved: boolean
-  restored: boolean
   saveTail: () => Promise<void>
   pending: boolean
   error: import("../../errors.ts").AppError | null
@@ -188,7 +186,6 @@ export function SummaryDefaults({
   type,
   unsaved,
   saved,
-  restored,
   saveTail,
   pending,
   error
@@ -247,8 +244,7 @@ export function SummaryDefaults({
           ) : (
             unsaved && (
               <span role="status" className="text-sm text-muted">
-                {restored ? "Typed earlier and not saved yet" : "Not saved yet"}: kept as a server draft until you save
-                it.
+                Not saved yet: kept as a server draft until you save it.
               </span>
             )
           )}

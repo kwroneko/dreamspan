@@ -1483,6 +1483,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
         assert.strictEqual(own.leafSlotId, owner.chat.slotId)
         assert.deepStrictEqual(Object.keys(own).sort(), [
+          "assemblyError",
           "budget",
           "forkId",
           "historyStart",

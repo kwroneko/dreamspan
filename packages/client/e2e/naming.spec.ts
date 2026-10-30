@@ -77,7 +77,11 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(`Winter inn ${width}`)
     await expect(page.getByRole("heading", { name: "Chats (2)" })).toBeVisible()
     await page.goto(`${server().url}/`)
-    await expect(page.getByRole("link", { name: `All chats of Winter inn ${width}`, exact: true })).toBeVisible()
+    // The home page lists groups by their chats' forks under Groups (the shell, 8e20190).
+    await page.getByRole("main").getByRole("group", { name: "Show" }).getByRole("button", { name: "Groups" }).click()
+    await expect(
+      page.getByRole("main").getByRole("button", { name: `Open chat Winter inn ${width}`, exact: true })
+    ).toHaveCount(2)
     await page.goto(`${server().url}/chats/${started.second}`)
     await page.getByRole("heading", { level: 1 }).getByRole("button").click()
     const dialog = page.getByRole("dialog", { name: "Rename chat" })

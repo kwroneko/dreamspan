@@ -180,10 +180,17 @@ test("summarized messages are distinct from dropped and hidden messages", async 
       chatId,
       parentSlotId: entries.at(-1)!.slotId,
       branch: true,
-      content: "Recent raw material " + "x".repeat(700)
+      // Keep the newest turn inside the recent-history allowance (daaa81f
+      // refuses dropping it), while older raw messages still leave the context.
+      content: "Recent raw material " + "x".repeat(200)
     })
   )
   if (sent._tag !== "Posted") throw new Error("expected posted message")
+  const next = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.GetNextContext({ chatId, leafSlotId: sent.entry.slotId, forkId: sent.chat.currentForkId })
+  )
+  expect(next.historyStart?.depth, JSON.stringify(next.budget)).toBeGreaterThan(entries[3]!.depth)
+  expect(next.historyStart?.depth).toBeLessThanOrEqual(sent.entry.depth)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}?fork=${sent.chat.currentForkId}&slot=${entries[1]!.slotId}`)
   const summarized = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)

@@ -1,6 +1,7 @@
-// Chat lists that page agree with the server after a delete or an Undo, in every list shown
-// (the sidebar and a card's page), whichever page the chat was on; and a first message kept
-// in this browser for a chat not made yet doesn't hold up logout (it waits for the next login).
+// The paged chat list agrees with the server after a delete or an Undo, whichever page the
+// chat was on; and a first message kept in this browser for a chat not made yet doesn't hold
+// up logout (it waits for the next login). Since the independent shell (8e20190) the paged
+// list is the Chats page's; a card's page lists its forks from the shell.
 import { expect, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
@@ -43,29 +44,26 @@ test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
 })
 
-test("deleting a chat from a later page removes it from the other list too", async ({ page }) => {
-  await page.goto(`${server().url}/cards/${card}`)
+test("deleting a chat from a later page removes it from the list", async ({ page }) => {
+  await page.goto(`${server().url}/chats`)
   const main = page.getByRole("main")
-  const sidebar = page.locator("aside")
-  for (const area of [sidebar, main]) {
-    const links = area.getByRole("list", { name: "Chats" }).getByRole("link")
-    await expect(links).toHaveCount(50)
-    for (const count of [100, 150]) {
-      await area.getByRole("button", { name: "Load more", exact: true }).click()
-      await expect(links).toHaveCount(count)
-    }
+  const links = main.getByRole("list", { name: "Chats" }).getByRole("link")
+  await expect(links).toHaveCount(50)
+  for (const count of [100, 150]) {
+    await main.getByRole("button", { name: "Load more", exact: true }).click()
+    await expect(links).toHaveCount(count)
   }
   const target = 'a[href="/chats/paged-c-010"]'
   const row = main.getByRole("listitem").filter({ has: page.locator(target) })
   await row.hover()
   await row.getByRole("button", { name: "Delete Paged chat 010", exact: true }).click()
   await expect(main.locator(target)).toHaveCount(0)
-  await expect(sidebar.locator(target)).toHaveCount(0)
-  await expect(sidebar.getByRole("list", { name: "Chats" }).getByRole("link")).toHaveCount(150)
+  // The list fills back up from the next page.
+  await expect(links).toHaveCount(150)
 })
 
 test("Undo shows the restored chat again in the list it was deleted from", async ({ page }) => {
-  await page.goto(`${server().url}/cards/${card}`)
+  await page.goto(`${server().url}/chats`)
   const main = page.getByRole("main")
   await expect(main.getByRole("list", { name: "Chats" }).getByRole("link")).toHaveCount(50)
   const target = 'a[href="/chats/paged-c-153"]'

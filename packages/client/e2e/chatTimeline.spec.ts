@@ -1,5 +1,5 @@
 import { expect, type Page, test } from "@playwright/test"
-import type { SendResult } from "@rp/shared/chatApi.ts"
+import { DEFAULT_DISPLAY_PREFS, type SendResult } from "@rp/shared/chatApi.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -110,14 +110,13 @@ test("viewer preferences belong to the account and patches preserve independent 
   const patch = { portraitSize: "largest", timeline: "summaries", coverageRail: true } as const
   await admin((api) => api.SetDisplayPrefs({ prefs: patch }))
   await admin((api) => api.SetDisplayPrefs({ prefs: { reasoning: "collapsed" } }))
-  expect(await admin((api) => api.GetDisplayPrefs({}))).toEqual({ ...patch, reasoning: "collapsed", guidance: false })
-  expect(await withCookie(server(), otherCookie, (api) => api.GetDisplayPrefs({}))).toEqual({
-    reasoning: "expanded",
-    portraitSize: "default",
-    timeline: "originals",
-    coverageRail: false,
-    guidance: false
+  // Later preferences (display transforms, text colours, Enter sends) keep their defaults.
+  expect(await admin((api) => api.GetDisplayPrefs({}))).toEqual({
+    ...DEFAULT_DISPLAY_PREFS,
+    ...patch,
+    reasoning: "collapsed"
   })
+  expect(await withCookie(server(), otherCookie, (api) => api.GetDisplayPrefs({}))).toEqual(DEFAULT_DISPLAY_PREFS)
   const chat = await fixture("Preferences across fresh browsers")
   // A fresh browser has no localStorage: the account still has the selected layer and size.
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })

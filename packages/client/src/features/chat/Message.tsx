@@ -278,7 +278,14 @@ function Editor({
         }
       }}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && event.currentTarget.contains(event.target as Node) && !event.defaultPrevented)
+        // A modal can open before its focus effect moves focus off this form's
+        // trigger. Escape belongs to that modal, even when its target is here.
+        if (
+          event.key === "Escape" &&
+          event.currentTarget.contains(event.target as Node) &&
+          !event.defaultPrevented &&
+          !document.querySelector('[role="dialog"], [role="alertdialog"]')
+        )
           onCancel()
       }}
     >
