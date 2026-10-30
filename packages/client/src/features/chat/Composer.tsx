@@ -1,3 +1,4 @@
+import { composerWorkspace } from "./composerWorkspace.ts"
 import { ComposerControls, invokeComposerControl, type ComposerControlContext } from "./composerControls.tsx"
 // The composer (DESIGN §2.2): who's speaking, always visible, with a switcher and the
 // speakers used most recently; Send as them, or Generate a turn. With the guidance toggle
@@ -17,7 +18,7 @@ import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { composerKeyDown } from "./composerKeys.ts"
+import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -27,7 +28,7 @@ import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
+import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
@@ -148,7 +149,9 @@ export function Composer({
   const userId = useSession().user.id
   // The text is a server draft per branch tip (composerDraft.ts). Text typed on the card's
   // page while this chat was being made comes along (composerCarry.ts).
-  const [draft] = useState(() => new ComposerDraft(session, userId))
+  const [workspace] = useState(() => composerWorkspace(session, userId))
+  const { draft, setBusy, setError } = workspace
+  const { busy, error } = useSyncExternalStore(workspace.subscribe, workspace.snapshot)
   const {
     text: draftText,
     ready: textReady,
@@ -158,8 +161,6 @@ export function Composer({
     error: saveError,
     draftId
   } = useSyncExternalStore(draft.subscribe, draft.snapshot)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
   // A reply's guidance being edited: the box shows it, and typing changes it, not the draft,
   // so the draft (and a reload) still has what was typed before Edit.
   const editor = guidanceEditor(session)
@@ -169,6 +170,7 @@ export function Composer({
   // edited, and as it was after. New versions and Continue ask the session for their guidance
   // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
+  const submitHint = composerSubmitHint(viewPrefs.prefs.enterSends)
   const guidance = viewPrefs.prefs.guidance || editing !== null
   const toggleOn = viewPrefs.prefs.guidance
   useEffect(
@@ -193,14 +195,15 @@ export function Composer({
   // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
   // reply order. Waiting for those reads would disable the visible button while Enter works.
   const ready =
-    editing !== null
+    viewPrefs.ready &&
+    (editing !== null
       ? !view.loading && editStillShown(editing, view)
       : !attachmentInput?.busy &&
         textReady &&
         choice.loaded &&
         !choice.saving &&
         choice.draftId === draftId &&
-        turnEntries !== null
+        turnEntries !== null)
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
@@ -273,7 +276,7 @@ export function Composer({
   const onPick = useCallback(
     (card: CastCard) =>
       void choices.change({ speaker: card.entityId }).then((picked) => setError(picked.ok ? null : picked.error)),
-    [choices]
+    [choices, setError]
   )
 
   /**
@@ -383,7 +386,7 @@ export function Composer({
   const hasText = text.trim() !== "" || !!attachmentInput?.count
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (Enter; Shift+Enter for a new line)`
+    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (${submitHint})`
     : replierName
       ? `${replierName} replies now, with nothing sent from you`
       : "Type a message to send"
@@ -392,14 +395,14 @@ export function Composer({
   const generateText = editing !== null ? "New version" : name ? `Write for ${name}` : "Reply"
   const generateHint =
     editing !== null
-      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (Enter). The guidance stays here.`
+      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
       : `${
           name === null
             ? "The model writes the next turn"
             : speakerPlayed
               ? `The model writes ${name}'s turn for you`
               : `The model writes ${name}'s turn`
-        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter)" : ""}`
+        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? ` (${submitHint})` : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
   // The draft's earlier text, while the box shows the draft.
   const history = editing === null && <History draft={draft} />
@@ -429,9 +432,9 @@ export function Composer({
     },
     hint:
       editing !== null
-        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (Enter) makes a new version of it with this text, and its regenerate uses it too. ✕ above goes back to your draft.`
+        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (${submitHint}) makes a new version of it with this text, and its regenerate uses it too. ✕ above goes back to your draft.`
         : guidance
-          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
+          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
           : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
     reply: {
       candidates: faces,
@@ -456,8 +459,9 @@ export function Composer({
     replyNow,
     report
   }
-  const onKeyDown = composerKeyDown(() =>
-    invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard")
+  const onKeyDown = composerKeyDown(
+    () => invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard"),
+    viewPrefs.prefs.enterSends
   )
 
   return (
@@ -533,6 +537,7 @@ export function Composer({
             <AutoGrowTextarea
               id="composer"
               data-testid="composer"
+              data-has-attachments={attachmentInput?.count ? true : undefined}
               value={text}
               readOnly={editing === null && !textReady}
               aria-busy={editing === null && !textReady}
@@ -566,6 +571,7 @@ export function Composer({
         <>
           <ComposerControls placement="guidance" context={controls} />
           <ComposerControls placement="reply" context={controls} />
+          <ComposerControls placement="help" context={controls} />
         </>
       )}
       {impersonationNotice && (

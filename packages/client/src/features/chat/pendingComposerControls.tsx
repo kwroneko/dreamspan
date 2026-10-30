@@ -7,6 +7,7 @@ import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 
 export interface PendingComposerContext {
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
+  readonly submitHint: string
   readonly speakerName: string
   readonly guidance: boolean
   readonly prefsReady: boolean
