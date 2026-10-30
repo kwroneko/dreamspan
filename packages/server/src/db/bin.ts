@@ -10,7 +10,8 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
-import { forkRecency, forksShowing, onPath, sharedDepth } from "./forks.ts"
+import { forkRecency, forksShowing, onForkPath, sharedDepth } from "./forks.ts"
+import { onDisplayPath, pathPieces, placedInsertions, type SlotPlace } from "./displayPath.ts"
 import {
   effectiveOverride,
   forkAt,
@@ -114,6 +115,33 @@ const chatRecordBytes = [
    FROM changeset_items i JOIN changesets c ON c.id = i.changeset_id WHERE c.chat_id = ?`
 ]
 
+/**
+ * The slots whose gap still holds an inserted message fork `forkId` shows: each slot it places
+ * and doesn't delete, and every anchor above it up to a structural one (a deleted inserted slot's
+ * own gap stays shown, as a deleted message's replies do). Empty, after one lookup, when the fork
+ * places nothing.
+ */
+const liveGaps = (sql: SqlClient.SqlClient, chatId: string, forkId: string) =>
+  Effect.gen(function* () {
+    const placed = yield* placedInsertions(sql, chatId, forkId)
+    const kept = new Set<string>()
+    if (placed.length === 0) return kept
+    const anchorOf = new Map(placed.map((x) => [x.id, x.anchorId]))
+    const live = yield* sql<{ id: string }>`
+      SELECT s.id FROM slots s WHERE ${sql.in(
+        "s.id",
+        placed.map((x) => x.id)
+      )} AND NOT ${slotDeletedIn(sql, forkId, "s")}`
+    for (const { id } of live) {
+      let anchor = anchorOf.get(id) ?? null
+      while (anchor !== null && !kept.has(anchor)) {
+        kept.add(anchor)
+        anchor = anchorOf.get(anchor) ?? null
+      }
+    }
+    return kept
+  })
+
 export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () => number = Date.now) => {
   const insertItem = (item: {
     readonly userId: UserId
@@ -151,7 +179,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
 
   /**
    * Every live fork of the chat whose tip is deleted in its own view moves it to the nearest
-   * ancestor that isn't (each fork's composer is its own, so nothing moves with it).
+   * ancestor that isn't (each fork's composer is its own, so nothing moves with it). It stops
+   * at a deleted one whose gap still holds an inserted message the fork shows (`liveGaps`), so
+   * that message stays on its display path; appends go below it (spec/MESSAGE-INSERT.md §2.4).
    */
   const relocateLeaf = (chatId: string) =>
     Effect.gen(function* () {
@@ -159,16 +189,18 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         SELECT f.id, f.tip_slot_id FROM forks f JOIN slots t ON t.id = f.tip_slot_id
         WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL AND ${slotDeletedIn(sql, sql.literal("f.id"), "t")}`
       for (const fork of forks) {
-        const [target] = yield* sql<{ id: string | null }>`
+        const kept = yield* liveGaps(sql, chatId, fork.id)
+        const up = yield* sql<{ id: string; deleted: number }>`
           WITH RECURSIVE up(id, parent, deleted, n) AS (
             SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, 0 FROM slots s WHERE s.id = ${fork.tip_slot_id}
             UNION ALL
             SELECT s.id, s.parent_slot_id, ${slotDeletedIn(sql, fork.id, "s")}, up.n + 1 FROM slots s JOIN up ON s.id = up.parent
             WHERE up.deleted
           )
-          SELECT (SELECT id FROM up WHERE NOT deleted ORDER BY n LIMIT 1) AS id`
-        yield* sql`UPDATE forks SET tip_slot_id = ${target?.id ?? null}, row_version = row_version + 1
-          WHERE id = ${fork.id}`
+          SELECT id, deleted FROM up ORDER BY n`
+        const target = up.find((slot) => !slot.deleted || kept.has(slot.id))?.id ?? null
+        if (target !== fork.tip_slot_id)
+          yield* sql`UPDATE forks SET tip_slot_id = ${target}, row_version = row_version + 1 WHERE id = ${fork.id}`
       }
     })
 
@@ -262,6 +294,62 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
       return { ...row, fork }
     })
 
+  /** How many slots of `ids` aren't marked yet, and the bytes their versions hold (as `deleteFork` counts them). */
+  const sizeOf = (ids: ReadonlyArray<string>) =>
+    ids.length === 0
+      ? Effect.succeed({ slots: 0, bytes: 0 })
+      : Effect.map(
+          sql<{ slots: number; bytes: number }>`
+            SELECT count(DISTINCT s.id) AS slots, coalesce(sum(${sql.literal(versionBytes("v"))}), 0) AS bytes
+            FROM slots s LEFT JOIN versions v ON v.slot_id = s.id AND v.deleted_at IS NULL
+            WHERE ${sql.in("s.id", ids)} AND s.deleted_at IS NULL`,
+          ([row]) => row!
+        )
+
+  /**
+   * The inserted messages that change what deleting `fork` marks (spec/MESSAGE-INSERT.md §3.1):
+   * `marked`, those it shows by an `insert` row that no other fork shows (`others`, in the bin
+   * or not, as `sharedDepth` reads them); `kept`, those on its structural path at `below` or
+   * deeper (it was made at or below them) that another fork shows by its own row. Costs one
+   * lookup when the fork places none and has none of its own on that stretch.
+   */
+  const insertedUnseen = (fork: ForkRow, others: ReadonlyArray<ForkRow>, below: number) =>
+    Effect.gen(function* () {
+      const structural =
+        fork.tip_slot_id === null
+          ? []
+          : yield* sql<{ id: string; chain_id: string; depth: number }>`
+              ${pathSegments(sql, fork.chat_id, fork.tip_slot_id, null)}
+              SELECT s.id, s.chain_id, s.depth FROM segments g JOIN slots s ON s.chain_id = g.chain_id
+                AND s.depth BETWEEN max(g.lo, ${below}) AND g.hi
+              WHERE s.inserted = 1 AND s.deleted_at IS NULL`
+      const placed = yield* placedInsertions(sql, fork.chat_id, fork.id)
+      const shown =
+        placed.length === 0
+          ? []
+          : (yield* pathPieces(sql, fork.chat_id, fork.id, fork.tip_slot_id)).flatMap((piece) =>
+              piece.kind === "inserted" ? [{ id: piece.slotId, chainId: piece.chainId, depth: piece.depth }] : []
+            )
+      if (structural.length === 0 && shown.length === 0) return { marked: [], kept: [] }
+      const views = yield* Effect.forEach(others, (other) => pathPieces(sql, fork.chat_id, other.id, other.tip_slot_id))
+      const elsewhere = (slot: SlotPlace) => views.some((pieces) => onDisplayPath(pieces, slot))
+      const unmarked =
+        shown.length === 0
+          ? new Set<string>()
+          : new Set(
+              (yield* sql<{ id: string }>`SELECT id FROM slots WHERE ${sql.in(
+                "id",
+                shown.map((slot) => slot.id)
+              )} AND deleted_at IS NULL`).map((row) => row.id)
+            )
+      return {
+        marked: shown.filter((slot) => unmarked.has(slot.id) && !elsewhere(slot)).map((slot) => slot.id),
+        kept: structural
+          .filter((row) => elsewhere({ id: row.id, chainId: row.chain_id, depth: row.depth }))
+          .map((row) => row.id)
+      }
+    })
+
   const forkOrigin = (fork: ForkRow) => ({ forkId: fork.id, forkName: fork.name })
 
   const deleteMessage = (userId: UserId, slotId: string, forkId?: string | null) =>
@@ -306,6 +394,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
    * their shared history. The fork is marked and its bin item names it. The messages of its
    * path that no other live fork shows are marked under the item (so they leave the
    * switcher and a purge can empty them); the rest stay, shown by the forks that have them.
+   * That includes the inserted messages it shows, which another fork may show by its own
+   * `insert` row (`insertedUnseen`).
    */
   const deleteFork = (userId: UserId, forkId: string) =>
     Effect.gen(function* () {
@@ -313,8 +403,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         SELECT f.*, c.title AS chat_title FROM forks f JOIN chats c ON c.id = f.chat_id
         WHERE f.id = ${forkId} AND c.owner_user_id = ${userId} AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
       if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
-      const others = yield* sql<{ tip_slot_id: string | null; deleted_at: number | null }>`
-        SELECT tip_slot_id, deleted_at FROM forks WHERE chat_id = ${fork.chat_id} AND purged_at IS NULL AND id <> ${forkId}`
+      const others = yield* sql<ForkRow>`
+        SELECT * FROM forks WHERE chat_id = ${fork.chat_id} AND purged_at IS NULL AND id <> ${forkId}`
       if (!others.some((other) => other.deleted_at === null)) return yield* new CannotDeleteLastFork()
       const below =
         fork.tip_slot_id === null
@@ -341,7 +431,14 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
                 WHERE deleted_at IS NULL AND id IN (SELECT s.id FROM segments g JOIN slots s ON s.chain_id = g.chain_id
                   AND s.depth BETWEEN max(g.lo, ${below}) AND g.hi)
                 RETURNING 0 AS slots, 0 AS bytes`
-      const [stats] = yield* unseen("count")
+      const [counted] = yield* unseen("count")
+      const inserted = yield* insertedUnseen(fork, others, below)
+      const added = yield* sizeOf(inserted.marked)
+      const kept = yield* sizeOf(inserted.kept)
+      const stats = {
+        slots: counted!.slots + added.slots - kept.slots,
+        bytes: counted!.bytes + added.bytes - kept.bytes
+      }
       const [tip] = yield* sql<{ content: string }>`
         SELECT v.content FROM slots t JOIN versions v ON v.id = ${shownIn(sql, forkId, "t")} WHERE t.id = ${fork.tip_slot_id}`
       const itemId = yield* insertItem({
@@ -349,19 +446,25 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         kind: "branch",
         targetId: forkId,
         chatId: fork.chat_id,
-        title: `Fork of ${stats!.slots} message${stats!.slots === 1 ? "" : "s"} in ${chatName(fork.chat_title)}`,
+        title: `Fork of ${stats.slots} message${stats.slots === 1 ? "" : "s"} in ${chatName(fork.chat_title)}`,
         excerpt: tip?.content ?? "",
         origin: {
           chatId: fork.chat_id,
           chatTitle: fork.chat_title,
           slotId: fork.tip_slot_id,
           parentSlotId: fork.base_slot_id,
-          messages: stats!.slots,
+          messages: stats.slots,
           ...forkOrigin(fork)
         },
-        byteSize: stats!.bytes
+        byteSize: stats.bytes
       })
       yield* unseen("mark", itemId)
+      if (inserted.kept.length > 0)
+        yield* sql`UPDATE slots SET deleted_at = NULL, bin_item_id = NULL
+          WHERE bin_item_id = ${itemId} AND ${sql.in("id", inserted.kept)}`
+      if (inserted.marked.length > 0)
+        yield* sql`UPDATE slots SET deleted_at = ${Date.now()}, bin_item_id = ${itemId}
+          WHERE deleted_at IS NULL AND ${sql.in("id", inserted.marked)}`
       // The head of what it marked is a barrier, as a deleted branch's root always was: a message
       // deleted on its own below it that's restored later doesn't bring the fork's slots back.
       yield* sql`UPDATE slots SET branch_deleted = 1 WHERE bin_item_id = ${itemId}
@@ -556,6 +659,22 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
             WHERE slot_id IN (${onItsPath}) AND deleted_at IS NOT NULL AND purged_at IS NULL
               AND bin_item_id IN (${sql.literal(forkItems)})`
         }
+        // And every inserted message it shows by an `insert` row (spec/MESSAGE-INSERT.md §3.1).
+        const placed = fork ? yield* placedInsertions(sql, chatId, fork.id) : []
+        const insertedIds =
+          placed.length === 0
+            ? []
+            : (yield* pathPieces(sql, chatId, fork!.id, fork!.tip_slot_id)).flatMap((piece) =>
+                piece.kind === "inserted" ? [piece.slotId] : []
+              )
+        if (insertedIds.length > 0) {
+          yield* sql`UPDATE slots SET deleted_at = NULL, bin_item_id = NULL, branch_deleted = 0
+            WHERE ${sql.in("id", insertedIds)} AND deleted_at IS NOT NULL AND purged_at IS NULL
+              AND bin_item_id IN (${sql.literal(forkItems)})`
+          yield* sql`UPDATE versions SET deleted_at = NULL, bin_item_id = NULL
+            WHERE ${sql.in("slot_id", insertedIds)} AND deleted_at IS NOT NULL AND purged_at IS NULL
+              AND bin_item_id IN (${sql.literal(forkItems)})`
+        }
       } else if (item.kind === "message" || item.kind === "version") {
         const slotId = JSON.parse(item.origin_json).slotId as string
         const target = item.target_id
@@ -607,7 +726,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           const [slot] = yield* sql<{
             parent_slot_id: string | null
           }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
-          if (!(yield* onPath(sql, chatId, fork.tip_slot_id, slotId))) {
+          if (!(yield* onForkPath(sql, chatId, fork, slotId))) {
             const tip = slotId
             if (fork.tip_slot_id === (slot?.parent_slot_id ?? null)) {
               yield* sql`UPDATE forks SET tip_slot_id = ${tip}, row_version = row_version + 1 WHERE id = ${fork.id}`
@@ -896,12 +1015,12 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
               ) {
                 // A deleted fork, or a locally deleted message, can become visible again. Its
                 // path still retains the content even when forksShowing quite correctly omits it.
-                const others = yield* sql<{ tip_slot_id: string }>`SELECT tip_slot_id FROM forks
-                  WHERE chat_id = ${oldest.chat_id} AND id <> ${origin.forkId} AND purged_at IS NULL
-                    AND tip_slot_id IS NOT NULL`
+                const others = yield* sql<ForkRow>`SELECT * FROM forks
+                  WHERE chat_id = ${oldest.chat_id} AND id <> ${origin.forkId} AND purged_at IS NULL`
                 let retained = false
                 for (const other of others) {
-                  if (yield* onPath(sql, oldest.chat_id, other.tip_slot_id, origin.slotId!)) {
+                  // An inserted message is retained by a fork that inherits it (its display path).
+                  if (yield* onForkPath(sql, oldest.chat_id, other, origin.slotId!)) {
                     retained = true
                     break
                   }
