@@ -1,5 +1,5 @@
 import { cardDoc } from "./support/docs.ts"
-import { completeFixture } from "./support/lcmFixtures.ts"
+import { completeFixture, fixtureSql } from "./support/lcmFixtures.ts"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { NewVersion, type ForkId, type SlotId } from "@rp/shared/chat.ts"
@@ -873,6 +873,32 @@ describe("history edits with inserted messages", () => {
       return hits
     })
 
+  it.effect("an insertion in another fork leaves the original hits, cost and changesets unchanged", () =>
+    Effect.gen(function* () {
+      const f = yield* setup
+      const preview = () => f.api.PreviewHistory({ chatId: f.chatId, forkId: f.main, search })
+      const cost = () =>
+        f.api.HistoryEditCost({ chatId: f.chatId, forkId: f.main, fromDepth: 0, retainedDepth: 0, summaryIds: [] })
+      const before = yield* preview()
+      const beforeCost = yield* cost()
+      yield* insert(f, f.sibling, null, "Aria elsewhere")
+      assert.deepStrictEqual(yield* preview(), before)
+      assert.deepStrictEqual(yield* cost(), beforeCost)
+      assert.deepStrictEqual(yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: f.main }), [])
+      yield* f.api.ApplyHistoryEdits({
+        title: "Original path",
+        applications: [{ chatId: f.chatId, forkId: f.main, edits: editsOf(before.hits) }]
+      })
+      const [record] = yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: f.main })
+      assert.strictEqual(record!.status, "applied")
+      assert.deepStrictEqual(
+        record!.items.map((item) => [item.targetId, item.before, item.after, item.applied]),
+        before.hits.map((hit) => [hit.targetId, hit.before, hit.after, true])
+      )
+      assert.deepStrictEqual(yield* f.text(f.sibling), ["Aria elsewhere", "Aria meets ARIA and aria."])
+    }).pipe(Effect.provide(serverLayer(config)))
+  )
+
   it.effect("a match in an inserted message is replaced and undone in its fork only", () =>
     Effect.gen(function* () {
       const f = yield* setup
@@ -966,6 +992,74 @@ describe("history edits with inserted messages", () => {
       const elsewhere = yield* f.api.PreviewHistory({ chatId: f.chatId, forkId: f.sibling, search: summaries })
       assert.lengthOf(elsewhere.hits, 0)
     }).pipe(Effect.provide(serverLayer(config)))
+  )
+
+  it.effect(
+    "forks made at X retain isolated replacements and undo through lineage compaction",
+    () =>
+      Effect.gen(function* () {
+        const f = yield* setup
+        const x = yield* insert(f, f.main, f.first.slotId, "Inserted Aria line")
+        const forkAt = (fromForkId: ForkId, atSlotId: SlotId) =>
+          Effect.map(
+            f.writer.CreateFork({ userId: f.userId, chatId: f.chatId, fromForkId, atSlotId }),
+            (made) => made.fork.id
+          )
+        const before = yield* forkAt(f.main, x)
+        const hits = (yield* scan(f, f.main, search)).filter((h) => h.slotId === x)
+        const applied = yield* f.api.ApplyHistoryEdits({
+          title: "Replace X",
+          applications: [{ chatId: f.chatId, forkId: f.main, edits: editsOf(hits) }]
+        })
+        const without = yield* forkAt(f.main, f.first.slotId)
+        let descendant = f.main
+        for (let i = 0; i < 70; i++) descendant = yield* forkAt(descendant, x)
+        const [lineage] = yield* fixtureSql(
+          config.dataDir,
+          [{ sql: "SELECT json_array_length(lineage_json) AS n FROM forks WHERE id=?", params: [descendant] }],
+          { readOnly: true }
+        )
+        assert.isBelow(lineage![0]!.n as number, 64)
+        assert.deepStrictEqual(yield* f.text(descendant), ["Aria meets ARIA and aria.", "Inserted Ari line"])
+        assert.deepStrictEqual(yield* f.text(before), ["Aria meets ARIA and aria.", "Inserted Aria line"])
+        assert.isFalse((yield* scan(f, without, search)).some((h) => h.slotId === x))
+        assert.isFalse((yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: without }))[0]!.items[0]!.applied)
+        assert.strictEqual(
+          yield* outcome(
+            f.api.ApplyHistoryEdits({
+              title: "Hidden X",
+              applications: [{ chatId: f.chatId, forkId: without, edits: editsOf(hits) }]
+            })
+          ),
+          "NotFound"
+        )
+        const hiddenUndo = yield* f.api.UndoHistoryEdit({
+          chatId: f.chatId,
+          forkId: without,
+          changesetId: applied.changesetIds[0]!
+        })
+        assert.strictEqual(hiddenUndo.undone, 0)
+        assert.lengthOf(hiddenUndo.conflicts, 1)
+        const inherited = yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: descendant })
+        assert.strictEqual(inherited[0]!.status, "applied")
+        assert.isTrue(inherited[0]!.inherited)
+        assert.strictEqual(
+          (yield* f.api.UndoHistoryEdit({
+            chatId: f.chatId,
+            forkId: descendant,
+            changesetId: applied.changesetIds[0]!
+          })).undone,
+          1
+        )
+        assert.deepStrictEqual(yield* f.text(descendant), ["Aria meets ARIA and aria.", "Inserted Aria line"])
+        assert.deepStrictEqual(yield* f.text(f.main), ["Aria meets ARIA and aria.", "Inserted Ari line"])
+        assert.strictEqual((yield* scan(f, descendant, search)).filter((h) => h.slotId === x).length, 1)
+        assert.strictEqual(
+          (yield* f.api.ListHistoryEdits({ chatId: f.chatId, forkId: descendant }))[0]!.status,
+          "undone"
+        )
+      }).pipe(Effect.provide(serverLayer(config))),
+    60_000
   )
 
   // Random appends, insertions, forks and deletions over a path longer than a window: every

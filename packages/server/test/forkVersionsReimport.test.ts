@@ -241,6 +241,7 @@ layer(serverLayer(inserting), { excludeTestServices: true, timeout: "180 seconds
     for (const [label, below, at] of [
       ["right above the rewritten message", 6, 7],
       ["inside the rewritten suffix", 8, 7],
+      ["after the rewritten suffix's last message", 9, 7],
       ["above the first message, rewritten", null, 0]
     ] as const) {
       it.effect(`a re-import stops at an insertion ${label}`, () =>
@@ -258,6 +259,35 @@ layer(serverLayer(inserting), { excludeTestServices: true, timeout: "180 seconds
         })
       )
     }
+
+    for (const deleted of [false, true]) {
+      it.effect(`a shortened file keeps an insertion in its removed suffix${deleted ? " even when deleted" : ""}`, () =>
+        Effect.gen(function* () {
+          const tag = `shortened-${deleted}`
+          const { api, chat, file, x, shown } = yield* imported(tag, 8)
+          if (deleted) yield* api.DeleteMessage({ slotId: x })
+          const before = yield* shown()
+          yield* importStFolder(folder(tag, file.slice(0, 7)))
+          assert.deepStrictEqual(yield* shown(), before)
+          assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+        })
+      )
+    }
+
+    it.effect("a rewritten suffix preserves a deleted insertion at its boundary", () =>
+      Effect.gen(function* () {
+        const tag = "deleted-boundary"
+        const { api, chat, file, x, shown } = yield* imported(tag, 6)
+        const original = yield* shown()
+        const item = yield* api.DeleteMessage({ slotId: x })
+        const before = yield* shown()
+        yield* importStFolder(folder(tag, rewritten(tag, file, 7)))
+        assert.deepStrictEqual(yield* shown(), before)
+        assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+        yield* api.RestoreBinItem({ itemId: item.id })
+        assert.deepStrictEqual(yield* shown(), original)
+      })
+    )
 
     it.effect("a re-import that changes nothing after an insertion goes on as before", () =>
       Effect.gen(function* () {
