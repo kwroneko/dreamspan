@@ -13,7 +13,8 @@ export const DraftTargetKind = Schema.Literals([
   "entity_field",
   "user_field",
   "summary_edit",
-  "queue_edit"
+  "queue_edit",
+  "insert"
 ])
 
 /** What a draft is for: the composer of a chat, the edit of a version, a field of a ref... */
@@ -22,7 +23,8 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
   targetId: Schema.String,
   /**
    * Composer and snippet: the fork it's typed in (the recovered text of one whose fork isn't known has
-   * it empty). Entity fields: a JSON path into the document. Otherwise empty.
+   * it empty). Entity fields: a JSON path into the document. Insert: the fork and the anchor
+   * (`insertDraftKey`). Otherwise empty.
    */
   field: Schema.String
 }) {}
@@ -35,6 +37,14 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
  */
 export const composerKey = (chatId: string, forkId: string | null) =>
   new DraftKey({ targetKind: "composer", targetId: chatId, field: forkId ?? "" })
+
+/**
+ * The text of a message being inserted (spec/MESSAGE-INSERT.md §3.1): one per chat, fork and
+ * anchor (the message it goes below; empty above the first message), so leaving the editor
+ * and coming back to the same place finds it. Inserting the message commits it.
+ */
+export const insertDraftKey = (chatId: string, forkId: string, anchor: string | null) =>
+  new DraftKey({ targetKind: "insert", targetId: chatId, field: `${forkId}:${anchor ?? ""}` })
 
 const DraftStatus = Schema.Literals(["active", "committed", "discarded"])
 

@@ -40,6 +40,7 @@ export const recoveredSource = (text: Pick<RecoveredText, "sourceKind" | "source
   const prefixes = {
     composer: "Composer in ",
     queue_edit: "Queued text in ",
+    insert: "Inserted message in ",
     version_edit: "Edit of a message in ",
     scratchpad: "Scratchpad in ",
     summary_edit: "Summary in ",

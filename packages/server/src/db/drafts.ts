@@ -259,7 +259,10 @@ export const makeDraftStore = (
       FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL)
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
-  /** A chat's open message editors (`ListMessageDrafts`): edits of its versions and versions being written. */
+  /**
+   * A chat's open message editors (`ListMessageDrafts`): edits of its versions, versions being
+   * written, queue edits and messages being inserted.
+   */
   const listMessageDrafts = (userId: UserId, chatId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -268,7 +271,8 @@ export const makeDraftStore = (
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s
           WHERE s.chat_id = ${chatId} AND s.deleted_at IS NULL))
-        OR (d.target_kind = 'queue_edit' AND d.target_id = ${chatId}))
+        OR (d.target_kind = 'queue_edit' AND d.target_id = ${chatId})
+        OR (d.target_kind = 'insert' AND d.target_id = ${chatId}))
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
   /** The text of state `seq`: the current text with newer entries undone. */

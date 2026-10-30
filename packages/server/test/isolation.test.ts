@@ -1337,6 +1337,30 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   SaveMessageDraft: {
     probe: (actor, owner) =>
       Effect.all([
+        // The text of a message being inserted in the other's chat, at their message or above
+        // the first, and in the actor's own fork of another chat.
+        ...[owner.chat.slotId, null].map((anchor) =>
+          refused(
+            actor.api.SaveMessageDraft({
+              target: { _tag: "Insert", chatId: owner.chat.chatId, forkId: owner.chat.forkId, anchor },
+              draftId: null,
+              content: "planted",
+              expectedRowVersion: null,
+              expectedSession: null
+            }),
+            "NotFound"
+          )
+        ),
+        refused(
+          actor.api.SaveMessageDraft({
+            target: { _tag: "Insert", chatId: owner.chat.chatId, forkId: actor.chat.forkId, anchor: null },
+            draftId: null,
+            content: "planted",
+            expectedRowVersion: null,
+            expectedSession: null
+          }),
+          "NotFound"
+        ),
         refused(
           actor.api.SaveMessageDraft({
             target: { _tag: "Queue", chatId: owner.chat.chatId, queuedId: owner.queuedId, rowVersion: 1 },
@@ -1400,6 +1424,62 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   DeleteChat: { probe: (actor, owner) => refused(actor.api.DeleteChat({ chatId: owner.chat.chatId }), "NotFound") },
   DeleteMessage: {
     probe: (actor, owner) => refused(actor.api.DeleteMessage({ slotId: owner.chat.slotId }), "NotFound")
+  },
+  InsertMessage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        for (const body of [
+          { _tag: "Write" as const, speaker: null, content: "planted" },
+          { _tag: "Generate" as const, speaker: null },
+          { _tag: "Duplicate" as const, versionId: theirs.version.id }
+        ])
+          yield* refused(
+            actor.api.InsertMessage({
+              chatId: owner.chat.chatId,
+              forkId: owner.chat.forkId,
+              anchor: owner.chat.slotId,
+              expectedRowVersion: theirs.rowVersion,
+              body
+            }),
+            "NotFound"
+          )
+        // Into the actor's own chat: the other's anchor, the other's version to copy, the other's card.
+        const mine = yield* ownSlot(actor)
+        const own = { chatId: actor.chat.chatId, forkId: actor.chat.forkId, expectedRowVersion: mine.rowVersion }
+        yield* refused(
+          actor.api.InsertMessage({
+            ...own,
+            anchor: owner.chat.slotId,
+            body: { _tag: "Write", speaker: null, content: "x" }
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.InsertMessage({
+            ...own,
+            anchor: actor.chat.slotId,
+            body: { _tag: "Duplicate", versionId: owner.chat.versionId }
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.InsertMessage({
+            ...own,
+            anchor: actor.chat.slotId,
+            body: { _tag: "Write", speaker: owner.cardId, content: "x" }
+          }),
+          "NotFound"
+        )
+        // Nothing was inserted in the other's chat.
+        const after = yield* owner.api.ReadPath({
+          chatId: owner.chat.chatId,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 50
+        })
+        assert.isFalse(after.entries.some((e) => e.version.content === "planted"))
+      })
   },
   RenameChat: {
     probe: (actor, owner) => refused(actor.api.RenameChat({ chatId: owner.chat.chatId, name: "x" }), "NotFound")

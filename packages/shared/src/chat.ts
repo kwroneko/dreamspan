@@ -224,6 +224,12 @@ export class PathEntry extends Schema.Class<PathEntry>("PathEntry")({
    */
   position: Schema.optionalKey(Schema.Int),
   /**
+   * Inserted between messages (spec/MESSAGE-INSERT.md §2.2). It's never the fork's tip: a
+   * message added at the end goes below the tip, even when an inserted one shows last. Absent:
+   * not inserted.
+   */
+  inserted: Schema.optionalKey(Schema.Literal(true)),
+  /**
    * The side the message is on when its speaker isn't one of the cast, as the context reads
    * it (assemblySources.ts): its first version's, deleted or not, so which versions are
    * live never changes it. A human's first version is the user's, unless it's a greeting.

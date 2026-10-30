@@ -20,7 +20,7 @@ import {
 } from "./chat.ts"
 import { LeafMoved, NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { ComposerImageIds, ComposerChoice, TextTooLong } from "./composerApi.ts"
-import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "./drafts.ts"
+import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState, insertDraftKey } from "./drafts.ts"
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
@@ -234,7 +234,9 @@ const ComposerCommit = Schema.optionalKey(Schema.Struct({ draftId: Schema.String
 export const MessageDraftTarget = Schema.Union([
   Schema.TaggedStruct("Edit", { versionId: VersionId }),
   Schema.TaggedStruct("Write", { slotId: SlotId }),
-  Schema.TaggedStruct("Queue", { chatId: ChatId, queuedId: Schema.String, rowVersion: Schema.Int })
+  Schema.TaggedStruct("Queue", { chatId: ChatId, queuedId: Schema.String, rowVersion: Schema.Int }),
+  /** A message being inserted below `anchor` (null: above the first message), spec/MESSAGE-INSERT.md §4.2. */
+  Schema.TaggedStruct("Insert", { chatId: ChatId, forkId: ForkId, anchor: Schema.NullOr(SlotId) })
 ])
 export type MessageDraftTarget = typeof MessageDraftTarget.Type
 
@@ -244,7 +246,9 @@ export const messageDraftKey = (target: MessageDraftTarget) =>
     ? new DraftKey({ targetKind: "version_edit", targetId: target.versionId, field: "" })
     : target._tag === "Write"
       ? new DraftKey({ targetKind: "scratchpad", targetId: target.slotId, field: "" })
-      : new DraftKey({ targetKind: "queue_edit", targetId: target.chatId, field: target.queuedId })
+      : target._tag === "Queue"
+        ? new DraftKey({ targetKind: "queue_edit", targetId: target.chatId, field: target.queuedId })
+        : insertDraftKey(target.chatId, target.forkId, target.anchor)
 
 /**
  * Text typed into a message editor, onto the draft as the tab last saw it (null before it

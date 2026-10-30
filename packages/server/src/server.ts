@@ -1,5 +1,6 @@
 import { Commands } from "./commands.ts"
 import { makeHistoryHandlers } from "./api/history.ts"
+import { makeMessageHandlers } from "./api/messages.ts"
 import { ExecutionRegistry } from "./execution.ts"
 import { RefusalJudge } from "./decision/RefusalJudge.ts"
 import { SummaryChecks } from "./lcm/OutputChecks.ts"
@@ -97,6 +98,7 @@ const Handlers = AppApi.toLayer(
       ...inspector,
       ...(yield* makeLcmHandlers),
       ...(yield* makeHistoryHandlers),
+      ...(yield* makeMessageHandlers),
       Health: () =>
         eventLoop.sample.pipe(
           Effect.map(

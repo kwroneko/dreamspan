@@ -13,7 +13,7 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathPieces } from "../src/db/displayPath.ts"
 import { LINEAGE_CAP, shownIn, slotDeletedIn } from "../src/db/forkState.ts"
-import type { InsertBody } from "../src/db/ops.ts"
+import type { InsertBody } from "@rp/shared/messagesApi.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 

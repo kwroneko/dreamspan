@@ -9,7 +9,7 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 // As for summaries, text typed is copied into this browser (`editor/backup.ts`) until the
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
 // the chat, which opening the chat again replays, with the draft it was typed on.
-import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { MessageDraftTarget } from "@rp/shared/chatApi.ts"
 import { type Draft, DraftHistoryPolicy } from "@rp/shared/drafts.ts"
 import type { AppError } from "../../errors.ts"
@@ -19,14 +19,16 @@ import type { ChatSession, Outcome } from "./session.ts"
 /** How long typing pauses before the text is saved. */
 const SAVE_DELAY_MS = 400
 
-export type MessageEditorKey = `edit:${string}` | `write:${string}` | `queue:${string}`
+export type MessageEditorKey = `edit:${string}` | `write:${string}` | `queue:${string}` | `insert:${string}`
 
 export const editorKey = (target: MessageDraftTarget): MessageEditorKey =>
   target._tag === "Edit"
     ? `edit:${target.versionId}`
     : target._tag === "Write"
       ? `write:${target.slotId}`
-      : `queue:${target.queuedId}`
+      : target._tag === "Queue"
+        ? `queue:${target.queuedId}`
+        : `insert:${target.forkId}:${target.anchor ?? ""}`
 
 /** What this browser's copies (backup.ts) file a chat's message editors under. */
 export const messageCopies = (chatId: string) => `messages:${chatId}`
@@ -44,7 +46,14 @@ export const targetOf = (draft: Draft): MessageDraftTarget | null =>
             queuedId: draft.key.field,
             rowVersion: Number(draft.baseRevision ?? 0)
           }
-        : null
+        : draft.key.targetKind === "insert"
+          ? {
+              _tag: "Insert",
+              chatId: draft.key.targetId as ChatId,
+              forkId: draft.key.field.split(":")[0] as ForkId,
+              anchor: (draft.key.field.split(":")[1] || null) as SlotId | null
+            }
+          : null
 
 export interface MessageDraftView {
   /** What the box shows. */

@@ -98,7 +98,7 @@ const branchLabel = (s: string) => `nullif(coalesce((SELECT CASE WHEN f.name_use
  * another fork's does. The count of versions is the message's own: a fork's copies stand in
  * for them.
  */
-const pathColumns = (fork: string) => `${shownVersionColumns}, s.lane_id, s.parent_slot_id, s.depth,
+const pathColumns = (fork: string) => `${shownVersionColumns}, s.lane_id, s.parent_slot_id, s.depth, s.inserted,
   s.row_version + max(coalesce(so.seq, 0), coalesce(ro.seq, 0), coalesce(dso.seq, 0), coalesce(hso.seq, 0))
     AS row_version,
   coalesce(hso.flag, ${contextExcluded()}) AS context_excluded, coalesce(hso.flag, s.hidden_by_user) AS hidden_by_user,

@@ -651,4 +651,84 @@ describe("send queue", () => {
       yield* release(next.entry.version.id)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
   )
+
+  // Inserting messages (spec/MESSAGE-INSERT.md §5): the queue waits only behind its own slot.
+  it.live("a generation at an inserted message holds neither the composer nor the queue", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      yield* release(reply.version.id)
+      const [m0] = yield* pathBecomes(api, chat.id, ["you: m0", "model (complete)"])
+      const forkId = (yield* api.GetChat({ chatId: chat.id })).currentForkId!
+      const inserted = yield* api.InsertMessage({
+        chatId: chat.id,
+        forkId,
+        anchor: m0!.slotId,
+        expectedRowVersion: m0!.rowVersion,
+        body: { _tag: "Generate", speaker: null }
+      })
+      yield* gate(inserted.entry.version.id)
+      // Sent at the tip while it's written: posted at once, and so is the reply asked for.
+      const sent = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: reply.slotId, branch: false, content: "m1" })
+      )
+      const next = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+      yield* pathBecomes(api, chat.id, [
+        "you: m0",
+        "model (generating)",
+        "model (complete)",
+        "you: m1",
+        "model (generating)"
+      ])
+      // Its end posts nothing: nothing waited on it.
+      yield* release(inserted.entry.version.id)
+      yield* release(next.entry.version.id)
+      yield* pathBecomes(api, chat.id, [
+        "you: m0",
+        "model (complete)",
+        "model (complete)",
+        "you: m1",
+        "model (complete)"
+      ])
+      assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
+  it.live("what's queued behind the reply at the tip posts there after an insertion", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, reply } = yield* generatingChat(api)
+      const [m0] = yield* path(api, chat.id)
+      const forkId = (yield* api.GetChat({ chatId: chat.id })).currentForkId!
+      const queued = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: reply.slotId,
+        branch: false,
+        content: "m1"
+      })
+      assert.strictEqual(queued._tag, "Queued")
+      yield* api.InsertMessage({
+        chatId: chat.id,
+        forkId,
+        anchor: m0!.slotId,
+        expectedRowVersion: m0!.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "inserted" }
+      })
+      assert.strictEqual((yield* api.ListQueued({ chatId: chat.id })).length, 1)
+      yield* release(reply.version.id)
+      const entries = yield* pathBecomes(api, chat.id, [
+        "you: m0",
+        "you: inserted",
+        "model (complete)",
+        "you: m1",
+        "model (generating)"
+      ])
+      assert.deepStrictEqual(
+        entries.map((e) => e.position),
+        [0, 1, 2, 3, 4]
+      )
+      yield* release(entries[4]!.version.id)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
 })
