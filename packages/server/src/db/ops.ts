@@ -10,6 +10,7 @@ import {
   RestoreSnippetFields
 } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
+import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
 import { RoleProjectionOption, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
@@ -211,21 +212,6 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   recovered: Schema.Int
 }) {}
 
-/**
- * What `InsertMessage` inserts (spec/MESSAGE-INSERT.md §7): text written as a speaker (null:
- * no card, as the composer allows), or a copy of the version the fork shows at the anchor.
- * Generating at the insertion point is a later unit of the spec.
- */
-export const InsertBody = Schema.Union([
-  Schema.TaggedStruct("Write", {
-    speaker: Schema.NullOr(EntityId),
-    content: Schema.String,
-    images: Schema.optionalKey(MessageImages)
-  }),
-  Schema.TaggedStruct("Duplicate", { versionId: VersionId })
-])
-export type InsertBody = typeof InsertBody.Type
-
 /** The inserted message as its fork shows it, at its position on the fork's display path. */
 export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
   slotId: SlotId,
@@ -233,11 +219,6 @@ export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
   position: Schema.Int,
   version: Version,
   chat: Chat
-}) {}
-
-/** A version that can't be copied: still generating, or failed. */
-export class InsertRefused extends Schema.TaggedError<InsertRefused>()("InsertRefused", {
-  message: Schema.String
 }) {}
 
 /** An encrypted secret and what may be shown of it. */
@@ -1270,7 +1251,8 @@ export class WriteOps extends RpcGroup.make(
    * `insert` row placing it in that fork, which forks made from it later inherit. The anchor
    * must be on the fork's display path and not deleted there (`StaleWrite`); a neighbour
    * inserted since is no conflict. `expectedRowVersion` is the anchor's as the tab saw the fork
-   * show it, reported back in the refusal. The fork is chatted in.
+   * show it, reported back in the refusal. The fork is chatted in. A `Generate` body writes a
+   * model version still generating, which the caller then starts, as for a swipe.
    */
   Rpc.make("InsertMessage", {
     payload: {
@@ -2250,7 +2232,15 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: Schema.NullOr(SlotId),
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAX_PATH_WINDOW }))
     },
-    success: Schema.Struct({ entries: Schema.Array(PathEntry), olderLeafSlotId: Schema.NullOr(SlotId) }),
+    success: Schema.Struct({
+      entries: Schema.Array(PathEntry),
+      olderLeafSlotId: Schema.NullOr(SlotId),
+      /**
+       * The fork's tip, which appends go below (spec/MESSAGE-INSERT.md §2.3): not always the last
+       * entry, which can be a message inserted after it.
+       */
+      tipSlotId: Schema.NullOr(SlotId)
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Earlier saved text of an owned human-written version. */

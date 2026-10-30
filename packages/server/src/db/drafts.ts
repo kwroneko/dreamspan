@@ -259,7 +259,10 @@ export const makeDraftStore = (
       FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL)
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
-  /** A chat's open message editors (`ListMessageDrafts`): edits of its versions and versions being written. */
+  /**
+   * A chat's open message editors (`ListMessageDrafts`): edits of its versions, versions being
+   * written, queue edits and messages being inserted.
+   */
   const listMessageDrafts = (userId: UserId, chatId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -268,7 +271,8 @@ export const makeDraftStore = (
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s
           WHERE s.chat_id = ${chatId} AND s.deleted_at IS NULL))
-        OR (d.target_kind = 'queue_edit' AND d.target_id = ${chatId}))
+        OR (d.target_kind = 'queue_edit' AND d.target_id = ${chatId})
+        OR (d.target_kind = 'insert' AND d.target_id = ${chatId}))
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
   /** The text of state `seq`: the current text with newer entries undone. */
@@ -689,8 +693,11 @@ export const makeDraftStore = (
     userId: UserId,
     commitDraft: CommitDraft | null,
     destination: {
-      readonly targetKind: DraftKey["targetKind"]
+      /** The kind of draft it may be; several when more than one editor can send here. */
+      readonly targetKind: DraftKey["targetKind"] | ReadonlyArray<DraftKey["targetKind"]>
       readonly targetId: string
+      /** Match the editor within the target, before it can be ended or returned to the caller. */
+      readonly matchesField?: (kind: DraftKey["targetKind"], field: string) => boolean
       readonly content: string | ((field: string) => string | null)
       readonly images?: MessageImages | undefined
     }
@@ -700,7 +707,13 @@ export const makeDraftStore = (
       yield* checkIdentity(userId, commitDraft.draftId)
       const draft = yield* byId(commitDraft.draftId)
       if (draft === null || draft.user_id !== userId) return { draft: null, recovered: 0 }
-      if (draft.target_kind !== destination.targetKind || draft.target_id !== destination.targetId)
+      const kinds: ReadonlyArray<string> =
+        typeof destination.targetKind === "string" ? [destination.targetKind] : destination.targetKind
+      if (
+        !kinds.includes(draft.target_kind) ||
+        draft.target_id !== destination.targetId ||
+        (destination.matchesField !== undefined && !destination.matchesField(draft.target_kind, draft.field))
+      )
         return { draft: null, recovered: 0 }
       const content = typeof destination.content === "string" ? destination.content : destination.content(draft.field)
       if (

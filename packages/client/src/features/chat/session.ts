@@ -34,12 +34,14 @@ import type {
 } from "@rp/shared/chatApi.ts"
 import type { CacheWarmth, NextContext } from "@rp/shared/inspectorApi.ts"
 import type { LcmCoverage, LcmState } from "@rp/shared/lcm.ts"
+import type { InsertBody, InsertedMessage } from "@rp/shared/messagesApi.ts"
 import { Cause, Context, Effect, Exit, Fiber, Schedule, Stream } from "effect"
 import { Atom, type AtomRegistry, AtomRegistry as Registry, Reactivity } from "effect/reactivity"
 import { type AppError, describeCause } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom } from "../../session.ts"
 import { mountedBodies, PERF, perf } from "./perf.ts"
+import { positionOf } from "./position.ts"
 import type { ComposerSource } from "./composerDraft.ts"
 import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
@@ -92,6 +94,8 @@ export interface ChatView {
   readonly lcm: LcmState | null
   /** Bumped each time the summaries are read and differ, so a window of coverage reads again. */
   readonly lcmVersion: number
+  /** A message just inserted here, briefly highlighted where it went (spec/MESSAGE-INSERT.md §4.3); null: none. */
+  readonly highlight: SlotId | null
 }
 
 type Client = AppClient["Service"]
@@ -118,6 +122,10 @@ const withInContext = (entry: PathEntry, version: Version) =>
     inContext: versionInContext(version.status, version.content, entry.contextExcluded, version.images?.length)
   }) as PathEntry
 
+/** The entry at `position`; unchanged without one (a window of a fork without insertions). */
+const withPosition = (entry: PathEntry, position: number | undefined) =>
+  position === undefined || entry.position === position ? entry : ({ ...entry, position } as PathEntry)
+
 export class ChatSession {
   private view: ChatView = {
     chat: null,
@@ -138,7 +146,8 @@ export class ChatSession {
     cache: null,
     history: null,
     lcm: null,
-    lcmVersion: 0
+    lcmVersion: 0,
+    highlight: null
   }
   private readonly listeners = new Set<() => void>()
   private readonly versionListeners = new Set<(version: Version) => void>()
@@ -517,6 +526,7 @@ export class ChatSession {
     for (const editor of this.editors.values()) void editor.save()
     if (typeof window !== "undefined") window.removeEventListener("pagehide", this.saveEditors)
     if (this.lcmTimer !== null) clearTimeout(this.lcmTimer)
+    if (this.highlightTimer !== null) clearTimeout(this.highlightTimer)
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
     for (const [id, unmount] of this.live) {
@@ -981,7 +991,9 @@ export class ChatSession {
       const next = entries.slice()
       // A finished version may arrive before the slot event that started it.
       const finished = current.version.id === entry.version.id && current.version.status !== "generating"
-      const stored = finished && entry.version.status === "generating" ? withInContext(entry, current.version) : entry
+      const updated = finished && entry.version.status === "generating" ? withInContext(entry, current.version) : entry
+      // Where it is in the window is the window's: an event's position is the one it was sent with.
+      const stored = withPosition(updated, current.position)
       next[index] = stored
       this.update({ entries: next })
       this.track(stored.version)
@@ -989,7 +1001,24 @@ export class ChatSession {
     }
     // A message another fork appended at the same tip isn't this fork's.
     const otherFork = entry.forkId !== undefined && this.view.forkId !== null && entry.forkId !== this.view.forkId
-    if (this.view.newer !== null || otherFork || entry.parentSlotId !== (entries.at(-1)?.slotId ?? null)) {
+    // A message inserted in this fork goes in place, by its position (spec/MESSAGE-INSERT.md §2.3).
+    if (entry.inserted === true) {
+      if (entry.shownForkId !== undefined ? entry.shownForkId !== this.view.forkId : otherFork) return false
+      // Single-slot updates have no position. An unknown insertion must never become the
+      // structural tip through the append path below.
+      if (entry.position === undefined) {
+        this.reload()
+        return false
+      }
+      return this.placeInserted(entry)
+    }
+    // An append goes below the fork's tip, which the window ends with, or which an inserted
+    // message shown last follows (its anchor; a deleted tip whose inserted messages stay shown).
+    const last = entries.at(-1)
+    const continues =
+      entry.parentSlotId === (last?.slotId ?? null) ||
+      (entry.parentSlotId === this.view.leafSlotId && last?.inserted === true)
+    if (this.view.newer !== null || otherFork || !continues) {
       // A new alternate of a message shown: it counts one more branch (DESIGN §3.2).
       if (entries.some((e) => e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount)) {
         this.update({
@@ -1011,13 +1040,46 @@ export class ChatSession {
       }
       return false
     }
-    let next = [...entries, entry]
+    // Numbered after the last shown, once the window numbers by position.
+    const appended = last?.position === undefined ? entry : withPosition(entry, positionOf(last) + 1)
+    let next = [...entries, appended]
     let older = this.view.older
     if (next.length > MAX_LOADED) {
       next = next.slice(next.length - MAX_LOADED)
       older = next[0]!.parentSlotId
     }
     this.update({ entries: next, older, leafSlotId: entry.slotId })
+    this.track(entry.version)
+    return true
+  }
+
+  /**
+   * An inserted message, placed directly below its anchor: it's the newest of the anchor's gap,
+   * so it comes before whatever was inserted there before. Everything after it moves down one
+   * position. With an unknown anchor or a newer sibling already shown, the server re-reads
+   * the window instead. Returns whether it was placed in the window immediately.
+   */
+  private placeInserted(entry: PathEntry): boolean {
+    const { entries } = this.view
+    const shift = (list: ReadonlyArray<PathEntry>) => list.map((e) => withPosition(e, positionOf(e) + 1))
+    const at =
+      entry.parentSlotId === null
+        ? this.view.older === null
+          ? 0
+          : -1
+        : entries.findIndex((e) => e.slotId === entry.parentSlotId) + 1 || -1
+    const newerSibling = entries.some(
+      (e) => e.inserted === true && e.parentSlotId === entry.parentSlotId && e.slotId > entry.slotId
+    )
+    if (at < 0 || newerSibling) {
+      // Reader replies (and generation starts) can publish out of commit order. The event's
+      // position was computed at commit time, so neither it nor arrival order can place a
+      // delayed sibling/child or renumber an off-window insertion reliably. Read the window.
+      this.reload()
+      return false
+    }
+    const placed = withPosition(entry, at === 0 ? 0 : positionOf(entries[at - 1]!) + 1)
+    this.update({ entries: [...entries.slice(0, at), placed, ...shift(entries.slice(at))] })
     this.track(entry.version)
     return true
   }
@@ -1389,6 +1451,54 @@ export class ChatSession {
     const result = await this.call((client) => client("StopGeneration", { versionId }))
     if (result.ok) this.applyVersion(result.value)
     return result
+  }
+
+  /**
+   * Inserts a message directly below `anchor` (null: above the first message) in the fork shown
+   * (spec/MESSAGE-INSERT.md §4): written, generated at that point, or a copy of the version shown
+   * there. It shows in place, briefly highlighted, and the messages after it renumber.
+   */
+  async insertMessage(anchor: PathEntry | null, body: InsertBody): Promise<Outcome<InsertedMessage>> {
+    const forkId = this.view.forkId ?? this.view.chat?.currentForkId ?? null
+    if (forkId === null)
+      return { ok: false, error: { tag: "NotFound", message: "The chat isn't open yet.", problems: [], reason: null } }
+    const result = await this.call((client) =>
+      client("InsertMessage", {
+        chatId: this.chatId,
+        forkId,
+        anchor: anchor?.slotId ?? null,
+        expectedRowVersion: anchor?.rowVersion ?? 0,
+        body
+      })
+    )
+    if (result.ok) {
+      this.update({ chat: result.value.chat })
+      this.applySlot(result.value.entry)
+      this.highlightSlot(result.value.entry.slotId)
+    } else if (result.error.tag === "StaleWrite") this.reload()
+    return result
+  }
+
+  private highlightTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Highlights a message for a moment (an insertion, where it went). */
+  highlightSlot(slotId: SlotId) {
+    if (this.highlightTimer !== null) clearTimeout(this.highlightTimer)
+    this.update({ highlight: slotId })
+    this.highlightTimer = setTimeout(() => {
+      this.highlightTimer = null
+      if (!this.disposed && this.view.highlight === slotId) this.update({ highlight: null })
+    }, 2500)
+  }
+
+  /**
+   * Undoes an insertion (spec §4.3): the message to the bin in this fork, as Delete would, so it
+   * can be restored or purged there. A generation still running into it is stopped first.
+   */
+  async undoInsert(slotId: SlotId, forkId: ForkId | null = this.view.forkId): Promise<Outcome<unknown>> {
+    const shown = this.view.entries.find((e) => e.slotId === slotId)
+    if (this.view.forkId === forkId && shown?.version.status === "generating") await this.stop(shown.version.id)
+    return this.call((client) => client("DeleteMessage", { slotId, forkId }))
   }
 
   /** Deletes the message in the fork shown only: another fork that has it keeps it. */

@@ -1,6 +1,7 @@
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import { SnippetsApi } from "./snippetsApi.ts"
 import { HistoryApi } from "./historyApi.ts"
+import { MessagesApi } from "./messagesApi.ts"
 import { ExportFormatInfo } from "./libraryImport.ts"
 import { StSettingsImport } from "./modelSettings.ts"
 import { LcmApi, LcmSettingsInvalid } from "./lcm.ts"
@@ -332,4 +333,6 @@ export class AppApi extends RpcGroup.make(
   .merge(InspectorApi)
   .merge(LcmApi)
   .merge(HistoryApi)
+  // --- Inserting messages anywhere in the history (messagesApi.ts).
+  .merge(MessagesApi)
   .middleware(Authentication) {}

@@ -3,6 +3,7 @@
 // hidden ones leave the arrows' cycle and are listed apart. A filter shows only the starred,
 // and two can be compared side by side. The counter `k/n` opens it: a popover on a wide
 // screen, a sheet on a phone.
+import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -387,7 +388,7 @@ export function VersionPicker({
     (position >= 0 ? `Version ${position + 1} of ${count}` : `${count} versions`) +
     (hiddenCount > 0 ? `, ${hiddenCount} hidden` : "") +
     ": choose a version"
-  const title = `Versions of message #${entry.depth + 1}`
+  const title = `Versions of message #${positionOf(entry) + 1}`
   const openChange = (next: boolean) => {
     setOpen(next)
     if (next) onOpen()

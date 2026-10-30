@@ -13,7 +13,7 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { pathPieces } from "../src/db/displayPath.ts"
 import { LINEAGE_CAP, shownIn, slotDeletedIn } from "../src/db/forkState.ts"
-import type { InsertBody } from "../src/db/ops.ts"
+import type { InsertBody } from "@rp/shared/messagesApi.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -647,6 +647,8 @@ describe("inserting messages in forks", () => {
                 limit
               })
               check(window.entries)
+              // Appends go below the tip, m9, not below the message inserted after it.
+              assert.strictEqual(window.tipSlotId, ms[9])
               ids.unshift(...window.entries.map((e) => e.slotId))
               leaf = window.olderLeafSlotId
             }
@@ -659,6 +661,8 @@ describe("inserting messages in forks", () => {
           for (const limit of [1, 3, 5]) {
             const ids: Array<SlotId> = []
             let window = yield* read({ _tag: "Bottom" }, limit)
+            // The client's leaf, which it appends below: the tip, not the inserted display end.
+            assert.strictEqual(window.leafSlotId, ms[9])
             ids.unshift(...window.entries.map((e) => e.slotId))
             while (window.older !== null) {
               window = yield* read({ _tag: "Older", from: window.older }, limit)

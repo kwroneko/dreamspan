@@ -106,6 +106,7 @@ export function HistoryPanel({
           chatId: session.id,
           forkId,
           fromDepth: firstDepth,
+          // CacheWarmth.historyStart.depth is the display position (including insertions).
           retainedDepth: view.history?.historyStart?.depth ?? 0,
           summaryIds: firstSummary < 0 ? [] : summaries.slice(firstSummary).map((s) => s.id)
         })

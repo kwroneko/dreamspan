@@ -64,13 +64,12 @@ import {
   displayEnd,
   displayEvents,
   displayLength,
-  displaySlotsIn,
+  displaySlots,
   displayThrough,
   pathPieces,
   positionOf,
   slotAtPosition,
-  slotPlace,
-  windowPieces
+  slotPlace
 } from "./displayPath.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -562,8 +561,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 const first = Math.max(from === null ? 0 : from + 1, onDisplay.end - limit + 1)
                 return {
                   first,
-                  floor: from === null ? 0 : from + 1,
-                  parts: windowPieces(onDisplay.pieces, first, onDisplay.end)
+                  floor: from === null ? 0 : from + 1
                 }
               })
         const columns = sql`s.id AS slot_id, s.parent_slot_id, ${sql.literal(window === null ? "s.depth" : "path.position AS depth, s.inserted")}, ${contextExcludedIn(sql, fork)} AS context_excluded,
@@ -600,9 +598,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             : window.first > onDisplay!.end
               ? []
               : yield* sql<HistoryRow>`
-          ${displaySlotsIn(sql, chatId, window.parts)}
+          ${displaySlots(sql, onDisplay!.pieces, window.first, onDisplay!.end)}
           SELECT ${columns}
-          FROM display path JOIN slots s ON s.id = path.id ${joins}
+          FROM display_slots path JOIN slots s ON s.id = path.id ${joins}
           WHERE ${owned}
           ORDER BY path.position`
         const read = rows
@@ -764,7 +762,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         )
         SELECT ${counted}`
             : yield* sql<{ n: number }>`
-        ${displaySlotsIn(sql, chatId, windowPieces(onDisplay.pieces, 0, onDisplay.end))}
+        ${displaySlots(sql, onDisplay.pieces, 0, onDisplay.end)}
+        , path AS (SELECT id FROM display_slots)
         SELECT ${counted} AND ${owned}`
         const count = row?.n ?? 0
         pins.messageCount.push({ key: keyOf(leaf), count })

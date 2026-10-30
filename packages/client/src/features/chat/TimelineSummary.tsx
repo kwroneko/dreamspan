@@ -1,5 +1,6 @@
 // The selected layer in the timeline, with lazy, recursive expansion. ReadPath stays
 // paged even for an imported summary spanning thousands of original messages.
+import { positionOf } from "./position.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -108,21 +109,26 @@ export function TimelineSummary({
           )
           if (!live) return
           if (!result.ok) return setError(result.error.message)
-          rows.unshift(...result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to))
-          older = (result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null
-          if (older === null || previous === null || (rows[0]?.depth ?? -1) <= previous.first) break
+          rows.unshift(
+            ...result.value.entries.filter((e) => positionOf(e) >= summary.from - 1 && positionOf(e) < summary.to)
+          )
+          older =
+            (result.value.entries[0] ? positionOf(result.value.entries[0]) : -1) > summary.from - 1
+              ? result.value.older
+              : null
+          if (older === null || previous === null || (rows[0] ? positionOf(rows[0]) : -1) <= previous.first) break
           from = older
           firstPage = false
         } while (true)
         const first = rows[0]
         const last = rows.at(-1)
-        if (first && last) loaded.current = { first: first.depth, last: last.slotId, targetId }
+        if (first && last) loaded.current = { first: positionOf(first), last: last.slotId, targetId }
         generation.current++
         setMessages(rows)
         setBefore(older)
         // A refresh reads backwards from the last loaded original, so its window has no
         // forward cursor of its own; the next page starts after that original either way.
-        setAfter(last && last.depth < summary.to - 1 ? last.slotId : null)
+        setAfter(last && positionOf(last) < summary.to - 1 ? last.slotId : null)
       }
     }
     void load()
@@ -161,16 +167,25 @@ export function TimelineSummary({
     setPending(false)
     if (generation.current !== current || session.snapshot().pathRevision !== revision) return
     if (!result.ok) return setError(result.error.message)
-    const entries = result.value.entries.filter((e) => e.depth >= summary.from - 1 && e.depth < summary.to)
+    const entries = result.value.entries.filter((e) => positionOf(e) >= summary.from - 1 && positionOf(e) < summary.to)
     const bounds = loaded.current
     if (bounds && entries.length > 0) {
-      if (direction === "earlier") bounds.first = entries[0]!.depth
+      if (direction === "earlier") bounds.first = positionOf(entries[0]!)
       else bounds.last = entries.at(-1)!.slotId
     }
     setMessages((rows) => (direction === "earlier" ? [...entries, ...(rows ?? [])] : [...(rows ?? []), ...entries]))
     if (direction === "earlier")
-      setBefore((result.value.entries[0]?.depth ?? -1) > summary.from - 1 ? result.value.older : null)
-    else setAfter((result.value.entries.at(-1)?.depth ?? summary.to) < summary.to - 1 ? result.value.newer : null)
+      setBefore(
+        (result.value.entries[0] ? positionOf(result.value.entries[0]) : -1) > summary.from - 1
+          ? result.value.older
+          : null
+      )
+    else
+      setAfter(
+        (result.value.entries.at(-1) ? positionOf(result.value.entries.at(-1)!) : summary.to) < summary.to - 1
+          ? result.value.newer
+          : null
+      )
   }
   return (
     <section
@@ -214,7 +229,9 @@ export function TimelineSummary({
                   session={session}
                   summary={child}
                   renderMessage={renderMessage}
-                  target={target && target.depth >= child.from - 1 && target.depth < child.to ? target : null}
+                  target={
+                    target && positionOf(target) >= child.from - 1 && positionOf(target) < child.to ? target : null
+                  }
                 />
               ))
             )

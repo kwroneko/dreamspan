@@ -101,6 +101,18 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
   await expect(page.getByLabel("Concurrent requests")).toHaveValue("4")
   await expect(page.getByRole("alert")).toHaveCount(0)
 
+  // The field already held 4 before Save: wait for the write before reloading another tab.
+  await expect
+    .poll(() =>
+      asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.map(
+          api.ListConnections(),
+          (connections) => connections.find((c) => c.name === "Renamed in the other tab")?.maxConcurrent
+        )
+      )
+    )
+    .toBe(4)
+
   // A key typed against an address the other tab has since changed: refused, then reloaded.
   await second.reload()
   await second.getByLabel("Name").fill("Renamed again")

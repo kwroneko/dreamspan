@@ -368,6 +368,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
+          const draftForkId = fork.id
           yield* graph.checkImages(userId, images ?? [])
           yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
           yield* graph.checkSpeaker(userId, speakerEntityId)
@@ -419,8 +420,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
               })} RETURNING *`
               // The text waits in the queue now, and comes back to the composer if withdrawn.
               const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
-                targetKind: "composer",
+                // The composer's, or the insertion editor's below the tip, whose insertion is an append
+                // (spec/MESSAGE-INSERT.md §4.2).
+                targetKind: ["composer", "insert"],
                 targetId: chatId,
+                matchesField: (kind, field) =>
+                  field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
                 content: row!.kind === "generate" ? (row!.direction ?? "") : row!.content
               })
               return {

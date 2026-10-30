@@ -39,11 +39,19 @@ export const makeCommand = <I, O, E>(definition: {
     )
 })
 
-export const runCommand = <O>(
+/**
+ * Runs a registered command. Its failures reach the caller when they're the command
+ * boundary's own or among `passes` (the errors the RPC declares); anything else is logged
+ * and becomes ServerError.
+ */
+type ErrorClass = abstract new (...args: never) => unknown
+
+export const runCommand = <O, const C extends ReadonlyArray<ErrorClass> = []>(
   registry: Registry<Command>,
   id: string,
   input: unknown,
-  output: Schema.Codec<O, unknown>
+  output: Schema.Codec<O, unknown>,
+  passes: C = [] as unknown as C
 ) =>
   Effect.gen(function* () {
     const command = registry.get(id)
@@ -51,10 +59,13 @@ export const runCommand = <O>(
     const value = yield* command
       .execute(input)
       .pipe(
-        Effect.catch((error) =>
-          error instanceof HistoryRejected || error instanceof NotFound || error instanceof ServerError
-            ? Effect.fail(error)
-            : toServerError(id)(error)
+        Effect.catch(
+          (error): Effect.Effect<never, HistoryRejected | NotFound | ServerError | InstanceType<C[number]>> =>
+            error instanceof HistoryRejected || error instanceof NotFound || error instanceof ServerError
+              ? Effect.fail(error)
+              : passes.some((type) => error instanceof type)
+                ? Effect.fail(error as InstanceType<C[number]>)
+                : toServerError(id)(error)
         )
       )
     return yield* Schema.decodeUnknownEffect(output)(value).pipe(

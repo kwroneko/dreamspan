@@ -1,4 +1,5 @@
 import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
+import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
   ChatSurfaceProviders,
@@ -7,7 +8,8 @@ import {
   chatComposerNotes,
   timelineRails,
   timelineBoundaries,
-  timelineSummaries
+  timelineSummaries,
+  messageStream
 } from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
 import { useIsPanelTab } from "./panels.tsx"
@@ -151,7 +153,7 @@ function MessageList({
   const divider =
     boundarySlots.entries.length === 0
       ? -1
-      : summaries && lcm && lcm.layer.length > 0 && (entries[0]?.depth ?? -1) > lcm.cursorDepth
+      : summaries && lcm && lcm.layer.length > 0 && (entries[0] ? positionOf(entries[0]) : -1) > lcmCursor(lcm)
         ? 0
         : (boundaryIndex(view) ?? -1)
   const transforms = useTimelineTransforms()
@@ -164,7 +166,7 @@ function MessageList({
   const rowCount = rows.length
   /** The row an entry is shown at. */
   const rowOf = (entry: number) =>
-    rows.findIndex((row) => entries[entry]!.depth >= row.from && entries[entry]!.depth <= row.to)
+    rows.findIndex((row) => positionOf(entries[entry]!) >= row.from && positionOf(entries[entry]!) <= row.to)
   // eslint-disable-next-line react-hooks/incompatible-library -- this component opts out of memoization above
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -320,7 +322,7 @@ function MessageList({
   const last = items.at(-1)?.index
   useEffect(() => {
     if (!settled.current || first === undefined || last === undefined) return
-    if (first < EDGE && (!summaries || lcm === null || (entries[0]?.depth ?? 0) > lcm.cursorDepth + 1))
+    if (first < EDGE && (!summaries || lcm === null || (entries[0] ? positionOf(entries[0]) : 0) > lcmCursor(lcm) + 1))
       void session.loadOlder()
     if (last >= rowCount - EDGE) void session.loadNewer()
     if (view.newer === null && virtualizer.isAtEnd(END_PX)) session.followAtBottom()
@@ -344,16 +346,22 @@ function MessageList({
   }
 
   const renderMessage = (entry: PathEntry) => (
-    <Message
-      context={contextOf(entry)}
-      revealed={revealed === entry.slotId}
-      onReveal={setRevealed}
-      entry={entry}
-      session={session}
-      highlighted={entry.slotId === anchor}
-      branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
-      onBranch={onBranch}
-    />
+    <>
+      {view.older === null && entries[0]?.slotId === entry.slotId && (
+        <SlotOutlet slot={messageStream} props={{ entry, session, place: "above" }} />
+      )}
+      <Message
+        context={contextOf(entry)}
+        revealed={revealed === entry.slotId}
+        onReveal={setRevealed}
+        entry={entry}
+        session={session}
+        highlighted={entry.slotId === anchor || entry.slotId === view.highlight}
+        branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
+        onBranch={onBranch}
+      />
+      <SlotOutlet slot={messageStream} props={{ entry, session, place: "below" }} />
+    </>
   )
 
   return (

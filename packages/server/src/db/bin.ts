@@ -1057,6 +1057,8 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           return `${key.targetId} › ${key.field}`
         case "queue_edit":
           return `Queued text in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
+        case "insert":
+          return `Inserted message in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "composer":
           return `Composer in ${yield* chatTitle(`SELECT title FROM chats WHERE id = ?`)}`
         case "version_edit":

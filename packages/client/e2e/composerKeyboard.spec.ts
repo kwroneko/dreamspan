@@ -230,6 +230,9 @@ test("edit-own and version shortcuts follow the cast like the visible message co
   )
   await page.reload()
   await expect(page.getByRole("article").filter({ hasText: "Keyboard persona" })).toHaveCount(0)
+  // The absence assertion also succeeds before the path/cast has loaded after a reload.
+  // Wait for the character role, as in the first shortcut check above.
+  await expect(page.getByRole("article").last()).toHaveAccessibleName("Reply")
   await box.press("Control+ArrowUp")
   await expect(
     page

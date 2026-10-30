@@ -1,4 +1,5 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { positionOf } from "./position.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -64,7 +65,8 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   const refId = viewer.prefs.displayRegex ? (view.history?.preset?.ref ?? null) : null
   const chatId = view.chat?.id
   const key = `${view.forkId}:${view.leafSlotId}`
-  const loadedDepth = view.entries.find((entry) => entry.slotId === view.leafSlotId)?.depth
+  const loadedEntry = view.entries.find((entry) => entry.slotId === view.leafSlotId)
+  const loadedDepth = loadedEntry && positionOf(loadedEntry)
   const [tip, setTip] = useState<{ key: string; depth: number } | null>(null)
   useEffect(() => {
     if (!chatId || !refId || loadedDepth !== undefined || view.leafSlotId === null) return
@@ -80,7 +82,8 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
         })
       )
       .then((result) => {
-        if (active && result.ok) setTip({ key, depth: result.value.entries.at(-1)?.depth ?? 0 })
+        if (active && result.ok)
+          setTip({ key, depth: result.value.entries.at(-1) ? positionOf(result.value.entries.at(-1)!) : 0 })
       })
     return () => {
       active = false

@@ -11,7 +11,8 @@ import type { Bin } from "./bin.ts"
 import { onDisplayPath, pathPieces, positionOf, slotPlace } from "./displayPath.ts"
 import { selectionIn, shownIn, slotDeletedIn, versionAsShown, writeInsert } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
-import { InsertRefused, InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
+import { InsertRefused } from "@rp/shared/messagesApi.ts"
+import { InsertResult, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { type ChatRow, toChat, toVersion } from "./rows.ts"
 import { transaction } from "./tx.ts"
 
@@ -78,17 +79,30 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
 
           let slotId: string
           let versionId: string
-          if (body._tag === "Write") {
+          if (body._tag !== "Duplicate") {
             yield* graph.checkSpeaker(userId, body.speaker)
-            const version = new NewVersion({
-              speakerEntityId: body.speaker,
-              writer: "human",
-              content: body.content,
-              ...(body.images !== undefined ? { images: body.images } : {}),
-              status: "complete",
-              macroMode: "verbatim",
-              origin: "user_written"
-            })
+            // Written: a finished human version. Generated: a model version still being written,
+            // as a swipe's is; the API starts its generation once this commits.
+            const version =
+              body._tag === "Write"
+                ? new NewVersion({
+                    speakerEntityId: body.speaker,
+                    writer: "human",
+                    content: body.content,
+                    ...(body.images !== undefined ? { images: body.images } : {}),
+                    status: "complete",
+                    macroMode: "verbatim",
+                    origin: "user_written"
+                  })
+                : new NewVersion({
+                    speakerEntityId: body.speaker,
+                    writer: "model",
+                    content: "",
+                    status: "generating",
+                    macroMode: "verbatim",
+                    origin: "generated",
+                    ...(body.direction?.trim() ? { direction: body.direction } : {})
+                  })
             const inserted = yield* graph.insertSlot(chatId, laneId, anchor, version, at, fork.id, [], 0, true)
             slotId = inserted.slotId
             versionId = inserted.version.id
@@ -142,6 +156,14 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
           }
 
           yield* writeInsert(sql, { id: fork.id, chatId }, slotId, 1)
+          // The editor's draft, if it still holds what was inserted (§3.10).
+          if (body._tag !== "Duplicate" && body.draft !== undefined)
+            yield* bin.drafts.commit(userId, body.draft, {
+              targetKind: "insert",
+              targetId: chatId,
+              matchesField: (_, field) => field === `${fork.id}:${anchorSlotId ?? ""}`,
+              content: body._tag === "Write" ? body.content : (body.direction ?? "")
+            })
           // Inserting adds a message: the fork is chatted in (ARCHITECTURE §3.8).
           yield* graph.chatIn(fork.id, at)
           const [chat] = yield* sql<ChatRow>`

@@ -1,4 +1,5 @@
 import { SlotOutlet } from "../../slots.tsx"
+import { positionOf } from "./position.ts"
 import { chatBranchControls } from "./presentation.tsx"
 import { ChatCommandMenu } from "./commands.tsx"
 // The open chat's header: whose chat it is (the cast's faces and a readable name, never
@@ -98,7 +99,7 @@ export function BranchMenu({
       : `Branch ${last.branchIndex + 1} of ${last.branchCount}`
     : "Another branch"
   const canSwitch = forks.some((fork) => fork.branchCount > 1) || off
-  const label = `${summary}${last ? `, at message #${last.depth + 1}` : ""}${off ? ", not the latest" : ""}: ${canSwitch ? "switch branch" : "branch actions"}`
+  const label = `${summary}${last ? `, at message #${positionOf(last) + 1}` : ""}${off ? ", not the latest" : ""}: ${canSwitch ? "switch branch" : "branch actions"}`
   const load = async () => {
     setLiveForkCount(null)
     const live = session.call((client) => client("ListForks", { chatId: session.id }))
@@ -179,7 +180,7 @@ export function BranchMenu({
           return (
             <MenuGroup
               key={fork.slotId}
-              label={`${fork.branchCount === 1 ? "Branch" : i === 0 ? "Branches" : "Earlier"} at message #${fork.depth + 1} (${speaker(fork)})`}
+              label={`${fork.branchCount === 1 ? "Branch" : i === 0 ? "Branches" : "Earlier"} at message #${positionOf(fork) + 1} (${speaker(fork)})`}
             >
               {fork.branchCount > 1 && (
                 <MenuRadioGroup value={fork.branchIndex} onValueChange={(index: number) => onBranch(fork, index)}>
@@ -208,7 +209,7 @@ export function BranchMenu({
                 </MenuItem>
               )}
               <MenuItem icon="right" onClick={() => onJump(fork.slotId)}>
-                Go to message #{fork.depth + 1}
+                Go to message #{positionOf(fork) + 1}
               </MenuItem>
             </MenuGroup>
           )
@@ -247,7 +248,7 @@ export function BranchMenu({
             write.clear()
           }
         }}
-        title={`Name branch ${(naming?.branchIndex ?? 0) + 1} at message #${(naming?.depth ?? 0) + 1}`}
+        title={`Name branch ${(naming?.branchIndex ?? 0) + 1} at message #${(naming ? positionOf(naming) : 0) + 1}`}
         label="Branch name"
         initial={(naming && nameOf(naming)) ?? ""}
         description="Shown instead of “Branch k” in this menu. Leave it empty to take the name off."

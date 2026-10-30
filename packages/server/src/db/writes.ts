@@ -121,7 +121,16 @@ export const makeWriteHandlers = (bin: Bin) =>
       queue_edit: (userId, key) => sql`SELECT count(*) AS n FROM chats c
         WHERE c.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`,
       summary_edit: (userId, key) => sql`SELECT count(*) AS n FROM summaries s JOIN chats c ON c.id = s.chat_id
-        WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+        WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`,
+      // The user's chat and a live fork of it, and an anchor of the chat or none (`fork:anchor`).
+      // The text stays the user's whatever becomes of the anchor, as a composer's does.
+      insert: (userId, key) => {
+        const [forkId = "", anchor = ""] = key.field.split(":")
+        return sql`SELECT count(*) AS n FROM forks f JOIN chats c ON c.id = f.chat_id
+          WHERE f.id = ${forkId} AND c.id = ${key.targetId} AND c.owner_user_id = ${userId}
+            AND f.deleted_at IS NULL AND c.deleted_at IS NULL
+            AND (${anchor} = '' OR EXISTS (SELECT 1 FROM slots s WHERE s.id = ${anchor} AND s.chat_id = c.id))`
+      }
     }
     const draftTarget = (userId: UserId, key: DraftKey) =>
       found(Effect.orDie(draftTargets[key.targetKind](userId, key)), key.targetKind, key.targetId)

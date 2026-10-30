@@ -7,6 +7,7 @@ import * as accounts from "./accounts.tsx"
 import * as bin from "./bin/index.ts"
 import * as characters from "./characters/index.ts"
 import * as chat from "./chat/index.tsx"
+import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
@@ -28,6 +29,7 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  insertMessage.register()
   snippets.register()
   bin.register()
   connections.register()

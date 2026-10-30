@@ -191,7 +191,7 @@ for (const width of [1440, 390]) {
     const unavailable = reply.getByRole("button", { name: /Continue isn't available with no-prefill/ })
     await expect(unavailable).toBeEnabled()
     await unavailable.click()
-    await expect(page.getByRole("alert")).toContainText("prefill")
+    await expect(page.getByRole("alert").filter({ hasText: /^Continue isn't available/ })).toContainText("prefill")
     await shoot(page, "09-unavailable-budget")
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })

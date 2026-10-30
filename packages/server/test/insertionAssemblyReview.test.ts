@@ -3,6 +3,7 @@ import { NewVersion, type ForkId, type SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { readFileSync } from "node:fs"
 import { assembleFixture } from "./support/assemblySources.ts"
+import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { cardDoc } from "./support/docs.ts"
 import { importStPreset } from "../src/formats/preset.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -207,6 +208,41 @@ describe("insertion assembly review", () => {
       assert.strictEqual(built.sources!.history.flatMap((w) => w.entries).find((e) => e.slotId === x.slotId)!.depth, 2)
       const next = yield* h.api.GetNextContext({ chatId: h.chat.id, forkId: h.forkId, leafSlotId: reply.slotId })
       assert.strictEqual(next.summarizedThrough, 1)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  )
+  it.live("counts inserted messages for lore delays and rebuilds the captured count", () =>
+    Effect.gen(function* () {
+      const h = yield* setup
+      const lore = loreBook([loreEntry({ constant: true, delay: 3, content: "DELAY_AFTER_THREE" })]).document
+      const card = yield* h.writer.CreateEntity({
+        userId: h.userId,
+        kind: "card",
+        label: "Synthetic lore",
+        subtitle: "",
+        doc: { ...cardDoc("Synthetic lore"), character_book: lore },
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      yield* h.writer.AddStateEvent({
+        userId: h.userId,
+        chatId: h.chat.id,
+        forkId: h.forkId,
+        slotId: null,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: card.entityId } }
+      })
+      const a = yield* h.append(null, "A")
+      const b = yield* h.append(a.slotId, "B")
+      yield* h.insert(a.slotId, "X")
+      const reply = yield* h.append(b.slotId, "Reply")
+      const built = yield* h.assemble(reply)
+      assert.include(texts(built), "DELAY_AFTER_THREE")
+      assert.strictEqual(built.sources!.messageCount![0]!.count, 3)
+      const replay = yield* h.reader.RebuildContext({ userId: h.userId, snapshot: JSON.stringify(built) })
+      assert.strictEqual(replay._tag, "Rebuilt")
+      if (replay._tag === "Rebuilt") assert.deepStrictEqual(JSON.parse(replay.snapshot), built)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   )
 })

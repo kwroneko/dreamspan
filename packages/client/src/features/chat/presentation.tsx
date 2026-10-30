@@ -37,6 +37,13 @@ export const reasoningActions = defineSlot<{
   readonly text: string
   readonly streaming: boolean
 }>("message.reasoning-actions")
+/**
+ * The message stream around a message: `below` it (each message), and `above` it (the first
+ * message of the path). The insertion editor opens here (insertMessage/).
+ */
+export const messageStream = defineSlot<{ entry: PathEntry; session: ChatSession; place: "above" | "below" }>(
+  "chat.message-stream"
+)
 /** Under a reply: the guidance it was written with (guidanceEdit.tsx). */
 export const messageDirections = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.direction")
 interface VersionNavigationContext {

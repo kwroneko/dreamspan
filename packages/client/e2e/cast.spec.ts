@@ -152,7 +152,7 @@ test("Edit opens the card used everywhere", async ({ page }) => {
   await page.getByRole("button", { name: "Edit Mira", exact: true }).click()
   // The editor URL carries the chat and fork, for the rename offer after a save (U18).
   await expect(page).toHaveURL(/\/library\/[^/?]+\?renameChat=[^&]+&renameFork=[^&]+$/)
-  await expect(page.getByText(/used by \d+ chats/)).toBeVisible()
+  await expect(page.getByText(/used by \d+ chats?/)).toBeVisible()
   await expectTextBox(page.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
 })
 

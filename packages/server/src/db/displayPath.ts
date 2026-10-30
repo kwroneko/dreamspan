@@ -404,20 +404,6 @@ export const displayPositionSql = (s: string) =>
     AND ${s}.depth BETWEEN p.lo AND p.hi AND (p.slot_id IS NULL OR p.slot_id = ${s}.id))`
 
 /**
- * SQL, `w(chain_id, lo, hi, start)` and `display(id, position)`: the slots of `parts`
- * (`windowPieces`), each with its position. A run's slots are found by chain and depth
- * (`slots_chain`), an inserted slot by its own chain and depth, which only it has. Further
- * common table expressions can follow it.
- */
-export const displaySlotsIn = (sql: SqlClient.SqlClient, chatId: string, parts: string) => sql`
-  WITH w(chain_id, lo, hi, start) AS (
-    SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 4 FROM json_each(${parts})
-  ), display(id, position) AS (
-    SELECT s.id, w.start + s.depth - w.lo FROM w CROSS JOIN slots s
-      ON s.chain_id = w.chain_id AND s.depth BETWEEN w.lo AND w.hi AND s.chat_id = ${chatId}
-  )`
-
-/**
  * SQL, `path_events`: `pathEvents` over display pieces (`displayThrough`), each event with the
  * position of its slot (`position`, null for the chat-wide ones), which orders the fold
  * (`eventOrder(e, "e.position")`). An event is found by its slot's chain and depth, as there.

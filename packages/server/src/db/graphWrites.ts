@@ -365,6 +365,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       const at = Date.now()
       yield* ownedChat(userId, chatId)
       let fork = yield* ownedFork(userId, chatId, params.forkId ?? null)
+      const draftForkId = fork.id
       yield* checkSpeaker(userId, version.speakerEntityId)
       let parent: { id: string; depth: number; lane_id: string } | null = null
       if (parentSlotId !== null) {
@@ -404,8 +405,12 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       // The composer is the fork's, so text typed while something else was appended stays
       // in view without moving.
       const committed = yield* drafts.commit(userId, commitDraft, {
-        targetKind: "composer",
+        // The composer's, or the insertion editor's below the tip, whose insertion is an append
+        // (spec/MESSAGE-INSERT.md §4.2).
+        targetKind: ["composer", "insert"],
         targetId: chatId,
+        matchesField: (kind, field) =>
+          field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
         content: row.writer === "model" ? (row.direction ?? "") : row.content
       })
       return new AppendResult({

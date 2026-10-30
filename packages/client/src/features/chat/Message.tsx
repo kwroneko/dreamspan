@@ -6,6 +6,7 @@ import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
 // a wide screen, and on a tap of the message on a narrow one. Rows only re-render when
 // their slot changes; the text of a generating version comes from its own atom, so a token
 // re-renders the body.
+import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
@@ -691,7 +692,7 @@ export const Message = memo(function Message({
               {formatWhen(version.createdAt)}
             </time>
           </Tooltip>
-          <span className="shrink-0 text-xs text-muted tabular-nums">#{entry.depth + 1}</span>
+          <span className="shrink-0 text-xs text-muted tabular-nums">#{positionOf(entry) + 1}</span>
           {version.writer === "model" && version.model !== null ? (
             <Tooltip label={`Generated with ${version.model}`}>
               <span tabIndex={0} className="min-w-0 truncate text-xs text-muted outline-none sm:max-w-64">
@@ -802,7 +803,7 @@ export const Message = memo(function Message({
             version={version}
             session={session}
             parentSlotId={entry.parentSlotId}
-            depth={entry.depth}
+            depth={positionOf(entry)}
             placement={model ? 2 : 1}
           />
         )}
