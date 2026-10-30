@@ -321,6 +321,7 @@ export interface ChatState {
   /** In join order. */
   readonly participants: ReadonlyArray<string>
   readonly absent: ReadonlyArray<string>
+  /** Zero or one persona; the last selected ID wins. */
   readonly playedByMe: ReadonlyArray<string>
   readonly activeNotes: ReadonlyArray<string>
   readonly noteRevisions: Readonly<Record<string, string>>
@@ -400,7 +401,7 @@ const applyCore = (
         absent: data.value.present ? remove(state.absent, data.value.entity) : add(state.absent, data.value.entity)
       }
     case "played_by_me.set":
-      return { ...state, playedByMe: [...data.value.entities] }
+      return { ...state, playedByMe: data.value.entities.slice(-1) }
     case "card.swap": {
       const { entity, replaces } = data.value
       if (!state.participants.includes(replaces) || entity === replaces) return state
@@ -527,7 +528,7 @@ export const noteSwitches = (events: Iterable<FoldableEvent>) => {
 
 /** Folds events, given in path order (position, then seq), into the state after them. */
 export const foldState = (events: Iterable<FoldableEvent>, initial: ChatState = emptyChatState): ChatState => {
-  let state = initial
+  let state = initial.playedByMe.length > 1 ? { ...initial, playedByMe: initial.playedByMe.slice(-1) } : initial
   for (const e of events) state = apply(state, e)
   return state
 }

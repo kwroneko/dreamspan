@@ -925,7 +925,13 @@ describe("context assembly from the database", () => {
     Effect.gen(function* () {
       const { reader, userId, assemble } = yield* setup()
       const built = yield* assemble()
-      for (const version of [undefined, ...Array.from({ length: ASSEMBLER_VERSION }, (_, index) => index)]) {
+      // Version 33 could expand {{user}} to several persona names. Never replay it
+      // through the singular-persona fold and claim that the request is unchanged.
+      for (const version of new Set([
+        undefined,
+        33,
+        ...Array.from({ length: ASSEMBLER_VERSION }, (_, index) => index)
+      ])) {
         const legacy = { ...built, assemblerVersion: version, sources: { ...built.sources, userMessages: [] } }
         const json = JSON.stringify(legacy)
         const result = yield* reader.RebuildContext({ userId, snapshot: json })

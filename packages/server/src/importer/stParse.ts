@@ -42,6 +42,7 @@ export const unreadChatPart = (
     batches: [],
     messages: 0,
     userTurns: 0,
+    lastUserSpeaker: null,
     leadingHidden: 0,
     speakers: [],
     greeting: null,

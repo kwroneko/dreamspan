@@ -53,6 +53,8 @@ export interface StSettings {
     readonly collapse_newlines: boolean
   }
   readonly selectedPreset: string | null
+  /** ST's default persona avatar, used by an imported chat without a user turn or lock. */
+  readonly defaultPersona: string | null
   readonly personas: ReadonlyArray<StPersona>
   /** Lorebooks ST applies to every chat (`world_info_settings.world_info.globalSelect`). */
   readonly globalWorlds: ReadonlyArray<string>
@@ -162,6 +164,10 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
         }
       : {}),
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
+    defaultPersona:
+      typeof powerUser.default_persona === "string" && powerUser.default_persona !== ""
+        ? bounded(powerUser.default_persona)
+        : null,
     personas,
     globalWorlds: strings(worldInfo.globalSelect, 1000),
     characterWorlds: (Array.isArray(worldInfo.charLore) ? worldInfo.charLore : []).slice(0, 10_000).flatMap((entry) => {

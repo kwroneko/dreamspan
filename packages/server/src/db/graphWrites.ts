@@ -194,6 +194,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         slotId = null
       }
       yield* checkStateReferences(sql, userId, chatId, data, scope)
+      if (data.key === "played_by_me.set") data = { ...data, value: { entities: data.value.entities.slice(-1) } }
       if (data.key === "card.swap") {
         const [family] = yield* sql`WITH RECURSIVE ancestors(id, parent) AS (
           SELECT id, forked_from_entity_id FROM entities WHERE id = ${data.value.entity}

@@ -5,7 +5,13 @@ import { ReportBuilder } from "@rp/shared/importReport.ts"
 import { parseStChatPart } from "../src/formats/stChat.ts"
 import { parseStSettings } from "../src/formats/stData.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { type CardInfo, chatStateChange, type FolderContext, type Link } from "../src/importer/stMapping.ts"
+import {
+  type CardInfo,
+  chatStateChange,
+  defaultPersona,
+  type FolderContext,
+  type Link
+} from "../src/importer/stMapping.ts"
 import { buildPersona } from "../src/importer/stParse.ts"
 
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
@@ -226,6 +232,27 @@ describe("ST's notes on import (DESIGN §4.1)", () => {
 })
 
 describe("ST personas (DESIGN §4.1, owner 2026-10-28)", () => {
+  it("uses the chat lock then the imported default when no user message selected a persona", () => {
+    const folder: FolderContext = {
+      settings: parseStSettings(json({ power_user: { default_persona: "b.png" } }), new ReportBuilder()),
+      cards: new Map(),
+      personas: new Map([
+        ["a.png", "a" as EntityId],
+        ["b.png", "b" as EntityId]
+      ]),
+      personaNames: new Map(),
+      worlds: new Map()
+    }
+    expect(folder.settings?.defaultPersona).toBe("b.png")
+    expect(defaultPersona(folder, header({ persona: "a.png" }))).toBe("a")
+    expect(defaultPersona(folder, header({ persona: "missing.png" }))).toBe("b")
+    expect(defaultPersona(folder, null)).toBe("b")
+    expect(defaultPersona({ ...folder, personas: new Map() }, null)).toBeNull()
+    const change = mapped({}, {}, folder)
+    expect(change.state.played).toEqual(["b"])
+    expect(change.state.participants).toEqual(["b"])
+  })
+
   const persona = (position: number) =>
     Effect.runSync(
       buildPersona(new Uint8Array(), "sam.png", {
