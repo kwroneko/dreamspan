@@ -331,7 +331,8 @@ export const makeChatHandlers = Effect.gen(function* () {
       }).pipe(Effect.uninterruptible, internal("Regenerate")),
 
     // Continue (ST's, DESIGN §7.5): a new version that starts as the text continued and
-    // streams on from its end, the old version left as it was. The slot is published before
+    // streams on from its end, the old version left as it was. Whoever wrote the version
+    // continued (an edit is the user's), the new one is the model's. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
     ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction }) =>
       Effect.gen(function* () {
@@ -339,7 +340,6 @@ export const makeChatHandlers = Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId })
         const refuse = (message: string) => Effect.fail(new NotContinuable({ versionId, message }))
-        if (source.writer !== "model") return yield* refuse("Only a reply the model wrote can be continued.")
         if (source.status === "generating") return yield* refuse("It's still being written.")
         if (source.content.trim() === "") return yield* refuse("It has no text to continue.")
         const { chatId, entry: before } = yield* reader.GetSlot({
@@ -436,6 +436,20 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* publishSlot(id, slotId, forkId ?? null)
       }).pipe(Effect.uninterruptible, internal("SetMessageHidden")),
 
+    // Taking an image out is an edit too: it changes what's sent next and starts nothing.
+    SetImageExcluded: ({ versionId, mediaId, forkId, excluded }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const written = yield* writer.SetImageExcluded({
+          userId: id,
+          versionId,
+          mediaId,
+          forkId: forkId ?? null,
+          excluded
+        })
+        return yield* publishSlot(id, written.slotId, written.forkId)
+      }).pipe(Effect.uninterruptible, internal("SetImageExcluded")),
+
     // An edit or a version the user writes is still the message's speaker's, as a swipe is:
     // an edit its source's, a written version the one shown's.
     EditVersion: ({ images, slotId, forkId, sourceVersionId, content, expectedRowVersion, draft }) =>
@@ -489,6 +503,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId,
           forkId,
           content: state.content,
+          ...(state.images === undefined ? {} : { images: state.images }),
           expectedRowVersion,
           commitDraft: null
         })
@@ -514,13 +529,14 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* reader.ListMessageDrafts({ userId: id, chatId })
       }).pipe(internal("MessageDrafts")),
 
-    SaveMessageDraft: ({ target, draftId, content, expectedRowVersion, expectedSession }) =>
+    SaveMessageDraft: ({ target, draftId, content, images, expectedRowVersion, expectedSession }) =>
       Effect.flatMap(userId, (id) =>
         writer.SaveDraft({
           userId: id,
           key: messageDraftKey(target),
           draftId,
           content,
+          ...(images === undefined ? {} : { images }),
           expectedRowVersion,
           expectedSession,
           baseRevision: target._tag === "Queue" ? String(target.rowVersion) : null
@@ -562,7 +578,7 @@ export const makeChatHandlers = Effect.gen(function* () {
 
     // An amend another fork shows gives this fork a copy in its place: its message changed
     // here only, and tabs on other forks read it again as theirs shows it.
-    AmendVersion: ({ versionId, forkId, content, expectedRowVersion, draft }) =>
+    AmendVersion: ({ versionId, forkId, content, images, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
         const version = yield* writer.AmendVersion({
@@ -570,6 +586,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId,
           forkId: forkId ?? null,
           content,
+          ...(images === undefined ? {} : { images }),
           expectedRowVersion,
           commitDraft: draft ?? null
         })
@@ -697,7 +714,11 @@ export const makeChatHandlers = Effect.gen(function* () {
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>
       Effect.flatMap(userId, (id) =>
         reader.CacheWarmth({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
-      ).pipe(internal("GetNextContext")),
+      ).pipe(
+        // What to count is the server's own business (ImageTokenCounts).
+        Effect.map(({ uncounted: _, ...next }) => next),
+        internal("GetNextContext")
+      ),
 
     SubscribeChat: ({ chatId }) =>
       Stream.unwrap(

@@ -15,7 +15,8 @@ import { AssemblySources } from "../assembler/pipeline.ts"
 import { WorkerAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
 import { wireContext } from "../assembler/wire.ts"
-import { sqlSources } from "./assemblySources.ts"
+import { estimateImage } from "../assembler/imageTokens.ts"
+import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { backfillOf, overCap, spentSince } from "./lcmBackfill.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
@@ -81,7 +82,27 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
         if (usable === null)
           return { ...empty, blocked: "no_model" as const, backfill: progress && { ...progress, settled: false } }
         const layer = yield* selectSummaryLayer(sql, userId, chatId, leafSlotId)
-        const path = yield* lcmPath(sql, userId, chatId, leafSlotId, layer.cursor ?? undefined)
+        const readPath = yield* lcmPath(sql, userId, chatId, leafSlotId, layer.cursor ?? undefined)
+        const hashes = [
+          ...new Set(
+            readPath.flatMap((slot) => (slot.images ?? []).flatMap((image) => (image.sha256 ? [image.sha256] : [])))
+          )
+        ]
+        const facts = yield* readImageTokenFacts(
+          sql,
+          userId,
+          { connectionId: usable.connectionId, kind: usable.kind, modelKey: usable.key },
+          hashes
+        )
+        const imageTarget = { kind: usable.kind, api: usable.api, model: usable.key }
+        const path = readPath.map((slot) => ({
+          ...slot,
+          images:
+            slot.images?.map((image) => ({
+              ...image,
+              estimate: estimateImage(image, imageTarget, assembler.imageTokens.list(), facts)
+            })) ?? []
+        }))
         const onPath = new Set(path.map((s) => s.id))
         const active = jobs.filter((j) => onPath.has(j.lastSlotId))
         const built = yield* assembler

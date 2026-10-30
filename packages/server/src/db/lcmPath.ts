@@ -1,9 +1,10 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { imageExcludedIn, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
+import type { RequestImage } from "../assembler/types.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
 
 export interface LcmSlot {
@@ -11,6 +12,8 @@ export interface LcmSlot {
   parent: string | null
   depth: number
   content: string
+  /** Owner-scoped attachment metadata; the planning reader adds estimates for its model. */
+  images?: ReadonlyArray<RequestImage>
   versionId: Summary["inputs"][number]["versionId"]
   amendCount: number
   generating: number
@@ -35,7 +38,7 @@ export const lcmPath = (
       WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
     if (!owned) return yield* new NotFound({ entity: "chat path", id: leaf })
     const fork = yield* viewAt(sql, chatId, leaf)
-    return yield* sql<LcmSlot>`WITH RECURSIVE path AS (
+    const rows = yield* sql<LcmSlot & { images_json: string }>`WITH RECURSIVE path AS (
       SELECT id, parent_slot_id, depth, 1 AS n FROM slots WHERE id = ${leaf}
       UNION ALL SELECT s.id, s.parent_slot_id, s.depth, p.n + 1 FROM slots s JOIN path p ON s.id = p.parent_slot_id
         WHERE p.id IS NOT ${first ?? null} AND p.n < ${limit}
@@ -44,12 +47,18 @@ export const lcmPath = (
         AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') AND (length(v.content) > 0 OR EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id)) THEN v.id END AS versionId,
       CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
         AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN length(v.content) > 0 THEN v.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
+      (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
+        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, "s.id", "a.media_id")} ORDER BY a.ordinal) AS images_json,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
       EXISTS(SELECT 1 FROM slot_parents m WHERE m.slot_id = p.id) AS merged,
       (SELECT count(*) FROM slots child WHERE child.parent_slot_id = p.id AND child.deleted_at IS NULL) AS children
       FROM path p JOIN slots s ON s.id = p.id LEFT JOIN versions v ON v.id = ${shownIn(sql, fork, "s")}
       ORDER BY p.depth`
+    return rows.map(({ images_json, ...row }) => ({
+      ...row,
+      images: row.versionId ? (JSON.parse(images_json) as RequestImage[]) : []
+    }))
   })
 export const slotInput = (s: LcmSlot): Summary["inputs"][number] => ({
   slotId: s.id,

@@ -114,7 +114,7 @@ import {
   ProxyMode
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
-import { NextContext, RunContext } from "@rp/shared/inspectorApi.ts"
+import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -209,6 +209,35 @@ export class AppendResult extends Schema.Class<AppendResult>("AppendResult")({
   draft: Schema.NullOr(Draft),
   /** How many texts committing it sent to the recovered texts (from before destructive or displaced changes). */
   recovered: Schema.Int
+}) {}
+
+/**
+ * What `InsertMessage` inserts (spec/MESSAGE-INSERT.md §7): text written as a speaker (null:
+ * no card, as the composer allows), or a copy of the version the fork shows at the anchor.
+ * Generating at the insertion point is a later unit of the spec.
+ */
+export const InsertBody = Schema.Union([
+  Schema.TaggedStruct("Write", {
+    speaker: Schema.NullOr(EntityId),
+    content: Schema.String,
+    images: Schema.optionalKey(MessageImages)
+  }),
+  Schema.TaggedStruct("Duplicate", { versionId: VersionId })
+])
+export type InsertBody = typeof InsertBody.Type
+
+/** The inserted message as its fork shows it, at its position on the fork's display path. */
+export class InsertResult extends Schema.Class<InsertResult>("InsertResult")({
+  slotId: SlotId,
+  forkId: ForkId,
+  position: Schema.Int,
+  version: Version,
+  chat: Chat
+}) {}
+
+/** A version that can't be copied: still generating, or failed. */
+export class InsertRefused extends Schema.TaggedError<InsertRefused>()("InsertRefused", {
+  message: Schema.String
 }) {}
 
 /** An encrypted secret and what may be shown of it. */
@@ -694,6 +723,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
       expectedSession: Schema.NullOr(Schema.Int),
@@ -1164,6 +1194,33 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A provider's exact count of one image for one model (ARCHITECTURE §6, image tokens). */
+  Rpc.make("RecordImageTokenCount", {
+    payload: {
+      userId: UserId,
+      sha256: Sha256,
+      kind: Schema.String,
+      modelKey: Schema.String,
+      detail: Schema.String,
+      tokens: Schema.Int
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** What a request's images cost together, for models without a formula; keeps the newest 20. */
+  Rpc.make("RecordImageTokenSample", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      modelKey: Schema.String,
+      images: Schema.Int,
+      pixels: Schema.Int,
+      tokens: Schema.Int,
+      source: Schema.Literals(["reported", "derived"])
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /** At startup: requests left running by a crash may have been billed, so they're kept as interrupted. */
   Rpc.make("InterruptRunningLlmRequests", {
     success: Schema.Struct({ interrupted: Schema.Int }),
@@ -1206,6 +1263,26 @@ export class WriteOps extends RpcGroup.make(
     },
     success: AppendResult,
     error: Schema.Union([NotFound, LeafMoved, StorageError])
+  }),
+  /**
+   * A message inserted below `anchorSlotId` (null: above the first message) in fork `forkId`
+   * (spec/MESSAGE-INSERT.md §2.4, §7): a new slot marked inserted, its first version and an
+   * `insert` row placing it in that fork, which forks made from it later inherit. The anchor
+   * must be on the fork's display path and not deleted there (`StaleWrite`); a neighbour
+   * inserted since is no conflict. `expectedRowVersion` is the anchor's as the tab saw the fork
+   * show it, reported back in the refusal. The fork is chatted in.
+   */
+  Rpc.make("InsertMessage", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: ForkId,
+      anchorSlotId: Schema.NullOr(SlotId),
+      expectedRowVersion: Schema.Int,
+      body: InsertBody
+    },
+    success: InsertResult,
+    error: Schema.Union([NotFound, StaleWrite, InsertRefused, StorageError])
   }),
   /**
    * A new version in place: a swipe, an edit, or "write your own" (DESIGN §3.1). An
@@ -1366,6 +1443,8 @@ export class WriteOps extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft)
@@ -1405,6 +1484,22 @@ export class WriteOps extends RpcGroup.make(
       hidden: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Takes image `mediaId` of a live version out of the context in fork `forkId` (absent or
+   * null: the fork through its slot), or puts it back; one write, of that fork's only. The
+   * choice is on the message's own version, so a fork's copy of it shares it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
@@ -2014,6 +2109,11 @@ export class WriteOps extends RpcGroup.make(
 
 export class ReadOps extends RpcGroup.make(
   Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
+  Rpc.make("GetImageTokenCount", {
+    payload: { userId: UserId, sha256: Sha256, kind: Schema.String, modelKey: Schema.String, detail: Schema.String },
+    success: Schema.NullOr(Schema.Int),
+    error: StorageError
+  }),
   Rpc.make("GetCostSettings", { payload: { userId: UserId }, success: CostSettings, error: StorageError }),
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
@@ -2664,6 +2764,12 @@ export class ReadOps extends RpcGroup.make(
     success: RunContext,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** Generation time and tokens of the user's versions (inspectorReads.ts); others are left out. */
+  Rpc.make("VersionMetrics", {
+    payload: { userId: UserId, versionIds: Schema.Array(VersionId) },
+    success: Schema.Array(VersionMetrics),
+    error: StorageError
+  }),
   /** Whether a prior request covers the entire requested provider cache endpoint. */
   Rpc.make("CachePrefixWarm", {
     payload: {
@@ -2694,7 +2800,19 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
-    success: NextContext,
+    /** With the images to count off the hot path (`chat/ImageTokenCounts.ts`), never published. */
+    success: Schema.Struct({
+      ...NextContext.fields,
+      uncounted: Schema.optionalKey(
+        Schema.Struct({
+          connectionId: Schema.String,
+          kind: Schema.String,
+          modelKey: Schema.String,
+          detail: Schema.String,
+          images: Schema.Array(Schema.Struct({ mediaId: Schema.String, sha256: Sha256 }))
+        })
+      )
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

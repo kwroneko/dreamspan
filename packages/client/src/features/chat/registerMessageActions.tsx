@@ -6,21 +6,12 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { canContinue, ContinueAction, runContinue } from "./ContinueAction.tsx"
+import { copy } from "./copy.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import { invokeMessageAction, messageActions, type MessageActionProps } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
-
-const copy = async (text: string, what: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    showToast({ title: `${what} copied` })
-  } catch {
-    showToast({ title: `Couldn't copy the ${what.toLowerCase()}`, description: "The browser didn't allow it." })
-  }
-}
 
 /**
  * "Regenerate with…": a new version of the message from a model the user picks, from the
@@ -92,6 +83,15 @@ function Branch({ openDialog }: MessageActionProps) {
   )
 }
 
+/**
+ * The fork the message is viewed in, for the inspector's links back into the chat. It isn't
+ * necessarily the fork the version was generated in, nor the chat's current one.
+ */
+const viewedFork = (session: ChatSession) => {
+  const fork = session.snapshot().forkId
+  return fork === null ? {} : { fork }
+}
+
 export const registerMessageActions = () => [
   messageActions.register({
     id: "message.edit",
@@ -143,6 +143,7 @@ export const registerMessageActions = () => [
         <Link
           to="/chats/$chatId/context/$versionId"
           params={{ chatId: session.id, versionId: entry.version.id }}
+          search={viewedFork(session)}
           aria-label="Request it was generated from"
           className={iconButtonClass()}
         >
@@ -154,7 +155,11 @@ export const registerMessageActions = () => [
       <MenuLinkItem
         icon="layers"
         render={
-          <Link to="/chats/$chatId/context/$versionId" params={{ chatId: session.id, versionId: entry.version.id }} />
+          <Link
+            to="/chats/$chatId/context/$versionId"
+            params={{ chatId: session.id, versionId: entry.version.id }}
+            search={viewedFork(session)}
+          />
         }
       >
         Context it was generated from

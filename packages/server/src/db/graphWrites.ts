@@ -12,8 +12,18 @@ import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
-import { forkThrough, onPath } from "./forks.ts"
-import { forkAt, nextSeq, insertFork, originalSql, replacedIn, selectionIn, writeSelect } from "./forkState.ts"
+import { forkThrough, onForkPath, onPath } from "./forks.ts"
+import { hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
+import {
+  forkAt,
+  nextSeq,
+  insertFork,
+  originalSql,
+  replacedIn,
+  selectionIn,
+  writeInsert,
+  writeSelect
+} from "./forkState.ts"
 import { versionExtras, type ChatRow, type ForkRow, toChat, toVersion, type VersionRow } from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 
@@ -130,6 +140,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
    * A new slot under `parent` with its first version, and `more` after it; `selected` of
    * them is its selection, which no write changes afterwards (a fork selects with an
    * override). `forkId` is the fork appending it (provenance; null: the chat's current fork).
+   * `inserted` marks a message inserted between others (spec/MESSAGE-INSERT.md §2.2).
    */
   const insertSlot = (
     chatId: string,
@@ -139,7 +150,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     at: number,
     forkId: string | null = null,
     more: ReadonlyArray<NewVersion> = [],
-    selected = 0
+    selected = 0,
+    inserted = false
   ) =>
     Effect.gen(function* () {
       const slotId = uuidv7()
@@ -158,7 +170,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         depth: parent ? parent.depth + 1 : 0,
         selected_version_id: rows[selected]!.id,
         fork_id: fork,
-        created_at: at
+        created_at: at,
+        ...(inserted ? { inserted: 1 } : {})
       })}`
       return { slotId, version: rows[0]!, selected: rows[selected]! }
     })
@@ -287,15 +300,32 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     )
 
   /**
+   * Fork `row`, just made from `from` at `baseSlotId`, places no inserted slot `from` doesn't
+   * show up to there: each gets a row of 0 (`hiddenAtFork`, spec/MESSAGE-INSERT.md §2.4).
+   * Costs the branch points and insertions of both paths; read even when `from` shows no
+   * insertion, since it may have one structurally while inheriting its row.
+   */
+  const placeAsShown = (chatId: string, from: ForkRow, baseSlotId: string | null, row: ForkRow) =>
+    Effect.gen(function* () {
+      const shown = yield* pathPieces(sql, chatId, from.id, from.tip_slot_id)
+      const base = baseSlotId === null ? null : yield* slotPlace(sql, chatId, baseSlotId)
+      const own = yield* pathPieces(sql, chatId, row.id, row.tip_slot_id)
+      for (const slotId of hiddenAtFork(shown, base, own)) yield* writeInsert(sql, { id: row.id, chatId }, slotId, 0)
+    })
+
+  /**
    * A new fork of `from` at `atSlotId` (null: before the first message), which must be on
-   * its path. Its tip is that message until something is sent in it, and it becomes the
-   * chat's current fork: the one created by forking (UX-REWORK §3).
+   * its display path. Its tip is that message until something is sent in it, and it becomes
+   * the chat's current fork: the one created by forking (UX-REWORK §3). It shows exactly what
+   * `from` shows up to there: an inserted slot it would place after it gets a row of 0
+   * (`hiddenAtFork`, spec/MESSAGE-INSERT.md §2.4).
    */
   const createFork = (chatId: string, from: ForkRow, atSlotId: string | null, at: number, checked = false) =>
     Effect.gen(function* () {
-      if (!checked && atSlotId !== null && !(yield* onPath(sql, chatId, from.tip_slot_id, atSlotId)))
+      if (!checked && atSlotId !== null && !(yield* onForkPath(sql, chatId, from, atSlotId)))
         return yield* new NotFound({ entity: "slot", id: atSlotId })
       const row = yield* insertFork(sql, { chatId, parent: from, baseSlotId: atSlotId, tipSlotId: atSlotId, at })
+      yield* placeAsShown(chatId, from, atSlotId, row)
       yield* sql`UPDATE chats SET current_fork_id = ${row.id}, row_version = row_version + 1 WHERE id = ${chatId}`
       return row
     })
@@ -345,7 +375,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       }
       if (branch) {
         const from =
-          parentSlotId === null || (yield* onPath(sql, chatId, fork.tip_slot_id, parentSlotId))
+          parentSlotId === null || (yield* onForkPath(sql, chatId, fork, parentSlotId))
             ? fork
             : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
         // At a fork's own tip it just continues. Elsewhere it makes a fork, checked above: a
@@ -444,6 +474,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     ownedVersion,
     ownedFork,
     createFork,
+    placeAsShown,
     chatIn,
     checkImages,
     checkSpeaker,

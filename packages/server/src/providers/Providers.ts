@@ -1,5 +1,6 @@
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
+import { imageSample, payloadImages } from "./imageSamples.ts"
 import { captureToolArguments } from "./toolArguments.ts"
 // The provider layer (spec/PROVIDERS.md): one streaming entry point over pi-ai for the
 // assembler and, later, the agent loop, plus the connection operations that need the
@@ -337,6 +338,17 @@ export interface ProvidersShape {
   ) => Effect.Effect<Cost | null, ProviderError | ServerError>
   /** The provider kinds in effect, built-in and from plugins, in picker order. */
   readonly kinds: () => ReadonlyArray<ProviderKindInfo>
+  /**
+   * One image's exact token count for a model, from the provider's counting endpoint
+   * (ARCHITECTURE §6); null when no registered counter applies. Never part of a send.
+   */
+  readonly countImageTokens: (input: {
+    readonly userId: UserId
+    readonly connectionId: ConnectionId
+    readonly modelKey: string
+    readonly image: { readonly data: string; readonly mimeType: string }
+    readonly detail: string
+  }) => Effect.Effect<number | null, ProviderError | ServerError>
 }
 
 export class Providers extends Context.Service<Providers, ProvidersShape>()("rp/Providers") {}
@@ -821,7 +833,9 @@ export const layer = (options: ProvidersOptions = {}) =>
           partial: null as AssistantMessage | null,
           refused: null as string | null,
           gate: undefined as ReturnType<typeof stagger.join> | undefined,
-          release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined
+          release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined,
+          /** The images the final payload sent, for image token calibration. */
+          sentImages: null as ReturnType<typeof payloadImages> | null
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
         const partialMessage = (stopReason: "aborted" | "error", errorMessage?: string): AssistantMessage => ({
@@ -844,6 +858,26 @@ export const layer = (options: ProvidersOptions = {}) =>
           Effect.gen(function* () {
             const { counts, source } = finalCounts(message, state.capture, context, request.options?.replyTool)
             if (!state.opened) return { counts, cost: null }
+            // A request with images calibrates its model's image cost (ARCHITECTURE §6).
+            const sample =
+              error === null && source === "reported" && state.sentImages
+                ? imageSample(
+                    state.sentImages,
+                    counts.inputUncached === null
+                      ? null
+                      : counts.inputUncached + (counts.cacheRead ?? 0) + (counts.cacheWrite ?? 0),
+                    state.capture.rawUsage
+                  )
+                : null
+            if (sample)
+              yield* writer
+                .RecordImageTokenSample({
+                  userId: request.userId,
+                  connectionId: prepared.connection.id,
+                  modelKey: model.key,
+                  ...sample
+                })
+                .pipe(Effect.catch((e) => Effect.logWarning("could not record an image token sample", e)))
             const cost = costOf(
               registry.costs.list(),
               { kind: prepared.kind.id, api: prepared.api, model: model.key },
@@ -890,8 +924,10 @@ export const layer = (options: ProvidersOptions = {}) =>
         // UTF-8 bytes plus framing bound text tokens conservatively, without assuming cache hits.
         const open = (payload: Readonly<Record<string, unknown>>) =>
           Effect.gen(function* () {
-            if (state.opened) return
             const hasImages = hasImageBlocks(payload)
+            // Generations open their row before the payload exists; the final payload still says what was sent.
+            if (hasImages) state.sentImages = payloadImages(payload)
+            if (state.opened) return
             // Unknown image tokenization reserves the largest safe ledger value. Saturate
             // after adding framing/output too: MAX_SAFE_INTEGER + bytes is not a safe Int.
             const inputTokens = Math.min(
@@ -1342,8 +1378,38 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
         })
 
+      const countImageTokens: ProvidersShape["countImageTokens"] = ({
+        userId,
+        connectionId,
+        modelKey,
+        image,
+        detail
+      }) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(userId, connectionId)
+          const target = { kind: prepared.kind.id, api: prepared.api, model: modelKey, baseUrl: prepared.baseUrl }
+          const counter = registry.imageCounters
+            .list()
+            .toReversed()
+            .find((c) => c.appliesTo(target))
+          if (!counter) return null
+          return yield* counter
+            .count({
+              baseUrl: prepared.baseUrl,
+              apiKey: prepared.apiKey,
+              headers: prepared.headers,
+              fetch: fetchFor(prepared, () => {}),
+              scrub: prepared.scrub,
+              model: modelKey,
+              image,
+              detail
+            })
+            .pipe(Effect.mapError((error) => providerError("unknown", prepared.scrub(error.message))))
+        })
+
       return Providers.of({
         estimateCost,
+        countImageTokens,
         kinds: () =>
           registry.kinds.list().map(
             (entry) =>

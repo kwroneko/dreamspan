@@ -1,3 +1,4 @@
+import { tokensOf } from "../assembler/st.ts"
 // Pure policies called by reader workers. Ownership, admission and writes stay in db/.
 import type { LcmSlot } from "../db/lcmPath.ts"
 import { slotInput } from "../db/lcmPath.ts"
@@ -27,7 +28,7 @@ export interface MaintenancePlanner {
   readonly id: string
   readonly plan: (input: MaintenanceInput) => Maintenance
 }
-export const slotCost = (s: LcmSlot) => (s.content ? Math.ceil(s.content.length / 4) + 3 : 0)
+export const slotCost = (s: LcmSlot) => tokensOf(s)
 
 export const defaultLeafPlanner: LeafPlanner = {
   id: "leaf",

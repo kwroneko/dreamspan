@@ -405,6 +405,8 @@ describe("stepped history", () => {
     Effect.gen(function* () {
       const fixture: AssemblyFixture = {
         ...base,
+        // Leave room for the newest turn; exhausting its target is now an explicit error.
+        preset: { ...preset, context_target: 380 },
         messages: messages(24),
         events: [
           {
@@ -456,6 +458,8 @@ describe("stepped history", () => {
     Effect.gen(function* () {
       const fixture: AssemblyFixture = {
         ...base,
+        // Leave room for the newest turn; exhausting its target is now an explicit error.
+        preset: { ...preset, context_target: 380 },
         notes: [
           {
             entity: "variable",

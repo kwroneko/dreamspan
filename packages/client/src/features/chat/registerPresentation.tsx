@@ -1,10 +1,12 @@
 import { MacroBindings } from "./MacroBindings.tsx"
 import { registerImages } from "./images.tsx"
 import { registerTimelineTransforms } from "./timelineContributions.tsx"
+import { NextImagesNote } from "./imageTokens.tsx"
 import { lazy, Suspense, type ComponentType } from "react"
 import {
   accountSettingSections,
   chatComposer,
+  chatComposerNotes,
   chatCardActions,
   chatNoteActions,
   chatBranchControls,
@@ -74,6 +76,11 @@ export const registerPresentation = () => [
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
   summaryPreviews.register({ id: "history.summary-preview", order: 10, component: HistorySummaryPreview }),
   accountSettingSections.register({ id: "settings.summary-defaults", order: 10, component: SummaryDefaults }),
+  chatComposerNotes.register({
+    id: "composer.image-tokens",
+    order: 10,
+    component: ({ view }) => (view.history?.imageTokens ? <NextImagesNote images={view.history.imageTokens} /> : null)
+  }),
   chatComposer.register({
     id: "chat.composer",
     order: 10,

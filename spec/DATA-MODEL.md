@@ -1,6 +1,6 @@
 # Data model
 
-**Status**: Partially implemented, 2026-10-10. The schema (every table below) and the message-graph operations are implemented and documented in ARCHITECTURE.md §3.7–§3.8. The library operations of §3.2 are implemented too (ARCHITECTURE.md §3.9), except export. Drafts are implemented (ARCHITECTURE.md §3.10). The ST import mapping (§14) is implemented (ARCHITECTURE.md §13). Not yet implemented: changeset application and revert, summaries and jobs logic. Implementation deltas from this draft:
+**Status**: Implemented portions obsolete as proposals (2026-10-30); ARCHITECTURE §3 is the current schema/operations record, §11 documents export, §13 ST mapping, and §16 summaries and jobs. Changeset application/revert are built (§3.13). The original following-card variants and chat-local card overrides are superseded by independent forks and swaps (§3.8–§3.9; DESIGN §4); the fresh schema is `db/baseline.ts`. Multi-parent thread/merge UX and general agent rollout resume remain unbuilt (DESIGN §3.3, §7). Everything below retains its original [P] provenance unless an owner decision is cited. Historical implementation deltas from this draft:
 - `rollouts.version_ids` is derived from `versions.rollout_id` instead of stored (principle 2).
 - FTS-indexed tables have an integer `seq` rowid alias.
 - Invariants are enforced by database triggers.

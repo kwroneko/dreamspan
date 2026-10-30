@@ -5,6 +5,7 @@ import { makeRegistry } from "../registry.ts"
 
 export interface MessageTextProps {
   text: string
+  sourceText?: string
   streaming: boolean
 }
 export const messageRenderers = makeRegistry<{
@@ -20,7 +21,18 @@ export function Markdown(props: MessageTextProps) {
     messageRenderers.snapshot
   )
   const renderer = [...snapshot.entries].sort((a, b) => b.order - a.order)[0]
-  const plain = <div className="markdown whitespace-pre-wrap">{props.text}</div>
+  const plain = (
+    <div
+      className="markdown whitespace-pre-wrap"
+      data-source-map={
+        props.sourceText === undefined || props.sourceText === props.text
+          ? JSON.stringify({ chars: 0, length: props.text.length, start: 0, end: props.text.length })
+          : undefined
+      }
+    >
+      {props.text}
+    </div>
+  )
   return renderer ? (
     <Suspense fallback={plain}>
       <renderer.component {...props} />

@@ -116,6 +116,21 @@ export const withFork = (sql: SqlClient.SqlClient, fork: ForkRef, sqlText: (fork
 export const effectiveOverride = (sql: SqlClient.SqlClient, kind: string, fork: ForkRef, target: string) =>
   withFork(sql, fork, (f) => effectiveOverrideSql(kind, f, target))
 
+/**
+ * SQL: whether the fork `fork` took image `media` (a media id) of version `o`, one of its
+ * message's own, out of the context (an `image_exclude` override with flag 1). A copy's images
+ * are its original's, so an amend keeps the choice for the images it keeps.
+ */
+export const imageExcludedSql = (fork: string, o: string, media: string) =>
+  `coalesce((SELECT flag FROM fork_overrides WHERE id = ${effectiveOverrideSql("image_exclude", fork, `${o} || ':' || ${media}`)}), 0) = 1`
+
+/** `imageExcludedSql` for a fork bound as a parameter or given as a fragment. */
+export const imageExcludedIn = (sql: SqlClient.SqlClient, fork: ForkRef, o: string, media: string) =>
+  withFork(sql, fork, (f) => imageExcludedSql(f, o, media))
+
+/** The override target of image `mediaId` of version `original`, one of its message's own. */
+export const imageTarget = (original: string, mediaId: string) => `${original}:${mediaId}`
+
 /** `slotDeletedInSql` for a fork bound as a parameter or given as a fragment. */
 export const slotDeletedIn = (sql: SqlClient.SqlClient, fork: ForkRef, s: string) =>
   withFork(sql, fork, (f) => slotDeletedInSql(f, s))
@@ -232,11 +247,13 @@ interface OverrideValue {
     | "delete_version"
     | "hide"
     | "suppress_event"
+    | "image_exclude"
     | "snippet_revision"
     | "summary_revision"
     | "summary_choice"
     | "summary_rerun"
     | "summary_superseded"
+    | "insert"
   readonly targetId: string
   readonly slotId: string | null
   readonly valueId: string | null
@@ -275,6 +292,29 @@ export const writeOverride = (
       VALUES (${uuidv7()}, ${fork.chatId}, ${fork.id}, ${seq}, ${value.kind}, ${value.targetId}, ${value.slotId},
         (SELECT depth FROM slots WHERE id = ${value.slotId}), ${value.valueId}, ${value.flag}, ${value.binItemId ?? null}, ${value.summariesDone ? 1 : 0}, ${origin})`
     return seq
+  })
+
+/**
+ * Fork `fork` places inserted slot `slotId` below its anchor (flag 1), or doesn't (0), from
+ * now on (`writeOverride`; spec/MESSAGE-INSERT.md §2.2). The row names the anchor, its parent.
+ */
+export const writeInsert = (
+  sql: SqlClient.SqlClient,
+  fork: { readonly id: string; readonly chatId: string },
+  slotId: string,
+  flag: 0 | 1
+) =>
+  Effect.gen(function* () {
+    const [slot] = yield* sql<{ anchor: string | null }>`
+      SELECT parent_slot_id AS anchor FROM slots WHERE id = ${slotId} AND chat_id = ${fork.chatId}`
+    if (slot === undefined) return yield* new NotFound({ entity: "slot", id: slotId })
+    return yield* writeOverride(sql, fork, {
+      kind: "insert",
+      targetId: slotId,
+      slotId: slot.anchor,
+      valueId: null,
+      flag
+    })
   })
 
 /** Fork `fork` shows `versionId` at `slotId` from now on (`writeOverride`). */

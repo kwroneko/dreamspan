@@ -438,8 +438,9 @@ describe("message images", () => {
         images: [older, image]
       })
       assert.strictEqual(generated.version.status, "complete", JSON.stringify(generated.version.error))
-      const body = JSON.stringify(mock.requests().find((r) => r.path === "/v1/chat/completions")!.body)
-      assert.strictEqual(body.split('"type":"image_url"').length - 1, 1)
+      // Image-aware planning can send a greeting summary before the actual reply.
+      const body = JSON.stringify(mock.requests().findLast((r) => r.path === "/v1/chat/completions")!.body)
+      assert.strictEqual(body.split('"type":"image_url"').length - 1, 1, body)
       assert.include(body, `data:image/png;base64,${Buffer.from(png()).toString("base64")}`)
       assert.notInclude(body, Buffer.from(png(textChunk("fixture", "older"))).toString("base64"))
       const [rows] = yield* fixtureSql(

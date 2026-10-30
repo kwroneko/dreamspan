@@ -1,5 +1,5 @@
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { conditionOf, editedDoc, triggersFor, withEndOfRequest } from "@rp/shared/presetConditions.ts"
+import { conditionOf, editedDoc, presetWarnings, triggersFor, withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import { DIRECTION_TEXT, endOfRequestText, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
@@ -924,6 +924,33 @@ describe("conditions (DESIGN §2.2)", () => {
       directed.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>
     )[0]!.order
     expect(directedOrder.find((e) => e.identifier === "a")?.enabled).toBe(false)
+    // A condition and generation types that never meet (as your card, only Normal; inv A2): never
+    // sent here, so off for ST, which would send it on a normal turn. A reimport turns it back on.
+    const never = {
+      ...edited,
+      // (b's condition alone goes to ST as its triggers, as above.)
+      prompts: edited.prompts.map((p) =>
+        p.identifier === "a"
+          ? { ...p, condition: "as_user" as const }
+          : p.identifier === "b"
+            ? { ...p, injection_trigger: ["impersonate"] }
+            : p
+      )
+    }
+    expect(presetWarnings(new Map(never.prompts.map((p) => [p.identifier, p])), never.order).neverSent).toEqual([
+      never.prompts.find((p) => p.identifier === "a")
+    ])
+    const neverFile = exportStPreset(never)
+    const neverOrder = (neverFile.prompt_order as Array<{ order: Array<{ identifier: string; enabled: boolean }> }>)[0]!
+      .order
+    expect(neverOrder.find((e) => e.identifier === "a")?.enabled).toBe(false)
+    expect(neverOrder.find((e) => e.identifier === "b")?.enabled).toBe(true)
+    const neverA = (neverFile.prompts as Array<Record<string, unknown>>).find((p) => p.identifier === "a")!
+    expect(neverA).toMatchObject({ injection_trigger: ["normal"], condition: "as_user", enabled_here: true })
+    expect(load(neverFile).doc).toEqual(never)
+    // Switched off here, it stays off there and after a reimport.
+    const neverOff = { ...never, order: never.order.map((e) => (e.identifier === "a" ? { ...e, enabled: false } : e)) }
+    expect(load(exportStPreset(neverOff)).doc).toEqual(neverOff)
     // An emptied nudge is an empty one in ST.
     const off = exportStPreset({
       ...edited,

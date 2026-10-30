@@ -302,6 +302,12 @@
     },
     {
       "type": "index",
+      "name": "image_token_samples_model",
+      "tbl_name": "image_token_samples",
+      "sql": "CREATE INDEX image_token_samples_model ON image_token_samples(owner_user_id, connection_id, model_key, id)"
+    },
+    {
+      "type": "index",
       "name": "jobs_lcm_backfill",
       "tbl_name": "jobs",
       "sql": "CREATE INDEX jobs_lcm_backfill ON jobs(json_extract(payload_json, '$.chatId')) WHERE kind = 'lcm-backfill'"
@@ -844,7 +850,7 @@
       "type": "table",
       "name": "connections",
       "tbl_name": "connections",
-      "sql": "CREATE TABLE connections ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, kind TEXT NOT NULL, api TEXT NOT NULL, -- NULL means the kind's default. base_url TEXT, -- Write-only secrets, encrypted with the server secret (PROVIDERS \u00a75). Header values -- often carry credentials too, so only header names are ever shown. api_key_enc BLOB, key_hint TEXT, headers_enc BLOB, header_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(header_names_json)), compat_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(compat_json)), cache_ttl_s INTEGER CHECK (cache_ttl_s IS NULL OR cache_ttl_s > 0), max_concurrent INTEGER CHECK (max_concurrent IS NULL OR max_concurrent >= 1), -- The per-connection proxy override (PROVIDERS \u00a76.2). proxy_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (proxy_mode IN ('inherit', 'direct', 'custom')), proxy_url_enc BLOB, preset_override_ref_id TEXT REFERENCES entity_refs(id), row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, -- Purged connections stay as tombstones, so old messages and ledger rows still -- name their model (PROVIDERS \u00a710). purged_at INTEGER, credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_origin TEXT, cache_revision INTEGER NOT NULL DEFAULT 0, CHECK ((api_key_enc IS NULL) = (key_hint IS NULL)), CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)), CHECK (purged_at IS NULL OR (api_key_enc IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL)) ) STRICT"
+      "sql": "CREATE TABLE connections ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, kind TEXT NOT NULL, api TEXT NOT NULL, -- NULL means the kind's default. base_url TEXT, -- Write-only secrets, encrypted with the server secret (PROVIDERS §5). Header values -- often carry credentials too, so only header names are ever shown. api_key_enc BLOB, key_hint TEXT, headers_enc BLOB, header_names_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(header_names_json)), compat_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(compat_json)), cache_ttl_s INTEGER CHECK (cache_ttl_s IS NULL OR cache_ttl_s > 0), max_concurrent INTEGER CHECK (max_concurrent IS NULL OR max_concurrent >= 1), -- The per-connection proxy override (PROVIDERS §6.2). proxy_mode TEXT NOT NULL DEFAULT 'inherit' CHECK (proxy_mode IN ('inherit', 'direct', 'custom')), proxy_url_enc BLOB, preset_override_ref_id TEXT REFERENCES entity_refs(id), row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, -- Purged connections stay as tombstones, so old messages and ledger rows still -- name their model (PROVIDERS §10). purged_at INTEGER, credential_id TEXT REFERENCES credentials(id) ON DELETE SET NULL, headers_origin TEXT, cache_revision INTEGER NOT NULL DEFAULT 0, CHECK ((api_key_enc IS NULL) = (key_hint IS NULL)), CHECK ((proxy_mode = 'custom') = (proxy_url_enc IS NOT NULL)), CHECK (purged_at IS NULL OR (api_key_enc IS NULL AND headers_enc IS NULL AND proxy_url_enc IS NULL AND base_url IS NULL)) ) STRICT"
     },
     {
       "type": "table",
@@ -862,13 +868,13 @@
       "type": "table",
       "name": "draft_history",
       "tbl_name": "draft_history",
-      "sql": "CREATE TABLE draft_history ( draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, seq INTEGER NOT NULL CHECK (seq >= 1), kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore')), first_at INTEGER NOT NULL, at INTEGER NOT NULL, start INTEGER NOT NULL CHECK (start >= 0), removed TEXT NOT NULL, inserted TEXT NOT NULL, displaced INTEGER NOT NULL DEFAULT 0 CHECK (displaced IN (0, 1)), PRIMARY KEY (draft_id, seq) ) STRICT, WITHOUT ROWID"
+      "sql": "CREATE TABLE draft_history ( draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE, seq INTEGER NOT NULL CHECK (seq >= 1), kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore')), first_at INTEGER NOT NULL, at INTEGER NOT NULL, start INTEGER NOT NULL CHECK (start >= 0), removed TEXT NOT NULL, images_before_json TEXT, images_after_json TEXT, inserted TEXT NOT NULL, displaced INTEGER NOT NULL DEFAULT 0 CHECK (displaced IN (0, 1)), PRIMARY KEY (draft_id, seq) ) STRICT, WITHOUT ROWID"
     },
     {
       "type": "table",
       "name": "drafts",
       "tbl_name": "drafts",
-      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field', 'queue_edit')), target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
+      "sql": "CREATE TABLE drafts ( id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field', 'queue_edit')), target_id TEXT NOT NULL, field TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)), -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key. base_revision TEXT, row_version INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, UNIQUE (user_id, target_kind, target_id, field) ) STRICT"
     },
     {
       "type": "table",
@@ -934,7 +940,7 @@
       "type": "table",
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
-      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event')), target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+      "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'insert', 'image_exclude')), -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
     },
     {
       "type": "table",
@@ -947,6 +953,18 @@
       "name": "history_changes",
       "tbl_name": "history_changes",
       "sql": "CREATE TABLE history_changes ( slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- The fork the reduction was made in; '' for every fork (a message nobody shows). fork_id TEXT NOT NULL DEFAULT '', chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, depth INTEGER NOT NULL, revision INTEGER NOT NULL, -- The chat's state_seq of this reduction, retained for descendant lineage bounds. seq INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (slot_id, fork_id, seq) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "image_token_counts",
+      "tbl_name": "image_token_counts",
+      "sql": "CREATE TABLE image_token_counts ( owner_user_id TEXT NOT NULL REFERENCES users(id), sha256 TEXT NOT NULL, kind TEXT NOT NULL, model_key TEXT NOT NULL, detail TEXT NOT NULL, tokens INTEGER NOT NULL CHECK (tokens >= 0), counted_at INTEGER NOT NULL, PRIMARY KEY (owner_user_id, sha256, kind, model_key, detail) ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
+      "name": "image_token_samples",
+      "tbl_name": "image_token_samples",
+      "sql": "CREATE TABLE image_token_samples ( id INTEGER PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id) ON DELETE CASCADE, model_key TEXT NOT NULL, images INTEGER NOT NULL CHECK (images > 0), pixels INTEGER NOT NULL CHECK (pixels >= 0), tokens INTEGER NOT NULL CHECK (tokens >= 0), -- 'reported': the provider's own image figure; 'derived': reported input less the text estimate. source TEXT NOT NULL CHECK (source IN ('reported', 'derived')), created_at INTEGER NOT NULL ) STRICT"
     },
     {
       "type": "table",
@@ -988,7 +1006,7 @@
       "type": "table",
       "name": "llm_requests",
       "tbl_name": "llm_requests",
-      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL CHECK (purpose IN ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit', 'test')), -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS \u00a79.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
+      "sql": "CREATE TABLE llm_requests ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL REFERENCES connections(id), model_id TEXT REFERENCES models(id), chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL, rollout_id TEXT REFERENCES rollouts(id) ON DELETE SET NULL, version_id TEXT REFERENCES versions(id) ON DELETE SET NULL, purpose TEXT NOT NULL CHECK (purpose IN ('generation', 'summarize', 'condense', 'decision', 'workshop', 'idle_job', 'edit', 'test')), -- What was requested. api TEXT NOT NULL, provider TEXT NOT NULL, model_key TEXT NOT NULL, -- What served it: the model the response named, and the routed upstream where a -- gateway reports one (OpenRouter). response_model TEXT, upstream TEXT, status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'aborted', 'interrupted')), started_at INTEGER NOT NULL, first_token_at INTEGER, ended_at INTEGER, -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write -- written with the long TTL; reasoning is the subset of output. input_uncached INTEGER, cache_read INTEGER, cache_write INTEGER, cache_write_long INTEGER, output INTEGER, reasoning INTEGER, usage_source TEXT NOT NULL DEFAULT 'none' CHECK (usage_source IN ('reported', 'estimated', 'none')), -- The provider's usage object verbatim, so counts can be recomputed if a -- normalization turns out wrong. raw_usage_json TEXT CHECK (raw_usage_json IS NULL OR json_valid(raw_usage_json)), reported_cost REAL, cost REAL, cost_currency TEXT, -- What produced cost: a built-in price source, 'reported', or a user formula. cost_formula TEXT, error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), cache_stagger_json TEXT CHECK (cache_stagger_json IS NULL OR json_valid(cache_stagger_json)), cache_identity_json TEXT CHECK (cache_identity_json IS NULL OR json_valid(cache_identity_json)), backfill_id TEXT REFERENCES jobs(id), reserved_tokens INTEGER, reserved_cost REAL, reserved_currency TEXT, CHECK ((status = 'running') = (ended_at IS NULL)), CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL)) ) STRICT"
     },
     {
       "type": "table",
@@ -1060,7 +1078,7 @@
       "type": "table",
       "name": "slots",
       "tbl_name": "slots",
-      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
+      "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, -- Inserted between messages (spec/MESSAGE-INSERT.md \u00a72.2): placed per fork by an insert override. inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)), CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
     },
     {
       "type": "table",
@@ -1162,13 +1180,13 @@
       "type": "table",
       "name": "version_history",
       "tbl_name": "version_history",
-      "sql": "CREATE TABLE version_history ( id INTEGER PRIMARY KEY, version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, content TEXT NOT NULL, replaced_at INTEGER NOT NULL ) STRICT"
+      "sql": "CREATE TABLE version_history ( id INTEGER PRIMARY KEY, version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE, content TEXT NOT NULL, replaced_at INTEGER NOT NULL, -- The version's complete image set before this amendment. images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)) ) STRICT"
     },
     {
       "type": "table",
       "name": "versions",
       "tbl_name": "versions",
-      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE versions ( seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, ordinal INTEGER NOT NULL, status TEXT NOT NULL CHECK (status IN ('generating', 'complete', 'stopped', 'failed', 'interrupted')), speaker_entity_id TEXT REFERENCES entities(id), writer TEXT NOT NULL CHECK (writer IN ('human', 'model')), content TEXT NOT NULL DEFAULT '', macro_mode TEXT NOT NULL CHECK (macro_mode IN ('template', 'verbatim')), context_form TEXT, display_form TEXT, reasoning TEXT, frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)), origin TEXT NOT NULL CHECK (origin IN ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')), source_version_id TEXT REFERENCES versions(id), greeting_ref TEXT CHECK (greeting_ref IS NULL OR json_valid(greeting_ref)), direction TEXT, rollout_id TEXT REFERENCES rollouts(id) DEFERRABLE INITIALLY DEFERRED, connection_id TEXT REFERENCES connections(id), model_id TEXT REFERENCES models(id), error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)), usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)), starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)), hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)), changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, mark TEXT CHECK (mark IS NULL OR mark IN ('refused')), fork_id TEXT, UNIQUE (slot_id, ordinal), CHECK (status <> 'failed' OR error_json IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1547,6 +1565,18 @@
       "name": "fork_overrides_identity_fixed",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TRIGGER fork_overrides_identity_fixed BEFORE UPDATE OF id, chat_id, fork_id, kind, target_id, slot_id, slot_depth ON fork_overrides BEGIN SELECT RAISE(ABORT, 'an override keeps its fork, kind and target'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_insert",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_insert BEFORE INSERT ON fork_overrides WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL OR NEW.slot_depth IS NOT (SELECT depth FROM slots WHERE id = NEW.slot_id) OR NOT EXISTS (SELECT 1 FROM slots x WHERE x.id = NEW.target_id AND x.chat_id = NEW.chat_id AND x.inserted = 1 AND x.parent_slot_id IS NEW.slot_id)) BEGIN SELECT RAISE(ABORT, 'an insertion places an inserted slot of its chat below its parent'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "fork_overrides_insert_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER fork_overrides_insert_update BEFORE UPDATE OF flag, value_id, bin_item_id, changeset_id ON fork_overrides WHEN NEW.kind = 'insert' AND (NEW.flag IS NULL OR NEW.value_id IS NOT NULL OR NEW.bin_item_id IS NOT NULL OR NEW.changeset_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'an insertion places an inserted slot of its chat below its parent'); END"
     },
     {
       "type": "trigger",
@@ -2000,6 +2030,12 @@
     },
     {
       "type": "trigger",
+      "name": "slots_inserted_frozen",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER slots_inserted_frozen BEFORE UPDATE OF inserted ON slots WHEN NEW.inserted IS NOT OLD.inserted BEGIN SELECT RAISE(ABORT, 'a slot stays inserted or not as it was inserted'); END"
+    },
+    {
+      "type": "trigger",
       "name": "slots_lane_same_chat",
       "tbl_name": "slots",
       "sql": "CREATE TRIGGER slots_lane_same_chat BEFORE INSERT ON slots WHEN (SELECT chat_id FROM lanes WHERE id = NEW.lane_id) IS NOT NEW.chat_id BEGIN SELECT RAISE(ABORT, 'a slot''s lane must be in the same chat'); END"
@@ -2440,7 +2476,7 @@
       "type": "trigger",
       "name": "versions_amend_history",
       "tbl_name": "versions",
-      "sql": "CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content BEGIN INSERT INTO version_history (version_id, content, replaced_at) VALUES (OLD.id, OLD.content, NEW.updated_at); END"
+      "sql": "CREATE TRIGGER versions_amend_history AFTER UPDATE OF content ON versions WHEN OLD.writer = 'human' AND OLD.status <> 'generating' AND NEW.content IS NOT OLD.content BEGIN INSERT INTO version_history (version_id, content, replaced_at, images_json) VALUES (OLD.id, OLD.content, NEW.updated_at, (SELECT json_group_array(json_object( 'mediaId', media_id, 'altText', coalesce(alt_text, ''))) FROM (SELECT media_id, alt_text FROM version_attachments WHERE version_id = OLD.id ORDER BY ordinal))); END"
     },
     {
       "type": "trigger",

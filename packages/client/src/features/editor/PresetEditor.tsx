@@ -12,8 +12,8 @@ import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
-import { PresetWarnings, PromptDocument } from "./PromptDocument.tsx"
-import { presetEditorSections } from "./presetSections.ts"
+import { PromptDocument } from "./PromptDocument.tsx"
+import { presetEditorSections, presetEditorWarnings } from "./presetSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
@@ -264,15 +264,16 @@ export function PresetEditor({
   context?: PresetContext | null | undefined
   focus?: string | undefined
 }) {
+  const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   return (
     <>
-      <PresetWarnings store={store} />
+      <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
       <Card>
         <CardHeader
           title="Prompts"
           description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
         />
-        <PromptDocument store={store} context={context} focus={focus} />
+        <PromptDocument store={store} context={context} focus={focus} goTo={goTo} />
       </Card>
       <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>

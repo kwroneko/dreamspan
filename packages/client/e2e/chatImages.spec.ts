@@ -3,6 +3,7 @@ import { asUser } from "./support/rpc.ts"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { apiLogin, ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
+import { messageMenu, showActions } from "./support/message.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 const openChat = async (page: Page, title: string) => {
@@ -318,4 +319,219 @@ test("hide images covers draft, message and full-size attachment surfaces", asyn
   const viewer = page.getByRole("dialog")
   await expect(viewer.locator("img")).toHaveCSS("visibility", "hidden")
   await expect(viewer.getByText("Image hidden", { exact: true })).toBeVisible()
+})
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`message images toggle in and out of the context, and say why a rule leaves one out ${width} ${colorScheme}`, async ({
+      browser
+    }) => {
+      const context = await browser.newContext({
+        viewport: { width, height: 900 },
+        colorScheme,
+        hasTouch: width === 390
+      })
+      const page = await context.newPage()
+      await openChat(page, `Image context ${width} ${colorScheme}`)
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const connection = yield* api.CreateConnection({
+            kind: "openai-chat",
+            settings: {
+              name: "Synthetic vision",
+              baseUrl: "http://127.0.0.1:9/v1",
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            }
+          })
+          const model = yield* api.AddUserModel({
+            connectionId: connection.id,
+            key: "one-image",
+            overrides: { vision: true, maxImages: 1 }
+          })
+          yield* api.SetGenerationDefaults({
+            defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          })
+        })
+      )
+      await page.reload()
+      const buffer = await drawing(page)
+      await page.getByLabel("Message", { exact: true }).fill("Two studies.")
+      await page.getByLabel("Choose images").setInputFiles([
+        { name: "first.png", mimeType: "image/png", buffer },
+        // Different bytes, so a different media id: identical images are one image to the context.
+        { name: "second.png", mimeType: "image/png", buffer: Buffer.concat([buffer, Buffer.from("second")]) }
+      ])
+      await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(2)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      const message = page.getByRole("article", { name: "Your message" })
+      const limited = message.getByRole("button", {
+        name: "Image 1 isn’t sent to the model: Only the last image is sent to this model"
+      })
+      await expect(limited).toBeVisible()
+      await expect(limited).toHaveAttribute("aria-pressed", "true")
+      await expect(limited).toHaveAttribute("aria-disabled", "true")
+      await expect(message.getByRole("button", { name: /^View image 1 \(not sent/ })).toBeVisible()
+      await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
+      await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible()
+      const screenshots = process.env.SCREENSHOT_DIR
+      if (screenshots) await page.screenshot({ path: join(screenshots, `image-rule-${width}-${colorScheme}.png`) })
+
+      const take = message.getByRole("button", { name: "Take image 2 out of the context" })
+      if (width === 390) {
+        // No hover on a phone: the in-context toggle must already be visible and tappable.
+        await page.mouse.move(0, 0)
+        await expect(take).toHaveCSS("opacity", "1")
+        await take.tap()
+      } else {
+        await message.getByRole("button", { name: "View image 2", exact: true }).hover()
+        await expect(take).toHaveCSS("opacity", "1")
+        await take.click()
+      }
+      const back = message.getByRole("button", { name: "Put image 2 back into the context" })
+      await expect(back).toHaveAttribute("aria-pressed", "true")
+      // The limit counts only what's sent: the first image is sent now.
+      await expect(message.getByRole("button", { name: "Take image 1 out of the context" })).toBeEnabled()
+      await page.mouse.move(0, 0)
+      await expect(back).toHaveCSS("opacity", "1")
+      if (screenshots) await page.screenshot({ path: join(screenshots, `image-taken-out-${width}-${colorScheme}.png`) })
+      await page.reload()
+      await expect(message.getByRole("button", { name: "Put image 2 back into the context" })).toBeVisible()
+      await message.getByRole("button", { name: "Put image 2 back into the context" }).click()
+      await expect(limited).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      await context.close()
+    })
+  }
+}
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`editing a message keeps, adds or removes its images ${width} ${colorScheme}`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme })
+      const page = await context.newPage()
+      await openChat(page, `Edit images ${width} ${colorScheme}`)
+      const buffer = await drawing(page)
+      await page.getByLabel("Message", { exact: true }).fill("A study to revise.")
+      await page.getByLabel("Choose images").setInputFiles({ name: "study.png", mimeType: "image/png", buffer })
+      await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      const message = page.getByRole("article", { name: "Your message" })
+      await expect(message.getByRole("button", { name: "View image 1" })).toBeVisible()
+      await showActions(message)
+      await message.getByRole("button", { name: "Edit", exact: true }).click()
+      const images = message.getByRole("list", { name: "Images of this version" })
+      await expect(images.getByRole("img")).toHaveCount(1)
+      // The editor's own controls stand in for the message's images while it's open.
+      await expect(message.getByRole("button", { name: "View image 1" })).toHaveCount(0)
+      await message.getByLabel("Choose images for this version").setInputFiles({
+        name: "revision.png",
+        mimeType: "image/png",
+        buffer: Buffer.concat([buffer, Buffer.from("revision")])
+      })
+      await expect(images.getByRole("img")).toHaveCount(2)
+      await images.getByRole("button", { name: "Remove study.png" }).click()
+      await expect(images.getByRole("img")).toHaveCount(1)
+      // An image-only edit is a server draft, even though its text never changed.
+      await expect(message.getByText("Uploading…", { exact: true })).toHaveCount(0)
+      await expect
+        .poll(() =>
+          asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+            Effect.gen(function* () {
+              const chats = yield* api.ListChats({ limit: 500, before: null })
+              const chat = chats.find((item) => item.title === `Edit images ${width} ${colorScheme}`)!
+              const drafts = yield* api.MessageDrafts({ chatId: chat.id })
+              return drafts[0]?.images?.map((image) => image.altText)
+            })
+          )
+        )
+        .toEqual(["revision.png"])
+      await page.reload()
+      await expect(images.getByRole("img", { name: "revision.png" })).toBeVisible()
+      const screenshots = process.env.SCREENSHOT_DIR
+      if (screenshots) await page.screenshot({ path: join(screenshots, `edit-images-${width}-${colorScheme}.png`) })
+      const elsewhere = await browser.newContext({ viewport: { width, height: 900 }, colorScheme })
+      await apiLogin(elsewhere.request, server(), ADMIN.handle, ADMIN.password)
+      const remote = await elsewhere.newPage()
+      await remote.goto(page.url())
+      const remoteMessage = remote.getByRole("article", { name: "Your message" })
+      await expect(
+        remoteMessage.getByRole("list", { name: "Images of this version" }).getByRole("img", { name: "revision.png" })
+      ).toBeVisible()
+      await remoteMessage.getByRole("button", { name: "Save", exact: true }).click()
+      await expect(remoteMessage.getByRole("list", { name: "Images of this version" })).toHaveCount(0)
+      await page.reload()
+      await elsewhere.close()
+      await expect(images).toHaveCount(0)
+      await expect(message.getByRole("button", { name: /^View image/ })).toHaveCount(1)
+      await expect(message.getByRole("img", { name: "revision.png" })).toBeVisible()
+      // Restoring an amendment brings back both the text and the earlier image set.
+      await messageMenu(message, "Saved amendment history")
+      const history = page.getByRole("dialog", { name: "Saved amendment history" })
+      await expect(history).toContainText("1 image")
+      if (screenshots)
+        await page.screenshot({ path: join(screenshots, `image-amendments-${width}-${colorScheme}.png`) })
+      await history.getByRole("button", { name: "Restore saved text" }).first().click()
+      await expect(message.getByRole("img", { name: "study.png" })).toBeVisible()
+      await expect(message.getByRole("img", { name: "revision.png" })).toHaveCount(0)
+      // The composer's attachments were never touched by the editor.
+      await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      await context.close()
+    })
+  }
+}
+
+test("a generated version's editor adds pasted/dropped images to a new version and waits for upload", async ({
+  page
+}) => {
+  await openChat(page, "Generated image edit")
+  await page.getByLabel("Message", { exact: true }).fill("Describe this harbor.")
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  const reply = page.getByRole("article", { name: "Reply" }).last()
+  await expect(reply).toBeVisible()
+  await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+  await showActions(reply)
+  await reply.getByRole("button", { name: "Edit", exact: true }).click()
+  const buffer = await drawing(page)
+  const transfer = async (kind: "paste" | "drop", name: string) => {
+    await reply.locator("form").evaluate(
+      (form, { kind, name, base64 }) => {
+        const data = new DataTransfer()
+        data.items.add(new File([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], name, { type: "image/png" }))
+        form.dispatchEvent(
+          kind === "paste"
+            ? new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true })
+            : new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true })
+        )
+      },
+      { kind, name, base64: buffer.toString("base64") }
+    )
+  }
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/chat/image", async (route) => {
+    await held
+    await route.continue()
+  })
+  await transfer("paste", "pasted-edit.png")
+  await expect(reply.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+  release()
+  const images = reply.getByRole("list", { name: "Images of this version" })
+  await expect(images.getByRole("img", { name: "pasted-edit.png" })).toBeVisible()
+  await page.unroute("**/chat/image")
+  await transfer("drop", "dropped-edit.png")
+  await expect(images.getByRole("img")).toHaveCount(2)
+  await reply.getByRole("button", { name: "Save", exact: true }).click()
+  // The edit stays in the same speaker's reply slot, alongside the original version.
+  const edited = reply
+  await expect(edited.getByRole("button", { name: /^View image/ })).toHaveCount(2)
+  await expect(edited.getByRole("group", { name: "Versions" })).toContainText("2/2")
+  await edited.getByRole("button", { name: "Previous version" }).click()
+  await expect(reply.getByRole("button", { name: /^View image/ })).toHaveCount(0)
+  await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
 })

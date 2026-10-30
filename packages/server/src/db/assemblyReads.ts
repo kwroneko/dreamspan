@@ -5,12 +5,14 @@ import { inFork, viewAt } from "./forkState.ts"
 // Context assembly and rebuilding in the reader workers (ARCHITECTURE §15).
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { withAssemblyModules } from "../assembler/modules.ts"
 import { WorkerAssembler } from "../assembler/assembler.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
+import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import {
@@ -20,7 +22,8 @@ import {
   type WireContext,
   generationOf
 } from "../assembler/types.ts"
-import { sqlSources } from "./assemblySources.ts"
+import type { RequestImage } from "../assembler/types.ts"
+import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousHistoryStart } from "./historyStart.ts"
 import { readDefaults, readGlobalLorebooks } from "./generationSettings.ts"
 import { readCardPromptUse } from "./lorebookSettings.ts"
@@ -174,8 +177,57 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               WHERE c.id = ${chosen.connection} AND c.owner_user_id = ${userId}
                 AND c.deleted_at IS NULL AND c.purged_at IS NULL`
           : []
+        const nextFork = (yield* viewAt(sql, chatId, sources.pins().target.parentSlotId)) as ForkId | null
+        // Composer uploads already belong to a server-backed, owner/fork-scoped draft.
+        // Estimate them before Send with the same registered rules and stored facts as history.
+        const draftImages = yield* sql<RequestImage>`SELECT m.id AS mediaId, m.sha256, m.width, m.height
+          FROM drafts d JOIN composer_images i ON i.draft_id=d.id JOIN media_assets m ON m.id=i.media_id
+          WHERE d.user_id=${userId} AND d.target_kind='composer' AND d.target_id=${chatId}
+            AND d.field=${nextFork ?? ""} AND i.status='active' ORDER BY i.rowid`
+        let imagePreview = next instanceof AssemblyFailed ? {} : nextImages(next)
+        if (resolved && draftImages.length) {
+          const facts = yield* readImageTokenFacts(
+            sql,
+            userId,
+            { connectionId: resolved.connectionId, kind: resolved.kind, modelKey: resolved.key },
+            draftImages.flatMap((image) => (image.sha256 ? [image.sha256] : []))
+          )
+          const target = { kind: resolved.kind, api: resolved.api, model: resolved.key }
+          const history = next instanceof AssemblyFailed ? [] : next.request.messages
+          let remaining = resolved.maxImages ?? 4
+          const messages = [
+            ...history,
+            {
+              role: "user" as const,
+              content: "",
+              images: draftImages.map((image) => ({
+                ...image,
+                estimate: estimateImage(image, target, assembler.imageTokens.list(), facts)
+              }))
+            }
+          ]
+            .toReversed()
+            .map((message) => ({
+              ...message,
+              images: (message.images ?? [])
+                .toReversed()
+                .map((image) => ({
+                  ...image,
+                  estimate: {
+                    ...(image.estimate ?? { tokens: null, basis: "unknown" as const }),
+                    ...(image.estimate?.sent === false || resolved.vision === false || remaining-- <= 0
+                      ? { sent: false as const }
+                      : {})
+                  }
+                }))
+                .reverse()
+            }))
+            .reverse()
+          // The regular snapshot stays unchanged: these images are still drafts.
+          imagePreview = nextImages({ request: { messages }, inputs: { model: resolved } })
+        }
         const boundary = {
-          forkId: (yield* viewAt(sql, chatId, sources.pins().target.parentSlotId)) as ForkId | null,
+          forkId: nextFork,
           presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
           ...(chosen === undefined
             ? {}
@@ -211,7 +263,10 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               : null,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
-          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth
+          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
+          // The next request's images, and those whose model hasn't counted them (for ImageTokenCounts).
+          ...imagePreview,
+          ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut })
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }
@@ -247,7 +302,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
                   changed
                 }
         }
-      }).pipe(inFork(sql, chatId, forkId, leafSlotId ?? null), query("CacheWarmth")),
+      }).pipe(inFork(sql, chatId, forkId, leafSlotId ?? null), query("CacheWarmth"), (effect) =>
+        withAssemblyModules(assembler, effect)
+      ),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),

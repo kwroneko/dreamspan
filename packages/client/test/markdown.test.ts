@@ -13,7 +13,11 @@ beforeEach(() => {
 })
 afterEach(() => dispose())
 
-const render = (text: string, streaming = false) => renderToStaticMarkup(createElement(Markdown, { text, streaming }))
+// Position spans are transparent to the formatting assertions below.
+const render = (text: string, streaming = false) =>
+  renderToStaticMarkup(createElement(Markdown, { text, streaming }))
+    .replace(/<span data-source-map="[^"]*">([^<]*)<\/span>/g, "$1")
+    .replace(/ data-source-map="[^"]*"/g, "")
 
 /** Characters added to the blocks of `text` by copying definitions. */
 const copied = (text: string) => {

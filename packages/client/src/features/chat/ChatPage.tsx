@@ -4,6 +4,7 @@ import {
   ChatSurfaceProviders,
   chatOverlays,
   chatComposer,
+  chatComposerNotes,
   timelineRails,
   timelineBoundaries,
   timelineSummaries
@@ -635,6 +636,7 @@ function ChatSurface({
               />
             )}
             <CacheIndicator warmth={view.cache} />
+            <SlotOutlet slot={chatComposerNotes} props={{ view }} />
             <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show }} />
             <SlotOutlet slot={chatOverlays} props={{ session, view }} />
           </div>
