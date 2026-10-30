@@ -15,7 +15,13 @@ function rendered(text: string, sourceText = text) {
   const leaves = [...html.matchAll(/<(?:span|code|div|br)[^>]*data-source-map="([^"]+)"[^>]*>/g)].map((match) => {
     const map = JSON.parse(decodeHtml(match[1]!)) as SourceMap
     let tail = html.slice(match.index + match[0].length)
-    if (map.code) tail = tail.slice(tail.indexOf("<code>") + 6).split("</code>")[0]!
+    if (map.code)
+      tail = tail
+        .slice(tail.indexOf("<code>") + 6)
+        .split("</code>")[0]!
+        .replaceAll("\n", "")
+        .replace(/<span class="block">/g, "\n")
+        .slice(1)
     const value = map.br ? "\n" : decodeHtml(tail.replace(/<[^>]*>/g, "")).slice(0, map.length)
     return { map, value }
   })
@@ -73,7 +79,7 @@ describe("rendered message source offsets", () => {
   )
   it("keeps code literals and multiline offsets, excluding the displayed language label", () => {
     const text = "```js\n&amp; \\*hello\\*\nnext\n```"
-    const value = "&amp; \\*hello\\*next"
+    const value = "&amp; \\*hello\\*\nnext"
     expect(copied(text, value)).toBe(text)
     expect(copied(text, value, 1, 4)).toBe("amp")
     expect(
@@ -91,7 +97,7 @@ describe("rendered message source offsets", () => {
     const text = "````\nhello````"
     expect(copied(text, "hello````", 5, 9)).toBe("````")
     expect(copied(text, "hello````")).toBe(text)
-    expect(copied("````\nhello\n```", "hello```", 5, 8)).toBe("```")
+    expect(copied("````\nhello\n```", "hello\n```", 6, 9)).toBe("```")
   })
   it("includes link syntax only at the selected label's edges", () => {
     const text = "Before [harbor](https://example.com/h) after"
@@ -151,7 +157,13 @@ describe("rendered message source offsets", () => {
   it("keeps CRLF offsets in normalized code and soft breaks", () => {
     expect(copied("Before `hello\r\nthere` after", "hello there", 6, 11)).toBe("there`")
     expect(copied("first\r\nsecond", "second", 1, 4)).toBe("eco")
-    expect(copied("```js\r\nhello\r\nthere\r\n```", "hellothere", 5, 8)).toBe("the")
+    expect(copied("```js\r\nhello\r\nthere\r\n```", "hello\nthere", 6, 9)).toBe("the")
+  })
+  it("maps individual code line breaks, including blank lines and CRLF", () => {
+    expect(copied("```\na\nb\n```", "a\nb", 1, 2)).toBe("\n")
+    expect(copied("```\na\n\nb\n```", "a\n\nb", 1, 2)).toBe("\n")
+    expect(copied("```\na\n\nb\n```", "a\n\nb", 2, 3)).toBe("\n")
+    expect(copied("```\r\na\r\nb\r\n```", "a\nb", 1, 2)).toBe("\r\n")
   })
   it("maps a blocked image's displayed alt text, excluding its generated label", () => {
     const text = "Before ![harbor](https://example.com/h.png) after"

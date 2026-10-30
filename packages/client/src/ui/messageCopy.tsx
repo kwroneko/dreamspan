@@ -35,11 +35,23 @@ export const messageCopyHandlers = makeRegistry<{
 const bodyAt = (node: Node) =>
   (node.nodeType === 1 ? (node as Element) : node.parentElement)?.closest("[data-message-source]")
 
-function textOffset(element: Element, node: Node, offset: number): number {
+function textOffset(element: Element, node: Node, offset: number, code = false): number {
   const prefix = element.ownerDocument.createRange()
   prefix.selectNodeContents(element)
   prefix.setEnd(node, offset)
-  return prefix.toString().length
+  let breaks = 0
+  if (code) {
+    const lines = [...element.querySelectorAll(":scope > span.block")]
+    breaks =
+      node === element
+        ? Math.min(offset, Math.max(0, lines.length - 1))
+        : Math.max(
+            0,
+            lines.findIndex((line) => line.contains(node))
+          )
+  }
+  // Empty line spans contain a display-only newline to give them height.
+  return (code ? prefix.toString().replaceAll("\n", "") : prefix.toString()).length + breaks
 }
 
 function clippedRange(range: Range, element: Element, selectNode = false): Range | null {
@@ -78,27 +90,47 @@ function renderedHtml(range: Range, body: Element): string {
   for (const code of holder.querySelectorAll("pre code")) {
     for (const [index, line] of code.querySelectorAll(":scope > span.block").entries()) {
       if (index) code.insertBefore(body.ownerDocument.createTextNode("\n"), line)
+      if (line.textContent === "\n") line.textContent = ""
       line.classList.remove("block")
     }
   }
   return holder.outerHTML
 }
 
+/** Selection.toString retains browser layout breaks that Range.toString omits.
+ * Restore the original selection, including its direction, before returning. */
+function nativeText(range: Range): string {
+  const selection = range.startContainer.ownerDocument!.getSelection()!
+  const ranges = Array.from({ length: selection.rangeCount }, (_, i) => selection.getRangeAt(i).cloneRange())
+  const { anchorNode, anchorOffset, focusNode, focusOffset } = selection
+  try {
+    selection.removeAllRanges()
+    selection.addRange(range)
+    return selection.toString()
+  } finally {
+    selection.removeAllRanges()
+    if (ranges.length === 1 && anchorNode && focusNode)
+      selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset)
+    else for (const saved of ranges) selection.addRange(saved)
+  }
+}
+
 function copyStoredSelection(range: Range): CopiedSelection | null {
-  const startBody = bodyAt(range.startContainer)
-  const endBody = bodyAt(range.endContainer)
-  if (!startBody || !endBody || !bodies.has(startBody) || !bodies.has(endBody) || range.collapsed) return null
+  if (range.collapsed) return null
+  const document = range.startContainer.ownerDocument!
   const slices: string[] = []
   const html: string[] = []
-  let handled = false
-  for (const body of startBody.ownerDocument.querySelectorAll("[data-message-source]")) {
+  let firstBody: Element | undefined
+  let lastBody: Element | undefined
+  for (const body of document.querySelectorAll("[data-message-source]")) {
     const text = bodies.get(body)
     if (text === undefined) continue
     const selection = clippedRange(range, body)
     if (!selection) continue
     const mapped = body.querySelectorAll("[data-source-map]")
     if (!mapped.length) continue
-    handled = true
+    firstBody ??= body
+    lastBody = body
     html.push(renderedHtml(selection, body))
     let from: number | undefined
     let to: number | undefined
@@ -110,8 +142,8 @@ function copyStoredSelection(range: Range): CopiedSelection | null {
       if (!selected) continue
       const offsets = selectedSource(
         map,
-        map.br ? 0 : textOffset(content, selected.startContainer, selected.startOffset),
-        map.br ? 1 : textOffset(content, selected.endContainer, selected.endOffset)
+        map.br ? 0 : textOffset(content, selected.startContainer, selected.startOffset, map.code),
+        map.br ? 1 : textOffset(content, selected.endContainer, selected.endOffset, map.code)
       )
       if (!offsets) continue
       from ??= offsets[0]
@@ -121,31 +153,60 @@ function copyStoredSelection(range: Range): CopiedSelection | null {
       slices.push(text.slice(from, to))
     }
   }
-  return handled ? { text: slices.join("\n\n"), html: html.join("") } : null
+  if (!firstBody || !lastBody) return null
+  let text = slices.join("\n\n")
+  if (!bodyAt(range.startContainer)) {
+    const prefix = range.cloneRange()
+    prefix.setEnd(firstBody, 0)
+    text = nativeText(prefix) + text
+    html.unshift(renderedHtml(prefix, document.documentElement))
+  }
+  if (!bodyAt(range.endContainer)) {
+    const suffix = range.cloneRange()
+    suffix.setStart(lastBody, lastBody.childNodes.length)
+    const throughBody = range.cloneRange()
+    throughBody.setEnd(lastBody, lastBody.childNodes.length)
+    // Reading the suffix alone suppresses a paragraph break at its start.
+    // Take its text from the original selection to retain the native boundary.
+    text += nativeText(range).slice(nativeText(throughBody).length)
+    html.push(renderedHtml(suffix, document.documentElement))
+  }
+  return { text, html: html.join("") }
 }
 
-/** One listener also handles a selection crossing several message bodies. */
+/** Copy and native selection drags share the effective registered handler. */
 export function registerMessageCopy() {
   const dispose = messageCopyHandlers.register({ id: "message.source-copy", order: 0, copy: copyStoredSelection })
-  const onCopy = (event: ClipboardEvent) => {
+  const transfer = (event: ClipboardEvent | DragEvent, data: DataTransfer | null) => {
     const active = document.activeElement
     if (active?.closest('input, textarea, [contenteditable="true"]')) return
     const selection = document.getSelection()
-    if (!event.clipboardData || !selection?.rangeCount || selection.isCollapsed || event.defaultPrevented) return
+    if (!data || !selection?.rangeCount || selection.isCollapsed || event.defaultPrevented) return
     const range = selection.getRangeAt(0)
+    // A stale selection must not replace an unrelated link/image drag's payload.
+    if (event.type === "dragstart" && (!(event.target instanceof Node) || !range.intersectsNode(event.target))) return
     const handlers = [...messageCopyHandlers.list()].sort((a, b) => b.order - a.order)
     for (const handler of handlers) {
       const copied = handler.copy(range)
       if (!copied) continue
-      event.clipboardData.setData("text/plain", copied.text)
-      event.clipboardData.setData("text/html", copied.html)
-      event.preventDefault()
+      data.setData("text/plain", copied.text)
+      data.setData("text/html", copied.html)
+      // Cancelling dragstart would cancel the transfer itself.
+      if (event.type === "copy") event.preventDefault()
       return
     }
   }
-  if (typeof document !== "undefined") document.addEventListener("copy", onCopy)
+  const onCopy = (event: ClipboardEvent) => transfer(event, event.clipboardData)
+  const onDragStart = (event: DragEvent) => transfer(event, event.dataTransfer)
+  if (typeof document !== "undefined") {
+    document.addEventListener("copy", onCopy)
+    document.addEventListener("dragstart", onDragStart)
+  }
   return () => {
     dispose()
-    if (typeof document !== "undefined") document.removeEventListener("copy", onCopy)
+    if (typeof document !== "undefined") {
+      document.removeEventListener("copy", onCopy)
+      document.removeEventListener("dragstart", onDragStart)
+    }
   }
 }

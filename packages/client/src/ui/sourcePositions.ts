@@ -163,13 +163,15 @@ export function sourcePositions({ offsets }: { offsets: ReadonlyArray<SourceChar
         }
         // Code indentation is a parser-removed prefix. Align each literal line at
         // its suffix, so an intentional leading space doesn't map to indentation.
-        // Streamdown renders block spans per line, without newline text nodes.
+        // Keep logical newlines even though Streamdown renders block spans per
+        // line without newline text nodes. DOM endpoint mapping accounts for them.
         if (blockCode) {
           chars = []
           const lines = raw.split("\n")
           let cursor = at
-          for (const [index, line] of value.split("\n").entries()) {
+          for (const [index, line] of value.replace(/\n$/, "").split("\n").entries()) {
             const original = lines[index] ?? ""
+            if (index) chars.push(sourceRange(cursor - 1, cursor))
             const prefix = original.endsWith(line) ? original.length - line.length : 0
             for (const range of textRanges(line, original.slice(prefix), cursor + prefix, true))
               chars.push(range ? sourceRange(range[0], range[1]) : null)
