@@ -50,30 +50,6 @@ import {
   useVersionNavigation
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
-import type { RefId } from "@rp/shared/library.ts"
-
-/** Issues the preset's prompt order causes, which the preset editor fixes (DESIGN §2.2). */
-const PRESET_ISSUES: ReadonlySet<string> = new Set(["direction_prompt_missing"])
-
-/** Opens the current preset in the editor beside the chat, where there is one to edit. */
-function OpenPreset({ session }: { session: ChatSession }) {
-  const workspace = usePresetWorkspace() as ReturnType<typeof usePresetWorkspace> | null
-  const ref = session.snapshot().history?.preset?.ref
-  if (!workspace || !ref) return null
-  return (
-    <>
-      {" "}
-      <button
-        type="button"
-        className="text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        onClick={() => workspace.open(ref as RefId)}
-      >
-        Open the preset editor
-      </button>
-    </>
-  )
-}
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -793,10 +769,7 @@ export const Message = memo(function Message({
             </summary>
             <ul className="mt-1 list-disc pl-5">
               {version.context.issues.map((issue, i) => (
-                <li key={i}>
-                  {issue.message}
-                  {PRESET_ISSUES.has(issue.kind) && <OpenPreset session={session} />}
-                </li>
+                <li key={i}>{issue.message}</li>
               ))}
             </ul>
           </details>
