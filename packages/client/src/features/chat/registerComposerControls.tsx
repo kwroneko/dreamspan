@@ -152,7 +152,7 @@ export const registerComposerControls = () => [
     order: 40,
     placement: "actions",
     available: ({ guidance }) => !guidance,
-    run: ({ hasText, send, replyNow }, source) => (source === "keyboard" || hasText ? send() : replyNow()),
+    run: ({ hasText, send, replyNow }) => (hasText ? send() : replyNow()),
     component: ({ sendLabel, sendHint, busy, ready, hasText, replier, invoke }) => (
       <SquareIconButton
         label={sendLabel}
