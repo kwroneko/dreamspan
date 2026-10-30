@@ -51,7 +51,7 @@ function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
         open={open}
         onOpenChange={setOpen}
         title="Earlier draft text"
-        description="Restore any earlier text of this edit. Restoring keeps the text you have now in this history."
+        description="Restore any earlier text and images of this edit. Restoring keeps the current draft in this history."
       >
         {error && (
           <p role="alert" className="text-sm text-danger">
@@ -121,7 +121,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
       wide
       onOpenChange={(open) => !open && closeDialog()}
       title="Saved amendment history"
-      description="Earlier saved text of this human-written version. Restoring changes only this fork and keeps the current text in history."
+      description="Earlier saved text and images of this human-written version. Restoring changes only this fork and keeps the current version in history."
     >
       {error && (
         <p role="alert" className="text-sm text-danger">
@@ -136,7 +136,10 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
         <ol className="flex flex-col gap-3 overflow-auto">
           {states.map((state) => (
             <li key={state.id} className="rounded-md border border-border p-3">
-              <p className="text-sm text-muted">{new Date(state.at).toLocaleString()}</p>
+              <p className="text-sm text-muted">
+                {new Date(state.at).toLocaleString()}
+                {state.images !== undefined && ` · ${state.images.length} image${state.images.length === 1 ? "" : "s"}`}
+              </p>
               <RevisionComparison label="Compare with saved text" before={state.content} after={base.version.content} />
               <Button
                 disabled={busy}

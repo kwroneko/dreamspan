@@ -5,6 +5,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
+import { completeFixture } from "./support/lcmFixtures.ts"
 import { png, textChunk } from "./formats/support.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -154,4 +155,57 @@ describe("image exclusion", () => {
       )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
+  it.live("marks images covered by a summary using the actual assembly cursor", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client(),
+        writer = yield* Writer
+      const userId = (yield* api.Whoami()).id as UserId
+      const image = yield* upload(png(textChunk("fixture", "summarized")))
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Summary image reason",
+          baseUrl: "http://127.0.0.1:9/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "vision", overrides: { vision: true } })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      const chat = yield* api.CreateChat({ title: "Summarized image" })
+      const { entry } = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: null,
+          branch: false,
+          content: "A sketch of a harbor",
+          images: [image],
+          reply: false
+        })
+      )
+      const { entry: tail } = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: entry.slotId,
+          branch: false,
+          content: "After the sketch",
+          reply: false
+        })
+      )
+      yield* completeFixture(config.dataDir, writer, userId, chat.id, [
+        { slotId: entry.slotId, versionId: entry.version.id, amendCount: 0 }
+      ])
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: tail.slotId })
+      assert.strictEqual(next.summarizedThrough, entry.depth)
+      assert.deepStrictEqual(
+        next.images?.ranges.find((range) => range.rule === "summary"),
+        { from: 0, to: entry.depth, rule: "summary", message: "Covered by a summary" }
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })

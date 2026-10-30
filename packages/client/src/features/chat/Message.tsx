@@ -244,7 +244,7 @@ function Editor({
   onSave: () => void
   onCancel: () => void
 }) {
-  const { text, error, conflict } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [original, setOriginal] = useState<Version | undefined>(source)
   useEffect(() => {
     if (draft.target._tag !== "Edit" || source) return
@@ -308,7 +308,7 @@ function Editor({
         />
       )}
       <div className="flex gap-2">
-        <Button type="submit" variant="primary">
+        <Button type="submit" variant="primary" disabled={imagesBusy}>
           <Icon name="check" />
           {saveLabel}
         </Button>
@@ -756,8 +756,7 @@ export const Message = memo(function Message({
                   : undefined
               if (target._tag === "Edit" && source === undefined) return
               const submitted = await editor.ready()
-              const { text, draft } = submitted
-              const { images } = editor.snapshot()
+              const { text, draft, images } = submitted
               const outcome =
                 editing === "edit"
                   ? await session.edit({ ...entry, version: source! }, text, draft, images)

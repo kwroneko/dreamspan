@@ -17,7 +17,7 @@ import {
   type Patch
 } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { MessageImages, EntityId } from "@rp/shared/chat.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
@@ -30,6 +30,7 @@ interface DraftRow {
   readonly target_id: string
   readonly field: string
   readonly content: string
+  readonly images_json: string | null
   readonly status: Draft["status"]
   readonly base_revision: string | null
   readonly row_version: number
@@ -57,6 +58,8 @@ interface Base {
 
 interface EntryRow {
   readonly seq: number
+  readonly images_before_json: string | null
+  readonly images_after_json: string | null
   readonly kind: "edit" | "restore"
   readonly first_at: number
   readonly at: number
@@ -103,6 +106,10 @@ const formChange = (before: string, after: string) => {
   return { paths: paths.sort().join("\n"), destructive }
 }
 
+const imageJson = (images: MessageImages) =>
+  JSON.stringify(images.map((image) => ({ mediaId: image.mediaId, altText: image.altText ?? "" })))
+const imageFields = (json: string | null) => (json === null ? {} : { images: JSON.parse(json) as MessageImages })
+
 const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | null = null) =>
   new Draft({
     recovered,
@@ -110,6 +117,7 @@ const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | nu
     id: row.id,
     key: { targetKind: row.target_kind, targetId: row.target_id, field: row.field },
     content: row.content,
+    ...imageFields(row.images_json),
     status: row.status,
     baseRevision: row.base_revision,
     rowVersion: row.row_version,
@@ -248,14 +256,14 @@ export const makeDraftStore = (
   const listActive = (userId: UserId) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
-      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND d.content <> ''
+      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL)
       ORDER BY d.updated_at DESC`.pipe(Effect.map((rows) => rows.map((row) => toDraft(row))))
 
   /** A chat's open message editors (`ListMessageDrafts`): edits of its versions and versions being written. */
   const listMessageDrafts = (userId: UserId, chatId: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
-      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.target_kind = 'queue_edit') AND (
+      FROM drafts d WHERE d.user_id = ${userId} AND d.status = 'active' AND (d.content <> '' OR d.images_json IS NOT NULL OR d.target_kind = 'queue_edit') AND (
         (d.target_kind = 'version_edit' AND d.target_id IN (SELECT v.id FROM versions v JOIN slots s ON s.id = v.slot_id
           WHERE s.chat_id = ${chatId} AND v.deleted_at IS NULL AND s.deleted_at IS NULL))
         OR (d.target_kind = 'scratchpad' AND d.target_id IN (SELECT s.id FROM slots s
@@ -350,14 +358,23 @@ export const makeDraftStore = (
     patch: Patch,
     kind: "edit" | "restore",
     now: number,
-    displaced: boolean
+    displaced: boolean,
+    imagesJson: string | null
   ) =>
     Effect.gen(function* () {
       const form = draft.target_kind === "user_field" ? formChange(draft.content, content) : null
       const keep = displaced || form?.destructive === true
       const [last] =
         yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
-      if (last && !keep && kind === "edit" && last.kind === "edit" && draft.status === "active") {
+      if (
+        last &&
+        !keep &&
+        kind === "edit" &&
+        last.kind === "edit" &&
+        draft.status === "active" &&
+        imagesJson === draft.images_json &&
+        last.images_before_json === last.images_after_json
+      ) {
         const lastPatch = patchOf(last)
         const beforeLast = applyPatch(draft.content, invertPatch(lastPatch))
         const sameField = form === null || formChange(beforeLast, draft.content)?.paths === form.paths
@@ -388,6 +405,8 @@ export const makeDraftStore = (
         start: patch.start,
         removed: patch.removed,
         inserted: patch.inserted,
+        images_before_json: draft.images_json,
+        images_after_json: imagesJson,
         displaced: keep ? 1 : 0
       })}`
       return yield* retain(draft, content)
@@ -405,19 +424,24 @@ export const makeDraftStore = (
     content: string,
     kind: "edit" | "restore",
     baseRevision: string | null,
-    displaced = false
+    displaced = false,
+    imagesJson: string | null = draft.images_json
   ) =>
     Effect.gen(function* () {
       const at = now()
       const patch = diffPatch(draft.content, content)
       // Saving the same text against a new base revision only moves the base.
       const sameBase = baseRevision === null || baseRevision === draft.base_revision
-      if (isEmptyPatch(patch) && draft.status === "active" && sameBase) return 0
-      const recovered = isEmptyPatch(patch) ? 0 : yield* record(draft, content, patch, kind, at, displaced)
+      const imagesChanged = imagesJson !== draft.images_json
+      if (isEmptyPatch(patch) && !imagesChanged && draft.status === "active" && sameBase) return 0
+      const recovered =
+        isEmptyPatch(patch) && !imagesChanged
+          ? 0
+          : yield* record(draft, content, patch, kind, at, displaced, imagesJson)
       // A save after a commit or discard starts a new drafting session.
       const reopened = draft.status !== "active"
-      const textChanged = reopened || !isEmptyPatch(patch)
-      yield* sql`UPDATE drafts SET content = ${content}, status = 'active',
+      const textChanged = reopened || !isEmptyPatch(patch) || imagesChanged
+      yield* sql`UPDATE drafts SET content = ${content}, images_json = ${imagesJson}, status = 'active',
                    base_revision = ${baseRevision ?? draft.base_revision},
                    row_version = row_version + 1,
                    text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
@@ -426,7 +450,13 @@ export const makeDraftStore = (
       return recovered
     })
 
-  const insert = (userId: UserId, key: DraftKey, content: string, baseRevision: string | null) => {
+  const insert = (
+    userId: UserId,
+    key: DraftKey,
+    content: string,
+    baseRevision: string | null,
+    imagesJson: string | null = null
+  ) => {
     const at = now()
     return sql`INSERT INTO drafts ${sql.insert({
       id: uuidv7(),
@@ -435,6 +465,7 @@ export const makeDraftStore = (
       target_id: key.targetId,
       field: key.field,
       content,
+      images_json: imagesJson,
       base_revision: baseRevision,
       status: "active",
       created_at: at,
@@ -467,7 +498,12 @@ export const makeDraftStore = (
     draft: DraftRow,
     base: Base | null,
     content: string,
-    options: { readonly baseRevision: string | null; readonly ended: "recover" | "reopen"; readonly next?: boolean }
+    options: {
+      readonly baseRevision: string | null
+      readonly ended: "recover" | "reopen"
+      readonly next?: boolean
+      readonly images?: MessageImages | undefined
+    }
   ) =>
     Effect.gen(function* () {
       const ended = base !== null && base.session !== null && base.session !== draft.session
@@ -482,9 +518,19 @@ export const makeDraftStore = (
       const [last] = changed
         ? yield* sql<EntryRow>`SELECT * FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC LIMIT 1`
         : []
+      const imagesJson =
+        options.images === undefined
+          ? draft.status === "active"
+            ? draft.images_json
+            : null
+          : imageJson(options.images)
       const displaced =
-        changed && draft.content !== content
-          ? new DraftDisplacement({ at: last?.at ?? draft.created_at, content: draft.content })
+        changed && (draft.content !== content || draft.images_json !== imagesJson)
+          ? new DraftDisplacement({
+              at: last?.at ?? draft.created_at,
+              content: draft.content,
+              ...imageFields(draft.images_json)
+            })
           : null
       // On another tab's text, the draft keeps the revision that text was started from.
       const recovered = yield* update(
@@ -492,7 +538,8 @@ export const makeDraftStore = (
         content,
         "edit",
         ended ? (options.baseRevision ?? draft.base_revision) : changed ? null : options.baseRevision,
-        changed
+        changed,
+        imagesJson
       )
       return { draft: toDraft((yield* byId(draft.id))!, recovered, displaced), recovered: recovered > 0 }
     })
@@ -507,6 +554,7 @@ export const makeDraftStore = (
     readonly key: DraftKey
     readonly draftId: string | null
     readonly content: string
+    readonly images?: MessageImages | undefined
     readonly base: Base | null
     readonly baseRevision: string | null
     readonly checkTarget: Effect.Effect<void, NotFound, never>
@@ -527,12 +575,19 @@ export const makeDraftStore = (
         const typedHere = options.draftId === null || options.draftId === existing.id
         const saved = yield* saveOnto(existing, typedHere ? options.base : null, options.content, {
           baseRevision: options.baseRevision,
-          ended: "reopen"
+          ended: "reopen",
+          images: options.images
         })
         return saved.draft
       }
       yield* options.checkTarget
-      yield* insert(options.userId, options.key, options.content, options.baseRevision)
+      yield* insert(
+        options.userId,
+        options.key,
+        options.content,
+        options.baseRevision,
+        options.images === undefined ? null : imageJson(options.images)
+      )
       return toDraft((yield* find(options.userId, options.key))!)
     })
 
@@ -541,12 +596,24 @@ export const makeDraftStore = (
     seq: number,
     expectedRowVersion: number,
     draftId: string = draft.id,
-    picked?: string
+    picked?: string,
+    pickedImages?: MessageImages
   ) =>
     Effect.gen(function* () {
       yield* checkDraft(draft, draftId, expectedRowVersion)
       const content = picked ?? (yield* stateAt(draft, seq))
-      const recovered = yield* update(draft, content, "restore", null)
+      // A history position restores the complete editor state; an explicitly picked
+      // conflict text carries its matching images, or keeps the source's set.
+      const undone = (yield* entries(draft.id)).filter((entry) => entry.seq > seq).at(-1)
+      const imagesJson =
+        picked !== undefined
+          ? pickedImages === undefined
+            ? null
+            : imageJson(pickedImages)
+          : undone
+            ? undone.images_before_json
+            : draft.images_json
+      const recovered = yield* update(draft, content, "restore", null, false, imagesJson)
       return toDraft((yield* find(draft.user_id, toDraft(draft).key))!, recovered)
     })
 
@@ -556,11 +623,12 @@ export const makeDraftStore = (
     draftId: string,
     seq: number,
     expectedRowVersion: number,
-    content?: string
+    content?: string,
+    images?: MessageImages
   ) =>
     Effect.gen(function* () {
       yield* checkIdentity(userId, draftId)
-      return yield* restoreRow(yield* get(userId, key), seq, expectedRowVersion, draftId, content)
+      return yield* restoreRow(yield* get(userId, key), seq, expectedRowVersion, draftId, content, images)
     })
 
   /**
@@ -577,7 +645,7 @@ export const makeDraftStore = (
       yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
       const updatedAt = now()
-      yield* sql`UPDATE drafts SET status = ${outcome}, content = '', row_version = row_version + 1,
+      yield* sql`UPDATE drafts SET status = ${outcome}, content = '', images_json = NULL, row_version = row_version + 1,
                    text_version = row_version + 1, session = session + 1, updated_at = ${updatedAt}
                  WHERE id = ${draft.id}`
       const ended = toDraft(
@@ -585,6 +653,7 @@ export const makeDraftStore = (
           ...draft,
           status: outcome,
           content: "",
+          images_json: null,
           row_version: draft.row_version + 1,
           text_version: draft.row_version + 1,
           session: draft.session + 1,
@@ -623,6 +692,7 @@ export const makeDraftStore = (
       readonly targetKind: DraftKey["targetKind"]
       readonly targetId: string
       readonly content: string | ((field: string) => string | null)
+      readonly images?: MessageImages | undefined
     }
   ) =>
     Effect.gen(function* () {
@@ -633,7 +703,13 @@ export const makeDraftStore = (
       if (draft.target_kind !== destination.targetKind || draft.target_id !== destination.targetId)
         return { draft: null, recovered: 0 }
       const content = typeof destination.content === "string" ? destination.content : destination.content(draft.field)
-      if (draft.status === "active" && draft.session === commitDraft.session && draft.content === content) {
+      if (
+        draft.status === "active" &&
+        draft.session === commitDraft.session &&
+        draft.content === content &&
+        (draft.images_json === null ||
+          (destination.images !== undefined && draft.images_json === imageJson(destination.images)))
+      ) {
         return yield* end(draft, "committed")
       }
       return { draft: toDraft(draft), recovered: 0 }

@@ -687,6 +687,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
       expectedSession: Schema.NullOr(Schema.Int),

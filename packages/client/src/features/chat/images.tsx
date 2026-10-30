@@ -153,18 +153,20 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
         setError("A message can hold at most 32 images.")
         return
       }
-      setBusy(true)
-      setError(null)
-      try {
-        const added = []
-        for (const file of selected)
-          added.push({ mediaId: await uploadImage(file), altText: (file.name || "Pasted image").slice(0, 2000) })
-        draft.setImages([...(draft.snapshot().images ?? images), ...added])
-      } catch (error) {
-        setError(`The image could not be uploaded. ${error instanceof Error ? error.message : ""}`)
-      } finally {
-        setBusy(false)
-      }
+      await draft.uploadImages(async () => {
+        setBusy(true)
+        setError(null)
+        try {
+          const added = []
+          for (const file of selected)
+            added.push({ mediaId: await uploadImage(file), altText: (file.name || "Pasted image").slice(0, 2000) })
+          draft.setImages([...(draft.snapshot().images ?? images), ...added])
+        } catch (error) {
+          setError(`The image could not be uploaded. ${error instanceof Error ? error.message : ""}`)
+        } finally {
+          setBusy(false)
+        }
+      })
     },
     [draft, images]
   )

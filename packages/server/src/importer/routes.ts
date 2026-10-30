@@ -703,6 +703,7 @@ export const layer = Layer.unwrap(
           key: messageDraftKey(message.target),
           draftId: message.draftId,
           content: message.content,
+          ...(message.images === undefined ? {} : { images: message.images }),
           expectedRowVersion: message.expectedRowVersion,
           expectedSession: message.expectedSession,
           baseRevision: message.target._tag === "Queue" ? String(message.target.rowVersion) : null

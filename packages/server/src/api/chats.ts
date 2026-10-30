@@ -503,6 +503,7 @@ export const makeChatHandlers = Effect.gen(function* () {
           versionId,
           forkId,
           content: state.content,
+          ...(state.images === undefined ? {} : { images: state.images }),
           expectedRowVersion,
           commitDraft: null
         })
@@ -528,13 +529,14 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* reader.ListMessageDrafts({ userId: id, chatId })
       }).pipe(internal("MessageDrafts")),
 
-    SaveMessageDraft: ({ target, draftId, content, expectedRowVersion, expectedSession }) =>
+    SaveMessageDraft: ({ target, draftId, content, images, expectedRowVersion, expectedSession }) =>
       Effect.flatMap(userId, (id) =>
         writer.SaveDraft({
           userId: id,
           key: messageDraftKey(target),
           draftId,
           content,
+          ...(images === undefined ? {} : { images }),
           expectedRowVersion,
           expectedSession,
           baseRevision: target._tag === "Queue" ? String(target.rowVersion) : null

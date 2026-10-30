@@ -30,7 +30,7 @@ export const VersionAmendment = Schema.Struct({
   id: Schema.Int,
   content: Schema.String,
   at: Schema.Number,
-  /** The images it had before this amend, when the amend changed them. */
+  /** The complete image set it had before this amendment, including text-only amendments. */
   images: Schema.optionalKey(MessageImages)
 })
 export type VersionAmendment = typeof VersionAmendment.Type
@@ -251,6 +251,7 @@ export const MessageDraftSave = Schema.Struct({
   target: MessageDraftTarget,
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
+  images: Schema.optionalKey(MessageImages),
   expectedRowVersion: Schema.NullOr(Schema.Int),
   expectedSession: Schema.NullOr(Schema.Int)
 })
