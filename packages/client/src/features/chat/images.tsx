@@ -625,13 +625,14 @@ function ImageThumbnails({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const session = controls?.session
-  const leftOut = useSyncExternalStore(session?.subscribe ?? noSubscribe, () => session?.snapshot().history?.images)
-  const editing = useSyncExternalStore(session?.subscribeEditors ?? noSubscribe, () =>
-    controls
+  const readLeftOut = () => session?.snapshot().history?.images
+  const leftOut = useSyncExternalStore(session?.subscribe ?? noSubscribe, readLeftOut, readLeftOut)
+  const readEditing = () =>
+    controls && images.length > 0
       ? session!.editor(`write:${controls.entry.slotId}`) !== undefined ||
         session!.editForSlot(controls.entry.slotId, [controls.entry.version]) !== undefined
       : false
-  )
+  const editing = useSyncExternalStore(session?.subscribeEditors ?? noSubscribe, readEditing, readEditing)
   // The editor shows the images it saves, with their own controls.
   if (!images.length || editing) return null
   return (
