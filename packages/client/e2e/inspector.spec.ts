@@ -119,7 +119,7 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await page.goto(`${server().url}/chats/${chat.id}`)
   await expect(reply(page)).toContainText(REPLY)
   await messageMenu(reply(page), "Context it was generated from")
-  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}/context/${chat.reply}\\?fork=[^&]+$`))
   const messages = page.getByRole("region", { name: "Messages" })
   await expect(messages.getByText("Card “Mira”: description")).toBeVisible()
   await expect(messages.getByText("Preset prompt “Main Prompt”")).toBeVisible()
@@ -135,7 +135,8 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await shoot(page, "inspector")
   // The message sources link back to the chat.
   await messages.getByRole("link", { name: "Message 2" }).click()
-  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}\\?slot=`))
+  // The viewed fork rides along; the chat drops it from the URL once it's the current one.
+  await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}\\?(fork=[^&]+&)?slot=`))
 })
 
 test("an earlier reply and a swipe each open their own request from the message's button", async ({ page }) => {
@@ -183,7 +184,7 @@ test("an earlier reply and a swipe each open their own request from the message'
   // The swipe, the second version of the last reply.
   await showActions(replies.last())
   await replies.last().getByRole("link", { name: "Request it was generated from" }).click()
-  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.swipe}\\?fork=[^&]+$`))
   await expect(page.getByText(/^swipe, /)).toBeVisible()
   const messages = page.getByRole("region", { name: "Messages" })
   // The earlier reply is in its history, by message and version.
@@ -192,7 +193,7 @@ test("an earlier reply and a swipe each open their own request from the message'
   // The earlier reply opens its own request.
   await showActions(replies.first())
   await replies.first().getByRole("link", { name: "Request it was generated from" }).click()
-  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}$`))
+  await expect(page).toHaveURL(new RegExp(`/chats/${made.id}/context/${made.first}\\?fork=[^&]+$`))
   await expect(page.getByText(/^normal, /)).toBeVisible()
   await expect(messages.getByText("The bell rang twice.", { exact: true })).toBeVisible()
 })
@@ -316,6 +317,68 @@ test("a version opened under another chat redirects to its canonical route", asy
     new RegExp(`/chats/${chat.id}\\?slot=`)
   )
 })
+
+// Two forks share a reply but show different versions of it: the inspector, opened from the
+// fork the user is viewing, leads back to that fork, not to the chat's current one (ux Annoying 1).
+for (const width of [1440, 390])
+  test(`the inspector returns to the fork it was opened from, at ${width}`, async ({ page }) => {
+    const EDITED = "The bridge holds, but Mira keeps the ledger."
+    const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const mira = (yield* api.ListCards()).find((card) => card.label === "Mira")!
+        const started = yield* api.StartChat({
+          cards: [mira.entityId as EntityId],
+          persona: null,
+          greeting: 0,
+          first: { _tag: "Send", content: "The tide turned.", speakerEntityId: null }
+        })
+        const chatId = started.chat.id
+        const generated = yield* api.Generate({ chatId, parentSlotId: started.entry.slotId, branch: false })
+        if (generated._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
+        const original = started.chat.currentForkId!
+        const child = yield* api.CreateFork({ chatId, fromForkId: original, atSlotId: generated.entry.slotId })
+        const path = yield* api.ReadPath({
+          chatId,
+          forkId: child.fork.id,
+          leafSlotId: null,
+          range: { _tag: "Bottom" },
+          limit: 100
+        })
+        const shared = path.entries.find((entry) => entry.slotId === generated.entry.slotId)!
+        yield* api.EditVersion({
+          slotId: shared.slotId,
+          forkId: child.fork.id,
+          sourceVersionId: shared.version.id,
+          expectedRowVersion: shared.rowVersion,
+          content: EDITED
+        })
+        return { chatId, original, slot: shared.slotId }
+      })
+    )
+    await page.setViewportSize({ width, height: width < 640 ? 844 : 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    // The child is the current fork and shows the edit; the original still shows the reply.
+    await page.goto(`${server().url}/chats/${made.chatId}`)
+    await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: EDITED })).toBeVisible()
+    await page.goto(`${server().url}/chats/${made.chatId}?fork=${made.original}`)
+    const original = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
+    await expect(original).toBeVisible()
+    await messageMenu(original, "Context it was generated from")
+    await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}$`))
+    // The history sources link to the viewed fork too.
+    const messages = page.getByRole("region", { name: "Messages" })
+    await expect(messages.getByRole("link", { name: "Message 2" })).toHaveAttribute(
+      "href",
+      new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=`)
+    )
+    await shoot(page, `inspector-viewed-fork-${width}`)
+    await page.getByRole("link", { name: "← Back to the reply" }).click()
+    await expect(page).toHaveURL(new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=${made.slot}$`))
+    await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })).toBeVisible()
+    // (The chat list's preview shows the current fork's last message; the messages don't.)
+    await expect(page.getByRole("article").filter({ hasText: EDITED })).toHaveCount(0)
+    await shoot(page, `inspector-viewed-fork-back-${width}`)
+  })
 
 const denseContext = async (page: Page, explanations = false) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

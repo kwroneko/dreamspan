@@ -3,7 +3,7 @@
 // breakpoints between them; then the model, the samplers and what the provider reported.
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type {
   ContextMessage,
@@ -12,8 +12,8 @@ import type {
   InspectorUsage,
   SourceActivation
 } from "@rp/shared/inspectorApi.ts"
-import { Link, Navigate, useParams } from "@tanstack/react-router"
-import { type ReactNode, useMemo, useRef, useState } from "react"
+import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
+import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -68,8 +68,15 @@ const unsent = (source: ContextSource) =>
   (source.activation?.kind === "note" && !source.activation.due) ||
   (source.activation?.kind === "lorebook" && source.activation.status === "skipped")
 
+/**
+ * The fork the inspector was opened from (`?fork=`), as links back into the chat carry it: the
+ * fork being viewed, which needn't be the one the reply was generated in. Empty: the current one.
+ */
+const ViewedFork = createContext<{ readonly fork?: ForkId }>({})
+
 /** What the source is, where it's from: the inspector's own words, never prompt text. */
 function SourceTitle({ source, chatId }: { source: ContextSource; chatId: ChatId }) {
+  const viewed = useContext(ViewedFork)
   const label = (
     <>
       {source.label}
@@ -83,7 +90,7 @@ function SourceTitle({ source, chatId }: { source: ContextSource; chatId: ChatId
           <Link
             to="/chats/$chatId"
             params={{ chatId }}
-            search={{ slot: source.slotId }}
+            search={{ ...viewed, slot: source.slotId }}
             className="text-accent underline-offset-2 hover:underline"
           >
             {label}
@@ -569,6 +576,11 @@ function Inspector({ run }: { run: RunContext }) {
 /** /chats/$chatId/context/$versionId */
 export function ContextPage() {
   const { chatId, versionId } = useParams({ strict: false }) as { chatId: ChatId; versionId: VersionId }
+  const search = useSearch({ strict: false }) as { fork?: unknown }
+  const viewed = useMemo(
+    () => (typeof search.fork === "string" && search.fork !== "" ? { fork: search.fork as ForkId } : {}),
+    [search.fork]
+  )
   useTitle("Request")
   const atom = useMemo(() => AppClient.query("GetRunContext", { versionId }), [versionId])
   return (
@@ -581,17 +593,17 @@ export function ContextPage() {
           run.chatId !== chatId ? (
             <Navigate to="/chats/$chatId/context/$versionId" params={{ chatId: run.chatId, versionId }} replace />
           ) : (
-            <>
+            <ViewedFork.Provider value={viewed}>
               <Link
                 to="/chats/$chatId"
                 params={{ chatId: run.chatId }}
-                search={{ slot: run.slotId }}
+                search={{ ...viewed, slot: run.slotId }}
                 className="text-sm text-muted hover:text-text"
               >
                 ← Back to the reply
               </Link>
               <Inspector run={run} />
-            </>
+            </ViewedFork.Provider>
           )
         }
       </AsyncView>
