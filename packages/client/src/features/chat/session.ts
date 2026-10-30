@@ -903,7 +903,8 @@ export class ChatSession {
           ...(event.budget === undefined ? {} : { budget: event.budget }),
           ...(event.preset === undefined ? {} : { preset: event.preset }),
           ...(event.model === undefined ? {} : { model: event.model }),
-          ...(event.images === undefined ? {} : { images: event.images })
+          ...(event.images === undefined ? {} : { images: event.images }),
+          ...(event.imageTokens === undefined ? {} : { imageTokens: event.imageTokens })
         }
         if (
           JSON.stringify(event.warmth) === JSON.stringify(this.view.cache) &&

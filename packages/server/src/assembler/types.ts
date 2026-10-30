@@ -203,7 +203,7 @@ export interface WireContext {
       readonly parts?: ContextMessage["parts"]
       readonly groups?: ContextMessage["groups"]
       readonly breakpoint?: ContextMessage["breakpoint"]
-      /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
+      /** Digest of final, unredacted text/role/name and sent image content hashes/detail. Never projected into an RPC DTO. */
       readonly digest?: string
       readonly inputs: ReadonlyArray<number>
     }

@@ -2060,6 +2060,11 @@ export class WriteOps extends RpcGroup.make(
 
 export class ReadOps extends RpcGroup.make(
   Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
+  Rpc.make("GetImageTokenCount", {
+    payload: { userId: UserId, sha256: Sha256, kind: Schema.String, modelKey: Schema.String, detail: Schema.String },
+    success: Schema.NullOr(Schema.Int),
+    error: StorageError
+  }),
   Rpc.make("GetCostSettings", { payload: { userId: UserId }, success: CostSettings, error: StorageError }),
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },

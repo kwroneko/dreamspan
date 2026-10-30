@@ -424,6 +424,7 @@ export const squash = (messages: ReadonlyArray<StMessage>): Array<StMessage> => 
         ...last,
         content: `${last.content}\n${message.content}`,
         pieces: [...last.pieces, ...message.pieces],
+        ...(last.images || message.images ? { images: [...(last.images ?? []), ...(message.images ?? [])] } : {}),
         kind: mergedKind(last.kind, message.kind)
       }
     } else {
@@ -507,6 +508,7 @@ const mergeMessages = (
         ...last,
         content: `${last.content}\n\n${message.content}`,
         pieces: [...last.pieces, ...message.pieces],
+        ...(last.images || message.images ? { images: [...(last.images ?? []), ...(message.images ?? [])] } : {}),
         kind: mergedKind(last.kind, message.kind)
       }
     } else {

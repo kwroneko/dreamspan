@@ -62,6 +62,28 @@ import { previousHistoryStart } from "./historyStart.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
+/** Stored image facts for assembly and its draft preview, always inside a reader worker. */
+export const readImageTokenFacts = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  model: { readonly connectionId: string; readonly kind: string; readonly modelKey: string },
+  sha256s: ReadonlyArray<string>
+) =>
+  Effect.gen(function* () {
+    const counts =
+      sha256s.length === 0
+        ? []
+        : yield* sql<{ sha256: string; detail: string; tokens: number }>`
+                SELECT sha256, detail, tokens FROM image_token_counts
+                WHERE owner_user_id = ${userId} AND kind = ${model.kind} AND model_key = ${model.modelKey}
+                  AND sha256 IN ${sql.in(sha256s)}`
+    const samples = yield* sql<{ images: number; pixels: number; tokens: number }>`
+          SELECT images, pixels, tokens FROM image_token_samples
+          WHERE owner_user_id = ${userId} AND connection_id = ${model.connectionId} AND model_key = ${model.modelKey}
+          ORDER BY id DESC LIMIT 20`
+    return { counts: [...counts], samples: [...samples] }
+  })
+
 const decodeEvent = Schema.decodeUnknownEffect(FoldableEvent)
 const decodeCard = Schema.decodeUnknownExit(CardDoc)
 const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
@@ -680,21 +702,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // connection's override, the user's default, the instance's, then ST's default. A level
     // that names something deleted is passed over.
     imageTokenFacts: (model, sha256s) =>
-      Effect.gen(function* () {
-        const counts =
-          sha256s.length === 0
-            ? []
-            : yield* sql<{ sha256: string; detail: string; tokens: number }>`
-                SELECT sha256, detail, tokens FROM image_token_counts
-                WHERE owner_user_id = ${userId} AND kind = ${model.kind} AND model_key = ${model.modelKey}
-                  AND sha256 IN ${sql.in(sha256s)}`
-        const samples = yield* sql<{ images: number; pixels: number; tokens: number }>`
-          SELECT images, pixels, tokens FROM image_token_samples
-          WHERE owner_user_id = ${userId} AND connection_id = ${model.connectionId} AND model_key = ${model.modelKey}
-          ORDER BY id DESC LIMIT 20`
-        pins.imageTokenFacts = { counts: [...counts], samples: [...samples] }
-        return pins.imageTokenFacts
-      }),
+      readImageTokenFacts(sql, userId, model, sha256s).pipe(
+        Effect.map((facts) => {
+          pins.imageTokenFacts = facts
+          return facts
+        })
+      ),
     lcmDefaults: () =>
       Effect.map(defaults, (read) => {
         pins.lcmDefaults = read.lcm ?? null

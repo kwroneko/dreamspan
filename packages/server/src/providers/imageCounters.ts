@@ -63,8 +63,8 @@ const difference = (
   withImage: Effect.Effect<number, ImageCountError>,
   without: Effect.Effect<number, ImageCountError>
 ) =>
-  Effect.flatMap(Effect.all([withImage, without], { concurrency: 2 }), ([a, b]) =>
-    a >= b ? Effect.succeed(a - b) : Effect.fail(new ImageCountError({ message: "the image counted negative" }))
+  Effect.flatMap(Effect.all([withImage, without], { concurrency: 1 }), ([a, b]) =>
+    a > b ? Effect.succeed(a - b) : Effect.fail(new ImageCountError({ message: "the image counted zero or negative" }))
   )
 
 const TEXT = "."

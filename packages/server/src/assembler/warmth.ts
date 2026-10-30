@@ -85,6 +85,10 @@ const reasonAt = (last: ContextSnapshot, next: ContextSnapshot, at: number, desc
     )
   })
   if (changed === undefined) {
+    const before = last.request.messages[at]
+    const after = next.request.messages[at]
+    if (before && after && wireDigest(before) !== wireDigest(after) && (before.images?.length || after.images?.length))
+      return "An image in the reusable context was changed, removed or taken out."
     if (JSON.stringify(last.lcm?.selected) !== JSON.stringify(next.lcm?.selected)) return "The summary layer changed."
     return LAYOUT
   }

@@ -25,7 +25,7 @@ const UNKNOWN_IMAGE_RESERVE = 1024
 
 /** The tokens the budget counts for an image: its figure, else its bound, else the reserve. */
 export const budgetTokens = (estimate: ImageEstimate | undefined) =>
-  estimate === undefined || estimate.sent === false ? 0 : (estimate.tokens ?? estimate.bound ?? UNKNOWN_IMAGE_RESERVE)
+  estimate?.sent === false ? 0 : (estimate?.tokens ?? estimate?.bound ?? UNKNOWN_IMAGE_RESERVE)
 
 /** The request an image goes to: provider kind, wire API and the model as the connection names it. */
 export interface ImageTarget {
@@ -125,8 +125,8 @@ const openAITileTokens = (image: ImageSize, costs: { base: number; tile: number 
   if (detail === "low") return costs.base
   let { width, height } = image
   const fit = Math.min(1, 2048 / Math.max(width, height))
-  width = Math.floor(width * fit)
-  height = Math.floor(height * fit)
+  width = Math.max(1, Math.floor(width * fit))
+  height = Math.max(1, Math.floor(height * fit))
   const shortest = Math.min(width, height)
   if (shortest > 768) {
     const scale = 768 / shortest
@@ -146,8 +146,8 @@ interface PatchSizing {
 export const openAIPatchTokens = (image: ImageSize, sizing: PatchSizing, multiplier: number) => {
   let { width, height } = image
   const fit = Math.min(1, sizing.maxDimension / Math.max(width, height))
-  width = Math.floor(width * fit)
-  height = Math.floor(height * fit)
+  width = Math.max(1, Math.floor(width * fit))
+  height = Math.max(1, Math.floor(height * fit))
   let patches = Math.ceil(width / 32) * Math.ceil(height / 32)
   if (sizing.budget !== null && patches > sizing.budget) {
     const shrink = Math.sqrt((32 ** 2 * sizing.budget) / (width * height))
@@ -157,8 +157,8 @@ export const openAIPatchTokens = (image: ImageSize, sizing: PatchSizing, multipl
         Math.floor((width * shrink) / 32) / ((width * shrink) / 32),
         Math.floor((height * shrink) / 32) / ((height * shrink) / 32)
       )
-    width = Math.floor(width * adjusted)
-    height = Math.floor(height * adjusted)
+    width = Math.max(1, Math.floor(width * adjusted))
+    height = Math.max(1, Math.floor(height * adjusted))
     patches = Math.ceil(width / 32) * Math.ceil(height / 32)
   }
   return Math.ceil(patches * multiplier)
@@ -200,17 +200,13 @@ const patchModel = (model: string): PatchModel | null => {
     sizing: { low: WIDE_6144, high: WIDE_6144, auto: WIDE_6144 },
     ...(note ? { note } : {})
   })
-  const retired = "OpenAI no longer lists this model's sizing; assumed as gpt-5.2's."
   if (/^gpt-5\.2/.test(model)) return legacy(1.2)
   if (/^gpt-4\.1-mini/.test(model)) return legacy(1.62)
-  if (/^gpt-5-mini/.test(model)) return legacy(1.2, retired)
-  if (/^gpt-5-nano/.test(model)) return legacy(1.5, retired)
-  if (/^gpt-4\.1-nano/.test(model)) return legacy(2.46, retired)
-  if (/^o4-mini/.test(model)) return legacy(1.72, retired)
   return null
 }
 
 const tileModel = (model: string): { base: number; tile: number } | null => {
+  if (/^(gpt-5-(mini|nano)|gpt-4\.1-nano)/.test(model)) return null
   if (/^gpt-4o-mini/.test(model)) return { base: 2833, tile: 5667 }
   if (/^(gpt-4o|chatgpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-vision)/.test(model)) return { base: 85, tile: 170 }
   if (/^gpt-5(\.1)?($|-)/.test(model)) return { base: 70, tile: 140 }
@@ -241,15 +237,17 @@ export const openAIImageTokens = (image: ImageSize, model: string, detail: Detai
 /** Before Gemini 3: 258 tokens up to 384×384, else 258 per 768×768 crop (Google's own rough rule). */
 const geminiTileTokens = (image: ImageSize) => {
   if (image.width <= 384 && image.height <= 384) return 258
-  const unit = Math.floor(Math.min(image.width, image.height) / 1.5)
+  const unit = Math.max(1, Math.floor(Math.min(image.width, image.height) / 1.5))
   return Math.ceil(image.width / unit) * Math.ceil(image.height / unit) * 258
 }
 
 /** Gemini 3 bills a fixed figure per media resolution; we send none, which is `high`'s 1120. */
 const GEMINI_3_RESOLUTION = { low: 280, medium: 560, high: 1120, ultra_high: 2240 } as const
 
-export const geminiImageTokens = (image: ImageSize, model: string): RuleEstimate => {
-  const major = Number(/gemini-(\d+)/.exec(upstreamModel(model))?.[1] ?? 0)
+export const geminiImageTokens = (image: ImageSize, model: string): RuleEstimate | null => {
+  const version = /gemini-(\d+)/.exec(upstreamModel(model))
+  if (!version) return null
+  const major = Number(version[1])
   return major >= 3
     ? { tokens: GEMINI_3_RESOLUTION.high, detail: "unspecified" }
     : { tokens: geminiTileTokens(image), note: "Google calls this formula approximate." }
@@ -341,7 +339,7 @@ export interface CalibrationSample {
  * samples' sizes differ (models whose cost grows with resolution), else the mean per image.
  */
 export const calibratedTokens = (samples: ReadonlyArray<CalibrationSample>, image: ImageSize) => {
-  const usable = samples.filter((s) => s.images > 0 && s.tokens >= 0)
+  const usable = samples.filter((s) => s.images > 0 && Number.isFinite(s.tokens) && s.tokens > 0)
   if (usable.length === 0) return null
   const perImage = usable.reduce((n, s) => n + s.tokens, 0) / usable.reduce((n, s) => n + s.images, 0)
   let [nn, np, pp, nt, pt] = [0, 0, 0, 0, 0]
@@ -358,7 +356,7 @@ export const calibratedTokens = (samples: ReadonlyArray<CalibrationSample>, imag
     const a = (nt * pp - np * pt) / determinant
     const b = (nn * pt - np * nt) / determinant
     const fitted = a + b * image.width * image.height
-    if (b >= 0 && fitted > 0) return Math.round(fitted)
+    if (b >= 0 && fitted > 0) return Math.max(1, Math.round(fitted))
   }
-  return Math.round(perImage)
+  return Math.max(1, Math.round(perImage))
 }

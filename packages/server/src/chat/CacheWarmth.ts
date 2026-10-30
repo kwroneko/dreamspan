@@ -46,7 +46,9 @@ export class CacheWarmth extends Context.Service<
               hub.publish(chatId, { _tag: "Cache", ...next })
               // Images the model hasn't counted: counted in the background, then estimated again.
               if (uncounted && Option.isSome(counts))
-                yield* counts.value.request(entry.userId, uncounted, () => schedule(chatId))
+                yield* counts.value.request(entry.userId, uncounted, () => {
+                  for (const [id, watchedEntry] of watched) if (watchedEntry.userId === entry.userId) schedule(id)
+                })
             })
           ),
           Effect.catchTag("NotFound", () => Effect.void),

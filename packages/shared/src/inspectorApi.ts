@@ -295,7 +295,6 @@ export const PresetContext = Schema.Struct({
 })
 export type PresetContext = typeof PresetContext.Type
 
-/** The next request boundary, also available before a first send or without a cache TTL. */
 /** The next request's images, summed (counted in the budget and the cache estimate). */
 const NextImages = Schema.Struct({
   count: Schema.Int,
@@ -333,6 +332,7 @@ export const ImagesLeftOut = Schema.Struct({
 })
 export type ImagesLeftOut = typeof ImagesLeftOut.Type
 
+/** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
   /** The next request's images, when it has any. */
   imageTokens: Schema.optionalKey(NextImages),

@@ -12,14 +12,8 @@ import {
 import { Effect } from "effect"
 import { AssemblySources, need, type AssemblerStage, type ImageTokenFacts } from "./pipeline.ts"
 import type { ContextImage } from "@rp/shared/inspectorApi.ts"
-import type {
-  AssembledRequest,
-  ContextSnapshot,
-  ModelInput,
-  RequestImage,
-  RequestMessage,
-  WireContext
-} from "./types.ts"
+import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
+import { newestImages } from "./images.ts"
 
 /** The detail level our requests send (OpenAI's `auto`; others have none), which counts key on. */
 const SENT_DETAIL = "auto"
@@ -40,11 +34,19 @@ export const estimateImage = (
   facts: ImageTokenFacts
 ): ImageEstimate => {
   const counted = facts.counts.find((c) => c.sha256 === image.sha256 && c.detail === SENT_DETAIL)
-  if (counted) return { tokens: counted.tokens, basis: "counted", detail: SENT_DETAIL }
-  if (!image.width || !image.height) return { tokens: null, basis: "unknown", note: "The image's size isn't recorded." }
+  if (counted && counted.tokens > 0) return { tokens: counted.tokens, basis: "counted", detail: SENT_DETAIL }
+  if (!image.width || !image.height) {
+    const mean = calibratedTokens(
+      facts.samples.map((sample) => ({ ...sample, pixels: 0 })),
+      { width: 0, height: 0 }
+    )
+    return mean === null
+      ? { tokens: null, basis: "unknown", note: "The image's size isn't recorded." }
+      : { tokens: mean, basis: "calibrated" }
+  }
   const size = { width: image.width, height: image.height }
   const rule = ruleEstimate(rules, size, target)
-  if (rule && rule.tokens !== null)
+  if (rule && rule.tokens !== null && Number.isFinite(rule.tokens) && rule.tokens > 0)
     return {
       tokens: rule.tokens,
       basis: "formula",
@@ -53,12 +55,31 @@ export const estimateImage = (
     }
   const calibrated = calibratedTokens(facts.samples, size)
   if (calibrated !== null) return { tokens: calibrated, basis: "calibrated" }
-  return rule
+  return rule?.tokens === null
     ? { tokens: null, basis: "unknown", bound: rule.bound, note: rule.note }
     : { tokens: null, basis: "unknown", note: UNKNOWN_NOTE }
 }
 
 const NO_FACTS: ImageTokenFacts = { counts: [], samples: [] }
+
+/** Match dispatch's cap in final message order, including a moved Newest message marker. */
+export const limitImageEstimates = <T extends { readonly images?: ReadonlyArray<RequestImage> }>(
+  messages: ReadonlyArray<T>,
+  max: number
+): Array<T> => {
+  const newest = newestImages(messages, max)
+  return messages.map((message, m) => ({
+    ...message,
+    ...(message.images
+      ? {
+          images: message.images.map((image, i) => {
+            const { sent: _, ...estimate } = image.estimate ?? { tokens: null, basis: "unknown" as const }
+            return { ...image, estimate: newest.has(`${m}:${i}`) ? estimate : { ...estimate, sent: false as const } }
+          })
+        }
+      : {})
+  }))
+}
 
 /**
  * Estimates every image of the history read, newest first. Images past the model's last-N
@@ -147,7 +168,10 @@ export const contextImage = (image: RequestImage): ContextImage => {
 }
 
 /** The next request's images, summed for the composer, and what to count for it. */
-export const nextImages = (snapshot: ContextSnapshot) => {
+export const nextImages = (snapshot: {
+  readonly request: Pick<AssembledRequest, "messages">
+  readonly inputs: { readonly model: ModelInput | null }
+}) => {
   const sent = snapshot.request.messages.flatMap((m) => m.images ?? []).filter((i) => i.estimate?.sent !== false)
   if (sent.length === 0) return {}
   const model = snapshot.inputs.model

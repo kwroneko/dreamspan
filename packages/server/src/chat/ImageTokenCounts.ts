@@ -4,7 +4,7 @@
 // model and detail, stored, and the chat's estimate is made again. Sends never wait for it.
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
-import { Context, Effect, FiberSet, Layer } from "effect"
+import { Context, Effect, FiberSet, Layer, Semaphore } from "effect"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { readMedia } from "../importer/mediaFiles.ts"
@@ -36,12 +36,21 @@ export class ImageTokenCounts extends Context.Service<
       const writer = yield* Writer
       const config = yield* AppConfig
       const run = yield* FiberSet.runtime(yield* FiberSet.make())()
+      const gate = yield* Semaphore.make(1)
       const busy = new Set<string>()
       const resting = new Map<string, number>()
       const rests = (key: string) => (resting.get(key) ?? 0) > Date.now()
 
       const countOne = (userId: UserId, pending: UncountedImages, image: UncountedImages["images"][number]) =>
         Effect.gen(function* () {
+          const cached = yield* reader.GetImageTokenCount({
+            userId,
+            sha256: image.sha256,
+            kind: pending.kind,
+            modelKey: pending.modelKey,
+            detail: pending.detail
+          })
+          if (cached !== null && cached > 0) return "counted" as const
           const file = yield* reader.GetMediaFile({ userId, mediaId: image.mediaId })
           const bytes = yield* readMedia(config.dataDir, file.path)
           if (!bytes) return "failed" as const
@@ -53,6 +62,7 @@ export class ImageTokenCounts extends Context.Service<
             detail: pending.detail
           })
           if (tokens === null) return "no-counter" as const
+          if (!Number.isSafeInteger(tokens) || tokens <= 0) return "failed" as const
           yield* writer.RecordImageTokenCount({
             userId,
             sha256: image.sha256,
@@ -67,11 +77,13 @@ export class ImageTokenCounts extends Context.Service<
       return ImageTokenCounts.of({
         request: (userId, pending, counted) =>
           Effect.sync(() => {
-            const model = `${userId}\n${pending.connectionId}\n${pending.modelKey}`
+            for (const [key, until] of resting) if (until <= Date.now()) resting.delete(key)
+            if (resting.size > 4096) return
+            const model = `${userId}\n${pending.kind}\n${pending.modelKey}`
             if (rests(model)) return
             const todo = pending.images.filter((image) => {
               const key = `${model}\n${pending.detail}\n${image.sha256}`
-              if (busy.has(key) || rests(key)) return false
+              if (busy.size >= 128 || busy.has(key) || rests(key)) return false
               busy.add(key)
               return true
             })
@@ -82,7 +94,11 @@ export class ImageTokenCounts extends Context.Service<
                 // One at a time: the endpoints have their own rate limits, and nothing waits on this.
                 for (const image of todo) {
                   const key = `${model}\n${pending.detail}\n${image.sha256}`
-                  const outcome = yield* countOne(userId, pending, image).pipe(
+                  const outcome = yield* Effect.suspend(() =>
+                    rests(model) ? Effect.succeed("no-counter" as const) : countOne(userId, pending, image)
+                  ).pipe(
+                    Effect.timeout("30 seconds"),
+                    gate.withPermits(1),
                     Effect.catch((error) =>
                       Effect.as(
                         Effect.logWarning(`counting an image's tokens for ${pending.modelKey} failed`, error),

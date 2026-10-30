@@ -5,11 +5,13 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Stream } from "effect"
 import type { ChatEvent } from "@rp/shared/chatApi.ts"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
-import { eventually, generateReply } from "./support/generation.ts"
+import { eventually, generateReply, finished } from "./support/generation.ts"
 import { png } from "./formats/support.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
+import { AssemblyModules } from "../src/assembler/modules.ts"
+import type * as ImageTokenPlugin from "./support/imageTokenPlugin.ts"
 
 /** A PNG whose header says it is `width`×`height`; only the header is read. */
 const sized = (width: number, height: number) => {
@@ -80,8 +82,53 @@ describe("image token estimates", () => {
       assert.isAbove(withImage.tokens, 765)
 
       const next = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
-      assert.deepStrictEqual(next.images, { count: 1, tokens: 765, unknown: 0, bases: ["formula"] })
+      assert.deepStrictEqual(next.imageTokens, { count: 1, tokens: 765, unknown: 0, bases: ["formula"] })
       assert.notProperty(next, "uncounted")
+      const draft = yield* api.OpenComposer({ chatId: generated.chat.id, forkId: null })
+      const attached = yield* upload(sized(512, 512))
+      yield* api.SetComposerImage({
+        chatId: generated.chat.id,
+        draftId: draft.id,
+        id: "synthetic-draft-image",
+        mediaId: attached.mediaId,
+        altText: "Drawing"
+      })
+      const preview = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
+      assert.deepStrictEqual(preview.imageTokens, { count: 2, tokens: 765 + 255, unknown: 0, bases: ["formula"] })
+      assert.notProperty(preview, "uncounted")
+      const modules = yield* AssemblyModules
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* modules.register({
+            id: "synthetic/image-tokens",
+            module: new URL("./support/imageTokenPlugin.ts", import.meta.url).href,
+            exportName: "fixed" satisfies keyof typeof ImageTokenPlugin
+          })
+          const overridden = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
+          assert.deepStrictEqual(overridden.imageTokens, { count: 2, tokens: 84, unknown: 0, bases: ["formula"] })
+        })
+      )
+      yield* api.SetComposerImage({
+        chatId: generated.chat.id,
+        draftId: draft.id,
+        id: "synthetic-draft-image",
+        mediaId: null,
+        altText: ""
+      })
+      assert.deepStrictEqual(
+        (yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })).imageTokens,
+        next.imageTokens
+      )
+      const otherModel = yield* api.AddUserModel({
+        connectionId: generated.connection.id,
+        key: "gpt-5.1",
+        overrides: { vision: true }
+      })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: generated.connection.id, model: otherModel.id }, preset: null }
+      })
+      const changedModel = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
+      assert.deepStrictEqual(changedModel.imageTokens, { count: 1, tokens: 630, unknown: 0, bases: ["formula"] })
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -115,7 +162,111 @@ describe("image token estimates", () => {
       assert.include(before.note, "first request with an image")
 
       const next = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
-      assert.deepStrictEqual(next.images, { count: 1, tokens: 576, unknown: 0, bases: ["calibrated"] })
+      assert.deepStrictEqual(next.imageTokens, { count: 1, tokens: 576, unknown: 0, bases: ["calibrated"] })
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
+  it.live("counts draft attachments before Send, and sends without waiting", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      let block = true
+      const waiting: Array<() => void> = []
+      const mock = yield* mockProvider((request, res) => {
+        if (request.path.endsWith("/count_tokens")) {
+          const respond = () =>
+            json(res, 200, { input_tokens: JSON.stringify(request.body).includes('"image"') ? 1311 : 11 })
+          if (block) waiting.push(respond)
+          else respond()
+          return
+        }
+        anthropicSse(res, [
+          {
+            type: "message_start",
+            message: {
+              id: "synthetic",
+              type: "message",
+              role: "assistant",
+              model: "synthetic",
+              content: [],
+              stop_reason: null,
+              usage: { input_tokens: 1400, output_tokens: 1 }
+            }
+          },
+          { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "A drawing." } },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 2 } },
+          { type: "message_stop" }
+        ])
+      })
+      const connection = yield* api.CreateConnection({
+        kind: "anthropic",
+        settings: {
+          name: "Synthetic counter",
+          baseUrl: mock.url,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-synthetic"
+      })
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "claude-opus-4-7",
+        overrides: { vision: true }
+      })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      const chat = yield* api.CreateChat({ title: "Synthetic draft" })
+      const draft = yield* api.OpenComposer({ chatId: chat.id, forkId: null })
+      const image = yield* upload(sized(1000, 1000))
+      const events: ChatEvent[] = []
+      yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+        Effect.forkScoped
+      )
+      yield* api.SetComposerImage({
+        chatId: chat.id,
+        draftId: draft.id,
+        id: "before-send",
+        mediaId: image.mediaId,
+        altText: "Drawing"
+      })
+      yield* eventually(() => waiting.length === 1)
+      // This Send and reply complete while the counting HTTP request is still stalled.
+      const posted = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "Describe",
+        images: [image],
+        speakerEntityId: null
+      })
+      assert.strictEqual(posted._tag, "Posted")
+      if (posted._tag !== "Posted") return
+      const reply = yield* api.Generate({ chatId: chat.id, parentSlotId: posted.entry.slotId, branch: false })
+      assert.strictEqual(reply._tag, "Posted")
+      if (reply._tag !== "Posted") return
+      yield* eventually(() => finished(events, reply.entry.version.id) !== undefined)
+      assert.strictEqual(
+        finished(events, reply.entry.version.id)!.status,
+        "complete",
+        JSON.stringify(finished(events, reply.entry.version.id)!.error)
+      )
+      assert.isTrue(
+        mock.requests().some((r) => r.path.startsWith("/v1/messages?") || r.path === "/v1/messages"),
+        JSON.stringify(mock.requests().map((r) => r.path))
+      )
+      block = false
+      waiting.splice(0).forEach((respond) => respond())
+      yield* eventually(() => events.some((e) => e._tag === "Cache" && e.imageTokens?.bases.includes("counted")))
+      assert.isTrue(
+        events.every((e) => !JSON.stringify(e).includes('"uncounted"') && !JSON.stringify(e).includes('"base64"'))
+      )
+      assert.strictEqual(mock.requests().filter((r) => r.path.endsWith("/count_tokens")).length, 2)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -168,7 +319,9 @@ describe("image token estimates", () => {
         Effect.forkScoped
       )
       const counted = () =>
-        events.some((e) => e._tag === "Cache" && e.images?.bases.includes("counted") && e.images.tokens === 1300)
+        events.some(
+          (e) => e._tag === "Cache" && e.imageTokens?.bases.includes("counted") && e.imageTokens.tokens === 1300
+        )
       yield* eventually(counted)
       const counts = () => mock.requests().filter((r) => r.path === "/v1/messages/count_tokens").length
       assert.strictEqual(counts(), 2, "one count with the image, one without")
@@ -178,7 +331,7 @@ describe("image token estimates", () => {
       )
       // Counted once: a later estimate reads the stored count.
       const next = yield* api.GetNextContext({ chatId: generated.chat.id, leafSlotId: null })
-      assert.deepStrictEqual(next.images, { count: 1, tokens: 1300, unknown: 0, bases: ["counted"] })
+      assert.deepStrictEqual(next.imageTokens, { count: 1, tokens: 1300, unknown: 0, bases: ["counted"] })
       assert.strictEqual(counts(), 2)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })

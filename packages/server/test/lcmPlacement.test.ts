@@ -159,7 +159,7 @@ it.effect("rendered layer framing stays inside the example-prefix allowance", ()
   Effect.gen(function* () {
     const make = (count: number, raw: number) => {
       // Room for the default group nudge after the history (DESIGN §2.2) as well.
-      const input = fixture({ mode: "none" }, { openai_max_context: 540, openai_max_tokens: 1 })
+      const input = fixture({ mode: "none" }, { openai_max_context: 640, openai_max_tokens: 1 })
       return assembleFixture({
         ...input,
         preset: { ...input.preset, pin_examples: true },
@@ -254,7 +254,7 @@ for (const placement of [null, "before_main_prompt", "after_main_prompt"] as con
 it.effect("the first ST summary keeps framing inside the example reservation", () =>
   Effect.gen(function* () {
     // Room for the default group nudge after the history (DESIGN §2.2) as well.
-    const input = fixture({ mode: "none" }, { openai_max_context: 540, openai_max_tokens: 1 })
+    const input = fixture({ mode: "none" }, { openai_max_context: 640, openai_max_tokens: 1 })
     const make = (count: number) =>
       assembleFixture({
         ...input,

@@ -5,7 +5,7 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { Cause, Effect, Exit } from "effect"
 import { Reader, Writer } from "../../src/db/Database.ts"
 import type { AppendResult } from "../../src/db/ops.ts"
-import type { ContextSnapshot } from "../../src/assembler/types.ts"
+import { AssemblyFailed, type ContextSnapshot } from "../../src/assembler/types.ts"
 import { client, posted, testConfig } from "../support/config.ts"
 import { completeFixture, fixtureSql } from "../support/lcmFixtures.ts"
 import { lastText, lcmServer, lcmHarness, lcmTest, PLANTED } from "../support/lcmHarness.ts"
@@ -444,19 +444,29 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     }
     const checkContext = async (target: Node) => {
       await adoptEmptyCoverage()
-      const { snapshot: json } = await call(
-        reader.AssembleContext({
-          userId: user.id,
-          chatId: chat.id,
-          slotId: target.id,
-          versionId: shown(target),
-          // The model's choices are the current fork's, wherever the target is.
-          forkId: current as ForkId,
-          now: 123456,
-          timeZone: "UTC",
-          frozen: null
-        })
+      const built = await call(
+        reader
+          .AssembleContext({
+            userId: user.id,
+            chatId: chat.id,
+            slotId: target.id,
+            versionId: shown(target),
+            // The model's choices are the current fork's, wherever the target is.
+            forkId: current as ForkId,
+            now: 123456,
+            timeZone: "UTC",
+            frozen: null
+          })
+          .pipe(
+            Effect.catchTag("AssemblyFailed", (error) =>
+              error.reason === "budget" ? Effect.succeed(null) : Effect.fail(error)
+            )
+          )
       )
+      // Budget rejection is a valid context outcome; it emits no incomplete prompt.
+      // Retention and graph checks still run, and successful snapshots still replay.
+      if (built === null) return null
+      const json = built.snapshot
       const snapshot = JSON.parse(json) as ContextSnapshot,
         history = path(target.parent)
       const selected = snapshot.lcm?.selected ?? []
@@ -739,7 +749,17 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
       const seen = new Set<string>()
       let reason: "reply" | "completion" = "reply"
       for (let pass = 0; pass < 40; pass++) {
-        const made = await call(summarizer.planNow(position, reason))
+        const made = await call(
+          summarizer.planNow(position, reason).pipe(
+            // planNow exposes storage failures as defects, rather than typed errors.
+            Effect.catchDefect((error) =>
+              error instanceof AssemblyFailed && error.reason === "budget" ? Effect.succeed(null) : Effect.die(error)
+            )
+          )
+        )
+        // Planning reads the reply's context budget too. An oversized newest turn
+        // blocks that pass explicitly; it cannot promise a quiescent rendered layer.
+        if (made === null) return false
         for (const job of made) {
           jobs.set(job.id, job)
           const same = before.filter(
@@ -772,7 +792,7 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
     }
     const assertQuiet = async (target: Node) => {
       const snapshot = await checkContext(target)
-      for (const pin of snapshot.lcm?.selected ?? [])
+      for (const pin of snapshot?.lcm?.selected ?? [])
         if (pin.stale)
           assert.isTrue(
             excused(artifacts.get(pin.id as never)!),
@@ -802,7 +822,12 @@ const runOnce = (steps: ReadonlyArray<Step>) => {
             await new Promise((r) => setTimeout(r, 5))
             version = (await call(api.ListVersions({ slotId: result.entry.slotId }))).find((v) => v.id === version.id)!
           }
-          assert.strictEqual(version.status, "complete")
+          if (version.status === "failed") {
+            // A synthetic large newest turn may exceed the model's history target.
+            // It stays in the graph; the reply must fail explicitly instead of ignoring it.
+            assert.strictEqual(version.error?.class, "budget", JSON.stringify(version.error))
+            assert.match(version.error!.message, /newest message/)
+          } else assert.strictEqual(version.status, "complete")
           accept({ slotId: result.entry.slotId, version }, parent)
         } else if ((step.kind === "edit" || step.kind === "swipe") && node) {
           const version = await call(

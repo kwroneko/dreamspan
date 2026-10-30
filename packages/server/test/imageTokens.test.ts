@@ -18,6 +18,7 @@ import { describeImage } from "../src/importer/images.ts"
 import { builtinImageCounters } from "../src/providers/imageCounters.ts"
 import { imageSample, payloadImages, reportedImageTokens } from "../src/providers/imageSamples.ts"
 import { estimateImage } from "../src/assembler/imageTokens.ts"
+import { wireDigest } from "../src/assembler/wire.ts"
 import { tokensOf } from "../src/assembler/st.ts"
 
 const size = (width: number, height: number) => ({ width, height })
@@ -84,16 +85,19 @@ describe("OpenAI's formulas", () => {
     // gpt-4.1-mini: 6,144 patches within 2048 px, multiplier 1.62.
     assert.strictEqual(openAIImageTokens(size(1024, 1024), "gpt-4.1-mini")?.tokens, Math.ceil(1024 * 1.62))
     assert.isNull(openAIImageTokens(size(1024, 1024), "llava-1.6"))
+    // No published sizing row: never label an invented sizing assumption as a formula.
+    assert.isNull(openAIImageTokens(size(1024, 1024), "gpt-5-mini"))
+    assert.isNull(openAIImageTokens(size(1024, 1024), "o4-mini"))
   })
 })
 
 describe("Gemini and Mistral", () => {
   // https://ai.google.dev/gemini-api/docs/tokens; https://ai.google.dev/gemini-api/docs/media-resolution
   it("tiles before Gemini 3 and bills a fixed figure from Gemini 3", () => {
-    assert.strictEqual(geminiImageTokens(size(384, 384), "gemini-2.5-flash").tokens, 258)
+    assert.strictEqual(geminiImageTokens(size(384, 384), "gemini-2.5-flash")!.tokens, 258)
     // Google's example: 960×540, crop unit 360, 3×2 tiles.
-    assert.strictEqual(geminiImageTokens(size(960, 540), "gemini-2.5-pro").tokens, 6 * 258)
-    assert.strictEqual(geminiImageTokens(size(4000, 3000), "gemini-3-pro-preview").tokens, 1120)
+    assert.strictEqual(geminiImageTokens(size(960, 540), "gemini-2.5-pro")!.tokens, 6 * 258)
+    assert.strictEqual(geminiImageTokens(size(4000, 3000), "gemini-3-pro-preview")!.tokens, 1120)
   })
   // https://docs.mistral.ai/studio/conversations/vision
   it("uses Mistral's approximate per-pixel figures", () => {
@@ -111,6 +115,8 @@ describe("the built-in rules", () => {
     assert.strictEqual(rule("openrouter", "google/gemini-2.5-flash", 384, 384)?.tokens, 258)
     assert.isNull(rule("openrouter", "meta-llama/llama-3.2-11b-vision-instruct"))
     assert.isNull(rule("openai-chat", "qwen2.5-vl-7b"))
+    assert.isNull(rule("google", "gemini-latest", 384, 384))
+    assert.isNull(rule("google", "gemma-3", 384, 384))
   })
   it("give DeepSeek's cap as a bound, not a figure", () => {
     const deepseek = rule("deepseek", "deepseek-flash")
@@ -254,6 +260,15 @@ describe("the counting endpoints", () => {
       assert.isFalse(openai.appliesTo({ ...target, kind: "openrouter", baseUrl: "https://openrouter.ai/api/v1" }))
     })
   )
+  it.effect("rejects a zero image count instead of storing a silent zero", () =>
+    Effect.gen(function* () {
+      const { fetch } = fake(() => ({ input_tokens: 8 }))
+      const error = yield* Effect.flip(
+        counter("anthropic-count-tokens").count(request(fetch, "https://api.anthropic.com", "synthetic"))
+      )
+      assert.include(error.message, "zero")
+    })
+  )
   it.effect("a failed count fails, scrubbed", () =>
     Effect.gen(function* () {
       const fetch = (async () =>
@@ -319,5 +334,32 @@ describe("ledger calibration samples", () => {
     assert.deepInclude(imageSample(sent, 600, null), { tokens: 581, source: "derived" })
     assert.isNull(imageSample({ ...sent, pixels: null }, 600, null))
     assert.isNull(imageSample(sent, 10, null))
+  })
+})
+
+describe("image estimate review regressions", () => {
+  it("reserves for images missing their estimate and rejects zero calibration", () => {
+    assert.strictEqual(tokensOf({ content: "", images: [{}] }), 1024)
+    assert.isNull(calibratedTokens([{ images: 1, pixels: 100, tokens: 0 }], size(10, 10)))
+    assert.isNull(
+      imageSample({ images: 1, pixels: 100, text: 10 }, 100, { prompt_tokens_details: { image_tokens: 0 } })
+    )
+  })
+  it("keeps narrow image estimates positive and finite", () => {
+    assert.isTrue(Number.isFinite(geminiImageTokens(size(1000, 1), "gemini-2.5-pro")!.tokens))
+    assert.isAbove(openAIImageTokens(size(1, 100_000), "gpt-5.4")!.tokens!, 0)
+  })
+  it("includes sent image content and detail in wire digests, independent of media id", () => {
+    const text = { role: "user" as const, content: "Look" }
+    const image = {
+      mediaId: "one",
+      sha256: "a".repeat(64),
+      estimate: { tokens: 10, basis: "formula" as const, detail: "auto" }
+    }
+    const digest = (images: (typeof image)[]) => wireDigest({ ...text, images })
+    assert.notStrictEqual(digest([image]), digest([]))
+    assert.notStrictEqual(digest([image]), digest([{ ...image, sha256: "b".repeat(64) }]))
+    assert.notStrictEqual(digest([image]), digest([{ ...image, estimate: { ...image.estimate, detail: "low" } }]))
+    assert.strictEqual(digest([image]), digest([{ ...image, mediaId: "another" }]))
   })
 })

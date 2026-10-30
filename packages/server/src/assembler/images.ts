@@ -32,7 +32,7 @@ export const messageImages = (assembly: Assembly, pieces: ReadonlyArray<number>)
     const source = assembly.pieces[p]?.source
     if (source?.kind !== "message") return []
     return (byVersion.get(source.version) ?? []).flatMap((image: HistoryImage, index) =>
-      image.excluded ? [] : [{ version: source.version, index, image: { mediaId: image.mediaId } }]
+      image.excluded ? [] : [{ version: source.version, index, image }]
     )
   })
 }

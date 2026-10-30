@@ -79,6 +79,7 @@ export const imageSample = (
 ) => {
   if (sent.images === 0 || sent.pixels === null) return null
   const reported = reportedImageTokens(raw)
+  if (reported !== null && (!Number.isSafeInteger(reported) || reported <= 0)) return null
   if (reported !== null)
     return { images: sent.images, pixels: sent.pixels, tokens: reported, source: "reported" as const }
   if (input === null) return null
