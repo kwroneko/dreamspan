@@ -251,7 +251,7 @@ function Editor({
   onSave: () => void
   onCancel: () => void
 }) {
-  const { text, error, conflict } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const { text, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
   const [original, setOriginal] = useState<Version | undefined>(source)
   useEffect(() => {
     if (draft.target._tag !== "Edit" || source) return
@@ -320,13 +320,28 @@ function Editor({
           switchText={() => draft.switchConflict()}
         />
       )}
-      {base !== undefined && <SlotOutlet slot={messageEditorTools} props={{ draft, base }} />}
+      {base !== undefined && (
+        <SlotOutlet
+          slot={messageEditorTools}
+          props={{
+            draft,
+            base,
+            images:
+              (draft.target._tag === "Edit"
+                ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
+                : entry.version.images) ?? []
+          }}
+        />
+      )}
       <div className="flex gap-2">
         <Tooltip label={`${saveLabel} (Ctrl+Enter)`}>
           <Button
             type="submit"
             variant="primary"
-            disabled={!availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")}
+            disabled={
+              imagesBusy ||
+              !availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")
+            }
           >
             <Icon name="check" />
             {saveLabel}
@@ -760,11 +775,11 @@ export const Message = memo(function Message({
                   : undefined
               if (target._tag === "Edit" && source === undefined) return
               const submitted = await editor.ready()
-              const { text, draft } = submitted
+              const { text, draft, images } = submitted
               const outcome =
                 editing === "edit"
-                  ? await session.edit({ ...entry, version: source! }, text, draft)
-                  : await session.writeVersion(entry, text, draft)
+                  ? await session.edit({ ...entry, version: source! }, text, draft, images)
+                  : await session.writeVersion(entry, text, draft, images)
               report(outcome)
               if (!outcome.ok) return
               // Text typed while it was being saved stays in the editor, which stays open.

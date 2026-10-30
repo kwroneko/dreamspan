@@ -3,7 +3,15 @@ import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { pathEvents } from "./pathSegments.ts"
-import { attachedApplies, originalSql, shownIn, slotDeletedIn, versionDeletedIn, viewAt } from "./forkState.ts"
+import {
+  attachedApplies,
+  imageExcludedIn,
+  originalSql,
+  shownIn,
+  slotDeletedIn,
+  versionDeletedIn,
+  viewAt
+} from "./forkState.ts"
 import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -449,8 +457,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
-            (SELECT json_group_array(json_object('mediaId', a.media_id, 'sha256', a.sha256,
-                'width', a.width, 'height', a.height)) FROM
+            (SELECT json_group_array(CASE WHEN ${imageExcludedIn(sql, fork, "o.id", "a.media_id")}
+                THEN json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height, 'excluded', json('true'))
+                ELSE json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height) END) FROM
               (SELECT va.media_id, m.sha256, m.width, m.height FROM version_attachments va
                 JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id ORDER BY va.ordinal) a) AS images_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL

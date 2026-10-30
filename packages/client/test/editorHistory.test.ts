@@ -164,3 +164,85 @@ it("editor history and saved amendments are removable registered contributions",
   expect(messageEditorTools.get("message.current-changes")).toBeUndefined()
   expect(summaryEditorTools.get("summary.current-changes")).toBeUndefined()
 })
+
+it("persists image-only editor changes with browser recovery and preserves images changed during a save", async () => {
+  const calls: Array<{ tag: string; payload: Record<string, unknown> }> = []
+  let answer: ((value: Draft) => void) | undefined
+  const rpc = (tag: string, payload: Record<string, unknown>) => {
+    calls.push({ tag, payload })
+    return Effect.promise(
+      () =>
+        new Promise<Draft>((resolve) => {
+          answer = resolve
+        })
+    )
+  }
+  const session = {
+    id: "image-draft-chat",
+    call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+      ok: true,
+      value: await Effect.runPromise(request(rpc))
+    })
+  } as unknown as ChatSession
+  const store = new MessageDraft(session, "user", targetFor("message"), "same text", null)
+  const first = [{ mediaId: "first" }]
+  const second = [{ mediaId: "second" }]
+  store.setImages(first)
+  const save = store.save()
+  await vi.waitFor(() => expect(answer).toBeDefined())
+  expect(calls[0]!.payload).toMatchObject({ content: "same text", images: first })
+  store.setImages(second)
+  answer!(new Draft({ ...draft("same text"), images: first }))
+  await save
+  expect(store.snapshot().unsaved).toBe(true)
+  expect(store.snapshot().images).toEqual(second)
+  const next = store.save()
+  await vi.waitFor(() => expect(calls).toHaveLength(2))
+  answer!(new Draft({ ...draft("same text", 2), images: second }))
+  await next
+  const submitted = await store.ready()
+  expect(submitted.images).toEqual(second)
+  store.setImages([])
+  expect(store.committed(submitted)).toBe(false)
+  // A fresh editor reads the persisted images, including an explicit empty set.
+  const reopened = new MessageDraft(
+    session,
+    "user",
+    targetFor("message"),
+    "source",
+    new Draft({ ...draft("same text"), images: [] })
+  )
+  expect(reopened.snapshot().images).toEqual([])
+  // Finish the last pending save so no timer is left behind.
+  const last = store.save()
+  await vi.waitFor(() => expect(calls).toHaveLength(3))
+  answer!(new Draft({ ...draft("same text", 3), images: [] }))
+  await last
+})
+
+it("waits for an editor image upload before taking the image set to save", async () => {
+  const rpc = (_tag: string, payload: Record<string, unknown>) =>
+    Effect.succeed(new Draft({ ...draft(String(payload.content)), images: payload.images as [] }))
+  const session = {
+    id: "upload-draft-chat",
+    call: async (request: (client: typeof rpc) => Effect.Effect<unknown>) => ({
+      ok: true,
+      value: await Effect.runPromise(request(rpc))
+    })
+  } as unknown as ChatSession
+  const store = new MessageDraft(session, "user", targetFor("message"), "study", null)
+  let finish!: () => void
+  const uploading = store.uploadImages(async () => {
+    await new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    store.setImages([{ mediaId: "uploaded" }])
+  })
+  const ready = store.ready()
+  expect(store.snapshot().imagesBusy).toBe(true)
+  await vi.waitFor(() => expect(finish).toBeDefined())
+  finish()
+  await uploading
+  expect((await ready).images).toEqual([{ mediaId: "uploaded" }])
+  expect(store.snapshot().imagesBusy).toBe(false)
+})

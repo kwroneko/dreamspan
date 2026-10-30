@@ -215,6 +215,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
           // The next request's images, and those whose model hasn't counted them (for ImageTokenCounts).
           ...(next instanceof AssemblyFailed ? {} : nextImages(next))
+          ...(next instanceof AssemblyFailed || !next.imagesLeftOut ? {} : { images: next.imagesLeftOut })
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }

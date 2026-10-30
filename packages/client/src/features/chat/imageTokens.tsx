@@ -34,7 +34,7 @@ export function ImageEstimate({ image, index }: { image: ContextImage; index: nu
 }
 
 /** The next request's images, summed, beside the composer. */
-export function NextImagesNote({ images }: { images: NonNullable<NextContext["images"]> }) {
+export function NextImagesNote({ images }: { images: NonNullable<NextContext["imageTokens"]> }) {
   const bases = images.bases.filter((b) => b !== "unknown").map((b) => basisLabel[b])
   return (
     <p className="mx-auto w-full max-w-3xl py-0.5 text-xs text-muted">

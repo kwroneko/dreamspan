@@ -253,6 +253,11 @@ export interface Assembly {
   historyRevision?: number
   historyStart?: HistoryStart
   historyMove?: ContextSnapshot["historyMove"]
+  /** The path's images the request leaves out and why (`images` stage); later stages may add their own. */
+  imagesLeftOut?: {
+    images: Array<import("@rp/shared/inspectorApi.ts").ImageLeftOut>
+    ranges: Array<import("@rp/shared/inspectorApi.ts").ImagesLeftOut["ranges"][number]>
+  }
   /** The messages of `history` that enter the context, with the pieces recording their text. */
   resolved?: ReadonlyArray<{ readonly entry: HistoryEntry; readonly piece: number }>
   /** Speakers of those messages who have left the cast, by entity: their messages keep their names. */
@@ -381,6 +386,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
       ...(assembly.cardOverrides?.length ? { cardOverrides: assembly.cardOverrides } : {}),
       ...(assembly.skippedPrompts?.length ? { skippedPrompts: assembly.skippedPrompts } : {}),
+      ...(assembly.imagesLeftOut ? { imagesLeftOut: assembly.imagesLeftOut } : {}),
       templateWrites: assembly.templateWrites,
       ...(assembly.lcm
         ? {

@@ -79,7 +79,7 @@ export const registerPresentation = () => [
   chatComposerNotes.register({
     id: "composer.image-tokens",
     order: 10,
-    component: ({ view }) => (view.history?.images ? <NextImagesNote images={view.history.images} /> : null)
+    component: ({ view }) => (view.history?.imageTokens ? <NextImagesNote images={view.history.imageTokens} /> : null)
   }),
   chatComposer.register({
     id: "chat.composer",

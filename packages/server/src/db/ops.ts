@@ -694,6 +694,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
       expectedSession: Schema.NullOr(Schema.Int),
@@ -1393,6 +1394,8 @@ export class WriteOps extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft)
@@ -1432,6 +1435,22 @@ export class WriteOps extends RpcGroup.make(
       hidden: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Takes image `mediaId` of a live version out of the context in fork `forkId` (absent or
+   * null: the fork through its slot), or puts it back; one write, of that fork's only. The
+   * choice is on the message's own version, so a fork's copy of it shares it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */

@@ -153,7 +153,7 @@ export const nextImages = (snapshot: ContextSnapshot) => {
   const model = snapshot.inputs.model
   const uncounted = uncountedImages(snapshot.request)
   return {
-    images: {
+    imageTokens: {
       count: sent.length,
       tokens: sent.reduce((n, image) => n + budgetTokens(image.estimate), 0),
       unknown: sent.filter((image) => (image.estimate?.tokens ?? null) === null).length,
