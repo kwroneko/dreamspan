@@ -85,12 +85,13 @@ for (const width of [1440, 390])
         await expect(block).toHaveCount(1)
         await expect(block.locator('[data-streamdown="code-block-header"]')).toHaveText("text")
         await expect(block.locator("pre")).toContainText('"code stays plain"')
-        const frames = await block.evaluate((root) =>
-          [root, ...root.querySelectorAll("*")].filter((element) => {
-            const style = getComputedStyle(element)
-            const painted = !["rgba(0, 0, 0, 0)", "transparent"].includes(style.backgroundColor)
-            return painted || parseFloat(style.borderTopWidth) > 0 || parseFloat(style.borderLeftWidth) > 0
-          }).length
+        const frames = await block.evaluate(
+          (root) =>
+            [root, ...root.querySelectorAll("*")].filter((element) => {
+              const style = getComputedStyle(element)
+              const painted = !["rgba(0, 0, 0, 0)", "transparent"].includes(style.backgroundColor)
+              return painted || parseFloat(style.borderTopWidth) > 0 || parseFloat(style.borderLeftWidth) > 0
+            }).length
         )
         expect(frames).toBe(1)
         const quote = message.locator("q").first()

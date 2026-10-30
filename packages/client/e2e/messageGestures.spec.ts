@@ -20,7 +20,12 @@ test("touch swipes step versions, but never from the editor, a control or a canc
   const { chat, slotId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const chat = yield* api.CreateChat({ title: "Synthetic gestures" })
-      const sent = yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "First take." })
+      const sent = yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "First take."
+      })
       if (sent._tag !== "Posted") return yield* Effect.die("unexpected queue")
       yield* api.WriteVersion({
         slotId: sent.entry.slotId,

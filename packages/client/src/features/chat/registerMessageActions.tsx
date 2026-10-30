@@ -6,21 +6,12 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { MenuItem, MenuLinkItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { ContinueAction } from "./ContinueAction.tsx"
+import { copy } from "./copy.ts"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
 import { messageActions, type MessageActionProps } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
-
-const copy = async (text: string, what: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    showToast({ title: `${what} copied` })
-  } catch {
-    showToast({ title: `Couldn't copy the ${what.toLowerCase()}`, description: "The browser didn't allow it." })
-  }
-}
 
 /**
  * "Regenerate with…": a new version of the message from a model the user picks, from the

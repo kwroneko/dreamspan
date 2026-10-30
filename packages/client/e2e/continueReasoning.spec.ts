@@ -288,10 +288,68 @@ for (const width of [1440, 390]) {
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
     expect(provider.requests.at(-1)!.messages.at(-1)).toEqual({ role: "assistant", content: "The ledger is wrong," })
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-      api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }).pipe(
-        Effect.flatMap((path) => api.ListVersions({ slotId: path.entries.at(-1)!.slotId }))
-      )
+      api
+        .ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+        .pipe(Effect.flatMap((path) => api.ListVersions({ slotId: path.entries.at(-1)!.slotId })))
     )
     expect(versions.map((v) => v.writer)).toEqual(["model", "human", "model"])
+  })
+}
+
+for (const width of [1440, 390]) {
+  test(`reasoning headers copy the raw reasoning and collapse every block at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+    await page.addInitScript(() => {
+      const copied: Array<string> = []
+      Object.assign(window, { copied })
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: async (text: string) => void copied.push(text) }
+      })
+    })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    const { chat } = await setup()
+    await page.goto(`${server().url}/chats/${chat.id}`)
+    const generate = async () => {
+      await page
+        .getByRole("button", { name: /^(Reply$|Generate(?! another))/ })
+        .last()
+        .click()
+      const reply = page.getByRole("article").last()
+      await expect(reply.locator(".markdown").last()).toContainText("The ledger says otherwise")
+      await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
+      return reply
+    }
+    const first = await generate()
+    const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+    )
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: path.entries.at(-1)!.slotId,
+        branch: false,
+        content: "And the bridge?"
+      })
+    )
+    await expect(page.getByRole("article")).toHaveCount(3)
+    const second = await generate()
+    for (const reply of [first, second]) {
+      const toggle = reply.getByRole("button", { name: /^Reasoning/ })
+      if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click()
+      await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    }
+    await shoot(page, "10-reasoning-actions")
+    await second.getByRole("button", { name: "Copy reasoning", exact: true }).click()
+    expect(await page.evaluate(() => (window as unknown as { copied: Array<string> }).copied)).toEqual([THOUGHT])
+    await expect(page.getByText("Reasoning copied")).toBeVisible()
+    await second.getByRole("button", { name: "Collapse all", exact: true }).click()
+    for (const reply of [first, second])
+      await expect(reply.getByRole("button", { name: /^Reasoning/ })).toHaveAttribute("aria-expanded", "false")
+    await expect(page.getByRole("region", { name: "Reasoning" })).toHaveCount(0)
+    await shoot(page, "11-reasoning-collapsed-all")
+    // Collapse all is a view action: the streaming preference stays as it was.
+    expect(await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetDisplayPrefs({}))).toMatchObject({
+      reasoning: "expanded"
+    })
   })
 }
