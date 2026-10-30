@@ -13,6 +13,8 @@ import type { ReadOps } from "./ops.ts"
 import type { ChatRow, ForkRow } from "./rows.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
+import { pathPieces } from "./displayPath.ts"
+import { shownIn, slotDeletedIn } from "./forkState.ts"
 
 type Slot = {
   fork_id: string
@@ -55,6 +57,12 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         const records = yield* sql<ForkRow>`SELECT f.* FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
         const slots = yield* sql.unsafe<Slot>(shellSlotsQuery, [userId])
+        const insertionChats = new Set(
+          (yield* sql<{ chat_id: string }>`SELECT DISTINCT chat_id FROM fork_overrides
+          WHERE kind = 'insert' AND chat_id IN (SELECT id FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL)`).map(
+            (row) => row.chat_id
+          )
+        )
         const raw = yield* sql.unsafe<{
           fork_id: string
           chat_id: string
@@ -86,7 +94,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           const row = chatById.get(record.chat_id)!
           const map = slotsByFork.get(record.id)
           // Iterative, including an interior checkpoint and every same-tip peer.
-          const path: Array<Slot> = []
+          let path: Array<Slot> = []
           let slot = map?.get(record.tip_slot_id ?? "")
           while (slot) {
             path.push(slot)
@@ -94,6 +102,34 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             slot = parent && parent.depth < slot.depth ? parent : undefined
           }
           path.reverse()
+          if (insertionChats.has(record.chat_id)) {
+            const pieces = yield* pathPieces(sql, record.chat_id, record.id, record.tip_slot_id)
+            const ids = pieces.flatMap((piece) => (piece.kind === "inserted" ? [piece.slotId] : []))
+            const inserted =
+              ids.length === 0
+                ? []
+                : yield* sql<Slot>`
+              SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
+                CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
+                v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
+                CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
+              FROM slots s JOIN versions v ON v.id = ${shownIn(sql, record.id, "s")}
+              WHERE ${sql.in("s.id", ids)}`
+            const byId = new Map(inserted.map((slot) => [slot.id, slot]))
+            const shown: Array<Slot> = []
+            let structural = 0
+            // `path` is already this fork's structural path, with one slot per depth.
+            // Consume its runs once and splice the single inserted pieces between them.
+            for (const piece of pieces) {
+              if (piece.kind === "inserted") {
+                const slot = byId.get(piece.slotId)
+                if (slot) shown.push(slot)
+              } else {
+                while (structural < path.length && path[structural]!.depth <= piece.hi) shown.push(path[structural++]!)
+              }
+            }
+            path = shown
+          }
           const onPath = new Set(path.map((s) => s.id))
           const applicable = (eventsByFork.get(record.id) ?? []).filter(
             (e) => e.slot_id === null || onPath.has(e.slot_id)

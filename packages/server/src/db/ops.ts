@@ -2176,6 +2176,8 @@ export class ReadOps extends RpcGroup.make(
       leafSlotId: SlotId,
       fromDepth: Schema.Int,
       toDepth: Schema.Int,
+      fromPosition: Schema.optionalKey(Schema.Int),
+      toPosition: Schema.optionalKey(Schema.Int),
       includeResolved: Schema.optionalKey(Schema.Boolean)
     },
     success: LcmCoverage,

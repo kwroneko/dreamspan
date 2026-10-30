@@ -180,6 +180,23 @@ const segmentsTo = (sql: SqlClient.SqlClient, chatId: string, slotId: string | n
         (rows) => rows.toReversed()
       )
 
+/**
+ * Fork `forkId`'s placed insertions and its display path to its tip, or null when it places
+ * none (or there's no such fork): the display path is then the structural one, and callers keep
+ * the structural code that predates insertions. One probe of `fork_overrides_point` per lineage
+ * entry when it's null.
+ */
+const forkDisplay = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
+  Effect.gen(function* () {
+    if (forkId === null) return null
+    const placed = yield* placedInsertions(sql, chatId, forkId)
+    if (placed.length === 0) return null
+    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
+      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+    if (fork === undefined) return null
+    return { placed, pieces: splice(yield* segmentsTo(sql, chatId, fork.tip_slot_id), placed) }
+  })
+
 /** The pieces of positions 0 to `end`. */
 const piecesThrough = (pieces: ReadonlyArray<PathPiece>, end: number): ReadonlyArray<PathPiece> =>
   pieces.flatMap((piece) =>
@@ -205,17 +222,15 @@ export const displayThrough = (
   slotId: string | null
 ) =>
   Effect.gen(function* () {
-    if (forkId === null || slotId === null) return null
-    const placed = yield* placedInsertions(sql, chatId, forkId)
-    if (placed.length === 0) return null
+    if (slotId === null) return null
+    const fork = yield* forkDisplay(sql, chatId, forkId)
+    if (fork === null) return null
     const place = yield* slotPlace(sql, chatId, slotId)
     if (place === null) return null
-    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
-      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
-    let pieces = splice(yield* segmentsTo(sql, chatId, fork?.tip_slot_id ?? null), placed)
+    let pieces = fork.pieces
     let end = positionOf(pieces, place)
     if (end === null) {
-      pieces = splice(yield* segmentsTo(sql, chatId, slotId), placed)
+      pieces = splice(yield* segmentsTo(sql, chatId, slotId), fork.placed)
       end = positionOf(pieces, place)
     }
     return end === null ? null : { pieces: piecesThrough(pieces, end), end }
@@ -235,6 +250,36 @@ export const displayEndOf = (
     if (placed.length === 0) return fork.tip_slot_id
     return displayEnd(splice(yield* segmentsTo(sql, chatId, fork.tip_slot_id), placed), fork.tip_slot_id)
   })
+
+/**
+ * Fork `forkId`'s display path, to its tip, when it shows an inserted slot; else null, and the
+ * fork reads as its structural path, by the code that predates insertions. That costs one probe
+ * of `fork_overrides_point` per lineage entry. Shared by readers that keep their structural
+ * path for forks without insertions (LCM, spec/MESSAGE-INSERT.md §3.4).
+ */
+export const insertionPieces = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
+  Effect.gen(function* () {
+    const fork = yield* forkDisplay(sql, chatId, forkId)
+    return fork !== null && fork.pieces.some((piece) => piece.kind === "inserted") ? fork.pieces : null
+  })
+
+/** The inserted slot at `position` (0 is the first message), or null when a structural run holds it or it's past the end. */
+export const insertedAt = (pieces: ReadonlyArray<PathPiece>, position: number) => {
+  const piece = pieceAt(pieces, position)
+  return piece?.kind === "inserted" ? piece.slotId : null
+}
+
+/** The piece holding `position`, if any. */
+const pieceAt = (pieces: ReadonlyArray<PathPiece>, position: number) =>
+  pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+
+/** Whether every position strictly between `a` and `b` holds an inserted slot (true when there are none). */
+export const onlyInsertedBetween = (pieces: ReadonlyArray<PathPiece>, a: number, b: number) =>
+  pieces.every((p) => p.kind === "inserted" || Math.max(p.start, a + 1) > Math.min(p.start + pieceLength(p) - 1, b - 1))
+
+/** The inserted slots at positions `0` to `last`, in order. */
+export const insertedThrough = (pieces: ReadonlyArray<PathPiece>, last: number) =>
+  pieces.flatMap((p) => (p.kind === "inserted" && p.start <= last ? [p.slotId] : []))
 
 /** The index in `pieces` of the piece holding `slot`, or -1. */
 const pieceOf = (pieces: ReadonlyArray<PathPiece>, slot: SlotPlace) =>
@@ -303,7 +348,7 @@ export const slotPlace = (sql: SqlClient.SqlClient, chatId: string, slotId: stri
 /** The slot at `position` on the display path (null past either end). */
 export const slotAtPosition = (sql: SqlClient.SqlClient, pieces: ReadonlyArray<PathPiece>, position: number) =>
   Effect.gen(function* () {
-    const piece = pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+    const piece = pieceAt(pieces, position)
     if (piece === undefined) return null
     if (piece.kind === "inserted") return piece.slotId
     const [row] = yield* sql<{ id: string }>`
