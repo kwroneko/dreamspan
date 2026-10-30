@@ -231,7 +231,7 @@ lcmTest("with the next reply holds claims; right after a reply admits them; the 
   })
 )
 
-lcmTest("without the preset a summary is the instruction, the earlier summaries, then the chunk", (server) =>
+lcmTest("without the preset a summary ends with a user instruction after continuity and the chunk", (server) =>
   Effect.gen(function* () {
     const h = yield* lcmHarness(server, { messages: 9, settings: { withPreset: false } })
     for (const [from, to] of [
@@ -249,31 +249,30 @@ lcmTest("without the preset a summary is the instruction, the earlier summaries,
     const instruction =
       BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "75") + "\nReturn only the summary, without commentary."
     for (const messages of sent) {
-      assert.deepStrictEqual(messages[0], { role: "system", content: instruction })
+      assert.deepStrictEqual(messages.at(-1), { role: "user", content: instruction })
       // Nothing of the preset: its main prompt is not there.
       assert.isFalse(messages.some((m) => m.content.includes("in a fictional chat")))
     }
     // The first chunk alone; then the continuity, one message per earlier summary, then the chunk.
     assert.deepStrictEqual(
-      sent[0]!.slice(1).map((m) => m.content.slice(0, 10)),
+      sent[0]!.slice(0, -1).map((m) => m.content.slice(0, 10)),
       ["Message 0.", "Message 1.", "Message 2."]
     )
-    assert.strictEqual(sent[1]![1]!.role, "user")
-    assert.match(sent[1]![1]!.content, /^<summary level="1" from="1" to="3">\nA summary\.\n<\/summary>$/)
+    assert.strictEqual(sent[1]![0]!.role, "user")
+    assert.match(sent[1]![0]!.content, /^<summary level="1" from="1" to="3">\nA summary\.\n<\/summary>$/)
     assert.deepStrictEqual(
-      sent[1]!.slice(2).map((m) => m.content.slice(0, 10)),
+      sent[1]!.slice(1, -1).map((m) => m.content.slice(0, 10)),
       ["Message 3.", "Message 4.", "Message 5."]
     )
     // The next chunk repeats the continuity before it byte for byte and adds the new summary after
     // it, so the breakpoint the previous request set is a prefix of this one.
-    assert.deepStrictEqual(sent[2]!.slice(0, 2), sent[1]!.slice(0, 2))
-    assert.match(sent[2]![2]!.content, /^<summary level="1" from="4" to="6">/)
+    assert.deepStrictEqual(sent[2]!.slice(0, 1), sent[1]!.slice(0, 1))
+    assert.match(sent[2]![1]!.content, /^<summary level="1" from="4" to="6">/)
     assert.deepStrictEqual(
-      sent[2]!.slice(3).map((m) => m.content.slice(0, 10)),
+      sent[2]!.slice(2, -1).map((m) => m.content.slice(0, 10)),
       ["Message 6.", "Message 7.", "Message 8."]
     )
-    // The breakpoint is after the continuity (after the instruction when there is none), and the
-    // instruction opens every request byte for byte, so consecutive chunks read it back.
+    // The breakpoint covers continuity only; the final instruction is outside the reusable prefix.
     const [snapshots] = yield* fixtureSql(h.dataDir, [
       {
         sql: `SELECT p.context_snapshot_json AS s FROM rollouts r JOIN rollout_payloads p ON p.rollout_id = r.id
@@ -282,13 +281,17 @@ lcmTest("without the preset a summary is the instruction, the earlier summaries,
       }
     ])
     const contexts = snapshots!.map((row) => JSON.parse(row.s as string) as ContextSnapshot)
-    assert.deepStrictEqual(contexts[0]!.request.breakpoints, [{ message: 0, reason: "prefix" }])
-    assert.deepStrictEqual(contexts[1]!.request.breakpoints, [{ message: 1, reason: "summary" }])
-    assert.deepStrictEqual(contexts[2]!.request.breakpoints, [{ message: 2, reason: "summary" }])
+    assert.deepStrictEqual(contexts[0]!.request.breakpoints, [])
+    assert.deepStrictEqual(contexts[1]!.request.breakpoints, [{ message: 0, reason: "summary" }])
+    assert.deepStrictEqual(contexts[2]!.request.breakpoints, [{ message: 1, reason: "summary" }])
     assert.isFalse(contexts[1]!.summaryJob!.withPreset)
     // Its inspector pieces name the instruction, the summaries and the messages.
-    assert.isTrue(contexts[1]!.pieces.some((p) => p.id === "lcm:instruction" && p.messages[0] === 0))
-    assert.isTrue(contexts[1]!.pieces.some((p) => p.source.kind === "summary" && p.messages[0] === 1))
+    assert.isTrue(
+      contexts[1]!.pieces.some(
+        (p) => p.id === "lcm:instruction" && p.messages[0] === contexts[1]!.request.messages.length - 1
+      )
+    )
+    assert.isTrue(contexts[1]!.pieces.some((p) => p.source.kind === "summary" && p.messages[0] === 0))
     // Each rebuilds exactly.
     for (const context of contexts) {
       const rebuilt = yield* h.reader.RebuildContext({ userId: h.userId, snapshot: JSON.stringify(context) })
@@ -307,6 +310,7 @@ lcmTest("with the full preset the instruction follows the chat as before", (serv
       (r) => r.body!.messages as Array<{ role: string; content: string }>
     )
     assert.notStrictEqual(messages![0]!.content.slice(0, 20), BUILTIN_SUMMARY_INSTRUCTION.slice(0, 20))
+    assert.strictEqual(messages!.at(-1)!.role, "user")
     assert.strictEqual(
       messages!.at(-1)!.content,
       BUILTIN_SUMMARY_INSTRUCTION.replace("{{words}}", "75") + "\nReturn only the summary, without commentary."
@@ -314,7 +318,7 @@ lcmTest("with the full preset the instruction follows the chat as before", (serv
   })
 )
 
-it.effect("the estimate prices requests without the preset: the instruction and summaries are the cached part", () =>
+it.effect("the estimate prices requests without the preset: only continuity is cached", () =>
   Effect.sync(() => {
     const input = {
       tokens: 100_000,
@@ -339,6 +343,10 @@ it.effect("the estimate prices requests without the preset: the instruction and 
     assert.isBelow(raw.cachedInput, preset.cachedInput - 6_000 * (preset.requests - 2))
     // The first request pays for the instruction only, not the preset.
     assert.strictEqual(raw.plannedRequests[0]!.uncachedInput, preset.plannedRequests[0]!.uncachedInput - 6_000)
+    // Every instruction stays in uncached input. With no preset the first request has no reusable prefix.
+    assert.strictEqual(raw.plannedRequests[0]!.cachedInput, 0)
+    const one = { ...input, tokens: 20_100, messages: 100, recentTarget: 20_000, recentMax: 20_000, withPreset: false }
+    assert.strictEqual(estimateBackfill(one).uncachedInput, estimateBackfill({ ...one, cached: false }).uncachedInput)
     // Without a cache, nothing of the preset is sent at all.
     const cold = estimateBackfill({ ...input, cached: false, withPreset: false })
     const coldPreset = estimateBackfill({ ...input, cached: false })

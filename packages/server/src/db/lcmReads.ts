@@ -1,3 +1,8 @@
+import type { ChatId, ForkId } from "@rp/shared/chat.ts"
+import type { ContextDisplay } from "@rp/shared/inspectorApi.ts"
+import type { WireContext } from "../assembler/types.ts"
+import { tokensOf } from "../assembler/st.ts"
+import { toLlmRequest, type LlmRequestRow } from "./providers.ts"
 import { inSummaryFork } from "./lcmFork.ts"
 import { effectiveOverride } from "./forkState.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -135,6 +140,69 @@ export const readSummary = (
 export const makeLcmReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
+    GetSummaryDetails: ({ userId, summaryId }) =>
+      Effect.gen(function* () {
+        const [row] = yield* sql<{
+          chat_id: string
+          fork_id: string | null
+          rollout_id: string | null
+          job_id: string | null
+          attempts: number | null
+          model: string | null
+          started_at: number | null
+          completed_at: number | null
+          sent: string | null
+        }>`SELECT s.chat_id,r.fork_id,s.rollout_id,j.id AS job_id,j.attempts,m.model_key AS model,
+          r.started_at,r.completed_at,p.sent_context_json AS sent
+          FROM summaries s JOIN chats c ON c.id=s.chat_id
+          LEFT JOIN rollouts r ON r.id=s.rollout_id
+          LEFT JOIN rollout_payloads p ON p.rollout_id=r.id
+          LEFT JOIN models m ON m.id=r.model_id
+          LEFT JOIN summarization_jobs j ON j.id=(SELECT id FROM summarization_jobs
+            WHERE result_summary_id=s.id ORDER BY created_at DESC,id DESC LIMIT 1)
+          WHERE s.id=${summaryId} AND c.owner_user_id=${userId} AND c.deleted_at IS NULL`
+        if (!row) return yield* new NotFound({ entity: "summary", id: summaryId })
+        const requests =
+          row.rollout_id === null
+            ? []
+            : yield* sql<LlmRequestRow>`SELECT * FROM llm_requests
+          WHERE rollout_id=${row.rollout_id} AND owner_user_id=${userId} ORDER BY started_at,id`
+        const wire = row.sent ? (JSON.parse(row.sent) as WireContext) : null
+        // Project the sanitized capture explicitly: transport metadata, digests and raw usage stay in storage.
+        const request: ContextDisplay | null = wire?.display
+          ? {
+              ...wire.display,
+              samplers: wire.samplers,
+              messages: wire.messages.map((message) => ({
+                role: message.role,
+                name: message.name ?? null,
+                content: message.content,
+                ...(message.prefill ? { prefill: message.prefill } : {}),
+                tokens: tokensOf(message),
+                sources: message.sources ?? [],
+                ...(message.parts ? { parts: message.parts } : {}),
+                ...(message.groups ? { groups: message.groups } : {}),
+                breakpoint: message.breakpoint ?? null
+              }))
+            }
+          : null
+        return {
+          chatId: row.chat_id as ChatId,
+          forkId: row.fork_id as ForkId | null,
+          jobId: row.job_id,
+          attempts: row.attempts,
+          model:
+            requests.findLast((request) => request.purpose === "summarize" || request.purpose === "condense")
+              ?.model_key ??
+            row.model ??
+            wire?.display?.model?.model ??
+            null,
+          startedAt: row.started_at,
+          endedAt: row.completed_at,
+          requests: requests.map(toLlmRequest),
+          request
+        }
+      }).pipe(query("GetSummaryDetails")),
     GetSummary: ({ userId, summaryId, forkId }) =>
       readSummary(sql, userId, summaryId).pipe(inSummaryFork(sql, userId, summaryId, forkId), query("GetSummary"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>

@@ -75,6 +75,7 @@ export function BranchMenu({
 }) {
   const { forks, complete } = useForks(session, view)
   // The alternates at each place, with their names: read each time the menu opens.
+  const [liveForkCount, setLiveForkCount] = useState<number | null>(null)
   const [branches, setBranches] = useState<ReadonlyMap<SlotId, ReadonlyArray<Branch>>>(new Map())
   const nameOf = (fork: PathEntry) => fork.branchName
   const [naming, setNaming] = useState<PathEntry | null>(null)
@@ -99,17 +100,21 @@ export function BranchMenu({
   const canSwitch = forks.some((fork) => fork.branchCount > 1) || off
   const label = `${summary}${last ? `, at message #${last.depth + 1}` : ""}${off ? ", not the latest" : ""}: ${canSwitch ? "switch branch" : "branch actions"}`
   const load = async () => {
+    setLiveForkCount(null)
+    const live = session.call((client) => client("ListForks", { chatId: session.id }))
     const read = await Promise.all(
       forks.map(async (fork) => [fork.slotId, await session.listBranches(fork.slotId)] as const)
     )
     const listed = read.flatMap(([slotId, result]) => (result.ok ? [[slotId, result.value] as const] : []))
     setBranches(new Map(listed))
+    const result = await live
+    if (result.ok) setLiveForkCount(result.value.length)
   }
   // The fork shown is the one deleted, and only it (owner, 2026-10-27): forks made from it keep
   // their history, the chat opens on the one chatted in last, and Undo brings it back.
   const shownFork = view.forkId ?? view.chat?.currentForkId ?? null
   const remove = async () => {
-    if (shownFork === null) return
+    if (shownFork === null || liveForkCount === null || liveForkCount <= 1) return
     const result = await session.deleteFork(shownFork)
     if (!result.ok) return showToast({ title: "Couldn't delete the fork", description: result.error.message })
     deleted(result.value)
@@ -211,12 +216,20 @@ export function BranchMenu({
         {shownFork !== null && (
           <>
             {(forks.length > 0 || off) && <MenuSeparator />}
-            <MenuItem icon="trash" tone="danger" onClick={() => void remove()}>
+            <MenuItem
+              icon="trash"
+              tone="danger"
+              disabled={liveForkCount === null || liveForkCount <= 1}
+              onClick={() => void remove()}
+            >
               Delete this fork
               {last !== undefined
                 ? `: ${named === undefined ? branchLabel(last.branchIndex, undefined) : `“${named}”`}`
                 : ""}
             </MenuItem>
+            {liveForkCount === 1 && (
+              <p className="px-2.5 py-1.5 text-xs text-muted">The only branch: delete the chat instead</p>
+            )}
           </>
         )}
         {!complete && (

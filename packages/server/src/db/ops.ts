@@ -16,6 +16,7 @@ import {
   LcmState,
   RerunTarget,
   Summary,
+  SummaryDetails,
   SummaryId,
   SummaryRevision,
   SummaryRevisionId,
@@ -1445,14 +1446,20 @@ export class WriteOps extends RpcGroup.make(
       persona: Schema.NullOr(EntityId),
       /**
        * Who greets, in order, each as a message of its own (one of `cards`; one without
-       * greetings is skipped): the greeting picked, and each greeting's frozen values in
-       * `GetCardForChat` order (null: none to freeze).
+       * greetings is skipped): the greeting picked and the API's registered-source
+       * snapshot, with each option's nonempty card index, text and frozen values.
        */
       greeters: Schema.Array(
         Schema.Struct({
           entityId: EntityId,
           greeting: Schema.NullOr(Schema.Int),
-          frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+          options: Schema.Array(
+            Schema.Struct({
+              index: Schema.Int,
+              text: Schema.String,
+              frozen: Schema.NullOr(FrozenMacros)
+            })
+          )
         })
       ),
       first: FirstTurn,
@@ -2046,6 +2053,11 @@ export class ReadOps extends RpcGroup.make(
     success: ShellLibrary,
     error: Schema.Union([NotFound, StorageError])
   }),
+  Rpc.make("GetSummaryDetails", {
+    payload: { userId: UserId, summaryId: SummaryId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
+  }),
   Rpc.make("GetSummary", {
     payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, summaryId: SummaryId },
     success: Summary,
@@ -2564,6 +2576,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetRevisionDoc", {
     payload: { userId: UserId, refId: RefId, revisionId: RevisionId },
     success: Doc,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The existing first imported card note, using the same identity as ImportFile. */
+  Rpc.make("GetCardImportNote", {
+    payload: { userId: UserId, cardRefId: RefId },
+    success: Schema.NullOr(EntityId),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The notes a card owns, by their upstream refs, oldest first. */

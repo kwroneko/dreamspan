@@ -1,21 +1,18 @@
-// Conditioned prompts (DESIGN §2.2, owner 2026-10-27): who the model writes as and the
-// one-turn direction reach the model through ordinary preset prompts with conditions. ST's
-// group nudge and impersonation prompt map onto them; the import and the read of a preset
-// saved before conditions existed go through the same conversion. ST's per-prompt triggers
-// (generation types) stay a filter of their own beside the condition (owner 2026-10-28).
-import type { PresetDoc, PresetPrompt, PromptCondition, PromptOrderEntry } from "./docs/preset.ts"
-import { newestMessage, presetOrder, withMain } from "./presetOrder.ts"
-
-export const GROUP_NUDGE = "groupNudge"
-export const IMPERSONATION_PROMPT = "impersonationPrompt"
-const DIRECTION_PROMPT = "direction"
-
-/** The default direction prompt, user role (DESIGN §2.2). */
-export const DIRECTION_TEXT =
-  "[The user has written a direction for {{speaker}}'s next message. It is not part of the story; follow it closely: {{direction}}]"
-
-/** The user turn the assembler adds when a request would otherwise end on an assistant message. */
-export const LAST_TURN_TEXT = "[Write {{speaker}}'s next message.]"
+// Conditioned prompts (DESIGN §2.2, owner 2026-10-27): every prompt has a condition (always,
+// as a character, as {{user}}, with a direction) beside ST's per-prompt triggers (generation
+// types, owner 2026-10-28). Who writes next and the direction itself are the end-of-request
+// instruction (`endOfRequest.ts`, owner 2026-10-29): three texts of the preset outside the order.
+// ST's group nudge and impersonation prompt map onto two of them; the import and every read of a
+// stored preset go through the same conversion.
+import type { PresetDoc, PresetPrompt, PromptCondition } from "./docs/preset.ts"
+import {
+  DIRECTION_PROMPT,
+  END_OF_REQUEST,
+  endOfRequestText,
+  GROUP_NUDGE,
+  IMPERSONATION_PROMPT
+} from "./endOfRequest.ts"
+import { withMain } from "./presetOrder.ts"
 
 const prompt = (fields: Pick<PresetPrompt, "identifier" | "name" | "role" | "content">): PresetPrompt => ({
   ...fields,
@@ -27,12 +24,6 @@ const prompt = (fields: Pick<PresetPrompt, "identifier" | "name" | "role" | "con
   injection_trigger: [],
   forbid_overrides: false
 })
-
-export const directionPrompt: PresetPrompt = {
-  ...prompt({ identifier: DIRECTION_PROMPT, name: "Direction", role: "user", content: DIRECTION_TEXT }),
-  condition: "with_direction",
-  added_on_import: true
-}
 
 /** ST's generation types, in the order its prompt editor lists them, with the editor's names. */
 export const TRIGGERS = [
@@ -75,7 +66,7 @@ export const triggersWithCondition = (prompt: PresetPrompt): Array<string> => {
 }
 
 /** A prompt's text reads the direction, so it carries one wherever it's sent. */
-export const readsDirection = (text: string) => /\{\{\s*direction\s*\}\}/i.test(text)
+const readsDirection = (text: string) => /\{\{\s*direction\s*\}\}/i.test(text)
 
 /** `{{char}}` (group nudge) or `{{user}}` (impersonation) as `{{speaker}}`, and back for export. */
 const toSpeaker = (text: string, macro: "char" | "user") =>
@@ -84,117 +75,65 @@ export const fromSpeaker = (text: string, macro: "char" | "user") =>
   text.replace(/\{\{\s*speaker\s*\}\}/gi, `{{${macro}}}`)
 
 export interface ConditionChange {
-  readonly kind: "group_nudge" | "impersonation" | "direction"
+  readonly kind: "group_nudge" | "impersonation"
 }
 
 type ConditionedDoc = Pick<PresetDoc, "prompts" | "order" | "utility_prompts">
 
 /**
- * The preset with ST's group nudge and impersonation prompt as conditioned prompts where ST
- * sends them: the nudge right after the history, the impersonation prompt last ("always
- * positioned last", openai.js), before the direction prompt. Their utility fields are emptied
- * so the conversion happens once, and the default direction prompt goes last, unless it has
- * one. Pure: a preset already converted comes back as it is.
+ * The preset with its end-of-request texts (DESIGN §2.2): ST's group nudge and impersonation
+ * prompt move from the utility prompts into `groupNudge` and `impersonationPrompt` (their
+ * macros as `{{speaker}}`), any of the three still missing gets its default, and none of them
+ * is in the order. The utility fields are emptied so the move happens once. Pure: a preset
+ * already converted comes back as it is.
  */
-export const withConditions = <D extends ConditionedDoc>(doc: D): { doc: D; changes: Array<ConditionChange> } => {
+export const withEndOfRequest = <D extends ConditionedDoc>(doc: D): { doc: D; changes: Array<ConditionChange> } => {
   doc = withMain(doc)
   const changes: Array<ConditionChange> = []
   const utility = { ...doc.utility_prompts }
   const ids = new Set(doc.prompts.map((p) => p.identifier))
-  const added: Array<PresetPrompt> = []
-  const nudge = utility.group_nudge_prompt
-  if (nudge) {
-    utility.group_nudge_prompt = ""
-    if (!ids.has(GROUP_NUDGE)) {
-      added.push({
-        ...prompt({ identifier: GROUP_NUDGE, name: "Group nudge", role: "system", content: toSpeaker(nudge, "char") }),
-        condition: "as_character"
-      })
-      changes.push({ kind: "group_nudge" })
-    }
+  const moved = new Map<string, string>()
+  const move = (field: "group_nudge_prompt" | "impersonation_prompt", identifier: string, macro: "char" | "user") => {
+    const text = utility[field]
+    if (!text) return
+    utility[field] = ""
+    if (ids.has(identifier)) return
+    moved.set(identifier, toSpeaker(text, macro))
+    changes.push({ kind: macro === "char" ? "group_nudge" : "impersonation" })
   }
-  const impersonation = utility.impersonation_prompt
-  if (impersonation) {
-    utility.impersonation_prompt = ""
-    if (!ids.has(IMPERSONATION_PROMPT)) {
-      added.push({
-        ...prompt({
-          identifier: IMPERSONATION_PROMPT,
-          name: "Impersonation prompt",
-          role: "system",
-          content: toSpeaker(impersonation, "user")
-        }),
-        condition: "as_user"
-      })
-      changes.push({ kind: "impersonation" })
-    }
+  move("group_nudge_prompt", GROUP_NUDGE, "char")
+  move("impersonation_prompt", IMPERSONATION_PROMPT, "user")
+  const added = END_OF_REQUEST.filter((text) => !ids.has(text.identifier)).map((text) =>
+    prompt({
+      identifier: text.identifier,
+      name: text.label,
+      role: "user",
+      content: moved.get(text.identifier) ?? text.content
+    })
+  )
+  const inOrder = doc.order.some((e) => endOfRequestText(e.identifier))
+  const emptied =
+    utility.group_nudge_prompt !== doc.utility_prompts.group_nudge_prompt ||
+    utility.impersonation_prompt !== doc.utility_prompts.impersonation_prompt
+  if (added.length === 0 && !inOrder && !emptied) return { doc, changes }
+  return {
+    doc: {
+      ...doc,
+      prompts: [...doc.prompts, ...added],
+      order: inOrder ? doc.order.filter((e) => !endOfRequestText(e.identifier)) : doc.order,
+      utility_prompts: utility
+    },
+    changes
   }
-  const direction = !ids.has(DIRECTION_PROMPT)
-  if (direction) changes.push({ kind: "direction" })
-  if (!nudge && !impersonation && !direction) return { doc, changes }
-  const prompts = [...doc.prompts]
-  let order: Array<PromptOrderEntry> = [...doc.order]
-  if (added.length > 0 || direction) {
-    // The order as it reads, with the newest-message marker where older revisions imply it.
-    order = presetOrder(prompts, order)
-    if (!ids.has(newestMessage.identifier)) prompts.push(newestMessage)
-  }
-  if (added.length > 0) {
-    const history = order.findIndex((e) => e.identifier === "chatHistory")
-    const after =
-      history < 0
-        ? order.length
-        : order[history + 1]?.identifier === newestMessage.identifier
-          ? history + 2
-          : history + 1
-    // Before the direction prompt, as a fresh import lists them, so an export reimports the same.
-    const at = prompts.findIndex((p) => p.identifier === DIRECTION_PROMPT)
-    prompts.splice(at < 0 ? prompts.length : at, 0, ...added)
-    const entry = (p: PresetPrompt) => ({ identifier: p.identifier, enabled: true })
-    const nudges = added.filter((p) => p.identifier === GROUP_NUDGE)
-    order.splice(after, 0, ...nudges.map(entry))
-    const last = added.filter((p) => p.identifier === IMPERSONATION_PROMPT)
-    const direction = order.findIndex((e) => e.identifier === DIRECTION_PROMPT)
-    order.splice(direction < 0 ? order.length : direction, 0, ...last.map(entry))
-  }
-  if (direction) {
-    prompts.push(directionPrompt)
-    order.push({ identifier: DIRECTION_PROMPT, enabled: true })
-  }
-  return { doc: { ...doc, prompts, order, utility_prompts: utility }, changes }
 }
 
 /**
- * What the preset editor warns about (DESIGN §2.2), for the order as it reads: `endsOn`, the
- * prompt a plain character turn ends on after the history, when that's an assistant prompt and
- * nothing prefills (the assembler then adds a user turn), and whether any prompt that's on sends the
- * direction. A plain turn has no direction, so the direction prompt last in an imported preset
- * doesn't hide an assistant prompt before it.
+ * What the preset editor warns about (DESIGN §2.2): the direction text doesn't read
+ * `{{direction}}`, so a direction the user gives would be lost.
  */
-export const presetWarnings = (
-  order: ReadonlyArray<PromptOrderEntry>,
-  prompts: ReadonlyMap<string, PresetPrompt>,
-  prefill: string
-): { endsOn: PresetPrompt | null; direction: boolean } => {
-  const history = order.findIndex((e) => e.identifier === "chatHistory")
-  const sent = order.flatMap((e, index) => {
-    const prompt = prompts.get(e.identifier)
-    return e.enabled && prompt && !prompt.marker && prompt.content.trim() !== "" ? [{ index, prompt }] : []
-  })
-  const last = sent
-    .filter(
-      ({ index, prompt }) =>
-        index > history &&
-        prompt.injection_position === "relative" &&
-        (conditionOf(prompt) === "always" || conditionOf(prompt) === "as_character") &&
-        triggersFor(prompt, "normal")
-    )
-    .findLast(({ prompt }) => prompt.role !== "system")?.prompt
-  return {
-    endsOn: history >= 0 && last?.role === "assistant" && prefill.trim() === "" ? last : null,
-    direction: sent.some(({ prompt }) => readsDirection(prompt.content))
-  }
-}
+export const presetWarnings = (prompts: ReadonlyMap<string, PresetPrompt>): { directionLost: boolean } => ({
+  directionLost: !readsDirection(prompts.get(DIRECTION_PROMPT)?.content ?? "")
+})
 
 /** The editor's names for the conditions; the inspector says which one admitted a prompt. */
 export const CONDITION_LABELS: Readonly<Record<PromptCondition, string>> = {
@@ -205,10 +144,10 @@ export const CONDITION_LABELS: Readonly<Record<PromptCondition, string>> = {
 }
 
 /**
- * A library document as the editors read it: a preset saved before conditions existed comes
- * converted, and the first save writes it (no new revision before that).
+ * A library document as the editors read it: a preset comes with its end-of-request texts,
+ * and the first save writes them (no new revision before that).
  */
 export const editedDoc = <D extends Readonly<Record<string, unknown>>>(kind: string, doc: D): D =>
   kind === "preset" && Array.isArray(doc.prompts) && Array.isArray(doc.order) && doc.utility_prompts
-    ? (withConditions(doc as unknown as ConditionedDoc).doc as unknown as D)
+    ? (withEndOfRequest(doc as unknown as ConditionedDoc).doc as unknown as D)
     : doc

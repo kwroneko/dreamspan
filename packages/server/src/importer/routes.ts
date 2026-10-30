@@ -11,6 +11,7 @@ import { RefId } from "@rp/shared/library.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
+import { Notices } from "../chat/Notices.ts"
 import { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { SummaryDraftSave } from "@rp/shared/lcm.ts"
 import { MessageDraftSave, messageDraftKey } from "@rp/shared/chatApi.ts"
@@ -148,6 +149,7 @@ export const layer = Layer.unwrap(
     })
     const reader = yield* Reader
     const writer = yield* Writer
+    const notices = yield* Notices
     // Media an import has written and not yet recorded, which the sweep leaves alone.
     const { pending, holding } = yield* MediaHolds
     // Files held in memory at once. An upload takes a permit once its first bytes arrive, so
@@ -680,6 +682,7 @@ export const layer = Layer.unwrap(
           ...save,
           baseRevision: null
         })
+        notices.publish(user.id, { _tag: "UserDraftChanged", draft })
         recovered += draft.recovered
       }
       for (const summary of input.value.summaries ?? []) {

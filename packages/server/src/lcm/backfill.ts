@@ -29,8 +29,8 @@ export interface BackfillInput {
   readonly recentMax: number
   readonly layerMax: number
   /**
-   * False: requests without the preset (DESIGN §8), whose cached part is the instruction and the
-   * continuity; with the preset it is the preset prefix and the layer, the instruction after the chunk.
+   * False: requests without the preset (DESIGN §8), whose cached part is continuity only.
+   * With the preset it is the preset prefix and the layer. The instruction follows the chunk.
    */
   readonly withPreset?: boolean
   /** The preset and cards that open every request. */
@@ -95,8 +95,8 @@ interface Simulated {
  * `fanout` summaries of a level the layer held when it planned (`planMaintenance`); the
  * chunks run first, then the condensations. Passes go on until neither is left. A summary
  * request sends the preset, the layer and its chunk; a condensation sends the preset and the
- * layer up to its last part. Without the preset, the instruction takes the preset's place. With caching, a request reads back what it shares with the one
- * before from the start, and pays for the rest.
+ * layer up to its last part. Without the preset, only the continuity can be cached. With caching,
+ * a request reads back what it shares with the previous one from the start, and pays for the rest.
  */
 export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   const { recentTarget, recentMax, leafInput, fanout } = input
@@ -104,9 +104,9 @@ export const estimateBackfill = (input: BackfillInput): BackfillTotals => {
   const keep = recentTarget
   const trigger = (recentTarget + recentMax) / 2
   const raw = input.withPreset === false
-  // Without the preset the instruction opens the request and is read back with the continuity.
-  const prefixTokens = raw ? TAIL_TOKENS : input.prefix
-  const tailTokens = raw ? 0 : TAIL_TOKENS
+  // The instruction is the final user message in both modes, outside the reusable prefix.
+  const prefixTokens = raw ? 0 : input.prefix
+  const tailTokens = TAIL_TOKENS
   if (input.tokens <= trigger) return EMPTY
   // A chunk ends once it holds `leafInput` tokens, so it overshoots by half a message on average.
   const average = input.tokens / input.messages

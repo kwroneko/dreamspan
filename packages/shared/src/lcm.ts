@@ -1,3 +1,5 @@
+import { ContextDisplay } from "./inspectorApi.ts"
+import { LlmRequest } from "./usage.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, ForkId, SlotId, VersionId } from "./chat.ts"
@@ -323,7 +325,26 @@ export const SummaryDraftSave = Schema.Struct({
   /** The revision the text started from. */
   baseRevisionId: Schema.NullOr(SummaryRevisionId)
 })
+/** Stored provenance of the generation, even when the selected text was edited later. */
+export const SummaryDetails = Schema.Struct({
+  chatId: ChatId,
+  forkId: Schema.NullOr(ForkId),
+  jobId: Schema.NullOr(Schema.String),
+  attempts: Schema.NullOr(Schema.Int),
+  model: Schema.NullOr(Schema.String),
+  startedAt: Schema.NullOr(Schema.Number),
+  endedAt: Schema.NullOr(Schema.Number),
+  requests: Schema.Array(LlmRequest),
+  request: Schema.NullOr(ContextDisplay)
+})
+export type SummaryDetails = typeof SummaryDetails.Type
+
 export class LcmApi extends RpcGroup.make(
+  Rpc.make("GetSummaryDetails", {
+    payload: { summaryId: SummaryId },
+    success: SummaryDetails,
+    error: Schema.Union([NotFound, ServerError])
+  }),
   Rpc.make("GetSummary", {
     payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), summaryId: SummaryId },
     success: Summary,

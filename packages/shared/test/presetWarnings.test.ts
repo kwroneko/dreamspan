@@ -1,8 +1,11 @@
-// The preset editor's warnings (DESIGN §2.2): a preset whose prompts after the history end on
-// an assistant prompt without a prefill, and one with no prompt sending the direction.
+// The preset editor's warnings and the end-of-request texts' normalization (DESIGN §2.2): a
+// direction text without {{direction}} loses the direction; every read gives a preset its three
+// texts outside the order.
 import { describe, expect, it } from "vitest"
-import type { PresetPrompt, PromptOrderEntry } from "../src/docs/preset.ts"
-import { directionPrompt, presetWarnings } from "../src/presetConditions.ts"
+import type { PresetDoc, PresetPrompt } from "../src/docs/preset.ts"
+import { DIRECTION_PROMPT, DIRECTION_TEXT, GROUP_NUDGE, IMPERSONATION_PROMPT, TURN_TEXT } from "../src/endOfRequest.ts"
+import { presetWarnings, withEndOfRequest } from "../src/presetConditions.ts"
+import { presetOrder } from "../src/presetOrder.ts"
 
 const prompt = (identifier: string, fields: Partial<PresetPrompt> = {}): PresetPrompt => ({
   identifier,
@@ -19,41 +22,65 @@ const prompt = (identifier: string, fields: Partial<PresetPrompt> = {}): PresetP
   ...fields
 })
 
-const warnings = (prompts: ReadonlyArray<PresetPrompt>, prefill = "", off: ReadonlyArray<string> = []) =>
-  presetWarnings(
-    prompts.map((p): PromptOrderEntry => ({ identifier: p.identifier, enabled: !off.includes(p.identifier) })),
-    new Map(prompts.map((p) => [p.identifier, p])),
-    prefill
-  )
-
-const history = prompt("chatHistory", { marker: true, content: "" })
-const ending = prompt("jailbreak", { role: "assistant", content: "Understood." })
+const doc = (
+  prompts: ReadonlyArray<PresetPrompt>,
+  utility: Partial<PresetDoc["utility_prompts"]> = {}
+): Pick<PresetDoc, "prompts" | "order" | "utility_prompts"> => ({
+  prompts,
+  order: prompts.map((p) => ({ identifier: p.identifier, enabled: true })),
+  utility_prompts: { group_nudge_prompt: "", impersonation_prompt: "", ...utility } as PresetDoc["utility_prompts"]
+})
 
 describe("preset warnings", () => {
-  it("an assistant prompt after the history warns, even with the imported direction prompt last", () => {
-    const result = warnings([prompt("main"), history, ending, directionPrompt])
-    expect(result.endsOn?.identifier).toBe("jailbreak")
-    expect(result.direction).toBe(true)
+  const warnings = (content: string | null) =>
+    presetWarnings(new Map(content === null ? [] : [[DIRECTION_PROMPT, prompt(DIRECTION_PROMPT, { content })]]))
+
+  it("warns when the direction text doesn't read {{direction}}", () => {
+    expect(warnings(DIRECTION_TEXT).directionLost).toBe(false)
+    expect(warnings("[Next: {{ Direction }}]").directionLost).toBe(false)
+    expect(warnings("[What happens next.]").directionLost).toBe(true)
+    expect(warnings("").directionLost).toBe(true)
+    expect(warnings(null).directionLost).toBe(true)
+  })
+})
+
+describe("the end-of-request texts", () => {
+  it("are created with their defaults, outside the order, and a converted preset comes back as it is", () => {
+    const { doc: converted, changes } = withEndOfRequest(doc([prompt("main"), prompt("chatHistory", { marker: true })]))
+    expect(changes).toEqual([])
+    const byId = new Map(converted.prompts.map((p) => [p.identifier, p]))
+    expect(byId.get(GROUP_NUDGE)).toMatchObject({ role: "user", content: TURN_TEXT, name: "When a character speaks" })
+    expect(byId.get(IMPERSONATION_PROMPT)).toMatchObject({ content: TURN_TEXT, name: "When your card speaks" })
+    expect(byId.get(DIRECTION_PROMPT)).toMatchObject({ content: DIRECTION_TEXT })
+    expect(converted.order.map((e) => e.identifier)).toEqual(["main", "chatHistory"])
+    // The editor's order doesn't list them either.
+    expect(presetOrder(converted.prompts, converted.order).map((e) => e.identifier)).toEqual([
+      "main",
+      "chatHistory",
+      "newestMessage"
+    ])
+    expect(withEndOfRequest(converted).doc).toBe(converted)
   })
 
-  it("a prefill, a user prompt a plain turn sends, or the prompt being off: no warning", () => {
-    expect(warnings([history, ending, directionPrompt], "Sure,").endsOn).toBeNull()
-    expect(warnings([history, ending, prompt("tail", { role: "user" })]).endsOn).toBeNull()
-    expect(warnings([history, ending], "", ["jailbreak"]).endsOn).toBeNull()
-    // System prompts after it don't change which turn the request ends on.
-    expect(warnings([history, ending, prompt("note")]).endsOn?.identifier).toBe("jailbreak")
+  it("takes ST's group nudge and impersonation prompt from the utility prompts, once", () => {
+    const { doc: converted, changes } = withEndOfRequest(
+      doc([prompt("main")], {
+        group_nudge_prompt: "[Write the next reply only as {{char}}.]",
+        impersonation_prompt: "[Write as {{user}}.]"
+      })
+    )
+    expect(changes.map((c) => c.kind)).toEqual(["group_nudge", "impersonation"])
+    const byId = new Map(converted.prompts.map((p) => [p.identifier, p]))
+    expect(byId.get(GROUP_NUDGE)!.content).toBe("[Write the next reply only as {{speaker}}.]")
+    expect(byId.get(IMPERSONATION_PROMPT)!.content).toBe("[Write as {{speaker}}.]")
+    expect(converted.utility_prompts.group_nudge_prompt).toBe("")
+    expect(converted.utility_prompts.impersonation_prompt).toBe("")
   })
 
-  it("a user prompt sent only as {{user}} or only on Continue doesn't hide the assistant ending", () => {
-    const asUser = prompt("asUser", { role: "user", condition: "as_user" })
-    const onContinue = prompt("onContinue", { role: "user", injection_trigger: ["continue"] })
-    expect(warnings([history, ending, asUser, onContinue]).endsOn?.identifier).toBe("jailbreak")
-    const asCharacter = prompt("asCharacter", { role: "user", condition: "as_character" })
-    expect(warnings([history, ending, asCharacter]).endsOn).toBeNull()
-  })
-
-  it("no prompt that's on reads {{direction}}", () => {
-    expect(warnings([history, directionPrompt], "", ["direction"]).direction).toBe(false)
-    expect(warnings([history, prompt("mine", { content: "Do this: {{ direction }}" })]).direction).toBe(true)
+  it("leaves the order of a preset that listed them, keeping their text", () => {
+    const nudge = prompt(GROUP_NUDGE, { content: "[Mine.]", condition: "as_character" })
+    const { doc: converted } = withEndOfRequest(doc([prompt("main"), prompt("chatHistory"), nudge]))
+    expect(converted.order.map((e) => e.identifier)).toEqual(["main", "chatHistory"])
+    expect(converted.prompts.find((p) => p.identifier === GROUP_NUDGE)!.content).toBe("[Mine.]")
   })
 })

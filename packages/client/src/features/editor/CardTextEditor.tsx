@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useComparisonRevision } from "./store.ts"
 
 /** Comparison reads never alter a draft or the identity its next save will name. */
@@ -31,6 +32,7 @@ export function CardTextEditor({
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
+  const searchMatch = useSearchMatch(path)
   const revision = useComparisonRevision(store, field)
   const [comparison, setComparison] = useState<{ revision: typeof revision; value: string } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -58,6 +60,8 @@ export function CardTextEditor({
     <>
       <CodeEditor
         value={value}
+        selection={searchMatch}
+        onRevealSelection={scrollToSearchField}
         base={comparison?.revision === revision ? comparison.value : value}
         label={label}
         rows={rows}
