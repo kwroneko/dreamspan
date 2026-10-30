@@ -139,7 +139,8 @@ for (const width of [1440, 390])
           return at!.getBoundingClientRect().height
         })
       if (width < 640) {
-        expect(sticky).toBeLessThan(400)
+        // Under half the 1000px viewport: the bar also keeps the preset's name and Close (ea4d2b7).
+        expect(sticky).toBeLessThan(500)
         const options = overlay.getByRole("button", { name: "Options", exact: true })
         await options.click()
         await expect(overlay.getByRole("checkbox", { name: "Whole word", exact: true })).toBeVisible()
