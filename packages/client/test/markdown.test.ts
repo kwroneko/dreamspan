@@ -1,9 +1,17 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { parseMarkdownIntoBlocks } from "streamdown"
-import { Markdown } from "../src/ui/Markdown.tsx"
+import { StMarkdown } from "../src/ui/StMarkdown.tsx"
+import { fixMarkdown } from "../src/ui/stFormatting.ts"
+import { Markdown, messageRenderers } from "../src/ui/Markdown.tsx"
 import { MAX_COPIED, withDefinitions } from "../src/ui/referenceDefinitions.ts"
+
+let dispose: () => void
+beforeEach(() => {
+  dispose = messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown })
+})
+afterEach(() => dispose())
 
 const render = (text: string, streaming = false) => renderToStaticMarkup(createElement(Markdown, { text, streaming }))
 
@@ -61,5 +69,120 @@ describe("Markdown", () => {
     const html = render(text, true)
     expect(html).toContain('href="https://example.com/map"')
     expect(html).not.toContain("[m]:")
+  })
+})
+
+describe("ST 1.19 message formatting", () => {
+  it.each(['"words"', "“words”", "«words»", "「words」", "『words』", "＂words＂"])(
+    "colours quote style %s, keeping its glyphs",
+    (text) => {
+      const html = render(text)
+      expect(html).toContain(`<q>${text.replaceAll('"', "&quot;")}</q>`)
+    }
+  )
+  it("uses ST's nearest closing delimiter, including midword and empty quotes", () => {
+    const html = render('a"one"b "" “first” second”')
+    expect(html).toContain("a<q>&quot;one&quot;</q>b <q>&quot;&quot;</q> <q>“first”</q> second”")
+    expect(render("“first\nsecond”")).not.toContain("<q>")
+    expect(render("«unclosed")).not.toContain("<q>")
+    expect(render('"one""two"')).toContain("<q>&quot;one&quot;</q><q>&quot;two&quot;</q>")
+  })
+  it.each([
+    '`"code" *literal* __literal__`',
+    '``"code"``',
+    '```text\n"code" *literal* __literal__\n```',
+    '~~~\n"code"\n~~~',
+    '```\n"code"'
+  ])("leaves quotes and formatting inside code as code: %s", (text) => {
+    const html = render(text)
+    expect(html).toContain("<code")
+    expect(html).not.toContain("<q>")
+    expect(html).not.toContain("<em>")
+    expect(html).not.toContain("<u>")
+  })
+  it("renders both italics forms and nests emphasis inside quoted dialogue", () => {
+    const html = render('*thought* _thought_ "say *this* and _that_"')
+    expect(html).toContain("<em>thought</em> <em>thought</em> <q>&quot;say <em>this</em> and <em>that</em>&quot;</q>")
+  })
+  it("keeps code inside dialogue outside the quote colour", () => {
+    const html = render("“say `literal` now”")
+    expect(html).toMatch(/<q>“say <\/q>.*<code[^>]*>literal<\/code>.*<q> now”<\/q>/)
+  })
+  it("uses underline for double underscores while double stars stay bold", () => {
+    const html = render("__underlined__ **bold** ___both___")
+    expect(html).toContain("<u>underlined</u>")
+    expect(html).toContain("<strong>bold</strong>")
+    expect(html).toContain("<u>both</u>")
+  })
+  it("keeps single breaks and blank-line paragraphs", () => {
+    const html = render("first\nsecond\n\nthird")
+    expect(html).toContain("first<br/>")
+    expect(html).toContain("second</p>")
+    expect(html).toContain(">third</p>")
+  })
+  it.each([
+    ["*open", "*open*"],
+    ['"open', '"open"'],
+    ["*open  \n*another", "*open*\n*another*"],
+    ["* spaced * _ spaced _ ** bold ** __ underline __", "*spaced* _spaced_ **bold** __underline__"],
+    ['* both "', '* both ""'],
+    ["_open", "_open"],
+    ["**open", "**open"],
+    ["“open", "“open"],
+    ["*line\nend*", "*line*\nend**"]
+  ])("matches fixMarkdown display behavior for %s", (text, expected) => {
+    expect(fixMarkdown(text)).toBe(expected)
+  })
+  it.each([false, true])("fixes every message, streaming=%s, without changing its source", (streaming) => {
+    const text = '*unfinished\n\n"unfinished'
+    expect(render(text, streaming)).toContain("<em>unfinished</em>")
+    expect(render(text, streaming)).toContain("<q>&quot;unfinished&quot;</q>")
+    expect(text).toBe('*unfinished\n\n"unfinished')
+  })
+  it("keeps line breaks in literal HTML and protects tag attributes as ST's default encode_tags=false does", () => {
+    const html = render('<div title="plain">\nfirst\nsecond\n</div>')
+    expect(html).toContain("&lt;div title=&quot;plain&quot;&gt;<br/>")
+    expect(html).not.toContain("<q>")
+    expect(html).toContain("first<br/>")
+    expect(html).toContain("second<br/>")
+    expect(html).not.toContain("<div title=")
+  })
+  it("colours dialogue beside literal tags without pairing it with straight attribute quotes", () => {
+    const html = render('<span title="plain" data-note="other">"say *this*"</span> "outside"')
+    expect(html).toContain("&lt;span title=&quot;plain&quot; data-note=&quot;other&quot;&gt;")
+    expect(html).toContain("<q>&quot;say <em>this</em>&quot;</q>")
+    expect(html).toContain("&lt;/span&gt; <q>&quot;outside&quot;</q>")
+    expect(html.match(/<q>/g)).toHaveLength(2)
+  })
+  it("shows HTML as text and retains image and link protections", () => {
+    const html = render(
+      '<span title="synthetic">hello</span>\n<script>alert(1)</script>\n![tracker](https://example.com/track)\n[link](https://example.com/)'
+    )
+    expect(html).not.toContain("<span title=")
+    expect(html).not.toContain("<script>")
+    expect(html).toContain("&lt;span")
+    expect(html).toContain("&lt;script&gt;")
+    expect(html).not.toContain("<img")
+    expect(html).toContain('rel="noopener noreferrer nofollow"')
+  })
+  it("allows replacement, wrapping, additions and disablement through the renderer registry", () => {
+    const original = messageRenderers.get("markdown")!
+    const replacement = messageRenderers.register({
+      ...original,
+      component: ({ text, ...props }) => createElement(original.component, { text: `__${text}__`, ...props })
+    })
+    expect(render("wrapped")).toContain("<u>wrapped</u>")
+    const additional = messageRenderers.register({
+      id: "synthetic",
+      order: 10,
+      component: ({ text }) => createElement("aside", null, text)
+    })
+    expect(render("alternate")).toContain("<aside>alternate</aside>")
+    additional()
+    const disabled = messageRenderers.disable("markdown")
+    expect(render("<b>plain</b>")).toContain("&lt;b&gt;plain&lt;/b&gt;")
+    disabled()
+    replacement()
+    expect(render("restored")).not.toContain("<u>")
   })
 })
