@@ -744,6 +744,8 @@ describe("window reads", () => {
             ...Array<string>(3).fill("SCAN el VIRTUAL TABLE INDEX 1:"),
             // Only the ordered attachments of this version are scanned, via its primary key.
             "SCAN a",
+            "SCAN el VIRTUAL TABLE INDEX 1:",
+            // Each of its images taken out of the context in the fork: one lineage read per image.
             "SCAN el VIRTUAL TABLE INDEX 1:"
           ],
           plan.join("\n")
@@ -754,7 +756,7 @@ describe("window reads", () => {
             (step) =>
               step === "SEARCH eo USING INDEX fork_overrides_point (fork_id=? AND kind=? AND target_id=? AND seq<?)"
           ),
-          7,
+          8,
           plan.join("\n")
         )
         assert.includeMembers(
