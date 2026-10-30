@@ -12,6 +12,8 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { PresetWarnings, PromptDocument } from "./PromptDocument.tsx"
+import { presetEditorSections } from "./presetSections.ts"
+import { SlotOutlet } from "../../slots.tsx"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
@@ -265,6 +267,7 @@ export function PresetEditor({
         />
         <PromptDocument store={store} context={context} focus={focus} />
       </Card>
+      <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>
         <CardHeader title="Text and context" description="SillyTavern's prompt text switches." />
         <div className="flex flex-col gap-3">

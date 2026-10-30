@@ -3,13 +3,14 @@ import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
 import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/shared/presetOrder.ts"
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
+import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
 import {
-  conditionOf,
-  DIRECTION_TEXT,
-  LAST_TURN_TEXT,
-  readsDirection,
-  triggersFor
-} from "@rp/shared/presetConditions.ts"
+  DIRECTION_PROMPT,
+  endOfRequestText,
+  FALLBACK_TEXT,
+  GROUP_NUDGE,
+  IMPERSONATION_PROMPT
+} from "@rp/shared/endOfRequest.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
@@ -774,7 +775,7 @@ const conditionHolds = (assembly: Assembly, condition: PromptCondition) => {
  * expanded); a disabled `main` stays as an empty prompt. A conditioned prompt after the
  * history changes from turn to turn, so it's never inside the cached part.
  */
-const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsDirection: boolean } => {
+const collectionOf = (assembly: Assembly): Array<StPrompt> => {
   const doc = withMain(need(assembly, "preset").doc)
   const type = need(assembly, "cast").type
   const prompts = new Map(
@@ -785,11 +786,11 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
   )
   const collection: Array<StPrompt> = []
   let afterHistory = false
-  let direction = false
   const skipped: Array<Source> = []
   for (const entry of presetOrder(doc.prompts, doc.order)) {
     const prompt = prompts.get(entry.identifier)
-    if (!prompt) continue
+    // The end-of-request texts are sent by their own stage, never from the order (DESIGN §2.2).
+    if (!prompt || endOfRequestText(prompt.identifier)) continue
     const condition = conditionOf(prompt)
     const allowed = entry.enabled && triggersFor(prompt, type) && conditionHolds(assembly, condition)
     if (entry.identifier === "chatHistory") afterHistory = true
@@ -805,7 +806,6 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
       else if (condition !== "always") skipped.push(presetSource(assembly, prompt.identifier, condition))
     }
     if (!allowed && entry.identifier !== "main") continue
-    if (allowed && readsDirection(prompt.content)) direction = true
     const text =
       allowed && prompt.content
         ? presetText(assembly, prompt.identifier, prompt.content, {}, condition === "always" ? undefined : condition)
@@ -829,7 +829,7 @@ const collectionOf = (assembly: Assembly): { collection: Array<StPrompt>; readsD
     })
   }
   assembly.skippedPrompts = skipped
-  return { collection, readsDirection: direction }
+  return collection
 }
 
 /** Puts a prompt where its marker is, or at the end when the order has none (preparePromptsForChatCompletion). */
@@ -1524,34 +1524,7 @@ const composeStage = sync("compose", (assembly) => {
     ? optional("utility.new_group_chat_prompt", utility.new_group_chat_prompt)
     : optional("utility.new_chat_prompt", utility.new_chat_prompt)
 
-  const { collection, readsDirection: directionSent } = collectionOf(assembly)
-  // A direction is never dropped: without a prompt of the preset to carry it, the default
-  // direction prompt goes last, and the reply says so (DESIGN §2.2).
-  const direction = need(assembly, "target").direction
-  if (direction?.trim() && !assembly.request.summarizing && !directionSent) {
-    const piece = env.piece(
-      "direction:default",
-      { kind: "assembler", what: "default direction prompt" },
-      DIRECTION_TEXT
-    )
-    collection.push({
-      identifier: "direction:default",
-      role: "user",
-      content: env.text(piece),
-      piece,
-      system_prompt: false,
-      injection_position: "relative",
-      injection_depth: 0,
-      injection_order: 100,
-      forbid_overrides: true,
-      kind: "volatile"
-    })
-    assembly.issues.push({
-      kind: "direction_prompt_missing",
-      message:
-        "The preset has no prompt that sends the direction ({{direction}}), so the default direction prompt was added at the end. Add one in the preset editor to place it yourself."
-    })
-  }
+  const collection = collectionOf(assembly)
   const lore = assembly.lore ?? []
   const loreBlock = (id: string, entries: typeof lore, format = false): Text | null => {
     if (!entries.length) return null
@@ -1912,17 +1885,17 @@ const composeStage = sync("compose", (assembly) => {
       reason: "budget",
       message: `The source prefix and requested continuation need about ${doc.samplers.openai_max_tokens + prefixOutput} output tokens, beyond ${assembly.model!.key}'s ${assembly.model!.maxOutput}-token output limit. Choose a model with a larger output limit or reduce the model's response length.`
     })
-  // The user turn `messages` adds when the chat ends on the model's side (DESIGN §2.2) is
-  // budgeted here, so it never takes the request past its target. (A tail prompt or note in the
-  // assistant's role can also need it; that rare case isn't reserved.)
-  const lastTurn =
-    !assembly.request.summarizing && !assembly.prefill && projected.at(-1)?.role === "assistant"
+  // The end-of-request message `messages` sends last (DESIGN §2.2) is budgeted here, so it never
+  // takes the request past its target; without one, so is the fallback that may replace it.
+  const endOfRequest = assembly.endOfRequest
+    ? tokensOf(assembly.endOfRequest)
+    : !assembly.request.summarizing && !assembly.prefill
       ? tokensOf({
-          content: LAST_TURN_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
+          content: FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
         })
       : 0
   const reserve =
-    lastTurn +
+    endOfRequest +
     prefillInput +
     prefixOutput +
     (belowHistory && assembly.lorebooks?.length ? loreAllowance(assembly) - loreCost : 0)
@@ -2263,6 +2236,35 @@ const composeStage = sync("compose", (assembly) => {
   }
 })
 
+/**
+ * The end-of-request instruction (DESIGN §2.2, owner 2026-10-29): one user message, the
+ * request's last, with the speaker's turn text (when your card speaks if the speaker is one you
+ * play, else when a character speaks) and, when the version has a direction, the direction text
+ * on a new line. Neither conditions nor ST's triggers apply to them. A summary request puts its
+ * instruction there instead (`summary-request`), so it sends none. `compose` budgets it and
+ * `messages` sends it; without this stage the fallback alone applies.
+ */
+const endOfRequestStage = sync("end-of-request", (assembly) => {
+  if (assembly.request.summarizing) return
+  const doc = need(assembly, "preset").doc
+  const { speaker, personas } = need(assembly, "cast")
+  const turn = speaker !== null && personas.includes(speaker) ? IMPERSONATION_PROMPT : GROUP_NUDGE
+  const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []
+  const parts = [turn, ...direction].flatMap((identifier) => {
+    const content = doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
+    if (content.trim() === "") return []
+    const text = presetText(assembly, identifier, content)
+    return text.text.trim() === "" ? [] : [text]
+  })
+  if (parts.length === 0) return
+  assembly.endOfRequest = {
+    role: "user",
+    content: parts.map((t) => t.text).join("\n"),
+    pieces: parts.map((t) => t.piece),
+    kind: "volatile"
+  }
+})
+
 /** Squashing and post-processing, as ST does them before sending (ARCHITECTURE §15). */
 const messagesStage = sync("messages", (assembly) => {
   const doc = need(assembly, "preset").doc
@@ -2287,33 +2289,29 @@ const messagesStage = sync("messages", (assembly) => {
     }
   })
   messages = messages.filter((m) => m.content)
+  // The end-of-request message is the request's last (DESIGN §2.2); squashing and
+  // post-processing treat it as any user message, so a merging mode can join it to the one before.
+  const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
+  if (end) messages.push({ ...end, kind: "volatile" })
   if (doc.squash) messages = squash(messages)
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
-  // The model is asked for the speaker's message (DESIGN §2.2) when the chat ends on the model's
-  // side and no user-role prompt follows the history: a user turn right after the last chat
-  // message, so the preset's own tail stays last. A prefill continues the model's own turn
-  // instead. Only the request inspector shows it.
-  const lastChat = messages.findLastIndex((m) => m.pieces.some((p) => assembly.pieces[p]?.source.kind === "message"))
-  const tail = lastChat < 0 ? messages : messages.slice(lastChat + 1)
+  // The only fallback (DESIGN §2.2): without an end-of-request message, a request that would end
+  // on an assistant message, with no prefill to continue it, asks for the speaker's message.
+  // Decided on the final request; system messages after it don't count, since some providers
+  // move them out of the turns.
   if (
+    !end &&
     !assembly.request.summarizing &&
     !assembly.prefill &&
-    (lastChat < 0
-      ? messages.findLast((m) => m.role !== "system")?.role === "assistant"
-      : messages[lastChat]!.role === "assistant" && !tail.some((m) => m.role === "user"))
+    messages.findLast((m) => m.role !== "system")?.role === "assistant"
   ) {
     const env = need(assembly, "macros")
     const piece = env.piece(
       "assembler:last-turn",
-      { kind: "assembler", what: "user turn so the request ends on one" },
-      LAST_TURN_TEXT
+      { kind: "assembler", what: "end of request fallback: who writes next" },
+      FALLBACK_TEXT
     )
-    messages.splice(lastChat < 0 ? messages.length : lastChat + 1, 0, {
-      role: "user",
-      content: env.text(piece),
-      pieces: [piece],
-      kind: "volatile"
-    })
+    messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
   }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
     role,
@@ -2422,6 +2420,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   noteGateStage,
   loreScanStage,
   loreActivationStage,
+  endOfRequestStage,
   composeStage,
   messagesStage,
   breakpointsStage,

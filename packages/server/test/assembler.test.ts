@@ -19,6 +19,8 @@ import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
 import { placeBreakpoints } from "../src/assembler/breakpoints.ts"
 import type { Stability } from "../src/assembler/st.ts"
 import { charDefinitions } from "@rp/shared/presetOrder.ts"
+import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
+import { builtinSourceDescriptors } from "../src/assembler/sourceDescriptors.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { json, run } from "./formats/support.ts"
 import { type AssemblyFixture, assembleFixture, type FixtureMessage } from "./support/assemblySources.ts"
@@ -128,6 +130,8 @@ const assembled = (fixture: AssemblyFixture, options?: Parameters<typeof assembl
   Effect.runPromise(assembleFixture(fixture, options))
 
 const contents = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
+/** The end-of-request message for Mira with the default turn text (DESIGN §2.2). */
+const MIRA_TURN = "user: [Write Mira's next message. Write only for Mira.]"
 
 /** A prompt-only regex script on the model's messages, as ST's preset file has it. */
 const regexScript = (id: string, fields: Record<string, unknown>) => ({
@@ -182,8 +186,9 @@ describe("the context assembler", () => {
       "system: [A new story begins]",
       "assistant: You're late.",
       "user: The road flooded.",
-      // The group nudge is sent whenever the model writes as a character, one or many (DESIGN §2.2).
-      "system: [Only Mira speaks next.]"
+      // The group nudge, the end-of-request text "when a character speaks", is the last message
+      // whenever the model writes as a character, one or many (DESIGN §2.2).
+      "user: [Only Mira speaks next.]"
     ])
     expect(snapshot.inputs.mode).toBe("layouts")
     const wrapped = await assembled(chat({ preset: presetFile("default") }))
@@ -307,7 +312,7 @@ describe("the context assembler", () => {
   it("injects the Character's Note at its depth and role, unless the chat turned it off", async () => {
     const characterNote = note("{{char}} never guesses.", 1, "user")
     const on = await assembled(chat({ notes: [characterNote] }))
-    expect(contents(on).slice(-3)).toEqual([
+    expect(contents(on).slice(-4, -1)).toEqual([
       "assistant: You're late.",
       "user: Mira never guesses.",
       "user: The road flooded."
@@ -326,7 +331,7 @@ describe("the context assembler", () => {
     const active = await assembled(
       chat({ notes: [other], events: [at(null, { key: "note.activate", value: { note: "note-other" as never } })] })
     )
-    expect(contents(active).at(-1)).toBe("system: Mira wears blue.")
+    expect(contents(active).at(-2)).toBe("system: Mira wears blue.")
   })
 
   it("sends an imported summary as ST's Summarize extension did (DESIGN §8.1)", async () => {
@@ -366,7 +371,7 @@ describe("the context assembler", () => {
       { mode: "depth", depth: 1, role: "system" },
       { notes: [summary({ mode: "depth", depth: 1, role: "system" }), note("{{char}} never guesses.", 1, "system")] }
     )
-    expect(contents(depth).slice(-3)).toEqual([
+    expect(contents(depth).slice(-4, -1)).toEqual([
       "assistant: You're late.",
       // The extension's prompt comes before the Character's Note, in ST's key order.
       "system: [Summary: Mira lost the ledger in the flood.]\nMira never guesses.",
@@ -436,7 +441,7 @@ describe("the context assembler", () => {
       const off = await assembled(chat({ notes: [scene] }))
       expect(contents(off).join("\n")).not.toContain("storm")
       const sent = await assembled(chat({ notes: [scene], events: on("note-scene") }))
-      expect(contents(sent).slice(-3)).toEqual([
+      expect(contents(sent).slice(-4, -1)).toEqual([
         "assistant: You're late.",
         "user: Mira and Tobin wait out the storm.",
         "user: The road flooded."
@@ -478,7 +483,7 @@ describe("the context assembler", () => {
           events: on("note-0-summary", "note-a-other", "note-z-author")
         })
       )
-      expect(contents(snapshot).slice(-2)).toEqual([
+      expect(contents(snapshot).slice(-3, -1)).toEqual([
         "system: [The ledger is lost.]\nTobin is soaked.\nThunder.\nMira never guesses.",
         "user: The road flooded."
       ])
@@ -496,16 +501,19 @@ describe("the context assembler", () => {
           ]
         })
       )
-      expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
+      expect(contents(snapshot).at(-2)).toBe("system: First.\nLast.")
     })
 
     it("puts a note at the tail at depth 0, with its role", async () => {
       const snapshot = await assembled(
         chat({ notes: [authorNote({ mode: "tail", role: "assistant" })], events: on("note-z-author") })
       )
-      // The chat ends on the user's message, so nothing is added after the assistant note
-      // (owner 2026-10-28: the closing user turn only follows a chat that ends on the model's side).
-      expect(contents(snapshot).slice(-2)).toEqual(["user: The road flooded.", "assistant: Tobin is soaked."])
+      // The end-of-request instruction follows everything, the tail note included (DESIGN §2.2).
+      expect(contents(snapshot).slice(-3)).toEqual([
+        "user: The road flooded.",
+        "assistant: Tobin is soaked.",
+        MIRA_TURN
+      ])
       expect(snapshot.issues).toEqual([])
     })
 
@@ -568,7 +576,7 @@ describe("the context assembler", () => {
         ] as const) {
           const snapshot = await assembled(chat({ notes: [note, authorNote(inChat)], events: on("note-z-author") }))
           expect(sent(snapshot)).toEqual([expected])
-          expect(contents(snapshot).slice(-2)).toEqual([expected, "user: The road flooded."])
+          expect(contents(snapshot).slice(-3, -1)).toEqual([expected, "user: The road flooded."])
         }
       })
 
@@ -593,7 +601,7 @@ describe("the context assembler", () => {
         ] as const
         for (const note of [top, bottom]) {
           const snapshot = await assembled(chat({ messages: [...messages], notes: [note] }))
-          expect(contents(snapshot).slice(-5)).toEqual([
+          expect(contents(snapshot).slice(-6, -1)).toEqual([
             "system: Tobin draws maps.",
             "assistant: Three.",
             "user: Four.",
@@ -963,7 +971,7 @@ describe("the context assembler", () => {
           events: on("a", "b", "c")
         })
       )
-      expect(contents(snapshot).at(-1)).toBe("system: First.\nLast.")
+      expect(contents(snapshot).at(-2)).toBe("system: First.\nLast.")
     })
 
     it("puts a due depth-zero note after send_if_empty's filler, and a skipped one nowhere", async () => {
@@ -979,7 +987,7 @@ describe("the context assembler", () => {
             events: on("note-z-author")
           })
         )
-        expect(contents(snapshot).slice(-2)).toEqual(
+        expect(contents(snapshot).slice(-3, -1)).toEqual(
           fields === never ? ["assistant: Reply.", "user: Continue."] : ["user: Continue.", "system: Tobin is soaked."]
         )
       }
@@ -1092,7 +1100,8 @@ describe("the context assembler", () => {
       })
     )
     expect(snapshot.inputs.type).toBe("impersonate")
-    expect(contents(snapshot).at(-1)).toMatch(/^system: \[Write your next reply from the point of view of Tobin/)
+    // The impersonation prompt ends the request, right before the prefill (DESIGN §2.2).
+    expect(contents(snapshot).at(-1)).toMatch(/^user: \[Write your next reply from the point of view of Tobin/)
     expect(snapshot.request.prefill).toBe("Tobin:")
   })
 
@@ -1227,17 +1236,15 @@ describe("the context assembler", () => {
     expect(snapshot.issues).toEqual([])
   })
 
-  it("sends the one-turn direction through the preset's direction prompt, as typed (DESIGN §2.2)", async () => {
+  it("sends the one-turn direction after the turn text, as typed (DESIGN §2.2)", async () => {
     const snapshot = await assembled(chat({ target: { direction: "Have {{char}} leave. {{random::a::b}}" } }))
-    expect(contents(snapshot).at(-1)).toBe(
-      "user: [The user has written a direction for Mira's next message. It is not part of the story; follow it closely: Have {{char}} leave. {{random::a::b}}]"
-    )
-    expect(snapshot.pieces.find((p) => p.id === "preset:direction")!.source).toEqual({
+    // The turn text, then the direction text on a new line, one user message (DESIGN §2.2).
+    expect(contents(snapshot).at(-1)).toBe(`${MIRA_TURN}\n[What happens next: Have {{char}} leave. {{random::a::b}}]`)
+    expect(snapshot.pieces.find((p) => p.id === "preset:directionPrompt")!.source).toEqual({
       kind: "preset",
       ref: "ref-preset",
       revision: "rev-preset",
-      identifier: "direction",
-      condition: "with_direction"
+      identifier: "directionPrompt"
     })
     expect(snapshot.issues).toEqual([])
   })
@@ -1372,7 +1379,7 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
     // ST's group names: everyone but the user's character is named in the text.
     expect(messages).toContain("assistant: Mira: Ledger's open.")
     expect(messages).toContain("user: Both of you, listen.")
-    expect(messages.at(-1)).toBe("system: [Write the next reply only as Oren.]")
+    expect(messages.at(-1)).toBe("user: [Write the next reply only as Oren.]")
     // The card blocks keep pointing at the fields they hold.
     expect(snapshot.pieces.find((p) => p.id === "card:oren:description")!.messages).toEqual([
       messages.findIndex((m) => m.includes("<Mira>\nMira keeps"))
@@ -1456,7 +1463,7 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
 
   it("lets the user's character speak, with the impersonation prompt naming them", async () => {
     const snapshot = await assembled(group({ target: { speaker: "tobin" } }))
-    expect(contents(snapshot).at(-1)).toMatch(/^system: \[Write your next reply from the point of view of Tobin/)
+    expect(contents(snapshot).at(-1)).toMatch(/^user: \[Write your next reply from the point of view of Tobin/)
   })
 
   it("unpins prompt names to follow the cast without following the chosen speaker", async () => {
@@ -1711,7 +1718,7 @@ describe("lorebook assembly", () => {
     )
     expect(contents(result).join("\n")).toContain("[Mira] The levee is guarded.")
     expect(contents(result).join("\n")).toContain("The toll is waived.")
-    expect(contents(result).at(-1)).toBe("user: The river runs north.")
+    expect(contents(result).at(-2)).toBe("user: The river runs north.")
     const tags = result.pieces.filter((p) => p.source.kind === "lorebook").map((p) => p.source)
     expect(tags).toEqual(
       expect.arrayContaining([
@@ -1942,38 +1949,212 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       })
     })
 
-  it("adds the default direction prompt when the preset has none that reads the direction, and says so", async () => {
-    const snapshot = await assembled(
-      chat({ preset: conditioned(false), target: { speaker: "mira", direction: "Have {{char}} leave." } })
-    )
-    expect(contents(snapshot).at(-1)).toBe(
-      "user: [The user has written a direction for Mira's next message. It is not part of the story; follow it closely: Have {{char}} leave.]"
-    )
-    expect(snapshot.pieces.find((p) => p.id === "direction:default")!.source).toEqual({
-      kind: "assembler",
-      what: "default direction prompt"
+  describe("the end-of-request instruction (DESIGN §2.2, owner 2026-10-29)", () => {
+    const tailNote = (content: string, role: "system" | "user" | "assistant"): NoteInput => ({
+      entity: `note-tail-${role}`,
+      revision: "note-tail-revision",
+      doc: {
+        schema_version: 1,
+        title: "Tail",
+        content,
+        placement: { mode: "section", section: "tail_end", role },
+        owner: { chat: "chat-1" as never },
+        exportable: false
+      }
     })
-    expect(snapshot.issues.map((i) => i.kind)).toEqual(["direction_prompt_missing"])
-    // Without a direction, nothing is added and nothing is said.
-    const plain = await assembled(chat({ preset: conditioned(false), target: { speaker: "mira" } }))
-    expect(plain.issues).toEqual([])
-    expect(contents(plain).join("\n")).not.toContain("has written a direction")
+    const activate = (note: NoteInput) => at(null, { key: "note.activate", value: { note: note.entity as never } })
+    /** The preset with its end-of-request texts emptied. */
+    const emptied = (doc: PresetDoc): PresetDoc => ({
+      ...doc,
+      prompts: doc.prompts.map((p) => (endOfRequestText(p.identifier) ? { ...p, content: "" } : p))
+    })
+    const describe = (snapshot: ContextSnapshot, id: string) => {
+      const source = snapshot.pieces.find((p) => p.id === id)!.source
+      const labels = {
+        names: new Map(),
+        titles: new Map(),
+        promptNames: new Map(),
+        depthOf: new Map(),
+        ordinalOf: new Map(),
+        linkOf: () => ({})
+      }
+      return builtinSourceDescriptors.find((d) => d.id === source.kind)!.describe(source, labels).label
+    }
+
+    it("ends a character's turn on its text, after the post-history instructions and the tail-end notes", async () => {
+      const note = tailNote("The lamp gutters.", "system")
+      const snapshot = await assembled(
+        chat({
+          preset: preset({ prompts: [{ identifier: "jailbreak", role: "system", content: "Stay sharp." }] }),
+          notes: [note],
+          events: [activate(note)]
+        })
+      )
+      expect(contents(snapshot).slice(-4)).toEqual([
+        "user: The road flooded.",
+        "system: Stay sharp.",
+        "system: The lamp gutters.",
+        MIRA_TURN
+      ])
+      expect(snapshot.request.messages.at(-1)!.role).toBe("user")
+      expect(describe(snapshot, "preset:groupNudge")).toBe("End of request: when a character speaks")
+      // Volatile: never inside a cached part.
+      expect(snapshot.request.breakpoints.every((b) => b.message < snapshot.request.messages.length - 1)).toBe(true)
+      expect(snapshot.issues).toEqual([])
+    })
+
+    it("uses the text for your card when the speaker is one you play, and adds the direction on a new line", async () => {
+      // ST's default impersonation prompt emptied: our default text.
+      const own = preset({ impersonation_prompt: "" })
+      const user = await assembled(chat({ preset: own, target: { speaker: "tobin" } }))
+      expect(contents(user).at(-1)).toBe("user: [Write Tobin's next message. Write only for Tobin.]")
+      expect(describe(user, "preset:impersonationPrompt")).toBe("End of request: when your card speaks")
+      expect(user.pieces.some((p) => p.id === "preset:groupNudge")).toBe(false)
+      const directed = await assembled(
+        chat({ preset: own, target: { speaker: "tobin", direction: "Tobin hesitates." } })
+      )
+      expect(contents(directed).at(-1)).toBe(
+        "user: [Write Tobin's next message. Write only for Tobin.]\n[What happens next: Tobin hesitates.]"
+      )
+      expect(describe(directed, "preset:directionPrompt")).toBe("End of request: when you give a direction")
+      // Each part keeps its own source, in the one message.
+      const last = directed.request.messages.length - 1
+      for (const id of ["preset:impersonationPrompt", "preset:directionPrompt"])
+        expect(directed.pieces.find((p) => p.id === id)!.messages).toEqual([last])
+      // A blank direction is none.
+      const blank = await assembled(chat({ target: { speaker: "mira", direction: "  " } }))
+      expect(contents(blank).at(-1)).toBe(MIRA_TURN)
+      // The texts are sent whatever their stored condition or triggers: neither applies to them.
+      const doc = preset()
+      const limited = {
+        ...doc,
+        prompts: doc.prompts.map((p) =>
+          p.identifier === "groupNudge" ? { ...p, condition: "as_user" as const, injection_trigger: ["quiet"] } : p
+        )
+      }
+      expect(contents(await assembled(chat({ preset: limited }))).at(-1)).toBe(MIRA_TURN)
+    })
+
+    it("names every character in {{char}} in a group, and the speaker in the end-of-request text", async () => {
+      const doc = preset({ prompts: [{ identifier: "main", role: "system", content: "Write for {{char}}." }] })
+      for (const speaker of ["mira", "oren"]) {
+        const snapshot = await assembled(chat({ participants: ["mira", "oren"], preset: doc, target: { speaker } }))
+        expect(contents(snapshot)[0]).toBe("system: Write for Mira, Oren.")
+        const name = speaker === "mira" ? "Mira" : "Oren"
+        expect(contents(snapshot).at(-1)).toBe(`user: [Write ${name}'s next message. Write only for ${name}.]`)
+      }
+    })
+
+    it("goes right before the partial message on a prefill or Continue, which stays last", async () => {
+      const prefilled = await assembled(
+        chat({ preset: preset({ assistant_prefill: "Mira:" }), model: model({ prefill: "assistant" }) })
+      )
+      expect(contents(prefilled).at(-1)).toBe(MIRA_TURN)
+      expect(prefilled.request.prefill).toBe("Mira:")
+      const wire = chatCompletionsFields(prefilled.request, "openai-chat") as {
+        messages: ReadonlyArray<{ role: string }>
+      }
+      expect(wire.messages.slice(-2).map((m) => m.role)).toEqual(["user", "assistant"])
+      const continued = await assembled(
+        chat({
+          target: { speaker: "mira", continues: { version: "version-1", text: "Mira looks up" } },
+          model: model({ prefill: "assistant" })
+        })
+      )
+      expect(continued.inputs.type).toBe("continue")
+      expect(contents(continued).at(-1)).toBe(MIRA_TURN)
+      expect(continued.request.prefill).toBe("Mira looks up")
+    })
+
+    it("leaves its place to the summary instruction in a summary request", async () => {
+      const summary = await assembled(chat({ target: { speaker: "mira", direction: "Rain." } }), {
+        summarizing: true
+      })
+      const text = contents(summary).join("\n")
+      expect(text).not.toContain("[Write ")
+      expect(text).not.toContain("What happens next")
+      expect(summary.pieces.some((p) => endOfRequestText(p.id.replace(/^preset:/, "")))).toBe(false)
+    })
+
+    it("falls back to a bare turn only when its texts are empty, nothing is prefilled and the request ends on assistant", async () => {
+      const ending = (fields: Partial<AssemblyFixture>) =>
+        assembled(
+          chat({
+            messages: [
+              { side: "user", content: "Both of you, listen." },
+              { side: "assistant", content: "Ferry's shut." }
+            ],
+            preset: emptied(preset()),
+            ...fields
+          })
+        )
+      const bare = await ending({})
+      expect(contents(bare).slice(-2)).toEqual(["assistant: Ferry's shut.", "user: [Write Mira's next message.]"])
+      expect(bare.pieces.find((p) => p.id === "assembler:last-turn")!.source).toEqual({
+        kind: "assembler",
+        what: "end of request fallback: who writes next"
+      })
+      expect(bare.issues).toEqual([])
+      // Decided on the whole request: a system prompt after the model's message doesn't hide it.
+      const after = await ending({
+        preset: emptied(preset({ prompts: [{ identifier: "jailbreak", role: "system", content: "Stay sharp." }] }))
+      })
+      expect(contents(after).slice(-2)).toEqual(["system: Stay sharp.", "user: [Write Mira's next message.]"])
+      // A chat ending on the user's message needs none.
+      const user = await ending({ messages: [{ side: "user", content: "Listen." }] })
+      expect(contents(user).at(-1)).toBe("user: Listen.")
+      // An assistant note after the user's last message does (models without prefill).
+      const note = tailNote("Mira:", "assistant")
+      const tail = await ending({
+        messages: [{ side: "user", content: "Listen." }],
+        notes: [note],
+        events: [activate(note)]
+      })
+      expect(contents(tail).slice(-2)).toEqual(["assistant: Mira:", "user: [Write Mira's next message.]"])
+      // A prefill continues the model's own turn: nothing is added.
+      const prefilled = await ending({
+        preset: emptied(preset({ assistant_prefill: "Mira:" })),
+        model: model({ prefill: "assistant" })
+      })
+      expect(contents(prefilled).at(-1)).toBe("assistant: Ferry's shut.")
+      // With its texts, the request ends on them instead.
+      expect(contents(await ending({ preset: preset() })).at(-1)).toBe(MIRA_TURN)
+      // Without the stage, the fallback still applies.
+      const disabled = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const own = yield* makeAssembler
+            yield* own.stages.disable("end-of-request")
+            return yield* assembleFixture(
+              chat({
+                messages: [
+                  { side: "user", content: "Both of you, listen." },
+                  { side: "assistant", content: "Ferry's shut." }
+                ]
+              }),
+              { assembler: own }
+            )
+          })
+        )
+      )
+      expect(contents(disabled).at(-1)).toBe("user: [Write Mira's next message.]")
+    })
   })
 
-  it("imports ST's group nudge and impersonation prompt as the prompts that say who writes", async () => {
+  it("imports ST's group nudge and impersonation prompt as the end-of-request texts", async () => {
     const doc = preset({
       group_nudge_prompt: "[Only {{char}} next.]",
       impersonation_prompt: "[Write as {{user}}.]"
     })
     const character = await assembled(chat({ ...group, preset: doc, target: { speaker: "oren" } }))
-    expect(contents(character)).toContain("system: [Only Oren next.]")
+    expect(contents(character).at(-1)).toBe("user: [Only Oren next.]")
     expect(contents(character).join("\n")).not.toContain("[Write as")
     const persona = await assembled(chat({ ...group, preset: doc, target: { speaker: "tobin" } }))
-    expect(contents(persona)).toContain("system: [Write as Tobin.]")
+    expect(contents(persona).at(-1)).toBe("user: [Write as Tobin.]")
     expect(contents(persona).join("\n")).not.toContain("[Only")
     // One character: sent all the same (ST sends its nudge in groups only).
     const one = await assembled(chat({ preset: doc, target: { speaker: "mira" } }))
-    expect(contents(one).at(-1)).toBe("system: [Only Mira next.]")
+    expect(contents(one).at(-1)).toBe("user: [Only Mira next.]")
   })
 
   it("keeps the messages before the history breakpoint byte-identical across speakers and directions", async () => {
@@ -2030,72 +2211,6 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
     }
   })
 
-  it("adds a user turn right after a chat ending on the model's side, unless a user prompt follows or the model is prefilled", async () => {
-    const ending = (fields: Partial<AssemblyFixture>) =>
-      assembled(
-        chat({
-          ...group,
-          messages: [
-            { side: "assistant", content: "Ledger's open.", speaker: "mira" },
-            { side: "user", content: "Both of you, listen.", speaker: "tobin" },
-            { side: "assistant", content: "Ferry's shut.", speaker: "oren" }
-          ],
-          target: { speaker: "mira" },
-          ...fields
-        })
-      )
-    // By writer, a group chat ending on another character, with a system prompt after it: the
-    // turn goes right after the last chat message, so the preset's tail stays last, and it's
-    // no issue on the reply (owner 2026-10-28).
-    const byWriter = await ending({ preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }) })
-    expect(contents(byWriter).slice(-3)).toEqual([
-      "assistant: Oren: Ferry's shut.",
-      "user: [Write Mira's next message.]",
-      "system: [Only Mira next.]"
-    ])
-    expect(byWriter.issues).toEqual([])
-    expect(byWriter.pieces.find((p) => p.id === "assembler:last-turn")!.source).toEqual({
-      kind: "assembler",
-      what: "user turn so the request ends on one"
-    })
-    // Alternation by depth (even depths are the assistant's): three messages end on an
-    // assistant one, four on a user one.
-    const alternate = at(null, { key: "roles.projection", value: "alternate" })
-    expect(contents(await ending({ events: [alternate] })).at(-1)).toBe("user: [Write Mira's next message.]")
-    const four = await ending({
-      events: [alternate],
-      messages: [
-        { side: "user", content: "Hello.", speaker: "tobin" },
-        { side: "assistant", content: "Ledger's open.", speaker: "mira" },
-        { side: "user", content: "Both of you, listen.", speaker: "tobin" },
-        { side: "assistant", content: "Ferry's shut.", speaker: "oren" }
-      ]
-    })
-    expect(contents(four).at(-1)).toBe("user: Oren: Ferry's shut.")
-    expect(four.issues).toEqual([])
-    // By perspective: the speaker's own last message is the assistant's.
-    const perspective = await ending({
-      events: [at(null, { key: "roles.projection", value: "perspective" })],
-      target: { speaker: "oren" }
-    })
-    expect(contents(perspective).at(-1)).toBe("user: [Write Oren's next message.]")
-    // A prefill continues the model's own turn: nothing is added.
-    const prefilled = await ending({
-      preset: preset({ assistant_prefill: "Mira:" }),
-      model: model({ prefill: "assistant" })
-    })
-    expect(contents(prefilled).at(-1)).toBe("assistant: Oren: Ferry's shut.")
-    expect(prefilled.request.prefill).toBe("Mira:")
-    expect(prefilled.issues).toEqual([])
-    // A user-role prompt after the history asks for the message itself: nothing is added.
-    const asked = await ending({
-      preset: preset({ group_nudge_prompt: "[Only {{char}} next.]" }),
-      target: { speaker: "mira", direction: "Mira laughs." }
-    })
-    expect(contents(asked).slice(-3, -1)).toEqual(["assistant: Oren: Ferry's shut.", "system: [Only Mira next.]"])
-    expect(contents(asked).at(-1)).toMatch(/^user: \[The user has written a direction for Mira's next message\./)
-  })
-
   it("keeps a muted character's card and notes in the context, and never picks it to speak (DESIGN §3.5)", async () => {
     const orenNote: NoteInput = { ...note("Oren hates the rain.", 2, "system"), entity: "note-oren" }
     const muted = await assembled(
@@ -2111,7 +2226,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
     expect(text).toContain("<Mira>\nMira keeps the ledger for Tobin.\n</Mira>")
     expect(text).toContain("Oren hates the rain.")
     // No speaker named: the first character not muted writes.
-    expect(contents(muted)).toContain("system: [Only Oren next.]")
+    expect(contents(muted).at(-1)).toBe("user: [Only Oren next.]")
     const mutedNote = await assembled(
       chat({
         ...group,
@@ -2258,7 +2373,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
     expect(before).toBeGreaterThanOrEqual(0)
     if (position === "absolute") expect(sent[before]).toBe("system: BEFORE MAIN\nAFTER MAIN")
     else expect(sent[before + 1]).toBe("system: AFTER MAIN")
-    expect(sent.filter((line) => line.includes("Write Mira"))).toEqual([])
+    expect(sent.filter((line) => line.includes("Write Mira's next reply"))).toEqual([])
     if (missing) expect(before).toBe(0)
     else expect(before).toBeGreaterThan(0)
   })
@@ -2349,12 +2464,12 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
     for (const id of ["charDescription", "charPersonality", "scenario", "personaDescription"])
       expect(marker(joined, id)).toBe(marker(alone, id))
     // What changes is the group rules: names on messages and the group's new-chat prompt. The
-    // group nudge is a prompt sent whenever the model writes as a character (DESIGN §2.2), one
-    // character or many.
+    // group nudge is the end-of-request text sent whenever the model writes as a character
+    // (DESIGN §2.2), one character or many.
     expect(contents(alone)).toContain("assistant: You're late.")
     expect(contents(joined)).toContain("assistant: Mira: You're late.")
-    expect(contents(joined).at(-1)).toBe("system: [Write the next reply only as Mira.]")
-    expect(contents(alone).at(-1)).toBe("system: [Write the next reply only as Mira.]")
+    expect(contents(joined).at(-1)).toBe("user: [Write the next reply only as Mira.]")
+    expect(contents(alone).at(-1)).toBe("user: [Write the next reply only as Mira.]")
   })
 
   it("puts every card whole at the Definitions marker, which wins over the per-field markers", async () => {

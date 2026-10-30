@@ -10,7 +10,7 @@ import type { SqlError } from "effect/sql"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroEnvironment } from "./macros.ts"
 import type { ScriptRunner } from "./regex.ts"
-import type { Composition, Stability } from "./st.ts"
+import type { Composition, Stability, StMessage } from "./st.ts"
 import type {
   AssembledRequest,
   CardInput,
@@ -241,6 +241,8 @@ export interface Assembly {
   /** Speakers of those messages who have left the cast, by entity: their messages keep their names. */
   departed?: ReadonlyMap<string, CardInput>
   projected?: ReadonlyArray<ProjectedEntry>
+  /** The end-of-request message (DESIGN §2.2), the request's last; absent: none this turn. */
+  endOfRequest?: StMessage
   composition?: Composition
   messages?: Array<RequestMessage & { readonly pieces: ReadonlyArray<number>; readonly kind: Stability }>
   /** The names ST folds into the text where a provider has no `name` field. */

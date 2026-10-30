@@ -56,6 +56,13 @@ it.live(
               content: "Begin.",
               system_prompt: false,
               injection_trigger: ["normal"]
+            },
+            {
+              identifier: "no-impersonation",
+              name: "No impersonation",
+              content: "Never write for {{user}}.",
+              system_prompt: false,
+              condition: "as_character"
             }
           ],
           prompt_order: [
@@ -63,6 +70,7 @@ it.live(
               character_id: 100001,
               order: [
                 { identifier: "fresh", enabled: true },
+                { identifier: "no-impersonation", enabled: true },
                 ...importStPreset('{"frequency_penalty":0}').document!.order.map((e) => ({
                   identifier: e.identifier,
                   enabled: e.enabled
@@ -246,11 +254,14 @@ it.live(
         for (let i = 1; i < parts.length; i++) assert.isAtLeast(parts[i]!.start, parts[i - 1]!.end)
       }
 
-      // Generating again after the reply: the request gets a user turn to end on.
+      // Generating again after the reply: the request ends on the end-of-request message.
       const again = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: yield* leaf(), branch: false }))
       const closing = yield* done(again.entry.version.id)
-      const last = closing.messages.findLast((m) => m.role === "user")!
-      assert.isTrue(last.sources.some((s) => s.kind === "assembler" && s.label.startsWith("User turn")))
+      const last = closing.messages.at(-1)!
+      assert.strictEqual(last.role, "user")
+      assert.isTrue(
+        last.sources.some((s) => s.kind === "preset" && s.label === "End of request: when a character speaks")
+      )
 
       // Writing as the user's card: the prompt conditioned on a character's turn isn't sent.
       const own = yield* posted(
@@ -260,8 +271,15 @@ it.live(
       assert.strictEqual(impersonated.type, "impersonate")
       assert.isTrue(
         impersonated.notSent!.some(
-          (s) => s.kind === "preset" && s.label === "Preset prompt “Group nudge” (sent when writing as a character)"
+          (s) =>
+            s.kind === "preset" && s.label === "Preset prompt “No impersonation” (sent when writing as a character)"
         )
+      )
+      // ...and the request ends on the text for the user's card.
+      assert.isTrue(
+        impersonated.messages
+          .at(-1)!
+          .sources.some((s) => s.kind === "preset" && s.label === "End of request: when your card speaks")
       )
       // ...and the note conditioned on Tobin's turn is sent.
       assert.deepStrictEqual(

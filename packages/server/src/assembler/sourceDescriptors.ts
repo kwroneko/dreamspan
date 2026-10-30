@@ -2,6 +2,7 @@
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { CONDITION_LABELS } from "@rp/shared/presetConditions.ts"
+import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 import type { Source } from "./types.ts"
 
 interface SourceLabels {
@@ -28,6 +29,14 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
   const { names, titles, promptNames, depthOf, ordinalOf, linkOf } = labels
   switch (source.kind) {
     case "preset": {
+      // The end-of-request texts by the editor's labels, whatever the prompt's stored name.
+      const end = endOfRequestText(source.identifier)
+      if (end)
+        return {
+          label: `End of request: ${end.label.charAt(0).toLowerCase()}${end.label.slice(1)}`,
+          slotId: null,
+          ...(source.ref ? { ref: source.ref } : {})
+        }
       const name = promptNames.get(`${source.revision}:${source.identifier}`)
       // Its other text (`utility.new_chat_prompt`, `prefill.assistant`) by what it is.
       const other = source.identifier.replace(/^utility\./, "").replaceAll("_", " ")

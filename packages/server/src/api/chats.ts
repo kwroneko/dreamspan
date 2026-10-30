@@ -634,8 +634,9 @@ export const makeChatHandlers = Effect.gen(function* () {
     SetDisplayPrefs: ({ prefs }) =>
       Effect.flatMap(userId, (id) => writer.SetDisplayPrefs({ userId: id, prefs })).pipe(internal("SetDisplayPrefs")),
 
-    // Once per preset per account (DESIGN §2.2): the built-in preset has ST's impersonation
-    // prompt, so it never needs the notice.
+    // Once per preset per account (DESIGN §2.2), unless a prompt of its order is marked for
+    // writing as {{user}}. The end-of-request text "when your card speaks" is outside the order
+    // and has no condition, so it doesn't count: a preset with only that shows the notice once.
     ImpersonationNotice: () =>
       Effect.gen(function* () {
         const id = yield* userId

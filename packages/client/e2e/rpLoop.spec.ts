@@ -264,21 +264,23 @@ for (const width of [1440, 390])
           .join("\n")
       ).toContain(`[Write ${personaName}'s next reply in their voice`)
       await expect.poll(async () => (await newestVersion()).status).toBe("complete")
-      // Night RP 3.1 has its impersonation prompt: no notice.
+      // Night RP 3.1 has a prompt only for impersonation: no notice.
       await expect(page.getByText(/may need “not when writing as/)).toHaveCount(0)
       await page.goto(`${server().url}/chats/${inn}/context/${(await newestVersion()).id}`)
-      await inspectorEnd(page, "sent when writing as {{user}}")
+      await inspectorEnd(page, "End of request: when your card speaks")
       await shot("10-inspector-impersonation")
 
-      // The preset editor: conditions, the import's prompt, and both warnings.
+      // The preset editor: conditions, the end-of-request texts, and the direction warning.
       await page.goto(`${server().url}/library`)
       await page.getByRole("button", { name: "Edit Night RP 3.1", exact: true }).click()
       const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
       await expect(editor).toBeVisible()
-      const direct = editor.locator('[data-prompt="direction"]')
-      await expect(direct).toContainText("added on import")
-      await expect(direct).toContainText("with a direction")
-      await expect(direct.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+      // The end-of-request texts are outside the order: no prompt blocks, a fixed section.
+      await expect(editor.locator('[data-prompt="groupNudge"]')).toHaveCount(0)
+      const end = editor.getByRole("heading", { name: "End of request" })
+      await expect(end).toBeVisible()
+      const direct = editor.locator('[data-end-of-request="directionPrompt"]')
+      await expect(direct).toContainText("When you give a direction (added after the turn text)")
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")
@@ -288,38 +290,24 @@ for (const width of [1440, 390])
       await expect(types.getByRole("checkbox", { name: "Normal" })).not.toBeChecked()
       await style.scrollIntoViewIfNeeded()
       await shot("11-editor-conditions")
-      const nudge = editor.locator('[data-prompt="groupNudge"]')
-      await nudge.getByRole("combobox", { name: "Role" }).click()
-      await page.getByRole("option", { name: "assistant", exact: true }).click()
+      const directionText = direct.getByRole("textbox", { name: /^When you give a direction/ })
+      const original = await directionText.textContent()
+      await directionText.fill("[What happens next.]")
       const warnings = editor.getByRole("group", { name: "Preset warnings" })
-      // The direction prompt after it is sent only with a direction: a plain turn ends on the nudge.
-      await expect(warnings).toContainText("end on an assistant prompt, “Group nudge”")
-      await direct.getByRole("switch", { name: "Send Direction" }).click()
-      await expect(warnings).toContainText("No prompt that's on sends the direction")
+      await expect(warnings).toContainText("doesn't contain {{direction}}")
       await editor.getByTestId("preset-scroll").evaluate((e) => (e.scrollTop = 0))
       await shot("12-editor-warnings")
-      await warnings.getByRole("button", { name: "Go to the prompt" }).click()
-      await expect(nudge).toBeInViewport()
-      // Put both back as they were (the drafts are this account's).
-      await nudge.getByRole("combobox", { name: "Role" }).click()
-      await page.getByRole("option", { name: "system", exact: true }).click()
-      await direct.getByRole("switch", { name: "Send Direction" }).click()
+      await warnings.getByRole("button", { name: "Go to the text" }).click()
+      await expect(direct).toBeInViewport()
+      // Put it back as it was (the drafts are this account's).
+      await directionText.fill(original ?? "")
       await expect(warnings).toHaveCount(0)
       await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
 
-      // The one-time notice, with a preset whose impersonation prompt is off.
+      // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
       if (theme === "light") {
         const label = width > 500 ? "Celia 4.2" : "Pixijb v18"
         await usePreset(label)
-        await page.goto(`${server().url}/library`)
-        await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
-        await editor.getByRole("switch", { name: "Send Impersonation prompt" }).click()
-        await editor.getByRole("button", { name: /^Save \(/ }).click()
-        await page
-          .getByRole("dialog", { name: "Save a revision" })
-          .getByRole("button", { name: "Save revision" })
-          .click()
-        await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
         await page.goto(`${server().url}/chats/${inn}`)
         const write = page.getByRole("button", { name: `Write for ${personaName}`, exact: true })
         await write.click()
