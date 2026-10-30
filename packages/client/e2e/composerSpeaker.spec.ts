@@ -5,10 +5,16 @@
 import { expect, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
+// One session for the file's setup calls: the server allows 50 logins per address in 15 minutes.
+let adminCookie: string
+test.beforeAll(async () => {
+  adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+})
+const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
 
 const composer = (page: Page) => page.getByLabel("Message", { exact: true })
 const generating = (page: Page) => page.getByText("generating", { exact: true })
@@ -16,24 +22,25 @@ const replyFrom = (page: Page) => page.getByRole("group", { name: "Reply from" }
 const speakerChip = (page: Page) => page.getByRole("button", { name: /^Speaking as / })
 const lastHeader = (page: Page) => page.locator("article[data-slot]").last().locator("header").first()
 
-/** A chat with `characters`, played as Ana and Bo (personas), with no messages yet. */
-const chatWith = (characters: ReadonlyArray<string>) =>
-  asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+/**
+ * A chat with `characters`, played as Ana (a persona), with no messages yet. With `withBo`, Bo,
+ * another persona card, is in the cast too, unselected: a chat has at most one selected persona,
+ * so Bo is an ordinary cast member the user can speak as (DESIGN §2.2, owner 2026-10-29).
+ */
+const chatWith = (characters: ReadonlyArray<string>, withBo = false) =>
+  admin((api) =>
     Effect.gen(function* () {
       const ids: Record<string, EntityId> = {}
-      for (const name of [...characters, "Ana", "Bo"]) {
+      const cast = [...characters, "Ana", ...(withBo ? ["Bo"] : [])]
+      for (const name of cast) {
         const existing = (yield* api.ListCards()).find((card) => card.name === name)
         ids[name] = existing?.entityId ?? (yield* api.CreateCard({ label: name, name })).entityId
         if (name === "Ana" || name === "Bo") yield* api.SetPersona({ entityId: ids[name], persona: true })
       }
       const chat = yield* api.CreateChat({ title: characters.length > 1 ? "The Lantern" : characters[0]! })
-      for (const name of [...characters, "Ana", "Bo"])
+      for (const name of cast)
         yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: ids[name]! } })
-      yield* api.ChangeCast({
-        chatId: chat.id,
-        slotId: null,
-        change: { _tag: "PlayedByMe", entityIds: [ids.Ana!, ids.Bo!] }
-      })
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "PlayedByMe", entityIds: [ids.Ana!] } })
       return chat.id
     })
   )
@@ -52,7 +59,7 @@ for (const [width, height] of [
     }) => {
       await page.setViewportSize({ width, height })
       const chatId = await chatWith(["Mira", "Tobin"])
-      const first = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      const first = await admin((api) =>
         Effect.gen(function* () {
           const cards = yield* api.ListCards()
           const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
@@ -77,15 +84,13 @@ for (const [width, height] of [
       if (width < 640) await page.getByRole("button", { name: "Composer options", exact: true }).click()
       await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
       if (turns > 60) await expect(page.getByText("Mira's earlier turn", { exact: true })).toHaveCount(0)
-      const deleted = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.DeleteMessage({ slotId: first })
-      )
+      const deleted = await admin((api) => api.DeleteMessage({ slotId: first }))
       await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
       await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.RestoreBinItem({ itemId: deleted.id }))
+      await admin((api) => api.RestoreBinItem({ itemId: deleted.id }))
       await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
       // Delete again, then verify both send paths actually use the corrected order.
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteMessage({ slotId: first }))
+      await admin((api) => api.DeleteMessage({ slotId: first }))
       await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
       if (width < 640) {
         await page.keyboard.press("Escape")
@@ -102,9 +107,9 @@ for (const [width, height] of [
 
   test(`the switcher lists only the chat's cast, and picking never adds a card (${width}px)`, async ({ page }) => {
     await page.setViewportSize({ width, height })
-    const chatId = await chatWith(["Mira", "Tobin"])
+    const chatId = await chatWith(["Mira", "Tobin"], true)
     // A library card that isn't in the chat: to speak as it, it has to be added first (DESIGN §2.2).
-    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    await admin((api) =>
       Effect.gen(function* () {
         if (!(yield* api.ListCards()).some((card) => card.name === "Harbor Guard"))
           yield* api.CreateCard({ label: "Harbor Guard", name: "Harbor Guard" })
@@ -116,7 +121,8 @@ for (const [width, height] of [
     await expect(search).toBeFocused()
     await expect(page.getByRole("tab")).toHaveCount(0)
     await expect(page.getByRole("option")).toHaveText(
-      ["Ana", "Bo", "Mira", "Tobin"].map((name) => new RegExp(name)),
+      // The selected persona first, then the rest of the cast in its order.
+      ["Ana", "Mira", "Tobin", "Bo"].map((name) => new RegExp(name)),
       {
         useInnerText: true
       }
@@ -129,7 +135,7 @@ for (const [width, height] of [
     await search.fill("Bo")
     await search.press("Enter")
     await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
-    const cast = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetCast({ chatId, slotId: null }))
+    const cast = await admin((api) => api.GetCast({ chatId, slotId: null }))
     expect(cast.participants).toHaveLength(4)
   })
 }
@@ -169,7 +175,7 @@ test("Reply from: the next in turn, a pick for one reply, and an empty Send", as
 })
 
 test("the speaker stays chosen through a reload and in every tab; the switcher searches", async ({ page }) => {
-  const chatId = await chatWith(["Mira", "Tobin"])
+  const chatId = await chatWith(["Mira", "Tobin"], true)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
 
@@ -222,7 +228,7 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone, pi
 }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await chatWith(["Mira"])
-  const cardCount = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+  const cardCount = await admin((api) =>
     Effect.gen(function* () {
       for (let index = 0; index < 240; index++) {
         const name = `Visitor ${String(index).padStart(3, "0")}`
@@ -271,7 +277,7 @@ test("a phone shows the full named Write for action and keeps an empty input com
 
 test("reply order follows the branch tip, including a character turn beyond the loaded window", async ({ page }) => {
   const chatId = await chatWith(["Mira", "Tobin", "Wren"])
-  const firstSlot = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+  const firstSlot = await admin((api) =>
     Effect.gen(function* () {
       const cards = yield* api.ListCards()
       const entity = (name: string) => cards.find((card) => card.name === name)!.entityId
@@ -338,7 +344,7 @@ test("typing stays available while the saved speaker is loading; sending waits f
 
 test("empty Enter requests the visible empty-box reply without adding human text", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
-  await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+  await admin((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
   await composer(page).press("Enter")
