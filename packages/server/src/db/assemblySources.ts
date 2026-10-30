@@ -461,14 +461,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             layer.cursorDepth
           ).pipe(Effect.map((failures) => ({ ...layer, failures })))
         ),
-        // The cursor at its display position, which the history's positions are compared with.
-        Effect.flatMap((layer) =>
-          Effect.gen(function* () {
-            const shown = layer.cursor === null ? null : yield* display(leaf)
-            const position = shown === null ? null : yield* positionIn(shown.pieces, layer.cursor!)
-            return position === null ? layer : { ...layer, cursorDepth: position }
-          })
-        ),
+        // The layer's cursor is a display position already (selectSummaryLayer in a fork that
+        // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
         Effect.tap((layer) =>
           Effect.sync(() => {
             layerPins = {

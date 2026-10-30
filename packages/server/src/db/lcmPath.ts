@@ -1,6 +1,6 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { imageExcludedIn, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
+import { imageExcludedIn, originalSql, shownIn, shownVersionDeletedIn, slotDeletedIn, viewAt } from "./forkState.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -55,7 +55,7 @@ export const lcmPath = (
       CASE WHEN NOT ${slotDeletedIn(sql, fork, "s")} AND ${contextExcludedIn(sql, fork)} = 0
         AND NOT ${shownVersionDeletedIn(sql, fork, "v")} AND v.status NOT IN ('generating','failed') THEN CASE WHEN length(v.content) > 0 THEN v.content WHEN EXISTS(SELECT 1 FROM version_attachments a WHERE a.version_id = v.id) THEN '[Image]' ELSE '' END ELSE '' END AS content,
       (SELECT json_group_array(json_object('mediaId',m.id,'sha256',m.sha256,'width',m.width,'height',m.height))
-        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, "s.id", "a.media_id")} ORDER BY a.ordinal) AS images_json,
+        FROM version_attachments a JOIN media_assets m ON m.id=a.media_id WHERE a.version_id=v.id AND NOT ${imageExcludedIn(sql, fork, `(${originalSql("v")})`, "a.media_id")} ORDER BY a.ordinal) AS images_json,
       (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amendCount,
       coalesce(v.status = 'generating',0) AS generating,
       EXISTS(SELECT 1 FROM slot_parents m WHERE m.slot_id = p.id) AS merged,

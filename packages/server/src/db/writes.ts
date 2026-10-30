@@ -316,7 +316,14 @@ export const makeWriteHandlers = (bin: Bin) =>
 
       AddStateEvent: ({ userId, chatId, slotId, versionId, scope, data, forkId, displayEnd }) =>
         Effect.gen(function* () {
-          yield* ownedPosition(userId, chatId, slotId)
+          yield* ownedChat(userId, chatId)
+          const at =
+            versionId === null && data.key !== "lcm.settings"
+              ? yield* statePosition(userId, chatId, slotId, forkId ?? null, displayEnd)
+              : slotId
+          // The slot written to must be live: a retained deleted tip (spec/MESSAGE-INSERT.md
+          // §2.4) resolves to the live inserted message after it, where the event folds.
+          yield* ownedPosition(userId, chatId, at)
           if (versionId !== null) {
             yield* found(
               sql`SELECT count(*) AS n FROM versions WHERE id = ${versionId} AND slot_id IS ${slotId} AND deleted_at IS NULL`,
@@ -324,17 +331,14 @@ export const makeWriteHandlers = (bin: Bin) =>
               versionId
             )
           }
-          const at =
-            versionId === null && data.key !== "lcm.settings"
-              ? yield* statePosition(userId, chatId, slotId, forkId ?? null, displayEnd)
-              : slotId
           return yield* insertStateEvent(userId, chatId, at, versionId, scope, data, forkId ?? null)
         }).pipe(transaction("AddStateEvent")),
 
       AddStateEvents: ({ userId, chatId, slotId, data, forkId, displayEnd }) =>
         Effect.gen(function* () {
-          yield* ownedPosition(userId, chatId, slotId)
+          yield* ownedChat(userId, chatId)
           const at = yield* statePosition(userId, chatId, slotId, forkId ?? null, displayEnd)
+          yield* ownedPosition(userId, chatId, at)
           for (const event of data)
             yield* insertStateEvent(
               userId,
