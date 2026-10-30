@@ -198,8 +198,12 @@ describe("continue and reasoning", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: { prefill: "assistant" }
       })
-      const reply = (yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }))
-        .entries.at(-1)!
+      const reply = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
       const edited = yield* api.EditVersion({
         slotId: reply.slotId,
         sourceVersionId: version.id,
@@ -230,6 +234,27 @@ describe("continue and reasoning", () => {
           ["model", "The ledger agrees, and the tide is late."]
         ]
       )
+      // Metrics: the continuation counts the reply it was continued from (through the edit),
+      // the edit has none of its own, the original only its request.
+      const metrics = yield* api.GetVersionMetrics({ versionIds: versions.map((v) => v.id) })
+      const of = (id: string) => metrics.find((m) => m.versionId === id)
+      assert.strictEqual(metrics.length, 2)
+      assert.strictEqual(of(edited.version.id), undefined)
+      assert.strictEqual(of(version.id)!.requests, 1)
+      assert.strictEqual(of(version.id)!.output, 10)
+      const total = of(continued.version.id)!
+      assert.strictEqual(total.requests, 2)
+      assert.strictEqual(total.output, 20)
+      assert.strictEqual(total.outputUnknown, 0)
+      assert.isFalse(total.running)
+      assert.isFalse(total.estimated)
+      assert.strictEqual(total.last.output, 10)
+      assert.isNotNull(total.last.firstTokenAt)
+      assert.isAtLeast(total.elapsedMs!, total.last.endedAt! - total.last.startedAt)
+      // The inspector's usage carries the request's times.
+      const run = yield* api.GetRunContext({ versionId: continued.version.id })
+      assert.strictEqual(run.requests[0]!.startedAt, total.last.startedAt)
+      assert.strictEqual(run.requests[0]!.endedAt, total.last.endedAt)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
@@ -322,8 +347,12 @@ describe("continue and reasoning", () => {
       assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
 
       // Only a finished version with text can be continued.
-      const now = (yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }))
-        .entries.at(-1)!
+      const now = (yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: null,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })).entries.at(-1)!
       const blank = yield* api.EditVersion({
         slotId: now.slotId,
         sourceVersionId: now.version.id,

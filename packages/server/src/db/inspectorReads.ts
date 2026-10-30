@@ -4,10 +4,10 @@ import { tokensOf } from "../assembler/st.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
 import { createHash } from "node:crypto"
-import type { ChatId, SlotId } from "@rp/shared/chat.ts"
+import type { ChatId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
-import { type ContextSource, RunContext } from "@rp/shared/inspectorApi.ts"
+import { type ContextSource, type RequestFigures, RunContext, versionMetricsOf } from "@rp/shared/inspectorApi.ts"
 import type { Assembler } from "../assembler/assembler.ts"
 import { withAssemblyModules } from "../assembler/modules.ts"
 import { fallbackDescription } from "../assembler/sourceDescriptors.ts"
@@ -131,6 +131,9 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
       LlmRequestRow,
       | "id"
       | "status"
+      | "started_at"
+      | "first_token_at"
+      | "ended_at"
       | "input_uncached"
       | "cache_read"
       | "cache_write"
@@ -140,7 +143,8 @@ export const rolloutUsage = (sql: SqlClient.SqlClient, userId: UserId, rolloutId
       | "cost_currency"
     >
   >`
-    SELECT id, status, input_uncached, cache_read, cache_write, output, usage_source, cost, cost_currency
+    SELECT id, status, started_at, first_token_at, ended_at, input_uncached, cache_read, cache_write, output,
+      usage_source, cost, cost_currency
     FROM llm_requests INDEXED BY llm_requests_rollout WHERE rollout_id = ${rolloutId} AND owner_user_id = ${userId}
     ORDER BY started_at, id`
 
@@ -327,6 +331,9 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           requests: requests.map((r): InspectorUsage => ({
             id: r.id as InspectorUsage["id"],
             status: r.status,
+            startedAt: r.started_at,
+            firstTokenAt: r.first_token_at,
+            endedAt: r.ended_at,
             usageSource: r.usage_source,
             counts: {
               inputUncached: r.input_uncached,
@@ -337,7 +344,54 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
             cost: r.cost === null ? null : { amount: r.cost, currency: r.cost_currency! }
           }))
         })
-      }).pipe(query("RunContext"))
+      }).pipe(query("RunContext")),
+
+    // A version's generation requests and those of the versions it continued, followed through
+    // `source_version_id` (at most 64 back). Only versions with requests of their own count:
+    // an edit isn't timed by the reply it was made from.
+    VersionMetrics: ({ userId, versionIds }) =>
+      Effect.gen(function* () {
+        const ids = unique(versionIds).slice(0, 200)
+        if (ids.length === 0) return []
+        const rows = yield* sql<{
+          root: string
+          status: RequestFigures["status"]
+          started_at: number
+          first_token_at: number | null
+          ended_at: number | null
+          output: number | null
+          reasoning: number | null
+          usage_source: RequestFigures["usageSource"]
+        }>`
+          WITH RECURSIVE chain(root, id, depth) AS (
+            SELECT v.id, v.id, 0 FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+            WHERE v.id IN ${sql.in(ids)} AND c.owner_user_id = ${userId}
+              AND EXISTS (SELECT 1 FROM llm_requests q INDEXED BY llm_requests_version
+                WHERE q.version_id = v.id AND q.purpose = 'generation' AND q.owner_user_id = ${userId})
+            UNION ALL
+            SELECT chain.root, v.source_version_id, chain.depth + 1 FROM chain JOIN versions v ON v.id = chain.id
+            WHERE v.source_version_id IS NOT NULL AND chain.depth < 64
+          )
+          SELECT chain.root, q.status, q.started_at, q.first_token_at, q.ended_at, q.output, q.reasoning, q.usage_source
+          FROM chain JOIN llm_requests q INDEXED BY llm_requests_version ON q.version_id = chain.id
+          WHERE q.purpose = 'generation' AND q.owner_user_id = ${userId}
+          ORDER BY chain.root, q.started_at, q.id`
+        const byVersion = new Map<string, Array<RequestFigures>>()
+        for (const row of rows) {
+          const list = byVersion.get(row.root) ?? []
+          list.push({
+            status: row.status,
+            startedAt: row.started_at,
+            firstTokenAt: row.first_token_at,
+            endedAt: row.ended_at,
+            output: row.output,
+            reasoning: row.reasoning,
+            usageSource: row.usage_source
+          })
+          byVersion.set(row.root, list)
+        }
+        return [...byVersion].map(([id, requests]) => versionMetricsOf(id as VersionId, requests))
+      }).pipe(query("VersionMetrics"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers
 })

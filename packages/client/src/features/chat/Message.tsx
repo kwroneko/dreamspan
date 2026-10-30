@@ -44,6 +44,7 @@ import { type ChatSession, liveText, type Outcome, waitingCache } from "./sessio
 import { stepFrom } from "./VersionControls.tsx"
 import {
   messageDirections,
+  messageHeaderDetails,
   messageRetries,
   messageVersions,
   messagePreviews,
@@ -635,7 +636,7 @@ export const Message = memo(function Message({
       />
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
-          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:truncate">
+          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
             {name}
           </span>
           <Tooltip label={fullTime.format(version.createdAt)}>
@@ -662,6 +663,7 @@ export const Message = memo(function Message({
           {version.origin === "user_written" && model && (
             <span className="shrink-0 text-xs text-muted">written by you</span>
           )}
+          <SlotOutlet slot={messageHeaderDetails} props={{ entry, session, generating }} />
           {(version.status === "stopped" || version.status === "interrupted") && (
             <Badge tone="warning">{version.status}</Badge>
           )}

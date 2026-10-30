@@ -6,6 +6,7 @@ import { registerComposerControls } from "./registerComposerControls.tsx"
 import { registerMessageActions } from "./registerMessageActions.tsx"
 import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
+import { registerVersionMetrics } from "./versionMetrics.tsx"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
 import { lazy, Suspense } from "react"
@@ -63,6 +64,7 @@ export const register = () => {
   registerMessageActions()
   registerGuidanceEdit()
   registerReasoningActions()
+  registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()
   routes.register({

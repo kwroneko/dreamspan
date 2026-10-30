@@ -293,6 +293,22 @@ for (const width of [1440, 390]) {
         .pipe(Effect.flatMap((path) => api.ListVersions({ slotId: path.entries.at(-1)!.slotId })))
     )
     expect(versions.map((v) => v.writer)).toEqual(["model", "human", "model"])
+    // Its header shows the time and tokens of both requests behind its text; a click opens
+    // the details the tooltip also gives.
+    const metrics = reply.getByRole("button", { name: /^Generation: \d+\.\d s · / })
+    await expect(metrics).toBeVisible()
+    await metrics.click()
+    const panel = page.getByRole("dialog", { name: "Generation" })
+    await expect(panel).toContainText("Time to first token")
+    await expect(panel).toContainText("2 (retries and the versions it continued)")
+    await shoot(page, "08-metrics")
+    await page.keyboard.press("Escape")
+    // The inspector's usage gives each request's times.
+    await messageMenu(reply, "Context it was generated from")
+    await expect(page.getByText("First token", { exact: true }).locator("visible=true")).toBeVisible()
+    await expect(page.getByText("Tokens/s", { exact: true }).locator("visible=true")).toBeVisible()
+    await page.getByText("Tokens/s", { exact: true }).locator("visible=true").scrollIntoViewIfNeeded()
+    await shoot(page, "09-inspector-timings")
   })
 }
 
