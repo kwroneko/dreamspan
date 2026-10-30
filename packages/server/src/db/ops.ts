@@ -16,6 +16,7 @@ import {
   LcmState,
   RerunTarget,
   Summary,
+  SummaryDetails,
   SummaryId,
   SummaryRevision,
   SummaryRevisionId,
@@ -2027,6 +2028,11 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId },
     success: ShellLibrary,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("GetSummaryDetails", {
+    payload: { userId: UserId, summaryId: SummaryId },
+    success: SummaryDetails,
+    error: Schema.Union([StorageError, NotFound])
   }),
   Rpc.make("GetSummary", {
     payload: { forkId: Schema.optionalKey(Schema.NullOr(ForkId)), userId: UserId, summaryId: SummaryId },

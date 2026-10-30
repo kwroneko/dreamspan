@@ -365,6 +365,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual((yield* owner.api.GetShellLibrary()).pinsCollapsed, before.pinsCollapsed)
       })
   },
+  GetSummaryDetails: {
+    probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
+  },
   GetSummary: { probe: (actor, owner) => refused(actor.api.GetSummary({ summaryId: owner.summary.id }), "NotFound") },
   EditSummary: {
     probe: (actor, owner) =>
@@ -3263,6 +3266,8 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  GetSummaryDetails: (reader, actor, owner) =>
+    refused(reader.GetSummaryDetails({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
   GetCardImportNote: (reader, actor, owner) =>
     refused(reader.GetCardImportNote({ userId: actor.user.id, cardRefId: owner.editor.cardRefId }), "NotFound"),
   GetSummary: (reader, actor, owner) =>
