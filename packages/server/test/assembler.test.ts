@@ -492,19 +492,29 @@ describe("the context assembler", () => {
       ])
     })
 
-    it("names the author's note by its state event as well as by its kind", async () => {
+    it("uses the chosen author's note ahead of an imported kind, and clears that choice explicitly", async () => {
       const plain = chatNote("note-z-plain", "Last.", { mode: "depth", depth: 0, role: "system" })
       const named = chatNote("note-zz-named", "First.", { mode: "depth", depth: 0, role: "system" })
-      const snapshot = await assembled(
-        chat({
-          notes: [plain, named],
-          events: [
-            ...on("note-z-plain", "note-zz-named"),
-            at(null, { key: "author_note.set", value: { note: "note-zz-named" as never } })
-          ]
-        })
+      const imported = chatNote(
+        "note-y-imported",
+        "Imported.",
+        { mode: "depth", depth: 0, role: "system" },
+        { kind: "author_note" }
       )
-      expect(contents(snapshot).at(-2)).toBe("system: First.\nLast.")
+      for (const choice of ["note-zz-named", null]) {
+        const snapshot = await assembled(
+          chat({
+            notes: [plain, named, imported],
+            events: [
+              ...on("note-z-plain", "note-zz-named", "note-y-imported"),
+              at(null, { key: "author_note.set", value: { note: choice as EntityId | null } })
+            ]
+          })
+        )
+        expect(contents(snapshot).at(-2)).toBe(
+          choice === null ? "system: Imported.\nLast.\nFirst." : "system: First.\nImported.\nLast."
+        )
+      }
     })
 
     it("puts a note at the tail at depth 0, with its role", async () => {
@@ -3171,4 +3181,71 @@ describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
     expect(contents(two).slice(0, prefixAt + 1)).toEqual(contents(one).slice(0, prefixAt + 1))
     expect(contents(one)[prefixAt]).not.toContain("is soaked")
   })
+})
+
+it("reports images outside the history budget and allows plugins to replace the image policy", async () => {
+  const fixture: AssemblyFixture = {
+    cards: [],
+    participants: [],
+    preset: preset(),
+    model: model({ vision: true, maxImages: 0 }),
+    messages: [{ side: "user", content: "A study", images: [{ mediaId: "study" }] }]
+  }
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const assembler = yield* makeAssembler
+      const builtin = yield* assembleFixture(fixture, { assembler })
+      expect(builtin.imagesLeftOut?.images.map((image) => image.rule)).toEqual(["limit"])
+      yield* assembler.stages.register({
+        id: "images",
+        run: (assembly) =>
+          Effect.sync(() => {
+            assembly.result = {
+              ...assembly.result!,
+              messages: assembly.result!.messages.map((message) => ({ ...message, images: [] }))
+            }
+            assembly.imagesLeftOut = {
+              images: [
+                {
+                  slotId: "slot-0" as never,
+                  versionId: "version-0" as never,
+                  mediaId: "study",
+                  depth: 0,
+                  index: 0,
+                  rule: "fixture/privacy",
+                  message: "Left out by the fixture privacy policy"
+                }
+              ],
+              ranges: []
+            }
+            return assembly
+          })
+      })
+      const replaced = yield* assembleFixture(fixture, { assembler })
+      expect(replaced.request.messages.flatMap((message) => message.images ?? [])).toEqual([])
+      expect(replaced.imagesLeftOut?.images[0]!.message).toBe("Left out by the fixture privacy policy")
+      yield* assembler.stages.disable("images")
+      const disabled = yield* assembleFixture(fixture, { assembler })
+      expect(disabled.imagesLeftOut).toBeUndefined()
+    }).pipe(Effect.scoped)
+  )
+  // A history message excluded by the budget is distinct from the model's last-N rule.
+  const crowded = await Effect.runPromise(
+    assembleFixture({
+      ...fixture,
+      model: model(),
+      preset: preset({ openai_max_context: 1000, openai_max_tokens: 100 }),
+      messages: [
+        { side: "user", content: "old image", images: [{ mediaId: "old" }] },
+        ...Array.from({ length: 40 }, () => ({
+          side: "assistant" as const,
+          content: "A long recent turn. ".repeat(50)
+        }))
+      ]
+    })
+  )
+  expect(
+    crowded.imagesLeftOut?.ranges.some((range) => range.rule === "history" && range.from <= 0 && range.to >= 0) ||
+      crowded.imagesLeftOut?.images.some((image) => image.mediaId === "old" && image.rule === "history")
+  ).toBe(true)
 })

@@ -326,6 +326,41 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         transaction(sql, "SetAppSetting")
       ),
 
+    RecordImageTokenCount: ({ userId, sha256, kind, modelKey, detail, tokens }) =>
+      sql`INSERT INTO image_token_counts ${sql.insert({
+        owner_user_id: userId,
+        sha256,
+        kind,
+        model_key: modelKey,
+        detail,
+        tokens,
+        counted_at: Date.now()
+      })} ON CONFLICT DO UPDATE SET tokens = excluded.tokens, counted_at = excluded.counted_at`.pipe(
+        Effect.asVoid,
+        transaction(sql, "RecordImageTokenCount")
+      ),
+
+    RecordImageTokenSample: ({ userId, connectionId, modelKey, images, pixels, tokens, source }) =>
+      Effect.gen(function* () {
+        const [owned] = yield* sql<{ id: string }>`
+          SELECT id FROM connections WHERE id = ${connectionId} AND owner_user_id = ${userId}`
+        if (!owned) return
+        yield* sql`INSERT INTO image_token_samples ${sql.insert({
+          owner_user_id: userId,
+          connection_id: connectionId,
+          model_key: modelKey,
+          images,
+          pixels,
+          tokens,
+          source,
+          created_at: Date.now()
+        })}`
+        yield* sql`DELETE FROM image_token_samples WHERE owner_user_id = ${userId}
+          AND connection_id = ${connectionId} AND model_key = ${modelKey}
+          AND id NOT IN (SELECT id FROM image_token_samples WHERE owner_user_id = ${userId}
+            AND connection_id = ${connectionId} AND model_key = ${modelKey} ORDER BY id DESC LIMIT 20)`
+      }).pipe(transaction(sql, "RecordImageTokenSample")),
+
     OpenLlmRequest: ({ userId, request }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, request.connectionId)

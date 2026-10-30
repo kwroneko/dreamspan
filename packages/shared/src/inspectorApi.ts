@@ -77,6 +77,23 @@ export type ContextSource = typeof ContextSource.Type
 /** Why a cache breakpoint follows a message: the end of the preset's prefix, or of the stable history. */
 const BreakpointReason = Schema.Literals(["prefix", "summary", "history", "pinned"])
 
+/** Where an image's token figure comes from (DESIGN §10.2a; `@rp/shared/imageTokens.ts`). */
+const ImageTokenBasis = Schema.Literals(["counted", "formula", "calibrated", "unknown"])
+
+/** One sent image's token estimate, as the context view shows it. */
+export const ContextImage = Schema.Struct({
+  /** Null when unknown; the budget then counts `bound`, or a reserve. */
+  tokens: Schema.NullOr(Schema.Int),
+  basis: ImageTokenBasis,
+  /** What the budget counted for it. */
+  budgeted: Schema.Int,
+  detail: Schema.optionalKey(Schema.String),
+  note: Schema.optionalKey(Schema.String),
+  /** False when the last-N image limit leaves it out of the request. */
+  sent: Schema.Boolean
+})
+export type ContextImage = typeof ContextImage.Type
+
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
   name: Schema.NullOr(Schema.String),
@@ -87,12 +104,15 @@ export const ContextMessage = Schema.Struct({
     })
   ),
   content: Schema.String,
-  /** The assembler's estimate: a token per four characters, plus three per message. */
+  /** The assembler's estimate: a token per four characters, plus three per message, plus its images. */
   tokens: Schema.Int,
+  /** The message's images and their token estimates; absent without images. */
+  images: Schema.optionalKey(Schema.Array(ContextImage)),
   sources: Schema.Array(ContextSource),
   /**
    * Where each source's text sits in `content`: character offsets, in order, not overlapping, with
    * `source` an index into `sources`. Text between parts is the assembler's joins and wrappers.
+   * A rewritten piece is boxed where its text was (`rewritten`), never left to the joins.
    * Absent in captures from before parts were recorded.
    */
   parts: Schema.optionalKey(
@@ -102,7 +122,14 @@ export const ContextMessage = Schema.Struct({
         end: Schema.Int,
         source: Schema.Int,
         /** A wrapper its block's owner added, such as a card join prefix: framing, not content. */
-        frame: Schema.optionalKey(Schema.Literal(true))
+        frame: Schema.optionalKey(Schema.Literal(true)),
+        /**
+         * Its text isn't the piece's as assembled (a provider transform rewrote the message): the
+         * text where it was, between the parts around it.
+         */
+        rewritten: Schema.optionalKey(Schema.Literal(true)),
+        /** Other sources rewritten into the same text, indices into `sources`. */
+        also: Schema.optionalKey(Schema.Array(Schema.Int))
       })
     )
   ),
@@ -112,7 +139,16 @@ export const ContextMessage = Schema.Struct({
    * inside their outer ones; text in a group outside its parts is its framing. Absent in older
    * captures and when no part sits in a block.
    */
-  groups: Schema.optionalKey(Schema.Array(Schema.Struct({ start: Schema.Int, end: Schema.Int, source: Schema.Int }))),
+  groups: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        start: Schema.Int,
+        end: Schema.Int,
+        source: Schema.Int,
+        rewritten: Schema.optionalKey(Schema.Literal(true))
+      })
+    )
+  ),
   breakpoint: Schema.NullOr(BreakpointReason)
 })
 export type ContextMessage = typeof ContextMessage.Type
@@ -276,8 +312,47 @@ export const PresetContext = Schema.Struct({
 })
 export type PresetContext = typeof PresetContext.Type
 
+/** The next request's images, summed (counted in the budget and the cache estimate). */
+const NextImages = Schema.Struct({
+  count: Schema.Int,
+  tokens: Schema.Int,
+  /** Images whose cost nothing states yet: budgeted at a bound or a reserve. */
+  unknown: Schema.Int,
+  bases: Schema.Array(ImageTokenBasis)
+})
+/**
+ * An image of the path that the request leaves out, and why, as the assembler's registered
+ * `images` stage (or a plugin's stage after it) decided (ARCHITECTURE §15).
+ */
+export const ImageLeftOut = Schema.Struct({
+  slotId: SlotId,
+  versionId: VersionId,
+  mediaId: Schema.String,
+  depth: Schema.Int,
+  /** Its place among its message's images, from 0. */
+  index: Schema.Int,
+  /**
+   * The rule: `user` (taken out by the user), `hidden` (its message isn't sent), `history` (its
+   * message doesn't fit), `vision`, `limit` (the last-N limit), or a plugin's `<plugin>/<rule>`.
+   */
+  rule: Schema.String,
+  /** Why, for the user: "Only the last 4 images are sent to this model". */
+  message: Schema.String
+})
+export type ImageLeftOut = typeof ImageLeftOut.Type
+
+/** The images a request leaves out: each one it read, and depth ranges of messages it never read. */
+export const ImagesLeftOut = Schema.Struct({
+  images: Schema.Array(ImageLeftOut),
+  /** Every image of a message at a depth from `from` to `to` (inclusive): summarized, or too far back. */
+  ranges: Schema.Array(Schema.Struct({ from: Schema.Int, to: Schema.Int, rule: Schema.String, message: Schema.String }))
+})
+export type ImagesLeftOut = typeof ImagesLeftOut.Type
+
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  /** The next request's images, when it has any. */
+  imageTokens: Schema.optionalKey(NextImages),
   /** Which fork the estimate describes, including when two forks share a tip. */
   forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
   presetContext: Schema.optionalKey(Schema.NullOr(PresetContext)),
@@ -296,7 +371,9 @@ export const NextContext = Schema.Struct({
   warmth: Schema.NullOr(CacheWarmth),
   leafSlotId: Schema.NullOr(Schema.String),
   historyStart: Schema.NullOr(Schema.Struct({ slotId: Schema.NullOr(Schema.String), depth: Schema.Int })),
-  summarizedThrough: Schema.NullOr(Schema.Int)
+  summarizedThrough: Schema.NullOr(Schema.Int),
+  /** The images the next request leaves out and why; absent when it can't be assembled. */
+  images: Schema.optionalKey(ImagesLeftOut)
 })
 export type NextContext = typeof NextContext.Type
 

@@ -854,6 +854,31 @@ describe("context assembly from the database", () => {
     () =>
       Effect.gen(function* () {
         const { writer, reader, userId, chat, entity, state } = yield* setup()
+        // This is an assembly scale fixture: give its latest turn an explicit budget
+        // instead of depending on the old fallback that silently omitted all history.
+        const connectionId = uuidv7() as ConnectionId
+        yield* writer.CreateConnection({
+          userId,
+          connectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Scale",
+            baseUrl: null,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({
+          userId,
+          connectionId,
+          key: "synthetic-scale",
+          overrides: { context: 32768, settings: { samplers: { openai_max_tokens: 300 }, context_target: 32000 } }
+        })
+        yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
         const book = yield* entity(
           "lorebook",
           "Scale",

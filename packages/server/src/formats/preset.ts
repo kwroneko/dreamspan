@@ -19,7 +19,13 @@ import {
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
 import { newestMessage, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
-import { conditionOf, fromSpeaker, triggersWithCondition, withEndOfRequest } from "@rp/shared/presetConditions.ts"
+import {
+  conditionOf,
+  fromSpeaker,
+  gatesNeverMeet,
+  triggersWithCondition,
+  withEndOfRequest
+} from "@rp/shared/presetConditions.ts"
 import { endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
@@ -213,7 +219,8 @@ const PROMPT_FIELDS = new Set([
   "forbid_overrides",
   // Ours, written by export so a reimport keeps what ST has no field for.
   "condition",
-  "sent_with_direction"
+  "sent_with_direction",
+  "enabled_here"
 ])
 /** Prompt fields ST has but the document doesn't model; kept without a report. */
 const ST_PROMPT_EXTRAS = new Set(["enabled", "position", "extension"])
@@ -418,9 +425,9 @@ const readPreset = (file: Json, r: ReportBuilder): PresetDoc => {
     postprocess = "none"
   }
 
-  const { prompts, neverSent, directionOn } = readPrompts(field("prompts"), r)
+  const { prompts, neverSent, exportedOff } = readPrompts(field("prompts"), r)
   const importedOrder = readOrder(field("prompt_order"), prompts, neverSent, r).map((e) =>
-    directionOn.has(e.identifier) ? { ...e, enabled: true } : e
+    exportedOff.has(e.identifier) ? { ...e, enabled: true } : e
   )
   const included = new Set(importedOrder.map((e) => e.identifier))
   const outside = prompts.filter((p) => !included.has(p.identifier) && p.identifier !== "newestMessage")
@@ -570,8 +577,9 @@ const readPrompts = (raw: unknown, r: ReportBuilder) => {
   const prompts = new Map<string, PresetPrompt>()
   // Prompts ST never sends, with the reason.
   const neverSent = new Map<string, string>()
-  // Direction prompts our export turned off for ST, which sends them every turn.
-  const directionOn = new Set<string>()
+  // Prompts our export turned off for ST: direction prompts, which ST sends every turn, and
+  // prompts whose condition and generation types never meet, which ST would send.
+  const exportedOff = new Set<string>()
   for (const [i, p] of list.entries()) {
     const path = ["prompts", i]
     if (!isObject(p)) {
@@ -589,7 +597,8 @@ const readPrompts = (raw: unknown, r: ReportBuilder) => {
       continue
     }
     prompts.set(prompt.identifier, prompt)
-    if (prompt.condition === "with_direction" && p.sent_with_direction === true) directionOn.add(prompt.identifier)
+    if (prompt.condition === "with_direction" && p.sent_with_direction === true) exportedOff.add(prompt.identifier)
+    if (p.enabled_here === true && gatesNeverMeet(prompt)) exportedOff.add(prompt.identifier)
     const reason = whyNeverSent(p, prompt)
     if (reason !== undefined) neverSent.set(prompt.identifier, reason)
   }
@@ -597,7 +606,7 @@ const readPrompts = (raw: unknown, r: ReportBuilder) => {
   for (const builtIn of ST_DEFAULT_PROMPTS)
     if (!prompts.has(builtIn.identifier as string))
       prompts.set(builtIn.identifier as string, readPrompt(builtIn, [], ids, r))
-  return { prompts: [...prompts.values()], neverSent, directionOn }
+  return { prompts: [...prompts.values()], neverSent, exportedOff }
 }
 
 const whyNeverSent = (p: Json, prompt: PresetPrompt): string | undefined => {
@@ -894,10 +903,15 @@ export const exportStPreset = (stored: PresetDoc): Json => {
       // ST ignores the condition; a reimport restores it. A prompt sent only with a direction
       // goes out off, and a reimport turns it back on.
       ...(conditionOf(p) !== "always" ? { condition: conditionOf(p) } : {}),
-      ...(conditionOf(p) === "with_direction" ? { sent_with_direction: enabled.get(p.identifier) === true } : {})
+      ...(conditionOf(p) === "with_direction" ? { sent_with_direction: enabled.get(p.identifier) === true } : {}),
+      // Its condition and generation types never meet: never sent here, so off for ST, which
+      // would send it on its generation types. A reimport restores the switch.
+      ...(gatesNeverMeet(p) ? { enabled_here: enabled.get(p.identifier) === true } : {})
     }))
-  const directed = new Set(doc.prompts.filter((p) => conditionOf(p) === "with_direction").map((p) => p.identifier))
-  const order = doc.order.map((e) => (directed.has(e.identifier) ? { ...e, enabled: false } : { ...e }))
+  const off = new Set(
+    doc.prompts.filter((p) => conditionOf(p) === "with_direction" || gatesNeverMeet(p)).map((p) => p.identifier)
+  )
+  const order = doc.order.map((e) => (off.has(e.identifier) ? { ...e, enabled: false } : { ...e }))
   const regex_scripts = doc.regex.map((s) => ({
     ...s.unsupported,
     id: s.id,

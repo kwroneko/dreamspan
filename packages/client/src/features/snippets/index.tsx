@@ -10,6 +10,10 @@ import { CodeEditor } from "../../ui/CodeEditor.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { DeleteSnippet } from "./delete.tsx"
+import { SnippetHistory } from "./history.tsx"
+import { snippetTools } from "./slots.ts"
 import { SnippetWorkspace } from "./workspace.ts"
 
 let workspace: SnippetWorkspace | null = null
@@ -120,7 +124,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
         <p className="text-sm text-muted">No snippets yet. Create one or send selected text here.</p>
       )}
       {item && (
-        <div className="flex flex-col gap-3" key={item.ref.id}>
+        <fieldset className="flex min-w-0 flex-col gap-3" key={item.ref.id} disabled={state.deleting === item.ref.id}>
           <Field label="Snippet name">
             <Input value={item.title} onChange={(e) => store.change(item.ref.id, { title: e.currentTarget.value })} />
           </Field>
@@ -129,6 +133,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
             value={item.content}
             base={item.content}
             rows={10}
+            readOnly={state.deleting === item.ref.id}
             onChange={(content) => store.change(item.ref.id, { content })}
             onSelectionChange={setSelection}
           />
@@ -140,8 +145,15 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
               </Button>
             )}
             {!item.global && <Button onClick={() => void store.makeGlobal(item.ref.id)}>Make global</Button>}
+            <SlotOutlet slot={snippetTools} props={{ store, item }} />
             <span role="status" className="text-xs text-muted">
-              {state.error ? "Not saved" : state.saving ? "Saving…" : "Saved continuously"}
+              {state.error
+                ? "Not saved"
+                : state.deleting === item.ref.id
+                  ? "Deleting…"
+                  : state.saving
+                    ? "Saving…"
+                    : "Saved continuously"}
             </span>
           </div>
           {state.error && (
@@ -152,7 +164,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
               <Button onClick={() => void store.create(item.content)}>Save as new snippet</Button>
             </>
           )}
-        </div>
+        </fieldset>
       )}
       {notice && (
         <p role="status" className="text-sm text-muted">
@@ -168,6 +180,8 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   )
 }
 export const register = () => [
+  snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
+  snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
   appTools.register({ id: "snippets.tools", order: 20, component: Tools }),
   chatSurfaceProviders.register({ id: "snippets.scope", order: 20, component: Scope }),
   chatPanels.register({

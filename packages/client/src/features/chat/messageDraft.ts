@@ -1,9 +1,10 @@
+import type { MessageImages } from "@rp/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
 // keyed by the version edited or the slot written to, so it outlives the row (the message
 // list unmounts rows scrolled away) and a reload, which opens the editor again with it.
 // Saving names the draft, which the server commits with the version only if it holds
-// exactly the text saved; cancelling discards it to the bin's recovered texts.
+// exactly the text and images saved; cancelling discards its text to the bin's recovered texts.
 //
 // As for summaries, text typed is copied into this browser (`editor/backup.ts`) until the
 // server has it: a save that fails, a closed tab or a reload leaves the copy, filed under
@@ -53,6 +54,12 @@ export interface MessageDraftView {
   readonly error: AppError | null
   /** A replay of this browser's text went over text saved elsewhere: kept until acknowledged or switched. */
   readonly conflict: ReplayConflict | null
+  /**
+   * The images the saved version will have, once the editor changed them; absent: its
+   * source's. Saved with the text in the server draft and browser recovery copy.
+   */
+  readonly images?: MessageImages | undefined
+  readonly imagesBusy?: boolean
 }
 
 /** What the text a save sends was typed on (§3.10, "a field's base"): the draft as the tab had it. */
@@ -70,6 +77,7 @@ const baseOf = (draft: Draft | null): Base => ({
 /** The text a commit took, from `ready()`. */
 export interface Submission {
   readonly text: string
+  readonly images?: MessageImages | undefined
   readonly draft: { readonly draftId: string; readonly session: number } | null
 }
 
@@ -91,6 +99,8 @@ export class MessageDraft {
   private pending: Copy | null = null
   /** Copies on their way to the server, which a newer one mustn't replace. */
   private readonly sending = new Set<Copy>()
+  private imageUploads: Promise<void> = Promise.resolve()
+  private uploads = 0
   private timer: ReturnType<typeof setTimeout> | null = null
   /** Replays and saves run one at a time, in order. */
   private queue: Promise<unknown> = Promise.resolve()
@@ -107,6 +117,7 @@ export class MessageDraft {
     this.base = baseOf(draft)
     this.view = {
       text: draft?.status === "active" ? draft.content : initial,
+      images: draft?.status === "active" ? draft.images : undefined,
       unsaved: false,
       error: null,
       conflict: null
@@ -159,6 +170,7 @@ export class MessageDraft {
           if (this.pending !== null && this.pending.at < copy.at) this.pending = null
           if (this.pending === null) {
             this.local = copy.content
+            this.set({ images: save.payload.images })
             this.pending = copy
             this.base = {
               draftId: save.payload.draftId,
@@ -173,6 +185,7 @@ export class MessageDraft {
       const draft = this.draft
       this.set({
         text: this.local ?? (draft?.status === "active" ? draft.content : this.view.text),
+        images: this.local === null ? draft?.images : this.view.images,
         unsaved: this.local !== null,
         error,
         conflict
@@ -187,6 +200,7 @@ export class MessageDraft {
       target: this.target,
       draftId: base.draftId,
       content,
+      ...(this.view.images === undefined ? {} : { images: this.view.images }),
       expectedRowVersion: base.rowVersion,
       expectedSession: base.session
     }
@@ -219,6 +233,24 @@ export class MessageDraft {
     this.timer = null
   }
 
+  /** An upload belongs to this editor even while its Save/Cancel waits for it. */
+  uploadImages(task: () => Promise<void>): Promise<void> {
+    this.uploads++
+    this.set({ imagesBusy: true })
+    const run = this.imageUploads.then(task, task)
+    this.imageUploads = run.catch(() => undefined)
+    return run.finally(() => {
+      this.uploads--
+      this.set({ imagesBusy: this.uploads > 0 })
+    })
+  }
+
+  /** The images the saved version will have (the editor's attachment controls). */
+  setImages(images: MessageImages) {
+    this.set({ images })
+    this.setText(this.view.text)
+  }
+
   setText(text: string) {
     this.local = text
     this.keep(text)
@@ -233,6 +265,7 @@ export class MessageDraft {
     return this.serial(async () => {
       const sent = this.local
       if (sent === null) return
+      const sentImages = this.view.images
       const payload = this.payload(sent)
       const copy = this.pending
       if (copy !== null) this.sending.add(copy)
@@ -247,7 +280,7 @@ export class MessageDraft {
       this.draft = result.value
       this.base = baseOf(result.value)
       if (copy !== null) void dropCopy(copy)
-      if (this.local === sent) {
+      if (this.local === sent && this.view.images === sentImages) {
         this.local = null
         if (this.pending === copy) this.pending = null
       } else if (this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
@@ -270,11 +303,13 @@ export class MessageDraft {
    * naming it).
    */
   async ready(): Promise<Submission> {
+    await this.imageUploads
     await this.save()
     const text = this.view.text
     const draft = this.draft
     return {
       text,
+      ...(this.view.images === undefined ? {} : { images: this.view.images }),
       draft:
         this.local === null && draft?.status === "active" && draft.content === text
           ? { draftId: draft.id, session: draft.session }
@@ -288,7 +323,7 @@ export class MessageDraft {
    * copy, its pending save and its base, and the editor stays open with it.
    */
   committed(submitted: Submission): boolean {
-    if (this.view.text !== submitted.text) return false
+    if (this.view.text !== submitted.text || this.view.images !== submitted.images) return false
     this.cancelTimer()
     this.local = null
     this.forget()
@@ -304,7 +339,7 @@ export class MessageDraft {
     )
   }
 
-  async restoreState(seq: number, content?: string): Promise<boolean> {
+  async restoreState(seq: number, content?: string, images?: MessageImages): Promise<boolean> {
     const picked = this.view.text
     await this.save()
     return this.serial(async () => {
@@ -315,7 +350,7 @@ export class MessageDraft {
           draftId: this.draft!.id,
           seq,
           expectedRowVersion: this.draft!.rowVersion,
-          ...(content === undefined ? {} : { content })
+          ...(content === undefined ? {} : { content, ...(images === undefined ? {} : { images }) })
         })
       )
       if (!result.ok) {
@@ -326,7 +361,12 @@ export class MessageDraft {
       this.base = baseOf(result.value)
       // Typing during the restore stays in the box, with its browser copy on the new base.
       if (this.local !== null) this.keep(this.local)
-      this.set({ text: this.local ?? result.value.content, unsaved: this.local !== null, error: null })
+      this.set({
+        text: this.local ?? result.value.content,
+        images: this.local === null ? result.value.images : this.view.images,
+        unsaved: this.local !== null,
+        error: null
+      })
       return true
     })
   }
@@ -335,7 +375,7 @@ export class MessageDraft {
     const conflict = this.view.conflict
     if (
       conflict &&
-      (await this.restoreState(0, conflict.content)) &&
+      (await this.restoreState(0, conflict.content, conflict.images)) &&
       !this.view.unsaved &&
       this.view.text === conflict.content &&
       this.view.conflict === conflict
@@ -352,6 +392,7 @@ export class MessageDraft {
    * doesn't have yet has nowhere to go: the edit stays open, with its copy.
    */
   async discard(): Promise<Outcome<unknown>> {
+    await this.imageUploads
     await this.save()
     if (this.local !== null) return { ok: false, error: this.view.error ?? notSaved }
     this.forget()

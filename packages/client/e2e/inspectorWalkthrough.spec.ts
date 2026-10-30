@@ -370,7 +370,7 @@ for (const [width, height] of [
       await expect(button).toBeVisible()
       await shoot(page, `${tag}-1-message-button`)
       await button.click()
-      await expect(page).toHaveURL(new RegExp(`/context/${made.swipe}$`))
+      await expect(page).toHaveURL(new RegExp(`/context/${made.swipe}\\?fork=[^&]+$`))
       await expect(page.getByText(/^swipe, /)).toBeVisible()
       await shoot(page, `${tag}-2-request-top`)
 

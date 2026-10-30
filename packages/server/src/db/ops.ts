@@ -5,7 +5,9 @@ import {
   SnippetContext,
   CreateSnippetFields,
   SaveSnippetFields,
-  GlobalSnippetFields
+  GlobalSnippetFields,
+  SnippetHistoryFields,
+  RestoreSnippetFields
 } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
@@ -449,6 +451,11 @@ export class WriteOps extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
   }),
+  Rpc.make("RestoreSnippet", {
+    payload: { userId: UserId, ...RestoreSnippetFields },
+    success: Snippet,
+    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+  }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
@@ -716,6 +723,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),
       expectedSession: Schema.NullOr(Schema.Int),
@@ -1186,6 +1194,33 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A provider's exact count of one image for one model (ARCHITECTURE §6, image tokens). */
+  Rpc.make("RecordImageTokenCount", {
+    payload: {
+      userId: UserId,
+      sha256: Sha256,
+      kind: Schema.String,
+      modelKey: Schema.String,
+      detail: Schema.String,
+      tokens: Schema.Int
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** What a request's images cost together, for models without a formula; keeps the newest 20. */
+  Rpc.make("RecordImageTokenSample", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      modelKey: Schema.String,
+      images: Schema.Int,
+      pixels: Schema.Int,
+      tokens: Schema.Int,
+      source: Schema.Literals(["reported", "derived"])
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /** At startup: requests left running by a crash may have been billed, so they're kept as interrupted. */
   Rpc.make("InterruptRunningLlmRequests", {
     success: Schema.Struct({ interrupted: Schema.Int }),
@@ -1408,6 +1443,8 @@ export class WriteOps extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
       commitDraft: Schema.optionalKey(CommitDraft)
@@ -1449,6 +1486,22 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Struct({ chatId: ChatId, forkId: ForkId, version: Version }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * Takes image `mediaId` of a live version out of the context in fork `forkId` (absent or
+   * null: the fork through its slot), or puts it back; one write, of that fork's only. The
+   * choice is on the message's own version, so a fork's copy of it shares it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      userId: UserId,
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: Schema.Struct({ chatId: ChatId, forkId: ForkId, slotId: SlotId }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A judge model's finding on a finished model version: its text stays (spec/LCM.md §2.4). */
   Rpc.make("MarkVersion", {
     payload: { userId: UserId, versionId: VersionId, mark: Schema.NullOr(Schema.Literals(["refused"])) },
@@ -1477,14 +1530,20 @@ export class WriteOps extends RpcGroup.make(
       persona: Schema.NullOr(EntityId),
       /**
        * Who greets, in order, each as a message of its own (one of `cards`; one without
-       * greetings is skipped): the greeting picked, and each greeting's frozen values in
-       * `GetCardForChat` order (null: none to freeze).
+       * greetings is skipped): the greeting picked and the API's registered-source
+       * snapshot, with each option's nonempty card index, text and frozen values.
        */
       greeters: Schema.Array(
         Schema.Struct({
           entityId: EntityId,
           greeting: Schema.NullOr(Schema.Int),
-          frozen: Schema.Array(Schema.NullOr(FrozenMacros))
+          options: Schema.Array(
+            Schema.Struct({
+              index: Schema.Int,
+              text: Schema.String,
+              frozen: Schema.NullOr(FrozenMacros)
+            })
+          )
         })
       ),
       first: FirstTurn,
@@ -2050,10 +2109,20 @@ export class WriteOps extends RpcGroup.make(
 
 export class ReadOps extends RpcGroup.make(
   Rpc.make("GetBinLimits", { payload: { userId: UserId }, success: BinLimits, error: StorageError }),
+  Rpc.make("GetImageTokenCount", {
+    payload: { userId: UserId, sha256: Sha256, kind: Schema.String, modelKey: Schema.String, detail: Schema.String },
+    success: Schema.NullOr(Schema.Int),
+    error: StorageError
+  }),
   Rpc.make("GetCostSettings", { payload: { userId: UserId }, success: CostSettings, error: StorageError }),
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("SnippetHistory", {
+    payload: { userId: UserId, ...SnippetHistoryFields },
+    success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("PreviewForkNotes", {
@@ -2725,7 +2794,19 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
-    success: NextContext,
+    /** With the images to count off the hot path (`chat/ImageTokenCounts.ts`), never published. */
+    success: Schema.Struct({
+      ...NextContext.fields,
+      uncounted: Schema.optionalKey(
+        Schema.Struct({
+          connectionId: Schema.String,
+          kind: Schema.String,
+          modelKey: Schema.String,
+          detail: Schema.String,
+          images: Schema.Array(Schema.Struct({ mediaId: Schema.String, sha256: Sha256 }))
+        })
+      )
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

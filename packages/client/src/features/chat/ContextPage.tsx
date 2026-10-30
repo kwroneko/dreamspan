@@ -3,7 +3,7 @@
 // breakpoints between them; then the model, the samplers and what the provider reported.
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
-import type { ChatId, VersionId } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type {
   ContextMessage,
@@ -12,13 +12,14 @@ import type {
   InspectorUsage,
   SourceActivation
 } from "@rp/shared/inspectorApi.ts"
-import { Link, Navigate, useParams } from "@tanstack/react-router"
-import { type ReactNode, useMemo, useRef, useState } from "react"
+import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
+import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { ImageEstimate } from "./imageTokens.tsx"
 import { useTitle } from "../shell.tsx"
 
 /** How much of a collapsed message shows. */
@@ -68,12 +69,28 @@ const unsent = (source: ContextSource) =>
   (source.activation?.kind === "note" && !source.activation.due) ||
   (source.activation?.kind === "lorebook" && source.activation.status === "skipped")
 
+/**
+ * The fork the inspector was opened from (`?fork=`), as links back into the chat carry it: the
+ * fork being viewed, which needn't be the one the reply was generated in. Empty: the current one.
+ */
+const ViewedFork = createContext<{ readonly fork?: ForkId }>({})
+
 /** What the source is, where it's from: the inspector's own words, never prompt text. */
-function SourceTitle({ source, chatId }: { source: ContextSource; chatId: ChatId }) {
+function SourceTitle({
+  source,
+  chatId,
+  rewritten = false
+}: {
+  source: ContextSource
+  chatId: ChatId
+  rewritten?: boolean
+}) {
+  const viewed = useContext(ViewedFork)
   const label = (
     <>
       {source.label}
       {source.version !== undefined && `, version ${source.version}`}
+      {rewritten && " (rewritten)"}
     </>
   )
   return (
@@ -83,7 +100,7 @@ function SourceTitle({ source, chatId }: { source: ContextSource; chatId: ChatId
           <Link
             to="/chats/$chatId"
             params={{ chatId }}
-            search={{ slot: source.slotId }}
+            search={{ ...viewed, slot: source.slotId }}
             className="text-accent underline-offset-2 hover:underline"
           >
             {label}
@@ -117,23 +134,29 @@ function Box({
   sources,
   chatId,
   children,
-  group = false
+  group = false,
+  rewritten = false
 }: {
   sources: ReadonlyArray<ContextSource>
   chatId: ChatId
   children: ReactNode
   group?: boolean
+  /** Its text is where the sources' text was, rewritten after assembly. */
+  rewritten?: boolean
 }) {
   return (
     <section
-      aria-label={sources.map((source) => source.label).join(", ") || "No recorded source"}
+      aria-label={
+        sources.map((source) => (rewritten ? `${source.label} (rewritten)` : source.label)).join(", ") ||
+        "No recorded source"
+      }
       className="overflow-hidden rounded-md border border-border"
     >
       <header className="flex flex-col gap-1 border-b border-border bg-surface-raised px-2.5 py-1.5 font-sans text-xs">
         {sources.length === 0 ? (
           <span className="text-muted">No recorded source</span>
         ) : (
-          sources.map((source) => <SourceTitle key={source.id} source={source} chatId={chatId} />)
+          sources.map((source) => <SourceTitle key={source.id} source={source} chatId={chatId} rewritten={rewritten} />)
         )}
       </header>
       <div className={group ? "flex flex-col gap-1.5 bg-surface p-2" : "bg-canvas px-2.5 py-2"}>{children}</div>
@@ -162,13 +185,30 @@ function Frame({ text, owner, quiet }: { text: string; owner: string | null; qui
 }
 
 type Span = { start: number; end: number; source: number }
-type Node = Span & { frame: boolean; children: Array<Node> | null }
+type Node = Span & {
+  frame: boolean
+  rewritten: boolean
+  also: ReadonlyArray<number>
+  children: Array<Node> | null
+}
 
 /** The recorded parts nested in their groups by offsets: a group holds what lies inside it. */
 const treeOf = (message: ContextMessage): Array<Node> => {
   const items: Array<Node> = [
-    ...(message.groups ?? []).map((g) => ({ ...g, frame: false, children: [] })),
-    ...(message.parts ?? []).map((p) => ({ ...p, frame: p.frame === true, children: null }))
+    ...(message.groups ?? []).map((g) => ({
+      ...g,
+      frame: false,
+      rewritten: g.rewritten === true,
+      also: [],
+      children: []
+    })),
+    ...(message.parts ?? []).map((p) => ({
+      ...p,
+      frame: p.frame === true,
+      rewritten: p.rewritten === true,
+      also: p.also ?? [],
+      children: null
+    }))
   ].toSorted((a, b) => a.start - b.start || b.end - a.end || (a.children ? 0 : 1) - (b.children ? 0 : 1))
   const roots: Array<Node> = []
   const open: Array<Node> = []
@@ -216,13 +256,24 @@ function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId })
       const text = message.content.slice(node.start, node.end)
       out.push(
         node.children ? (
-          <Box key={`group-${node.start}-${node.end}`} sources={source ? [source] : []} chatId={chatId} group>
+          <Box
+            key={`group-${node.start}-${node.end}`}
+            sources={source ? [source] : []}
+            chatId={chatId}
+            group
+            rewritten={node.rewritten}
+          >
             {render(node.children, node.start, node.end, source ?? null)}
           </Box>
         ) : node.frame ? (
           <Frame key={`frame-${node.start}`} text={text} owner={source?.label ?? null} quiet />
         ) : (
-          <Box key={`part-${node.start}`} sources={source ? [source] : []} chatId={chatId}>
+          <Box
+            key={`part-${node.start}`}
+            sources={[node.source, ...node.also].flatMap((i) => message.sources[i] ?? [])}
+            chatId={chatId}
+            rewritten={node.rewritten}
+          >
             <PromptText text={text} />
           </Box>
         )
@@ -233,7 +284,12 @@ function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId })
     return out
   }
   // Sources with no box of their own, such as a join that's only whitespace.
-  const boxed = new Set([...(message.groups ?? []), ...message.parts].map((p) => sourceOf(p)?.id))
+  const boxed = new Set(
+    [
+      ...(message.groups ?? []).map((g) => g.source),
+      ...message.parts.flatMap((p) => [p.source, ...(p.also ?? [])])
+    ].map((i) => message.sources[i]?.id)
+  )
   const around = sent.filter((source) => !boxed.has(source.id))
   return (
     <>
@@ -294,6 +350,13 @@ function Message({
             )}
             <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
           </span>
+          {message.images && (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
+              {message.images.map((image, i) => (
+                <ImageEstimate key={i} image={image} index={i} />
+              ))}
+            </span>
+          )}
           {!open && (
             <>
               <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -569,6 +632,11 @@ function Inspector({ run }: { run: RunContext }) {
 /** /chats/$chatId/context/$versionId */
 export function ContextPage() {
   const { chatId, versionId } = useParams({ strict: false }) as { chatId: ChatId; versionId: VersionId }
+  const search = useSearch({ strict: false }) as { fork?: unknown }
+  const viewed = useMemo(
+    () => (typeof search.fork === "string" && search.fork !== "" ? { fork: search.fork as ForkId } : {}),
+    [search.fork]
+  )
   useTitle("Request")
   const atom = useMemo(() => AppClient.query("GetRunContext", { versionId }), [versionId])
   return (
@@ -581,17 +649,17 @@ export function ContextPage() {
           run.chatId !== chatId ? (
             <Navigate to="/chats/$chatId/context/$versionId" params={{ chatId: run.chatId, versionId }} replace />
           ) : (
-            <>
+            <ViewedFork.Provider value={viewed}>
               <Link
                 to="/chats/$chatId"
                 params={{ chatId: run.chatId }}
-                search={{ slot: run.slotId }}
+                search={{ ...viewed, slot: run.slotId }}
                 className="text-sm text-muted hover:text-text"
               >
                 ← Back to the reply
               </Link>
               <Inspector run={run} />
-            </>
+            </ViewedFork.Provider>
           )
         }
       </AsyncView>

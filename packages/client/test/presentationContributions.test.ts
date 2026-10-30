@@ -7,6 +7,7 @@ import { registerPresentation } from "../src/features/chat/registerPresentation.
 import {
   accountSettingSections,
   chatCardActions,
+  chatNoteActions,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
@@ -67,6 +68,7 @@ const acceptsAlternative = <P extends object>(slot: Slot<P>) => {
   })
 }
 acceptsAlternative(chatCardActions)
+acceptsAlternative(chatNoteActions)
 acceptsAlternative(chatBranchControls)
 acceptsAlternative(messagePreviews)
 acceptsAlternative(summaryPreviews)

@@ -86,7 +86,7 @@ describe("composer contributions", () => {
 
   it("disables Enter with its control, supports peers and observes guidance availability", async () => {
     const send = vi.fn(async () => {})
-    const context = { guidance: false, send } as unknown as ComposerControlContext
+    const context = { guidance: false, hasText: true, send } as unknown as ComposerControlContext
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -115,6 +115,18 @@ describe("composer contributions", () => {
     expect(composerControls.get("synthetic.control")).toBeUndefined()
   })
 
+  it("empty Enter and the empty button share replyNow; text and attachments share send", async () => {
+    const send = vi.fn(async () => {})
+    const replyNow = vi.fn(async () => {})
+    const context = { guidance: false, hasText: false, send, replyNow } as unknown as ComposerControlContext
+    for (const source of ["button", "keyboard"] as const) {
+      await invokeComposerControl("composer.send", context, source)
+      await invokeComposerControl("composer.send", { ...context, hasText: true }, source)
+    }
+    expect(replyNow).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
   it("pending Enter follows guidance through overridable registered actions", async () => {
     const start = vi.fn(async () => {})
     const context = { guidance: false, start } as unknown as PendingComposerContext
@@ -135,17 +147,6 @@ describe("composer contributions", () => {
     expect(composerControls.get("composer.stop")).toBeUndefined()
     expect(availableComposerControls("actions", context).map((entry) => entry.id)).not.toContain("composer.stop")
   })
-
-  it("preserves the empty-text difference between Enter and the reply-now button", async () => {
-    const send = vi.fn(async () => {})
-    const replyNow = vi.fn(async () => {})
-    const context = { guidance: false, hasText: false, send, replyNow } as unknown as ComposerControlContext
-    await invokeComposerControl("composer.send", context, "keyboard")
-    expect(send).toHaveBeenCalledTimes(1)
-    expect(replyNow).not.toHaveBeenCalled()
-    await invokeComposerControl("composer.send", context, "button")
-    expect(replyNow).toHaveBeenCalledTimes(1)
-  })
 })
 
 describe("message action contributions", () => {
@@ -157,6 +158,7 @@ describe("message action contributions", () => {
     for (const close of dispose.reverse()) close()
   })
   const context = {
+    session: { subscribe: () => () => {}, snapshot: () => ({ entries: [], newer: null }) },
     entry: { versionCount: 1, version: { context: {} } },
     generating: false
   } as unknown as MessageActionContext

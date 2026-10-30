@@ -50,17 +50,18 @@ export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
 /** A button that's just an icon: `label` is its accessible name and its tooltip. */
 export function IconButton({
   label,
+  hint,
   icon,
   tone = "muted",
   filled = false,
   className = "",
   ...props
-}: { label: string; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
+}: { label: string; hint?: ReactNode; icon: IconName; tone?: "muted" | "danger"; filled?: boolean } & Omit<
   ComponentProps<typeof BaseButton>,
   "children" | "aria-label"
 >) {
   return (
-    <Tooltip label={label}>
+    <Tooltip label={hint ?? label}>
       <BaseButton aria-label={label} className={`${iconButtonClass(tone)} ${className}`} {...props}>
         <Icon name={icon} filled={filled} />
       </BaseButton>
@@ -84,6 +85,44 @@ export function SquareIconButton({
       <Button aria-label={label} className={`w-9 px-0! ${className}`} {...props}>
         {children}
       </Button>
+    </Tooltip>
+  )
+}
+
+/**
+ * An icon button that toggles (`pressed`), with its label as its name and tooltip. Disabled,
+ * it stays focusable and hoverable, so its tooltip can still say why it can't be used.
+ * `className` places it and sets when it shows.
+ */
+export function ToggleIconButton({
+  label,
+  icon,
+  pressed,
+  disabled = false,
+  className = "",
+  onClick
+}: {
+  label: string
+  icon: IconName
+  pressed: boolean
+  disabled?: boolean
+  className?: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip label={label}>
+      <BaseButton
+        aria-label={label}
+        aria-pressed={pressed}
+        disabled={disabled}
+        focusableWhenDisabled
+        onClick={onClick}
+        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-disabled:cursor-not-allowed ${
+          pressed ? "text-text" : "text-muted"
+        } ${className}`}
+      >
+        <Icon name={icon} />
+      </BaseButton>
     </Tooltip>
   )
 }

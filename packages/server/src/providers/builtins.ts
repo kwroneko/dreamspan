@@ -11,6 +11,7 @@ import { piCatalogs, withCatalog } from "./catalog.ts"
 import { modelListers } from "./modelLists.ts"
 import { empty, ProviderRegistry, type ProviderKindEntry } from "./registry.ts"
 import { builtinCostFormulas, usageObservers } from "./usage.ts"
+import { builtinImageCounters } from "./imageCounters.ts"
 
 const completions = openAICompletionsApi()
 
@@ -115,5 +116,7 @@ export const layer = Layer.effectDiscard(
     }
     // Cost formulas (PROVIDERS §9.3): the price table, then the provider's own figure.
     for (const formula of [...builtinCostFormulas, userCostFormula]) yield* registry.costs.register(formula)
+    // Exact image token counts where the provider has an endpoint for them (ARCHITECTURE §6).
+    for (const counter of builtinImageCounters) yield* registry.imageCounters.register(counter)
   })
 ).pipe(Layer.provideMerge(empty))

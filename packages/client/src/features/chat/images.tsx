@@ -1,12 +1,28 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentProps } from "react"
-import type { MessageImages } from "@rp/shared/chat.ts"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+  type ReactNode
+} from "react"
+import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
+import type { ImagesLeftOut } from "@rp/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { ContentImage } from "../../ui/ContentImage.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
+import type { ChatSession } from "./session.ts"
+import type { MessageDraft } from "./messageDraft.ts"
+import { messageEditorTools } from "./editorHistory.tsx"
 import {
   chatComposer,
   chatSurfaceProviders,
@@ -27,6 +43,212 @@ interface ImagesState {
   readonly restore: AttachmentInput["restore"]
 }
 const ImagesContext = createContext<ImagesState | null>(null)
+
+/** Uploads an image's bytes (`POST /chat/image`) and returns its media id. */
+const uploadImage = async (file: Blob) => {
+  const response = await fetch("/chat/image", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file
+  })
+  if (!response.ok) throw new Error(await response.text())
+  return ((await response.json()) as { mediaId: string }).mediaId
+}
+
+const IMAGE_TYPES = "image/png,image/jpeg,image/webp,image/gif"
+const imageFiles = (files: Iterable<File>) => Array.from(files).filter((file) => file.type.startsWith("image/"))
+
+/**
+ * The paperclip: a picker for images, one tap. Its tooltip says pasting and dropping work too.
+ * The composer and the message editor use it.
+ */
+function AttachButton({
+  disabled,
+  onFiles,
+  pickerLabel = "Choose images",
+  hint = "Attach images. You can also paste an image or drop it anywhere in the chat."
+}: {
+  disabled: boolean
+  onFiles: (files: File[]) => void
+  pickerLabel?: string
+  hint?: string
+}) {
+  const picker = useRef<HTMLInputElement>(null)
+  return (
+    <>
+      <input
+        ref={picker}
+        className="sr-only"
+        disabled={disabled}
+        type="file"
+        accept={IMAGE_TYPES}
+        multiple
+        aria-label={pickerLabel}
+        onChange={(event) => {
+          onFiles(Array.from(event.currentTarget.files ?? []))
+          event.currentTarget.value = ""
+        }}
+      />
+      <SquareIconButton
+        label="Attach images"
+        hint={hint}
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => picker.current?.click()}
+      >
+        <Icon name="paperclip" />
+      </SquareIconButton>
+    </>
+  )
+}
+
+/** Removable thumbnails of attached images; the composer and the message editor use it. */
+function AttachmentList({
+  label,
+  items,
+  onRemove
+}: {
+  label: string
+  items: ReadonlyArray<{
+    readonly id: string
+    readonly name: string
+    readonly thumbnail: ReactNode
+    readonly sending?: boolean
+  }>
+  onRemove: (id: string) => void
+}) {
+  return (
+    <ul className="flex flex-wrap gap-2" aria-label={label}>
+      {items.map((item) => (
+        <li key={item.id} className="flex flex-col items-center rounded-md border border-border p-1">
+          {item.thumbnail}
+          {item.sending ? (
+            <span className="text-xs text-muted">Sending…</span>
+          ) : (
+            <Button variant="ghost" aria-label={`Remove ${item.name}`} onClick={() => onRemove(item.id)}>
+              Remove
+            </Button>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * The message editor's images (DESIGN §10.2a): the version saved keeps, adds or removes them.
+ * Starts from the source's set; the paperclip, paste and drop on the editor add, Remove takes
+ * one off. The set is the draft's (`MessageDraft.setImages`), which Save sends.
+ */
+function EditorImages({ draft, images }: { draft: MessageDraft; base: string; images: MessageImages }) {
+  const view = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  const current = view.images ?? images
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const add = useCallback(
+    async (files: File[]) => {
+      const selected = imageFiles(files)
+      if (!selected.length) return
+      if ((draft.snapshot().images ?? images).length + selected.length > 32) {
+        setError("A message can hold at most 32 images.")
+        return
+      }
+      await draft.uploadImages(async () => {
+        setBusy(true)
+        setError(null)
+        try {
+          const added = []
+          for (const file of selected)
+            added.push({ mediaId: await uploadImage(file), altText: (file.name || "Pasted image").slice(0, 2000) })
+          draft.setImages([...(draft.snapshot().images ?? images), ...added])
+        } catch (error) {
+          setError(`The image could not be uploaded. ${error instanceof Error ? error.message : ""}`)
+        } finally {
+          setBusy(false)
+        }
+      })
+    },
+    [draft, images]
+  )
+  // Paste and drop on the editor add here, not to the composer below.
+  const ref = useCallback(
+    (node: HTMLDivElement | null) => {
+      const form = node?.closest("form")
+      if (!form) return
+      const paste = (event: ClipboardEvent) => {
+        const files = imageFiles(event.clipboardData?.files ?? [])
+        if (!files.length) return
+        event.preventDefault()
+        event.stopPropagation()
+        void add(files)
+      }
+      const over = (event: DragEvent) => {
+        if (event.dataTransfer?.types.includes("Files")) event.preventDefault()
+      }
+      const drop = (event: DragEvent) => {
+        if (!event.dataTransfer?.files.length) return
+        event.preventDefault()
+        event.stopPropagation()
+        void add(Array.from(event.dataTransfer.files))
+      }
+      form.addEventListener("paste", paste)
+      form.addEventListener("dragover", over)
+      form.addEventListener("drop", drop)
+      return () => {
+        form.removeEventListener("paste", paste)
+        form.removeEventListener("dragover", over)
+        form.removeEventListener("drop", drop)
+      }
+    },
+    [add]
+  )
+  return (
+    <div ref={ref} className="flex flex-col gap-2" aria-label="Images of this version">
+      <div className="flex items-center gap-2">
+        <AttachButton
+          disabled={busy}
+          onFiles={(files) => void add(files)}
+          pickerLabel="Choose images for this version"
+          hint="Attach images to this version. You can also paste an image or drop it on the editor."
+        />
+        <span className="text-xs text-muted" role="status">
+          {busy
+            ? "Uploading…"
+            : current.length === 0
+              ? "No images"
+              : current.length === 1
+                ? "1 image"
+                : `${current.length} images`}
+        </span>
+      </div>
+      {current.length > 0 && (
+        <AttachmentList
+          label="Images of this version"
+          items={current.map((image, index) => ({
+            id: `${index}:${image.mediaId}`,
+            name: image.altText || `image ${index + 1}`,
+            thumbnail: (
+              <ContentImage
+                src={mediaUrl(image.mediaId, 160)}
+                alt={image.altText || `Image ${index + 1}`}
+                className="h-20 w-20 rounded-md object-contain"
+              />
+            )
+          }))}
+          onRemove={(id) => {
+            const at = Number(id.slice(0, id.indexOf(":")))
+            draft.setImages(current.filter((_, index) => index !== at))
+          }}
+        />
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
 
 function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { scope: string }) {
   const [entries, setEntries] = useState<readonly ImageDraftEntry[]>([])
@@ -69,13 +291,7 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
     if (entry.mediaId) return sync(entry)
     if (!entry.file) return
     try {
-      const response = await fetch("/chat/image", {
-        method: "POST",
-        headers: { "content-type": "application/octet-stream" },
-        body: entry.file
-      })
-      if (!response.ok) throw new Error(await response.text())
-      const { mediaId } = (await response.json()) as { mediaId: string }
+      const mediaId = await uploadImage(entry.file)
       const uploaded = {
         id: entry.id,
         scope,
@@ -304,7 +520,6 @@ function DraftThumbnail({ entry }: { entry: ImageDraftEntry }) {
 }
 function ImageComposer(props: ComponentProps<typeof Composer>) {
   const state = useContext(ImagesContext)
-  const picker = useRef<HTMLInputElement>(null)
   if (!state) return <Composer {...props} />
   const vision = props.view.history?.model?.vision
   const maxImages = props.view.history?.model?.maxImages ?? 4
@@ -316,90 +531,160 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
         busy: !state.ready || state.busy || state.entries.some((entry) => !entry.mediaId || !entry.saved),
         capture: state.capture,
         restore: state.restore,
-        editor: (
-          <div className="flex flex-col gap-2" aria-label="Image attachments">
-            <input
-              ref={picker}
-              className="sr-only"
-              disabled={!state.ready || state.busy}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              multiple
-              aria-label="Choose images"
-              onChange={(event) => {
-                state.add(Array.from(event.currentTarget.files ?? []))
-                event.currentTarget.value = ""
-              }}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button disabled={!state.ready || state.busy} onClick={() => picker.current?.click()}>
-                Attach images
-              </Button>
-              <span className="text-xs text-muted">Paste an image or drop it anywhere in the chat.</span>
-            </div>
-            {state.entries.length > 0 && (
-              <>
-                <ul className="flex flex-wrap gap-2" aria-label="Attached images">
-                  {state.entries.map((entry) => (
-                    <li key={entry.id} className="rounded-md border border-border p-1">
-                      <DraftThumbnail entry={entry} />
-                      {entry.sending ? (
-                        <span className="text-xs text-muted">Sending…</span>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          aria-label={`Remove ${entry.name}`}
-                          onClick={() => state.remove(entry.id)}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
-                  {vision === false
-                    ? "This model cannot see images. Choose a vision model before replying."
-                    : vision === undefined
-                      ? "Choose a vision model to reply to these images."
-                      : `The model sees up to the last ${maxImages} images in context.`}
+        action: <AttachButton disabled={!state.ready || state.busy} onFiles={state.add} />,
+        editor:
+          state.entries.length > 0 || state.error ? (
+            <div className="flex flex-col gap-2" aria-label="Image attachments">
+              {state.entries.length > 0 && (
+                <>
+                  <AttachmentList
+                    label="Attached images"
+                    items={state.entries.map((entry) => ({
+                      id: entry.id,
+                      name: entry.name,
+                      thumbnail: <DraftThumbnail entry={entry} />,
+                      ...(entry.sending ? { sending: true } : {})
+                    }))}
+                    onRemove={state.remove}
+                  />
+                  <p role="status" className={`text-sm ${vision === false ? "text-danger" : "text-muted"}`}>
+                    {vision === false
+                      ? "This model cannot see images. Choose a vision model before replying."
+                      : vision === undefined
+                        ? "Choose a vision model to reply to these images."
+                        : `The model sees up to the last ${maxImages} images in context.`}
+                  </p>
+                </>
+              )}
+              {state.error && (
+                <p role="alert" className="text-sm text-danger">
+                  {state.error} Remove an image or reload to retry.
                 </p>
-              </>
-            )}
-            {state.error && (
-              <p role="alert" className="text-sm text-danger">
-                {state.error} Remove an image or reload to retry.
-              </p>
-            )}
-          </div>
-        )
+              )}
+            </div>
+          ) : null
       }}
     />
   )
 }
-function ImageThumbnails({ images }: { images: MessageImages }) {
+/** Why the next request leaves image `index` of the message out, by the assembler's rules; null: it's sent. */
+const leftOutBy = (images: ImagesLeftOut | undefined, entry: PathEntry, index: number) => {
+  const image = images?.images.find(
+    (item) => item.versionId === entry.version.id && item.index === index && item.rule !== "user"
+  )
+  if (image) return image
+  return images?.ranges.find((range) => entry.depth >= range.from && entry.depth <= range.to) ?? null
+}
+
+/**
+ * A message image's corner button: takes it out of the context or puts it back. Shown on
+ * hover (always on touch screens); always shown while it's out. An image a rule leaves out
+ * shows it toggled and disabled, and hovering says which rule.
+ */
+function ContextToggle({
+  index,
+  excluded,
+  rule,
+  busy,
+  onToggle
+}: {
+  index: number
+  excluded: boolean
+  rule: string | null
+  busy: boolean
+  onToggle: () => void
+}) {
+  const out = excluded || rule !== null
+  const label =
+    rule !== null
+      ? `Image ${index + 1} isn’t sent to the model: ${rule}`
+      : excluded
+        ? `Put image ${index + 1} back into the context`
+        : `Take image ${index + 1} out of the context`
+  return (
+    <ToggleIconButton
+      label={label}
+      icon={out ? "eyeOff" : "eye"}
+      pressed={out}
+      disabled={rule !== null || busy}
+      onClick={onToggle}
+      className={`absolute top-1 right-1 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${
+        out ? "" : "opacity-0 group-hover:opacity-100"
+      }`}
+    />
+  )
+}
+
+function ImageThumbnails({
+  images,
+  controls
+}: {
+  images: MessageImages
+  /** A message's images: the context toggle and why each one isn't sent. */
+  controls?: { entry: PathEntry; session: ChatSession }
+}) {
   const [selected, setSelected] = useState<{ mediaId: string; altText?: string } | null>(null)
-  if (!images.length) return null
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const session = controls?.session
+  const readLeftOut = () => session?.snapshot().history?.images
+  const leftOut = useSyncExternalStore(session?.subscribe ?? noSubscribe, readLeftOut, readLeftOut)
+  const readEditing = () =>
+    controls && images.length > 0
+      ? session!.editor(`write:${controls.entry.slotId}`) !== undefined ||
+        session!.editForSlot(controls.entry.slotId, [controls.entry.version]) !== undefined
+      : false
+  const editing = useSyncExternalStore(session?.subscribeEditors ?? noSubscribe, readEditing, readEditing)
+  // The editor shows the images it saves, with their own controls.
+  if (!images.length || editing) return null
   return (
     <>
       <div className="flex flex-wrap gap-2" aria-label="Message images">
-        {images.map((image, index) => (
-          <button
-            key={`${image.mediaId}:${index}`}
-            type="button"
-            aria-label={`View image ${index + 1}`}
-            onClick={() => setSelected(image)}
-            className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          >
-            <ContentImage
-              src={mediaUrl(image.mediaId, 320)}
-              alt={image.altText || `Image ${index + 1}`}
-              loading="lazy"
-              className="max-h-48 max-w-full rounded-md object-contain"
-            />
-          </button>
-        ))}
+        {images.map((image, index) => {
+          const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
+          const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
+          const reason = excluded ? "taken out of the context by you" : left ? left.message : null
+          const view = (
+            <button
+              type="button"
+              aria-label={`View image ${index + 1}${reason ? ` (not sent to the model: ${reason})` : ""}`}
+              onClick={() => setSelected(image)}
+              className="rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <ContentImage
+                src={mediaUrl(image.mediaId, 320)}
+                alt={image.altText || `Image ${index + 1}`}
+                loading="lazy"
+                className={`max-h-48 max-w-full rounded-md object-contain ${reason ? "opacity-40 grayscale" : ""}`}
+              />
+            </button>
+          )
+          return (
+            <div key={`${image.mediaId}:${index}`} className="group relative" data-image-sent={reason ? "no" : "yes"}>
+              {reason ? <Tooltip label={`Not sent to the model: ${reason}`}>{view}</Tooltip> : view}
+              {controls && (
+                <ContextToggle
+                  index={index}
+                  excluded={excluded}
+                  rule={left ? left.message : null}
+                  busy={busy}
+                  onToggle={async () => {
+                    setBusy(true)
+                    const outcome = await controls.session.setImageExcluded(controls.entry, image.mediaId, !excluded)
+                    setBusy(false)
+                    setError(outcome.ok ? null : outcome.error.message)
+                  }}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
       <Dialog
         open={selected !== null}
         onOpenChange={(open) => {
@@ -420,14 +705,18 @@ function ImageThumbnails({ images }: { images: MessageImages }) {
     </>
   )
 }
+const noSubscribe = () => () => {}
 export const registerImages = () => [
   chatComposer.register({ id: "chat.composer", order: 10, component: ImageComposer }),
   chatSurfaceProviders.register({ id: "chat.images", order: 40, component: ImageProvider }),
   messagePreviews.register({
     id: "message.images",
     order: 20,
-    component: ({ entry }) => <ImageThumbnails images={entry.version.images ?? []} />
+    component: ({ entry, session }) => (
+      <ImageThumbnails images={entry.version.images ?? []} controls={{ entry, session }} />
+    )
   }),
+  messageEditorTools.register({ id: "message.editor-images", order: 5, component: EditorImages }),
   queuedPreviews.register({
     id: "queued.images",
     order: 10,

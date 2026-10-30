@@ -36,6 +36,7 @@ import { Notices } from "./chat/Notices.ts"
 import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
+import { ImageTokenCounts } from "./chat/ImageTokenCounts.ts"
 import { CacheWarmth } from "./chat/CacheWarmth.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
@@ -430,7 +431,7 @@ export const serverWith = <E>(
     // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
     Layer.provideMerge(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(
-      Layer.merge(Generations.layer, CacheWarmth.layer).pipe(
+      Layer.merge(Generations.layer, CacheWarmth.layer.pipe(Layer.provideMerge(ImageTokenCounts.layer))).pipe(
         Layer.provideMerge(generator),
         Layer.provideMerge(summaries),
         // The refusal judge registers itself with the summary checks the summarizer runs.

@@ -14,6 +14,7 @@ import {
 } from "../lcm/instructionPolicies.ts"
 // The assembler with its built-in stages and macros registered (ARCHITECTURE §15).
 import { withAssemblyModules } from "./modules.ts"
+import { builtinImageTokenRules, type ImageTokenRule } from "@rp/shared/imageTokens.ts"
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Context, Effect, type Scope } from "effect"
@@ -40,10 +41,14 @@ export interface Assembler {
   readonly transforms: TransformRegistry
   readonly macros: MacroRegistry
   readonly projections: ProjectionRegistry
+  /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
+  readonly imageTokens: Registry<ImageTokenRule>
   readonly projectionOptions: Effect.Effect<
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
-  readonly assemble: (request: Omit<AssemblyRequest, "macros" | "projections">) => ReturnType<typeof assemble>
+  readonly assemble: (
+    request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens">
+  ) => ReturnType<typeof assemble>
 }
 
 export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>()("rp/assembler/WorkerAssembler") {}
@@ -66,6 +71,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* summaryStyles.register(defaultSummaryStyle)
   yield* transforms.register(makeSummaryRequestTransform(summaryInstructions))
   const projections = makeProjectionRegistry()
+  const imageTokens = makeRegistry<ImageTokenRule>()
+  for (const rule of builtinImageTokenRules) yield* imageTokens.register(rule)
   yield* registerBuiltinStages(stages)
   yield* registerBuiltinProjections(projections)
   yield* registerBuiltinMacros(macros)
@@ -79,6 +86,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     transforms,
     macros,
     projections,
+    imageTokens,
     projectionOptions: Effect.suspend(() =>
       withAssemblyModules(
         assembler,
@@ -90,7 +98,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
       )
     ),
     assemble: (request) =>
-      withAssemblyModules(assembler, assemble(stages, { ...request, macros, projections }, transforms))
+      withAssemblyModules(assembler, assemble(stages, { ...request, macros, projections, imageTokens }, transforms))
   }
   return assembler
 })

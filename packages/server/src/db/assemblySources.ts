@@ -3,7 +3,15 @@ import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { pathEvents } from "./pathSegments.ts"
-import { attachedApplies, originalSql, shownIn, slotDeletedIn, versionDeletedIn, viewAt } from "./forkState.ts"
+import {
+  attachedApplies,
+  imageExcludedIn,
+  originalSql,
+  shownIn,
+  slotDeletedIn,
+  versionDeletedIn,
+  viewAt
+} from "./forkState.ts"
 import { selectSummaryLayer, selectFailedRanges } from "./lcmLayer.ts"
 import { readSummary } from "./lcmReads.ts"
 // The assembler's sources over the database, every read the acting user's, and the pins a
@@ -53,6 +61,28 @@ import { historyRevision } from "./historyChanges.ts"
 import { previousHistoryStart } from "./historyStart.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
+
+/** Stored image facts for assembly and its draft preview, always inside a reader worker. */
+export const readImageTokenFacts = (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  model: { readonly connectionId: string; readonly kind: string; readonly modelKey: string },
+  sha256s: ReadonlyArray<string>
+) =>
+  Effect.gen(function* () {
+    const counts =
+      sha256s.length === 0
+        ? []
+        : yield* sql<{ sha256: string; detail: string; tokens: number }>`
+                SELECT sha256, detail, tokens FROM image_token_counts
+                WHERE owner_user_id = ${userId} AND kind = ${model.kind} AND model_key = ${model.modelKey}
+                  AND sha256 IN ${sql.in(sha256s)}`
+    const samples = yield* sql<{ images: number; pixels: number; tokens: number }>`
+          SELECT images, pixels, tokens FROM image_token_samples
+          WHERE owner_user_id = ${userId} AND connection_id = ${model.connectionId} AND model_key = ${model.modelKey}
+          ORDER BY id DESC LIMIT 20`
+    return { counts: [...counts], samples: [...samples] }
+  })
 
 const decodeEvent = Schema.decodeUnknownEffect(FoldableEvent)
 const decodeCard = Schema.decodeUnknownExit(CardDoc)
@@ -260,7 +290,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     globalLorebooks: [] as Array<string>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
-    lcmDefaults: undefined as SourcePins["lcmDefaults"]
+    lcmDefaults: undefined as SourcePins["lcmDefaults"],
+    imageTokenFacts: undefined as SourcePins["imageTokenFacts"]
   }
 
   const pinTarget = (target: Target) =>
@@ -448,8 +479,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
             v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
-            (SELECT json_group_array(json_object('mediaId', a.media_id)) FROM
-              (SELECT media_id FROM version_attachments WHERE version_id=v.id ORDER BY ordinal) a) AS images_json,
+            (SELECT json_group_array(CASE WHEN ${imageExcludedIn(sql, fork, "o.id", "a.media_id")}
+                THEN json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height, 'excluded', json('true'))
+                ELSE json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height) END) FROM
+              (SELECT va.media_id, m.sha256, m.width, m.height FROM version_attachments va
+                JOIN media_assets m ON m.id = va.media_id WHERE va.version_id=v.id ORDER BY va.ordinal) a) AS images_json,
             (SELECT count(*) FROM versions c WHERE c.slot_id = s.id AND c.fork_id IS NULL
               AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_count,
             f.writer AS first_writer, f.origin AS first_origin,
@@ -667,6 +701,13 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     // The scope chain (DATA-MODEL §5.4): the chat's role binding, the chat's own, the
     // connection's override, the user's default, the instance's, then ST's default. A level
     // that names something deleted is passed over.
+    imageTokenFacts: (model, sha256s) =>
+      readImageTokenFacts(sql, userId, model, sha256s).pipe(
+        Effect.map((facts) => {
+          pins.imageTokenFacts = facts
+          return facts
+        })
+      ),
     lcmDefaults: () =>
       Effect.map(defaults, (read) => {
         pins.lcmDefaults = read.lcm ?? null
@@ -772,6 +813,8 @@ const replaySources = (
 
     historyStart: () => Effect.succeed(pins.historyStart ?? null),
     lcmDefaults: () => Effect.succeed(pins.lcmDefaults ?? null),
+    // A replay estimates images as the snapshot did; one from before this was pinned, by formula.
+    imageTokenFacts: () => Effect.succeed(pins.imageTokenFacts ?? { counts: [], samples: [] }),
     historyRevision: (leaf, before) => Effect.succeed(pins.historyRevisions?.[keyOf(leaf, before)] ?? 0),
 
     events: () =>

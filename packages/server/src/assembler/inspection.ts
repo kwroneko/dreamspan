@@ -35,22 +35,38 @@ export interface PartNode {
   readonly parts?: ReadonlyArray<PartNode>
 }
 
+type Located = Span & { frame?: true; rewritten?: true; also?: Array<number> }
+
+/** A shared fallback box must retain the sources inside blocks it can no longer separate. */
+const sourcesIn = (nodes: ReadonlyArray<PartNode>): Array<number> => [
+  ...new Set(nodes.flatMap((node) => (node.frame ? [] : [node.source, ...sourcesIn(node.parts ?? [])])))
+]
+
 /**
  * Where each source's text sits in a sent message: each piece's scrubbed text, searched in order
  * from the end of the one before, else anywhere it doesn't overlap a part already found; a block's
- * parts are searched only inside the block. Leaves are parts, blocks are groups around them. A
- * piece whose text isn't there verbatim (a regex script changed it) gets no part.
+ * parts are searched only inside the block. Leaves are parts, blocks are groups around them.
+ *
+ * A piece whose text isn't there verbatim (a provider transform rewrote the message after
+ * assembly) takes the text between its neighbours that were found, trimmed, marked `rewritten`;
+ * a run of such pieces shares it, the first as `source` and the rest as `also`. A lone rewritten
+ * block's parts are searched inside it. Inseparable blocks retain their nested sources; moved
+ * anchors leave a shared fallback over the unclaimed text. Wrappers (`frame`) and blank pieces
+ * never take text.
  */
 export const locate = (
   content: string,
   nodes: ReadonlyArray<PartNode>
-): { parts: Array<Span & { frame?: true }>; groups: Array<Span> } => {
-  const parts: Array<Span & { frame?: true }> = []
-  const groups: Array<Span> = []
+): { parts: Array<Located>; groups: Array<Span & { rewritten?: true }> } => {
+  const parts: Array<Located> = []
+  const groups: Array<Span & { rewritten?: true }> = []
   const walk = (nodes: ReadonlyArray<PartNode>, from: number, to: number) => {
     const siblings: Array<Span> = []
     const free = (start: number, end: number) =>
       end <= to && [...parts, ...siblings].every((p) => end <= p.start || start >= p.end)
+    // The pieces that could hold text, with where each was found (null: not verbatim).
+    const found: Array<{ node: PartNode; span: Span | null }> = []
+    const unlocated: Array<PartNode> = []
     let cursor = from
     for (const node of nodes) {
       const { text } = node
@@ -64,14 +80,60 @@ export const locate = (
             break
           }
       }
-      if (at === -1) continue
+      if (at === -1) {
+        if (!node.frame) found.push({ node, span: null })
+        continue
+      }
       const span = { start: at, end: at + text.length, source: node.source }
+      found.push({ node, span })
       siblings.push(span)
       if (node.parts?.length) {
         groups.push(span)
         walk(node.parts, span.start, span.end)
       } else parts.push(node.frame ? { ...span, frame: true } : span)
       cursor = span.end
+    }
+    // Each run of pieces not found takes what lies between the found ones around it.
+    for (let i = 0; i < found.length; i++) {
+      if (found[i]!.span) continue
+      let j = i
+      while (j + 1 < found.length && !found[j + 1]!.span) j++
+      const run = found.slice(i, j + 1).map(({ node }) => node)
+      let start = found[i - 1]?.span?.end ?? from
+      let end = found[j + 1]?.span?.start ?? to
+      i = j
+      while (start < end && /\s/.test(content[start]!)) start++
+      while (end > start && /\s/.test(content[end - 1]!)) end--
+      if (start >= end || !free(start, end)) {
+        unlocated.push(...run)
+        continue
+      }
+      const [first, ...rest] = run
+      const span = { start, end, source: first!.source }
+      siblings.push(span)
+      if (rest.length === 0 && first!.parts?.length) {
+        groups.push({ ...span, rewritten: true })
+        walk(first!.parts, start, end)
+      } else {
+        const also = sourcesIn(run).filter((source) => source !== span.source)
+        parts.push({ ...span, rewritten: true, ...(also.length ? { also } : {}) })
+      }
+    }
+    // A transform may also reorder the anchors. The interval between those anchors no longer
+    // locates the rewrite: box the remaining text with all unresolved sources instead of
+    // presenting it as assembler framing. Recorded sibling blocks and wrappers stay intact.
+    if (unlocated.length) {
+      const [source, ...also] = sourcesIn(unlocated)
+      let at = from
+      for (const span of [...siblings.toSorted((a, b) => a.start - b.start), { start: to, end: to }]) {
+        let start = at
+        let end = span.start
+        while (start < end && /\s/.test(content[start]!)) start++
+        while (end > start && /\s/.test(content[end - 1]!)) end--
+        if (source !== undefined && start < end && free(start, end))
+          parts.push({ start, end, source, rewritten: true, ...(also.length ? { also } : {}) })
+        at = span.end
+      }
     }
   }
   walk(nodes, 0, content.length)

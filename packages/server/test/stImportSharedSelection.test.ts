@@ -53,21 +53,34 @@ for (const count of [10, 205]) {
             range: { _tag: "Around", slot: root },
             limit: 100
           })
+          const writer = yield* Writer
+          // Synthetic asset metadata; this test exercises storage without dispatching a request.
+          const mediaId = yield* writer.RecordMessageImage({
+            userId: user.id,
+            media: {
+              sha256: "a".repeat(64) as never,
+              mime: "image/png",
+              byteSize: 16,
+              width: 1,
+              height: 1
+            }
+          })
           // A local suffix version and amendment must remain on the copied child path.
           const local = yield* api.EditVersion({
             forkId: childRecord.forkId,
             sourceVersionId: childBefore.entries[8]!.version.id,
             slotId: childBefore.entries[8]!.slotId,
             content: "Local suffix version",
+            images: [{ mediaId }],
             expectedRowVersion: childBefore.entries[8]!.rowVersion
           })
           yield* api.AmendVersion({
             forkId: childRecord.forkId,
             versionId: local.version.id,
             content: "Local suffix amended",
+            images: [],
             expectedRowVersion: local.version.rowVersion
           })
-          const writer = yield* Writer
           yield* writer.AddStateEvent({
             userId: user.id,
             chatId: chat.id,
@@ -159,6 +172,12 @@ for (const count of [10, 205]) {
             { readOnly: true }
           )
           assert.deepStrictEqual(history, [{ content: "Local suffix version" }])
+          const amendments = yield* api.VersionAmendments({ versionId: suffixVersions[1]!.id })
+          assert.deepStrictEqual(
+            amendments[0]!.images,
+            [{ mediaId, altText: "" }],
+            "copying the imported suffix keeps the amendment's restorable image set"
+          )
           assert.deepStrictEqual(
             branchAfter.entries.slice(0, 4).map((e) => e.slotId),
             childBefore.entries.slice(0, 4).map((e) => e.slotId)

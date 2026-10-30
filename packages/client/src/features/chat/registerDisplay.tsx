@@ -1,5 +1,7 @@
+import { routes } from "../../routes.tsx"
 import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
+import { registerMessageCopy } from "../../ui/messageCopy.tsx"
 import { appTools } from "../shell.tsx"
 import { MessageColorPreferences } from "./MessageColors.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
@@ -10,6 +12,14 @@ import { chatSurfaceProviders } from "./presentation.tsx"
 import { DisplayProvider, DisplaySettings } from "./DisplaySettings.tsx"
 
 export const registerDisplay = () => [
+  registerMessageCopy(),
+  routes.register({
+    id: "settings.display",
+    parent: "settings",
+    path: "display",
+    component: DisplaySettings,
+    nav: { label: "Display", order: 20 }
+  }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
   displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),

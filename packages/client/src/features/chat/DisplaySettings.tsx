@@ -5,7 +5,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
 import { createContext, useContext, useMemo, useEffect, useState, type ReactNode } from "react"
 import { AppClient } from "../../rpc.ts"
-import { Switch } from "../../ui/Choice.tsx"
+import { RadioGroup, Switch } from "../../ui/Choice.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
@@ -97,6 +97,25 @@ export function DisplaySettings() {
   const viewer = useViewPrefs()
   return (
     <div className="flex flex-col gap-6">
+      <Fieldset
+        legend="Enter sends"
+        description="Your account preference for both chat and new-chat composers. Ctrl/Cmd+Enter always submits; Shift+Enter adds a line."
+      >
+        <RadioGroup
+          value={viewer.prefs.enterSends}
+          disabled={!viewer.ready}
+          onValueChange={(enterSends) => void viewer.change({ enterSends })}
+          options={[
+            {
+              value: "automatic",
+              label: "Automatic",
+              description: "Enter sends on a desktop keyboard and inserts a line on touch devices."
+            },
+            { value: "always", label: "Always", description: "Enter sends on every device." },
+            { value: "never", label: "Never", description: "Enter inserts a line. Ctrl/Cmd+Enter sends." }
+          ]}
+        />
+      </Fieldset>
       <MessageColorSettings />
       <Fieldset
         legend="Display transformations"

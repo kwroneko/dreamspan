@@ -26,7 +26,13 @@ import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
 
 /** Earlier saved text of a human-written version, newest first. */
-export const VersionAmendment = Schema.Struct({ id: Schema.Int, content: Schema.String, at: Schema.Number })
+export const VersionAmendment = Schema.Struct({
+  id: Schema.Int,
+  content: Schema.String,
+  at: Schema.Number,
+  /** The complete image set it had before this amendment, including text-only amendments. */
+  images: Schema.optionalKey(MessageImages)
+})
 export type VersionAmendment = typeof VersionAmendment.Type
 
 /** Generation needs a generator, and this server has none (only tests run one without). */
@@ -70,6 +76,7 @@ const displayFields = {
   outputMacros: Schema.Boolean,
   displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
+  enterSends: Schema.Literals(["automatic", "always", "never"]),
   guidance: Schema.Boolean
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
@@ -85,6 +92,7 @@ export const DisplayPrefsChange = Schema.Struct({
   coverageRail: Schema.optionalKey(displayFields.coverageRail),
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
+  enterSends: Schema.optionalKey(displayFields.enterSends),
   guidance: Schema.optionalKey(displayFields.guidance)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
@@ -99,6 +107,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   coverageRail: false,
   outputMacros: false,
   displayRegex: false,
+  enterSends: "automatic",
   guidance: false
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
@@ -245,6 +254,7 @@ export const MessageDraftSave = Schema.Struct({
   target: MessageDraftTarget,
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
+  images: Schema.optionalKey(MessageImages),
   expectedRowVersion: Schema.NullOr(Schema.Int),
   expectedSession: Schema.NullOr(Schema.Int)
 })
@@ -492,6 +502,21 @@ export class ChatApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
+   * Takes an image of a message out of the context, or puts it back, in fork `forkId` (absent
+   * or null: the fork through its message): it stays in the message, marked, and isn't sent.
+   * Like any edit it never starts a generation. Returns the message as that fork shows it.
+   */
+  Rpc.make("SetImageExcluded", {
+    payload: {
+      versionId: VersionId,
+      mediaId: Schema.String,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      excluded: Schema.Boolean
+    },
+    success: PathEntry,
+    error: Schema.Union([...Errors])
+  }),
+  /**
    * Hides a message from the model, or shows it to the model again (ST's ghost toggle): it
    * stays in the chat, marked, and isn't sent. Like any edit it never starts a generation.
    */
@@ -540,6 +565,8 @@ export class ChatApi extends RpcGroup.make(
       versionId: VersionId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       content: Schema.String,
+      /** Its images from now on (absent: kept); the earlier set stays in its history. */
+      images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       draft: DraftCommit
     },

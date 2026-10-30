@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 35
+export const ASSEMBLER_VERSION = 38
 
 export type Role = "system" | "user" | "assistant"
 
@@ -117,6 +117,12 @@ export interface RequestImage {
   /** Hydrated only for dispatch; snapshots retain references, never image bytes. */
   readonly data?: string
   readonly mimeType?: string
+  /** The stored file's content hash and size, which image token estimates key and work from. */
+  readonly sha256?: string
+  readonly width?: number | null
+  readonly height?: number | null
+  /** What the image costs this request's model (`image-tokens` stage); counted in `tokensOf`. */
+  readonly estimate?: import("@rp/shared/imageTokens.ts").ImageEstimate
 }
 
 export interface RequestMessage {
@@ -197,7 +203,7 @@ export interface WireContext {
       readonly parts?: ContextMessage["parts"]
       readonly groups?: ContextMessage["groups"]
       readonly breakpoint?: ContextMessage["breakpoint"]
-      /** Digest of final, unredacted text/role/name. Never projected into an RPC DTO. */
+      /** Digest of final, unredacted text/role/name and sent image content hashes/detail. Never projected into an RPC DTO. */
       readonly digest?: string
       readonly inputs: ReadonlyArray<number>
     }
@@ -322,6 +328,8 @@ export interface ContextSnapshot {
   readonly cardOverrides?: ReadonlyArray<CardOverride>
   /** Enabled preset prompts their condition left out this turn; absent in older snapshots. */
   readonly skippedPrompts?: ReadonlyArray<Source>
+  /** The path's images the request leaves out and why (`images` stage); absent in older snapshots. */
+  readonly imagesLeftOut?: import("@rp/shared/inspectorApi.ts").ImagesLeftOut
   /** What the sources read, by id and revision, so the context can be read again exactly. */
   readonly wire?: WireContext
   readonly sources?: SourcePins
@@ -348,6 +356,8 @@ export interface SummaryLayer {
 
 /** What one context's sources read, by id and revision, each read keyed by its request (invariant 6). */
 export interface SourcePins {
+  /** The image token counts and calibration the assembly read (absent before they were pinned). */
+  readonly imageTokenFacts?: import("./pipeline.ts").ImageTokenFacts | undefined
   /** The account's summarization defaults as the assembly read them (absent before they were pinned). */
   readonly lcmDefaults?: import("@rp/shared/lcmSettings.ts").LcmDefaults | null | undefined
   readonly lcm?: {
@@ -476,9 +486,14 @@ export interface Target {
   readonly continues?: { readonly version: string; readonly text: string } | undefined
 }
 
+/** An image of a history message; `excluded`: the fork took it out of the context (SetImageExcluded). */
+export interface HistoryImage extends RequestImage {
+  readonly excluded?: true
+}
+
 /** One message of the path, as assembly reads it. */
 export interface HistoryEntry {
-  readonly images?: ReadonlyArray<RequestImage>
+  readonly images?: ReadonlyArray<HistoryImage>
   readonly slotId: string
   readonly versionId: string
   readonly depth: number

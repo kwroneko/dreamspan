@@ -5,7 +5,7 @@ import { createHash } from "node:crypto"
 import { Predicate } from "effect"
 import { REPLY_TOOL, replyTool, schemaPrefillBudget } from "./prefill.ts"
 import type { Api, AssistantMessage, Context, Message, Model } from "@earendil-works/pi-ai"
-import type { AssembledRequest, ModelInput, RequestMessage, WireContext } from "./types.ts"
+import type { AssembledRequest, ModelInput, RequestImage, RequestMessage, WireContext } from "./types.ts"
 
 /** The messages with the prefill appended as the start of the reply, where the model takes one. */
 const withPrefill = (request: AssembledRequest): ReadonlyArray<RequestMessage> =>
@@ -337,6 +337,7 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
         role: images?.length ? ("user" as const) : role,
         content,
         ...(name ? { name } : {}),
+        ...(images?.length ? { images } : {}),
         inputs: [i]
       })),
       samplers,
@@ -359,7 +360,13 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
       typeof message.content === "string"
         ? message.content
         : message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n")
-    messages.push({ role: message.role === "assistant" ? "assistant" : "user", content, inputs: [i + systemCount] })
+    const images = input[i + systemCount]?.images
+    messages.push({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content,
+      ...(images?.length ? { images } : {}),
+      inputs: [i + systemCount]
+    })
   }
   const projected = { messages, samplers, mapping: model.mapping }
   if (model.api === "openai-responses") {
@@ -384,7 +391,15 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
       }))
     }
     markWireSources(payload, converted)
-    return { ...sentWire(payload, projected), samplers }
+    const captured = sentWire(payload, projected)
+    return {
+      ...captured,
+      samplers,
+      messages: captured.messages.map((message) => {
+        const images = message.inputs.flatMap((i) => input[i]?.images ?? [])
+        return { ...message, images, digest: wireDigest({ ...message, images }) }
+      })
+    }
   }
   if (model.api === "google-generative-ai") {
     return {
@@ -396,12 +411,27 @@ export const wireContext = (request: AssembledRequest, model: ModelInput): WireC
 }
 
 type WireMessage = WireContext["messages"][number]
-type TextMessage = Pick<WireMessage, "role" | "content" | "name" | "prefill">
+type TextMessage = Pick<WireMessage, "role" | "content" | "name" | "prefill" | "images">
 
 /** Only stored server-side; display redaction must not change cache identity. */
 export const wireDigest = (message: TextMessage): string =>
   createHash("sha256")
-    .update(JSON.stringify([message.role, message.name ?? null, message.content]))
+    .update(
+      JSON.stringify([
+        message.role,
+        message.name ?? null,
+        message.content,
+        (message.images ?? [])
+          .filter((image) => image.estimate?.sent !== false)
+          .map((image) => [
+            image.sha256 ??
+              (image.data
+                ? createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex")
+                : image.mediaId),
+            image.estimate?.detail === "unspecified" ? "auto" : (image.estimate?.detail ?? "auto")
+          ])
+      ])
+    )
     .digest("hex")
 
 // Enumerable symbols survive normal transform object spreads, but never JSON serialization.
@@ -420,6 +450,45 @@ const textContent = (value: unknown): string =>
           .join("\n")
       : ""
 
+/** Only identities survive capture: never persist or publish inline image data. */
+const capturedImages = (content: unknown): ReadonlyArray<RequestImage> => {
+  if (!Array.isArray(content)) return []
+  return content.flatMap((block) => {
+    if (!Predicate.isObject(block)) return []
+    const url =
+      block.type === "input_image"
+        ? block.image_url
+        : block.type === "image_url"
+          ? Predicate.isObject(block.image_url)
+            ? block.image_url.url
+            : block.image_url
+          : undefined
+    const source = Predicate.isObject(block.source) ? block.source : {}
+    const inline = Predicate.isObject(block.inlineData)
+      ? block.inlineData
+      : Predicate.isObject(block.inline_data)
+        ? block.inline_data
+        : {}
+    const data =
+      typeof url === "string"
+        ? /^data:[^;,]+;base64,(.*)$/s.exec(url)?.[1]
+        : block.type === "image" && source.type === "base64" && typeof source.data === "string"
+          ? source.data
+          : typeof inline.data === "string"
+            ? inline.data
+            : undefined
+    if (data === undefined) return []
+    const detail = Predicate.isObject(block.image_url) ? block.image_url.detail : block.detail
+    return [
+      {
+        mediaId: "",
+        sha256: createHash("sha256").update(Buffer.from(data, "base64")).digest("hex"),
+        estimate: { tokens: null, basis: "unknown" as const, detail: typeof detail === "string" ? detail : "auto" }
+      }
+    ]
+  })
+}
+
 const wireRows = (payload: Record<string, unknown>) => {
   const config = Predicate.isObject(payload.config) ? payload.config : {}
   const rows: Array<{ row: TextMessage; carrier: Carrier; system?: true }> = []
@@ -436,6 +505,7 @@ const wireRows = (payload: Record<string, unknown>) => {
         row: {
           role,
           content: textContent(message.content ?? message.parts),
+          images: capturedImages(message.content ?? message.parts),
           ...(typeof message.name === "string" ? { name: message.name } : {}),
           ...(message.prefix === true && role === "assistant"
             ? { prefill: { protocol: "deepseek_prefix" as const } }
@@ -476,13 +546,13 @@ const wireRows = (payload: Record<string, unknown>) => {
 export const markWireSources = (payload: Record<string, unknown>, sources: WireContext): void => {
   const matches = new Map<string, Array<ReadonlyArray<number>>>()
   for (const message of sources.messages) {
-    const key = wireDigest(message)
+    const key = wireDigest({ ...message, images: [] })
     const queue = matches.get(key) ?? []
     queue.push(message.inputs)
     matches.set(key, queue)
   }
   for (const { row, carrier, system } of wireRows(payload)) {
-    const inputs = matches.get(wireDigest(row))?.shift() ?? []
+    const inputs = matches.get(wireDigest({ ...row, images: [] }))?.shift() ?? []
     if (system) carrier[systemProvenance] = { content: row.content, inputs }
     else carrier[provenance] = inputs
   }
@@ -521,9 +591,9 @@ export const sentWire = (
   return {
     mapping: sources.mapping,
     samplers,
-    messages: wireRows(payload).map(({ row, carrier, system }) => ({
+    messages: wireRows(payload).map(({ row: { images, ...row }, carrier, system }) => ({
       ...row,
-      digest: wireDigest(row),
+      digest: wireDigest({ ...row, images: images ?? [] }),
       content: scrub(row.content),
       ...(row.prefill
         ? { prefill: { ...row.prefill, ...(row.prefill.schema ? { schema: scrub(row.prefill.schema) } : {}) } }
