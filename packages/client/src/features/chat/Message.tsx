@@ -26,6 +26,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
+import { MessageBody } from "../../ui/messageCopy.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
@@ -166,7 +167,9 @@ function TemplateText({
     displayText(version.content, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
   return (
     <>
-      <Markdown text={text} streaming={false} />
+      <MessageBody text={version.content}>
+        <Markdown text={text} sourceText={version.content} streaming={false} />
+      </MessageBody>
       {current?.issues.map((issue, i) => (
         <p key={i} role="note" className="text-xs text-muted">
           {issue}
@@ -211,7 +214,9 @@ function VersionBody({
           placement={placement}
         />
       ) : (
-        <Markdown text={text} streaming={generating} />
+        <MessageBody text={text}>
+          <Markdown text={text} streaming={generating} />
+        </MessageBody>
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">

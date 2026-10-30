@@ -1,25 +1,50 @@
+import { sliceText } from "./sourcePositions.ts"
+
 // ST 1.19 public/scripts/power-user.js fixMarkdown(text, true). This is deliberately
 // line-based, including its last-character-wins behavior when both checks match a line.
 export function fixMarkdown(text: string): string {
+  return fixMarkdownMapped(text).text
+}
+
+/** Original UTF-16 offsets; display-only closing marks have no source. */
+export function fixMarkdownMapped(text: string): { text: string; offsets: Array<number | null> } {
   const matches = [...text.matchAll(/([*_]{1,2})([\s\S]*?)\1/gm)]
   let fixed = text
+  let offsets: Array<number | null> = Array.from({ length: text.length }, (_, i) => i)
   for (const match of matches.reverse()) {
+    const removedOffsets: number[] = []
     const replacement = match[0].replace(
       /(\*|_)([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)|([\t \u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]+)(\*|_)/g,
-      "$1$4"
+      (whole: string, left: string | undefined, _a: string, _b: string, right: string | undefined, at: number) => {
+        for (let i = 0; i < whole.length; i++)
+          if (i !== (left ? 0 : whole.length - 1)) removedOffsets.push(match.index + at + i)
+        return left ?? right ?? ""
+      }
     )
-    fixed = fixed.slice(0, match.index) + replacement + fixed.slice(match.index + match[0].length)
+    const removed = new Set(removedOffsets)
+    if (removed.size) offsets = offsets.filter((_, i) => !removed.has(i))
+    if (replacement !== match[0])
+      fixed = fixed.slice(0, match.index) + replacement + fixed.slice(match.index + match[0].length)
   }
-  return fixed
+  let cursor = 0
+  const mapped: Array<number | null> = []
+  const result = fixed
     .split("\n")
-    .map((line) => {
+    .map((line, index) => {
       let result = line
       for (const char of ["*", '"']) {
         if (line.split(char).length % 2 === 0) result = line.trimEnd() + char
       }
+      const closed = result !== line
+      const length = closed ? line.trimEnd().length : line.length
+      if (index) mapped.push(offsets[cursor - 1] ?? null)
+      for (let i = cursor; i < cursor + length; i++) mapped.push(offsets[i] ?? null)
+      if (closed) mapped.push(null)
+      cursor += line.length + 1
       return result
     })
     .join("\n")
+  return { text: result, offsets: mapped }
 }
 
 // A small structural AST contract avoids coupling the replaceable formatter to a
@@ -91,18 +116,17 @@ export function stFormatting() {
           ]
         }
         if (node.type !== "text") return [node]
-        const value = node.value!
         const out: Node[] = []
         let cursor = 0
         for (const [index, [start, end]] of ranges.entries()) {
           const from = Math.max(0, start - offset)
           const to = Math.min(length, end - offset)
           if (to <= from) continue
-          if (from > cursor) out.push({ type: "text", value: value.slice(cursor, from) })
-          out.push(quote([{ type: "text", value: value.slice(from, to) }], index))
+          if (from > cursor) out.push(sliceText(node, cursor, from, source))
+          out.push(quote([sliceText(node, from, to, source)], index))
           cursor = to
         }
-        if (cursor < length) out.push({ type: "text", value: value.slice(cursor) })
+        if (cursor < length) out.push(sliceText(node, cursor, length, source))
         return out
       }
       let offset = 0
@@ -122,7 +146,7 @@ export function stFormatting() {
           const value = node.value ?? ""
           node.type = "paragraph"
           delete node.value
-          node.children = [{ type: "text", value }]
+          node.children = [{ type: "text", value, ...(node.position ? { position: node.position } : {}) }]
         } else node.type = "text"
       }
       // Showdown's underline option consumes triple underscores as underline too.
@@ -140,15 +164,16 @@ export function stFormatting() {
       for (const child of node.children) visit(child, node)
       if (["paragraph", "heading", "tableCell"].includes(node.type)) inline(node)
       // Showdown simpleLineBreaks: every soft break in prose becomes a real break.
-      node.children = node.children.flatMap((child) =>
-        child.type === "text" && child.value?.includes("\n")
-          ? child.value
-              .split("\n")
-              .flatMap((value, index) =>
-                index ? [{ type: "break" }, { type: "text", value }] : [{ type: "text", value }]
-              )
-          : [child]
-      )
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== "text" || !child.value?.includes("\n")) return [child]
+        let cursor = 0
+        return child.value.split("\n").flatMap((value, index) => {
+          const text = sliceText(child, cursor, cursor + value.length, source)
+          const newline = sliceText(child, cursor - 1, cursor, source)
+          cursor += value.length + 1
+          return index ? [{ type: "break", ...(newline.position ? { position: newline.position } : {}) }, text] : [text]
+        })
+      })
     }
     visit(tree)
   }
