@@ -1,6 +1,7 @@
-// Continue (ST's, DESIGN §7.5): on the latest message, when the model wrote the version shown
-// and it's finished with text (stopped, interrupted, cut off or complete), a new version that
-// starts as its text and streams on from its end. The old version stays. It needs a model
+// Continue (ST's, DESIGN §7.5): on the latest message, when the version shown is finished with
+// text (stopped, interrupted, cut off or complete), whoever wrote it (an edit of a reply is
+// the user's), a new generated version that starts as its text and streams on from its end.
+// The old version stays. It needs a model
 // that takes the start of its reply (a prefill); with another, the button says why it isn't
 // available, and a click (or a tap, where there's no tooltip) shows the reason in full.
 import { useSyncExternalStore } from "react"
@@ -24,10 +25,9 @@ const continueBlocked = (model: NextModel): string | null => {
   return `Continue isn't available with ${name}${where}: it isn't known to take the start of its reply (a prefill). If it does, set its Prefill capability in Settings → Connections.`
 }
 
-/** Only the latest finished model reply with text can continue. */
+/** The latest finished version with text can continue, whoever wrote it. */
 export const canContinue = ({ entry, session }: MessageActionContext) => {
-  if (entry.version.writer !== "model" || entry.version.status === "generating" || entry.version.content.trim() === "")
-    return false
+  if (entry.version.status === "generating" || entry.version.content.trim() === "") return false
   const view = session.snapshot()
   return !view.loading && view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
 }

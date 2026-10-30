@@ -1,6 +1,6 @@
 # LCM: hierarchical summarization
 
-**Status**: User-formula estimates in §2.11 are built (U12, 2026-10-28; obsolete as an implementation plan, see ARCHITECTURE.md §6). Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–7 are implemented in ARCHITECTURE §16; what is not built is listed under its section and in §5. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
+**Status**: User-formula estimates in §2.11 are built (U12, 2026-10-28; obsolete as an implementation plan, see ARCHITECTURE.md §6). Proposed, 2026-10-13. Phase 3 (PLAN.md). Slices 1–7 are implemented and obsolete as implementation proposals (2026-10-30; ARCHITECTURE §16); what is not built is listed under its section and in §5. Items are marked as in DESIGN.md: **[D]** the owner stated or confirmed it (with where), **[P]** proposed and not confirmed, **[O]** open. The baseline is reference-harness as described in [the earlier reference notes](the earlier reference notes), cited as "ref §N". This document lists what carries over, then only the differences.
 
 Scope:
 - **[D]** LCM is the main feature: chats of unlimited length with a fixed, cache-friendly budget, keeping every message and every intermediate summary (DESIGN §8).

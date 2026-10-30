@@ -157,6 +157,132 @@ const run = <A, E>(body: (dataDir: string) => Effect.Effect<A, E, Database.Write
 
 describe("inserting messages in forks", () => {
   it.live(
+    "opens the fork through an Around target beyond an explicitly named leaf",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a", "human")
+          const b = yield* t.append(t.main, a, "b")
+          const plain = yield* t.fork(t.main, b)
+          const x = yield* t.insert(t.main, a, "x")
+          // The oracle only checks whole fork paths. A named leaf truncates a read's
+          // path even when the requested target is on the same fork beyond that leaf.
+          for (const [forkId, leafSlotId, target] of [
+            [t.main, a, x],
+            [plain, a, x],
+            [t.main, a, b],
+            [t.main, x, b]
+          ] as const) {
+            const found = yield* t.reader.ReadPath({
+              userId: t.userId,
+              chatId: t.chatId,
+              forkId,
+              leafSlotId,
+              range: { _tag: "Around", slot: target },
+              limit: 3
+            })
+            assert.strictEqual(found.forkId, t.main)
+            assert.strictEqual(found.leafSlotId, b)
+            assert.deepStrictEqual(
+              found.entries.map((e) => [e.slotId, e.position]),
+              [
+                [a, 0],
+                [x, 1],
+                [b, 2]
+              ]
+            )
+          }
+        })
+      ),
+    60_000
+  )
+
+  it.live(
+    "serializes two tabs inserting at a generating anchor without moving the tip or changing another fork",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a", "human")
+          const b = yield* t.append(t.main, a, "b")
+          const other = yield* t.fork(t.main, b)
+          const running = yield* t.writer.AddVersion({
+            userId: t.userId,
+            slotId: b,
+            forkId: t.main,
+            version: said(t.mira, "partial reply", "model", "generating"),
+            select: true,
+            commitDraft: null
+          })
+          const seen = (yield* t.entry(b, t.main)).rowVersion
+          const [first, second] = yield* Effect.all(
+            ["tab one", "tab two"].map((content) =>
+              t.insertBody(t.main, b, { _tag: "Write", speaker: t.mira, content }, seen)
+            ),
+            { concurrency: "unbounded" }
+          )
+          assert.isDefined(first)
+          assert.isDefined(second)
+          const newest = [first!, second!].sort((x, y) => y.slotId.localeCompare(x.slotId))
+          assert.deepStrictEqual(yield* t.shows(t.main), [
+            "a",
+            "partial reply",
+            ...newest.map((r) => r.version.content)
+          ])
+          assert.strictEqual((yield* t.entry(b, t.main)).version.id, running.id)
+          assert.strictEqual((yield* t.entry(b, t.main)).version.status, "generating")
+          assert.deepStrictEqual(yield* t.shows(other), ["a", "b"])
+          // Both operations were accepted against the same row version, and neither
+          // changed the structural tip used by the next append.
+          yield* t.append(t.main, b, "after the insertions", "human")
+          assert.deepStrictEqual(yield* t.shows(t.main), [
+            "a",
+            "partial reply",
+            ...newest.map((r) => r.version.content),
+            "after the insertions"
+          ])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
+    "rolls back the version and chat state when an insertion's attachment is refused",
+    () =>
+      run((dataDir) =>
+        Effect.gen(function* () {
+          const t = yield* setup(dataDir)
+          const a = yield* t.append(t.main, null, "a", "human")
+          const snapshot = () =>
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return yield* sql`SELECT state_seq, row_version, current_fork_id, last_message_at,
+              (SELECT count(*) FROM slots) AS slots, (SELECT count(*) FROM versions) AS versions
+              FROM chats WHERE id = ${t.chatId}`
+            }).pipe(Effect.provide(SqliteClient.layer({ filename: databaseFile(dataDir), readonly: true })))
+          const before = yield* snapshot()
+          // insertVersion writes a row before checking attachment ownership. A refusal
+          // here must roll that write back, along with every other part of the operation.
+          assert.include(
+            yield* failure(
+              t.insertBody(t.main, a, {
+                _tag: "Write",
+                speaker: t.mira,
+                content: "refused",
+                images: [{ mediaId: "missing-media" }]
+              })
+            ),
+            "NotFound"
+          )
+          assert.deepStrictEqual(yield* snapshot(), before)
+          assert.deepStrictEqual(yield* t.shows(t.main), ["a"])
+        })
+      ),
+    60_000
+  )
+
+  it.live(
     "shows an insertion in its fork and in forks made from it later, never in one made before or beside it",
     () =>
       run((dataDir) =>

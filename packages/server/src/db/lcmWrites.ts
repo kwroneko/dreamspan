@@ -8,6 +8,8 @@ import { SqlClient } from "effect/sql"
 import { tokensOf } from "../assembler/st.ts"
 import type { Bin } from "./bin.ts"
 import { readSummary } from "./lcmReads.ts"
+import { followsInDisplay, lcmView, placesOf, positionIn } from "./lcmDisplay.ts"
+import type { Summary } from "@rp/shared/lcm.ts"
 import { NotFound, StaleWrite, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -79,49 +81,126 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             )
               return yield* refused("Completion must use the inputs frozen for this job's active request")
           }
-          const chain = yield* sql<{
-            id: string
-            parent_slot_id: string | null
-            merged: number
-          }>`WITH RECURSIVE chain AS (
-        SELECT id, parent_slot_id, depth FROM slots WHERE id = ${job.last_slot_id} AND chat_id = ${job.chat_id}
-        UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN chain p ON p.parent_slot_id = s.id WHERE p.id <> ${job.first_slot_id} AND s.depth >= (SELECT depth FROM slots WHERE id = ${job.first_slot_id})
-      ) SELECT id, parent_slot_id, EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = chain.id) AS merged FROM chain ORDER BY depth`
-          if (chain[0]?.id !== job.first_slot_id || chain.some((s) => s.merged))
-            return yield* refused("summary must cover a primary-parent chain without merges")
-          if (!content.trim()) return yield* refused("a completed summary cannot be empty")
-          if (job.level === 1) {
-            if (children.length || inputs.length !== chain.length || inputs.some((i, n) => i.slotId !== chain[n]!.id))
-              return yield* refused("L1 inputs must be exactly the job's chain, in order")
-            for (const input of inputs) {
-              if (input.versionId !== null) {
-                const [version] =
-                  yield* sql`SELECT id FROM versions WHERE id = ${input.versionId} AND slot_id = ${input.slotId}
-              AND ${input.amendCount} >= 0 AND (SELECT count(*) FROM version_history h WHERE h.version_id = versions.id) >= ${input.amendCount}`
-                if (!version) return yield* new NotFound({ entity: "summary input", id: input.versionId })
-              } else if (input.amendCount !== 0) return yield* refused("absent inputs have no amendments")
-            }
-          } else {
-            if (
-              inputs.length ||
-              !children.length ||
-              JSON.stringify(children.map((c) => c.summaryId)) !== job.input_child_ids
-            )
-              return yield* refused("condensation must use the job's exact ordered children")
-            let at = 0
-            for (const child of children) {
-              const summary = yield* readSummary(sql, userId, child.summaryId, child.revisionId)
+          // In a job's fork that shows inserted slots, its range is a stretch of the display path
+          // (spec/MESSAGE-INSERT.md §3.4): inputs, or parts, follow one another there with only
+          // inserted slots between them. A job claimed before an insertion inside its range
+          // completes with its inputs, and its summary is stale there at once.
+          const view = yield* lcmView(sql, job.chat_id, yield* viewAt(sql, job.chat_id, job.last_slot_id))
+          const ends = view.pieces ? yield* placesOf(sql, job.chat_id, [job.first_slot_id, job.last_slot_id]) : null
+          const shown = view.pieces && ends ? positionIn(view.pieces, ends.get(job.last_slot_id)) : null
+          let count: number
+          if (view.pieces && ends && shown !== null) {
+            const pieces = view.pieces
+            const start = positionIn(pieces, ends.get(job.first_slot_id))
+            if (!content.trim()) return yield* refused("a completed summary cannot be empty")
+            if (job.level === 1) {
+              const places = yield* placesOf(
+                sql,
+                job.chat_id,
+                inputs.map((i) => i.slotId)
+              )
+              const at = (slot: string) => positionIn(pieces, places.get(slot))
+              const [merged] = inputs.length
+                ? yield* sql`SELECT 1 FROM slot_parents WHERE slot_id IN ${sql.in(inputs.map((i) => i.slotId))} LIMIT 1`
+                : []
+              if (merged) return yield* refused("summary must cover a primary-parent chain without merges")
               if (
-                summary.chatId !== job.chat_id ||
-                summary.level >= job.level ||
-                summary.status === "failed" ||
-                summary.firstSlotId !== chain[at]?.id ||
-                summary.lastSlotId !== chain[at + summary.slotCount - 1]?.id
+                children.length ||
+                inputs[0]?.slotId !== job.first_slot_id ||
+                inputs.at(-1)?.slotId !== job.last_slot_id ||
+                !followsInDisplay(
+                  pieces,
+                  inputs.map((i) => [at(i.slotId), at(i.slotId)] as const),
+                  start,
+                  shown
+                )
+              )
+                return yield* refused("L1 inputs must be exactly the job's chain, in order")
+              for (const input of inputs) {
+                if (input.versionId !== null) {
+                  const [version] =
+                    yield* sql`SELECT id FROM versions WHERE id = ${input.versionId} AND slot_id = ${input.slotId}
+              AND ${input.amendCount} >= 0 AND (SELECT count(*) FROM version_history h WHERE h.version_id = versions.id) >= ${input.amendCount}`
+                  if (!version) return yield* new NotFound({ entity: "summary input", id: input.versionId })
+                } else if (input.amendCount !== 0) return yield* refused("absent inputs have no amendments")
+              }
+              count = inputs.length
+            } else {
+              if (
+                inputs.length ||
+                !children.length ||
+                JSON.stringify(children.map((c) => c.summaryId)) !== job.input_child_ids
+              )
+                return yield* refused("condensation must use the job's exact ordered children")
+              const parts: Array<Summary> = []
+              for (const child of children)
+                parts.push(yield* readSummary(sql, userId, child.summaryId, child.revisionId))
+              const places = yield* placesOf(
+                sql,
+                job.chat_id,
+                parts.flatMap((part) => [part.firstSlotId, part.lastSlotId])
+              )
+              const at = (slot: string) => positionIn(pieces, places.get(slot))
+              if (
+                parts.some(
+                  (part) => part.chatId !== job.chat_id || part.level >= job.level || part.status === "failed"
+                ) ||
+                !followsInDisplay(
+                  pieces,
+                  parts.map((part) => [at(part.firstSlotId), at(part.lastSlotId)] as const),
+                  start,
+                  shown
+                )
               )
                 return yield* refused("children must partition the chain at lower levels")
-              at += summary.slotCount
+              count = parts.reduce((n, part) => n + part.slotCount, 0)
             }
-            if (at !== chain.length) return yield* refused("children must cover the entire chain")
+          } else {
+            const chain = yield* sql<{
+              id: string
+              parent_slot_id: string | null
+              merged: number
+            }>`WITH RECURSIVE chain AS (
+          SELECT id, parent_slot_id, depth FROM slots WHERE id = ${job.last_slot_id} AND chat_id = ${job.chat_id}
+          UNION ALL SELECT s.id, s.parent_slot_id, s.depth FROM slots s JOIN chain p ON p.parent_slot_id = s.id WHERE p.id <> ${job.first_slot_id} AND s.depth >= (SELECT depth FROM slots WHERE id = ${job.first_slot_id})
+        ) SELECT id, parent_slot_id, EXISTS(SELECT 1 FROM slot_parents p WHERE p.slot_id = chain.id) AS merged FROM chain ORDER BY depth`
+            if (chain[0]?.id !== job.first_slot_id || chain.some((s) => s.merged))
+              return yield* refused("summary must cover a primary-parent chain without merges")
+            if (!content.trim()) return yield* refused("a completed summary cannot be empty")
+            if (job.level === 1) {
+              if (children.length || inputs.length !== chain.length || inputs.some((i, n) => i.slotId !== chain[n]!.id))
+                return yield* refused("L1 inputs must be exactly the job's chain, in order")
+              for (const input of inputs) {
+                if (input.versionId !== null) {
+                  const [version] =
+                    yield* sql`SELECT id FROM versions WHERE id = ${input.versionId} AND slot_id = ${input.slotId}
+                AND ${input.amendCount} >= 0 AND (SELECT count(*) FROM version_history h WHERE h.version_id = versions.id) >= ${input.amendCount}`
+                  if (!version) return yield* new NotFound({ entity: "summary input", id: input.versionId })
+                } else if (input.amendCount !== 0) return yield* refused("absent inputs have no amendments")
+              }
+            } else {
+              if (
+                inputs.length ||
+                !children.length ||
+                JSON.stringify(children.map((c) => c.summaryId)) !== job.input_child_ids
+              )
+                return yield* refused("condensation must use the job's exact ordered children")
+              let at = 0
+              for (const child of children) {
+                const summary = yield* readSummary(sql, userId, child.summaryId, child.revisionId)
+                if (
+                  summary.chatId !== job.chat_id ||
+                  summary.level >= job.level ||
+                  summary.status === "failed" ||
+                  summary.firstSlotId !== chain[at]?.id ||
+                  summary.lastSlotId !== chain[at + summary.slotCount - 1]?.id
+                )
+                  return yield* refused("children must partition the chain at lower levels")
+                at += summary.slotCount
+              }
+              if (at !== chain.length) return yield* refused("children must cover the entire chain")
+            }
+            count = chain.length
           }
           const supersede: Array<string> = []
           if (job.absorbed_parent_id !== null) {
@@ -147,7 +226,7 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
             selected_revision_id: revisionId,
             first_slot_id: job.first_slot_id,
             last_slot_id: job.last_slot_id,
-            slot_count: chain.length,
+            slot_count: count,
             status,
             rollout_id: rolloutId,
             batch_id: job.batch_id,

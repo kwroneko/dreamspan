@@ -388,7 +388,7 @@ export const makeReadHandlers = Effect.gen(function* () {
           let pathLeaf = leaf
           let view = fork.id
           let anchor = yield* positionIn(pieces, range.slot)
-          if (anchor === null) {
+          if (anchor === null || anchor > end) {
             // A slot on another path opens the fork through it that was current most
             // recently, or with none, the path through it on its latest replies.
             const through = yield* forkThrough(sql, chatId, range.slot)

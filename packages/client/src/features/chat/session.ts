@@ -286,8 +286,8 @@ export class ChatSession {
     })
   }
 
-  /** The summaries overlapping a range of message depths on the path shown, without their text. */
-  async coverage(fromDepth: number, toDepth: number, includeResolved = false): Promise<LcmCoverage | null> {
+  /** The summaries overlapping a range of message positions on the path shown, without their text. */
+  async coverage(fromPosition: number, toPosition: number, includeResolved = false): Promise<LcmCoverage | null> {
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
     if (leafSlotId === null) return null
@@ -296,8 +296,10 @@ export class ChatSession {
         forkId,
         chatId: this.chatId,
         leafSlotId,
-        fromDepth,
-        toDepth,
+        fromDepth: fromPosition,
+        toDepth: toPosition,
+        fromPosition,
+        toPosition,
         includeResolved
       })
     )

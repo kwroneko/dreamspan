@@ -20,6 +20,8 @@ import type { Summary } from "@rp/shared/lcm.ts"
 import { jobColumns, type SummaryJob } from "./lcmJobs.ts"
 import { MAX_CHUNK_SLOTS } from "./lcmLimits.ts"
 import { lcmPath, slotInput } from "./lcmPath.ts"
+import { pathView, placesOf, positionIn } from "./lcmDisplay.ts"
+import { insertionPieces, positionOf, type PathPiece } from "./displayPath.ts"
 import { NotFound, StorageError, type WriteOps } from "./ops.ts"
 import { transaction } from "./tx.ts"
 
@@ -51,6 +53,35 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
       usage_cache_write_tokens = (SELECT sum(cache_write) FROM llm_requests WHERE rollout_id = ${rolloutId}),
       usage_cost = (SELECT sum(cost) FROM llm_requests WHERE rollout_id = ${rolloutId})
       WHERE id = ${rolloutId} AND status = 'running'`
+  /**
+   * The live jobs of a level in fork `fork` whose display range overlaps positions `first` to
+   * `last` (spec/MESSAGE-INSERT.md §3.4). A job whose ends the fork doesn't show is kept, with
+   * its span, for the caller's check by slot.
+   */
+  const nearInDisplay = (
+    chatId: string,
+    fork: string | null,
+    level: number,
+    shown: { readonly pieces: ReadonlyArray<PathPiece> },
+    first: number,
+    last: number
+  ) =>
+    Effect.gen(function* () {
+      const jobs = yield* sql<{ id: string; status: string; first_slot_id: string; last_slot_id: string }>`
+        SELECT j.id,j.status,j.first_slot_id,j.last_slot_id FROM summarization_jobs j
+        WHERE j.chat_id = ${chatId} AND j.fork_id IS ${fork} AND j.level = ${level} AND j.status IN ('pending', 'processing')`
+      const places = yield* placesOf(
+        sql,
+        chatId,
+        jobs.flatMap((j) => [j.first_slot_id, j.last_slot_id])
+      )
+      return jobs.flatMap((j) => {
+        const a = positionIn(shown.pieces, places.get(j.first_slot_id)),
+          b = positionIn(shown.pieces, places.get(j.last_slot_id))
+        if (a === null || b === null) return [{ ...j, span: MAX_CHUNK_SLOTS }]
+        return a <= last && b >= first ? [{ ...j, span: b - a + 1 }] : []
+      })
+    })
   return {
     SaveLcmMaintenance: ({ userId, chatId, leafSlotId, forkId, pins }) =>
       Effect.gen(function* () {
@@ -79,7 +110,9 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         }
         const fork = yield* viewAt(sql, chatId, leafSlotId)
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
-        const valid = lineageValidator(sql, userId)
+        // A fork that shows inserted slots compares positions on its display path (spec/MESSAGE-INSERT.md §3.4).
+        const shown = yield* pathView(sql, chatId, leafSlotId)
+        const valid = lineageValidator(sql, userId, shown ?? undefined)
         const batchId = uuidv7(),
           now = Date.now(),
           result: SummaryJob[] = []
@@ -106,17 +139,32 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           if (!chunk.refresh) {
             const owners = yield* sql<{ id: string; last_slot_id: string }>`
               SELECT DISTINCT s.id,s.last_slot_id FROM summary_inputs i JOIN summaries s ON s.id = i.summary_id
-              WHERE i.slot_id IN (WITH RECURSIVE chain(id,n) AS (
+              WHERE i.slot_id IN ${
+                shown
+                  ? sql.in(chain.map((c) => c.id))
+                  : sql`(WITH RECURSIVE chain(id,n) AS (
                 SELECT ${last},1 UNION ALL SELECT s.parent_slot_id,c.n+1 FROM slots s JOIN chain c ON c.id=s.id
                   WHERE c.n < ${chunk.inputs.length}
-              ) SELECT id FROM chain) AND s.chat_id = ${chatId} AND s.level = 1
+              ) SELECT id FROM chain)`
+              } AND s.chat_id = ${chatId} AND s.level = 1
                 AND s.sealed = 1 AND s.status IN ('complete', 'truncated')`
+            const ownerPlaces = shown
+              ? yield* placesOf(
+                  sql,
+                  chatId,
+                  owners.map((o) => o.last_slot_id)
+                )
+              : null
+            const ownerShown = (slot: string) =>
+              shown && ownerPlaces
+                ? Effect.succeed((positionIn(shown.pieces, ownerPlaces.get(slot)) ?? Infinity) <= shown.end)
+                : slotOnPath(sql, chatId, leafSlotId, slot)
             let covered = false
             for (const owner of owners)
               if (
-                (yield* slotOnPath(sql, chatId, leafSlotId, owner.last_slot_id)) &&
+                (yield* ownerShown(owner.last_slot_id)) &&
                 (yield* valid(owner.id)) &&
-                (yield* readSummary(sql, userId, owner.id)).fresh
+                (yield* readSummary(sql, userId, owner.id, undefined, undefined, shown ?? undefined)).fresh
               )
                 covered = true
             if (covered) {
@@ -125,13 +173,15 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             }
           }
           const ids = new Set(chain.map((s) => s.id))
-          const near = yield* sql<{
-            id: string
-            status: string
-            first_slot_id: string
-            last_slot_id: string
-            span: number
-          }>`SELECT j.id,j.status,j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
+          const near = shown
+            ? yield* nearInDisplay(chatId, fork, 1, shown, chain[0]!.position, chain.at(-1)!.position)
+            : yield* sql<{
+                id: string
+                status: string
+                first_slot_id: string
+                last_slot_id: string
+                span: number
+              }>`SELECT j.id,j.status,j.first_slot_id, j.last_slot_id, b.depth - a.depth + 1 AS span FROM summarization_jobs j
               JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
             WHERE j.chat_id = ${chatId} AND j.fork_id IS ${fork} AND j.level = 1 AND j.status IN ('pending', 'processing')
               AND a.depth <= ${chain.at(-1)!.depth} AND b.depth >= ${chain[0]!.depth}`
@@ -195,6 +245,15 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
           ) SELECT count(*) AS n FROM path WHERE id = ${slotId}`.pipe(Effect.map(([row]) => row!.n === 1))
         const fork = yield* viewAt(sql, chatId, leafSlotId)
         const prefix = yield* prefixAt(sql, chatId, leafSlotId, triggerVersionId)
+        // In a fork that shows inserted slots, parts follow one another on its display path.
+        const shown = yield* pathView(sql, chatId, leafSlotId)
+        const shownAt = (slots: ReadonlyArray<string>) =>
+          shown
+            ? Effect.map(
+                placesOf(sql, chatId, slots),
+                (places) => (slot: string) => positionIn(shown.pieces, places.get(slot))
+              )
+            : Effect.succeed((_slot: string): number | null => null)
         const now = Date.now(),
           result: SummaryJob[] = []
         const withdraw = (ids: ReadonlyArray<string> | undefined) => withdrawReruns(sql, chatId, ids)
@@ -210,10 +269,15 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
             last = children.at(-1)
           if (!first || !last || children.length < 2)
             return yield* reject("EnqueueCondensations", "A condensation needs at least two parts.")
+          const at = yield* shownAt(children.flatMap((c) => [c.firstSlotId, c.lastSlotId]))
           for (const [n, child] of children.entries()) {
             if (child.chatId !== chatId || child.status === "failed" || child.level >= job.level)
               return yield* reject("EnqueueCondensations", "Parts must be this chat's summaries below the new level.")
-            if (n > 0) {
+            if (n > 0 && shown) {
+              const previous = at(children[n - 1]!.lastSlotId)
+              if (previous === null || at(child.firstSlotId) !== previous + 1)
+                return yield* reject("EnqueueCondensations", "Parts must follow one another along one chain.")
+            } else if (n > 0) {
               const [link] = yield* sql<{
                 ok: number
               }>`SELECT parent_slot_id = ${children[n - 1]!.lastSlotId} AS ok FROM slots WHERE id = ${child.firstSlotId}`
@@ -221,7 +285,11 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
                 return yield* reject("EnqueueCondensations", "Parts must follow one another along one chain.")
             }
           }
-          if (!(yield* onPath(last.lastSlotId)))
+          if (
+            shown
+              ? at(first.firstSlotId) === null || (at(last.lastSlotId) ?? Infinity) > shown.end
+              : !(yield* onPath(last.lastSlotId))
+          )
             return yield* reject("EnqueueCondensations", "The parts are not on the path being planned.")
           if (job.absorbedParentId) {
             const parent = yield* readSummary(sql, userId, job.absorbedParentId)
@@ -234,7 +302,9 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
               return yield* reject("EnqueueCondensations", "Absorption must reduce the parent's own parts again.")
           }
           // A live job of this level that starts on this chain at or before the last part and ends at or after the first.
-          const [clash] = yield* sql<{ id: string; status: string; first_slot_id: string; last_slot_id: string }>`
+          const [clash] = shown
+            ? yield* nearInDisplay(chatId, fork, job.level, shown, at(first.firstSlotId)!, at(last.lastSlotId)!)
+            : yield* sql<{ id: string; status: string; first_slot_id: string; last_slot_id: string }>`
             SELECT j.id,j.status,j.first_slot_id,j.last_slot_id FROM summarization_jobs j JOIN slots b ON b.id = j.last_slot_id
             WHERE j.chat_id = ${chatId} AND j.fork_id IS ${fork} AND j.level = ${job.level} AND j.status IN ('pending', 'processing')
               AND b.depth >= (SELECT depth FROM slots WHERE id = ${first.firstSlotId})
@@ -329,8 +399,37 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
                 CASE json_extract(value_json,'$.spendAhead') WHEN 0 THEN 'next-reply' END)
               FROM user_settings WHERE user_id = ? AND key = 'generation.lcm'),
             'after-reply') <> 'next-reply' OR ${drivenSql(`${job}.chat_id`, `${job}.fork_id`)})`
+        // Depth orders structural paths. Insertions can put a deep slot before a shallow
+        // one; resolve the handful of live L1 starts by display position in those forks only.
+        const starts = yield* sql<{
+          id: string
+          chat_id: string
+          fork_id: string
+          slot_id: string
+          chain_id: string
+          depth: number
+        }>`
+          SELECT j.id, j.chat_id, j.fork_id, s.id AS slot_id, s.chain_id, s.depth
+          FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id JOIN slots s ON s.id = j.first_slot_id
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND j.fork_id IS NOT NULL
+            AND j.level = 1 AND j.status IN ('pending','processing')`
+        const positions: Array<readonly [string, number]> = []
+        for (const fork of new Set(starts.map((j) => j.fork_id))) {
+          const jobs = starts.filter((j) => j.fork_id === fork)
+          const pieces = yield* insertionPieces(sql, jobs[0]!.chat_id, fork)
+          if (pieces)
+            for (const job of jobs) {
+              const position = positionOf(pieces, { id: job.slot_id, chainId: job.chain_id, depth: job.depth })
+              if (position !== null) positions.push([job.id, position])
+            }
+        }
+        const displayOrder = positions.length > 0
+        const startOrder = displayOrder ? "coalesce(jo.position,start.depth)" : "start.depth"
+        const busyOrder = displayOrder ? "coalesce(bo.position,bs.depth)" : "bs.depth"
         const [next] = yield* sql.unsafe<{ id: string }>(
-          `SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
+          `${displayOrder ? "WITH display_jobs AS (SELECT value ->> 0 AS id, value ->> 1 AS position FROM json_each(?))" : ""}
+        SELECT j.id FROM summarization_jobs j JOIN chats c ON c.id = j.chat_id
+        ${displayOrder ? "LEFT JOIN display_jobs jo ON jo.id = j.id" : ""}
         JOIN slots start ON start.id = j.first_slot_id
         WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND j.status = 'pending'
         AND (j.fork_id IS NULL OR EXISTS(SELECT 1 FROM forks jf WHERE jf.id=j.fork_id AND jf.deleted_at IS NULL))
@@ -339,13 +438,14 @@ export const makeLcmQueueHandlers = Effect.gen(function* () {
         AND (SELECT count(*) FROM summarization_jobs busy JOIN chats bc ON bc.id = busy.chat_id
           WHERE bc.owner_user_id = ? AND busy.status = 'processing') < 2
         AND (j.level > 1 OR NOT EXISTS (SELECT 1 FROM summarization_jobs busy JOIN slots bs ON bs.id = busy.first_slot_id
+          ${displayOrder ? "LEFT JOIN display_jobs bo ON bo.id = busy.id" : ""}
           WHERE busy.chat_id = j.chat_id AND busy.fork_id IS j.fork_id AND busy.level = 1 AND
             (busy.status = 'processing' OR (busy.status = 'pending'
              AND (busy.request_class = 'interactive' OR busy.explicit_requested = 1 OR ${spends("busy")}
                OR busy.last_slot_id IN (WITH RECURSIVE ancestors(id) AS (SELECT j.last_slot_id UNION ALL SELECT s.parent_slot_id FROM slots s JOIN ancestors a ON a.id=s.id WHERE s.parent_slot_id IS NOT NULL) SELECT id FROM ancestors))
-             AND (bs.depth < start.depth OR (bs.depth = start.depth AND busy.id < j.id))))))
+             AND (${busyOrder} < ${startOrder} OR (${busyOrder} = ${startOrder} AND busy.id < j.id))))))
         ORDER BY CASE j.request_class WHEN 'interactive' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END, j.created_at, j.id LIMIT 1`,
-          [userId, userId, userId, userId]
+          [...(displayOrder ? [JSON.stringify(positions)] : []), userId, userId, userId, userId]
         )
         if (!next) return null
         yield* sql`UPDATE summarization_jobs SET status = 'processing', attempts = attempts + 1, claim_epoch = claim_epoch + 1, rollout_id = NULL,

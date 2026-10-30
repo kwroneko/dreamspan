@@ -1,5 +1,7 @@
 # Design: requirements and decisions
 
+**Implementation audit 2026-10-30:** Built entries below are obsolete as implementation plans, retaining their [P]/[O] provenance unless a cited owner decision supersedes them. Open and later work remains unbuilt.
+
 **Built 2026-10-30:** CCv3 `group_only_greetings` selection in §4 is implemented and obsolete as a proposal; see ARCHITECTURE.md §12. Other §4 fields retain their statuses.
 
 **Status**: Draft, 2026-10-09. U12 user cost overrides (§9) are built (2026-10-28); that entry is obsolete as an implementation plan, see ARCHITECTURE.md §6. U20 ST preset text/context switches built 2026-10-28; the implemented requirements are obsolete as plans here, see ARCHITECTURE.md §9 and §15. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Composer backlog U03/U06/U07 built 2026-10-28: queue edit drafts and recovery (§6.2), pending cast speaker/guidance parity (§2.2), and version-only Stop (§3.1) are implemented; those requirements are now documented in ARCHITECTURE.md §12. U18’s card-rename Save and chat-fork history offers are built (ARCHITECTURE §3.13); those portions of §4 and §10.3 are obsolete as proposals. Embedded-card lorebook authoring (U19) is built; its implementation record is in ARCHITECTURE.md §14. The corresponding authoring gap under §1.1 is obsolete. Each item is marked:
@@ -22,36 +24,36 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 1.1 Cards
 - **[D]** Import, create and distribute ST cards as easily as in ST. **Embedded lorebook editing built** (U19, 2026-10-29; ARCHITECTURE.md §14), through the card’s field drafts and revisions.
-- **[P]** Formats: V1, V2 and V3, as JSON, PNG (`chara` and `ccv3` text chunks) or CHARX. Embedded `character_book` lorebooks. Alternate greetings.
-- **[P]** Export flattens a chosen variant plus its exportable modules (§4) into a standard V2 or V3 card.
-- **[P]** A watched import folder: drop a card file in and it becomes available. Each imported card remembers its source file and hash, and offers an update when the file changes. Files are only import and export; the internal representation is the source of truth **[D]**.
+- **[P]** Formats: V1, V2 and V3, as JSON, PNG (`chara` and `ccv3` text chunks) or CHARX. Embedded `character_book` lorebooks. Alternate greetings. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §8).
+- **[P]** **Overtaken**: Independent card forks and exportable card notes replace following variants/modules (§4 and §5.0, owner decisions). Card export is built (ARCHITECTURE §8, §11). Earlier wording: “Export flattens a chosen variant plus its exportable modules (§4) into a standard V2 or V3 card.”
+- **[P]** A watched import folder: drop a card file in and it becomes available. Each imported card remembers its source file and hash, and offers an update when the file changes. Files are only import and export; the internal representation is the source of truth **[D]**. **Partial**: source paths/hashes and explicit re-import/update/merge are built (ARCHITECTURE §3.9, §11, §13); watched intake and filesystem change notifications remain open proposals.
 
 ### 1.2 Presets (chat completion only)
 - **[D]** Import and export ST chat-completion presets so they give similar results. **U20 built (2026-10-28):** `pin_examples`, `strip_examples` and `collapse_newlines`, with ST differential tests and prompt-preset controls; implementation in ARCHITECTURE.md §9 and §15. This scoped requirement is obsolete as an implementation plan.
 - **[D]** No text-completion presets, instruct templates or context templates. The importer lists them as unsupported.
 - **[D]** Connection and model data in presets is ignored. There's an optional one-way binding the other way: a connection can switch to a chosen preset (§9).
-- **[P]** Supported semantics:
+- **[P]** Supported semantics: **Built** for the listed prompt semantics (ARCHITECTURE §9, §15); the sampler item is superseded by the owner’s model-settings split (§6.1). Unknown ST extensions are not promised.
   - `prompts[]` and `prompt_order`, markers (main, worldInfoBefore/After, charDescription, charPersonality, scenario, personaDescription, dialogueExamples, chatHistory, …)
   - prompt roles, in-chat injection at a depth with a role, injection order
   - squashing and post-processing modes
   - assistant prefill and continue prefill
-  - sampler values, mapped per provider
+  - sampler values: **overtaken** by model/connection settings (§6.1); explicit model-settings import is built (ARCHITECTURE §6, §9)
   - macros (§5.6)
   - prompt-only regex scripts, plus display regex as display rules
-- **[P]** The importer never runs code from a preset. It writes an import report listing anything it couldn't represent (pi-forge's ST importer is a good reference).
+- **[P]** The importer never runs code from a preset. It writes an import report listing anything it couldn't represent (pi-forge's ST importer is a good reference). **Built**, narrowed by the following owner decision to actionable reports (ARCHITECTURE §9, §13).
 - **[D]** The import report holds only what a user must act on; nobody reads it, so nothing the user needs may live only there (owner, 2026-10-28).
-- **[P]** Fidelity is tested by **differential testing against real ST**: a stock ST in a throwaway container, pointed at a mock endpoint that records its requests. Synthetic card, chat, preset and persona fixtures are fed to both, and the request bodies are diffed. This applies to the non-agentic assembler.
+- **[P]** Fidelity is tested by **differential testing against real ST**: a stock ST in a throwaway container, pointed at a mock endpoint that records its requests. Synthetic card, chat, preset and persona fixtures are fed to both, and the request bodies are diffed. This applies to the non-agentic assembler. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §7, §15).
 - **[D]** Prefill must work where the provider supports it. Most frontier models don't. reference-harness's tool-schema prefill for GPT (`spec/OPENAI-PREFILL.md`) is worth porting as a separate capability.
-- **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so.
+- **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Continue instead refuses a model without the required prefill capability.
 
 ### 1.3 Lorebooks / World Info
 - **[D]** Imported lorebooks must work. Matching ST's activation and placement exactly is **not** a goal; ST's implementation is considered poor.
 - **[D]** Lorebooks usually wreck the KV cache, so they will work differently here.
 - **[D]** Decision models (Jev and others) can decide whether an entry is included. This must stay optional.
-- **[P]** Activation sources: keyword triggers as the fallback, an optional decision model asking whether each entry or group is relevant to the current scene, and an agent lookup tool for anything missed.
+- **[P]** Activation sources: keyword triggers as the fallback, an optional decision model asking whether each entry or group is relevant to the current scene, and an agent lookup tool for anything missed. **Partial**: keyword activation is built (ARCHITECTURE §15); decision-model activation and RP lookup tools remain Phase 4 work.
 - **[D]** Keyword matching follows ST's convention for now (owner, 2026-10-12): `use_regex` is ignored, as ST never reads it, and a key is a regular expression only when written as `/pattern/flags`. Low priority to revisit.
 - **[D]** A card's own lorebook (`character_book`) is used in new chats automatically, with no "import card lore" dialog. A chat imported from ST keeps what ST sent: the card's lorebook only if ST had imported it as a lorebook file. Each chat's settings can turn a card's lorebook on or off (owner, 2026-10-14).
-- **[P]** Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.
+- **[P]** **Overtaken**: The following owner decisions allow above-history placement when the default override is off, pin only above-history entries, and evaluate tail entries every turn. Built: ARCHITECTURE §15. Earlier wording: “Placement is cache-friendly: entries are never inserted above the history. They go in a block near the tail, where they stay until the next compaction boundary.”
 
 - **[D]** (owner, 2026-10-27) Wherever lorebooks are selected there is a setting, **on by default**, that overrides entries' positions so lorebook entries are only placed **below the history**. What it does is made very clear, with a popover explaining why (entries that come and go above the history invalidate the cache for everything after them) and how, right where lorebooks are selected.
 - **[D]** With that setting off, entries placed above the history stay activated ("pinned") until the history's start next moves; entries after the history are never pinned and are evaluated every turn, as in ST.
@@ -61,15 +63,15 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** Point the importer at an ST data folder. It finds the chats and their cards and adds them seamlessly. Exporting chats back to ST is secondary.
 - **[D]** ST has a single hidden flag. If a long consecutive run of hidden messages starts at message 0 (the manual-summary pattern), the importer offers to un-hide them so LCM can take over. Other hidden messages stay excluded from context.
 - **[D]** Chats that have only the greeting and zero user turns are skipped (ST creates these just by opening a card). The import report gave the count until the owner cut the report to what a user must act on (2026-10-28, §1.2).
-- **[P]** Mapping:
+- **[P]** Mapping: **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §13).
   - single and group chats → chats with N participants
   - ST branch files (linked by metadata) → one message graph
   - swipes → versions
   - personas → cards in the persona folder, with their original images (ST's card-to-persona conversion blurs them)
   - global, chat-bound and embedded lorebooks → lorebooks
   - presets → presets
-- **[P]** ST links chats to cards by folder name, so when a card was renamed the importer needs fallback matching.
-- **[P]** An LCM backfill of a large imported chat runs lazily (for example when the chat is first opened, or in idle time), not as part of the import.
+- **[P]** ST links chats to cards by folder name, so when a card was renamed the importer needs fallback matching. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §13).
+- **[P]** An LCM backfill of a large imported chat runs lazily (for example when the chat is first opened, or in idle time), not as part of the import. **Built with explicit enable/adoption and backfill approval** (ARCHITECTURE §16); §8’s later owner decision makes approved catch-up up front. Import itself starts no summarization.
 
 ### 1.5 Out of scope
 - **[D]** ST extensions and plugins, external ST integrations, text completion, connection profiles.
@@ -81,13 +83,13 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ### 2.1 A chat is its own object
 - **[D]** In ST you *message a card*: the card is the chat target, usually a whole scenario, and effectively the only chat with that character (older chats are history travel). Group chats are a special case created by irreversibly promoting a chat. Here, **a chat is a first-class object with any number of cards**. A single-card chat is just the trivial case.
 - **[D]** Keep the convenience of ST's one click from the grid into a conversation, with the card definitions and the other participants in a side panel.
-- **[P]** A card's page offers **Continue** (its latest chat), **New chat**, and the list of all its chats as peers.
+- **[P]** A card's page offers **Continue** (its latest chat), **New chat**, and the list of all its chats as peers. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12).
 - **[D]** Opening a card must not create a chat.
-- **[P]** Chats are created lazily: clicking a card with no chats opens a *pending* chat showing the greeting (alternate greetings selectable), saved only when the first message is sent.
-- **[P]** Recents are sorted by last message, never by last opened. A separate *inspect* action shows a card without entering a chat.
+- **[P]** Chats are created lazily: clicking a card with no chats opens a *pending* chat showing the greeting (alternate greetings selectable), saved only when the first message is sent. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12).
+- **[P]** **Overtaken**: Message-activity ordering is built (ARCHITECTURE §12); the separate portrait Inspect action is superseded by the owner’s one-click chat plus definitions rule below. Earlier wording: “Recents are sorted by last message, never by last opened. A separate *inspect* action shows a card without entering a chat.”
 - **[D]** Cards can be filtered by "never used".
-- **[P]** Chats have editable titles (auto-generated by default, never just the first character's name). The thumbnail is an avatar collage by default, and can be overridden.
-- **[P], rejected as the home screen (see below)** The main surfaces are a **chat list** (recent first, also the mobile home screen) and a **library** (cards, personas, presets, lorebooks).
+- **[P]** Chats have editable titles (auto-generated by default, never just the first character's name). The thumbnail is an avatar collage by default, and can be overridden. **Partial/overtaken**: editable names and cast portraits are built (ARCHITECTURE §12); model-generated titles are explicitly rejected below. Arbitrary per-chat thumbnail overrides remain unbuilt/open.
+- **[P], rejected as the home screen (see below)** The main surfaces are a **chat list** (recent first, also the mobile home screen) and a **library** (cards, personas, presets, lorebooks). **Overtaken** by the owner’s rejection and the shell/home navigation (ARCHITECTURE §12).
 - **[D]** Chats imported from ST must be easy to recognize and find. Most users' chats, the owner's included, will come from ST (owner, 2026-10-16).
 - **[D]** One click on a portrait gives both the chat and the card's definitions, as in ST. No flow may take more steps than ST's or add clutter where it makes no sense: separate "open chat" and "open card" buttons on a portrait are a regression (owner, 2026-10-16).
 - **[D] Rejected:** a list of the most recent chats as the home screen (the first UI). Rows titled like "Jane Doe - 2026-04-23@6:00 AM", with forks of the same chat flattened among them, can't be recognized or picked out. The owner judged that design not worth improving (owner, 2026-10-14; restated 2026-10-16).
@@ -95,17 +97,17 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - For reference, ST's layout (owner, 2026-10-16): the main screen shows the three most recent chats; the character and group grid is always in a side panel, never in the center. That panel picks and searches characters and groups; clicking one replaces the grid with that card's definitions, while the main view becomes the current chat with that character or group (there is only one current chat).
 - **[D]** Characters are added to and removed from a chat seamlessly. The natural way to get a chat with several characters is to start with one and add more; adding more on the first turn is a special case. So there's no multi-card picker or multi-step creation, and creation must not reintroduce a distinction between "group" and single-card chats (owner, 2026-10-16).
 - **[D] Rejected:** titles generated from the story by a model. It assumes a separately configured cheap model, and chats with the same card all start the same way, so it's a more expensive way of naming them after the card (owner, 2026-10-16).
-- **[O]** What a usable UX is on data made entirely in this app, with nothing imported (owner, 2026-10-16).
-- **[O]** How forks of a chat are treated: part of the same chat or separate chats, how they're browsed and chosen, where they're switched. ST could treat everything with the same character or group as one more chat, new or forked, because its forks are copies (owner, 2026-10-16).
-- **[O]** Does "start over" with a card create a new peer chat (proposed), or a new root inside the same chat?
+- **[O]** What a usable UX is on data made entirely in this app, with nothing imported (owner, 2026-10-16). **Implementation concern addressed** by New card, New preset and pending-chat creation (ARCHITECTURE §12, §14); owner daily-use acceptance remains open.
+- **[O]** **Overtaken**: The owner’s “Each fork is effectively its own chat” and current/peer rule (§10.3) supply the model. Stable fork IDs, checkpoints, pins, browsing and switcher are built (ARCHITECTURE §3.8, §12); owner UX acceptance remains unverified. Earlier wording: “How forks of a chat are treated: part of the same chat or separate chats, how they're browsed and chosen, where they're switched. ST could treat everything with the same character or group as one more chat, new or forked, because its forks are copies (owner, 2026-10-16).”
+- **[O]** **Overtaken**: New chat creates a new peer chat through the pending flow (ARCHITECTURE §12), consistent with §10.3’s independent-chat model; it does not create another root in an existing chat. Earlier wording: “Does "start over" with a card create a new peer chat (proposed), or a new root inside the same chat?”
 - **[D] Rejected:** per-participant roles (character vs. narrator) in each chat. They force a separation, and muting plus the card's own text already cover it. Per-card preset overlays replace them (§6.3).
 
 ### 2.2 Personas, speakers and writers
 - **[D]** Personas aren't a special entity. **A persona is a card in the "persona folder"**, and any card can be added to that folder. Cards in it get special UI treatment.
 - **[D]** You can switch to writing as any card, on any turn.
 - **[D]** The model can write for "your" character, because you may not be playing it.
-- **[P]** Each turn has a **speaker** (any participant) and a **writer** (human or model).
-- **[P]** A per-chat "played by me" set (state on the graph, §3.4) drives:
+- **[P]** Each turn has a **speaker** (any participant) and a **writer** (human or model). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12, §15).
+- **[P]** A per-chat "played by me" set (state on the graph, §3.4) drives: **Built state foundation** (ARCHITECTURE §3.8), but the macro claim is **overtaken** by the following owner decisions: `{{user}}` is the selected single persona or pinned text, separate from speaker; it never joins the set.
   - the composer's default speaker
   - what `{{user}}` resolves to
   - which characters the "don't write for" instructions protect
@@ -113,11 +115,11 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D] Speaker switcher:**
   - The current speaker is **always visible** next to the composer.
   - Clicking it opens a panel listing **only the chat's cast**: the persona and the cards in the chat. To speak as another card, add it to the chat first (owner, 2026-10-28; this replaces the tabs Members / Personas / All cards and "switching to a card that isn't in the chat adds it"). The persona control keeps Members / Personas / All cards.
-- **[P]** Up to three one-tap avatars next to the switcher for the speakers used most recently in this chat.
-- **[P]** Composer actions:
+- **[P]** Up to three one-tap avatars next to the switcher for the speakers used most recently in this chat. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Compact phone controls use the speaker picker.
+- **[P]** Composer actions: **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12).
   - **Send as X**: you wrote it.
   - **Generate X**: the model writes X's turn, as a real generation. Not a fake turn inserted into the history, and no command to remember.
-- **[P]** **Composer text used with Generate becomes a one-turn direction**, stored on that generated turn. Swiping reuses it, going back restores it, and it never leaks into later turns. This replaces "put next-turn guidance in the author's note and remember to remove it".
+- **[P]** **Overtaken**: Version-owned one-turn direction is built (ARCHITECTURE §12); the guidance-toggle and guidance-on-swipes owner decisions below define reuse, clearing and edit targeting. Earlier wording: “**Composer text used with Generate becomes a one-turn direction**, stored on that generated turn. Swiping reuses it, going back restores it, and it never leaks into later turns. This replaces "put next-turn guidance in the author's note and remember to remove it".”
 - **[D]** `{{user}}` (who the persona is) and the speaker (who is writing this turn) are separate (owner, 2026-10-27). `{{user}}` is relatively fixed and only changes sometimes. The persona can be any card; persona cards sit in their own folder, whose tab opens by default when switching persona. The persona role exists so the model maps intuitively for ST users.
 - **[D]** Roleplaying as any other character is as easy as writing as yourself and never invalidates the cache: selecting a speaker means writing as it (owner, 2026-10-27).
 - **[D]** Guidance instead of a written turn (owner, 2026-10-27): the owner usually doesn't write the turn but a `[Next: …]` direction (in ST, in the Author's Note, or with the Guided Generations Quick Reply set, which injects `[<text>]` at chat depth 0 and generates). Here: type in the composer and Generate, and the text is a prompt for that generation, not a sent message. (A popover on Generate was asked for first, then made unnecessary by the guidance toggle below.)
@@ -126,19 +128,19 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 - **[D]** A **guidance toggle** on the composer (owner, 2026-10-27): on, the composer's contents are used as guidance wherever applicable (Generate, a new swipe, Continue); off, they never are, Generate included. Rejected: using composer text as guidance on a swipe implicitly (too non-obvious: the composer may hold your own next message), and a "new version with direction" box on every swipe control (redundant surfaces, more annoying).
 - **[D]** (owner confirmed 2026-10-27) Consequences: with guidance on, the box reads as guidance (its own look and placeholder) and Send is replaced by the generate actions, so guidance is never sent as a message by mistake; (2026-10-29: the text staying in the box and "with guidance off nothing is reused" are replaced by the item below.) The popover on Generate becomes unnecessary while the toggle shows the mode. The toggle's state is remembered per account, like other viewer settings. **Enter submits as Generate while guidance is on**, the same key that sends a message while it's off (owner, 2026-10-27).
-- **[D]** **Guidance on swipes** (owner, 2026-10-29; replaces the box keeping its text). Submitting guidance clears the box, and the reply shows the guidance under it, as now. A swipe reuses the guidance of the version it re-rolls, whether the guidance switch is on or off; everything else (edited messages, notes, cards) is read fresh, as in ST. To fix the guidance, the guidance shown under a reply has an **Edit** button: it puts that guidance in the composer's box, with a bar above the composer naming the reply ("Editing guidance for Aria's reply", ✕). While the bar is there, any submit (Enter, the write button) makes a new version of that reply with the box's text, never a new turn, and the text stays in the box between those versions, so fixing is edit, submit, edit, submit. The box's text applies live: that reply's swipe button also uses the text as it is in the box, unsaved edits included; each new version records the guidance it was written with. Swiping any other reply uses that reply's own guidance. ✕ on the bar clears the box and returns it to new turns, giving back whatever draft was there before. No feature depends on a key combination: shortcuts may be added only beside a visible control.
+- **[D]** **Guidance on swipes** (owner, 2026-10-29; replaces the box keeping its text). Submitting guidance clears the box, and the reply shows the guidance under it, as now. A swipe reuses the guidance of the version it re-rolls, whether the guidance switch is on or off; everything else (edited messages, notes, cards) is read fresh, as in ST. To fix the guidance, the guidance shown under a reply has an **Edit** button: it puts that guidance in the composer's box, with a bar above the composer naming the reply ("Editing guidance for Aria's reply", ✕). While the bar is there, any submit (Enter, the write button) makes a new version of that reply with the box's text, never a new turn, and the text stays in the box between those versions, so fixing is edit, submit, edit, submit. The box's text applies live: that reply's swipe button also uses the text as it is in the box, unsaved edits included; each new version records the guidance it was written with. Swiping any other reply uses that reply's own guidance. ✕ on the bar clears the box and returns it to new turns, giving back whatever draft was there before. No feature depends on a key combination: shortcuts may be added only beside a visible control. **Built** (W2; ARCHITECTURE §12).
 - **[D]** Guidance changes only *who writes*, never *which character* (owner, 2026-10-28). Off: Enter sends your text as the selected speaker's message. On: Enter makes the model write the **selected speaker's** message following your text as the direction, persona or card alike; never the Reply-from or next-in-turn character's.
 
 - **[D]** (owner confirmed 2026-10-27) Directions and "who writes next" are ordinary prompts in the preset: the macros `{{speaker}}` (who the model writes as) and `{{direction}}` (the composer text); every prompt has a condition (always / only when the model writes as a character / only when it writes as `{{user}}` / only when there's a direction). Default direction prompt, user role: `[The user has written a direction for {{speaker}}'s next message. It is not part of the story; follow it closely: {{direction}}]`. "Who writes next" is one prompt (`Write {{speaker}}'s next message.`); impersonation needs nothing extra. Anti-impersonation prompts get "not when writing as `{{user}}`". ST's group nudge and impersonation prompt map onto conditions on import. ST's per-prompt generation-type triggers (normal, swipe, regenerate, continue, impersonate, quiet; none set = always) are kept **in addition** to the conditions, as a normal per-prompt option in the preset editor, imported from and exported to ST (owner, 2026-10-28; this replaces mapping the triggers onto conditions). There's no regenerate separate from a new version, so ST's `regenerate` and `swipe` triggers both mean "on a new version" (owner, 2026-10-29); ST's `quiet` is a summary request. (Placement of these prompts and the closing user turn: replaced by the end-of-request instruction below, owner 2026-10-29.)
-- **[D]** **End-of-request instruction** (owner, 2026-10-29; provisional, to be judged in use). The prompts that say who writes next and carry the direction are always the request's last message, one user message, after everything else (post-history instructions, other prompts after the history, notes at the end of the tail). The preset editor shows them in a fixed **End of request** section, not in the ordering list, as three editable texts: **when a character speaks** (ST's group nudge imports here, `{{char}}` read as `{{speaker}}`), **when your card speaks** (ST's impersonation prompt imports here), and **when you give a direction**, appended after the turn text. Defaults: `[Write {{speaker}}'s next message. Write only for {{speaker}}.`, the same for your card, and `What happens next: {{direction}}]`. Who else the model may write for is only this wording, with no switch anywhere: edit the text to let other characters act; a one-turn exception goes in the direction. The composer is unchanged. The closing user turn is removed; the only fallback is a bare `[Write {{speaker}}'s next message.]` when the request would otherwise end on assistant and the model has no prefill, decided on the whole request. With prefill (Continue or a prefill on a model that supports it) the instruction goes right before the partial message. The wording is per preset, so strict and loose chats need two presets. In a summary request the same last place holds the summary instruction instead of the turn text. The ST fidelity gate lists the placement as a documented difference.
-- **[D]** Importing an ST preset appends the default direction prompt at the very end, marked "added on import" (owner, 2026-10-27). Acceptable only because it never applies normally: only when a direction is given, a feature ST doesn't have. A re-import of the same file therefore differs from the stored preset by that prompt.
-- **[D]** (owner confirmed 2026-10-27) Nothing else is added on import: ST presets already carry their group nudge and impersonation prompt, which map to conditioned prompts; adding a "who writes next" prompt would change normal generations. The first impersonation with a preset that has no "writing as `{{user}}`" conditions says once that its anti-impersonation prompts may need marking, with a link to the editor.
+- **[D]** **End-of-request instruction** (owner, 2026-10-29; provisional, to be judged in use). The prompts that say who writes next and carry the direction are always the request's last message, one user message, after everything else (post-history instructions, other prompts after the history, notes at the end of the tail). The preset editor shows them in a fixed **End of request** section, not in the ordering list, as three editable texts: **when a character speaks** (ST's group nudge imports here, `{{char}}` read as `{{speaker}}`), **when your card speaks** (ST's impersonation prompt imports here), and **when you give a direction**, appended after the turn text. Defaults: `[Write {{speaker}}'s next message. Write only for {{speaker}}.`, the same for your card, and `What happens next: {{direction}}]`. Who else the model may write for is only this wording, with no switch anywhere: edit the text to let other characters act; a one-turn exception goes in the direction. The composer is unchanged. The closing user turn is removed; the only fallback is a bare `[Write {{speaker}}'s next message.]` when the request would otherwise end on assistant and the model has no prefill, decided on the whole request. With prefill (Continue or a prefill on a model that supports it) the instruction goes right before the partial message. The wording is per preset, so strict and loose chats need two presets. In a summary request the same last place holds the summary instruction instead of the turn text. The ST fidelity gate lists the placement as a documented difference. **Built** (W1; ARCHITECTURE §9, §15).
+- **[D] Overtaken** (2026-10-27 import rule, replaced by the owner’s end-of-request instruction, 2026-10-29). **Built W1** (ARCHITECTURE §9, §15): import stores the direction text as `directionPrompt`, outside the ordering list, with the default supplied by the end-of-request conversion. It appends no default direction prompt to the order. ST has no corresponding field, so this text is not exported.
+- **[D] Overtaken in placement** (owner confirmed 2026-10-27; superseded by the end-of-request decision, 2026-10-29). **Built W1** (ARCHITECTURE §9, §15): ST’s group nudge and impersonation text become the two end-of-request turn texts, outside the ordering list, with defaults when empty; their speaker macros are converted accordingly. They no longer map to ordered conditioned prompts. The first-impersonation notice about anti-impersonation conditions remains built, with an editor link.
 
 - **[D]** Changing persona swaps the persona definitions, as ST does: the cache is rebuilt, and the history is untouched (old messages keep their speaker's name). Several personas means adding cards to the cast and switching the speaker (owner, 2026-10-28).
 - **[D]** The group nudge is sent whenever the model writes as a character: there's no group / one-on-one distinction, and the persona is a cast card (owner, 2026-10-28). ST sends it only in group chats; the ST fidelity gate lists it as a documented difference. It's the "when a character speaks" text of the end-of-request instruction.
-- **[P]** Impersonation is just Generate for a character you play. The output lands as a real turn with versions. A "draft into composer" option is available.
+- **[P]** Impersonation is just Generate for a character you play. The output lands as a real turn with versions. A "draft into composer" option is available. **Partial**: Generate commits a real version (ARCHITECTURE §12); a separate “draft into composer” action remains an unbuilt proposal.
 - **[D]** Sending into a chat that's still generating **queues** the message (owner, 2026-10-12). It shows as pending under the streaming reply and posts as soon as the reply finishes. If the reply is stopped, it posts right after the stopped version. Typing and sending are never blocked; to interject, press Stop first.
-- **[P]** The queued message is held by the server, so it survives closing the tab. It attaches to the reply's slot, not to a version, so it posts after whichever version ends up selected, including a failed one (which stays out of the context). Posting it starts the next reply as a normal Send does. A queued message can be edited or withdrawn until it posts.
+- **[P]** The queued message is held by the server, so it survives closing the tab. It attaches to the reply's slot, not to a version, so it posts after whichever version ends up selected, including a failed one (which stays out of the context). Posting it starts the next reply as a normal Send does. A queued message can be edited or withdrawn until it posts. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12).
 
 ### 2.3 Group-chat orchestration (see §7)
 - **[D]** The owner only uses group chats. Single-card chats are a special case of the general system.
@@ -148,7 +150,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ## 3. The message graph: versions, branches, threads, state
 
 ### 3.1 Slots and versions
-**[O]** **How the model is presented to users** (owner, 2026-10-14): "the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly." The rules below (generated text frozen, edits of it as new versions, the user's own text amended with undo history, branches as forks, layered cards, re-imports merged) are decided; how each shows up in the UI, and what the user is told when one applies, is open and needs a discussion with the owner before more UI is built on it.
+**[O]** **How the model is presented to users** (owner, 2026-10-14): "the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly." The rules below (generated text frozen, edits of it as new versions, the user's own text amended with undo history, branches as forks, layered cards, re-imports merged) are decided; how each shows up in the UI, and what the user is told when one applies, was the open question at that date. **Largely overtaken** by the later owner decisions on edit/amend, per-note fork inheritance, editor shape and independent forks (§3.4, §6.2a, §10.3), whose concrete UI is built (ARCHITECTURE §12, §14). Owner acceptance of the resulting UX remains unverified.
 
 - **[D]** **Versions belong to a message slot, and the continuation belongs to the slot**, not to a version. Swapping, regenerating or editing a version at *any* depth replaces that message in place and keeps what follows. This is a version, not a branch.
 - **[D]** Any message can get a new version, including the user's own messages and messages in the middle of the history.
@@ -162,11 +164,11 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** A **composition scratchpad**: the owner generates 10–50 versions of a turn and merges the best parts. Select text in any version, assemble it in the scratchpad, commit it as a new version. The scratchpad persists like a draft.
 Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-10-28), [ARCHITECTURE.md §14](../ARCHITECTURE.md). The owner's 2026-10-27 confirmation in UX-REWORK supersedes the earlier separate-store wording and the open question about named notes: they are one store, global or chat-scoped, with a right-panel editor and selection transfers in both directions. Server persistence and same-origin cross-tab updates from the earlier **[P]** are used for continuous drafts. The broader composition-scratchpad workflow remains a proposal; inserting into a message's existing editor works through the ordinary text transfer.
 
-- **[P]** The version picker is built for dozens of versions: compact previews, star, hide, delete, side-by-side comparison.
+- **[P]** The version picker is built for dozens of versions: compact previews, star, hide, delete, side-by-side comparison. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Delete is on the adjacent version action surface.
 - **[D]** Pressing swipe while a generation is running starts another one. You can move freely between versions that are still generating and finished ones. **The stop button belongs to the version**, not the composer. There's no dedicated "generate ×N" action.
 - **[D]** **Failed generations are versions** with a clear failure style showing the cause: HTTP error, context length, classifier refusal (with its category), or a length cutoff. They never enter the context. **Built** (U08, 2026-10-28; ARCHITECTURE.md §12).
-- **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals offer Retry and "Retry with…" another model.
-- **[D]** Generating with different models and upstreams at the same time is required. The model is chosen per generation and recorded on the version **[P]**.
+- **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals offer Retry and "Retry with…" another model. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Text Continue is distinct from agent transcript recovery (§7.5).
+- **[D]** Generating with different models and upstreams at the same time is required. The model is chosen per generation and recorded on the version **[P]**. **Built** per-generation model recording (ARCHITECTURE §12, §15).
 
 ### 3.2 Branches
 - **[D]** A branch is an explicit fork of the path. It's what you choose when you want the continuation to differ, and it never happens as a side effect of swiping.
@@ -174,29 +176,29 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 ### 3.3 Threads and merges (the architecture must allow them now; the UX comes later)
 - **[D]** Parallel threads in one conversation that fork and **merge**, with the ability to send one message to several threads at once (same or different speaker, and the speaker can be any card).
 - **[D]** Concurrent threads and alternate branches are different concepts and must look different in the UI.
-- **[P]** Messages form a **graph from day one**: slots point to their parents, and a merge is a slot with several parents. Threads are named lanes. **Every view is a selection of a path through the graph**, and context assembly always works on a path.
+- **[P]** Messages form a **graph from day one**: slots point to their parents, and a merge is a slot with several parents. Threads are named lanes. **Every view is a selection of a path through the graph**, and context assembly always works on a path. **Partial foundation built** (ARCHITECTURE §3.7–§3.8, §15); usable multi-parent merges and thread UX remain Phase 7 work, as do the next two items.
 - **[P]** Sending to several threads creates one placement per thread, linked by a group ID. Editing one asks whether to edit the whole group.
 - **[O]** How two merged threads become one sequence: interleave by time, or the merge node carries a summary of the other thread. A merge is an explicit event that sets the merged state **[P]**.
 
 ### 3.4 Chat state lives on the graph
 - **[D] Problem:** in ST the author's note state is not tied to branch points, so the owner branches at the latest message as a checkpoint before every author's-note edit.
 - **[D]** Following the messages has a cost (owner, 2026-10-16): branching from an earlier point resets everything that follows the chat's messages. That's less intuitive than it seems, and it's a problem for everything that works this way: not every change is specific to that exact chat state, and many are wanted even in a fork that goes back earlier.
-- **[O]** So each kind of chat state has to be classed as either following the messages (causal: it belongs to what happened at that point) or belonging to the branch (kept by new forks made from any earlier point, while existing forks keep what they had). Cards are classed below (§4); human notes are decided below. Preset switches and toggles, presence and the "played by me" set remain open.
+- **[O]** **Overtaken**: Core scopes are implemented (ARCHITECTURE §3.8): branch-owned card swaps; positional presence, played-by-me and legacy bindings; ordinary model/preset selection is account-owned (§6.1). Human notes use the owner’s per-note choice below. Agent/tool scopes remain Phase 4 work. Earlier wording: “So each kind of chat state has to be classed as either following the messages (causal: it belongs to what happened at that point) or belonging to the branch (kept by new forks made from any earlier point, while existing forks keep what they had). Cards are classed below (§4); human notes are decided below. Preset switches and toggles, presence and the "played by me" set remain open.”
 - **[D]** For notes it depends on the note (owner, 2026-10-16). Notes often hold background or higher-level, story-driven changes that aren't meant to apply only from the message they were last edited at, so forking back to an earlier message doesn't necessarily mean reverting every note. This is harder than for cards: a note isn't a change to something that already existed, and there can be many of them. It might be a per-note setting, but that needs care not to become confusing.
-- **[D]** Human note inheritance on fork (owner, 2026-10-28 23:30 and 23:33; implemented, this proposal is obsolete: ARCHITECTURE §3.4). When forking before human note edits, ask per changed note: **As it was then** / **As it is now**, including its text and on/off state. **Then is the default**. A top-level then/now switch sets all notes at once; individual rows can differ afterwards. Each accordion row expands to a side-by-side CodeMirror diff. A button opening the same diff is available behind a development-only toggle for comparison. This supersedes the earlier proposed default-now mode. Notes the agent changes during a turn always follow the messages (§4.1a).
-- **[P]** Card-note activation in the chat follows the same per-note fork choice (coordinator fill-in, 2026-10-28; implemented). Card-owned text remains owned by the card, as in §4.1.
-- **[P]** **Every change to chat state is an event at a position in the graph.** The state at any message is the result of replaying the events on the path to it. Chat state covers:
+- **[D]** Human note inheritance on fork (owner, 2026-10-28 23:30 and 23:33; implemented, this proposal is obsolete: ARCHITECTURE §3.8). When forking before human note edits, ask per changed note: **As it was then** / **As it is now**, including its text and on/off state. **Then is the default**. A top-level then/now switch sets all notes at once; individual rows can differ afterwards. Each accordion row expands to a side-by-side CodeMirror diff. A button opening the same diff is available behind a development-only toggle for comparison. This supersedes the earlier proposed default-now mode. Notes the agent changes during a turn always follow the messages (§4.1a).
+- **[P]** Card-note activation in the chat follows the same per-note fork choice (coordinator fill-in, 2026-10-28; implemented). Card-owned text remains owned by the card, as in §4.1. **Built; obsolete as an implementation proposal** (ARCHITECTURE §3.8); remains [P], not an owner decision.
+- **[P]** **Every change to chat state is an event at a position in the graph.** The state at any message is the result of replaying the events on the path to it. Chat state covers: **Partial/overtaken**: event replay is built (ARCHITECTURE §3.8), but branch-owned swaps survive earlier forks and ordinary preset selection is global (§4, §6.1); not every setting is a positional event.
   - notes and which notes are active
   - card overrides
   - preset switches and toggles
   - presence
   - the "played by me" set
   - variables
-- **[P]** As a result, branching restores state automatically, edits after a branch point don't leak into other branches, and the timeline can show small markers for state changes.
-- **[P]** State events produced by a rollout are **attached to the version that produced them**, so switching versions switches their effects too.
+- **[P]** As a result, branching restores state automatically, edits after a branch point don't leak into other branches, and the timeline can show small markers for state changes. **Built isolation foundation** (ARCHITECTURE §3.8); universal timeline state markers remain unbuilt, to revisit with Phase 4 tool effects.
+- **[P]** State events produced by a rollout are **attached to the version that produced them**, so switching versions switches their effects too. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.8). General RP tool production of these events remains Phase 4 work.
 - **[P]** A deleted message's state events stop applying while it's in the recycle bin, and restoring the message brings them back (built, ARCHITECTURE.md §3.8; found 2026-10-11: before, they kept applying from the bin).
-- **[P]** Default edit scope is "from here on, on this branch", with "apply to all branches" as an option.
-- **[O]** That option assumes the note has a stable, recognizable identity, which may not be clear to the user.
+- **[P]** **Overtaken**: History edits are always this chat only (§10.3, owner); shared-note text has explicit global sharing (§4.1), and new forks use the per-note choice above. No blanket apply-to-all-forks option is built. Earlier wording: “Default edit scope is "from here on, on this branch", with "apply to all branches" as an option.”
+- **[O]** **Overtaken**: The blanket scope option is superseded by §10.3’s owner decision; named shared notes (§4.1) have explicit identity and global text sharing (ARCHITECTURE §14). Earlier wording: “That option assumes the note has a stable, recognizable identity, which may not be clear to the user.”
 
 ### 3.5 Presence
 - **[D]** Characters can be marked present or absent per branch. Presence can be set:
@@ -204,9 +206,9 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
   - by a tool call
   - by a required `send_message` argument
   - by a decision model reading the message
-- **[P]** All of these produce the same presence event.
-- **[D]** Muting is not presence (owner, 2026-10-26). **Muting** is a concrete user action with no fixed RP meaning: the character doesn't talk, whether it's away or you're just having a long one-on-one with someone else while it stays in the scene. It's shown as an explicit option, the one that isn't confusing for users. **Presence** was meant for agentic RP: the model or a decision model marks that a character *isn't there*, so it won't talk. The two overlap (an absent character can't talk). **[O]** Whether presence stays a separate concept or is redundant with muting.
-- **[D]** Muting only stops the character talking: it is never picked to reply automatically (it can still be made to speak explicitly). It **doesn't remove its card from the context**: taking cards out or swapping them busts the KV cache every turn, the worst possible default (the owner rejected it in the first design session; §5.2). Cards are only swapped in the opt-in card-swap layout, at the tail (owner, 2026-10-26). **[P]** Per fork, switched from the cast.
+- **[P]** All of these produce the same presence event. **Built manual Mute event** (ARCHITECTURE §3.8, §12); autonomous tool/decision-model producers remain Phase 4 work.
+- **[D]** Muting is not presence (owner, 2026-10-26). **Muting** is a concrete user action with no fixed RP meaning: the character doesn't talk, whether it's away or you're just having a long one-on-one with someone else while it stays in the scene. It's shown as an explicit option, the one that isn't confusing for users. **Presence** was meant for agentic RP: the model or a decision model marks that a character *isn't there*, so it won't talk. The two overlap (an absent character can't talk). **[O], answered for plain RP below:** whether presence stays separate or is redundant with muting. **Overtaken for plain RP** by PHASE1-DECISIONS §2 (owner, 2026-10-28): “Muting and presence … one thing, shown as Mute. Keep.” The Mute control is built (ARCHITECTURE §12); future agent semantics remain later work.
+- **[D]** Muting only stops the character talking: it is never picked to reply automatically (it can still be made to speak explicitly). It **doesn't remove its card from the context**: taking cards out or swapping them busts the KV cache every turn, the worst possible default (the owner rejected it in the first design session; §5.2). Cards are only swapped in the opt-in card-swap layout, at the tail (owner, 2026-10-26). **[P]** Per fork, switched from the cast. **Built** per-fork cast switch (ARCHITECTURE §3.8, §12); explicit speaker choice can still make a muted card speak.
 
 ---
 
@@ -219,41 +221,41 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
   - Users also expect editing a card to change it everywhere.
 
   The UI must make edit scope clear. The owner expects this design to be hard.
-- **[P]** Three names, kept separate: **identity** (internal ID), **library label** (title plus a free-text subtitle), **in-chat name** (what `{{char}}` resolves to).
+- **[P]** **Overtaken**: The following owner-confirmed CCv3 mapping uses `name`, `nickname` and `character_version`; built (ARCHITECTURE §3.9, §14). Earlier wording: “Three names, kept separate: **identity** (internal ID), **library label** (title plus a free-text subtitle), **in-chat name** (what `{{char}}` resolves to).”
 - **[D]** A card has three names (owner, 2026-10-16):
   - the **in-character name**: what `{{char}}` resolves to and what the model sees
   - a **display name**: the in-character name by default, but it can be set to something else, and then it's the name the UI shows the card by, while the in-character name stays the one sent to the model and used in templates
-  - a **subtitle**: the version string. It is the card's own version field, ST's `character_version`, a real card field that ST can show as the subtitle: so it's part of the card's content, with its revisions, and goes in and out with the card file. It's not a separate label the app keeps beside the card (owner, 2026-10-16). Today's build has it as a separate library `subtitle`, apart from `character_version`.
+  - a **subtitle**: the version string. It is the card's own version field, ST's `character_version`, a real card field that ST can show as the subtitle: so it's part of the card's content, with its revisions, and goes in and out with the card file. It's not a separate label the app keeps beside the card (owner, 2026-10-16). That earlier separate-library-subtitle build is obsolete: the standard-field mapping below is built (ARCHITECTURE §3.9).
 - **[D]** These names use the standard card metadata, not a scheme of the app's own (owner, 2026-10-26).
 - **[D]** The mapping CCv3 gives (owner confirmed, 2026-10-26): the **display name** is the card's `name`; the **in-character name** is `nickname`, which CCv3 says `{{char}}` uses, falling back to `name` when it's empty; the **subtitle** is `character_version`. So "display name defaults to the in-character name" holds the other way round in the file: a card with one name sets only `name`, and setting a different in-character name fills `nickname`. ST 1.19 ignores `nickname` (it appears nowhere in its source, checked 2026-10-26): its cards have only `name`, which imports as both names, and a card whose two names differ sends its display name to the model in ST.
-- **[P]** Other standard fields cover things planned or open elsewhere: `source` (CCv3: IDs or URLs of where the card came from, only appended to, not user-editable) records an archive card's origin and recognizes duplicates (§12); `creation_date` and `modification_date`; `group_only_greetings` (greetings used only in chats with several characters; **[D]** offered as greetings when a new chat has more than one character, owner 2026-10-30). Card lineage (forks) has no standard field, so it stays the app's own relationship outside the card's content.
+- **[P]** Other standard fields cover things planned or open elsewhere: `source` (CCv3: IDs or URLs of where the card came from, only appended to, not user-editable) records an archive card's origin and recognizes duplicates (§12); `creation_date` and `modification_date`; `group_only_greetings` (greetings used only in chats with several characters; **[D]** offered as greetings when a new chat has more than one character, owner 2026-10-30). Card lineage (forks) has no standard field, so it stays the app's own relationship outside the card's content. **Partial**: all listed fields round-trip (ARCHITECTURE §8); **[D] group-only greeting selection built** (fgreet, 2026-10-30; ARCHITECTURE §12). Archive duplicate/update recognition and automatic timestamp maintenance remain later work; preservation is not archive integration.
 - **[D]** Card forks are a model for cards only: cards and presets can't work the same way, notes even less (owner, 2026-10-26). Presets, lorebooks and notes get their own designs.
-- **[D]** A card's own notes (its Character's Note) are forked with the card: there is no other coherent way (owner, 2026-10-26). **[O]** A system of named notes shared between different things is likely, to bridge the case where a note shouldn't be forked with what it belongs to.
+- **[D]** A card's own notes (its Character's Note) are forked with the card: there is no other coherent way (owner, 2026-10-26). **[O], answered** by the owner’s global named-note store (§4.1), built with linked note slots and snippets (ARCHITECTURE §14). Card-owned text copies on fork; linked shared text remains linked.
 - **[D]** Who wrote the earlier messages after a fork or a rename has no single answer. As in ST, which asks on renaming a character whether to replace its name in all past chats, renaming offers to rewrite the name in past chats (§10.3; built in U18, ARCHITECTURE §3.13). That still leaves a gap: using the renamed fork in another chat that has the previous name. A mechanism for wide-range edits on chat history, replacing strings and names, is needed (owner, 2026-10-26).
 - **[D]** Existing card variants and "only in this chat" overrides are not migrated to forks: no data has any (ST imports never create them). The owner clarified on 2026-10-28 that deployment starts fresh from the single edited baseline: no card-specific startup refusal or migration (unit-4 brief).
 - **[D]** Making a variant is called **forking** the card, with the semantics that go with it: a fork is the child of the card it was forked from, its parent (owner, 2026-10-16).
 - **[D]** There must be an easy way to find all the variants of a card (owner, 2026-10-16).
 - **[D]** No two cards may have both the same display name and the same version: one of the two must differ. The UI enforces it when making forks or new cards, where it's required. It isn't a data-model rule, because imported cards won't respect it (owner, 2026-10-16).
-- **[P]** The same check applies when an existing card's display name or version is changed. Imported cards that collide are left as they are.
+- **[P]** The same check applies when an existing card's display name or version is changed. Imported cards that collide are left as they are. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §14). This is UI validation, not database uniqueness.
 - **[D]** ST's problems with this (owner, 2026-10-16): cards have a `character_version` field that ST can show as a subtitle, but it's hidden until enabled in settings, it's settable only in the advanced definitions, and cloning sets neither it nor the display name, so a clone is an identical card and the original can only be told apart by the chats tied to it.
-- **[P]** Three layers, the same mechanism for cards, presets and lorebooks:
+- **[P]** Three layers, the same mechanism for cards, presets and lorebooks: **Overtaken for cards** by the owner’s independent forks and fork-and-swap below. Non-card refs, overrides and explicit re-import merges are built (ARCHITECTURE §3.9); this is not a shared card/preset/note design.
   - **Base:** the imported or upstream version. Re-importing a new version adds a base revision.
   - **Variant:** a named fork, stored as changes on top of the base, so upstream updates flow through. *(Rejected for forks, below.)*
   - **Chat-local override:** changes for one chat only, with no library entry. It can be **promoted** to a variant.
 - **[D]** Customizing a card for one chat is the typical case, and it's done by **forking and swapping** ("Fork for this chat" or similar): it makes a concrete card, a fork, and the chat uses it instead. Forking the chat from anywhere earlier keeps the changed card; *existing* forks of the chat keep whatever they had. This covers refining a card for a chat and then going back a few messages, or redoing much of the story (owner, 2026-10-16).
 - **[D]** Card changes that follow the messages (made at a point in the timeline, reset by branching before it) are the specific case, not the default, and users wouldn't find them intuitive. They also invalidate the cache in a default configuration. Their main purpose is tool-based autonomous card rewriting, which must always work this way: the model can't change the card for anyone else as part of a chat turn without losing every property of chat turns and swipes, and this keeps swipes redoable and reversible. They can make sense manually for the same reason, character progression (owner, 2026-10-16).
 - **[D]** Character progression needs a more convenient path that's typically used instead: not editing the card, but adding and changing other things connected to it, tied to the card *and* the chat, such as author's notes for characters (owner, 2026-10-16).
-- **[D] Rejected:** forks that follow their parent, with the parent's later changes merged into them (owner, 2026-10-16). There's no way to keep that from overwriting the changes the user made, nor for the user to make sure the result in the downstream cards is coherent; it's an effect hidden from the user and surprising; and the point of forking is to replace duplicating cards, which this doesn't allow. (It's what the build does today: a variant stores only its changes over its parent.)
-- **[P]** So a fork is a card of its own from the moment it's made: a full copy whose only tie to its parent is the recorded relationship. Nothing done to the parent changes it. The same holds for a chat's own changes to a card. Re-importing a new version of the *same* card or preset (the preset case below) is different: it's an explicit act on that one entity, merged into the user's edits there with conflicts shown, and it doesn't reach the entity's forks.
-- **[P]** Chats point to a variant and follow its latest version by default, or are pinned to a fixed revision.
-- **[D]** Cards often need **non-additive changes as a story progresses**. You can't substitute a duplicate for the card in the current chat. Chat-local overrides cover this **[P]**.
+- **[D] Rejected:** forks that follow their parent, with the parent's later changes merged into them (owner, 2026-10-16). There's no way to keep that from overwriting the changes the user made, nor for the user to make sure the result in the downstream cards is coherent; it's an effect hidden from the user and surprising; and the point of forking is to replace duplicating cards, which this doesn't allow. (That older card-variant implementation has been removed; independent card forks are built, ARCHITECTURE §3.9.)
+- **[P]** So a fork is a card of its own from the moment it's made: a full copy whose only tie to its parent is the recorded relationship. Nothing done to the parent changes it. The same holds for a chat's own changes to a card. Re-importing a new version of the *same* card or preset (the preset case below) is different: it's an explicit act on that one entity, merged into the user's edits there with conflicts shown, and it doesn't reach the entity's forks. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.9). For cards “this chat’s changes” means fork-and-swap, not a following override.
+- **[P]** **Overtaken**: Card chats bind an independent card’s latest upstream head or a fixed revision (ARCHITECTURE §3.9, §15); the following-variant noun is obsolete (§4 owner decisions). Earlier wording: “Chats point to a variant and follow its latest version by default, or are pinned to a fixed revision.”
+- **[D]** Cards often need **non-additive changes as a story progresses**. You can't substitute a duplicate for the card in the current chat. **[P], overtaken**: the owner’s fork-and-swap rule above replaces card-local overrides; built (ARCHITECTURE §3.9, §12).
 - **[D]** **Preset re-import must keep user edits.** Concrete case: the owner added a `{{summary}}` prompt and a summarization instruction, and softened "do not impersonate the user". A new upstream version currently means redoing all of it in ST's poor editor.
-- **[P]** Additions survive trivially. Edits to upstream prompt text are reapplied with a three-way merge, and you're only asked when upstream changed the same passage. Real conflicts get a side-by-side resolver.
-- **[P]** Edit scope depends on where you edit from:
+- **[P]** Additions survive trivially. Edits to upstream prompt text are reapplied with a three-way merge, and you're only asked when upstream changed the same passage. Real conflicts get a side-by-side resolver. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.9, §14).
+- **[P]** Edit scope depends on where you edit from: **Built/overtaken**: library edits affect that card everywhere; Fork for this chat creates/swaps an independent card (ARCHITECTURE §3.9, §12, §14), replacing the old local-override scope.
   - in the library, the variant changes everywhere, and the screen always shows "used by N chats"
   - from inside a chat, you choose "this chat only" or "the card everywhere", with the count visible
-- **[P]** The UI shows two concepts, **variants** and **this chat's changes**. Revisions sit behind a History button, and modules appear as sections of the card.
-- **[P]** Library: variants are grouped under one character entry. Sorting is explicit (last chatted or last edited, never "last viewed"). Any two variants can be diffed.
+- **[P]** **Overtaken**: Independent card forks and fork-and-swap (§4), plus card notes (§5.0), replace this distinction. Usage, revisions and family comparisons are built (ARCHITECTURE §12, §14). Earlier wording: “The UI shows two concepts, **variants** and **this chat's changes**. Revisions sit behind a History button, and modules appear as sections of the card.”
+- **[P]** Library: variants are grouped under one character entry. Sorting is explicit (last chatted or last edited, never "last viewed"). Any two variants can be diffed. **Partial**: family tree/filter, explicit sorting and saved family-card comparisons are built (ARCHITECTURE §14); collapsing each family into one grid entry remains an unbuilt proposal.
 
 ### 4.1 Card modules and character notes
 - **[D] Wanted:**
@@ -263,7 +265,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
   - **traveling with the character between chats, but not activated in other chats automatically**
   - example: outfits, which today must either live permanently in the card definition, be lorebook entries (which doesn't really work), or be described in chat
 - **[D]** Extended prompts attached to a card, swapped per chat or situation, possibly **private** (excluded from export).
-- **[P]** **Notes as a first-class object:**
+- **[P]** **Notes as a first-class object:** **Partial**: card/chat ownership, placement, activation, privacy and turn/mute conditions are built (ARCHITECTURE §12, §14, §15). Persona/global ownership is superseded by the owner’s card/chat slot rule below; “while present” by the later mute condition. Decision-model conditions remain Phase 4 work; automatic universal notes remain open below.
   - owner: a character, a chat, a persona or global
   - placement: tail/D0, depth N, or a fixed section
   - condition: always, on this character's turn, while this character is present, or decided by a decision model
@@ -281,7 +283,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[D]** Any note can be named, since there is more than one, and the notes need a collapsed view (owner, 2026-10-26).
 - **[D]** A global "database" of named notes, usable from anywhere: when adding a note anywhere, instead of writing one you can pick an existing shared note, filterable by name, which fills that note slot; changes to a shared note are global (owner, 2026-10-26). ("Save as local note" is the unlink below.)
 - **[O]** A note that applies in every chat whatever the preset: it extends a preset without modifying it and stays when the preset changes, which makes it somewhat useful, but it's close to being a preset itself and its UX is unclear (owner, 2026-10-26).
-- **[P]** So a note *slot* belongs to a chat or a card (the only two owners), and its content is either its own text or a link to a shared named note.
+- **[P]** So a note *slot* belongs to a chat or a card (the only two owners), and its content is either its own text or a link to a shared named note. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §14).
 
 - **[D]** When a note applies: always, or only on a given character's turn. "While X is present in the chat" was dropped: cards are rarely removed and re-added (owner, 2026-10-26). **[D]** "While X isn't muted" is a condition too; both it and "on X's turn" are the user's choice, and placed sensibly (not above the cached part of the context) neither invalidates the cache (owner, 2026-10-26). **[D]** A conditioned note above the history is allowed: a user choice; the editor shows the cache warning and nothing is restricted (owner, 2026-10-28).
 - **[D]** Each note has a switch for whether lorebook entries can trigger on its text (ST's "Include in World Info Scanning") (owner, 2026-10-26).
@@ -298,7 +300,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[D]** These changes belong to the message and its history. They're tied to a particular swipe. Swiping resets them, and the next swipe may bring its own changes instead.
 - **[D]** The user decides which items the LLM may and may not change.
 - **[D]** Changing a card freely invalidates the cache on the next turn. Putting cards at the end of the context (§5.2) avoids that, but it's generally not wanted: cards are usually written as a scenario or premise for the start of the prompt. So in practice some card fields go later in the context, as ST's Character's Note does with its depth.
-- **[P]** The mechanism, as deltas on what exists:
+- **[P]** The mechanism, as deltas on what exists: **Partial foundation**: versioned state, note/card `agent_editable` data and ST depth-note mapping exist (ARCHITECTURE §3.8, §8, §14); autonomous field-patch tools and permission controls remain Phase 4 proposals.
   - **Agent changes are chat-state effects** (§7.3), attached to the version that made them (§3.4). Swiping and branching then reset them with no extra machinery.
   - **Card changes are field patches**, not whole revisions: a `card.field.set` event sets one field of the card a participant uses in this chat. Patches sit on top of whatever card revision is bound, so upstream fixes still arrive, and the context view can show which fields changed and where. A whole new revision pinned per swipe would stop following the card, and would leave the chat override with no meaningful head, since each branch would point at a different revision.
   - **State that changes over the story belongs in notes or card modules, not the description.** A costume is a card-owned note at depth, not an edit to the top of the prompt. Card modules get the same placement options notes have (§5.2), so a card can carry several of them at depth.
@@ -312,7 +314,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 ### 5.0 Layout belongs to the preset (owner, 2026-10-26)
 - **[D]** The context layout is the preset's, not a fixed one: presets are made by users, mostly for ST's layout, and their tail can be far longer than reference-harness's (whose single fixed layout is not a model to copy).
 - **[D]** Everything after the chat history is the **tail prompt** (the satellite system prompt, for its system parts). It sits at the end so the model attends to it most and the history can't causally override its instructions (style, rules), and it can change every turn without breaking the cache. Presets put most of their weight there; so does the Author's Note.
-- **[D]** Where the newest message goes is the preset's to control. Since a long tail can separate the newest message from the history, neither ST's placement (newest message at the end of the history, the tail after it) nor reference-harness's (tail, then the newest message last) is right for every preset. **[P]** A "Newest message" marker in the preset's prompt order, next to "Chat history": imported ST presets get it right after the history (ST's behaviour); a preset can move it after the tail.
+- **[D]** Where the newest message goes is the preset's to control. Since a long tail can separate the newest message from the history, neither ST's placement (newest message at the end of the history, the tail after it) nor reference-harness's (tail, then the newest message last) is right for every preset. **[P]** A "Newest message" marker in the preset's prompt order, next to "Chat history": imported ST presets get it right after the history (ST's behaviour); a preset can move it after the tail. **Built [P] marker** (ARCHITECTURE §15).
 - **[D]** Every section of a preset can be system, user or assistant, as in ST's preset editor, which the app needs too.
 - **[D]** Later, not now: modes where the card definitions move into the tail and are swapped every turn for the character speaking. The layout must allow it.
 
@@ -322,6 +324,8 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[D]** (owner confirmed 2026-10-27) **Choosing lorebooks**: a Lorebooks tab in the right panel, per chat (fork), listing each character's embedded book (on by default), books added from the library, and the global books, each with its switch; the "only below the history" setting (§1.3) sits there.
 
 ### 5.1 Pipeline [P]
+
+**Built as registered, replaceable stages; obsolete as an implementation plan** (ARCHITECTURE §15). The sequence below is the original outline: ordinary RP now resolves independent cards and global preset selection (§4, §6.1), uses the implemented LCM layer (§8), and places direction in the end-of-request instruction (§2.2). Rich/compact display forms remain deferred (§10.2).
 1. Take the path (§3.3).
 2. Replay state events along it (§3.4).
 3. Resolve participants, and cards through their layers (§4).
@@ -338,14 +342,16 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
   - **default:** all cards concatenated one after another, each in a clearly labelled block
   - **card-swap mode:** the active card's definition goes at the **tail**, which helps both caching and instruction-following
   - the user picks the layout, per RP and per model, and it must be easy to change
-- **[P]** A preset's `charDescription` and similar markers become the slot where the combined block goes.
-- **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a).
+- **[P]** **Overtaken**: The owner’s §5.0 rule fills field markers field by field; Definitions is the separate whole-card marker. Both are built (ARCHITECTURE §15). Earlier wording: “A preset's `charDescription` and similar markers become the slot where the combined block goes.”
+- **[P]** Placement is per piece, not only per card. The card's fixed definition stays where the layout puts it. Card modules and card-owned notes each have their own placement (top section, depth N or tail), so the parts that change during a chat can sit late in the context (§4.1a). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Arbitrary agent-editable card fields remain Phase 4 work.
 
 ### 5.3 `{{user}}`, `{{char}}` and the speaker
 - **[D]** In ST these rebind every turn (to the current speaker and the current persona). That breaks the cache and fights instructions like "don't write for `{{user}}`". Users need to control and pin these bindings, and to edit presets and cards to stop relying on them, which requires search and replace. **Binding controls built** (U09, 2026-10-28; ARCHITECTURE.md §15); cross-entry search and replace remains separate.
 - **[D]** In preset text, `{{char}}` is every character in the chat except your persona, comma-joined, so the start of the request is the same whoever speaks; a card's own text uses that card's name, and the chat can pin other text in its place (owner, 2026-10-29). In a one-on-one chat it's the one name, as in ST; in a group ST uses the current speaker, which rebuilds the cache on most turns, and the ST fidelity gate lists this as a documented difference. `{{user}}` is in §2.2. The speaker for this turn is named by the end-of-request instruction (§2.2), which realises the earlier proposed "tail directive".
 
 ### 5.4 Role projection [P]
+
+**Built; obsolete as an implementation proposal**: all three are registered strategies, with open persisted IDs (ARCHITECTURE §15).
 These are strategies for mapping history to user and assistant roles:
 - **by writer:** human → user, model → assistant (ST's behavior)
 - **strict alternation by position:** the owner's idea. It's stable as the chat grows (cache-friendly) and avoids long same-role runs that degrade models.
@@ -353,40 +359,40 @@ These are strategies for mapping history to user and assistant roles:
 
 ### 5.5 Caching
 
-Stepped history, dropped-message display and rewrite warnings without a TTL are implemented in ARCHITECTURE §12 and §15 (2026-10-13). LCM will later supply the history boundary.
+Stepped history, dropped-message display and rewrite warnings without a TTL are implemented in ARCHITECTURE §12 and §15 (2026-10-13). LCM now supplies its summary cursor alongside stepped recent-history cuts (ARCHITECTURE §16).
 - **[D]** Preserving the KV cache is a near-top priority, second only to avoiding RCEs.
-- **[D]** Depth injections are cache-friendly when breakpoints are placed correctly. A depth-0 author's note is the ideal place for information that changes, like reference-harness's tail prompt. The real cache-killers are changes near the top of the prompt, which the assembler should flag **[P]**.
-- **[P]** Breakpoints follow reference-harness's scheme (ARCHITECTURE.md "Cache control"): system/preset, summary layer, last verbatim timeline item.
+- **[D]** Depth injections are cache-friendly when breakpoints are placed correctly. A depth-0 author's note is the ideal place for information that changes, like reference-harness's tail prompt. The real cache-killers are changes near the top of the prompt, which the assembler should flag **[P]**. **Built** rewrite estimate (ARCHITECTURE §15).
+- **[P]** Breakpoints follow reference-harness's scheme (ARCHITECTURE.md "Cache control"): system/preset, summary layer, last verbatim timeline item. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §6, §15).
 - **[D]** **Cache-warmth indicator** near the composer, with an optional countdown (can be turned off).
   - The TTL comes from known provider defaults, or from a TTL the user sets on any model or connection. No TTL means no indicator.
-  - **[P]** States: warm (verified from reported cache usage), warm (assumed), cold.
-  - **[P]** It tracks the prefix of the *next* generation and warns when an edit changed it ("next send rewrites ~N tokens").
+  - **[P]** States: warm (verified from reported cache usage), warm (assumed), cold. **Built** (ARCHITECTURE §15).
+  - **[P]** It tracks the prefix of the *next* generation and warns when an edit changed it ("next send rewrites ~N tokens"). **Built** (ARCHITECTURE §15).
   - **[D]** That warning shows even when no TTL is known: a changed prefix is cold whatever the TTL (owner, 2026-10-13).
   - **[D]** Known provider defaults cover every provider that documents a cache lifetime, not just Anthropic (owner, 2026-10-13).
 - **[D]** **History that doesn't fit is cut in steps, not one message at a time** (owner, 2026-10-13). ST drops just enough old messages to fit the maximum context, so once a chat reaches it, every new message pushes the oldest one out and the cached prefix changes on every send. Instead there are two thresholds, as in reference-harness: a **maximum** and a **target** context size. When the maximum is reached, enough old messages leave the context to get down to the target, and the start of the history stays put until the maximum is reached again, so the cache survives the sends in between.
   - **[D]** The target defaults to a fixed distance below the maximum, so a preset imported from ST, which has only a maximum, needs no translation (owner, 2026-10-13).
   - **[D]** Where the history starts is therefore state, not a formula of the messages and the budget (owner, 2026-10-13).
-  - **[P]** Default target: 80% of the maximum. The start point is recorded with each generation's context and read back by the next one on the same path, so a rebuild reproduces it. It applies in every layout, ST-compatible mode included, where it's a documented difference from ST. LCM's summary cursor later takes this role (LCM.md).
+  - **[P]** Default target: 80% of the maximum. The start point is recorded with each generation's context and read back by the next one on the same path, so a rebuild reproduces it. It applies in every layout, ST-compatible mode included, where it's a documented difference from ST. LCM's summary cursor later takes this role (LCM.md). **Built** 80% non-LCM fallback and pinned history start (ARCHITECTURE §15); LCM now uses the owner’s explicit recent/summary pairs (§8; ARCHITECTURE §16).
 - **[D]** **Messages that dropped out of the context are shown as such** in the chat (owner, 2026-10-13): faded, or with another background or border shade (whichever fits the final design), and an icon. They must look different from messages the user hid on purpose, which ST marks with a ghost icon. It isn't shown as a note or issue on each reply.
-- **[D]** **Parallel requests with a cold cache can cause N cache writes.** Stagger them deliberately per provider: start one, and release the others once its cache write is readable. When that happens differs by provider, so it must be tested and measured (cache-read token counts on the follow-ups) **[P]**.
+- **[D]** **Parallel requests with a cold cache can cause N cache writes.** Stagger them deliberately per provider: start one, and release the others once its cache write is readable. When that happens differs by provider, so it must be tested and measured (cache-read token counts on the follow-ups) **[P]**. **Built** provider-specific staggering and measurement tooling (ARCHITECTURE §6, §15); no new paid provider measurement is claimed by this audit.
 
 ### 5.6 Macros
 
 **Built 2026-10-28 (U10; obsolete as requirements):** verbatim defaults for human/model text and opt-in output substitution are implemented in [ARCHITECTURE.md §10](../ARCHITECTURE.md#10-macros), alongside the bounded, approved display-only preset regex pipeline. Other proposals below retain their status.
 - **[D]** In ST, `{{user}}` in greetings gets fixed when a card is opened, so changing persona before the first message keeps the old name. Substitution must stay dynamic until a message is sent.
-- **[P]** Card-sourced text keeps its macros unresolved in storage. They're resolved when rendered or assembled, against the state at that message's position.
-- **[P]** Non-deterministic macros (`{{random}}`, `{{roll}}`, `{{time}}`) are evaluated once and frozen, for determinism and caching.
-- **[P]** A per-message toggle can switch expansion on.
-- **[P]** Expansion therefore depends on where text came from, and model text stays verbatim when it's sent back in later turns.
+- **[P]** Card-sourced text keeps its macros unresolved in storage. They're resolved when rendered or assembled, against the state at that message's position. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §10, §15).
+- **[P]** Non-deterministic macros (`{{random}}`, `{{roll}}`, `{{time}}`) are evaluated once and frozen, for determinism and caching. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §10, §15).
+- **[P]** A per-message toggle can switch expansion on. **Open/unbuilt**: the built output-expansion option is account-wide (ARCHITECTURE §10); Edit/Write has no per-message macro-mode control.
+- **[P]** Expansion therefore depends on where text came from, and model text stays verbatim when it's sent back in later turns. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §10, §15).
 
 ---
 
 ## 6. Presets: scope and overlays
 
 ### 6.1 Scope
-- **[D]** A preset isn't global, but it isn't obvious what it belongs to.
-- **[P]** Inheritance chain: app default → default for the chat kind (RP or workshop) → chat → per-role override (narrator, character agent, summarizer) → card overlays and per-turn conditions.
-- **[P]** The composer strip shows the active preset and where it comes from. Changing it uses the same scope prompt as card edits. A preset switch is a state event.
+- **[D]** A preset isn't global, but it isn't obvious what it belongs to. **Overtaken** for ordinary RP by the owner’s global-default decision below (2026-10-27).
+- **[P]** **Overtaken**: Ordinary RP uses the owner’s global model/preset defaults below; per-chat preset changes were rejected. Workshop/per-agent configuration remains Phase 6 work, and an explicit chat lock remains open. Earlier wording: “Inheritance chain: app default → default for the chat kind (RP or workshop) → chat → per-role override (narrator, character agent, summarizer) → card overlays and per-turn conditions.”
+- **[P]** **Overtaken**: The built composer bar selects account-global defaults and shows their source (ARCHITECTURE §12, §15); ordinary preset selection is not a positional state event (§6.1 owner decisions). Earlier wording: “The composer strip shows the active preset and where it comes from. Changing it uses the same scope prompt as card edits. A preset switch is a state event.”
 
 - **[D]** (owner, 2026-10-27) **A preset is global by default**: chats and forks don't own one. Which preset is right usually depends on the model.
 - **[D]** **Presets and models (connections) are separate by default**: switching either is easy and doesn't touch the other. ST links them (switching model switches to whatever preset was last used or saved with it), which is extremely confusing: having switched or edited your preset, moving the same work from OpenRouter to the OpenAI API changes the preset without you noticing.
@@ -397,7 +403,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** The current preset and model are switched from the composer bar, one click each, their settings opening in the right panel; space in the bar is a concern with everything else there (owner, 2026-10-27).
 
 - **[D]** Model settings move out of the preset into the model/connection settings: samplers and much more (owner, 2026-10-27).
-- **[P]** The split: **the model's settings** are what depends on the model or provider: samplers (temperature, top-p/k, min-p, penalties, seed, logit bias), context window and response length, reasoning or thinking effort, stop strings, streaming, caching options, provider routing, how roles go on the wire (system role support, squashing, names), the image limit, and whether prefill is supported. **The prompt preset** keeps what is written: its prompts, their order, roles and positions, the "Newest message" marker, the prompts used only in certain moments (impersonation, group nudge, continue), the prefill text, and its regex scripts.
+- **[P]** The split: **the model's settings** are what depends on the model or provider: samplers (temperature, top-p/k, min-p, penalties, seed, logit bias), context window and response length, reasoning or thinking effort, stop strings, streaming, caching options, provider routing, how roles go on the wire (system role support, squashing, names), the image limit, and whether prefill is supported. **The prompt preset** keeps what is written: its prompts, their order, roles and positions, the "Newest message" marker, the prompts used only in certain moments (impersonation, group nudge, continue), the prefill text, and its regex scripts. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §6, §9, §14).
 - **[D]** What ST calls a "preset" bundles three things the app keeps apart: the **prompt preset**, the **model (LLM) settings**, and **connection settings** with the model name (owner, 2026-10-27). An ST preset JSON (shared and imported by hand) can contain all three, so there are three import surfaces, each taking the parts it applies to.
 - **[D]** The ST folder import takes the prompt presets (every chat-completion preset file; ST's selected one becomes the default) and **neither model settings nor connections** (owner, 2026-10-27). Keys are never read (`secrets.json`). Model settings can still be taken from one preset file by hand through the model-settings import surface.
 
@@ -414,18 +420,18 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **[D]** Messages, swipes and branches are restored in place: deleting marks them, so restoring puts them back exactly where they were, with their versions. The bin entry also records where an item came from and a preview, so its text can be copied out instead.
   - **[D]** Permanently deleting a chat or an entity removes it. Permanently deleting a message or branch erases its content but keeps an empty placeholder, so the conversation's structure and any summaries over it stay valid.
   - **[D]** Default capacities: 10,000 deleted items or 2 GB; 2,000 recovered texts or 200 MB. Large enough that most users never reach them; configurable. **Built U13:** account capacities and UI; ARCHITECTURE §3.11. (These three confirmed by the owner, 2026-10-10.)
-  - **[P]** Eviction never deletes the item a delete just made. If deleting everything else that can go still wouldn't bring the section within its limits (one item bigger than the whole section, or old items that fail to delete), nothing is evicted: the delete goes through and the bin stays over capacity rather than one delete emptying it. Later deletes or emptying the bin bring it back within its limits.
+  - **[P]** Eviction never deletes the item a delete just made. If deleting everything else that can go still wouldn't bring the section within its limits (one item bigger than the whole section, or old items that fail to delete), nothing is evicted: the delete goes through and the bin stays over capacity rather than one delete emptying it. Later deletes or emptying the bin bring it back within its limits. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.11).
 - **[D]** **The composer belongs to a branch** (owner, 2026-10-10):
   - Each chat, and each branch within it, has its own composer.
   - A half-typed message waits where it was left, even months later, while other chats and branches show their own.
   - Starting a branch copies the current composer into it.
   - Switching between existing branches doesn't carry text along: moving text to another branch or chat is copy and paste, which is simpler than a composer that follows you around.
-- **[P]** Anything appended at a branch's tip, such as a model reply, carries that branch's composer forward to the new tip, so text typed meanwhile stays in view.
+- **[P]** Anything appended at a branch's tip, such as a model reply, carries that branch's composer forward to the new tip, so text typed meanwhile stays in view. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.10, §12). Composers now belong to stable forks; append advances the tip without moving the draft.
 - **[D]** Drafts and field-level undo history are **persisted on the server** for every text field. That protects against Ctrl-A plus a stray key and survives refreshes, closing the tab and switching devices. **Built for U02/U05**: both summarization instructions, non-secret connection/model forms, pending-chat prose and the short creation/rename forms; implementation and remaining live-subscription limit: ARCHITECTURE §3.10. The broader requirement still applies to other text surfaces.
 - **[D]** The undo history only lives while a draft is being written. A commit ends it: the committed text is preserved in a version or revision, and history tables must not grow indefinitely (owner, 2026-10-10).
 - **[D]** A bad save can lose hours of typing in any field (a card, a preset), whatever happened to the previous version. So when a draft is committed, the text from before **each** destructive change in that session goes to the bin's recovered-text section, and a discarded draft goes there too (owner, 2026-10-10).
-- **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action.
-- **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state.
+- **[P]** Creating versions or named revisions needs an explicit commit, and a commit is a clear action. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12, §14).
+- **[P]** Every write carries the revision it was based on, so a stale tab can never silently overwrite newer state. **Built optimistic bases** (ARCHITECTURE §3.10, §14); compound forms retain documented snapshots and setting-save/draft-end operations are separate. This is not universal live field collaboration.
 - **[D]** Search, and search and replace, everywhere: preset prompts, cards and chats.
 - **[D]** Text boxes work like a code editor (owner, 2026-10-16), and almost every text box needs it:
   - the left edge marks new, modified and unchanged lines
@@ -444,10 +450,10 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - Explicit Save with the diff of every changed prompt; revisions.
   - **The editor overlays the centre column**, as ST's does: it never navigates to another page, so editing the preset while chatting stays convenient.
   - The right panel's Preset tab has the on/off switches and token counts, and **Edit on each block**, which opens the editor overlay scrolled to that prompt. A switch flipped there is an edit of the (global) preset and shows Save.
-- **[O]** Token counts per prompt for the current chat: ST updates them only after a message is sent with the preset. Whether to update them continuously is open.
+- **[O]** Token counts per prompt for the current chat: ST updates them only after a message is sent with the preset. Whether to update them continuously is open. **Partial**: raw text estimates update while typing and expanded/marker counts refresh from the committed context without a send (ARCHITECTURE §14, §15). Debounced assembly of unsaved preset drafts remains open/unbuilt.
 
 ### 6.3 Per-card preset overlays
-- **[P]** Prompt toggles or replacements attached to a card (or a card within one chat), applied when the card is present or speaking. The owner's example: "you may impersonate" for a narrator card. Cache cost is shown when an overlay changes text above the tail.
+- **[P]** Prompt toggles or replacements attached to a card (or a card within one chat), applied when the card is present or speaking. The owner's example: "you may impersonate" for a narrator card. Cache cost is shown when an overlay changes text above the tail. **Partly superseded** by prompt conditions and visible Main/post-history card overrides (§2.2, §5.0), with per-chat preset changes rejected (§6.1). A separate general per-card overlay editor is unbuilt; broader agent/card policies remain Phase 4/6 work.
 
 ---
 
@@ -459,9 +465,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **a single agent per turn with all cards loaded** (reference-harness's way, the most cache-friendly)
   - **one agent per character**, with its own system prompt and only its own card. It speaks only for itself and sees history only for the periods it was present. This turns the model from a narrator into an agent acting for its character, and scales to many characters. It's not the owner's usual choice.
   - plain ST-like non-agentic generation
-- **[P]** A mode decides three things: who runs on a turn, what each agent sees, and how output is committed.
+- **[P]** A mode decides three things: who runs on a turn, what each agent sees, and how output is committed. **Partial**: execution/planning/commit registries host plain replies and summary strategies (ARCHITECTURE §6, §15, §16); general agent orchestration remains Phase 4 work.
 - **[D]** Per-agent private state (notes, memories) hidden from other agents **[L]**. Getting agents to actually use such tools is the hard part. Follow reference-harness's rule that how an agent is prompted to use a tool is designed as carefully as the tool.
-- **[P]** With presence-limited views, summary chunks are cut at presence boundaries so they can be shared wherever views overlap.
+- **[P]** With presence-limited views, summary chunks are cut at presence boundaries so they can be shared wherever views overlap. **Unbuilt Phase 4 proposal.**
 
 ### 7.2 Output contracts
 - **[D]** Support both: capturing the final assistant text, and an explicit `send_message` call. Agentic models produce intermediate blocks that aren't the final output, and weaker models don't use `send_message` reliably.
@@ -471,31 +477,31 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 
 ### 7.3 Rollouts as versions
 - **[D]** Because the rollout is separate from the timeline, regenerating creates a new rollout and therefore a new version.
-- **[P]** Tool effect classes (reference-harness has a version of this in `tools/side-effects.ts`):
+- **[P]** Tool effect classes (reference-harness has a version of this in `tools/side-effects.ts`): **Unbuilt Phase 4 toolset**; version-attached state is a built foundation (ARCHITECTURE §3.8).
   - **read-only:** lore lookup, summary expansion, search. Freely regenerable.
   - **chat state:** notes, presence, private memory. State events attached to the version, so swiping reverses them.
   - **chat state** also covers edits to this chat's copy of a card and to notes, within what the user marked editable (§4.1a).
   - **external or global:** library card edits (the card everywhere), settings, plugin edits. Regenerating warns first, and these tools aren't offered in RP turns.
 
 ### 7.4 Display
-- **[D]** Reasoning, steps and intermediate output stream **live and expanded by default**, then collapse when the final message arrives. If the user collapses or expands them during a run, that becomes the sticky preference (stored per user **[P]**).
+- **[D]** Reasoning, steps and intermediate output stream **live and expanded by default**, then collapse when the final message arrives. If the user collapses or expands them during a run, that becomes the sticky preference (stored per user **[P]**). **Partial**: streamed reasoning and per-account preference are built (ARCHITECTURE §12, §14); general multi-step agent timelines remain Phase 4 work.
 - **[D]** Rollout steps expand **inline**, as a collapsed "N steps" element inside the message version they belong to, the way coding harnesses do it. (A side-panel rollout timeline was rejected for space reasons.)
 - **[D]** **Run inspector** (side panel or full view): the exact assembled context of *that specific run*, presented readably from system blocks through summaries to the chat, as in reference-harness's console.
   - **[D]** (owner, 2026-10-28; PHASE1-DECISIONS §1) From any generated message or swipe, old ones included, a button opens the exact request that produced it. What was sent is stored, never reconstructed from references. Every part records what it is and where it came from (preset prompt, card and field, note, lorebook and entry, history message and version, the added closing user turn, summary blocks). One block per turn, titled boxes for the parts, all prompt text verbatim and the inspector's own labels unmistakable from it, readable at 1440 and 390, light and dark; prompts and notes skipped by their condition show as "not sent".
-- **[P]** A badge on the message header shows the step count and time, and nothing for plain generations. Rollouts attach to versions, not to positions between messages.
-- **[P]** Rollouts that produce no message (summaries, jobs, decision calls) appear in an **activity panel** with cost and token use.
+- **[P]** A badge on the message header shows the step count and time, and nothing for plain generations. Rollouts attach to versions, not to positions between messages. **Unbuilt** general agent-step badge (Phase 4); this does not assert the in-flight per-reply time/token work is built.
+- **[P]** Rollouts that produce no message (summaries, jobs, decision calls) appear in an **activity panel** with cost and token use. **Partial**: ordinary notifications, usage totals and LCM job rows are built (ARCHITECTURE §6, §12, §16); per-summary model/cost access and a general activity panel remain unbuilt.
 
 ### 7.5 Resuming
 - **[D]** Resume a stopped or broken rollout mid-way **without sending another turn and without the model being able to tell**. reference-harness does this; most coding harnesses don't.
-- **[P]** As in reference-harness (`src/agent/recovery.ts`):
+- **[P]** As in reference-harness (`src/agent/recovery.ts`): **Unbuilt Phase 4 recovery proposal**; a frozen plain-reply request and text Continue do not implement agent reseeding.
   - a frozen context snapshot is taken when the rollout starts
   - the transcript is flushed as each turn completes
   - on failure, synthetic error messages and partial turns are stripped and a fresh agent is reseeded
-- **[P]** Interruption policies:
+- **[P]** Interruption policies: **Unbuilt Phase 4 proposal.**
   - after a tool call but before its result: re-run the tool
   - midway through a tool call: discard it and resample
   - midway through text: continue it through prefill where supported, otherwise discard it
-- **[P]** Any step of a rollout can be edited before resuming.
+- **[P]** Any step of a rollout can be edited before resuming. **Unbuilt Phase 4 proposal.**
 
 ### 7.6 Decision models
 - **[D]** Jev and similar decision models are integrated as in reference-harness (`spec/DECISION-MODEL.md`), but are **never mandatory**. Each decision point has a heuristic fallback.
@@ -503,18 +509,18 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ### 7.7 Agent use ("workshop")
 - **[D]** Agentic work outside the RP itself: creating cards with tools, editing and cloning them, changing settings, setting up chat modes, eventually writing plugins.
 - **[D]** It needs a **clear UX distinction** within one shared UI, and it must be hard to slip into "Claude Code mode" from RP by accident. It ships preconfigured with an agent preset and a default assistant card the user can swap for any of their own.
-- **[P]** Technically it's a chat configuration made of:
+- **[P]** Technically it's a chat configuration made of: **Unbuilt workshop configuration (Phase 6)**; registry/state groundwork is not a running workshop.
   - an output contract that allows several messages
   - **rollout continuity**: fork fresh per turn, or **resume the previous rollout** **[D]** (the timeline stays separate either way)
   - the meta toolset
-- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip.
-- **[P]** An out-of-character side channel attached to an RP chat: a small workshop docked in a panel that can read the story but writes to its own timeline.
-- **[P]** Permissions:
+- **[P]** The chat kind (RP or Workshop) is chosen at creation and can't be toggled afterwards. Workshops have a distinct accent, a badge and a capability strip. **Unbuilt Phase 6 proposal.**
+- **[P]** An out-of-character side channel attached to an RP chat: a small workshop docked in a panel that can read the story but writes to its own timeline. **Unbuilt Phase 6 proposal.**
+- **[P]** Permissions: **Unbuilt tool/plugin consent UX (Phase 6)**; imported data already cannot grant executable capabilities.
   - tools with external effects need approval
   - installing a plugin always needs confirmation
   - **[D]** Content the user loads (a card, a preset) is effectively their own prompt. If it steers the agent, that's user error, not our vulnerability. Agent capabilities don't depend on where content came from, because defending against the user's own prompt would hamstring the agent (owner, 2026-10-11).
-  - **[P]** Import formats never carry capability grants: a card or preset file's own fields can't enable tools, plugins or permissions (Marinara's bug, §11). The user turns those on.
-- **[P]** Every UI action is a typed server operation, so that later it can be exposed as an agent tool.
+  - **[P]** Import formats never carry capability grants: a card or preset file's own fields can't enable tools, plugins or permissions (Marinara's bug, §11). The user turns those on. **Built boundary** (ARCHITECTURE §8–§11); workshop capability/approval controls remain Phase 6 work.
+- **[P]** Every UI action is a typed server operation, so that later it can be exposed as an agent tool. **Built authenticated typed operation foundation** (ARCHITECTURE §2); uploads and cookie login also use HTTP. Exposing these as workshop tools is Phase 6 work.
 
 ---
 
@@ -545,7 +551,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** **Refusal detection** is needed on this surface, so a refusal is never saved as a summary. reference-harness has one, which may need refining for our cases later. Refusal detection is useful for every message, not only summaries (owner, 2026-10-12).
 
 - **[D]** The summary divider and the summary panel have a toggle for what the timeline shows before the summary line: the original messages, or the summaries themselves in the chat. It can be switched at any time, including while previewing a search and replace (owner, 2026-10-26). It is saved per account: the toggle belongs to the chat viewer itself, not to the chat or anything about it (owner, 2026-10-26).
-- **[P]** "Summaries in the chat" shows the layer the model actually reads, in path order, each in place of the messages it covers, with its level and range; each expands to its messages (a level above 1 to the summaries it condenses). So the timeline can show exactly what the model sees.
+- **[P]** "Summaries in the chat" shows the layer the model actually reads, in path order, each in place of the messages it covers, with its level and range; each expands to its messages (a level above 1 to the summaries it condenses). So the timeline can show exactly what the model sees. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16).
 
 - **[D]** (owner, 2026-10-27) The owner's actual ST method is the "Sum2" Quick Reply: pick a message range, hide everything outside it, generate **with the full preset** and an instruction ("Pause your roleplay. Context usage has reached a critical level… If there is already a summary, your new summary should start where the previous one stopped…"), unhide, post the result. ST's Summarize extension offers the same choice: "Classic" (full context plus the instruction, optionally without lorebook and Author's Note) or "Raw" (the instruction as system prompt plus the messages).
 - **[D]** Catching up a chat that has no summaries is done up front; the main cost is reading the context (owner, 2026-10-27).
@@ -564,38 +570,38 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - when it runs: with the next reply, or right after one while the cache is warm;
   - under Advanced: chunk size and summary length.
   - Rejected: a manual "summarize up to here". The point is automation, and it can't work with several levels.
-- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. The preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it.
+- **[P]** Imported ST summaries are plain notes: "Summary (from ST)", switched on if ST was sending it (injected or through `{{summary}}` in the active preset), controlled only by its switch. The preset editor marks each `{{summary}}` with what it fills in, and the note says the preset includes it. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §13, §16).
 - **[D]** Default sizes (owner, 2026-10-28): recent messages target 12,000 and maximum 20,000 tokens; the summaries target 14,000 and maximum 18,000. Summaries cover unbounded history and recent chat grows faster, so recent messages get the wider gap. Chats that never changed the sizes they copied follow the new defaults; sizes a user set stay.
 - **[D]** Summaries are **separate blocks placed like the chat history**, usually just before it, so a new summary never invalidates the ones before it. `{{summary}}` exists only for an imported ST chat's single summary note text: it inserts the chat's switched-on summary notes, never the summaries (owner, 2026-10-28, correcting the build, where `{{summary}}` held the summaries).
 - **[D]** A summary request doesn't send the chat's notes: the current notes may describe events after the summarized range. A setting "include notes in summary requests", per chat over the account default, is **off by default**. A snapshot of the notes at the cutoff may come later (owner, 2026-10-28).
 - **[D]** Switching summarization on in a chat with an imported ST summary note switches the note off in the same step, visibly on the note; the user can switch it back on, and the note then says it's also sent beside the summaries (owner, 2026-10-28).
-- **[P]** The summary length is set in tokens and the instruction asks for it in words, about 0.75 words per token: models follow word counts more reliably (PHASE1-DECISIONS §5 default).
-- **[P]** An ST chat whose Summarize extension was disabled imports its summary note switched off, since ST sent nothing (PHASE1-DECISIONS §5 default: keep).
-- **[P]** Lowering a maximum to its target or below lowers the target with it, at the same share of the maximum, and says so (PHASE1-DECISIONS §7.33).
+- **[P]** The summary length is set in tokens and the instruction asks for it in words, about 0.75 words per token: models follow word counts more reliably (PHASE1-DECISIONS §5 default). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16).
+- **[P]** An ST chat whose Summarize extension was disabled imports its summary note switched off, since ST sent nothing (PHASE1-DECISIONS §5 default: keep). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §13, §16).
+- **[P]** Lowering a maximum to its target or below lowers the target with it, at the same share of the maximum, and says so (PHASE1-DECISIONS §7.33). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16).
 
 ### 8.1 Imported summaries
 - **[D]** Importing a chat also imports its summary, if it has one. **This is required before the owner starts using the harness** (owner, 2026-10-12).
 - **[D]** The custom single-field summary is kept in its own field, even where LCM makes it technically obsolete. A chat that already has a summary keeps it.
 - **[D]** When a chat has a run of messages hidden continuously from message 0, and a summary covering them, the summary can act as an L1 summary over those hidden messages.
 - **[D]** LCM is **not enabled by default** on imported chats, but enabling it is easy and obvious. On enabling it, the user chooses: keep the summary as the L1 covering that range, or redo LCM from scratch. Either way, the summary stays in its own field.
-- **[O]** Details to work out (owner, 2026-10-12):
+- **[O]** Details to work out (owner, 2026-10-12): **Answered/built** (ARCHITECTURE §13, §16): `extra.memory` and extension settings, continuous-hidden-run coverage, note placement, enable/adopt/backfill UI; obsolete as an implementation question.
   - where ST keeps the summary (its Summarize extension stores it on messages, `extra.memory`, with injection settings in `extension_settings.memory`)
   - how "covering the hidden run" is detected
   - how the summary is placed in the context before LCM is enabled (proposed: as ST placed it, so an imported chat sends what ST sent)
   - what the UI shows
 - **[D]** **Semi-background idle-time jobs:** run LCM work in the gap after a reply, while the cache is still warm, which also refreshes it (depending on settings and provider).
-- **[P]** Summaries cover **path segments**, so threads and branches share summaries up to their fork.
-- **[P]** Editing a message already covered by a summary marks that summary stale and re-summarizes it lazily. Mechanical edits such as renames are applied to the summaries directly.
+- **[P]** Summaries cover **path segments**, so threads and branches share summaries up to their fork. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16). Shared immutable material has per-fork selections, freshness and jobs; multi-parent thread UX is still later work.
+- **[P]** Editing a message already covered by a summary marks that summary stale and re-summarizes it lazily. Mechanical edits such as renames are applied to the summaries directly. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.13, §16).
   - **[D]** Re-summarizing is never triggered by the edit itself: an edit or swipe must not start a generation. If it's automatic, it runs with the next reply (owner, 2026-10-13).
-  - **[O]** How branches, forks and edits interact with shared summaries has to be worked out from what the user sees and expects, not only from what's correct (owner, 2026-10-13). So does how the UI shows which summary covers which messages, and where "re-summarize" lives.
+  - **[O]** How branches, forks and edits interact with shared summaries has to be worked out from what the user sees and expects, not only from what's correct (owner, 2026-10-13). So does how the UI shows which summary covers which messages, and where "re-summarize" lives. **Answered by later owner rules** (§3.4, §10.3) and built per-fork summary selections, revisions, range/rail views and rerun controls (ARCHITECTURE §16); owner UX acceptance remains unverified.
 - **[D]** A summary that fails (for example, the model keeps refusing) leaves the original messages in the context for as long as they fit; no placeholder replaces them until there's no room (owner, 2026-10-13).
 - **[D]** LCM is on by default for new chats (owner, 2026-10-13). Imported chats stay off by default, as above.
 - **[D]** Both summarizer styles are supported: the reply itself is the summary (direct output, which chat-only models without tool calling need), or the model writes it through tools as reference-harness does (owner, 2026-10-12 and 2026-10-13).
-- **[P]** Summaries are **editable**, with versions.
+- **[P]** Summaries are **editable**, with versions. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §16).
 - **[D]** Memory retrieval of *some* sort will be a feature. LCM is already a form of RAG (owner, 2026-10-10).
 - **[D]** Assume vector search will exist somewhere eventually. Plain embedding search over all messages is of doubtful value on its own (owner, 2026-10-10). sqlite-vec already covers vector search, but only by brute force; an indexed ANN search is a benefit of alternatives such as Turso, not a requirement.
-- **[P]** Search tools combine full-text and vector results with reciprocal rank fusion (RRF). reference-harness's memory retrieval (`spec/MEMORY-RETRIEVAL.md`) and its RRF evaluations are the baseline.
-- **[D]** The UI shows where verbatim context ends and which summaries stand in for older history. **[P]** Three layers:
+- **[P]** Search tools combine full-text and vector results with reciprocal rank fusion (RRF). reference-harness's memory retrieval (`spec/MEMORY-RETRIEVAL.md`) and its RRF evaluations are the baseline. **Unbuilt** vector/embedding/RRF retrieval proposal; FTS history search is built (ARCHITECTURE §3.13), not this Phase 4 retrieval tool.
+- **[D]** The UI shows where verbatim context ends and which summaries stand in for older history. **[P]** Three layers: **Built** all three proposed surfaces (ARCHITECTURE §12, §15, §16).
   1. an always-on **boundary divider** in the stream, which opens the current summaries
   2. an optional **coverage rail** next to the messages, with bars per summary by level, stale marks, and click to open
   3. the **context view**: the exact assembled request with token counts and cache breakpoints, plus "the context this message was generated from" for each message
@@ -607,11 +613,11 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** No ST-style connection profiles. **A connection is one wire type, one provider and one set of settings.** You switch models within a connection; otherwise you switch connections.
 - **[D]** Every provider type has an **overridable base URL**. No special "proxy" concept; a provider's native model picker stays whatever the address.
 - **[D]** Model lists are fetched from the configured upstream. Users can add and edit models for every provider type.
-- **[P]** User-added and edited models have capability fields: context length, reasoning, prefill support, cache mode, TTL (like reference-harness's `compat` flags).
+- **[P]** User-added and edited models have capability fields: context length, reasoning, prefill support, cache mode, TTL (like reference-harness's `compat` flags). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §6).
 - **[D]** No coupling between presets and connections, except an optional one-way "preset override" field on a connection.
-- **[P]** Model choice is a (connection, model) pair, inherited through the same kind of chain as presets but completely separate from them. The summarizer can have its own model.
-- **[P]** Several connections of the same type are allowed.
-- **[P]** API keys are write-only: stored on the server and never sent back to the browser.
+- **[P]** Model choice is a (connection, model) pair, inherited through the same kind of chain as presets but completely separate from them. The summarizer can have its own model. **Partial/overtaken**: pair and independent selection built (ARCHITECTURE §6, §15); the inherited chain is superseded by §6.1’s global defaults. A dedicated steady summarizer-model control remains open, explicitly deferrable under §8; retry/fallback is built.
+- **[P]** Several connections of the same type are allowed. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §6).
+- **[P]** API keys are write-only: stored on the server and never sent back to the browser. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.12, §6).
 - **[D]** Keys are stored once as credentials that connections share, and are sent only to the hosts they were entered for. Moving a key to a new host takes typing it again. Keys are protected more than chats because they have economic value: easy key theft makes the frontend worth attacking, as with ST (owner, 2026-10-11).
 - **[D]** Most settings are configurable from inside the app, so the user's agent can change them. Security settings are the exception, changeable only from outside (environment or config); host binding for keys is the first (owner, 2026-10-11).
 - **[D]** A provider kind is an upstream API as that upstream defines it, endpoints included. The base URL moves the whole API; there are no per-endpoint URLs (owner, 2026-10-10).
@@ -621,7 +627,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** An admin can force the instance proxy on everyone, so non-admins can't send requests direct from the admin's machine and IP (owner, 2026-10-11).
 - **[D]** Every LLM request is tracked: uncached input, cache reads, cache writes and output, normalized across providers' reporting quirks. Cost is computed from that by formulas: built in for every supported provider, overridable by users, conditional on model, upstream and context size, with a currency label that's only for display (owner, 2026-10-10). **Built (U12, 2026-10-28):** per-user declarative rates, conditions, context tiers and currency labels; implementation in ARCHITECTURE.md §6.
 - **[D]** Later, and deliberately small: connections an admin shares with all or chosen users. Their URL, key and proxy stay hidden; the admin can optionally restrict their models; per-user cost limits are optional. Connections are per user by default (owner, 2026-10-10).
-- **[P]** The provider layer's design is in [PROVIDERS.md](PROVIDERS.md).
+- **[P]** The provider layer's design is in [PROVIDERS.md](PROVIDERS.md). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §6). General agent-loop integration remains Phase 4 work.
 
 ---
 
@@ -633,11 +639,11 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 - **[D]** **Multiple tabs work from day one**, e.g. comparing an old branch in another tab. In-app side-by-side panels come later.
 - **[D]** Any number of generations can run at once across chats. You can read or send in another chat while one is generating.
 - **[D]** **Nothing is locked during generation.** (ST can't even show group members' cards while generating.)
-- **[P]** A running generation uses the context snapshot taken when it started.
+- **[P]** A running generation uses the context snapshot taken when it started. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15).
 - **[D]** Notifications when something finishes elsewhere, like a chat client: badges, plus the tab title and favicon, with optional sound. **Built U14:** browser-local opt-in completion sound; ARCHITECTURE §12. **[P]** Web push for phones.
-- **[P]** The server owns all state. Clients subscribe over a WebSocket. Writes are per entity with a version check, and no client ever writes back a large settings blob.
+- **[P]** The server owns all state. Clients subscribe over a WebSocket. Writes are per entity with a version check, and no client ever writes back a large settings blob. **Built foundation** (ARCHITECTURE §2, §3.10, §12); live subscriptions do not cover every open authored-setting draft and compound forms retain their documented snapshot limits.
 - **[D]** **Separate users**, each with their own library, chats, connections and settings, as in ST's multi-user mode.
-- **[P]** Authentication: works behind a reverse proxy that handles auth, such as Authelia, plus built-in login. Proxy identities map to users.
+- **[P]** Authentication: works behind a reverse proxy that handles auth, such as Authelia, plus built-in login. Proxy identities map to users. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §4).
 - **[D]** Built-in login (owner, 2026-10-11):
   - **No sign-up:** accounts are created for people, not by them.
   - **No account, no login:** on loopback, the app works without setting up an account. Most people will use it this way.
@@ -649,40 +655,42 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
   - **The first password** can be set from inside the app, over that passwordless access. (The owner first said there'd be no separate bootstrap mechanism. Their headless-server requirement, below, needs one.)
 - **[D]** No cap on how long a proxy-mode connection keeps its identity: logging out of the proxy needn't end an open tab, because the app isn't used on shared computers (owner, 2026-10-11).
 - **[D]** Headless servers (owner, 2026-10-11): an instance on a server, for example in Docker, must be configurable without browser access to its loopback, and without an SSH tunnel. The typical user still just starts it and uses it on localhost, with nothing to configure.
-- **[P]** For that, an environment variable sets the first admin's password: `ADMIN_PASSWORD_FILE` (a Docker secret) or `ADMIN_PASSWORD`, with an optional `ADMIN_USER`. It only applies while no enabled admin has a password, so a password changed in the app is never overwritten, and an instance whose admins can't log in can be recovered. The server then counts as protected, and can listen beyond loopback without an allowlist.
+- **[P]** For that, an environment variable sets the first admin's password: `ADMIN_PASSWORD_FILE` (a Docker secret) or `ADMIN_PASSWORD`, with an optional `ADMIN_USER`. It only applies while no enabled admin has a password, so a password changed in the app is never overwritten, and an instance whose admins can't log in can be recovered. The server then counts as protected, and can listen beyond loopback without an allowlist. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §4).
 
 ### 10.2 Rendering
 - **[D]** HTML rendering must be possible (ST's HTML "games"). Interactivity will be expanded later, once the harness is agentic.
 - **[D]** Per-turn HTML makes the context explode, so recent and older messages need to be shown differently.
-- **[D]** Message text renders as ST renders it (owner, 2026-10-29; ST 1.19 `messageFormatting`): text in double quotes ("…", “…”, «…», 「…」, 『…』, ＂…＂, not inside code) in the quote colour, `*italics*` in the italics colour (italics inside a quote keep the quote colour), `__text__` underlined in the underline colour, single line breaks kept as line breaks, and unclosed Markdown fixed on every message. The four colours (main text, italics, underline, quote) are theme colours with ST's defaults (adjusted to read well in the light theme), and the user can change them in display settings.
-- **[D]** Copying selected message text copies the raw text underneath, not the rendered form (owner, 2026-10-30): selecting a rendered italic or quoted passage and copying it gives its `*…*` and quotes as written, so it pastes back as the same message text. The copy is exactly the stored text from where the selection starts to where it ends: a selection that starts inside a span and stops before its end copies the opening mark without a closing one.
+- **[D]** Message text renders as ST renders it (owner, 2026-10-29; ST 1.19 `messageFormatting`): text in double quotes ("…", “…”, «…», 「…」, 『…』, ＂…＂, not inside code) in the quote colour, `*italics*` in the italics colour (italics inside a quote keep the quote colour), `__text__` underlined in the underline colour, single line breaks kept as line breaks, and unclosed Markdown fixed on every message. The four colours (main text, italics, underline, quote) are theme colours with ST's defaults (adjusted to read well in the light theme), and the user can change them in display settings. **Built W3** (ARCHITECTURE §14); HTML remains deferred below.
+- **[D]** Copying selected message text copies the raw text underneath, not the rendered form (owner, 2026-10-30): selecting a rendered italic or quoted passage and copying it gives its `*…*` and quotes as written, so it pastes back as the same message text. The copy is exactly the stored text from where the selection starts to where it ends: a selection that starts inside a span and stops before its end copies the opening mark without a closing one. **Built fcopy** (2026-10-30; ARCHITECTURE §14).
 - **[D]** HTML in messages is deferred, not dropped: it's required, but the owner doesn't use it yet, so it isn't part of the pre-Phase-4 fixing (owner, 2026-10-29). Until then raw HTML shows as text.
 - **[P]** Model-generated HTML renders only in a **sandboxed iframe**: no same-origin access, ideally a separate origin, a strict CSP, and a narrow `postMessage` bridge to the harness. This follows AIRI's CVE-2025-59053, where card text rendered as HTML led to RCE through Tauri IPC.
-- **[P]** Ordinary messages get sanitized markdown.
+- **[P]** Ordinary messages get sanitized markdown. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §14).
 - **[P]** Each version has a **display form** and a **context form**: recent turns send the rich form, older ones the compact form (reference-harness's rich/compact split).
 - **[L]** Template-bound UI: a persistent "stage" or widget whose state the model updates through tools, so only small state changes enter the context.
 
 ### 10.2a Image input (vision)
 
-**Built (U15/U16/U22; obsolete as an implementation proposal):** ARCHITECTURE §§12, 16 describe version-owned uploads, direct attachment input, server-backed attachment drafts, thumbnails/full-size viewing, reply and summary transport and text-only refusal. Image token/cache estimates remain unimplemented. The [P] choices below retain their status.
+**Built (U15/U16/U22; obsolete as an implementation proposal):** ARCHITECTURE §§12, 16 describe version-owned uploads, direct attachment input, server-backed attachment drafts, thumbnails/full-size viewing, reply and summary transport and text-only refusal. Image token and cache estimates are built (ftok, 2026-10-30; ARCHITECTURE §6, §15). The [P] choices below retain their status.
 - **[D], built (U15/U16)** Users can attach images to their messages, as in any chat interface, and vision models see them (owner, 2026-10-10). It's rarely used in RP, but it must work well and feel integrated. The owner's case: sending drawings to a card-making chat as the source for character and costume designs.
 - **[D], built (U16)** Attaching is direct: drag and drop onto the composer or the chat, paste from the clipboard, and a picker button. ST's "find the right button in a submenu" is the anti-pattern.
 - **[D], built (U15)** No captioning by another model for text-only models, for now. There's no clear reason to send an image to a text-only model in this app.
-- **[P], version ownership/API and thumbnail/viewer built (U15/U16)** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
+- **[P], built (U15/U16, completed by fimg; ARCHITECTURE §12)** Attachments belong to the version, so editing or writing a new version can keep, add or remove them. Thumbnails show inline in the message, and a click opens a full-size viewer.
 - **[P], built (U15/U16)** When the chosen model has no vision capability, the composer and the request preview say so before sending, so images are never silently dropped ("Nothing changes silently").
-- **[D]** Images are context like anything else, so their token cost and cache effect show in the context view, and the estimate is accurate on every provider (owner, 2026-10-30, non-negotiable; replaces the [P]): image tokens are part of the prompt.
-- **[D]** Editing a message can keep, add or remove its images (owner, 2026-10-30). Outside the editor, hovering an image shows a button in its corner that takes it out of the context or puts it back; an image taken out keeps that button visible, in its toggled state. An image the app leaves out by a rule (the last-N limit, a model without vision, a summarized range) shows the same button toggled and disabled, and hovering the image says it isn't sent to the model and why.
+- **[D]** Images are context like anything else, so their token cost and cache effect show in the context view, and the estimate is accurate on every provider (owner, 2026-10-30, non-negotiable; replaces the [P]): image tokens are part of the prompt. **Built ftok** (2026-10-30; ARCHITECTURE §6, §15): counted/formula/calibrated estimates and explicit unknowns, not a claim of verified exact counts on every API.
+- **[D]** Editing a message can keep, add or remove its images (owner, 2026-10-30). Outside the editor, hovering an image shows a button in its corner that takes it out of the context or puts it back; an image taken out keeps that button visible, in its toggled state. An image the app leaves out by a rule (the last-N limit, a model without vision, a summarized range) shows the same button toggled and disabled, and hovering the image says it isn't sent to the model and why. **Built fimg** (2026-10-30; ARCHITECTURE §12): version-owned image editing and fork-local context toggles, with disabled rule exclusions and reasons.
 - **[D], built (U22)** Older images: the summarizer sees the images in the range it summarizes, so the summary can describe them, and they leave the context together with the messages that range covers (owner, 2026-10-13).
-- **[D], built (U15/U22)** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one.
+- **[D], built (U15/U22)** **Every request carries at most the last N images**, N configurable, because many models have a hard limit (Xiaomi MiMo: 4). This applies everywhere images go to a model: replies, summaries and anything else (owner, 2026-10-13). **[P]** N is set per model, with a default from the model catalog where it states one. **Built [P]** per-model cap/catalog defaults (ARCHITECTURE §6, §12, §16).
+
+- **[P], built ftok (2026-10-30)** Builder choices: prefer an exact provider count, then a registered model/provider formula, then usage-ledger calibration, then an explicit unknown. With no recorded dimensions, calibration can be used directly. Unknown images reserve a documented bound or 1,024 tokens for budgeting; unknown is never presented as zero. Exact counting runs asynchronously after a send or model change for images in the open chat’s next context, rather than on attachment; sending does not wait (ARCHITECTURE §6, §15). These choices remain proposed, not owner-confirmed.
 
 ### 10.3 Chat-wide edits
 
 Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/swipe/summary search and replace, history diffs and undo, state changesets, and the rename-history RPCs. The proposed notes/card-override and cross-thread scope extensions remain unimplemented. The decided search panel and U18 card-name Save/fork rename offers are implemented (ARCHITECTURE §3.13); these portions are obsolete as proposals. No UI decision in this section blocks them.
 - **[D]** Large edits across a whole conversation, summaries included, such as search and replace to rename a character, and agentic editing to instructions.
-- **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history.
+- **[P]** A **changeset** is one atomic batch of new versions across slots and summaries, with a title and one entry in the chat's history. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.13).
 - **[D]** It's applied directly, with no review gate since everything is reversible. Afterwards you can inspect the diff and revert all of it or individual messages. (The earlier "draft, then review" proposal was rejected.)
-- **[P]** Scope options: the current path, all branches, or chosen threads; messages, summaries, notes, and card overrides. Drastic rewrites can be applied as a new chat.
-- **[D]** Nothing changes that the user doesn't see: an edit to history applies to the chat it's made in, and a fork made afterwards inherits it (forking from an earlier point must never undo it, or the fork would show something different from what was in front of the user). Each fork is effectively its own chat, connected to its siblings only by shared history (owner, 2026-10-26). A chat's current fork is the one last chatted in or created by forking; named or pinned forks are its peers (owner, 2026-10-26, UX-REWORK §3). Built throughout the navigation shell in U01 (2026-10-28; ARCHITECTURE §12), including checkpoints and same-tip peers. **[P]** The owner leans towards edits applying only to the chat (timeline) they're made in, for now.
+- **[P]** Scope options: the current path, all branches, or chosen threads; messages, summaries, notes, and card overrides. Drastic rewrites can be applied as a new chat. **Partial/overtaken**: current-fork messages/swipes/summaries are built (ARCHITECTURE §3.13). The owner’s flow below restricts today’s panel to this chat; card overrides are replaced by fork-and-swap. Notes, chosen threads and new-chat transformations remain later Phase 5/7 proposals.
+- **[D]** Nothing changes that the user doesn't see: an edit to history applies to the chat it's made in, and a fork made afterwards inherits it (forking from an earlier point must never undo it, or the fork would show something different from what was in front of the user). Each fork is effectively its own chat, connected to its siblings only by shared history (owner, 2026-10-26). A chat's current fork is the one last chatted in or created by forking; named or pinned forks are its peers (owner, 2026-10-26, UX-REWORK §3). Built throughout the navigation shell in U01 (2026-10-28; ARCHITECTURE §12), including checkpoints and same-tip peers. **[P], overtaken** by the owner-confirmed “Always this chat only” flow below; implemented in ARCHITECTURE §3.13.
 - **[D]** Renaming a card asks, in the owner's wording (2026-10-26):
   > "Aria" will be renamed to "Ari"
   > Replace "Aria" with "Ari" in past messages?
@@ -690,8 +698,8 @@ Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/sw
   > - Yes, only in this chat. (Does not touch any forks of this chat or any other chats)
   > - Yes, in all 37 chats with Aria
   "All chats with Aria" counts forks as chats.
-- **[P]** A history edit in a chat includes the swipes of its messages (owner leaning yes, 2026-10-26). A swipe shared with an existing fork then reads differently there, since that fork isn't touched.
-- **[P]** After Fork for this chat, the character is new: replacing the old name in that chat's past messages is offered for this chat only, or not at all.
+- **[P]** A history edit in a chat includes the swipes of its messages (owner leaning yes, 2026-10-26). A swipe shared with an existing fork then reads differently there, since that fork isn't touched. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.13). Existing siblings retain their own effective versions.
+- **[P]** After Fork for this chat, the character is new: replacing the old name in that chat's past messages is offered for this chat only, or not at all. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3.13).
 - **[D]** Search and replace over a chat works like a code editor's: case-sensitive or not, whole word, regular expression (with capture groups in the replacement), and every match is previewable, matches in summaries included (owner, 2026-10-26).
 - **[D]** The flow (owner confirmed, 2026-10-26):
   - Opened from the chat's menu, the chat's list of history edits, or Ctrl+H, in the right panel (a sheet on phones) so the chat stays in view.
@@ -715,10 +723,10 @@ Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/sw
   - its rule that "model-visible means logged" and its core-service context assembly conflict with separating the timeline from rollouts
   - it has no documented auth
 - **[D]** No Cordis (owner, 2026-10-11; evaluation in [CORDIS.md](CORDIS.md)). The plugin threat model and structure are in [PLUGINS.md](PLUGINS.md).
-- **[P]** SQLite with FTS5 for the timeline, versions, summaries, rollouts and jobs. JSON files can't handle the version and branch structures.
+- **[P]** SQLite with FTS5 for the timeline, versions, summaries, rollouts and jobs. JSON files can't handle the version and branch structures. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §3).
 - **[D]** Performance on chats of any length is an absolute priority: very smooth, never buggy, no corners cut. Looks rank below that but matter a lot (screenshots) (owner, 2026-10-10).
 - **[D]** TanStack libraries, Query where it applies (owner, 2026-10-10).
-- **[P]** Effect 4 across the server and the client data layer: [EFFECT.md](EFFECT.md). The owner asked for it to be strongly considered.
+- **[P]** Effect 4 across the server and the client data layer: [EFFECT.md](EFFECT.md). The owner asked for it to be strongly considered. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §1–§6).
 - **[D]** Client framework: **React** (owner, 2026-10-10). This is one of the main stack decisions, because UI quality for real users matters most; reference-harness's console stack is not the default. Evaluation, and the proposed stack around React: [CLIENT-FRAMEWORK.md](CLIENT-FRAMEWORK.md).
 
 ---
@@ -736,7 +744,7 @@ Implementation: fork independence unit 8 (ARCHITECTURE §3.13) builds message/sw
   - Peers are checked by each connection's source address, never by a forwarded header, so the check holds in Docker, where the host's requests come from the bridge gateway.
   - The override, `ALLOW_INSECURE_EXPOSURE`, is set only outside the app, like every security setting.
 - **[P]** Cross-site requests (built, ARCHITECTURE.md §4; found 2026-10-11): browsers let any page open a WebSocket to the user's own loopback, so before this, any site the owner visited could call every RPC of a local instance. Requests are refused when `Origin` names another site, or when `Host` is a name that isn't the instance's (DNS rebinding). Proxy mode with named trusted proxies skips the `Host` check, since only the proxies can connect. Instances served under a domain name list it in `PUBLIC_ORIGINS`.
-- **[P]** Rules:
+- **[P]** Rules: **Partial**: non-executable imports, write-only keys and literal/sanitized rendering are built (ARCHITECTURE §4, §6, §8–§11, §14). Sandboxed HTML and tool/plugin approvals belong to the deferred features, not current enforcement of an agent runtime.
   - imported cards, presets and lorebooks never execute code, and their fields never grant capabilities (a file can't enable tools or plugins by itself)
   - model and card HTML renders only in a sandbox
   - API keys are write-only

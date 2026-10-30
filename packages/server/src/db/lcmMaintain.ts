@@ -15,6 +15,8 @@ import { type PlannedJob } from "./lcmJobs.ts"
 import { lineageValidator } from "./lcmLayer.ts"
 import { type LcmSlot, lcmPath, slotInput } from "./lcmPath.ts"
 import { readSummary } from "./lcmReads.ts"
+import { insertedOnPath, pathView, seamStale } from "./lcmDisplay.ts"
+import { positionOf } from "./displayPath.ts"
 
 /** How many jobs one plan asks the writer for; the rest follow in later plans, so a write stays short. */
 export const MAX_JOBS_PER_PLAN = 4
@@ -46,9 +48,18 @@ export const maintain = (
     const fork = yield* viewAt(sql, chatId, leaf)
     const fanout = options.fanout ?? DEFAULT_FANOUT,
       condenseTarget = options.condenseTarget ?? DEFAULT_CONDENSE_TARGET
-    const valid = lineageValidator(sql, userId)
+    // In a fork that shows inserted slots, the path is its display path and ranges are positions
+    // on it (spec/MESSAGE-INSERT.md §3.4), with the inserted slots a path query adds.
+    const shown = yield* pathView(sql, chatId, leaf)
+    const valid = lineageValidator(sql, userId, shown ?? undefined)
     const memo = new Map<string, Summary>()
-    const onPath = sql`WITH RECURSIVE path(id) AS (
+    const onPath = shown
+      ? sql`WITH RECURSIVE structural(id) AS (
+      SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id
+        WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+      UNION ALL SELECT s.parent_slot_id FROM slots s JOIN structural p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
+    ), path(id) AS (SELECT id FROM structural UNION SELECT value FROM json_each(${insertedOnPath(shown)}))`
+      : sql`WITH RECURSIVE path(id) AS (
       SELECT s.id FROM slots s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${leaf} AND c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
       UNION ALL SELECT s.parent_slot_id FROM slots s JOIN path p ON p.id = s.id WHERE s.parent_slot_id IS NOT NULL
@@ -69,8 +80,11 @@ export const maintain = (
     const failedById = new Map<string, Summary>()
     for (const row of rows) {
       if (!(yield* valid(row.id))) continue
-      const summary = yield* readSummary(sql, userId, row.id, undefined, memo)
-      if (summary.to - summary.from + 1 !== summary.slotCount) continue
+      const summary = yield* readSummary(sql, userId, row.id, undefined, memo, shown ?? undefined)
+      if (
+        shown ? summary.to - summary.from + 1 < summary.slotCount : summary.to - summary.from + 1 !== summary.slotCount
+      )
+        continue
       // A failed summary whose inputs are unchanged holds its range until Retry.
       if (row.status === "failed") {
         if (summary.fresh) held.push({ level: summary.level, from: summary.from, to: summary.to })
@@ -83,11 +97,37 @@ export const maintain = (
         batchLive: summary.batchId !== null && liveBatches.has(summary.batchId)
       })
     }
-    const jobs = yield* sql<{ level: number; from: number; to: number; input_child_ids: string | null }>`${onPath}
-      SELECT j.level, a.depth + 1 AS "from", b.depth + 1 AS "to", j.input_child_ids
+    // At a seam, a summary covers the inserted slots after it, stale, as the layer walk has it.
+    if (shown) {
+      const live = candidates.filter((s) => s.status !== "superseded")
+      const extended = new Map(
+        seamStale(live, shown.pieces, shown.end + 1, (s, change) => ({ ...s, ...change })).map((s) => [s.id, s])
+      )
+      candidates.splice(0, candidates.length, ...candidates.map((s) => extended.get(s.id) ?? s))
+    }
+    const jobRows = yield* sql<{
+      level: number
+      from: number
+      to: number
+      input_child_ids: string | null
+      a_id: string
+      a_chain: string
+      a_depth: number
+      b_id: string
+      b_chain: string
+      b_depth: number
+    }>`${onPath}
+      SELECT j.level, a.depth + 1 AS "from", b.depth + 1 AS "to", j.input_child_ids,
+        a.id AS a_id, a.chain_id AS a_chain, a.depth AS a_depth, b.id AS b_id, b.chain_id AS b_chain, b.depth AS b_depth
       FROM path JOIN summarization_jobs j ON j.last_slot_id = path.id
         JOIN slots a ON a.id = j.first_slot_id JOIN slots b ON b.id = j.last_slot_id
       WHERE j.chat_id = ${chatId} AND (j.fork_id IS NULL OR j.fork_id=${fork}) AND j.status IN ('pending', 'processing')`
+    const jobs = jobRows.map(({ a_id, a_chain, a_depth, b_id, b_chain, b_depth, ...j }) => {
+      if (!shown) return j
+      const from = positionOf(shown.pieces, { id: a_id, chainId: a_chain, depth: a_depth })
+      const to = positionOf(shown.pieces, { id: b_id, chainId: b_chain, depth: b_depth })
+      return from === null || to === null ? j : { ...j, from: from + 1, to: to + 1 }
+    })
     // Rerun requests (SetSummaryRerun) are answered by a reply's pass, and only by it: a summary the
     // user asked for is made again whatever its state; a failed one or a job that gave up is retried.
     type Ask = { readonly id: string; readonly model: typeof ModelChoice.Type | undefined }
