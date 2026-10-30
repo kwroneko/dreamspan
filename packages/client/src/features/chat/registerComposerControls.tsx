@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react"
+import { chatCommands } from "./commands.tsx"
 import { QueuedMessages } from "./QueuedMessages.tsx"
 import { pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -9,6 +11,19 @@ import { GenerateIcon, RegenerateIcon, SendIcon } from "./icons.tsx"
 import { ReplyFrom } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { composerControls } from "./composerControls.tsx"
+
+function ShortcutList() {
+  const commands = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot)
+  return (
+    <ul className="list-inside list-disc space-y-1 pt-1">
+      {commands.entries
+        .filter((command) => command.shortcut)
+        .map((command) => (
+          <li key={command.id}>{command.label}</li>
+        ))}
+    </ul>
+  )
+}
 
 export const registerComposerControls = () => [
   composerControls.register({
@@ -189,10 +204,14 @@ export const registerComposerControls = () => [
     id: "composer.help",
     order: 10,
     placement: "help",
-    component: ({ hint }) => (
-      <p id="composer-hint" className="text-xs text-muted">
-        {hint}
-      </p>
+    component: ({ hint, compact }) => (
+      <div className="text-xs text-muted">
+        {compact && <p id="composer-hint">{hint}</p>}
+        <details>
+          <summary className="cursor-pointer">Keyboard shortcuts</summary>
+          <ShortcutList />
+        </details>
+      </div>
     )
   }),
   composerControls.register({

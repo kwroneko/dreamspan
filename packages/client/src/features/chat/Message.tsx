@@ -41,7 +41,14 @@ import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
-import { stepFrom } from "./VersionControls.tsx"
+import { stepVersion } from "./versionNavigation.ts"
+import {
+  availableCommands,
+  chatCommands,
+  invokeChatCommand,
+  runCommandShortcut,
+  type ChatCommandContext
+} from "./commands.tsx"
 import {
   messageDirections,
   messageRetries,
@@ -262,12 +269,31 @@ function Editor({
       ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.content
       : ""
 
+  const commandSnapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
+  const commands: ChatCommandContext = {
+    session,
+    view: session.snapshot(),
+    onHistory: () => {},
+    onJump: () => {},
+    saveMessageEdit: onSave
+  }
   return (
     <form
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
-        onSave()
+        invokeChatCommand("message.save", commands)
+      }}
+      onKeyDownCapture={(event) => {
+        // Handle Save before CodeMirror's Mod+Enter binding inserts a blank line.
+        if (
+          event.key === "Enter" &&
+          (event.ctrlKey || event.metaKey) &&
+          runCommandShortcut(event.nativeEvent, commands)
+        ) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
       }}
       onKeyDown={(event) => {
         if (event.key === "Escape" && event.currentTarget.contains(event.target as Node) && !event.defaultPrevented)
@@ -296,10 +322,16 @@ function Editor({
       )}
       {base !== undefined && <SlotOutlet slot={messageEditorTools} props={{ draft, base }} />}
       <div className="flex gap-2">
-        <Button type="submit" variant="primary">
-          <Icon name="check" />
-          {saveLabel}
-        </Button>
+        <Tooltip label={`${saveLabel} (Ctrl+Enter)`}>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={!availableCommands(commands, commandSnapshot).some((command) => command.id === "message.save")}
+          >
+            <Icon name="check" />
+            {saveLabel}
+          </Button>
+        </Tooltip>
         <Button onClick={onCancel}>
           <Icon name="close" />
           Cancel
@@ -520,18 +552,7 @@ export const Message = memo(function Message({
     if (outcome.ok) deleted(outcome.value)
   }
 
-  const defaultStep = async (step: -1 | 1) => {
-    const all = entry.versionCount > 1 ? await load() : [version]
-    if (all === null) return
-    const target = stepFrom(
-      all,
-      all.findIndex((v) => v.id === version.id),
-      step
-    )
-    if (target) return report(await session.select(entry, target))
-    // Past the last version of a generated message, a swipe generates another, as in SillyTavern.
-    if (step === 1 && generated) report(await session.regenerate(entry))
-  }
+  const defaultStep = (step: -1 | 1) => stepVersion(entry, session, !!generated, report, step, load)
   const versionNavigation = useVersionNavigation()
   const swipe = (step: -1 | 1) => versionNavigation?.step?.({ entry, session, defaultStep }, step)
   const flag = async (target: Version, flags: { starred?: boolean; hidden?: boolean }) => {

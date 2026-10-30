@@ -19,7 +19,7 @@ const admin = <A>(use: (api: Client) => Effect.Effect<A, unknown>) => {
   return cookie.then((value) => withCookie(server(), value, use))
 }
 
-const setup = () =>
+const setup = (human = false) =>
   admin((api) =>
     Effect.gen(function* () {
       yield* api.SetDisplayPrefs({ prefs: { guidance: false } })
@@ -43,7 +43,14 @@ const setup = () =>
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
       const chat = yield* api.CreateChat({ title: "Keyboard fixture" })
-      yield* api.Generate({ chatId: chat.id, parentSlotId: null, branch: false })
+      const sent = human
+        ? yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Human fixture" })
+        : null
+      yield* api.Generate({
+        chatId: chat.id,
+        parentSlotId: sent?._tag === "Posted" ? sent.entry.slotId : null,
+        branch: false
+      })
       return chat
     })
   )
@@ -68,4 +75,53 @@ test("Alt+Enter continues without sending or consuming composer text, including 
     await expect(page.getByRole("article")).toHaveCount(1)
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
   }
+})
+
+test("editing, saving and version arrows share visible actions and ignore typing, IME and dialogs", async ({
+  page
+}) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await setup(true)
+  await page.goto(`${server().url}/chats/${chat.id}`)
+  const box = page.getByTestId("composer")
+  const reply = page.getByRole("article").last()
+  await expect(reply.locator(".markdown").last()).toContainText("The ledger")
+  await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
+  await box.fill("typing")
+  await box.press("ArrowUp")
+  await box.press("Control+ArrowUp")
+  await box.press("ArrowRight")
+  await expect(page.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+  await box.fill("")
+  await box.dispatchEvent("keydown", { key: "ArrowUp", isComposing: true })
+  await expect(page.getByRole("textbox", { name: "Message text", exact: true })).toHaveCount(0)
+  await box.press("ArrowUp")
+  const editor = page.getByRole("textbox", { name: "Message text", exact: true })
+  await expect(editor).toBeVisible()
+  await expect(reply.getByRole("button", { name: "Save", exact: true })).toBeVisible()
+  await editor.fill("Edited synthetic reply")
+  await editor.press("Control+Enter")
+  await expect(editor).toHaveCount(0)
+  await expect(reply.locator(".markdown").last()).toContainText("Edited synthetic reply")
+  await box.press("Control+ArrowUp")
+  await expect(
+    page.getByRole("article").first().getByRole("textbox", { name: "Message text", exact: true })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await box.focus()
+  await box.blur()
+  await page.keyboard.press("ArrowLeft")
+  await expect(reply.locator(".markdown").last()).toContainText("The ledger")
+  await page.keyboard.press("ArrowRight")
+  await expect(reply.locator(".markdown").last()).toContainText("Edited synthetic reply")
+  const requests = provider.requests.length
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(() => provider.requests.length).toBe(requests + 1)
+  await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 30_000 })
+  await reply.getByRole("button", { name: /choose a version/ }).click()
+  const dialog = page.getByRole("dialog", { name: /Versions of message/ })
+  await expect(dialog).toBeVisible()
+  await page.keyboard.press("Alt+Enter")
+  await expect.poll(() => provider.requests.length).toBe(requests + 1)
+  await page.keyboard.press("Escape")
 })

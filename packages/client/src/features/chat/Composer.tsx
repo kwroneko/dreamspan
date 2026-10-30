@@ -533,6 +533,7 @@ export function Composer({
             <AutoGrowTextarea
               id="composer"
               data-testid="composer"
+              data-has-attachments={attachmentInput?.count ? true : undefined}
               value={text}
               readOnly={editing === null && !textReady}
               aria-busy={editing === null && !textReady}
@@ -566,6 +567,7 @@ export function Composer({
         <>
           <ComposerControls placement="guidance" context={controls} />
           <ComposerControls placement="reply" context={controls} />
+          <ComposerControls placement="help" context={controls} />
         </>
       )}
       {impersonationNotice && (

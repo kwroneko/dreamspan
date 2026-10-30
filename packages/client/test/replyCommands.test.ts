@@ -58,3 +58,21 @@ it("ignores composition, repeated keys and extra modifiers", () => {
   for (const extra of [{ isComposing: true }, { shiftKey: true }, { ctrlKey: true }, { repeat: true }])
     expect(runCommandShortcut({ ...key, ...extra }, context)).toBe(false)
 })
+
+it("editing and saving resolve registered handlers, including disablement", () => {
+  const { context, view, session } = setup()
+  const own = { ...entry, side: "user", slotId: "human", version: { ...entry.version, writer: "human" } } as PathEntry
+  view.entries = [own, entry]
+  const edit = vi.fn()
+  disposers.push(messageActions.register({ ...messageActions.get("message.edit")!, run: edit }))
+  expect(runCommandShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false }, context)).toBe(true)
+  expect(edit).toHaveBeenCalledWith(expect.objectContaining({ entry: own, session }), "keyboard")
+  disposers.push(messageActions.disable("message.edit"))
+  expect(runCommandShortcut({ key: "ArrowUp", ctrlKey: true, metaKey: false }, context)).toBe(false)
+  const saveMessageEdit = vi.fn()
+  const saving = { ...context, saveMessageEdit }
+  expect(runCommandShortcut({ key: "Enter", ctrlKey: true, metaKey: false }, saving)).toBe(true)
+  expect(saveMessageEdit).toHaveBeenCalledOnce()
+  disposers.push(chatCommands.disable("message.save"))
+  expect(runCommandShortcut({ key: "Enter", ctrlKey: true, metaKey: false }, saving)).toBe(false)
+})

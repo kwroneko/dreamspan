@@ -10,7 +10,7 @@ import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { canContinue, ContinueAction, runContinue } from "./ContinueAction.tsx"
 import { parseModelValue, useModelChoices } from "./modelChoices.ts"
-import { messageActions, type MessageActionProps } from "./messageActions.tsx"
+import { invokeMessageAction, messageActions, type MessageActionProps } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
 
 const copy = async (text: string, what: string) => {
@@ -97,13 +97,15 @@ export const registerMessageActions = () => [
     id: "message.edit",
     order: 10,
     available: ({ generating }) => !generating,
-    toolbar: ({ session, entry }) => (
+    run: ({ session, entry }) => {
+      session.openEditor({ _tag: "Edit", versionId: entry.version.id }, entry.version.content, entry.slotId)
+    },
+    toolbar: (context) => (
       <IconButton
         label="Edit"
+        hint="Edit (ArrowUp in the empty composer; Ctrl+ArrowUp for your last message)"
         icon="edit"
-        onClick={() =>
-          session.openEditor({ _tag: "Edit", versionId: entry.version.id }, entry.version.content, entry.slotId)
-        }
+        onClick={() => void invokeMessageAction("message.edit", context, "button")}
       />
     )
   }),
