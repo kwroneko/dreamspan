@@ -14,6 +14,9 @@ vi.hoisted(() => {
 })
 // The fields' own editor is tested elsewhere: here, which fields the section has, at which paths.
 vi.mock("../src/features/editor/controls.tsx", () => ({
+  NumberField: () => null,
+  SelectField: () => null,
+  SwitchField: () => null,
   TextField: ({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) =>
     createElement("label", { "data-path": path.join("/") }, label, createElement("textarea", null, store.text(path)))
 }))
@@ -22,11 +25,20 @@ vi.mock("../src/features/editor/controls.tsx", () => ({
 vi.mock("../src/features/editor/store.ts", async (original) => ({
   ...(await original<typeof import("../src/features/editor/store.ts")>()),
   useValue: (store: EditorStore, path: FieldPath) => store.value(path),
-  useText: (store: EditorStore, path: FieldPath) => store.text(path)
+  useText: (store: EditorStore, path: FieldPath) => store.text(path),
+  useEditorState: (store: EditorStore) => ({ snapshot: store.snapshot })
+}))
+
+// Render the editor's actual warning host without mounting the unrelated prompt fields.
+vi.mock("../src/features/editor/PromptDocument.tsx", async (original) => ({
+  ...(await original<typeof import("../src/features/editor/PromptDocument.tsx")>()),
+  PromptDocument: () => null
 }))
 
 const { EndOfRequest } = await import("../src/features/editor/EndOfRequest.tsx")
-const { PresetWarnings } = await import("../src/features/editor/PromptDocument.tsx")
+const { PresetWarnings, registerPresetWarnings } = await import("../src/features/editor/PromptDocument.tsx")
+const { PresetEditor } = await import("../src/features/editor/PresetEditor.tsx")
+const { presetEditorWarnings } = await import("../src/features/editor/presetSections.ts")
 
 const prompt = (identifier: string, content: string): PresetPrompt => ({
   identifier,
@@ -59,7 +71,7 @@ const storeOf = (
     return value
   }
   return {
-    snapshot: { ref: { kind: "preset" } },
+    snapshot: { ref: { kind: "preset" }, doc },
     subscribe: () => () => () => {},
     value: at,
     text: (path: FieldPath) => String(at(path) ?? "")
@@ -94,6 +106,45 @@ describe("the End of request section", () => {
 
 describe("the preset warnings", () => {
   const onGoTo = () => {}
+
+  it("the mounted editor renders registered warnings, scoped replacements, additions and disablement", () => {
+    const lost = defaults.map((p) => (p.identifier === "directionPrompt" ? { ...p, content: "[Next.]" } : p))
+    const store = storeOf(lost)
+    const render = () => renderToStaticMarkup(createElement(PresetEditor, { store, call: vi.fn() }))
+    const builtIn = registerPresetWarnings()
+    const added = presetEditorWarnings.register({
+      id: "synthetic.warning",
+      order: 200,
+      component: () => createElement("p", null, "Additional warning")
+    })
+    try {
+      expect(render()).toContain("doesn&#x27;t contain {{direction}}")
+      expect(render()).toContain("Additional warning")
+      const replacement = presetEditorWarnings.register({
+        id: "preset.warnings",
+        order: 100,
+        component: () => createElement("p", null, "Replacement warning")
+      })
+      try {
+        expect(render()).toContain("Replacement warning")
+        expect(render()).not.toContain("doesn&#x27;t contain {{direction}}")
+        const disabled = presetEditorWarnings.disable("preset.warnings")
+        try {
+          expect(render()).not.toContain("Replacement warning")
+          expect(render()).toContain("Additional warning")
+        } finally {
+          disabled()
+        }
+      } finally {
+        replacement()
+      }
+      expect(render()).toContain("doesn&#x27;t contain {{direction}}")
+    } finally {
+      added()
+      builtIn()
+    }
+    expect(render()).not.toContain("Preset warnings")
+  })
 
   it("say nothing while the direction text reads {{direction}}", () => {
     expect(renderToStaticMarkup(createElement(PresetWarnings, { store: storeOf(defaults), onGoTo }))).toBe("")

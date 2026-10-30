@@ -277,3 +277,42 @@ it.live("a provider transform's rewritten piece keeps its source box, marked rew
     assert.include(message.content.slice(part.start, part.end), "guards the ledger")
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
 })
+
+it.live("a transform rewriting adjacent card blocks retains both cards' field sources", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const mock = yield* provider()
+    const api = yield* client()
+    const registry = yield* ProviderRegistry
+    yield* registry.transforms.register({
+      id: "rewrite-both-cards",
+      appliesTo: (t) => t.api === "openai-completions",
+      transform: (p) => ({
+        ...p,
+        messages: (p.messages as Message[]).map((m) => ({
+          ...m,
+          content: m.content.replace("keeps the ledger", "guards the ledger").replace("draws maps", "charts roads")
+        }))
+      })
+    })
+    const { version } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: mock.url + "/v1", cacheTtlS: 300 },
+      model: {}
+    })
+    const run = yield* api.GetRunContext({ versionId: version.id })
+    for (const [text, card] of [
+      ["guards the ledger", "Mira"],
+      ["charts roads", "Tobin"]
+    ]) {
+      const message = run.messages.find((m) => m.content.includes(text!))!
+      const at = message.content.indexOf(text!)
+      const part = message.parts!.find((p) => p.start <= at && p.end > at)!
+      assert.isTrue(part.rewritten)
+      const labels = [part.source, ...(part.also ?? [])].map((i) => message.sources[i]!.label)
+      assert.isTrue(
+        labels.some((label) => label.includes(card!) && label.includes("description")),
+        labels.join("; ")
+      )
+    }
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
+})

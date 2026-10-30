@@ -12,8 +12,8 @@ import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Fieldset } from "../../ui/Field.tsx"
-import { PresetWarnings, PromptDocument } from "./PromptDocument.tsx"
-import { presetEditorSections } from "./presetSections.ts"
+import { PromptDocument } from "./PromptDocument.tsx"
+import { presetEditorSections, presetEditorWarnings } from "./presetSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
@@ -267,7 +267,7 @@ export function PresetEditor({
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   return (
     <>
-      <PresetWarnings store={store} onGoTo={(identifier) => setGoTo({ identifier })} />
+      <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
       <Card>
         <CardHeader
           title="Prompts"

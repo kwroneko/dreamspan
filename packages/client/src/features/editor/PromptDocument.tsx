@@ -16,6 +16,7 @@ import { NumberField, SelectField, SwitchField, TextField, TriggersField } from 
 import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
+import { presetEditorWarnings } from "./presetSections.ts"
 
 const at = (id: string) => ["prompts", `identifier=${id}`]
 const roles = ["system", "user", "assistant"].map((value) => ({ value, label: value }))
@@ -504,6 +505,9 @@ export function PromptDocument({
  * read `{{direction}}`, so a direction you give would be lost; a switched-on prompt whose
  * condition and generation types never meet is never sent. Each links to its text.
  */
+export const registerPresetWarnings = () =>
+  presetEditorWarnings.register({ id: "preset.warnings", order: 100, component: PresetWarnings })
+
 export function PresetWarnings({ store, onGoTo }: { store: EditorStore; onGoTo: (identifier: string) => void }) {
   const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
   const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []

@@ -321,64 +321,71 @@ test("a version opened under another chat redirects to its canonical route", asy
 // Two forks share a reply but show different versions of it: the inspector, opened from the
 // fork the user is viewing, leads back to that fork, not to the chat's current one (ux Annoying 1).
 for (const width of [1440, 390])
-  test(`the inspector returns to the fork it was opened from, at ${width}`, async ({ page }) => {
-    const EDITED = "The bridge holds, but Mira keeps the ledger."
-    const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-      Effect.gen(function* () {
-        const mira = (yield* api.ListCards()).find((card) => card.label === "Mira")!
-        const started = yield* api.StartChat({
-          cards: [mira.entityId as EntityId],
-          persona: null,
-          greeting: 0,
-          first: { _tag: "Send", content: "The tide turned.", speakerEntityId: null }
+  for (const theme of ["light", "dark"] as const)
+    test(`the inspector returns to the fork it was opened from, at ${width}, ${theme}`, async ({ page }) => {
+      const EDITED = "The bridge holds, but Mira keeps the ledger."
+      const made = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const mira = (yield* api.ListCards()).find((card) => card.label === "Mira")!
+          const started = yield* api.StartChat({
+            cards: [mira.entityId as EntityId],
+            persona: null,
+            greeting: 0,
+            first: { _tag: "Send", content: "The tide turned.", speakerEntityId: null }
+          })
+          const chatId = started.chat.id
+          const generated = yield* api.Generate({ chatId, parentSlotId: started.entry.slotId, branch: false })
+          if (generated._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
+          const generating = started.chat.currentForkId!
+          // Dark cases view an inheriting fork: the captured reply was generated in a different one.
+          const original =
+            theme === "dark"
+              ? (yield* api.CreateFork({ chatId, fromForkId: generating, atSlotId: generated.entry.slotId })).fork.id
+              : generating
+          const child = yield* api.CreateFork({ chatId, fromForkId: original, atSlotId: generated.entry.slotId })
+          const path = yield* api.ReadPath({
+            chatId,
+            forkId: child.fork.id,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 100
+          })
+          const shared = path.entries.find((entry) => entry.slotId === generated.entry.slotId)!
+          yield* api.EditVersion({
+            slotId: shared.slotId,
+            forkId: child.fork.id,
+            sourceVersionId: shared.version.id,
+            expectedRowVersion: shared.rowVersion,
+            content: EDITED
+          })
+          return { chatId, original, slot: shared.slotId }
         })
-        const chatId = started.chat.id
-        const generated = yield* api.Generate({ chatId, parentSlotId: started.entry.slotId, branch: false })
-        if (generated._tag !== "Posted") return yield* Effect.die(new Error("the reply was queued"))
-        const original = started.chat.currentForkId!
-        const child = yield* api.CreateFork({ chatId, fromForkId: original, atSlotId: generated.entry.slotId })
-        const path = yield* api.ReadPath({
-          chatId,
-          forkId: child.fork.id,
-          leafSlotId: null,
-          range: { _tag: "Bottom" },
-          limit: 100
-        })
-        const shared = path.entries.find((entry) => entry.slotId === generated.entry.slotId)!
-        yield* api.EditVersion({
-          slotId: shared.slotId,
-          forkId: child.fork.id,
-          sourceVersionId: shared.version.id,
-          expectedRowVersion: shared.rowVersion,
-          content: EDITED
-        })
-        return { chatId, original, slot: shared.slotId }
-      })
-    )
-    await page.setViewportSize({ width, height: width < 640 ? 844 : 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    // The child is the current fork and shows the edit; the original still shows the reply.
-    await page.goto(`${server().url}/chats/${made.chatId}`)
-    await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: EDITED })).toBeVisible()
-    await page.goto(`${server().url}/chats/${made.chatId}?fork=${made.original}`)
-    const original = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
-    await expect(original).toBeVisible()
-    await messageMenu(original, "Context it was generated from")
-    await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}$`))
-    // The history sources link to the viewed fork too.
-    const messages = page.getByRole("region", { name: "Messages" })
-    await expect(messages.getByRole("link", { name: "Message 2" })).toHaveAttribute(
-      "href",
-      new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=`)
-    )
-    await shoot(page, `inspector-viewed-fork-${width}`)
-    await page.getByRole("link", { name: "← Back to the reply" }).click()
-    await expect(page).toHaveURL(new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=${made.slot}$`))
-    await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })).toBeVisible()
-    // (The chat list's preview shows the current fork's last message; the messages don't.)
-    await expect(page.getByRole("article").filter({ hasText: EDITED })).toHaveCount(0)
-    await shoot(page, `inspector-viewed-fork-back-${width}`)
-  })
+      )
+      await page.setViewportSize({ width, height: width < 640 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      // The child is the current fork and shows the edit; the original still shows the reply.
+      await page.goto(`${server().url}/chats/${made.chatId}`)
+      await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: EDITED })).toBeVisible()
+      await page.goto(`${server().url}/chats/${made.chatId}?fork=${made.original}`)
+      const original = page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })
+      await expect(original).toBeVisible()
+      await messageMenu(original, "Context it was generated from")
+      await expect(page).toHaveURL(new RegExp(`\\?fork=${made.original}$`))
+      // The history sources link to the viewed fork too.
+      const messages = page.getByRole("region", { name: "Messages" })
+      await expect(messages.getByRole("link", { name: "Message 2" })).toHaveAttribute(
+        "href",
+        new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=`)
+      )
+      await shoot(page, `inspector-viewed-fork-${width}-${theme}`)
+      await page.getByRole("link", { name: "← Back to the reply" }).click()
+      await expect(page).toHaveURL(new RegExp(`/chats/${made.chatId}\\?fork=${made.original}&slot=${made.slot}$`))
+      await expect(page.getByRole("article", { name: "Reply" }).filter({ hasText: REPLY })).toBeVisible()
+      // (The chat list's preview shows the current fork's last message; the messages don't.)
+      await expect(page.getByRole("article").filter({ hasText: EDITED })).toHaveCount(0)
+      await shoot(page, `inspector-viewed-fork-back-${width}-${theme}`)
+    })
 
 const denseContext = async (page: Page, explanations = false) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -661,18 +668,20 @@ test("a rewritten piece shows in its source's box, labelled rewritten", async ({
   try {
     await save(JSON.stringify(changed))
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: 900 })
-      await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
-      const messages = page.getByRole("region", { name: "Messages" })
-      const box = messages.getByRole("region", { name: "Card “Mira”: description (rewritten)" })
-      await expect(box.getByText(after, { exact: true })).toBeVisible()
-      await expect(box.getByRole("link", { name: "Card “Mira”: description (rewritten)" })).toBeVisible()
-      await expect(messages.getByText("Added by the assembler").filter({ hasText: after })).toHaveCount(0)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-      await box.scrollIntoViewIfNeeded()
-      await shoot(page, `inspector-rewritten-${width}`)
-    }
+    for (const width of [1440, 390])
+      for (const theme of ["light", "dark"] as const) {
+        await page.setViewportSize({ width, height: 900 })
+        await page.emulateMedia({ colorScheme: theme })
+        await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+        const messages = page.getByRole("region", { name: "Messages" })
+        const box = messages.getByRole("region", { name: "Card “Mira”: description (rewritten)" })
+        await expect(box.getByText(after, { exact: true })).toBeVisible()
+        await expect(box.getByRole("link", { name: "Card “Mira”: description (rewritten)" })).toBeVisible()
+        await expect(messages.getByText("Added by the assembler").filter({ hasText: after })).toHaveCount(0)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+        await box.scrollIntoViewIfNeeded()
+        await shoot(page, `inspector-rewritten-${width}-${theme}`)
+      }
   } finally {
     await save(original)
   }

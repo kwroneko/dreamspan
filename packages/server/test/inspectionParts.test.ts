@@ -2,7 +2,7 @@
 import { assert, it } from "@effect/vitest"
 import { locate, partsOf } from "../src/assembler/inspection.ts"
 
-it("finds each piece in order, keeps repeated text apart, and skips text that isn't there", () => {
+it("finds each piece in order, keeps repeated text apart, and leaves recorded framing alone", () => {
   const content = "<Mira>\nRain.\n</Mira>\n\nRain."
   assert.deepStrictEqual(
     partsOf(content, [
@@ -10,11 +10,13 @@ it("finds each piece in order, keeps repeated text apart, and skips text that is
       { source: 1, text: "Rain." },
       { source: 2, text: "changed by a script" },
       { source: 3, text: "  " },
-      { source: 4, text: "<Mira>" }
+      { source: 4, text: "<Mira>" },
+      { source: 5, text: "</Mira>", frame: true }
     ]),
     [
       { start: 0, end: 6, source: 4 },
       { start: 7, end: 12, source: 0 },
+      { start: 13, end: 20, source: 5, frame: true },
       { start: 22, end: 27, source: 1 }
     ]
   )
@@ -132,4 +134,26 @@ it("searches a rewritten block's parts inside the text it took", () => {
       groups: [{ start: 7, end: 38, source: 1, rewritten: true }]
     }
   )
+})
+
+it("keeps nested sources when adjacent rewritten blocks cannot be separated", () => {
+  const { parts } = locate("Changed A. Changed B.", [
+    { source: 0, text: "Block A.", parts: [{ source: 1, text: "A." }] },
+    { source: 2, text: "Block B.", parts: [{ source: 3, text: "B." }] }
+  ])
+  assert.deepStrictEqual(parts, [{ start: 0, end: 21, source: 0, rewritten: true, also: [1, 2, 3] }])
+})
+
+it("boxes unlocated rewritten text even when the located neighbours moved out of order", () => {
+  const content = "Right. Changed. Left."
+  const { parts } = locate(content, [
+    { source: 0, text: "Left." },
+    { source: 1, text: "Original." },
+    { source: 2, text: "Right." }
+  ])
+  assert.deepStrictEqual(parts, [
+    { start: 0, end: 6, source: 2 },
+    { start: 7, end: 15, source: 1, rewritten: true },
+    { start: 16, end: 21, source: 0 }
+  ])
 })
