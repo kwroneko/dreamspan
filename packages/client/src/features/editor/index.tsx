@@ -1,3 +1,4 @@
+import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
 import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
@@ -23,6 +24,7 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  registerUserDraftNotices()
   libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })
   libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
