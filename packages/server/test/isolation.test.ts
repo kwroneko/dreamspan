@@ -3257,6 +3257,8 @@ const storage: Record<
       }),
       "NotFound"
     ),
+  GetCardImportNote: (reader, actor, owner) =>
+    refused(reader.GetCardImportNote({ userId: actor.user.id, cardRefId: owner.editor.cardRefId }), "NotFound"),
   GetSummary: (reader, actor, owner) =>
     refused(reader.GetSummary({ userId: actor.user.id, summaryId: owner.summary.id }), "NotFound"),
   ChangeLcmSettings: (_reader, actor, owner, writer) =>

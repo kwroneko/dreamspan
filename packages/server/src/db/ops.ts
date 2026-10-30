@@ -2548,6 +2548,12 @@ export class ReadOps extends RpcGroup.make(
     success: Doc,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** The existing first imported card note, using the same identity as ImportFile. */
+  Rpc.make("GetCardImportNote", {
+    payload: { userId: UserId, cardRefId: RefId },
+    success: Schema.NullOr(EntityId),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The notes a card owns, by their upstream refs, oldest first. */
   Rpc.make("ListCardNotes", {
     payload: { userId: UserId, cardRefId: RefId },

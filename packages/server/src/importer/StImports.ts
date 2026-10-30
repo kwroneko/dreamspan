@@ -396,7 +396,11 @@ export class StImports extends Context.Service<
           const same = earlier ?? session.libraryByHash.get(`${library.kind}:${parsed.sha256}`)
           if (same !== undefined && same.kind === library.kind && same.sourceHash === parsed.sha256) {
             report.count(countAs, "unchanged")
-            return { outcome: result("unchanged"), entity: same, created: false, note: null }
+            const note =
+              library.noteDocJson === null
+                ? null
+                : yield* reader.GetCardImportNote({ userId: user.id, cardRefId: same.refId })
+            return { outcome: result("unchanged"), entity: same, created: false, note }
           }
           const imported = yield* holding(
             parsed.media.map((file) => file.sha256),
