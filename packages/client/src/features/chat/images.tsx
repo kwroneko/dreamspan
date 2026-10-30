@@ -1,5 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentProps } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps
+} from "react"
 import type { MessageImages, PathEntry } from "@rp/shared/chat.ts"
+import type { ImagesLeftOut } from "@rp/shared/inspectorApi.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { ContentImage } from "../../ui/ContentImage.tsx"
@@ -379,6 +389,15 @@ function ImageComposer(props: ComponentProps<typeof Composer>) {
     />
   )
 }
+/** Why the next request leaves image `index` of the message out, by the assembler's rules; null: it's sent. */
+const leftOutBy = (images: ImagesLeftOut | undefined, entry: PathEntry, index: number) => {
+  const image = images?.images.find(
+    (item) => item.versionId === entry.version.id && item.index === index && item.rule !== "user"
+  )
+  if (image) return image
+  return images?.ranges.find((range) => entry.depth >= range.from && entry.depth <= range.to) ?? null
+}
+
 /**
  * A message image's corner button: takes it out of the context or puts it back. Shown on
  * hover (always on touch screens); always shown while it's out. An image a rule leaves out
@@ -429,14 +448,16 @@ function ImageThumbnails({
   const [selected, setSelected] = useState<{ mediaId: string; altText?: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const session = controls?.session
+  const leftOut = useSyncExternalStore(session?.subscribe ?? noSubscribe, () => session?.snapshot().history?.images)
   if (!images.length) return null
   return (
     <>
       <div className="flex flex-wrap gap-2" aria-label="Message images">
         {images.map((image, index) => {
           const excluded = controls?.entry.excludedImages?.includes(image.mediaId) ?? false
-          const left = null as { message: string } | null
-          const reason = excluded ? "taken out of the context by you" : null
+          const left = controls && !excluded ? leftOutBy(leftOut, controls.entry, index) : null
+          const reason = excluded ? "taken out of the context by you" : left ? left.message : null
           const view = (
             <button
               type="button"
@@ -498,6 +519,7 @@ function ImageThumbnails({
     </>
   )
 }
+const noSubscribe = () => () => {}
 export const registerImages = () => [
   chatComposer.register({ id: "chat.composer", order: 10, component: ImageComposer }),
   chatSurfaceProviders.register({ id: "chat.images", order: 40, component: ImageProvider }),

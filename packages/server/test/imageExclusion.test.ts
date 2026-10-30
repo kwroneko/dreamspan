@@ -26,7 +26,7 @@ const imageCount = (body: unknown) => JSON.stringify(body).split('"type":"image_
 
 describe("image exclusion", () => {
   it.live(
-    "takes an image out in one fork only, leaves it out of the request and its limit, and the inspector says so",
+    "takes an image out in one fork only, leaves it out of the request and its limit, and says why for each rule",
     () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -53,6 +53,13 @@ describe("image exclusion", () => {
         const leaf = path.entries.at(-1)!.slotId as SlotId
         const other = yield* writer.CreateFork({ userId, chatId: chat.id, fromForkId: fork, atSlotId: leaf })
 
+        // Before: the newest two are sent, the oldest is left out by the limit.
+        const before = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
+        assert.deepStrictEqual(
+          before.images?.images.map((image) => [image.mediaId, image.rule, image.message]),
+          [[first.mediaId, "limit", "Only the last 2 images are sent to this model"]]
+        )
+
         const taken = yield* api.SetImageExcluded({
           versionId: message.version.id,
           mediaId: third.mediaId,
@@ -67,10 +74,14 @@ describe("image exclusion", () => {
         const after = yield* api.GetNextContext({ chatId: chat.id, forkId: fork, leafSlotId: leaf })
         assert.deepStrictEqual(
           after.images?.images.map((image) => [image.mediaId, image.rule, image.index]),
-          [[third.mediaId, "user", 2]]
+          [[third.mediaId, "user", 2]],
+          "the limit counts only what's sent: the first two now fit"
         )
         const otherNext = yield* api.GetNextContext({ chatId: chat.id, forkId: other.fork.id, leafSlotId: leaf })
-        assert.deepStrictEqual(otherNext.images?.images, [])
+        assert.deepStrictEqual(
+          otherNext.images?.images.map((image) => [image.mediaId, image.rule]),
+          [[first.mediaId, "limit"]]
+        )
 
         // The next reply sends the two kept images, and the inspector says the third was taken out.
         const { entry } = yield* posted(
@@ -99,5 +110,48 @@ describe("image exclusion", () => {
         })
         assert.isUndefined(back.excludedImages)
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("names a model without vision and a hidden message", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const reader = yield* Reader
+      const userId = (yield* api.Whoami()).id as UserId
+      const image = yield* upload(png())
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider((_request, res) => sse(res, completionChunks(["Text."], {})))),
+        (m) => Effect.promise(() => m.close())
+      )
+      const generated = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        modelKey: "text-only",
+        model: { vision: false },
+        content: "A drawing"
+      })
+      const { chat } = generated
+      const path = yield* reader.GetPath({ userId, chatId: chat.id, leafSlotId: null, limit: 20 })
+      const leaf = path.entries.at(-1)!
+      const sent = yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: leaf.slotId,
+          branch: false,
+          content: "",
+          images: [image],
+          reply: false
+        })
+      )
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: sent.entry.slotId })
+      assert.deepStrictEqual(
+        next.images?.images.map((i) => [i.rule, i.message]),
+        [["vision", "text-only can't see images"]]
+      )
+      yield* api.SetMessageHidden({ slotId: sent.entry.slotId, hidden: true })
+      const hidden = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: sent.entry.slotId })
+      assert.deepStrictEqual(
+        hidden.images?.images.map((i) => i.rule),
+        ["hidden"]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 })

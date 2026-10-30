@@ -319,3 +319,77 @@ test("hide images covers draft, message and full-size attachment surfaces", asyn
   await expect(viewer.locator("img")).toHaveCSS("visibility", "hidden")
   await expect(viewer.getByText("Image hidden", { exact: true })).toBeVisible()
 })
+
+for (const colorScheme of ["light", "dark"] as const) {
+  for (const width of [1440, 390]) {
+    test(`message images toggle in and out of the context, and say why a rule leaves one out ${width} ${colorScheme}`, async ({
+      browser
+    }) => {
+      const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme })
+      const page = await context.newPage()
+      await openChat(page, `Image context ${width} ${colorScheme}`)
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        Effect.gen(function* () {
+          const connection = yield* api.CreateConnection({
+            kind: "openai-chat",
+            settings: {
+              name: "Synthetic vision",
+              baseUrl: "http://127.0.0.1:9/v1",
+              compat: {},
+              cacheTtlS: null,
+              maxConcurrent: null,
+              presetOverrideRefId: null
+            }
+          })
+          const model = yield* api.AddUserModel({
+            connectionId: connection.id,
+            key: "one-image",
+            overrides: { vision: true, maxImages: 1 }
+          })
+          yield* api.SetGenerationDefaults({
+            defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+          })
+        })
+      )
+      await page.reload()
+      const buffer = await drawing(page)
+      await page.getByLabel("Message", { exact: true }).fill("Two studies.")
+      await page.getByLabel("Choose images").setInputFiles([
+        { name: "first.png", mimeType: "image/png", buffer },
+        // Different bytes, so a different media id: identical images are one image to the context.
+        { name: "second.png", mimeType: "image/png", buffer: Buffer.concat([buffer, Buffer.from("second")]) }
+      ])
+      await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(2)
+      await page.getByRole("button", { name: "Send", exact: true }).click()
+      const message = page.getByRole("article", { name: "Your message" })
+      const limited = message.getByRole("button", {
+        name: "Image 1 isn’t sent to the model: Only the last image is sent to this model"
+      })
+      await expect(limited).toBeVisible()
+      await expect(limited).toHaveAttribute("aria-pressed", "true")
+      await expect(limited).toHaveAttribute("aria-disabled", "true")
+      await expect(message.getByRole("button", { name: /^View image 1 \(not sent/ })).toBeVisible()
+      await message.getByRole("button", { name: "View image 1", exact: false }).first().hover()
+      await expect(page.getByText("Not sent to the model: Only the last image is sent to this model")).toBeVisible()
+      const screenshots = process.env.SCREENSHOT_DIR
+      if (screenshots) await page.screenshot({ path: join(screenshots, `image-rule-${width}-${colorScheme}.png`) })
+
+      await message.getByRole("button", { name: "View image 2", exact: true }).hover()
+      const take = message.getByRole("button", { name: "Take image 2 out of the context" })
+      await take.click()
+      const back = message.getByRole("button", { name: "Put image 2 back into the context" })
+      await expect(back).toHaveAttribute("aria-pressed", "true")
+      // The limit counts only what's sent: the first image is sent now.
+      await expect(message.getByRole("button", { name: "Take image 1 out of the context" })).toBeEnabled()
+      await page.mouse.move(0, 0)
+      await expect(back).toHaveCSS("opacity", "1")
+      if (screenshots) await page.screenshot({ path: join(screenshots, `image-taken-out-${width}-${colorScheme}.png`) })
+      await page.reload()
+      await expect(message.getByRole("button", { name: "Put image 2 back into the context" })).toBeVisible()
+      await message.getByRole("button", { name: "Put image 2 back into the context" }).click()
+      await expect(limited).toBeVisible()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+      await context.close()
+    })
+  }
+}

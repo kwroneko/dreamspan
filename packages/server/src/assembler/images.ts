@@ -47,6 +47,10 @@ export const imagesStage: AssemblerStage = {
   run: (assembly) =>
     Effect.sync(() => {
       const messages = need(assembly, "messages")
+      const result = need(assembly, "result")
+      const model = assembly.model
+      const max = model?.maxImages ?? DEFAULT_MAX_IMAGES
+      const newest = newestImages(result.messages, max)
       // Where each image the request carries is: its message and place there.
       const sent = new Map<string, string>()
       messages.forEach((message, m) =>
@@ -58,8 +62,22 @@ export const imagesStage: AssemblerStage = {
       for (const entry of assembly.history ?? []) {
         for (const [index, image] of (entry.images ?? []).entries()) {
           const at = sent.get(`${entry.versionId}:${index}`)
-          void at
-          const [rule, message] = image.excluded ? ["user", "Taken out of the context by you"] : [null, null]
+          const [rule, message] = image.excluded
+            ? ["user", "Taken out of the context by you"]
+            : !entry.inContext
+              ? ["hidden", "Its message isn't sent to the model"]
+              : at === undefined
+                ? ["history", "Its message doesn't fit in this context"]
+                : model?.vision === false
+                  ? ["vision", `${model.key} can't see images`]
+                  : !newest.has(at)
+                    ? [
+                        "limit",
+                        max === 1
+                          ? "Only the last image is sent to this model"
+                          : `Only the last ${max} images are sent to this model`
+                      ]
+                    : [null, null]
           if (rule === null) continue
           images.push({
             slotId: entry.slotId as SlotId,
@@ -73,6 +91,16 @@ export const imagesStage: AssemblerStage = {
         }
       }
       const ranges: Array<NonNullable<Assembly["imagesLeftOut"]>["ranges"][number]> = []
+      const summarized = assembly.lcm?.cursorDepth ?? -1
+      if (summarized >= 0) ranges.push({ from: 0, to: summarized, rule: "summary", message: "Covered by a summary" })
+      const first = assembly.history?.[0]?.depth ?? need(assembly, "target").depth
+      if ((assembly.historyOmitted ?? 0) > 0 && first - 1 > summarized)
+        ranges.push({
+          from: summarized + 1,
+          to: first - 1,
+          rule: "history",
+          message: "Its message doesn't fit in this context"
+        })
       assembly.imagesLeftOut = { images, ranges }
       return assembly
     })
