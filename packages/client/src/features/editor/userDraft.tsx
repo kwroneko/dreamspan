@@ -206,7 +206,9 @@ export class UserDraftStore {
     if (draft.id === this.base.draftId && draft.rowVersion <= (this.base.expectedRowVersion ?? 0)) return
     if (this.state.remote?.id === draft.id && draft.rowVersion <= this.state.remote.rowVersion) return
     // A queued or refused write still belongs to the text the user actually saw.
-    if (this.copy !== null || this.pendingTypes.size > 0) {
+    // Ended rows contain empty storage, not the saved setting/form. The host's
+    // saved value may be stale too, so offer a reload instead of showing either.
+    if (draft.status !== "active" || this.copy !== null || this.pendingTypes.size > 0) {
       this.update({ remote: draft, history: null })
       return
     }
@@ -225,23 +227,56 @@ export class UserDraftStore {
     })
   }
   resolveRemote = (load: boolean) => {
-    this.queue = this.queue.then(async () => {
+    const operation = this.queue.then(async () => {
       const remote = this.state.remote
-      if (!remote) return
+      if (!remote) return false
       const edits = this.edits
       // Put local text in undo history before accepting another device's text.
-      if (this.state.text !== null && !(await this.persist(this.state.text))) return
-      if (this.edits !== edits) return
+      if (this.state.text !== null && !(await this.persist(this.state.text))) return false
+      if (this.edits !== edits) return false
       if (load) {
+        if (remote.status !== "active") {
+          // Reloading alone would reopen the local text just persisted. Discard that
+          // exact version into recovered texts first; never pass empty storage to a
+          // JSON form or use its stale saved-value prop as a new active draft.
+          if (this.state.text === null) {
+            this.draft = remote
+            this.base = baseOf(remote)
+          }
+          if (this.draft?.status === "active") {
+            const ended = await this.run((client) =>
+              client("EndUserDraft", {
+                ...this.address(),
+                draftId: this.draft!.id,
+                expectedRowVersion: this.draft!.rowVersion,
+                outcome: "discarded"
+              })
+            )
+            if (!ended.ok) {
+              this.update({ error: ended.error.message })
+              return false
+            }
+            this.draft = ended.value
+            this.base = baseOf(ended.value)
+            this.update({ recovered: this.state.recovered + ended.value.recovered })
+            if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+          }
+          if (this.edits !== edits) return false
+          this.update({ text: null, remote: null })
+          return true
+        }
         this.update({ text: remote.content })
         // This is an explicit choice of the observed remote version. Saving on that base
         // keeps the local text as a displaced history step, even for similar prose.
         this.base = baseOf(remote)
         await this.remember(remote.content, true).kept
-        if (!(await this.persist(remote.content))) return
+        if (!(await this.persist(remote.content))) return false
       }
       this.update({ remote: null })
+      return false
     })
+    this.queue = operation
+    return operation
   }
   leave = () => {
     const copy = this.copy
@@ -413,7 +448,9 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
     showHistory: store.history,
     restore: store.restore,
     acknowledge: store.acknowledge,
-    loadRemote: () => store.resolveRemote(true),
+    loadRemote: async () => {
+      if (await store.resolveRemote(true)) window.location.reload()
+    },
     keepLocal: () => store.resolveRemote(false)
   }
 }
@@ -451,14 +488,23 @@ export function UserDraftStatus({ draft }: { draft: ReturnType<typeof useUserDra
       )}
       {draft.remote && (
         <div role="status" className="flex w-full flex-col gap-2 text-text">
-          <span>Another device saved a different draft. Your unsaved text is still here.</span>
-          <details>
-            <summary>Preview the other device's text</summary>
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.remote.content}</pre>
-          </details>
+          {draft.remote.status === "active" ? (
+            <>
+              <span>Another device saved a different draft. Your unsaved text is still here.</span>
+              <details>
+                <summary>Preview the other device's text</summary>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words">{draft.remote.content}</pre>
+              </details>
+            </>
+          ) : (
+            <span>
+              Another device finished this draft. Your text is still here. Reload to read the saved value; your current
+              text will be kept in recovered texts in the bin.
+            </span>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" onClick={draft.loadRemote}>
-              Load the other device's text
+              {draft.remote.status === "active" ? "Load the other device's text" : "Reload saved value"}
             </Button>
             <Button variant="ghost" onClick={draft.keepLocal}>
               Keep my text

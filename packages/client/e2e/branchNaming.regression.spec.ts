@@ -10,7 +10,8 @@ const admin = <A>(use: (api: Api) => Effect.Effect<A, unknown>) => asUser(server
 const shot = async (page: Page, name: string, width: number) => {
   if (process.env.R4D_SCREENSHOTS) {
     await expect(page.getByRole("dialog")).toHaveCount(0)
-    await page.screenshot({ path: `${process.env.R4D_SCREENSHOTS}/${name}-${width}.png` })
+    const scheme = await page.evaluate(() => (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"))
+    await page.screenshot({ path: `${process.env.R4D_SCREENSHOTS}/${name}-${width}-${scheme}.png` })
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
 }
@@ -41,99 +42,115 @@ const forked = (long = false) =>
     })
   )
 
-for (const width of [1440, 390]) {
-  test("an off-window branch name updates in the other open tab at " + width, async ({ page, context }) => {
-    test.setTimeout(120_000)
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const { chatId } = await forked(true)
-    await page.goto(server().url + "/chats/" + chatId)
-    const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
-    await expect(branch).toHaveAccessibleName(/Old road/)
-    const other = await context.newPage()
-    await other.goto(page.url())
-    await other.getByRole("button", { name: /switch branch|branch actions/ }).click()
-    await other.getByRole("menuitem", { name: "Rename “Old road”…" }).click()
-    await other.getByRole("dialog").getByLabel("Branch name").fill("New road")
-    await other.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
-    await expect(other.getByRole("button", { name: /switch branch|branch actions/ })).toHaveAccessibleName(/New road/)
-    await expect(branch).toHaveAccessibleName(/New road/)
-    await shot(page, "live-off-window-name", width)
-    // Clearing a name also propagates, without opening the observer's menu.
-    await other.getByRole("button", { name: /switch branch/ }).click()
-    await other.getByRole("menuitem", { name: "Rename “New road”…" }).click()
-    await other.getByRole("dialog").getByLabel("Branch name").fill("")
-    await other.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
-    await expect(branch).toHaveAccessibleName(/Branch 2 of 2/)
-    await shot(page, "live-cleared-name", width)
-  })
+for (const scheme of ["light", "dark"] as const)
+  for (const width of [1440, 390]) {
+    test(
+      "an off-window branch name updates in the other open tab at " + width + ` (${scheme})`,
+      async ({ page, context }) => {
+        test.setTimeout(120_000)
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: scheme })
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const { chatId } = await forked(true)
+        await page.goto(server().url + "/chats/" + chatId)
+        const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
+        await expect(branch).toHaveAccessibleName(/Old road/)
+        const other = await context.newPage()
+        await other.emulateMedia({ colorScheme: scheme })
+        await other.goto(page.url())
+        await other.getByRole("button", { name: /switch branch|branch actions/ }).click()
+        await other.getByRole("menuitem", { name: "Rename “Old road”…" }).click()
+        await other.getByRole("dialog").getByLabel("Branch name").fill("New road")
+        await other.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
+        await expect(other.getByRole("button", { name: /switch branch|branch actions/ })).toHaveAccessibleName(
+          /New road/
+        )
+        await expect(branch).toHaveAccessibleName(/New road/)
+        await shot(page, "live-off-window-name", width)
+        // Clearing a name also propagates, without opening the observer's menu.
+        await other.getByRole("button", { name: /switch branch/ }).click()
+        await other.getByRole("menuitem", { name: "Rename “New road”…" }).click()
+        await other.getByRole("dialog").getByLabel("Branch name").fill("")
+        await other.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
+        await expect(branch).toHaveAccessibleName(/Branch 2 of 2/)
+        await shot(page, "live-cleared-name", width)
+      }
+    )
 
-  test("the last surviving named branch remains identifiable and editable at " + width, async ({ page }) => {
-    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const { chatId } = await forked()
-    await page.goto(server().url + "/chats/" + chatId)
-    const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
-    await branch.click()
-    await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
-    await branch.click()
-    await page.getByRole("menuitem", { name: "Delete this fork: Branch 1" }).click()
-    await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
-    await expect(branch).toHaveAccessibleName(/Old road/)
-    await branch.click()
-    await expect(page.getByRole("menuitem", { name: "Rename “Old road”…" })).toBeVisible()
-    await expect(page.getByRole("menuitemradio")).toHaveCount(0)
-    await expect(page.getByRole("menuitem", { name: "Delete this fork: “Old road”" })).toBeDisabled()
-    await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
-    await shot(page, "single-named-menu", width)
-    await page.keyboard.press("Escape")
-    await page.reload()
-    await expect(branch).toHaveAccessibleName(/Old road.*branch actions/)
-    await branch.click()
-    await page.getByRole("menuitem", { name: "Rename “Old road”…" }).click()
-    await page.getByRole("dialog").getByLabel("Branch name").fill("Only road")
-    await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
-    await expect(branch).toHaveAccessibleName(/Only road/)
-    await shot(page, "single-named-reloaded-renamed", width)
-    await branch.click()
-    await expect(page.getByRole("menuitem", { name: "Delete this fork: “Only road”" })).toBeDisabled()
-    await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
-    await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
-  })
-}
+    test(
+      "the last surviving named branch remains identifiable and editable at " + width + ` (${scheme})`,
+      async ({ page }) => {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: scheme })
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const { chatId } = await forked()
+        await page.goto(server().url + "/chats/" + chatId)
+        const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
+        await branch.click()
+        await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
+        await branch.click()
+        await page.getByRole("menuitem", { name: "Delete this fork: Branch 1" }).click()
+        await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
+        await expect(branch).toHaveAccessibleName(/Old road/)
+        await branch.click()
+        await expect(page.getByRole("menuitem", { name: "Rename “Old road”…" })).toBeVisible()
+        await expect(page.getByRole("menuitemradio")).toHaveCount(0)
+        await expect(page.getByRole("menuitem", { name: "Delete this fork: “Old road”" })).toBeDisabled()
+        await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
+        await shot(page, "single-named-menu", width)
+        await page.keyboard.press("Escape")
+        await page.reload()
+        await expect(branch).toHaveAccessibleName(/Old road.*branch actions/)
+        await branch.click()
+        await page.getByRole("menuitem", { name: "Rename “Old road”…" }).click()
+        await page.getByRole("dialog").getByLabel("Branch name").fill("Only road")
+        await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
+        await expect(branch).toHaveAccessibleName(/Only road/)
+        await shot(page, "single-named-reloaded-renamed", width)
+        await branch.click()
+        await expect(page.getByRole("menuitem", { name: "Delete this fork: “Only road”" })).toBeDisabled()
+        await expect(page.getByText("The only branch: delete the chat instead")).toBeVisible()
+        await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
+      }
+    )
+  }
 
-for (const width of [1440, 390]) {
-  test(
-    "Delete branch and Undo preserve the unsent draft when returning to that branch at " + width,
-    async ({ page }) => {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      const { chatId, first, second } = await forked()
-      await page.goto(server().url + "/chats/" + chatId)
-      const message = page.getByLabel("Message", { exact: true })
-      await message.fill("Important unsent paragraph")
-      await expect
-        .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: second }), (draft) => draft.content)))
-        .toBe("Important unsent paragraph")
-      const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
-      await branch.click()
-      await page.getByRole("menuitem", { name: "Delete this fork: “Old road”" }).click()
-      await expect(page.getByTestId("messages").getByText("Other branch", { exact: true })).toBeVisible()
-      // Undo immediately, with a survivor save still pending; changing paths must flush it.
-      await message.fill("Draft typed on the surviving branch")
-      await page.getByRole("button", { name: "Undo", exact: true }).click()
-      await branch.click()
-      await page.getByRole("menuitemradio", { name: /Old road/ }).click()
-      await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
-      await expect(message).toHaveValue("Important unsent paragraph")
-      await shot(page, "restored-branch-original-draft", width)
-      await branch.click()
-      await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
-      await expect(message).toHaveValue("Draft typed on the surviving branch")
-      await expect
-        .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: first }), (draft) => draft.content)))
-        .toBe("Draft typed on the surviving branch")
-      await shot(page, "survivor-draft-after-undo", width)
-    }
-  )
-}
+for (const scheme of ["light", "dark"] as const)
+  for (const width of [1440, 390]) {
+    test(
+      "Delete branch and Undo preserve the unsent draft when returning to that branch at " + width + ` (${scheme})`,
+      async ({ page }) => {
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+        await page.emulateMedia({ colorScheme: scheme })
+        await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+        const { chatId, first, second } = await forked()
+        await page.goto(server().url + "/chats/" + chatId)
+        const message = page.getByLabel("Message", { exact: true })
+        await message.fill("Important unsent paragraph")
+        await expect
+          .poll(() =>
+            admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: second }), (draft) => draft.content))
+          )
+          .toBe("Important unsent paragraph")
+        const branch = page.getByRole("button", { name: /switch branch|branch actions/ })
+        await branch.click()
+        await page.getByRole("menuitem", { name: "Delete this fork: “Old road”" }).click()
+        await expect(page.getByTestId("messages").getByText("Other branch", { exact: true })).toBeVisible()
+        // Undo immediately, with a survivor save still pending; changing paths must flush it.
+        await message.fill("Draft typed on the surviving branch")
+        await page.getByRole("button", { name: "Undo", exact: true }).click()
+        await branch.click()
+        await page.getByRole("menuitemradio", { name: /Old road/ }).click()
+        await expect(page.getByTestId("messages").getByText("The named road", { exact: true })).toBeVisible()
+        await expect(message).toHaveValue("Important unsent paragraph")
+        await shot(page, "restored-branch-original-draft", width)
+        await branch.click()
+        await page.getByRole("menuitemradio", { name: /Branch 1/ }).click()
+        await expect(message).toHaveValue("Draft typed on the surviving branch")
+        await expect
+          .poll(() => admin((api) => Effect.map(api.OpenComposer({ chatId, forkId: first }), (draft) => draft.content)))
+          .toBe("Draft typed on the surviving branch")
+        await shot(page, "survivor-draft-after-undo", width)
+      }
+    )
+  }
