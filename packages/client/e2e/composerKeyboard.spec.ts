@@ -125,3 +125,69 @@ test("editing, saving and version arrows share visible actions and ignore typing
   await expect.poll(() => provider.requests.length).toBe(requests + 1)
   await page.keyboard.press("Escape")
 })
+
+test("Enter sends is visible, persists and controls saved and pending composers", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await setup()
+  await page.goto(`${server().url}/settings/display`)
+  await page.getByRole("radio", { name: /^Never/ }).click()
+  await expect.poll(async () => (await admin((api) => api.GetDisplayPrefs({}))).enterSends).toBe("never")
+  await page.reload()
+  await expect(page.getByRole("radio", { name: /^Never/ })).toBeChecked()
+  const card = await admin((api) => api.CreateCard({ label: "Keyboard pending", name: "Keyboard pending" }))
+  for (const url of [`/chats/${chat.id}`, `/cards/${card.entityId}/chat`]) {
+    await page.goto(`${server().url}${url}`)
+    const box = page.getByTestId("composer")
+    await expect(box).toBeEditable()
+    await box.fill("first line")
+    await box.press("Enter")
+    await expect(box).toHaveValue("first line\n")
+    await box.press("Alt+Enter") // Pending chats have nothing to continue; never send the draft.
+    await expect(box).toHaveValue("first line\n")
+    await box.press("Control+Enter")
+    await expect(page.getByRole("article").filter({ hasText: "first line" })).toBeVisible()
+    await expect(page.getByTestId("composer")).toHaveValue("")
+  }
+  await page.goto(`${server().url}/settings/display`)
+  await page.getByRole("radio", { name: /^Automatic/ }).click()
+})
+
+test("composer and Enter sends display at desktop and phone widths in both themes", async ({ page }) => {
+  test.skip(!process.env.RP_SCREENS, "Screenshot capture requested through RP_SCREENS")
+  const { mkdirSync } = await import("node:fs")
+  mkdirSync(process.env.RP_SCREENS!, { recursive: true })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const chat = await admin((api) =>
+    Effect.gen(function* () {
+      yield* api.SetDisplayPrefs({ prefs: { guidance: false, enterSends: "never" } })
+      const card = yield* api.CreateCard({ label: "Screenshot Mira", name: "Mira" })
+      const chat = yield* api.CreateChat({ title: "The lantern keeper" })
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: card.entityId } })
+      yield* api.SendMessage({
+        chatId: chat.id,
+        parentSlotId: null,
+        branch: false,
+        content: "The lantern keeper pauses by the harbor. Rain taps against the glass.",
+        speakerEntityId: card.entityId
+      })
+      return chat
+    })
+  )
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme as "light" | "dark" })
+      await page.goto(`${server().url}/chats/${chat.id}`)
+      await page.evaluate((theme) => localStorage.setItem("rp.theme", theme), theme)
+      await page.reload()
+      await expect(page.getByTestId("composer")).toBeEditable()
+      await page.getByTestId("composer").fill("We should leave before the watch changes.\nThere is still time.")
+      await page.screenshot({ path: `${process.env.RP_SCREENS}/composer-${width}-${theme}.png` })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      await page.goto(`${server().url}/settings/display`)
+      await expect(page.getByRole("radio", { name: /^Never/ })).toBeChecked()
+      await page.screenshot({ path: `${process.env.RP_SCREENS}/enter-sends-${width}-${theme}.png` })
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    }
+})

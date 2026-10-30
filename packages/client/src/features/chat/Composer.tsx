@@ -17,7 +17,7 @@ import { Link } from "@tanstack/react-router"
 import { useSession } from "../../session.ts"
 import type { AppError } from "../../errors.ts"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { composerKeyDown } from "./composerKeys.ts"
+import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -169,6 +169,7 @@ export function Composer({
   // edited, and as it was after. New versions and Continue ask the session for their guidance
   // as they're asked for: a new version reuses its reply's own, except the reply edited here.
   const viewPrefs = useViewPrefs()
+  const submitHint = composerSubmitHint(viewPrefs.prefs.enterSends)
   const guidance = viewPrefs.prefs.guidance || editing !== null
   const toggleOn = viewPrefs.prefs.guidance
   useEffect(
@@ -195,7 +196,8 @@ export function Composer({
   const ready =
     editing !== null
       ? !view.loading && editStillShown(editing, view)
-      : !attachmentInput?.busy &&
+      : viewPrefs.ready &&
+        !attachmentInput?.busy &&
         textReady &&
         choice.loaded &&
         !choice.saving &&
@@ -383,7 +385,7 @@ export function Composer({
   const hasText = text.trim() !== "" || !!attachmentInput?.count
   const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (Enter; Shift+Enter for a new line)`
+    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (${submitHint})`
     : replierName
       ? `${replierName} replies now, with nothing sent from you`
       : "Type a message to send"
@@ -392,14 +394,14 @@ export function Composer({
   const generateText = editing !== null ? "New version" : name ? `Write for ${name}` : "Reply"
   const generateHint =
     editing !== null
-      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (Enter). The guidance stays here.`
+      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
       : `${
           name === null
             ? "The model writes the next turn"
             : speakerPlayed
               ? `The model writes ${name}'s turn for you`
               : `The model writes ${name}'s turn`
-        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? " (Enter)" : ""}`
+        }${guidance && hasText ? ", following the guidance" : ""}${guidance ? ` (${submitHint})` : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
   // The draft's earlier text, while the box shows the draft.
   const history = editing === null && <History draft={draft} />
@@ -429,9 +431,9 @@ export function Composer({
     },
     hint:
       editing !== null
-        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (Enter) makes a new version of it with this text, and its regenerate uses it too. ✕ above goes back to your draft.`
+        ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (${submitHint}) makes a new version of it with this text, and its regenerate uses it too. ✕ above goes back to your draft.`
         : guidance
-          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (Enter) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
+          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
           : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
     reply: {
       candidates: faces,
@@ -456,8 +458,9 @@ export function Composer({
     replyNow,
     report
   }
-  const onKeyDown = composerKeyDown(() =>
-    invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard")
+  const onKeyDown = composerKeyDown(
+    () => invokeComposerControl(guidance ? "composer.generate" : "composer.send", controls, "keyboard"),
+    viewPrefs.prefs.enterSends
   )
 
   return (

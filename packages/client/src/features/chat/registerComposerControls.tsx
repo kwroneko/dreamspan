@@ -65,7 +65,7 @@ export const registerComposerControls = () => [
         variant={context.guidance ? "primary" : "secondary"}
         aria-label={`Generate ${context.speakerName}`}
         pending={context.busy}
-        disabled={context.busy}
+        disabled={context.busy || !context.prefsReady}
         className="min-w-0 max-w-52 sm:max-w-56"
         onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
       >
@@ -83,10 +83,10 @@ export const registerComposerControls = () => [
       context.guidance ? null : (
         <SquareIconButton
           label={context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`}
-          hint={`${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (Enter; Shift+Enter for a new line)`}
+          hint={`${context.speakerName === "You" ? "Send" : `Send as ${context.speakerName}`} (${context.submitHint})`}
           variant="primary"
           pending={context.busy}
-          disabled={context.busy || !context.hasText}
+          disabled={context.busy || !context.prefsReady || !context.hasText}
           onClick={() => void pendingComposerControls.get("pending.send")?.run?.(context)}
         >
           <SendIcon />

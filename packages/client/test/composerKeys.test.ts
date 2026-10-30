@@ -32,3 +32,25 @@ it("excludes Alt+Enter, modifiers with Alt, Shift+Enter and composition from sen
   expect(send).toHaveBeenCalledOnce()
   expect(key.preventDefault).toHaveBeenCalledOnce()
 })
+
+it("applies all account modes on desktop and touch, with a send chord and newline escape", () => {
+  for (const coarse of [false, true]) {
+    vi.stubGlobal("matchMedia", () => ({ matches: coarse }))
+    for (const mode of ["automatic", "always", "never"] as const) {
+      const send = vi.fn()
+      const key = event()
+      composerKeyDown(send, mode)(key)
+      expect(send).toHaveBeenCalledTimes(Number(mode === "always" || (mode === "automatic" && !coarse)))
+      const before = send.mock.calls.length
+      composerKeyDown(send, mode)(event({ shiftKey: true }))
+      expect(send).toHaveBeenCalledTimes(before)
+      composerKeyDown(send, mode)(event({ ctrlKey: true }))
+      composerKeyDown(send, mode)(event({ metaKey: true }))
+      expect(send).toHaveBeenCalledTimes(before + 2)
+      composerKeyDown(send, mode)(event({ altKey: true }))
+      composerKeyDown(send, mode)(event({ nativeEvent: { isComposing: true } }))
+      expect(send).toHaveBeenCalledTimes(before + 2)
+    }
+  }
+  vi.unstubAllGlobals()
+})
