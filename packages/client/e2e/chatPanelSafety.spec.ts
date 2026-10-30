@@ -6,6 +6,7 @@
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
 import type { SummaryId } from "@rp/shared/lcm.ts"
@@ -103,7 +104,7 @@ test("switching tabs saves text typed while a summary draft save was in flight",
     )
     .toBe("The latest text typed before switching tabs.")
   await page.getByRole("tab", { name: "Summaries", exact: true }).click()
-  await expect(box).toHaveValue("The latest text typed before switching tabs.")
+  await expectTextBox(box, "The latest text typed before switching tabs.")
 })
 
 test("summary text survives a failed save and switching to another tab", async ({ page }) => {
@@ -118,14 +119,14 @@ test("summary text survives a failed save and switching to another tab", async (
   await page.getByRole("tab", { name: "Notes", exact: true }).click()
   // The edit is still there behind the other tab.
   await page.getByRole("tab", { name: "Summaries", exact: true }).click()
-  await expect(box).toHaveValue("Offline text must survive switching tabs.")
+  await expectTextBox(box, "Offline text must survive switching tabs.")
   await page.getByRole("tab", { name: "Notes", exact: true }).click()
   await server().restart()
   // A reload too: the copy in this browser goes to the server when the edit opens again.
   await page.goto(`${server().url}/chats/${chat.id}?panel=summaries`)
   await row.getByRole("button", { name: /^Edit / }).click()
   await expect(box).toBeEnabled()
-  await expect(box).toHaveValue("Offline text must survive switching tabs.")
+  await expectTextBox(box, "Offline text must survive switching tabs.")
   await expect
     .poll(
       async () =>

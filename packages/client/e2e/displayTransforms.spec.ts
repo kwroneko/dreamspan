@@ -7,6 +7,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { showActions } from "./support/message.ts"
 
@@ -186,7 +187,7 @@ for (const width of [1440, 390])
       }
       await showActions(reply)
       await reply.getByRole("button", { name: "Edit", exact: true }).click()
-      await expect(reply.getByLabel("Message text")).toHaveValue("Hi {{user}}")
+      await expectTextBox(reply.getByLabel("Message text"), "Hi {{user}}")
       await reply.getByRole("button", { name: "Cancel", exact: true }).click()
       const before = provider.completions.length
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>

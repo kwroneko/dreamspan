@@ -9,6 +9,7 @@ import type { Copy } from "../src/features/editor/backup.ts"
 import { messageMenu } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60", FAKE_GENERATOR_TOKENS: "80" })
@@ -132,7 +133,7 @@ for (const kind of ["message", "summary"] as const) {
     await expect.poll(async () => (await copies(page)).map((copy) => copy.content)).toContain(later)
     release!()
     await expect.poll(() => refused).toBeGreaterThan(0)
-    await expect(box).toHaveValue(later)
+    await expectTextBox(box, later)
     await expect.poll(async () => (await copies(page)).map((copy) => copy.content)).toContain(later)
   })
 }
