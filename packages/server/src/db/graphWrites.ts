@@ -365,11 +365,15 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
       const at = Date.now()
       yield* ownedChat(userId, chatId)
       let fork = yield* ownedFork(userId, chatId, params.forkId ?? null)
+      const draftForkId = fork.id
       yield* checkSpeaker(userId, version.speakerEntityId)
       let parent: { id: string; depth: number; lane_id: string } | null = null
       if (parentSlotId !== null) {
+        // A deleted message is the fork's tip only while its gap still holds an inserted message
+        // the fork shows (`relocateLeaf`, spec/MESSAGE-INSERT.md §2.4): appends go below it.
         const [row] = yield* sql<{ id: string; depth: number; lane_id: string }>`
-            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId} AND deleted_at IS NULL`
+            SELECT id, depth, lane_id FROM slots WHERE id = ${parentSlotId} AND chat_id = ${chatId}
+              AND (deleted_at IS NULL OR id = ${fork.tip_slot_id})`
         if (!row) return yield* new NotFound({ entity: "slot", id: parentSlotId })
         parent = row
       }
@@ -405,6 +409,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         // (spec/MESSAGE-INSERT.md §4.2).
         targetKind: ["composer", "insert"],
         targetId: chatId,
+        matchesField: (kind, field) =>
+          field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
         content: row.writer === "model" ? (row.direction ?? "") : row.content
       })
       return new AppendResult({

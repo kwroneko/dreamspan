@@ -85,6 +85,45 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
       })
     )
   }
+  it.effect("returns a newest-message refusal before Send and clears it when the model budget is repaired", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      yield* importStFolder(folder(14_000))
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Newest-turn budget",
+          baseUrl: "http://localhost:1234/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "small-context",
+        overrides: { settings: { samplers: { openai_max_context: 4095, openai_max_tokens: 300 } } }
+      })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
+      const refused = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      assert.isNull(refused.historyStart)
+      assert.match(refused.assemblyError ?? "", /newest message/)
+      // Fixed prompts fit the maximum: the refusal must still reach the UI.
+      assert.isBelow(refused.budget!.nonHistoryTokens + refused.budget!.responseReserve, refused.budget!.maximum)
+      yield* api.EditModel({
+        modelId: model.id,
+        expectedRowVersion: model.rowVersion,
+        overrides: { settings: { samplers: { openai_max_context: 32000, openai_max_tokens: 300 } } }
+      })
+      const repaired = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      assert.isNull(repaired.assemblyError)
+      assert.strictEqual(repaired.historyStart?.depth, 0)
+    })
+  )
   it.effect("preserves a chosen default and names the preset ST used in the report", () =>
     Effect.gen(function* () {
       const api = yield* client()

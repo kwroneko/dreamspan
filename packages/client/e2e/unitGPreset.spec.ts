@@ -139,6 +139,7 @@ for (const width of [1440, 390])
           return at!.getBoundingClientRect().height
         })
       if (width < 640) {
+        // Keep the preset name and Close without wrapping Rename onto a spare row.
         expect(sticky).toBeLessThan(400)
         const options = overlay.getByRole("button", { name: "Options", exact: true })
         await options.click()
@@ -248,6 +249,10 @@ test("the panel's Discard asks first when the overlay reordered blocks", async (
   const panel = await openPanel(page, "Prompt preset")
   const names = async () =>
     (await panel.getByRole("list", { name: "Preset blocks" }).getByRole("listitem").allTextContents()).join("|")
+  // Read the order once the blocks and their estimates are shown, not while the panel loads.
+  const blocks = panel.getByRole("list", { name: "Preset blocks" }).getByRole("listitem")
+  await expect(blocks.first()).toContainText(/~[\d,]+ tokens/)
+  await expect(blocks.last()).toContainText(/~[\d,]+ tokens/)
   const before = await names()
   await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })

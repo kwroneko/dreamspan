@@ -3,7 +3,7 @@ import { newChatLcm } from "@rp/shared/lcmSettings.ts"
 import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import type { BinItem, BinLimits, RecoveredText } from "@rp/shared/bin.ts"
-import { NewVersion, type SlotId } from "@rp/shared/chat.ts"
+import { type ForkId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { composerKey } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
@@ -12,6 +12,7 @@ import { databaseFile } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
+import { LINEAGE_CAP } from "../src/db/forkState.ts"
 
 const database = (dataDir = tempDir("bin"), binLimits?: BinLimits) =>
   Database.layer({
@@ -693,5 +694,503 @@ describe("recycle bin", () => {
       const del = (yield* bob.writer.DeleteMessage({ userId: bob.userId, slotId: ana.c.slotId }).pipe(Effect.flip))._tag
       assert.strictEqual(del, "NotFound")
     }).pipe(Effect.provide(database()))
+  )
+})
+
+/** `setup` with inserting, forking and reading by fork (spec/MESSAGE-INSERT.md, unit 5). */
+const inserting = (handle = "ana") =>
+  Effect.gen(function* () {
+    const t = yield* setup(handle)
+    const { writer, reader, userId, chat, say } = t
+    const main = chat.currentForkId! as ForkId
+    const send = (forkId: ForkId, parentSlotId: SlotId | null, content: string) =>
+      Effect.map(
+        writer.AppendMessage({
+          userId,
+          chatId: chat.id,
+          forkId,
+          parentSlotId,
+          branch: false,
+          version: say(content),
+          commitDraft: null
+        }),
+        (sent) => sent.slotId
+      )
+    const insert = (forkId: ForkId, anchor: SlotId | null, content: string) =>
+      Effect.gen(function* () {
+        const rowVersion =
+          anchor === null ? 0 : (yield* reader.GetSlot({ userId, slotId: anchor, forkId })).entry.rowVersion
+        const made = yield* writer.InsertMessage({
+          userId,
+          chatId: chat.id,
+          forkId,
+          anchorSlotId: anchor,
+          expectedRowVersion: rowVersion,
+          body: { _tag: "Write", speaker: t.card.entityId, content }
+        })
+        return made.slotId
+      })
+    const fork = (from: ForkId, at: SlotId | null) =>
+      Effect.map(writer.CreateFork({ userId, chatId: chat.id, fromForkId: from, atSlotId: at }), (made) => made.fork.id)
+    /** What a fork shows, in display order, without what it deleted. */
+    const shows = (forkId: ForkId) =>
+      Effect.map(reader.GetPath({ userId, chatId: chat.id, forkId, leafSlotId: null, limit: 500 }), (window) =>
+        window.entries.map((e) => e.version.content)
+      )
+    const forks = () => reader.ListForks({ userId, chatId: chat.id })
+    const forkOf = (forkId: ForkId) => Effect.map(forks(), (all) => all.find((f) => f.id === forkId)!)
+    const del = (forkId: ForkId, slotId: SlotId) => writer.DeleteMessage({ userId, slotId, forkId })
+    return { ...t, main, send, insert, fork, shows, forks, forkOf, del }
+  })
+
+/** Columns of a slot and its versions, read straight from the database. */
+const slotRow = (dir: string, slotId: SlotId) => {
+  const db = new DatabaseSync(databaseFile(dir), { readOnly: true })
+  const slot = db.prepare(`SELECT deleted_at, bin_item_id, purged_at FROM slots WHERE id = ?`).get(slotId) as {
+    deleted_at: number | null
+    bin_item_id: string | null
+    purged_at: number | null
+  }
+  const contents = (
+    db.prepare(`SELECT content FROM versions WHERE slot_id = ? ORDER BY ordinal`).all(slotId) as Array<{
+      content: string
+    }>
+  ).map((row) => row.content)
+  db.close()
+  return { marked: slot.deleted_at !== null, item: slot.bin_item_id, purged: slot.purged_at !== null, contents }
+}
+
+describe("the bin with inserted messages (spec/MESSAGE-INSERT.md §3.1)", () => {
+  it.live("relocation bumps a plain tip once, and a retained deleted tip only when its gap empties", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      const before = yield* t.forkOf(t.main)
+      yield* t.del(t.main, t.c.slotId)
+      const moved = yield* t.forkOf(t.main)
+      assert.strictEqual(moved.tipSlotId, t.b.slotId)
+      assert.strictEqual(moved.rowVersion, before.rowVersion + 1)
+      yield* t.del(t.main, t.a.slotId)
+      assert.strictEqual((yield* t.forkOf(t.main)).rowVersion, moved.rowVersion)
+      const x = yield* t.insert(t.main, t.b.slotId, "x")
+      const placed = yield* t.forkOf(t.main)
+      yield* t.del(t.main, t.b.slotId)
+      yield* t.del(t.main, t.root.slotId)
+      const kept = yield* t.forkOf(t.main)
+      assert.strictEqual(kept.tipSlotId, t.b.slotId)
+      assert.strictEqual(kept.rowVersion, placed.rowVersion)
+      yield* t.del(t.main, x)
+      const empty = yield* t.forkOf(t.main)
+      assert.strictEqual(empty.tipSlotId, null)
+      assert.strictEqual(empty.rowVersion, kept.rowVersion + 1)
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("the composer sends and generates past a deleted tip, including a deleted generating tip", () =>
+    Effect.gen(function* () {
+      for (const kind of ["message", "generate"] as const) {
+        for (const generating of [false, true]) {
+          const t = yield* inserting(`${kind}${generating}`)
+          if (generating)
+            yield* t.writer.AddVersion({
+              userId: t.userId,
+              slotId: t.c.slotId,
+              version: new NewVersion({ ...t.say("unfinished"), status: "generating" }),
+              select: true,
+              commitDraft: null
+            })
+          yield* t.insert(t.main, t.c.slotId, "last shown")
+          yield* t.del(t.main, t.c.slotId)
+          const sent = yield* t.writer.SendOrQueue({
+            userId: t.userId,
+            chatId: t.chat.id,
+            forkId: t.main,
+            parentSlotId: t.c.slotId,
+            branch: false,
+            kind,
+            content: "next",
+            speakerEntityId: t.card.entityId,
+            replySpeakerEntityId: null,
+            noReply: true,
+            direction: null,
+            commitDraft: null
+          })
+          assert.strictEqual(sent._tag, "Posted")
+          assert.deepStrictEqual(yield* t.shows(t.main), [
+            "root",
+            "a",
+            "b",
+            "last shown",
+            kind === "message" ? "next" : ""
+          ])
+        }
+      }
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("chat previews and bin excerpts use the shown insertion past a deleted anchor", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      yield* t.insert(t.main, t.c.slotId, "last shown")
+      yield* t.del(t.main, t.c.slotId)
+      // The composer's cast and a swipe at the display end read state at the deleted anchor.
+      yield* t.reader.StateEventsAt({
+        userId: t.userId,
+        chatId: t.chat.id,
+        forkId: t.main,
+        slotId: t.c.slotId,
+        leafSlotId: t.c.slotId
+      })
+      const summaries = yield* t.reader.ChatSummaries({ userId: t.userId, chatIds: [t.chat.id] })
+      assert.strictEqual(summaries[0]!.last?.text, "last shown")
+      assert.strictEqual(summaries[0]!.messages, 5)
+      const shell = yield* t.reader.ShellLibrary({ userId: t.userId })
+      const sidebar = shell.forks.find((fork) => fork.forkId === t.main)!
+      assert.strictEqual(sidebar.preview, "last shown")
+      assert.strictEqual(sidebar.messages, 4, "the shell counts shown messages, excluding the deleted anchor")
+      const later = yield* t.fork(t.main, t.b.slotId)
+      // A second deletion warns about main, whose structural tip is deleted.
+      const gone = yield* t.del(later, t.a.slotId)
+      const warning = yield* t.reader.BinItemForks({ userId: t.userId, itemIds: [gone.id] })
+      assert.strictEqual(warning.find((f) => f.forkId === t.main)!.tipExcerpt, "last shown")
+      const branch = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      assert.strictEqual(branch.excerpt, "last shown")
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a purged fork's inherited top insertion cannot retain text or appear in bin warnings", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const top = yield* t.insert(t.main, null, "top")
+      const later = yield* t.fork(t.main, t.b.slotId)
+      const branch = yield* t.writer.DeleteFork({ userId: t.userId, forkId: later })
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: branch.id })
+      const before = (yield* t.reader.GetSlot({ userId: t.userId, slotId: top, forkId: t.main })).entry.version
+      const amended = yield* t.writer.AmendVersion({
+        userId: t.userId,
+        forkId: t.main,
+        versionId: before.id,
+        content: "top edited",
+        expectedRowVersion: before.rowVersion
+      })
+      assert.strictEqual(amended.id, before.id, "a purged fork cannot force an amend copy")
+      const gone = yield* t.del(t.main, top)
+      assert.deepStrictEqual(yield* t.reader.BinItemForks({ userId: t.userId, itemIds: [gone.id] }), [])
+      assert.isTrue(slotRow(dir, top).marked)
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("restore, fork deletion, purge and eviction preserve inherited insertions after lineage compaction", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const top = yield* t.insert(t.main, null, "top")
+      let descendant = t.main
+      for (let i = 0; i < LINEAGE_CAP; i++) descendant = yield* t.fork(descendant, t.b.slotId)
+      const gone = yield* t.del(t.main, x)
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: gone.id })
+      const branch = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      assert.strictEqual(branch.origin.messages, 1)
+      assert.strictEqual(branch.byteSize, Buffer.byteLength("c"))
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: branch.id })
+      const again = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: again.id })
+      assert.deepStrictEqual(yield* t.shows(descendant), ["top", "root", "a", "x", "b"])
+      yield* t.del(descendant, x)
+      yield* t.del(descendant, top) // evicts x's item; the intermediate forks retain its text.
+      assert.deepStrictEqual(slotRow(dir, x).contents, ["x"])
+      assert.deepStrictEqual(slotRow(dir, top).contents, ["top"])
+      assert.deepStrictEqual(yield* t.shows(descendant), ["root", "a", "b"])
+    }).pipe(
+      Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+    )
+  })
+
+  it.live(
+    "an inserted message deleted in its fork comes back in its gap, without moving the tip or making a fork",
+    () =>
+      Effect.gen(function* () {
+        const t = yield* inserting()
+        const x = yield* t.insert(t.main, t.a.slotId, "x")
+        yield* t.insert(t.main, t.a.slotId, "y")
+        assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "y", "x", "b", "c"])
+        const item = yield* t.del(t.main, x)
+        assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "y", "b", "c"])
+        assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.c.slotId)
+        yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: item.id })
+        assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "y", "x", "b", "c"])
+        assert.strictEqual((yield* t.forks()).length, 1)
+        assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.c.slotId)
+
+        // At the display end, below the tip, and above the first message.
+        const end = yield* t.insert(t.main, t.c.slotId, "end")
+        const top = yield* t.insert(t.main, null, "top")
+        for (const slotId of [end, top]) {
+          const gone = yield* t.del(t.main, slotId)
+          yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: gone.id })
+        }
+        assert.deepStrictEqual(yield* t.shows(t.main), ["top", "root", "a", "y", "x", "b", "c", "end"])
+        assert.strictEqual((yield* t.forks()).length, 1)
+        const after = yield* t.forkOf(t.main)
+        assert.deepStrictEqual([after.tipSlotId, after.tipExcerpt], [t.c.slotId, "end"])
+      }).pipe(Effect.provide(database()))
+  )
+
+  it.live("an inserted message restored after its anchor left the fork's path comes back as a fork of its own", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.b.slotId, "x")
+      const item = yield* t.del(t.main, x)
+      yield* t.del(t.main, t.c.slotId)
+      yield* t.del(t.main, t.b.slotId)
+      assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.a.slotId)
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: item.id })
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a"])
+      const made = (yield* t.forks()).find((f) => f.id !== t.main)!
+      assert.deepStrictEqual([made.baseSlotId, made.tipSlotId], [t.b.slotId, x])
+      assert.deepStrictEqual(yield* t.shows(made.id), ["root", "a", "x"])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("purging an inserted message names the later fork that inherits it, and erases it there too", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const before = yield* t.fork(t.main, t.b.slotId)
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const later = yield* t.fork(t.main, t.b.slotId)
+      assert.deepStrictEqual(yield* t.shows(later), ["root", "a", "x", "b"])
+      const item = yield* t.del(t.main, x)
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "b", "c"])
+      assert.deepStrictEqual(yield* t.shows(later), ["root", "a", "x", "b"])
+      assert.deepStrictEqual(yield* t.shows(before), ["root", "a", "b"])
+      // Another fork shows it, so it isn't marked; the warning names that fork alone.
+      assert.isFalse(slotRow(dir, x).marked)
+      const named = yield* t.reader.BinItemForks({ userId: t.userId, itemIds: [item.id] })
+      assert.deepStrictEqual(
+        named.map((f) => f.forkId),
+        [later]
+      )
+      const stale = yield* t.writer
+        .PurgeBinItem({ userId: t.userId, itemId: item.id, expectedForkIds: [] })
+        .pipe(Effect.flip)
+      assert.strictEqual(stale._tag, "BinChanged")
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: item.id, expectedForkIds: [later] })
+      assert.deepStrictEqual(yield* t.shows(later), ["root", "a", "b"])
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "b", "c"])
+      const row = slotRow(dir, x)
+      assert.deepStrictEqual([row.marked, row.purged, row.contents], [true, true, [""]])
+      assert.deepStrictEqual(yield* t.bin(), [])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("making room in the bin never erases an inserted message a later fork inherits", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const later = yield* t.fork(t.main, t.b.slotId)
+      yield* t.del(t.main, x)
+      // The one-item bin evicts x's item: its deletion in main stays, and `later` keeps it.
+      yield* t.del(t.main, t.c.slotId)
+      assert.deepStrictEqual(
+        (yield* t.bin()).map((i) => i.excerpt),
+        ["c"]
+      )
+      assert.deepStrictEqual(yield* t.shows(later), ["root", "a", "x", "b"])
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "b"])
+      assert.deepStrictEqual(slotRow(dir, x).contents, ["x"])
+    }).pipe(
+      Effect.provide(database(dir, { deletedItems: 1, deletedBytes: 1e9, recoveredTexts: 10, recoveredBytes: 1e9 }))
+    )
+  })
+
+  it.live("deleting the fork that inserted a message keeps it for a descendant that shows it", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const later = yield* t.fork(t.main, t.b.slotId)
+      const item = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      // Only c is main's alone: b and x are shown by `later`.
+      assert.strictEqual(item.origin.messages, 1)
+      assert.isFalse(slotRow(dir, x).marked)
+      assert.isTrue(slotRow(dir, t.c.slotId).marked)
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: item.id })
+      assert.deepStrictEqual(yield* t.shows(later), ["root", "a", "x", "b"])
+      assert.deepStrictEqual(slotRow(dir, x).contents, ["x"])
+      assert.deepStrictEqual(slotRow(dir, t.c.slotId).contents, [""])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("deleting a fork marks the inserted messages no other fork shows, and restoring it brings them back", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const before = yield* t.fork(t.main, t.b.slotId)
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const top = yield* t.insert(t.main, null, "top")
+      const item = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      // c, x and top: `before` was made before the insertions.
+      assert.strictEqual(item.origin.messages, 3)
+      assert.strictEqual(item.byteSize, Buffer.byteLength("cxtop"))
+      assert.strictEqual(item.title, 'Fork of 3 messages in "Harbor"')
+      for (const slotId of [x, top, t.c.slotId]) assert.strictEqual(slotRow(dir, slotId).item, item.id)
+      assert.deepStrictEqual(yield* t.shows(before), ["root", "a", "b"])
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: item.id })
+      assert.deepStrictEqual(yield* t.shows(t.main), ["top", "root", "a", "x", "b", "c"])
+      for (const slotId of [x, top]) assert.isFalse(slotRow(dir, slotId).marked)
+
+      const again = yield* t.writer.DeleteFork({ userId: t.userId, forkId: t.main })
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: again.id })
+      for (const slotId of [x, top]) assert.deepStrictEqual(slotRow(dir, slotId).contents, [""])
+      assert.deepStrictEqual(yield* t.shows(before), ["root", "a", "b"])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("deleting a fork made at an inserted message keeps that message for the fork that inserted it", () => {
+    const dir = tempDir("bin")
+    return Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      const atX = yield* t.fork(t.main, x)
+      yield* t.writer.AddVersion({
+        userId: t.userId,
+        slotId: x,
+        forkId: atX,
+        version: t.say("another shared swipe"),
+        select: false,
+        commitDraft: null
+      })
+      const e = yield* t.send(atX, x, "e")
+      assert.deepStrictEqual(yield* t.shows(atX), ["root", "a", "x", "e"])
+      const item = yield* t.writer.DeleteFork({ userId: t.userId, forkId: atX })
+      // x is on its structural path, past what it shares with main, but main shows it.
+      assert.strictEqual(item.origin.messages, 1)
+      assert.strictEqual(item.byteSize, Buffer.byteLength("e"))
+      assert.isFalse(slotRow(dir, x).marked)
+      yield* t.writer.PurgeBinItem({ userId: t.userId, itemId: item.id })
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "c"])
+      assert.deepStrictEqual(slotRow(dir, e).contents, [""])
+    }).pipe(Effect.provide(database(dir)))
+  })
+
+  it.live("deleting an anchor keeps the messages inserted below it, the fork's tip included", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      // In the middle: its gap stays where it was.
+      yield* t.insert(t.main, t.a.slotId, "x")
+      const a = yield* t.del(t.main, t.a.slotId)
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "x", "b", "c"])
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: a.id })
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "c"])
+
+      // At the tip: the tip stays on it while its gap holds a message the fork shows.
+      const z = yield* t.insert(t.main, t.c.slotId, "z")
+      const c = yield* t.del(t.main, t.c.slotId)
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "z"])
+      const tip = yield* t.forkOf(t.main)
+      assert.deepStrictEqual([tip.tipSlotId, tip.tipExcerpt], [t.c.slotId, "z"])
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: c.id })
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "c", "z"])
+      assert.strictEqual((yield* t.forks()).length, 1)
+      const d = yield* t.send(t.main, t.c.slotId, "d")
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "c", "z", "d"])
+
+      // Appending while the tip is deleted goes below it, after its gap.
+      yield* t.del(t.main, d)
+      assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.c.slotId)
+      yield* t.del(t.main, t.c.slotId)
+      const e = yield* t.send(t.main, t.c.slotId, "e")
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b", "z", "e"])
+      // Deleting e brings the tip back to c, which still holds z; deleting z frees it.
+      yield* t.del(t.main, e)
+      assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.c.slotId)
+      yield* t.del(t.main, z)
+      assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.b.slotId)
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "x", "b"])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a deleted inserted message's own gap keeps a deleted tip in place", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      const x = yield* t.insert(t.main, t.c.slotId, "x")
+      yield* t.insert(t.main, x, "y")
+      yield* t.del(t.main, x)
+      yield* t.del(t.main, t.c.slotId)
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "b", "y"])
+      assert.strictEqual((yield* t.forkOf(t.main)).tipSlotId, t.c.slotId)
+    }).pipe(Effect.provide(database()))
+  )
+
+  // Against a list oracle: a fork is a list of messages, deleted ones flagged. Appending adds
+  // at its end, inserting below P directly after P (above the first message, at its start), a
+  // fork made at P starts as its parent's list up to P, and deleting any message, the tip
+  // included, hides it alone. Every fork must show its list after every step.
+  it.live(
+    "keeps every fork's view as a list of what it shows under random appends, insertions, forks and deletions",
+    () =>
+      Effect.gen(function* () {
+        for (const seed of [1, 2, 3, 4, 5, 6]) {
+          const t = yield* inserting(`seed${seed}`)
+          let state = seed
+          const pick = (n: number) => {
+            state = (state * 1103515245 + 12345) % 2147483648
+            return state % n
+          }
+          const text = new Map<string, string>([
+            [t.root.slotId, "root"],
+            [t.a.slotId, "a"],
+            [t.b.slotId, "b"],
+            [t.c.slotId, "c"]
+          ])
+          type Model = { list: Array<SlotId>; deleted: Set<SlotId> }
+          const models = new Map<ForkId, Model>([
+            [t.main, { list: [t.root.slotId, t.a.slotId, t.b.slotId, t.c.slotId], deleted: new Set() }]
+          ])
+          const visible = (model: Model) => model.list.filter((id) => !model.deleted.has(id))
+          for (let step = 0; step < 40; step++) {
+            const forkIds = [...models.keys()]
+            const forkId = forkIds[pick(forkIds.length)]!
+            const model = models.get(forkId)!
+            const shown = visible(model)
+            const label = `s${seed}.${step}`
+            const op = pick(10)
+            if (op < 3 || shown.length === 0) {
+              const tip = (yield* t.forkOf(forkId)).tipSlotId
+              const id = yield* t.send(forkId, tip, label)
+              text.set(id, label)
+              model.list.push(id)
+            } else if (op < 6) {
+              const at = pick(shown.length + 1)
+              const anchor = at === shown.length ? null : shown[at]!
+              const id = yield* t.insert(forkId, anchor, label)
+              text.set(id, label)
+              model.list.splice(anchor === null ? 0 : model.list.indexOf(anchor) + 1, 0, id)
+            } else if (op < 8) {
+              const at = shown[pick(shown.length)]!
+              const made = yield* t.fork(forkId, at)
+              models.set(made, {
+                list: model.list.slice(0, model.list.indexOf(at) + 1),
+                deleted: new Set(model.deleted)
+              })
+            } else {
+              const id = shown[pick(shown.length)]!
+              yield* t.del(forkId, id)
+              model.deleted.add(id)
+            }
+            for (const [id, each] of models) {
+              assert.deepStrictEqual(
+                yield* t.shows(id),
+                visible(each).map((slotId) => text.get(slotId)),
+                `seed ${seed}, step ${step}, fork ${id}`
+              )
+            }
+          }
+        }
+      }).pipe(Effect.provide(database())),
+    120_000
   )
 })

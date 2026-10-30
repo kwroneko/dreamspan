@@ -151,94 +151,103 @@ const notesAt = async (page: Page, width: number, theme: "light" | "dark") => {
 const noWideScroll = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
 
-for (const width of [1440, 390]) {
-  test(`notes: collapse, add, pick, save as shared, unlink, switch, condition at ${width}`, async ({ page }) => {
-    const tab = await notesAt(page, width, "light")
-    const own = tab.getByRole("region", { name: "This chat's notes" })
-    // Collapsed: rows with their place and condition, no editor open.
-    const row = own.getByRole("button", { name: /^Aria's outfit/ })
-    await expect(row).toContainText("End of tail")
-    await expect(row).toContainText("Aria Vance's turn")
-    await expect(tab.getByRole("region", { name: /^Note / })).toHaveCount(0)
-    await row.click()
-    await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toBeVisible()
-    await row.click()
-    await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toHaveCount(0)
-    // An imported group chat has Aria's own author's note off, as ST ignores it there.
-    const aria = tab.getByRole("region", { name: "Aria Vance's notes" })
-    await expect(aria.getByRole("switch", { name: /Character author's note/ })).not.toBeChecked()
-    await expect(aria.getByRole("button", { name: /^Character author's note/ })).toContainText("Private")
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const) {
+    test(`notes: collapse, add, pick, save as shared, unlink, switch, condition at ${width} ${theme}`, async ({
+      page
+    }) => {
+      const tab = await notesAt(page, width, theme)
+      const own = tab.getByRole("region", { name: "This chat's notes" })
+      // Collapsed: rows with their place and condition, no editor open.
+      const row = own.getByRole("button", { name: /^Aria's outfit/ })
+      await expect(row).toContainText("End of tail")
+      await expect(row).toContainText("Aria Vance's turn")
+      await expect(tab.getByRole("region", { name: /^Note / })).toHaveCount(0)
+      await row.click()
+      await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toBeVisible()
+      await row.click()
+      await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toHaveCount(0)
+      // An imported group chat has Aria's own author's note off, as ST ignores it there.
+      const aria = tab.getByRole("region", { name: "Aria Vance's notes" })
+      await expect(aria.getByRole("switch", { name: /Character author's note/ })).not.toBeChecked()
+      await expect(aria.getByRole("button", { name: /^Character author's note/ })).toContainText("Private")
 
-    // Add a new note: it opens, on from here.
-    await own.getByRole("button", { name: "Add note" }).click()
-    await page.getByRole("menuitem", { name: "New note" }).click()
-    const fresh = tab.getByRole("region", { name: "Note Note" })
-    await expect(fresh).toBeVisible()
-    await expect(fresh.getByRole("spinbutton", { name: /Every how many/ })).toHaveCount(0)
-    await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).toBeChecked()
-    // Its condition and a place above the history: the cache warning.
-    await fresh.getByRole("combobox", { name: "When it applies" }).click()
-    await page.getByRole("option", { name: "While a character isn't muted" }).click()
-    await expect(fresh.getByRole("combobox", { name: "Character" })).toBeVisible()
-    await expect(fresh.getByText(/rewrites the cached part/)).toHaveCount(0)
-    await fresh.getByRole("combobox", { name: "Position" }).click()
-    await page.getByRole("option", { name: "Start of context" }).click()
-    await expect(fresh.getByText(/rewrites the cached part/)).toBeVisible()
-    await fresh.getByRole("combobox", { name: "Position" }).click()
-    // Exactly the five decided places for a new note.
-    await expect(page.getByRole("option")).toHaveText([
-      "Start of context",
-      "With the definitions (after the main prompt)",
-      "In the history, at a depth",
-      "Start of the tail",
-      "End of the tail"
-    ])
-    await page.keyboard.press("Escape")
-    await fresh.getByRole("button", { name: "Save the note" }).click()
-    await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-    await expect(own.getByRole("button", { name: /^Note/ }).last()).toContainText("Start of context")
-    // Its switch turns it off from here.
-    await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()
-    await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()
+      // Add a new note: it opens, on from here.
+      await own.getByRole("button", { name: "Add note" }).click()
+      await expect(page.getByRole("menuitem", { name: "New note" })).toBeInViewport()
+      await page.getByRole("menuitem", { name: "New note" }).click({ timeout: 10_000 })
+      const fresh = tab.getByRole("region", { name: "Note Note" })
+      await expect(fresh).toBeVisible()
+      await expect(fresh.getByRole("spinbutton", { name: /Every how many/ })).toHaveCount(0)
+      await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).toBeChecked()
+      // Its condition and a place above the history: the cache warning.
+      await fresh.getByRole("combobox", { name: "When it applies" }).click()
+      await page.getByRole("option", { name: "While a character isn't muted" }).click()
+      await expect(fresh.getByRole("combobox", { name: "Character" })).toBeVisible()
+      await expect(fresh.getByText(/rewrites the cached part/)).toHaveCount(0)
+      await fresh.getByRole("combobox", { name: "Position" }).click()
+      await page.getByRole("option", { name: "Start of context" }).click()
+      await expect(fresh.getByText(/rewrites the cached part/)).toBeVisible()
+      await fresh.getByRole("combobox", { name: "Position" }).click()
+      // Exactly the five decided places for a new note.
+      await expect(page.getByRole("option")).toHaveText([
+        "Start of context",
+        "With the definitions (after the main prompt)",
+        "In the history, at a depth",
+        "Start of the tail",
+        "End of the tail"
+      ])
+      await page.keyboard.press("Escape")
+      await fresh.getByRole("button", { name: "Save the note" }).click()
+      await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+      await expect(own.getByRole("button", { name: /^Note/ }).last()).toContainText("Start of context")
+      // Its switch turns it off from here.
+      await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()
+      await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()
 
-    // Pick a shared note into this chat: the slot shows it, with the banner.
-    await own.getByRole("button", { name: "Add note" }).click()
-    await page.getByRole("menuitem", { name: "Pick a shared note…" }).click()
-    const picker = page.getByRole("dialog", { name: "Pick a shared note" })
-    await picker.getByRole("textbox", { name: "Filter by name" }).fill("harb")
-    await picker
-      .getByRole("button", { name: /Harbor weather/ })
-      .first()
-      .click()
-    const linked = tab.getByRole("region", { name: "Note Harbor weather" }).last()
-    await expect(linked.getByText(/Shared note “Harbor weather”: edits change it in \d+ place/)).toBeVisible()
-    await expect(linked.getByRole("button", { name: "Open in Snippets", exact: true })).toBeVisible()
-    // Unlink: its own copy of the text, the link gone.
-    await linked.getByRole("button", { name: "Unlink" }).click()
-    await expect(
-      tab
-        .getByRole("region", { name: "Note Harbor weather" })
-        .last()
-        .getByText(/Shared note “/)
-    ).toHaveCount(0)
+      // Pick a shared note into this chat: the slot shows it, with the banner.
+      await own.getByRole("button", { name: "Add note" }).click()
+      await page.getByRole("menuitem", { name: "Pick a shared note…" }).click()
+      const picker = page.getByRole("dialog", { name: "Pick a shared note" })
+      await picker.getByRole("textbox", { name: "Filter by name" }).fill("harb")
+      await picker
+        .getByRole("button", { name: /Harbor weather/ })
+        .first()
+        .click()
+      const linked = tab.getByRole("region", { name: "Note Harbor weather" }).last()
+      await expect(linked.getByText(/Shared note “Harbor weather”: edits change it in \d+ place/)).toBeVisible()
+      await expect(linked.getByRole("button", { name: "Open in Snippets", exact: true })).toBeVisible()
+      // Unlink: its own copy of the text, the link gone.
+      await linked.getByRole("button", { name: "Unlink" }).click()
+      await expect(
+        tab
+          .getByRole("region", { name: "Note Harbor weather" })
+          .last()
+          .getByText(/Shared note “/)
+      ).toHaveCount(0)
 
-    // Save a card's note as a shared note, from its menu.
-    const tobias = tab.getByRole("region", { name: "Tobias Wren's notes" })
-    await tobias.getByRole("button", { name: "Add note" }).click()
-    await page.getByRole("menuitem", { name: "New note" }).click()
-    const his = tab.getByRole("region", { name: "Note Note" }).last()
-    await his.getByRole("button", { name: "More actions for Note" }).click()
-    await page.getByRole("menuitem", { name: "Save as shared note" }).click()
-    await expect(
-      tab
-        .getByRole("region", { name: "Note Note" })
-        .last()
-        .getByText(/Shared note “Note”/)
-    ).toBeVisible()
-    await expect(tobias.getByRole("button", { name: /Shared note/ }).last()).toBeVisible()
-    await noWideScroll(page)
-  })
-}
+      // Save a card's note as a shared note, from its menu.
+      const tobias = tab.getByRole("region", { name: "Tobias Wren's notes" })
+      await tobias.getByRole("button", { name: "Add note" }).click()
+      // A portaled menu in the fixed phone sheet stays in viewport coordinates;
+      // scrolling its trigger must not send the document into a scroll loop.
+      await expect(page.getByRole("menuitem", { name: "New note" })).toBeInViewport()
+      await expect(page.getByRole("menu", { name: "Add note", exact: true })).toHaveCSS("opacity", "1")
+      await page.screenshot({ animations: "disabled", path: join(shots, `new-note-menu-${width}-${theme}.png`) })
+      await page.getByRole("menuitem", { name: "New note" }).click({ timeout: 10_000 })
+      const his = tab.getByRole("region", { name: "Note Note" }).last()
+      await his.getByRole("button", { name: "More actions for Note" }).click()
+      await page.getByRole("menuitem", { name: "Save as shared note" }).click()
+      await expect(
+        tab
+          .getByRole("region", { name: "Note Note" })
+          .last()
+          .getByText(/Shared note “Note”/)
+      ).toBeVisible()
+      await expect(tobias.getByRole("button", { name: /Shared note/ }).last()).toBeVisible()
+      await noWideScroll(page)
+    })
+  }
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {

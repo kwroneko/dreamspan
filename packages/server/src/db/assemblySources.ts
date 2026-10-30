@@ -69,8 +69,7 @@ import {
   pathPieces,
   positionOf,
   slotAtPosition,
-  slotPlace,
-  windowPieces
+  slotPlace
 } from "./displayPath.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { withoutPurged } from "./stateRefs.ts"
@@ -233,6 +232,18 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     Effect.gen(function* () {
       const leaf = next ? target.parentSlotId : target.slotId
       const shown = yield* display(leaf)
+      // A fork with no structural tip can still have insertions above the first message.
+      if (shown === null && next && leaf === null) {
+        const fork = yield* viewAt(sql, chatId, leaf)
+        const pieces = yield* pathPieces(sql, chatId, fork, null)
+        if (pieces.length > 0)
+          return {
+            ...target,
+            depth: displayLength(pieces),
+            historyLeaf: displayEnd(pieces, null),
+            displayPositions: true
+          }
+      }
       if (shown === null) return target
       let depth = next ? shown.end + 1 : shown.end
       let before = next ? leaf : shown.end === 0 ? null : yield* slotAtPosition(sql, shown.pieces, shown.end - 1)
@@ -245,7 +256,12 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           before = displayEnd(pieces, leaf)
         }
       }
-      return { ...target, depth, ...(before === target.parentSlotId ? {} : { historyLeaf: before }) } satisfies Target
+      return {
+        ...target,
+        depth,
+        displayPositions: true,
+        ...(before === target.parentSlotId ? {} : { historyLeaf: before })
+      } satisfies Target
     })
   /** A revision of an entity of this kind the user owns and hasn't deleted. */
   const revisionDoc = (revisionId: string, kind: string, entity?: string, binned = false) =>
@@ -394,7 +410,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     SELECT s.id AS leaf, s.depth FROM chats c LEFT JOIN slots s
       ON s.id = coalesce(${viewedLeaf}, c.active_leaf_slot_id) AND s.chat_id = c.id
     WHERE c.id = ${chatId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
-      AND (${viewedLeaf} IS NULL OR (s.id IS NOT NULL AND s.deleted_at IS NULL))`.pipe(
+      AND (${viewedLeaf} IS NULL OR (s.id IS NOT NULL AND (s.deleted_at IS NULL
+        OR EXISTS (SELECT 1 FROM forks f WHERE f.chat_id = c.id AND f.tip_slot_id = s.id AND f.deleted_at IS NULL))))`.pipe(
     Effect.flatMap(([row]) =>
       row
         ? Effect.succeed({
@@ -443,14 +460,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             layer.cursorDepth
           ).pipe(Effect.map((failures) => ({ ...layer, failures })))
         ),
-        // The cursor at its display position, which the history's positions are compared with.
-        Effect.flatMap((layer) =>
-          Effect.gen(function* () {
-            const shown = layer.cursor === null ? null : yield* display(leaf)
-            const position = shown === null ? null : yield* positionIn(shown.pieces, layer.cursor!)
-            return position === null ? layer : { ...layer, cursorDepth: position }
-          })
-        ),
+        // The layer's cursor is a display position already (selectSummaryLayer in a fork that
+        // shows insertions, spec/MESSAGE-INSERT.md §3.4), which the history's positions compare with.
         Effect.tap((layer) =>
           Effect.sync(() => {
             layerPins = {
@@ -550,8 +561,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
                 const first = Math.max(from === null ? 0 : from + 1, onDisplay.end - limit + 1)
                 return {
                   first,
-                  floor: from === null ? 0 : from + 1,
-                  parts: windowPieces(onDisplay.pieces, first, onDisplay.end)
+                  floor: from === null ? 0 : from + 1
                 }
               })
         const columns = sql`s.id AS slot_id, s.parent_slot_id, ${sql.literal(window === null ? "s.depth" : "path.position AS depth, s.inserted")}, ${contextExcludedIn(sql, fork)} AS context_excluded,
@@ -588,9 +598,9 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             : window.first > onDisplay!.end
               ? []
               : yield* sql<HistoryRow>`
-          ${displaySlots(sql, chatId, window.parts)}
+          ${displaySlots(sql, onDisplay!.pieces, window.first, onDisplay!.end)}
           SELECT ${columns}
-          FROM display path JOIN slots s ON s.id = path.id ${joins}
+          FROM display_slots path JOIN slots s ON s.id = path.id ${joins}
           WHERE ${owned}
           ORDER BY path.position`
         const read = rows
@@ -752,7 +762,8 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         )
         SELECT ${counted}`
             : yield* sql<{ n: number }>`
-        ${displaySlots(sql, chatId, windowPieces(onDisplay.pieces, 0, onDisplay.end))}
+        ${displaySlots(sql, onDisplay.pieces, 0, onDisplay.end)}
+        , path AS (SELECT id FROM display_slots)
         SELECT ${counted} AND ${owned}`
         const count = row?.n ?? 0
         pins.messageCount.push({ key: keyOf(leaf), count })

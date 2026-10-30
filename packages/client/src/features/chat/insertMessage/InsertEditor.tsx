@@ -124,7 +124,7 @@ export function InsertEditor({
       // Inserted without naming its draft (it didn't hold exactly this text): it's ended unsaved.
       if (submitted.draft === null && submitted.text !== "") await editor.discard()
       close(false)
-      if (inserted !== null) insertedToast(session, inserted, "Message inserted")
+      if (inserted !== null) insertedToast(session, inserted, "Message inserted", target.forkId)
       else showToast({ title: "Queued: it posts when the reply being written ends" })
     } finally {
       setBusy(false)

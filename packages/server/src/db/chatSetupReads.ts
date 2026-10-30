@@ -21,6 +21,8 @@ import { type ChatRow, toChat } from "./rows.ts"
 import { query } from "./tx.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { currentForkSql, selectedInSql, shownInSql, slotDeletedInSql } from "./forkState.ts"
+import { lastShown } from "./forks.ts"
+import { displayLength, pathPieces, placedInsertions } from "./displayPath.ts"
 
 /** A card's binding from the payload's, without the nulls; undefined for none. */
 const bindingOf = (
@@ -264,23 +266,26 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const summaries: Array<ChatSummary> = []
         for (const chatId of chatIds.slice(0, 200)) {
-          const [chat] = yield* sql<{ leaf: string | null }>`
-            SELECT active_leaf_slot_id AS leaf FROM chats
+          const [chat] = yield* sql<{ leaf: string | null; fork: string }>`
+            SELECT active_leaf_slot_id AS leaf, current_fork_id AS fork FROM chats
             WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
           if (!chat) continue
           const cast = yield* chatCast(sql, userId, chatId, chat.leaf)
+          const inserted = (yield* placedInsertions(sql, chatId, chat.fork)).length > 0
+          const end = inserted ? yield* lastShown(sql, chatId, { id: chat.fork, tip_slot_id: chat.leaf }) : chat.leaf
+          const positions = inserted ? displayLength(yield* pathPieces(sql, chatId, chat.fork, chat.leaf)) : null
           const [leaf] =
-            chat.leaf === null
+            end === null
               ? []
               : yield* sql<{ depth: number; speaker: string | null; writer: string; text: string }>`
                   SELECT s.depth, v.speaker_entity_id AS speaker, v.writer, substr(v.content, 1, 240) AS text
                   FROM slots s JOIN versions v ON v.id = ${sql.literal(shownInSql(currentForkSql("s.chat_id"), "s"))}
-                  WHERE s.id = ${chat.leaf} AND s.chat_id = ${chatId}`
+                  WHERE s.id = ${end} AND s.chat_id = ${chatId}`
           summaries.push(
             new ChatSummary({
               chatId,
               cast,
-              messages: leaf ? leaf.depth + 1 : 0,
+              messages: positions ?? (leaf ? leaf.depth + 1 : 0),
               last: leaf ? { speaker: leaf.speaker as EntityId | null, writer: leaf.writer, text: leaf.text } : null
             })
           )

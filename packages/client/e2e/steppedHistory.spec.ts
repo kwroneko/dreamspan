@@ -180,10 +180,17 @@ test("summarized messages are distinct from dropped and hidden messages", async 
       chatId,
       parentSlotId: entries.at(-1)!.slotId,
       branch: true,
-      content: "Recent raw material " + "x".repeat(700)
+      // Keep the newest turn inside the recent-history allowance (daaa81f
+      // refuses dropping it), while older raw messages still leave the context.
+      content: "Recent raw material " + "x".repeat(200)
     })
   )
   if (sent._tag !== "Posted") throw new Error("expected posted message")
+  const next = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.GetNextContext({ chatId, leafSlotId: sent.entry.slotId, forkId: sent.chat.currentForkId })
+  )
+  expect(next.historyStart?.depth, JSON.stringify(next.budget)).toBeGreaterThan(entries[3]!.depth)
+  expect(next.historyStart?.depth).toBeLessThanOrEqual(sent.entry.depth)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}?fork=${sent.chat.currentForkId}&slot=${entries[1]!.slotId}`)
   const summarized = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
@@ -197,3 +204,26 @@ test("summarized messages are distinct from dropped and hidden messages", async 
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")
   await expect(dropped).not.toHaveAttribute("data-summarized")
 })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`insertion before retained history explains that the next reply cannot see it (${width}px, ${theme})`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await page.goto(`${server().url}/chats/${chatId}?slot=${entries[1]!.slotId}`)
+      const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
+      await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+      await messageMenu(dropped, "Insert message below")
+      const editor = page.getByTestId("insert-editor")
+      await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
+      await expect(editor).not.toContainText("The model will re-read")
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({
+          path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
+        })
+      await editor.getByRole("button", { name: "Cancel", exact: true }).click()
+    })

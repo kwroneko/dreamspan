@@ -78,8 +78,12 @@ for (const kind of ["card", "preset"] as const) {
       })
     })
     await page.goto(`${server().url}/library/${refId}`)
-    const box = () => page.getByRole("textbox", { name: kind === "card" ? /^Description/ : /^Prompt/ })
-    if (kind === "preset") await page.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+    // The preset document shows every prompt open (525e3e3): no Edit button to press first.
+    const box = () =>
+      page.getByRole("textbox", {
+        name: kind === "card" ? /^Description/ : "Prompt: Main Prompt",
+        exact: kind !== "card"
+      })
     await expectTextBox(box(), "hello")
     await offlineBeacon(page)
     await box().fill("hello A")
@@ -98,7 +102,6 @@ for (const kind of ["card", "preset"] as const) {
     page.on("dialog", (dialog) => void dialog.accept())
     block = false
     await page.reload()
-    if (kind === "preset") await page.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
     await expectTextBox(box(), "hello A")
     await expect
       .poll(

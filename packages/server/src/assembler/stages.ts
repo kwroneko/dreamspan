@@ -600,6 +600,9 @@ const resolveStage: AssemblerStage = {
                 (a.depth ?? -1) - (b.depth ?? -1)
             )
       for (const entry of need(assembly, "history")) {
+        // A display path's positions include summarized history and deleted gaps. Keep
+        // numbering aligned without changing the message arrays used by older snapshots.
+        if (need(assembly, "target").displayPositions) while (messages.length < entry.depth) messages.push(omitted)
         if (!entry.inContext) {
           messages.push(omitted)
           continue

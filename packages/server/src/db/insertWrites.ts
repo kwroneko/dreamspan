@@ -161,6 +161,7 @@ export const makeInsertWriteHandlers = (bin: Bin) =>
             yield* bin.drafts.commit(userId, body.draft, {
               targetKind: "insert",
               targetId: chatId,
+              matchesField: (_, field) => field === `${fork.id}:${anchorSlotId ?? ""}`,
               content: body._tag === "Write" ? body.content : (body.direction ?? "")
             })
           // Inserting adds a message: the fork is chatted in (ARCHITECTURE §3.8).

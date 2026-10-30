@@ -418,6 +418,8 @@ export type ImagesLeftOut = typeof ImagesLeftOut.Type
 
 /** The next request boundary, also available before a first send or without a cache TTL. */
 export const NextContext = Schema.Struct({
+  /** Why the next request cannot be assembled; cleared after a successful estimate. */
+  assemblyError: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The next request's images, when it has any. */
   imageTokens: Schema.optionalKey(NextImages),
   /** Which fork the estimate describes, including when two forks share a tip. */

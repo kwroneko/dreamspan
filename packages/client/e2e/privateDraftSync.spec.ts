@@ -4,12 +4,13 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
-const refuseDraftSaves = async (page: Page, refuse: () => boolean) => {
+const refuseDraftSaves = async (page: Page, refuse: () => boolean, onRefusal?: () => void) => {
   await page.routeWebSocket(/\/rpc$/, (socket) => {
     const upstream = socket.connectToServer()
     socket.onMessage((data) => {
       const request = typeof data === "string" ? (JSON.parse(data) as { tag?: string; id?: string }) : null
       if (refuse() && request?.tag === "SaveUserDraft") {
+        onRefusal?.()
         socket.send(
           JSON.stringify({
             _tag: "Exit",
@@ -140,7 +141,12 @@ for (const scheme of ["light", "dark"] as const)
         })
       )
       let refuse = false
-      await refuseDraftSaves(page, () => refuse)
+      let refusals = 0
+      await refuseDraftSaves(
+        page,
+        () => refuse,
+        () => refusals++
+      )
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       const path = `${server().url}/settings/connections/${connection.id}`
       await page.goto(path)
@@ -163,8 +169,11 @@ for (const scheme of ["light", "dark"] as const)
         await expect(name).toHaveValue("Only in this browser")
         if (process.env.SCREENSHOT_DIR)
           await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/draft-ended-${width}-${scheme}.png` })
-        // Loading cannot discard a copy that the server has refused.
+        // Keep the refusal in force until this particular reload attempt reaches the transport.
+        // The field and notice already had their expected values before the click.
+        const beforeReload = refusals
         await page.getByRole("button", { name: "Reload saved value", exact: true }).click()
+        await expect.poll(() => refusals).toBeGreaterThan(beforeReload)
         await expect(name).toHaveValue("Only in this browser")
         await expect(page.getByText(/Another device finished this draft/)).toBeVisible()
         refuse = false

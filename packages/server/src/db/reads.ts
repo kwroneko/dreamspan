@@ -18,6 +18,7 @@ import { binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkColumns, forkRecency, forkThrough, withDisplayEnd } from "./forks.ts"
 import {
+  displayEndOf,
   displayLength,
   type PathPiece,
   pathPieces,
@@ -309,7 +310,11 @@ export const makeReadHandlers = Effect.gen(function* () {
       SELECT id FROM down WHERE id IS NOT NULL ORDER BY n DESC LIMIT 1`.pipe(Effect.map(([row]) => row!.id))
 
   const liveSlot = (chatId: ChatId, slotId: SlotId) =>
-    sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId} AND deleted_at IS NULL`.pipe(
+    // A deleted insertion anchor remains a valid state boundary: its gap still has
+    // messages whose swipes and speaker choices read the state after that anchor.
+    sql<{ id: string }>`SELECT id FROM slots WHERE id = ${slotId} AND chat_id = ${chatId}
+      AND (deleted_at IS NULL OR EXISTS (SELECT 1 FROM slots x
+        WHERE x.parent_slot_id = slots.id AND x.inserted = 1))`.pipe(
       Effect.flatMap(([row]) => (row ? Effect.void : Effect.fail(new NotFound({ entity: "slot", id: slotId }))))
     )
 
@@ -479,13 +484,18 @@ export const makeReadHandlers = Effect.gen(function* () {
         return rows.map(toVersion)
       }).pipe(query("ListVersions")),
 
-    StateEventsAt: ({ userId, chatId, slotId, forkId, leafSlotId }) =>
+    StateEventsAt: ({ userId, chatId, slotId, forkId, leafSlotId, displayEnd }) =>
       Effect.gen(function* () {
         const chat = yield* ownedChat(userId, chatId)
         if (slotId !== null) yield* liveSlot(chatId, slotId)
         if (leafSlotId != null) yield* liveSlot(chatId, leafSlotId)
         const fork = forkId ? (yield* liveFork(chat, forkId)).id : yield* forkAt(sql, chatId, leafSlotId ?? slotId)
-        const rows = yield* stateEventsThrough(sql, chatId, slotId, fork)
+        let at = slotId
+        if (displayEnd && fork !== null) {
+          const viewed = yield* liveFork(chat, fork as ForkId)
+          if (viewed.tip_slot_id === slotId) at = (yield* displayEndOf(sql, chatId, viewed)) as SlotId | null
+        }
+        const rows = yield* stateEventsThrough(sql, chatId, at, fork)
         const events = yield* Effect.forEach(rows, (row) =>
           decodeStateEvent({ scope: row.scope, data: { key: row.key, value: JSON.parse(row.value_json) } }).pipe(
             Effect.mapError(

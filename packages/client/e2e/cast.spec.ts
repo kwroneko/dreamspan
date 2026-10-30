@@ -150,8 +150,9 @@ test("Edit opens the card used everywhere", async ({ page }) => {
   await openCast(page)
   await expect(member(page, "Mira")).toContainText(/used by \d+ chats?/)
   await page.getByRole("button", { name: "Edit Mira", exact: true }).click()
-  await expect(page).toHaveURL(/\/library\/[^/?]+$/)
-  await expect(page.getByText(/used by \d+ chats/)).toBeVisible()
+  // The editor URL carries the chat and fork, for the rename offer after a save (U18).
+  await expect(page).toHaveURL(/\/library\/[^/?]+\?renameChat=[^&]+&renameFork=[^&]+$/)
+  await expect(page.getByText(/used by \d+ chats?/)).toBeVisible()
   await expectTextBox(page.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
 })
 

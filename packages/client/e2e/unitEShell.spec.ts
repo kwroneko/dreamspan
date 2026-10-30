@@ -115,13 +115,17 @@ for (const width of [1440, 390]) {
       .filter({ hasText: "Current fork" })
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
+    // Current-fork URLs are canonicalized after the path loads. Wait before
+    // opening phone sheets; neither the fork nor its temporary leaf stays in the URL.
+    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
+    await expect.poll(() => new URL(page.url()).searchParams.get("leaf")).toBeNull()
+    await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
     if (width === 390 && (await page.getByRole("button", { name: "Close", exact: true }).isVisible()))
       await page.getByRole("button", { name: "Close", exact: true }).click()
     await openLeft()
     await expect(crumbs).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Current fork", exact: true })).toContainText(group.name)
-    expect(new URL(page.url()).searchParams.get("leaf")).toBe(group.leaf)
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
@@ -210,13 +214,19 @@ for (const width of [1440, 390]) {
       const fork = data.forks.find((f) => f.current && f.cast.length > 1)!
       const card = fork.cast[0]!
       await page.goto(`${server().url}/chats/${fork.chat.id}?panel=card:${card}&forks=${fork.chat.id}`)
-      await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+      // In a chat, the card's tab has the Cast row's actions, Edit among them (f55e4e7).
+      await expect(
+        page
+          .getByRole("tabpanel")
+          .getByRole("button", { name: /^Edit / })
+          .first()
+      ).toBeVisible()
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
       await shoot("chat-card")
       for (const tab of ["Cast", "This chat", "Lorebooks", "Notes", "Summaries"]) {
         await page.getByRole("tab", { name: tab, exact: true }).click()
         if (tab === "Notes")
-          await expect(page.getByRole("heading", { name: "This chat's notes", exact: true })).toBeVisible()
+          await expect(page.getByRole("region", { name: "This chat's notes", exact: true })).toBeVisible()
         await shoot(`panel-${tab.toLowerCase().replaceAll(" ", "-")}`)
       }
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()

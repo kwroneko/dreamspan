@@ -470,6 +470,8 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
 
 /** The version being generated and where it is. */
 export interface Target {
+  /** Position-based numbering, including summarized/deleted gaps; absent on legacy snapshots and paths without insertions. */
+  readonly displayPositions?: boolean
   readonly chatId: string
   readonly slotId: string
   readonly versionId: string

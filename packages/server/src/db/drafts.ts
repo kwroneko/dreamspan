@@ -696,6 +696,8 @@ export const makeDraftStore = (
       /** The kind of draft it may be; several when more than one editor can send here. */
       readonly targetKind: DraftKey["targetKind"] | ReadonlyArray<DraftKey["targetKind"]>
       readonly targetId: string
+      /** Match the editor within the target, before it can be ended or returned to the caller. */
+      readonly matchesField?: (kind: DraftKey["targetKind"], field: string) => boolean
       readonly content: string | ((field: string) => string | null)
       readonly images?: MessageImages | undefined
     }
@@ -707,7 +709,11 @@ export const makeDraftStore = (
       if (draft === null || draft.user_id !== userId) return { draft: null, recovered: 0 }
       const kinds: ReadonlyArray<string> =
         typeof destination.targetKind === "string" ? [destination.targetKind] : destination.targetKind
-      if (!kinds.includes(draft.target_kind) || draft.target_id !== destination.targetId)
+      if (
+        !kinds.includes(draft.target_kind) ||
+        draft.target_id !== destination.targetId ||
+        (destination.matchesField !== undefined && !destination.matchesField(draft.target_kind, draft.field))
+      )
         return { draft: null, recovered: 0 }
       const content = typeof destination.content === "string" ? destination.content : destination.content(draft.field)
       if (

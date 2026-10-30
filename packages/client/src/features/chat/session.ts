@@ -526,6 +526,7 @@ export class ChatSession {
     for (const editor of this.editors.values()) void editor.save()
     if (typeof window !== "undefined") window.removeEventListener("pagehide", this.saveEditors)
     if (this.lcmTimer !== null) clearTimeout(this.lcmTimer)
+    if (this.highlightTimer !== null) clearTimeout(this.highlightTimer)
     if (this.frame !== null) cancelAnimationFrame(this.frame)
     if (this.subscription) Effect.runFork(Fiber.interrupt(this.subscription))
     for (const [id, unmount] of this.live) {
@@ -907,6 +908,7 @@ export class ChatSession {
         this.contextReads++
         // The same estimate again (another tab subscribed) changes nothing on screen.
         const history = {
+          assemblyError: event.assemblyError ?? null,
           leafSlotId: event.leafSlotId,
           historyStart: event.historyStart,
           summarizedThrough: event.summarizedThrough,
@@ -1000,8 +1002,14 @@ export class ChatSession {
     // A message another fork appended at the same tip isn't this fork's.
     const otherFork = entry.forkId !== undefined && this.view.forkId !== null && entry.forkId !== this.view.forkId
     // A message inserted in this fork goes in place, by its position (spec/MESSAGE-INSERT.md §2.3).
-    if (entry.inserted === true && entry.position !== undefined) {
-      if (otherFork || (entry.shownForkId !== undefined && entry.shownForkId !== this.view.forkId)) return false
+    if (entry.inserted === true) {
+      if (entry.shownForkId !== undefined ? entry.shownForkId !== this.view.forkId : otherFork) return false
+      // Single-slot updates have no position. An unknown insertion must never become the
+      // structural tip through the append path below.
+      if (entry.position === undefined) {
+        this.reload()
+        return false
+      }
       return this.placeInserted(entry)
     }
     // An append goes below the fork's tip, which the window ends with, or which an inserted
@@ -1009,7 +1017,7 @@ export class ChatSession {
     const last = entries.at(-1)
     const continues =
       entry.parentSlotId === (last?.slotId ?? null) ||
-      (entry.parentSlotId !== null && entry.parentSlotId === this.view.leafSlotId && last?.inserted === true)
+      (entry.parentSlotId === this.view.leafSlotId && last?.inserted === true)
     if (this.view.newer !== null || otherFork || !continues) {
       // A new alternate of a message shown: it counts one more branch (DESIGN §3.2).
       if (entries.some((e) => e.parentSlotId === entry.parentSlotId && e.branchCount < entry.branchCount)) {
@@ -1048,8 +1056,8 @@ export class ChatSession {
   /**
    * An inserted message, placed directly below its anchor: it's the newest of the anchor's gap,
    * so it comes before whatever was inserted there before. Everything after it moves down one
-   * position. Above the window, only the numbers change; below it, nothing shows. Returns
-   * whether it's in the window.
+   * position. With an unknown anchor or a newer sibling already shown, the server re-reads
+   * the window instead. Returns whether it was placed in the window immediately.
    */
   private placeInserted(entry: PathEntry): boolean {
     const { entries } = this.view
@@ -1060,9 +1068,14 @@ export class ChatSession {
           ? 0
           : -1
         : entries.findIndex((e) => e.slotId === entry.parentSlotId) + 1 || -1
-    if (at < 0) {
-      const first = entries[0]
-      if (first !== undefined && entry.position! <= positionOf(first)) this.update({ entries: shift(entries) })
+    const newerSibling = entries.some(
+      (e) => e.inserted === true && e.parentSlotId === entry.parentSlotId && e.slotId > entry.slotId
+    )
+    if (at < 0 || newerSibling) {
+      // Reader replies (and generation starts) can publish out of commit order. The event's
+      // position was computed at commit time, so neither it nor arrival order can place a
+      // delayed sibling/child or renumber an off-window insertion reliably. Read the window.
+      this.reload()
       return false
     }
     const placed = withPosition(entry, at === 0 ? 0 : positionOf(entries[at - 1]!) + 1)
@@ -1482,10 +1495,10 @@ export class ChatSession {
    * Undoes an insertion (spec §4.3): the message to the bin in this fork, as Delete would, so it
    * can be restored or purged there. A generation still running into it is stopped first.
    */
-  async undoInsert(slotId: SlotId): Promise<Outcome<unknown>> {
+  async undoInsert(slotId: SlotId, forkId: ForkId | null = this.view.forkId): Promise<Outcome<unknown>> {
     const shown = this.view.entries.find((e) => e.slotId === slotId)
-    if (shown?.version.status === "generating") await this.stop(shown.version.id)
-    return this.deleteMessage(slotId)
+    if (this.view.forkId === forkId && shown?.version.status === "generating") await this.stop(shown.version.id)
+    return this.call((client) => client("DeleteMessage", { slotId, forkId }))
   }
 
   /** Deletes the message in the fork shown only: another fork that has it keeps it. */

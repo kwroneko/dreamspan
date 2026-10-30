@@ -7,8 +7,9 @@ import type { Chat, SlotId } from "@rp/shared/chat.ts"
 import type { SendResult } from "@rp/shared/chatApi.ts"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
+import { REPLY, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
-import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { ADMIN, apiLogin, serverPerFile, startServer, withAdmin } from "./support/server.ts"
 
 // About two seconds a reply: long enough to stop one, short enough to wait for.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "160" })
@@ -30,9 +31,9 @@ const repliesDone = async (page: Page, count: number) => {
   expect(reply!.y + reply!.height).toBeLessThanOrEqual(list!.y + list!.height + 1)
 }
 
-const newChat = async (page: Page, title: string) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/chats`)
+const newChat = async (page: Page, title: string, host = server()) => {
+  await apiLogin(page.request, host, ADMIN.handle, ADMIN.password)
+  await page.goto(`${host.url}/chats`)
   await page.getByLabel("Title of the new chat").fill(title)
   await page.getByRole("button", { name: "New chat" }).click()
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
@@ -72,53 +73,84 @@ test("a message gets a streamed reply, with versions to swipe through", async ({
 test("a stopped reply keeps its text, and a message can be edited, linked to, branched from and deleted", async ({
   page
 }) => {
-  await newChat(page, "Chapel")
-  await send(page, "Knock twice.")
-  await expect(generating(page)).toBeVisible()
-  await page.waitForTimeout(400)
-  // The composer's Stop: the message's own moves as its text grows.
-  await page.getByRole("button", { name: "Stop" }).last().click()
-  const reply = replies(page).last()
-  await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
-  expect((await reply.locator(".markdown").innerText()).length).toBeGreaterThan(0)
+  test.setTimeout(120_000)
+  const heldServer = await startServer(withAdmin)
+  const heldProvider = await startProvider({ holdAfterText: true })
+  try {
+    await asUser(heldServer, ADMIN.handle, ADMIN.password, (api) =>
+      Effect.gen(function* () {
+        const connection = yield* api.CreateConnection({
+          kind: "openai-chat",
+          settings: {
+            name: "Held Stop fixture",
+            baseUrl: heldProvider.baseUrl,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          apiKey: "synthetic"
+        })
+        yield* api.RefreshModels({ connectionId: connection.id })
+        const models = yield* api.ListModels({ connectionId: connection.id, includeHidden: false })
+        yield* api.SetGenerationDefaults({
+          defaults: { model: { connection: connection.id, model: models[0]!.id }, preset: null }
+        })
+      })
+    )
+    await newChat(page, "Chapel", heldServer)
+    await send(page, "Knock twice.")
+    await expect(generating(page)).toBeVisible()
+    const reply = replies(page).last()
+    await expect(reply.locator(".markdown")).toHaveText(REPLY)
+    // Stop belongs to this version (DESIGN §3.1). Its stream stays open until
+    // stopped, so the assertion cannot race a two-second synthetic completion.
+    await reply.getByRole("button", { name: "Stop", exact: true }).click()
+    await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
+    expect((await reply.locator(".markdown").innerText()).length).toBeGreaterThan(0)
+    heldProvider.release()
 
-  // A message the user wrote is changed in place.
-  const mine = page.getByRole("article", { name: "Your message" }).first()
-  await showActions(mine)
-  await mine.getByRole("button", { name: "Edit" }).click()
-  await mine.getByLabel("Message text").fill("Knock three times.")
-  await mine.getByRole("button", { name: "Save" }).click()
-  await expect(mine.locator(".markdown")).toHaveText("Knock three times.")
-  // Amended in place: still its only version.
-  await expect(mine.getByRole("group", { name: "Versions" })).toHaveCount(0)
+    // A message the user wrote is changed in place.
+    const mine = page.getByRole("article", { name: "Your message" }).first()
+    await showActions(mine)
+    await mine.getByRole("button", { name: "Edit" }).click()
+    await mine.getByLabel("Message text").fill("Knock three times.")
+    await mine.getByRole("button", { name: "Save" }).click()
+    await expect(mine.locator(".markdown")).toHaveText("Knock three times.")
+    // Amended in place: still its only version.
+    await expect(mine.getByRole("group", { name: "Versions" })).toHaveCount(0)
 
-  // A copied link opens the chat at that message.
-  await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
-  await messageMenu(mine, "Copy link")
-  await expect(page.getByText("Link copied")).toBeVisible()
-  const link = await page.evaluate(() => navigator.clipboard.readText())
-  expect(link).toMatch(/slot=/)
-  await page.goto(link)
-  await expect(page.locator("article[data-slot]").first()).toHaveClass(/border-accent/)
+    // A copied link opens the chat at that message.
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
+    await messageMenu(mine, "Copy link")
+    await expect(page.getByText("Link copied")).toBeVisible()
+    const link = await page.evaluate(() => navigator.clipboard.readText())
+    expect(link).toMatch(/slot=/)
+    await page.goto(link)
+    await expect(page.locator("article[data-slot]").first()).toHaveClass(/border-accent/)
 
-  // A branch from the first message: the reply below it isn't on it.
-  await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")
-  // A fork made by branching is the current one: the chat's own URL opens on it.
-  await expect(page).not.toHaveURL(/fork=/)
-  await expect(replies(page)).toHaveCount(0)
-  await send(page, "Walk away instead.")
-  await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
-  await repliesDone(page, 1)
-  // The branch is now the chat's latest: the chat's own URL opens on it.
-  await page.goto(page.url().split("?")[0]!)
-  await expect(page.getByText("Walk away instead.")).toBeVisible()
-  await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
+    // A branch from the first message: the reply below it isn't on it.
+    await messageMenu(page.getByRole("article", { name: "Your message" }).first(), "Branch from here")
+    // A fork made by branching is the current one: the chat's own URL opens on it.
+    await expect(page).not.toHaveURL(/fork=/)
+    await expect(replies(page)).toHaveCount(0)
+    await send(page, "Walk away instead.")
+    await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
+    await repliesDone(page, 1)
+    // The branch is now the chat's latest: the chat's own URL opens on it.
+    await page.goto(page.url().split("?")[0]!)
+    await expect(page.getByText("Walk away instead.")).toBeVisible()
+    await expect(page.getByRole("article", { name: "Your message" })).toHaveCount(2)
 
-  // Deleting goes to the bin; the message is gone from the path.
-  const walk = page.getByRole("article", { name: "Your message" }).filter({ hasText: "Walk away" })
-  await showActions(walk)
-  await walk.getByRole("button", { name: "Delete message", exact: true }).click()
-  await expect(page.getByText("Walk away instead.")).toHaveCount(0)
+    // Deleting goes to the bin; the message is gone from the path.
+    const walk = page.getByRole("article", { name: "Your message" }).filter({ hasText: "Walk away" })
+    await showActions(walk)
+    await walk.getByRole("button", { name: "Delete message", exact: true }).click()
+    await expect(page.getByText("Walk away instead.")).toHaveCount(0)
+  } finally {
+    await heldProvider.stop()
+    await heldServer.stop()
+  }
 })
 
 test("a message sent from an older part of the chat lands at the end, with its reply", async ({ page }) => {
@@ -187,7 +219,9 @@ test("another user can't open someone's chat", async ({ browser }) => {
   await dana.goto(`${server().url}/chats`)
   await expect(dana.getByText(/^No chats yet\./)).toBeVisible()
   await dana.goto(`${server().url}/chats/${chat.id}`)
-  await expect(dana.getByRole("alert")).toContainText("doesn't exist")
+  // Attachment drafts can report their own load error too; check the chat's
+  // access refusal itself, while retaining the private-title assertion below.
+  await expect(dana.getByRole("alert").filter({ hasText: /^This chat doesn't exist any more\.$/ })).toBeVisible()
   await expect(dana.getByText("Private")).toHaveCount(0)
 })
 

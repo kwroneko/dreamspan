@@ -13,6 +13,7 @@ import { Writer } from "../src/db/Database.ts"
 import { Generator } from "../src/chat/Generator.ts"
 import { Commands } from "../src/commands.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
+import { completeFixture } from "./support/lcmFixtures.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
@@ -200,6 +201,35 @@ describe("generating an inserted message", () => {
       assert.notInclude(retried, SENT)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
+
+  it.live("never sees following messages through a summary crossing the insertion point", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const p = yield* provider()
+      const api = yield* client()
+      const writer = yield* Writer
+      const s = yield* setup(api, p.mock.url)
+      const userId = (yield* api.Whoami()).id
+      yield* api.SetLcmEnabled({ chatId: s.chat.id, forkId: s.forkId, enabled: true })
+      yield* completeFixture(
+        config.dataDir,
+        writer,
+        userId,
+        s.chat.id,
+        [s.greeting, s.message, s.reply].map((e) => ({ slotId: e.slotId, versionId: e.version.id, amendCount: 0 })),
+        [],
+        "FUTURE_SUMMARY_TEXT"
+      )
+      const before = p.completions().length
+      const x = yield* insert(api, s.chat.id, s.forkId, s.greeting, { _tag: "Generate", speaker: s.tobin })
+      yield* done(s.events, x.entry.version.id)
+      const request = sent(p.completions()[before]!)
+      assert.include(request, GREETING)
+      assert.notInclude(request, SENT)
+      assert.notInclude(request, "Reply 1.")
+      assert.notInclude(request, "FUTURE_SUMMARY_TEXT")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 
   it.live("leaves out of a reply already generating, and is in a queued message's reply", () =>
     Effect.gen(function* () {

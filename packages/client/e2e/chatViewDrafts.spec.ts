@@ -398,10 +398,29 @@ test("a reply written by hand keeps its speaker and Regenerate after the origina
 })
 
 test("on a phone, a tap on a long message out of the context shows the start of why", async ({ page }) => {
-  // A synthetic ST import whose card takes the default preset's whole budget: no history is sent.
+  // Budgets belong to the model (20c7164), so give the fixture an explicit small
+  // context and response reserve instead of relying on model-less defaults.
   const { importId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
-      yield* api.SetGenerationDefaults({ defaults: { model: null, preset: null } })
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Out-of-context fixture",
+          baseUrl: "http://127.0.0.1:5999/v1",
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        }
+      })
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "small-context",
+        overrides: { settings: { samplers: { openai_max_context: 4095, openai_max_tokens: 300 } } }
+      })
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
       return yield* api.StartStImport({ unsupported: [] })
     })
   )
@@ -414,7 +433,9 @@ test("on a phone, a tap on a long message out of the context shows the start of 
     })
     expect(response.status).toBe(200)
   }
-  await upload("characters/Mira.png", card("Mira", "Hello.", {}, { description: "x".repeat(14_000) }))
+  // daaa81f refuses a request that would drop its newest message. Leave room
+  // for the short tail, while the long turn at depth 6 still cannot fit.
+  await upload("characters/Mira.png", card("Mira", "Hello.", {}, { description: "x".repeat(11_000) }))
   const long = Array.from({ length: 40 }, (_, i) => `Paragraph ${i} of a long turn. ${"b".repeat(80)}`).join("\n\n")
   await upload(
     "chats/Mira/Long turns.jsonl",
@@ -425,7 +446,7 @@ test("on a phone, a tap on a long message out of the context shows the start of 
       )
     ])
   )
-  const { chatId, slotId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+  const { chatId, slotId, firstSent } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const chat = (yield* api.ListChats({ limit: 10, before: null })).find((c) => c.title === "Long turns")!
       const { entries } = yield* api.ReadPath({
@@ -434,7 +455,10 @@ test("on a phone, a tap on a long message out of the context shows the start of 
         range: { _tag: "Bottom" },
         limit: 100
       })
-      return { chatId: chat.id, slotId: entries[6]!.slotId }
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      expect(next.historyStart?.depth, JSON.stringify(next.budget)).toBeGreaterThan(6)
+      expect(next.historyStart?.depth).toBeLessThan(12)
+      return { chatId: chat.id, slotId: entries[6]!.slotId, firstSent: next.historyStart!.depth + 1 }
     })
   )
   await page.setViewportSize({ width: 390, height: 844 })
@@ -443,7 +467,7 @@ test("on a phone, a tap on a long message out of the context shows the start of 
   await expect(row).toHaveAttribute("data-out-of-context", "true")
   await row.locator(".markdown").click({ position: { x: 20, y: 20 } })
   await expect(row.getByRole("toolbar", { name: "Message actions" })).toBeVisible()
-  const reason = row.getByText(/^Not sent to the model: the history sent starts at #13/)
+  const reason = row.getByText(new RegExp(`^Not sent to the model: the history sent starts at #${firstSent}\\b`))
   await expect(reason).toBeVisible()
   await page.waitForTimeout(600)
   const box = (await reason.boundingBox())!

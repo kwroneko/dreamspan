@@ -161,58 +161,66 @@ describe("the cache-warmth estimate", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("names a message inserted above the breakpoint, and replays the earlier capture unchanged", () => {
-    const config = testConfig()
-    return Effect.gen(function* () {
-      const mock = yield* mockProvider
-      const api = yield* client()
-      const writer = yield* Writer
-      const reader = yield* Reader
-      const { version, chat, events } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, cacheTtlS: 300 },
-        model: {}
-      })
-      const userId = (yield* api.Whoami()).id
-      const forkId = chat.currentForkId!
-      const ended = events.findIndex((e) => e._tag === "Version" && e.version.id === version.id)
-      yield* estimate(events, ended, (w) => w !== null && w.changed === null)
-      const run = yield* api.GetRunContext({ versionId: version.id })
-      const [rows] = yield* fixtureSql(
-        config.dataDir,
-        [
-          {
-            sql: `SELECT p.context_snapshot_json AS snapshot FROM rollout_payloads p
+  for (const aboveFirst of [false, true])
+    it.live(
+      `names a message inserted ${aboveFirst ? "above the first" : "above the breakpoint"}, and replays the earlier capture unchanged`,
+      () => {
+        const config = testConfig()
+        return Effect.gen(function* () {
+          const mock = yield* mockProvider
+          const api = yield* client()
+          const writer = yield* Writer
+          const reader = yield* Reader
+          const { version, chat, events } = yield* generateReply(api, {
+            connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1`, cacheTtlS: 300 },
+            model: {}
+          })
+          const userId = (yield* api.Whoami()).id
+          const forkId = chat.currentForkId!
+          const ended = events.findIndex((e) => e._tag === "Version" && e.version.id === version.id)
+          yield* estimate(events, ended, (w) => w !== null && w.changed === null)
+          const run = yield* api.GetRunContext({ versionId: version.id })
+          const [rows] = yield* fixtureSql(
+            config.dataDir,
+            [
+              {
+                sql: `SELECT p.context_snapshot_json AS snapshot FROM rollout_payloads p
               JOIN versions v ON v.rollout_id = p.rollout_id WHERE v.id = ?`,
-            params: [version.id]
+                params: [version.id]
+              }
+            ],
+            { readOnly: true }
+          )
+          const snapshot = rows![0]!.snapshot as string
+          const rebuilt = yield* reader.RebuildContext({ userId, snapshot })
+          const [greeting] = (yield* api.ReadPath({
+            chatId: chat.id,
+            leafSlotId: null,
+            range: { _tag: "Bottom" },
+            limit: 10
+          })).entries
+          yield* writer.InsertMessage({
+            userId,
+            chatId: chat.id,
+            forkId,
+            anchorSlotId: aboveFirst ? null : greeting!.slotId,
+            expectedRowVersion: aboveFirst ? 0 : greeting!.rowVersion,
+            body: { _tag: "Write", speaker: null, content: "A lantern swings by the door." }
+          })
+          const warmth = yield* reader.CacheWarmth({ userId, chatId: chat.id, leafSlotId: null, forkId })
+          // Before the recorded start the insertion stays outside the next request.
+          // Otherwise it is the second displayed message and names the cache change.
+          if (aboveFirst) assert.isNull(warmth.warmth!.changed)
+          else {
+            assert.strictEqual(warmth.warmth!.changed!.reason, "Message 2 was inserted.")
+            assert.isAbove(warmth.warmth!.changed!.tokens, Math.ceil("A lantern swings by the door.".length / 4))
           }
-        ],
-        { readOnly: true }
-      )
-      const snapshot = rows![0]!.snapshot as string
-      const rebuilt = yield* reader.RebuildContext({ userId, snapshot })
-      const [greeting] = (yield* api.ReadPath({
-        chatId: chat.id,
-        leafSlotId: null,
-        range: { _tag: "Bottom" },
-        limit: 10
-      })).entries
-      yield* writer.InsertMessage({
-        userId,
-        chatId: chat.id,
-        forkId,
-        anchorSlotId: greeting!.slotId,
-        expectedRowVersion: greeting!.rowVersion,
-        body: { _tag: "Write", speaker: null, content: "A lantern swings by the door." }
-      })
-      const warmth = yield* reader.CacheWarmth({ userId, chatId: chat.id, leafSlotId: null, forkId })
-      // The inserted message is the second shown, so the first change of the next request.
-      assert.strictEqual(warmth.warmth!.changed!.reason, "Message 2 was inserted.")
-      assert.isAbove(warmth.warmth!.changed!.tokens, Math.ceil("A lantern swings by the door.".length / 4))
-      // The capture of the earlier reply, and its replay, don't change.
-      assert.deepStrictEqual(yield* api.GetRunContext({ versionId: version.id }), run)
-      assert.deepStrictEqual(yield* reader.RebuildContext({ userId, snapshot }), rebuilt)
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-  })
+          // The capture of the earlier reply, and its replay, don't change.
+          assert.deepStrictEqual(yield* api.GetRunContext({ versionId: version.id }), run)
+          assert.deepStrictEqual(yield* reader.RebuildContext({ userId, snapshot }), rebuilt)
+        }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+      }
+    )
 
   it.live("is cold on another branch", () => {
     const config = testConfig()

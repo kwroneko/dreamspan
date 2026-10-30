@@ -47,9 +47,10 @@ function Duplicate(context: MessageActionContext) {
       icon="duplicate"
       disabled={refusal !== null}
       onClick={async () => {
+        const forkId = session.snapshot().forkId
         const outcome = await session.insertMessage(entry, { _tag: "Duplicate", versionId: entry.version.id })
         report(outcome)
-        if (outcome.ok) insertedToast(session, outcome.value.entry.slotId, "Message duplicated")
+        if (outcome.ok) insertedToast(session, outcome.value.entry.slotId, "Message duplicated", forkId)
       }}
     >
       Duplicate

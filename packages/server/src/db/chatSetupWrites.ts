@@ -20,7 +20,7 @@ import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import { loadCards } from "./cards.ts"
 import { forkRecency, forkThrough, onForkPath } from "./forks.ts"
-import { selectedIn } from "./forkState.ts"
+import { selectedIn, slotDeletedIn } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
@@ -368,20 +368,25 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
+          const draftForkId = fork.id
           yield* graph.checkImages(userId, images ?? [])
           yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
           yield* graph.checkSpeaker(userId, speakerEntityId)
           if (kind === "message") yield* graph.checkSpeaker(userId, replySpeakerEntityId)
           if (parentSlotId !== null) {
-            const [parent] = yield* sql<{ status: string }>`
-              SELECT v.status FROM slots s JOIN versions v ON v.id = ${selectedIn(sql, fork.id, "s")}
-              WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId} AND s.deleted_at IS NULL`
+            const [parent] = yield* sql<{ status: string; deleted: number }>`
+              SELECT v.status, ${slotDeletedIn(sql, fork.id, "s")} AS deleted
+              FROM slots s JOIN versions v ON v.id = ${selectedIn(sql, fork.id, "s")}
+              WHERE s.id = ${parentSlotId} AND s.chat_id = ${chatId}
+                AND (s.deleted_at IS NULL OR s.id = ${fork.tip_slot_id})`
             if (!parent) return yield* new NotFound({ entity: "slot", id: parentSlotId })
             // A tab that missed a newer message hears about it, queued or not.
             if (!branch && parentSlotId !== fork.tip_slot_id) {
               return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
             }
-            if (parent.status === "generating") {
+            // A deleted anchor can remain the tip to retain its gap. Nothing waits on its
+            // hidden generation: afterReply withdraws entries whose reply was deleted.
+            if (parent.status === "generating" && !parent.deleted) {
               const at = Date.now()
               // A branch queued onto a reply still being written waits in a fork of its own.
               if (branch && parentSlotId !== fork.tip_slot_id) {
@@ -419,6 +424,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 // (spec/MESSAGE-INSERT.md §4.2).
                 targetKind: ["composer", "insert"],
                 targetId: chatId,
+                matchesField: (kind, field) =>
+                  field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
                 content: row!.kind === "generate" ? (row!.direction ?? "") : row!.content
               })
               return {

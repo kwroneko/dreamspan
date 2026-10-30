@@ -229,7 +229,7 @@ export function Editor({
               </Button>
             </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
             <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
               Save{dirty > 0 ? ` (${dirty})` : ""}
             </Button>

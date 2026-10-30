@@ -998,6 +998,24 @@ describe("stepped history with inserted messages", () => {
         assert.notInclude(texts(held.snapshot), "Inserted before the start.")
         assert.isNull(prefixChange(last.snapshot, held.snapshot, labelOf))
 
+        // HistoryPanel forwards this preview's history start as retainedDepth to HistoryEditCost.
+        // The wire name is historical: it is a display position, not the slot's graph depth.
+        const preview = yield* reader.CacheWarmth({ userId, chatId: chat.id, forkId: before, leafSlotId: held.slot })
+        const retained = preview.historyStart!
+        const window = yield* reader.GetPath({ userId, chatId: chat.id, forkId: before, leafSlotId: null, limit: 100 })
+        const retainedEntry = window.entries.find((e) => e.slotId === retained.slotId)!
+        assert.strictEqual(retained.depth, retainedEntry.position)
+        assert.notStrictEqual(retained.depth, retainedEntry.depth)
+        const estimate = yield* reader.HistoryEditCost({
+          userId,
+          chatId: chat.id,
+          forkId: before,
+          fromDepth: 0,
+          retainedDepth: retained.depth,
+          summaryIds: []
+        })
+        assert.strictEqual(estimate.messages, window.entries.filter((e) => e.position! >= retained.depth).length)
+
         // After the start: nothing is cut, and the prefix changes from the inserted message on.
         const after = yield* fork(last.slot)
         const anchor = path[start.depth + 1]!

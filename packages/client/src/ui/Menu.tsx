@@ -28,7 +28,13 @@ export function Menu({
     <BaseMenu.Root modal={false} {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}>
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
-        <BaseMenu.Positioner className="z-50 outline-none" side={side} align={align} sideOffset={4}>
+        <BaseMenu.Positioner
+          className="z-50 outline-none"
+          positionMethod="fixed"
+          side={side}
+          align={align}
+          sideOffset={4}
+        >
           <BaseMenu.Popup
             aria-label={label}
             className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
@@ -148,7 +154,7 @@ export function ActionMenu({
         </BaseMenu.Trigger>
       </Tooltip>
       <BaseMenu.Portal>
-        <BaseMenu.Positioner className="z-50 outline-none" sideOffset={4} align="end">
+        <BaseMenu.Positioner className="z-50 outline-none" positionMethod="fixed" sideOffset={4} align="end">
           <BaseMenu.Popup className="flex min-w-48 origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
             {items.map((entry) =>
               "checked" in entry ? (

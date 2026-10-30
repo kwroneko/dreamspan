@@ -68,10 +68,14 @@ const a = entry("a", null, 0)
 const b = entry("b", "a", 1, { speaker: TOBIN })
 const c = entry("c", "b", 2)
 
-const pathWindow = (entries: ReadonlyArray<PathEntry>, leaf: string, older: string | null = null) =>
+const pathWindow = (entries: ReadonlyArray<PathEntry>, leaf: string | null, older: string | null = null) =>
   ({ leafSlotId: leaf, forkId: fork, entries, older, newer: null }) as unknown as PathWindow
 
-const session = async (entries: ReadonlyArray<PathEntry> = [a, b, c], leaf = "c", older: string | null = null) => {
+const session = async (
+  entries: ReadonlyArray<PathEntry> = [a, b, c],
+  leaf: string | null = "c",
+  older: string | null = null
+) => {
   const s = new ChatSession(chatId, null, AtomRegistry.make(), "user")
   const internals = s as unknown as {
     read: () => Promise<PathWindow>
@@ -89,7 +93,13 @@ const session = async (entries: ReadonlyArray<PathEntry> = [a, b, c], leaf = "c"
   internals.read = async () => pathWindow(entries, leaf, older)
   internals.call = async () => ({ ok: true, value: chat })
   await s.open(null)
-  return { s, receive: (event: ChatEvent) => internals.receive([event], null) }
+  return {
+    s,
+    setWindow: (window: PathWindow) => {
+      internals.read = async () => window
+    },
+    receive: (event: ChatEvent) => internals.receive([event], null)
+  }
 }
 
 const shown = (s: Session) => s.snapshot().entries.map((e) => [e.slotId, e.position ?? e.depth])
@@ -120,6 +130,57 @@ describe("an open chat places inserted messages", () => {
     expect(s.snapshot().leafSlotId).toBe("c")
   })
 
+  it("uses the server order when older sibling events arrive after newer ones", async () => {
+    const h = await session()
+    const older = entry("x1", "a", 1, { position: 1, inserted: true })
+    const newer = entry("x2", "a", 1, { position: 1, inserted: true })
+    // Both writes committed before either event: each had position 1 when committed.
+    h.setWindow(pathWindow([a, newer, { ...older, position: 2 }, { ...b, position: 3 }, { ...c, position: 4 }], "c"))
+    h.receive({ _tag: "Slot", entry: newer })
+    h.receive({ _tag: "Slot", entry: older })
+    await vi.waitFor(() =>
+      expect(shown(h.s)).toEqual([
+        ["a", 0],
+        ["x2", 1],
+        ["x1", 2],
+        ["b", 3],
+        ["c", 4]
+      ])
+    )
+    h.s.dispose()
+  })
+
+  it("recovers a child whose insertion event precedes its anchor's event", async () => {
+    const h = await session()
+    const parent = entry("x1", "a", 1, { position: 1, inserted: true })
+    const child = entry("x2", "x1", 2, { position: 2, inserted: true })
+    h.setWindow(pathWindow([a, parent, child, { ...b, position: 3 }, { ...c, position: 4 }], "c"))
+    h.receive({ _tag: "Slot", entry: child })
+    h.receive({ _tag: "Slot", entry: parent })
+    await vi.waitFor(() =>
+      expect(shown(h.s)).toEqual([
+        ["a", 0],
+        ["x1", 1],
+        ["x2", 2],
+        ["b", 3],
+        ["c", 4]
+      ])
+    )
+    h.s.dispose()
+  })
+
+  it("never promotes an unknown inserted slot without a position to the structural tip", async () => {
+    const h = await session([], null)
+    const x = entry("x", null, 0, { inserted: true })
+    h.setWindow(pathWindow([{ ...x, position: 0 }], null))
+    h.receive({ _tag: "Slot", entry: x })
+    await vi.waitFor(() => {
+      expect(shown(h.s)).toEqual([["x", 0]])
+      expect(h.s.snapshot().leafSlotId).toBeNull()
+    })
+    h.s.dispose()
+  })
+
   it("keeps its place when the same event comes again, or a slot event without a position", async () => {
     const { s, receive } = await session()
     const x = entry("x", "b", 2, { position: 2, inserted: true })
@@ -141,11 +202,30 @@ describe("an open chat places inserted messages", () => {
     expect(shown(top.s).map(([id]) => id)).toEqual(["x", "a", "b", "c"])
     // A window starting at `b`: the anchor `a` is above it.
     const later = await session([entry("b", "a", 1), entry("c", "b", 2)], "c", "a")
-    later.receive({ _tag: "Slot", entry: entry("x", "a", 1, { position: 1, inserted: true }) })
+    later.setWindow(
+      pathWindow(
+        [
+          { ...b, position: 2 },
+          { ...c, position: 3 }
+        ],
+        "c",
+        "x"
+      )
+    )
+    const event = { _tag: "Slot", entry: entry("x", "a", 1, { position: 1, inserted: true }) } as const
+    later.receive(event)
+    await vi.waitFor(() =>
+      expect(shown(later.s)).toEqual([
+        ["b", 2],
+        ["c", 3]
+      ])
+    )
+    later.receive(event)
     expect(shown(later.s)).toEqual([
       ["b", 2],
       ["c", 3]
     ])
+    later.s.dispose()
   })
 
   it("ignores another fork's insertion", async () => {
@@ -155,6 +235,18 @@ describe("an open chat places inserted messages", () => {
       entry: { ...entry("x", "a", 1, { position: 1, inserted: true }), forkId: "other", shownForkId: "other" } as never
     })
     expect(shown(s).map(([id]) => id)).toEqual(["a", "b", "c"])
+  })
+
+  it("appends after an above-first insertion while the structural tip is null", async () => {
+    const x = entry("x", null, 0, { position: 0, inserted: true })
+    const h = await session([x], null)
+    h.receive({ _tag: "Slot", entry: entry("root", null, 0) })
+    expect(shown(h.s)).toEqual([
+      ["x", 0],
+      ["root", 1]
+    ])
+    expect(h.s.snapshot().leafSlotId).toBe("root")
+    h.s.dispose()
   })
 
   it("appends below the tip after an inserted message shown last", async () => {

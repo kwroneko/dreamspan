@@ -585,6 +585,47 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("the composer reads the display end while StateEventsAt keeps the precise tip", () =>
+    Effect.gen(function* () {
+      const { api, main, b, writer, reader, userId, chatId, card, add, state, fork } = yield* setup
+      const old = yield* fork(main, b.slotId)
+      const x = yield* writer.InsertMessage({
+        userId,
+        chatId,
+        forkId: main,
+        anchorSlotId: b.slotId,
+        expectedRowVersion: (yield* reader.GetSlot({ userId, slotId: b.slotId, forkId: main })).entry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "After the tip" }
+      })
+      yield* add(main, x.slotId, { key: "participant.join", value: { entity: card.entityId } })
+      assert.notInclude((yield* state(main, b.slotId)).participants, card.entityId)
+      assert.include((yield* state(main, x.slotId)).participants, card.entityId)
+      const cast = yield* api.GetCast({ chatId, forkId: main, slotId: b.slotId })
+      assert.include(cast.participants, card.entityId)
+      const elsewhere = yield* api.GetCast({ chatId, forkId: old, slotId: b.slotId })
+      assert.notInclude(elsewhere.participants, card.entityId)
+      const changed = yield* api.ChangeCast({
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        change: { _tag: "Leave", entityId: card.entityId }
+      })
+      assert.notInclude(changed.participants, card.entityId)
+      assert.notInclude((yield* state(main, x.slotId)).participants, card.entityId)
+      yield* writer.AddStateEvents({
+        userId,
+        chatId,
+        forkId: main,
+        slotId: b.slotId,
+        displayEnd: true,
+        data: [{ key: "var.set", value: { name: "composer", value: "at end" } }]
+      })
+      assert.strictEqual((yield* state(main, x.slotId)).vars.composer, "at end")
+      assert.isUndefined((yield* state(main, b.slotId)).vars.composer)
+      assert.isUndefined((yield* state(old, b.slotId)).vars.composer)
+    })
+  )
+
   it.effect("the next-context preview reads the viewed fork at a shared tip", () =>
     Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(

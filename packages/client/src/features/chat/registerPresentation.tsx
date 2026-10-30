@@ -27,6 +27,7 @@ import { AuthorNoteAction } from "./AuthorNoteAction.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
+import { Alert } from "../../ui/Surface.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
   const Component = lazy(load)
   return (props: P) => (
@@ -76,6 +77,16 @@ export const registerPresentation = () => [
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
   summaryPreviews.register({ id: "history.summary-preview", order: 10, component: HistorySummaryPreview }),
   accountSettingSections.register({ id: "settings.summary-defaults", order: 10, component: SummaryDefaults }),
+  chatComposerNotes.register({
+    id: "composer.assembly-error",
+    order: 5,
+    component: ({ view }) =>
+      view.history?.assemblyError ? (
+        <Alert tone="danger" title="Can't prepare the next reply">
+          {view.history.assemblyError}
+        </Alert>
+      ) : null
+  }),
   chatComposerNotes.register({
     id: "composer.image-tokens",
     order: 10,

@@ -180,3 +180,158 @@ layer(serverLayer(other), { excludeTestServices: true, timeout: "180 seconds" })
     )
   }
 )
+
+// Messages the user inserted (spec/MESSAGE-INSERT.md §3.3, unit 8) are local changes: a
+// re-import of a changed ST chat stops at one, keeping the fork on the path that shows it, and
+// never matches one as the file's own message. One that changes nothing after an insertion
+// goes on as before, and the insertion stays where it is.
+const inserting = testConfig()
+layer(serverLayer(inserting), { excludeTestServices: true, timeout: "180 seconds" })(
+  "inserted messages on re-import",
+  (it) => {
+    const lines = (tag: string) =>
+      Array.from({ length: 10 }, (_, i) =>
+        message({
+          name: i % 2 ? "Sam" : "Alice",
+          user: i % 2 === 1,
+          mes: `${tag} ${i}`,
+          minute: i,
+          ...(!(i % 2) ? { swipes: [`${tag} ${i}`] } : {})
+        })
+      )
+    const folder = (tag: string, messages: ReadonlyArray<unknown>) =>
+      new Map([
+        ["characters/Alice.png", card("Alice", "Synthetic greeting")],
+        [`chats/Alice/${tag}.jsonl`, jsonl([header({ tainted: true }), ...messages])]
+      ])
+    /** A chat imported from `tag`'s file, with a message inserted below its message `below` (null: above the first). */
+    const imported = (tag: string, below: number | null) =>
+      Effect.gen(function* () {
+        const file = lines(tag)
+        const { api } = yield* importStFolder(folder(tag, file))
+        const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === tag)!
+        const forkId = (yield* api.GetChat({ chatId: chat.id })).currentForkId! as ForkId
+        const before = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+        const user = yield* api.Whoami()
+        const made = yield* (yield* Writer).InsertMessage({
+          userId: user.id,
+          chatId: chat.id,
+          forkId,
+          anchorSlotId: below === null ? null : before.entries[below]!.slotId,
+          expectedRowVersion: 0,
+          body: { _tag: "Write", speaker: null, content: "Inserted here" }
+        })
+        const shown = () =>
+          Effect.map(
+            api.ReadPath({ chatId: chat.id, forkId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 }),
+            (w) => w.entries.map((e) => [e.slotId, e.version.content, e.position])
+          )
+        const slots = () =>
+          Effect.map(stImportGraph(inserting.dataDir, chat.id), (rows) => new Set(rows.map((r) => r.id)).size)
+        return { api, chat, file, x: made.slotId, shown, slots }
+      })
+    // ST's message `at` rewritten by the other side: a writer change starts a new path there.
+    const rewritten = (tag: string, file: ReadonlyArray<ReturnType<typeof message>>, at: number) =>
+      file.map((m, i) =>
+        i === at
+          ? message({ name: i % 2 ? "Alice" : "Sam", user: i % 2 === 0, mes: `${tag} rewritten ${i}`, minute: 60 + i })
+          : m
+      )
+
+    for (const [label, below, at] of [
+      ["right above the rewritten message", 6, 7],
+      ["inside the rewritten suffix", 8, 7],
+      ["after the rewritten suffix's last message", 9, 7],
+      ["above the first message, rewritten", null, 0]
+    ] as const) {
+      it.effect(`a re-import stops at an insertion ${label}`, () =>
+        Effect.gen(function* () {
+          const tag = `stop-${at}-${below}`
+          const { api, chat, file, x, shown, slots } = yield* imported(tag, below)
+          const before = yield* shown()
+          assert.isTrue(before.some(([slot]) => slot === x))
+          const count = yield* slots()
+          yield* importStFolder(folder(tag, rewritten(tag, file, at)))
+          // The fork keeps the path that shows X; ST's new path is stored beside it.
+          assert.deepStrictEqual(yield* shown(), before)
+          assert.strictEqual(yield* slots(), count + file.length - at)
+          assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+        })
+      )
+    }
+
+    for (const deleted of [false, true]) {
+      it.effect(`a shortened file keeps an insertion in its removed suffix${deleted ? " even when deleted" : ""}`, () =>
+        Effect.gen(function* () {
+          const tag = `shortened-${deleted}`
+          const { api, chat, file, x, shown } = yield* imported(tag, 8)
+          if (deleted) yield* api.DeleteMessage({ slotId: x })
+          const before = yield* shown()
+          yield* importStFolder(folder(tag, file.slice(0, 7)))
+          assert.deepStrictEqual(yield* shown(), before)
+          assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+        })
+      )
+    }
+
+    it.effect("a rewritten suffix preserves a deleted insertion at its boundary", () =>
+      Effect.gen(function* () {
+        const tag = "deleted-boundary"
+        const { api, chat, file, x, shown } = yield* imported(tag, 6)
+        const original = yield* shown()
+        const item = yield* api.DeleteMessage({ slotId: x })
+        const before = yield* shown()
+        yield* importStFolder(folder(tag, rewritten(tag, file, 7)))
+        assert.deepStrictEqual(yield* shown(), before)
+        assert.strictEqual((yield* api.GetChat({ chatId: chat.id })).activeLeafSlotId, chat.activeLeafSlotId)
+        yield* api.RestoreBinItem({ itemId: item.id })
+        assert.deepStrictEqual(yield* shown(), original)
+      })
+    )
+
+    it.effect("a re-import that changes nothing after an insertion goes on as before", () =>
+      Effect.gen(function* () {
+        const tag = "below-3"
+        const { file, x, shown } = yield* imported(tag, 3)
+        yield* importStFolder(folder(tag, rewritten(tag, file, 7)))
+        const after = yield* shown()
+        // ST's new messages 7 to 9 follow, and X stays below message 3.
+        assert.deepStrictEqual(
+          after.map(([, content]) => content),
+          [
+            ...[0, 1, 2, 3].map((i) => `${tag} ${i}`),
+            "Inserted here",
+            ...[4, 5, 6].map((i) => `${tag} ${i}`),
+            `${tag} rewritten 7`,
+            `${tag} 8`,
+            `${tag} 9`
+          ]
+        )
+        assert.strictEqual(after[4]![0], x)
+        assert.deepStrictEqual(
+          after.map(([, , position]) => position),
+          after.map((_, i) => i)
+        )
+      })
+    )
+
+    it.effect("an appended ST message is never matched to an inserted one", () =>
+      Effect.gen(function* () {
+        const tag = "append"
+        const { file, x, shown, chat } = yield* imported(tag, 9)
+        // The file's next message reads exactly like X, with X's writer and time.
+        const at = (yield* stImportGraph(inserting.dataDir, chat.id)).find((r) => r.id === x)!.at
+        const next = {
+          ...message({ name: "Sam", user: true, mes: "Inserted here", minute: 0 }),
+          send_date: new Date(at).toISOString()
+        }
+        yield* importStFolder(folder(tag, [...file, next]))
+        const after = yield* shown()
+        assert.strictEqual(after.length, 12)
+        assert.deepStrictEqual(after[10], [x, "Inserted here", 10])
+        assert.notStrictEqual(after[11]![0], x)
+        assert.deepStrictEqual(after[11]!.slice(1), ["Inserted here", 11])
+      })
+    )
+  }
+)

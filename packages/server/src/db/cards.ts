@@ -136,8 +136,7 @@ export const chatCast = Effect.fnUntraced(function* (
       ? []
       : yield* sql<{ id: string; tip_slot_id: string | null }>`
     SELECT id, tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId}`
-  const at =
-    tip !== undefined && leaf !== null && tip.tip_slot_id === leaf ? yield* displayEndOf(sql, chatId, tip) : leaf
+  const at = tip !== undefined && tip.tip_slot_id === leaf ? yield* displayEndOf(sql, chatId, tip) : leaf
   const events = yield* stateEventsThrough(sql, chatId, at as SlotId | null, fork)
   const state = foldState(
     yield* withoutPurged(

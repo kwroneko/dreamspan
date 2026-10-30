@@ -180,6 +180,23 @@ const segmentsTo = (sql: SqlClient.SqlClient, chatId: string, slotId: string | n
         (rows) => rows.toReversed()
       )
 
+/**
+ * Fork `forkId`'s placed insertions and its display path to its tip, or null when it places
+ * none (or there's no such fork): the display path is then the structural one, and callers keep
+ * the structural code that predates insertions. One probe of `fork_overrides_point` per lineage
+ * entry when it's null.
+ */
+const forkDisplay = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
+  Effect.gen(function* () {
+    if (forkId === null) return null
+    const placed = yield* placedInsertions(sql, chatId, forkId)
+    if (placed.length === 0) return null
+    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
+      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+    if (fork === undefined) return null
+    return { placed, pieces: splice(yield* segmentsTo(sql, chatId, fork.tip_slot_id), placed) }
+  })
+
 /** The pieces of positions 0 to `end`. */
 const piecesThrough = (pieces: ReadonlyArray<PathPiece>, end: number): ReadonlyArray<PathPiece> =>
   pieces.flatMap((piece) =>
@@ -205,17 +222,15 @@ export const displayThrough = (
   slotId: string | null
 ) =>
   Effect.gen(function* () {
-    if (forkId === null || slotId === null) return null
-    const placed = yield* placedInsertions(sql, chatId, forkId)
-    if (placed.length === 0) return null
+    if (slotId === null) return null
+    const fork = yield* forkDisplay(sql, chatId, forkId)
+    if (fork === null) return null
     const place = yield* slotPlace(sql, chatId, slotId)
     if (place === null) return null
-    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
-      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
-    let pieces = splice(yield* segmentsTo(sql, chatId, fork?.tip_slot_id ?? null), placed)
+    let pieces = fork.pieces
     let end = positionOf(pieces, place)
     if (end === null) {
-      pieces = splice(yield* segmentsTo(sql, chatId, slotId), placed)
+      pieces = splice(yield* segmentsTo(sql, chatId, slotId), fork.placed)
       end = positionOf(pieces, place)
     }
     return end === null ? null : { pieces: piecesThrough(pieces, end), end }
@@ -244,21 +259,19 @@ export const displayEndOf = (
  */
 export const insertionPieces = (sql: SqlClient.SqlClient, chatId: string, forkId: string | null) =>
   Effect.gen(function* () {
-    if (forkId === null) return null
-    const placed = yield* placedInsertions(sql, chatId, forkId)
-    if (placed.length === 0) return null
-    const [fork] = yield* sql<{ tip_slot_id: string | null }>`
-      SELECT tip_slot_id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
-    if (fork === undefined) return null
-    const pieces = splice(yield* segmentsTo(sql, chatId, fork.tip_slot_id), placed)
-    return pieces.some((piece) => piece.kind === "inserted") ? pieces : null
+    const fork = yield* forkDisplay(sql, chatId, forkId)
+    return fork !== null && fork.pieces.some((piece) => piece.kind === "inserted") ? fork.pieces : null
   })
 
 /** The inserted slot at `position` (0 is the first message), or null when a structural run holds it or it's past the end. */
 export const insertedAt = (pieces: ReadonlyArray<PathPiece>, position: number) => {
-  const piece = pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+  const piece = pieceAt(pieces, position)
   return piece?.kind === "inserted" ? piece.slotId : null
 }
+
+/** The piece holding `position`, if any. */
+const pieceAt = (pieces: ReadonlyArray<PathPiece>, position: number) =>
+  pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
 
 /** Whether every position strictly between `a` and `b` holds an inserted slot (true when there are none). */
 export const onlyInsertedBetween = (pieces: ReadonlyArray<PathPiece>, a: number, b: number) =>
@@ -335,7 +348,7 @@ export const slotPlace = (sql: SqlClient.SqlClient, chatId: string, slotId: stri
 /** The slot at `position` on the display path (null past either end). */
 export const slotAtPosition = (sql: SqlClient.SqlClient, pieces: ReadonlyArray<PathPiece>, position: number) =>
   Effect.gen(function* () {
-    const piece = pieces.find((p) => position >= p.start && position < p.start + pieceLength(p))
+    const piece = pieceAt(pieces, position)
     if (piece === undefined) return null
     if (piece.kind === "inserted") return piece.slotId
     const [row] = yield* sql<{ id: string }>`
@@ -361,18 +374,34 @@ export const windowPieces = (pieces: ReadonlyArray<PathPiece>, first: number, la
   )
 
 /**
- * SQL, `w(chain_id, lo, hi, start)` and `display(id, position)`: the slots of `parts`
- * (`windowPieces`), each with its position. A run's slots are found by chain and depth
- * (`slots_chain`), an inserted slot by its own chain and depth, which only it has. Further
- * common table expressions can follow it.
+ * SQL: CTEs over positions `first` to `last` of a display path, for reads that join what a
+ * fork shows: `display_pieces(chain_id, lo, hi, slot_id, start)` (`windowPieces`' rows), and
+ * `display_slots(id, position)`, one row per slot there, by one range of `slots_chain` per
+ * structural stretch. A slot's position through the pieces alone, without listing the slots,
+ * is `displayPositionSql`.
  */
-export const displaySlots = (sql: SqlClient.SqlClient, chatId: string, parts: string) => sql`
-  WITH w(chain_id, lo, hi, start) AS (
-    SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 4 FROM json_each(${parts})
-  ), display(id, position) AS (
-    SELECT s.id, w.start + s.depth - w.lo FROM w CROSS JOIN slots s
-      ON s.chain_id = w.chain_id AND s.depth BETWEEN w.lo AND w.hi AND s.chat_id = ${chatId}
+export const displaySlots = (
+  sql: SqlClient.SqlClient,
+  pieces: ReadonlyArray<PathPiece>,
+  first: number,
+  last: number
+) => sql`
+  WITH display_pieces(chain_id, lo, hi, slot_id, start) AS (
+    SELECT value ->> 0, value ->> 1, value ->> 2, value ->> 3, value ->> 4 FROM json_each(${windowPieces(pieces, first, last)})
+  ), display_slots(id, position) AS (
+    SELECT s.id, p.start + s.depth - p.lo FROM display_pieces p CROSS JOIN slots s ON s.chain_id = p.chain_id
+      AND s.depth BETWEEN p.lo AND p.hi WHERE p.slot_id IS NULL
+    UNION ALL
+    SELECT p.slot_id, p.start FROM display_pieces p WHERE p.slot_id IS NOT NULL
   )`
+
+/**
+ * SQL, inside `displaySlots`: the position of slot alias `s` on the display path, or null when
+ * the pieces don't hold it. A run holds a slot by chain and depth, an inserted piece by id.
+ */
+export const displayPositionSql = (s: string) =>
+  `(SELECT p.start + ${s}.depth - p.lo FROM display_pieces p WHERE p.chain_id = ${s}.chain_id
+    AND ${s}.depth BETWEEN p.lo AND p.hi AND (p.slot_id IS NULL OR p.slot_id = ${s}.id))`
 
 /**
  * SQL, `path_events`: `pathEvents` over display pieces (`displayThrough`), each event with the

@@ -1329,6 +1329,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
+      /** Composer write: resolve a structural tip to its display end in this transaction. */
+      displayEnd: Schema.optionalKey(Schema.Boolean),
       versionId: Schema.NullOr(VersionId),
       scope: FoldableEvent.fields.scope,
       data: StoredStateEventData
@@ -1346,6 +1348,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       slotId: Schema.NullOr(SlotId),
+      /** Composer write: resolve a structural tip to its display end in this transaction. */
+      displayEnd: Schema.optionalKey(Schema.Boolean),
       data: Schema.Array(StoredStateEventData)
     },
     success: Schema.Void,
@@ -2269,6 +2273,8 @@ export class ReadOps extends RpcGroup.make(
       /** The viewed leaf when reading an earlier position; forkId takes precedence. */
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId)),
       slotId: Schema.NullOr(SlotId),
+      /** Composer/next-state read: include the tip’s trailing insertions when slotId is the tip. */
+      displayEnd: Schema.optionalKey(Schema.Boolean),
       /** Whose selections decide the version-attached events (absent or null: the fork through the slot, forkAt). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId))
     },

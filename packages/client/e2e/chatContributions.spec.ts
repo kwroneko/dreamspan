@@ -12,7 +12,8 @@ import type { install, close } from "./support/chatContributions.ts"
 const server = serverPerFile(withAdmin)
 let vite: ViteDevServer
 let url: string
-test.beforeAll(async () => {
+test.beforeAll(async ({ browser }) => {
+  test.setTimeout(180_000)
   vite = await createServer({
     root: resolve(import.meta.dirname, ".."),
     server: {
@@ -26,6 +27,18 @@ test.beforeAll(async () => {
   })
   await vite.listen()
   url = vite.resolvedUrls!.local[0]!.replace(/\/$/, "")
+  // Compile the dev application's lazy chat/Markdown modules and the synthetic
+  // plugin before timing individual interactions. Production suites use a build;
+  // this file needs Vite's live module graph to exercise registry replacement.
+  const warm = await browser.newPage()
+  try {
+    await setup(warm, 120_000)
+    await expect(warm.locator("article .markdown")).toHaveText("A synthetic message.")
+    await contribution(warm, "install", "cards")
+    await contribution(warm, "close", "cards")
+  } finally {
+    await warm.close()
+  }
 })
 test.afterAll(async () => {
   await vite?.close()
@@ -42,7 +55,7 @@ const contribution = (page: Page, operation: "install" | "close", id: Parameters
     { operation, id }
   )
 
-const setup = async (page: Page) => {
+const setup = async (page: Page, timeout = 30_000) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
@@ -54,7 +67,7 @@ const setup = async (page: Page) => {
     })
   )
   await page.goto(`${url}/chats/${chat.id}`)
-  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout: 30_000 })
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEditable({ timeout })
 }
 
 test("scoped contributions update mounted panels, controls, commands and dialogs, then disappear", async ({ page }) => {
@@ -63,6 +76,8 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await page.getByRole("button", { name: "Plugin send", exact: true }).click()
   await page.getByRole("textbox", { name: "Message", exact: true }).press("Control+Enter")
   await expect(page.locator("body")).toHaveAttribute("data-plugin-sends", "2")
+  // A command's shortcut doesn't fire while typing in a text field (ac8a5a1).
+  await page.getByRole("textbox", { name: "Message", exact: true }).blur()
   await page.keyboard.press("Control+y")
   await expect(page.locator("body")).toHaveAttribute("data-plugin-commands", "1")
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()
@@ -80,6 +95,7 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await expect(page.getByRole("button", { name: "Plugin send", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Plugin message action", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^(Send|Mira replies)$/ })).toBeVisible()
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.keyboard.press("Control+y")
   await expect(page.locator("body")).toHaveAttribute("data-plugin-commands", "2")
 })
@@ -103,7 +119,11 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(notes).toBeVisible()
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
-  await expect(page.getByRole("button", { name: "Chat actions", exact: true })).toHaveCount(0)
+  // The menu stays for the reply commands (ac8a5a1), without the history ones.
+  await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+  await expect(page.getByRole("menuitem", { name: "Edit your last message (Ctrl+ArrowUp)" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: /^(Search and replace|History edits)$/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await page.keyboard.press("Control+h")
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
   await contribution(page, "close", "history")
