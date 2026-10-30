@@ -5,7 +5,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import type { Notice } from "@rp/shared/noticeApi.ts"
 import { type Cause, Context, Effect, Layer, Queue, type Scope } from "effect"
 
-/** Notices a tab may fall behind by; past that the oldest go, which only loses a badge. */
+/** Batches a tab may lag behind; overflow requests a draft refresh and keeps the newest notice. */
 const BACKLOG = 256
 
 export class Notices extends Context.Service<
@@ -23,11 +23,16 @@ export class Notices extends Context.Service<
     const subscribers = new Map<UserId, Set<Queue.Queue<ReadonlyArray<Notice>, Cause.Done>>>()
     return Notices.of({
       publish: (userId, notice) => {
-        for (const queue of subscribers.get(userId) ?? []) Queue.offerUnsafe(queue, [notice])
+        for (const queue of subscribers.get(userId) ?? []) {
+          if (!Queue.offerUnsafe(queue, [notice])) {
+            while (Queue.sizeUnsafe(queue) > 0) Queue.takeUnsafe(queue)
+            Queue.offerUnsafe(queue, [{ _tag: "UserDraftSync" }, notice])
+          }
+        }
       },
       subscribe: (userId) =>
         Effect.acquireRelease(
-          Effect.map(Queue.sliding<ReadonlyArray<Notice>, Cause.Done>(BACKLOG), (queue) => {
+          Effect.map(Queue.bounded<ReadonlyArray<Notice>, Cause.Done>(BACKLOG), (queue) => {
             const set = subscribers.get(userId) ?? new Set()
             subscribers.set(userId, set)
             set.add(queue)

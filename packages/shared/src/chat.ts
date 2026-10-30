@@ -110,7 +110,6 @@ export const ContextIssue = Schema.Struct({
     "lorebook_issue",
     // Recorded by contexts assembled before version 30; never shown (ARCHITECTURE §15).
     "last_turn_filled",
-    "direction_prompt_missing",
     "layout_ignored",
     "cache_breakpoints",
     "role_projection_missing"

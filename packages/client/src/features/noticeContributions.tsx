@@ -2,6 +2,15 @@ import type { Notice } from "@rp/shared/noticeApi.ts"
 import { type ComponentType, useSyncExternalStore } from "react"
 import { makeRegistry } from "../registry.ts"
 
+/** Account events reach registered features independently of optional reply alerts. */
+export const userNoticeReceivers = makeRegistry<{
+  readonly id: string
+  readonly receive: (notice: Notice) => void
+}>()
+export const receiveUserNotice = (notice: Notice) => {
+  for (const receiver of userNoticeReceivers.list()) receiver.receive(notice)
+}
+
 /** Optional ways to announce an unseen reply, with their settings and browser activation. */
 export const noticeChannels = makeRegistry<{
   readonly id: string

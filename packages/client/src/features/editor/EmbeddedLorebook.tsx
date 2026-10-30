@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { SearchNavigation, scrollToSearchField } from "./searchNavigation.ts"
+import { useContext, useEffect, useRef, useState } from "react"
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -10,15 +11,38 @@ import { emptyBook, emptyEntry } from "./lorebookDefaults.ts"
 import { type EditorStore, useText, useValue } from "./store.ts"
 
 const BOOK = ["character_book"]
+const EMPTY_KEYS: ReadonlyArray<string> = []
 
 /** One key per line: commas in a /pattern/flags key must survive unchanged. */
 function Keys({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
-  const keys = useValue<ReadonlyArray<string>>(store, path) ?? []
+  const match = useContext(SearchNavigation)
+  const target = useRef<HTMLTextAreaElement>(null)
+  const revealed = useRef<typeof match>(null)
+  const keys = useValue<ReadonlyArray<string>>(store, path) ?? EMPTY_KEYS
   const field = valueField(path)
+  const pathKey = JSON.stringify(path)
+  useEffect(() => {
+    if (!match || revealed.current === match || JSON.stringify(match.path.slice(0, -1)) !== pathKey) return
+    const input = target.current!
+    for (let parent = input.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true
+    }
+    const index = Number(match.path.at(-1))
+    const offset = keys.slice(0, index).reduce((n, key) => n + key.length + 1, 0)
+    const frame = requestAnimationFrame(() => {
+      // Apply a visit once; subsequent typing must retain the user's new caret.
+      revealed.current = match
+      input.focus({ preventScroll: true })
+      input.setSelectionRange(offset + match.at, offset + match.at + match.length)
+      scrollToSearchField(input)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [match, pathKey, keys])
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <Field label={label} description="One key per line. Regular expressions use /pattern/flags.">
         <Textarea
+          ref={target}
           rows={2}
           value={keys.join("\n")}
           onChange={(event) =>
@@ -54,7 +78,13 @@ function InheritedSwitch({ store, path, label }: { store: EditorStore; path: Fie
 }
 
 function Entry({ store, uid, initiallyOpen }: { store: EditorStore; uid: number; initiallyOpen: boolean }) {
+  const match = useContext(SearchNavigation)
   const [open, setOpen] = useState(initiallyOpen)
+  useEffect(() => {
+    if (match?.path[0] !== "character_book" || match.path[2] !== `uid=${uid}`) return
+    const frame = requestAnimationFrame(() => setOpen(true))
+    return () => cancelAnimationFrame(frame)
+  }, [match, uid])
   const path = [...BOOK, "entries", `uid=${uid}`]
   const title = useText(store, [...path, "comment"]) || "Untitled entry"
   return (

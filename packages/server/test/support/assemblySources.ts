@@ -33,7 +33,13 @@ export interface AssemblyFixture {
   /** The path, root first; the message being generated comes after it. */
   readonly summaries?: ReadonlyArray<import("@rp/shared/lcm.ts").Summary>
   readonly messages: ReadonlyArray<FixtureMessage>
-  readonly target?: { readonly speaker?: string; readonly direction?: string; readonly ordinal?: number }
+  readonly target?: {
+    readonly speaker?: string
+    readonly direction?: string
+    readonly ordinal?: number
+    /** Continue: the version and the text it continues. */
+    readonly continues?: { readonly version: string; readonly text: string }
+  }
   readonly cards: ReadonlyArray<{ readonly entity: string; readonly doc: CardDoc }>
   /** Joined at the start, in order; the persona is played by the user. */
   readonly participants: ReadonlyArray<string>
@@ -85,7 +91,8 @@ const fixtureSources = (fixture: AssemblyFixture) => {
       parentSlotId: n === 0 ? null : slot(n - 1),
       ordinal: fixture.target?.ordinal ?? 0,
       speaker: fixture.target?.speaker ?? null,
-      direction: fixture.target?.direction ?? null
+      direction: fixture.target?.direction ?? null,
+      ...(fixture.target?.continues ? { continues: fixture.target.continues } : {})
     }),
     historyStart: () => Effect.succeed(fixture.historyStart ?? null),
     historyRevision: (_leaf, before) =>
@@ -161,6 +168,7 @@ export const assembleFixture = (
     readonly loreFallback?: ContextSnapshot["loreFallback"]
     /** A summary's request: written as no one, with no direction. */
     readonly summarizing?: boolean
+    readonly summaryJob?: ContextSnapshot["summaryJob"]
     /** An assembler of the test's own, to register plugin parts in a scope of its own. */
     readonly assembler?: Assembler
   } = {}
@@ -172,6 +180,7 @@ export const assembleFixture = (
       frozen: options.frozen ?? {},
       ...(options.loreFallback ? { loreFallback: options.loreFallback } : {}),
       ...(options.summarizing ? { summarizing: true } : {}),
+      ...(options.summaryJob ? { summaryJob: options.summaryJob } : {}),
       random: options.random ?? (() => 0.5)
     })
     .pipe(Effect.provide(fixtureSources(fixture)))

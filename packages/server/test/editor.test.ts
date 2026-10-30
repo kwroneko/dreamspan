@@ -140,6 +140,14 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const order = first.order as PresetDoc["order"]
       assert.isAbove(order.length, 5)
       assert.isTrue(order.every((e) => prompts.some((p) => p.identifier === e.identifier)))
+      for (const [identifier, content] of [
+        ["groupNudge", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
+        ["impersonationPrompt", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
+        ["directionPrompt", "[What happens next: {{direction}}]"]
+      ]) {
+        assert.strictEqual(prompts.find((p) => p.identifier === identifier)!.content, content)
+        assert.isFalse(order.some((entry) => entry.identifier === identifier))
+      }
       for (const id of ["main", "jailbreak"]) assert.isTrue(prompts.find((p) => p.identifier === id)!.forbid_overrides)
       assert.isFalse(first.regex_approved)
       assert.notProperty(first, "samplers")

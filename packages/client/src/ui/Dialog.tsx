@@ -16,6 +16,7 @@ export function Dialog({
   title,
   description,
   wide = false,
+  finalFocus,
   children
 }: {
   open: boolean
@@ -24,13 +25,15 @@ export function Dialog({
   description?: ReactNode
   /** Room for two columns side by side on a wide screen. */
   wide?: boolean
+  /** Override focus restoration when an action navigates outside the dialog. */
+  finalFocus?: (() => boolean) | undefined
   children: ReactNode
 }) {
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
-        <BaseDialog.Popup className={wide ? `${popup} sm:max-w-5xl` : popup}>
+        <BaseDialog.Popup finalFocus={finalFocus} className={wide ? `${popup} sm:max-w-5xl` : popup}>
           <div className="flex flex-col gap-1">
             <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
             {description && (
