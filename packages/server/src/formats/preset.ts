@@ -19,14 +19,8 @@ import {
 import { type ImportReport, ReportBuilder, shownList, shownText } from "@rp/shared/importReport.ts"
 import { Schema } from "effect"
 import { newestMessage, presetOrder, sentOutsideTheOrder } from "@rp/shared/presetOrder.ts"
-import {
-  conditionOf,
-  fromSpeaker,
-  GROUP_NUDGE,
-  IMPERSONATION_PROMPT,
-  triggersWithCondition,
-  withConditions
-} from "@rp/shared/presetConditions.ts"
+import { conditionOf, fromSpeaker, triggersWithCondition, withEndOfRequest } from "@rp/shared/presetConditions.ts"
+import { endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -219,7 +213,6 @@ const PROMPT_FIELDS = new Set([
   "forbid_overrides",
   // Ours, written by export so a reimport keeps what ST has no field for.
   "condition",
-  "added_on_import",
   "sent_with_direction"
 ])
 /** Prompt fields ST has but the document doesn't model; kept without a report. */
@@ -659,27 +652,23 @@ const readPrompt = (p: Json, path: Path, ids: FreshIds, r: ReportBuilder): Prese
     // ST honours the flag only when it's exactly `true`.
     forbid_overrides: p.forbid_overrides === true,
     ...(PromptCondition.literals.some((c) => c === p.condition) ? { condition: p.condition as PromptCondition } : {}),
-    ...(p.added_on_import === true ? { added_on_import: true } : {}),
     ...(Object.keys(unsupported).length > 0 ? { unsupported } : {})
   }
 }
 
 /**
- * ST's group nudge and impersonation prompt as conditioned prompts, and the default direction
- * prompt last (DESIGN §2.2), each reported. ST's triggers stay as they are: they're a filter of
- * their own beside the condition (owner 2026-10-28).
+ * ST's group nudge and impersonation prompt as end-of-request texts (DESIGN §2.2), each
+ * reported; an empty one keeps our default. ST's triggers of the other prompts stay as they are.
  */
 const conditioned = (doc: PresetDoc, r: ReportBuilder): PresetDoc => {
-  const { doc: converted, changes } = withConditions(doc)
+  const { doc: converted, changes } = withEndOfRequest(doc)
   for (const change of changes)
     r.add(
       "info",
       `preset.${change.kind}_prompt`,
       change.kind === "group_nudge"
-        ? "The group nudge is now the prompt “Group nudge” after the chat history, sent when the model writes as a character, with {{char}} as {{speaker}}."
-        : change.kind === "impersonation"
-          ? "The impersonation prompt is now the prompt “Impersonation prompt” at the end, sent when the model writes as {{user}}, with {{user}} as {{speaker}}."
-          : "The default direction prompt was added at the end, sent only when you give a direction.",
+        ? "The group nudge is now the end-of-request text “When a character speaks”, sent last whenever the model writes as a character, with {{char}} as {{speaker}}."
+        : "The impersonation prompt is now the end-of-request text “When your card speaks”, sent last when the model writes as a card you play, with {{user}} as {{speaker}}.",
       ["prompts"]
     )
   return converted
@@ -874,23 +863,21 @@ const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
  * regex approval isn't written: ST keeps its own.
  */
 export const exportStPreset = (stored: PresetDoc): Json => {
-  // Conditions back to what ST has (DESIGN §2.2): the group nudge and impersonation prompt
-  // to its utility prompts, with their macros; a condition to the triggers that mean it, with
-  // the prompt's own; a prompt sent only with a direction, which ST would send every turn, off.
-  const doc = withConditions(stored).doc
+  // Back to what ST has (DESIGN §2.2): the turn texts to its utility prompts, with their macros
+  // (ST has no field for the direction text, which isn't written); a condition to the triggers
+  // that mean it, with the prompt's own; a prompt sent only with a direction, which ST would
+  // send every turn, off.
+  const doc = withEndOfRequest(stored).doc
   const enabled = new Map(doc.order.map((e) => [e.identifier, e.enabled]))
-  const utility = (identifier: string, macro: "char" | "user") => {
-    const prompt = doc.prompts.find((p) => p.identifier === identifier)
-    return prompt && enabled.get(identifier) ? fromSpeaker(prompt.content, macro) : ""
-  }
+  const utility = (identifier: string, macro: "char" | "user") =>
+    fromSpeaker(doc.prompts.find((p) => p.identifier === identifier)?.content ?? "", macro)
   const utility_prompts = {
     ...doc.utility_prompts,
     group_nudge_prompt: utility(GROUP_NUDGE, "char"),
     impersonation_prompt: utility(IMPERSONATION_PROMPT, "user")
   }
-  const moved = new Set([GROUP_NUDGE, IMPERSONATION_PROMPT])
   const prompts = doc.prompts
-    .filter((p) => !moved.has(p.identifier))
+    .filter((p) => !endOfRequestText(p.identifier))
     .map((p) => ({
       ...p.unsupported,
       identifier: p.identifier,
@@ -907,13 +894,10 @@ export const exportStPreset = (stored: PresetDoc): Json => {
       // ST ignores the condition; a reimport restores it. A prompt sent only with a direction
       // goes out off, and a reimport turns it back on.
       ...(conditionOf(p) !== "always" ? { condition: conditionOf(p) } : {}),
-      ...(conditionOf(p) === "with_direction" ? { sent_with_direction: enabled.get(p.identifier) === true } : {}),
-      ...(p.added_on_import ? { added_on_import: true } : {})
+      ...(conditionOf(p) === "with_direction" ? { sent_with_direction: enabled.get(p.identifier) === true } : {})
     }))
   const directed = new Set(doc.prompts.filter((p) => conditionOf(p) === "with_direction").map((p) => p.identifier))
-  const order = doc.order
-    .filter((e) => !moved.has(e.identifier))
-    .map((e) => (directed.has(e.identifier) ? { ...e, enabled: false } : { ...e }))
+  const order = doc.order.map((e) => (directed.has(e.identifier) ? { ...e, enabled: false } : { ...e }))
   const regex_scripts = doc.regex.map((s) => ({
     ...s.unsupported,
     id: s.id,

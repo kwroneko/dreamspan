@@ -25,13 +25,13 @@ Guidance and speaker-picker corrections are built for saved and pending chats (U
 
 - **Guidance (owner).** Guidance changes only *who writes*, never *which character*. Off: Enter sends your text as the selected speaker's message. On: Enter makes the model write the **selected speaker's** message following your text as the direction (persona or card alike). **Change:** the build generates for the "Reply from" / next-in-turn character.
 - **Speaker picker (owner).** "Writing as" lists only the chat's cast (the persona and the cards in the chat). To speak as another card, add it to the chat first. **Change:** the build lists library cards and silently adds the chosen one.
-- **Closing user turn (owner).** Added only when there's no new user text **and** no user-role prompt follows the history. It goes right after the last chat message (before any system prompts that follow). **No warning** on messages or replies; it's visible only in the inspector. **Change:** remove the per-reply warning; check placement.
+- **Closing user turn (owner).** Added only when there's no new user text **and** no user-role prompt follows the history. It goes right after the last chat message (before any system prompts that follow). **No warning** on messages or replies; it's visible only in the inspector. **Change:** remove the per-reply warning; check placement. *(Replaced by DESIGN §2.2's end-of-request instruction, owner 2026-10-29: there's no closing user turn; the end-of-request message is always last, and the only fallback is a bare `[Write {{speaker}}'s next message.]` when its texts are empty, nothing is prefilled and the request would end on assistant.)*
 - **Persona change (owner).** Changing persona swaps the persona definitions, as ST does (the cache is rebuilt; the history is untouched: old messages keep their speaker's name). Several personas = add cards to the cast and switch the speaker.
 - **ST prompt triggers (owner).** ST's per-prompt generation-type triggers (normal, swipe, regenerate, continue, impersonate, quiet; none set = always) are kept **in addition** to our conditions wherever they fit our model, and are a **normal per-prompt option in the preset editor**, not only an import artifact. Where a trigger doesn't fit our model, decide case by case whether we don't need it or it shows a gap in our model (write those cases up for the owner rather than guessing). **Change:** the build dropped the filter in favour of conditions.
-- **Group nudge.** Sent whenever the model writes as a character (our model has no group / one-on-one distinction; the persona is a cast card). Keep; register it as a documented ST difference in the gate.
+- **Group nudge.** Sent whenever the model writes as a character (our model has no group / one-on-one distinction; the persona is a cast card). Keep; register it as a documented ST difference in the gate. *(Its placement is replaced by DESIGN §2.2's end-of-request instruction, owner 2026-10-29: it's the "when a character speaks" text, in the request's last message; the gate's difference is "End-of-request instruction".)*
 - **Muting and presence (owner):** one thing, shown as Mute. Keep.
-- **Preset export to ST (owner):** keep as built (conditions back to triggers where they map; nudge and impersonation back into ST's fields; the added direction prompt exported switched off).
-- **Impersonation prompt on ST preset import (default):** placed last, where ST sends it.
+- **Preset export to ST (owner):** keep as built (conditions back to triggers where they map; nudge and impersonation back into ST's fields; the added direction prompt exported switched off). *(The direction prompt part is replaced by DESIGN §2.2's end-of-request instruction, owner 2026-10-29: the direction text is `directionPrompt`, outside the order, and isn't exported, since ST has no such field.)*
+- **Impersonation prompt on ST preset import (default):** placed last, where ST sends it. *(Replaced by DESIGN §2.2's end-of-request instruction, owner 2026-10-29: it's the "when your card speaks" text, outside the order, sent in the request's last message.)*
 - **On an impersonation turn (owner):** the speaking card's prompt override applies (impersonating the persona: none).
 
 ## 3. Notes
@@ -87,7 +87,7 @@ Also from the reviews, code lows for a cleanup pass: `DECISIONS.md` "Not decisio
 
 ## 8. ST fidelity gate
 
-Run `npm run test:st` locally (Docker works on the owner's machine) on master after the fixes. Every intended difference gets a documented matcher with its explanation in ARCHITECTURE §15: the group nudge in every chat, the closing user turn, conditioned prompt order, `<Name>` wrappers, the removed one-character ST mode. Anything else that differs is a bug.
+Run `npm run test:st` locally (Docker works on the owner's machine) on master after the fixes. Every intended difference gets a documented matcher with its explanation in ARCHITECTURE §15: the group nudge in every chat, the closing user turn, conditioned prompt order, `<Name>` wrappers, the removed one-character ST mode. *(The nudge, closing turn and conditioned order are replaced by one "End-of-request instruction" difference, DESIGN §2.2, owner 2026-10-29; `{{char}}` in groups is listed too.)* Anything else that differs is a bug.
 
 ## 9. Work order for the next run
 

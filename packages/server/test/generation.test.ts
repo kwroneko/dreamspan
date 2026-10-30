@@ -74,8 +74,9 @@ describe("generation", () => {
         { role: "system", content: "[Start a new Chat]" },
         { role: "assistant", content: "*Mira looks up.* Late again, Tobin." },
         { role: "user", content: "The road flooded." },
-        // ST's default group nudge: sent whenever the model writes as a character (DESIGN §2.2).
-        { role: "system", content: "[Write the next reply only as Mira.]" }
+        // ST's default group nudge, the end-of-request message: sent last whenever the model
+        // writes as a character (DESIGN §2.2).
+        { role: "user", content: "[Write the next reply only as Mira.]" }
       ])
       assert.deepInclude(body, { model: "mock-model", stream: true, temperature: 0.7, top_p: 0.9, seed: 42 })
       assert.notProperty(body, "max_completion_tokens")
@@ -221,7 +222,7 @@ describe("generation", () => {
         { role: "assistant", content: "The ledger says otherwise." },
         { role: "assistant", content: "The ledger says otherwise." },
         { role: "user", content: "Wait for me." },
-        { role: "system", content: "[Write the next reply only as Mira.]" }
+        { role: "user", content: "[Write the next reply only as Mira.]" }
       ])
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
@@ -365,7 +366,7 @@ describe("generation", () => {
         [
           ["assistant", "*Mira looks up.* Late again, Tobin."],
           ["user", "The road flooded."],
-          // The group nudge, which Anthropic takes only as a user turn.
+          // The group nudge, the end-of-request message, right before the prefill.
           ["user", "[Write the next reply only as Mira.]"],
           ["assistant", "*Mira sighs.*"]
         ]

@@ -23,6 +23,7 @@ import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { query } from "./tx.ts"
 import { readDefaults } from "./generationSettings.ts"
 import { chunkSize, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
+import { endOfRequestText } from "@rp/shared/endOfRequest.ts"
 
 /** The speed of the model's last requests, for how long the work takes; null without any. */
 const recentSpeed = (sql: SqlClient.SqlClient, userId: string, modelId: string) =>
@@ -238,7 +239,7 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           return { enabled, imported: offer, fromScratch: blocked, adopted: offer ? blocked : null, ...noted }
         }
         // What opens every request: the messages that are neither history nor summaries, nor
-        // what only a reply sends (a conditioned prompt, the user turn that ends a reply's request:
+        // what only a reply sends (a conditioned prompt, the end-of-request message or its fallback:
         // a summary request sends neither, DESIGN §2.2).
         const notPrefix = new Set<number>()
         const replyOnly = new Map<number, boolean>()
@@ -246,7 +247,8 @@ export const makeLcmEnableReadHandlers = Effect.gen(function* () {
           if (piece.source.kind === "message" || piece.source.kind === "summary")
             for (const message of piece.messages) notPrefix.add(message)
           const only =
-            (piece.source.kind === "preset" && piece.source.condition !== undefined) ||
+            (piece.source.kind === "preset" &&
+              (piece.source.condition !== undefined || endOfRequestText(piece.source.identifier) !== undefined)) ||
             (piece.source.kind === "assembler" && piece.id === "assembler:last-turn")
           for (const message of piece.messages) replyOnly.set(message, (replyOnly.get(message) ?? true) && only)
         }

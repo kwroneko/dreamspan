@@ -16,7 +16,7 @@ import { CardDoc } from "@rp/shared/docs/card.ts"
 import { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { NoteDoc } from "@rp/shared/docs/note.ts"
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { withConditions } from "@rp/shared/presetConditions.ts"
+import { withEndOfRequest } from "@rp/shared/presetConditions.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import type { Summary } from "@rp/shared/lcm.ts"
@@ -60,8 +60,10 @@ const decodeLorebook = Schema.decodeUnknownExit(LorebookDoc)
 const decodeNote = Schema.decodeUnknownExit(NoteDoc)
 const decodePreset = Schema.decodeUnknownExit(PresetDoc)
 
-/** ST's default chat-completion preset: what generation uses when nothing chooses one. */
-export const builtinPreset = forbidCardOverrides(importStPreset(JSON.stringify({ frequency_penalty: 0 })).document!)
+/** The built-in preset uses our end-of-request defaults; ST imports retain their own wording. */
+export const builtinPreset = forbidCardOverrides(
+  importStPreset(JSON.stringify({ frequency_penalty: 0, group_nudge_prompt: "", impersonation_prompt: "" })).document!
+)
 
 const invalid = (what: string) =>
   new AssemblyFailed({
@@ -229,7 +231,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         decodePreset({ ...builtinPreset, ...JSON.parse(row.doc_json) }),
         "The preset"
       )
-      return { ref: row.ref, revision: row.revision, scope, doc: withConditions(doc).doc } satisfies PresetInput
+      return { ref: row.ref, revision: row.revision, scope, doc: withEndOfRequest(doc).doc } satisfies PresetInput
     })
 
   let layerPins: SourcePins["lcm"]
@@ -900,7 +902,7 @@ const replaySources = (
           revision,
           scope,
           doc: withModelSettings(
-            withConditions(doc).doc,
+            withEndOfRequest(doc).doc,
             inputs.model?.settings ?? {},
             inputs.model?.context,
             inputs.model?.maxOutput
