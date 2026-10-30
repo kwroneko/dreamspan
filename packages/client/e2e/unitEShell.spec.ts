@@ -222,7 +222,7 @@ for (const width of [1440, 390]) {
       for (const tab of ["Cast", "This chat", "Lorebooks", "Notes", "Summaries"]) {
         await page.getByRole("tab", { name: tab, exact: true }).click()
         if (tab === "Notes")
-          await expect(page.getByRole("heading", { name: "This chat's notes", exact: true })).toBeVisible()
+          await expect(page.getByRole("region", { name: "This chat's notes", exact: true })).toBeVisible()
         await shoot(`panel-${tab.toLowerCase().replaceAll(" ", "-")}`)
       }
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
