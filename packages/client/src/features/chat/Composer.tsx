@@ -190,13 +190,17 @@ export function Composer({
   const choice = useComposerChoice(session)
   useEffect(() => choices.bind(draftId), [choices, draftId])
   const turnEntries = useComposerTurn(session, view, cast)
+  // Revising an existing reply needs its slot/fork, not the new turn's speaker choice or
+  // reply order. Waiting for those reads would disable the visible button while Enter works.
   const ready =
-    !attachmentInput?.busy &&
-    textReady &&
-    choice.loaded &&
-    !choice.saving &&
-    choice.draftId === draftId &&
-    turnEntries !== null
+    editing !== null
+      ? !view.loading && editStillShown(editing, view)
+      : !attachmentInput?.busy &&
+        textReady &&
+        choice.loaded &&
+        !choice.saving &&
+        choice.draftId === draftId &&
+        turnEntries !== null
   const speaker = choice.speaker ?? defaultSpeaker(cast)
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
@@ -370,7 +374,7 @@ export function Composer({
    */
   const reviseGuidance = async () => {
     const entry = editing === null ? undefined : view.entries.find((e) => e.slotId === editing.slotId)
-    if (busy || entry === undefined) return
+    if (busy || !ready || entry === undefined) return
     setBusy(true)
     report(await session.regenerate(entry))
     setBusy(false)
@@ -530,14 +534,14 @@ export function Composer({
               id="composer"
               data-testid="composer"
               value={text}
-              readOnly={!textReady}
-              aria-busy={!textReady}
+              readOnly={editing === null && !textReady}
+              aria-busy={editing === null && !textReady}
               aria-describedby={(!phone || secondaryOpen) && (hasText || guidance) ? "composer-hint" : undefined}
               placeholder={
-                !textReady
-                  ? "Loading…"
-                  : editing !== null
-                    ? "Guidance for this reply…"
+                editing !== null
+                  ? "Guidance for this reply…"
+                  : !textReady
+                    ? "Loading…"
                     : guidance
                       ? "Direction for the next message…"
                       : leafGenerating

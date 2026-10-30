@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
+import { messageMenu, showActions } from "./support/message.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -114,6 +115,7 @@ for (const width of [1440, 390]) {
       await expect(toggle(page)).toBeChecked()
       await expect(toggle(page)).toBeDisabled()
       await expect(page.getByRole("button", { name: "New version", exact: true })).toBeVisible()
+      await expect(page.getByRole("button", { name: "New version", exact: true })).toBeEnabled()
       if (process.env.RP_SCREENS) {
         mkdirSync(process.env.RP_SCREENS, { recursive: true })
         await page.screenshot({ path: `${process.env.RP_SCREENS}/guidance-edit-bar-${width}-${theme}.png` })
@@ -139,6 +141,9 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("article").last()).toContainText("Direction: Aria hums an old sailors' song.")
       await expect(box(page)).toHaveValue("Aria hums an old sailors' song.")
       expect(await pathLength(chatId)).toBe(turns)
+      await expect
+        .poll(async () => (await rpc((api) => api.OpenComposer({ chatId, forkId: null }))).content)
+        .toBe(draft)
 
       // ✕: the draft comes back, the box returns to messages, and the toggle as it was.
       await bar(page).getByRole("button", { name: "Stop editing this guidance" }).click()
@@ -152,6 +157,95 @@ for (const width of [1440, 390]) {
       await expect(box(page)).toHaveValue(draft)
       await expect(bar(page)).toHaveCount(0)
       expect(await pathLength(chatId)).toBe(turns)
+
+      // Reload while editing, rather than only after closing: the server draft stays intact.
+      await page.getByRole("button", { name: "Edit guidance" }).click()
+      await box(page).fill("An unsent revision, not the composer draft.")
+      await page.reload()
+      await expect(box(page)).toHaveValue(draft)
+      await expect(bar(page)).toHaveCount(0)
+      await expect(toggle(page)).not.toBeChecked()
     })
   }
+}
+
+for (const width of [1440, 390]) {
+  test(`New version stays available while unrelated speaker choices load (${width}px)`, async ({ page }) => {
+    const held: Array<() => void> = []
+    await page.routeWebSocket(/\/rpc$/, (socket) => {
+      const upstream = socket.connectToServer()
+      socket.onMessage((data) => {
+        if (typeof data === "string" && JSON.parse(data).tag === "GetComposerChoice")
+          held.push(() => upstream.send(data))
+        else upstream.send(data)
+      })
+    })
+    await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: false } }))
+    const { chatId, slotId } = await harbor()
+    await settled(slotId, 1)
+    await page.setViewportSize({ width, height: 844 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect.poll(() => held.length).toBeGreaterThan(0)
+    await page.getByRole("button", { name: "Edit guidance" }).click()
+    await box(page).fill("Aria listens to the waves.")
+    await expect(page.getByRole("button", { name: "New version", exact: true })).toBeEnabled()
+    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await settled(slotId, 2)
+    expect((await versions(slotId)).at(-1)!.direction).toBe("Aria listens to the waves.")
+    for (const release of held) release()
+  })
+
+  test(`live swipes, Add guidance, deletion and chat navigation preserve the draft (${width}px)`, async ({ page }) => {
+    await rpc((api) => api.SetDisplayPrefs({ prefs: { guidance: true } }))
+    const { chatId, slotId } = await harbor()
+    await settled(slotId, 1)
+    const second = await rpc((api) =>
+      api.Generate({ chatId, parentSlotId: slotId, branch: false, direction: "A different reply's guidance." })
+    )
+    if (second._tag !== "Posted") throw new Error("Expected a posted reply")
+    const secondId = second.entry.slotId
+    await settled(secondId, 1)
+    await page.setViewportSize({ width, height: 844 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    await expect(toggle(page)).toBeEnabled()
+    const draft = "The next turn's original guidance."
+    await box(page).fill(draft)
+    const reply = page.getByRole("article").filter({ hasText: "Direction: Aria looks out to sea." })
+    await reply.getByRole("button", { name: "Edit guidance" }).click()
+    await box(page).fill("Live unsaved guidance.")
+    await showActions(reply)
+    await reply.getByRole("button", { name: "Regenerate", exact: true }).click()
+    await settled(slotId, 2)
+    expect((await versions(slotId)).at(-1)!.direction).toBe("Live unsaved guidance.")
+    // Regenerating the other reply doesn't take the text currently in the box.
+    const other = page.getByRole("article").filter({ hasText: "Direction: A different reply's guidance." })
+    await showActions(other)
+    await other.getByRole("button", { name: "Regenerate", exact: true }).click()
+    await settled(secondId, 2)
+    expect((await versions(secondId)).at(-1)!.direction).toBe("A different reply's guidance.")
+    await expect(box(page)).toHaveValue("Live unsaved guidance.")
+    // An explicit empty box removes guidance; Add guidance offers the same editor again.
+    await box(page).fill("")
+    await page.getByRole("button", { name: "New version", exact: true }).click()
+    await settled(slotId, 3)
+    expect((await versions(slotId)).at(-1)!.direction).toBeNull()
+    await bar(page).getByRole("button", { name: "Stop editing this guidance" }).click()
+    await expect(box(page)).toHaveValue(draft)
+    await expect(toggle(page)).toBeChecked()
+    const unguided = page.getByRole("article").nth(1)
+    await messageMenu(unguided, "Add guidance")
+    await expect(box(page)).toHaveValue("")
+    await expect(bar(page)).toBeVisible()
+    await messageMenu(unguided, "Delete message (all 3 versions)")
+    await expect(bar(page)).toHaveCount(0)
+    await expect(box(page)).toHaveValue(draft)
+    await page.getByRole("button", { name: "Edit guidance" }).click()
+    await expect(bar(page)).toBeVisible()
+    await page.getByRole("link", { name: "Characters", exact: true }).first().click()
+    await page.goBack()
+    await expect(bar(page)).toHaveCount(0)
+    await expect(box(page)).toHaveValue(draft)
+  })
 }
