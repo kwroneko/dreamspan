@@ -1156,6 +1156,33 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** A provider's exact count of one image for one model (ARCHITECTURE §6, image tokens). */
+  Rpc.make("RecordImageTokenCount", {
+    payload: {
+      userId: UserId,
+      sha256: Sha256,
+      kind: Schema.String,
+      modelKey: Schema.String,
+      detail: Schema.String,
+      tokens: Schema.Int
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** What a request's images cost together, for models without a formula; keeps the newest 20. */
+  Rpc.make("RecordImageTokenSample", {
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      modelKey: Schema.String,
+      images: Schema.Int,
+      pixels: Schema.Int,
+      tokens: Schema.Int,
+      source: Schema.Literals(["reported", "derived"])
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
   /** At startup: requests left running by a crash may have been billed, so they're kept as interrupted. */
   Rpc.make("InterruptRunningLlmRequests", {
     success: Schema.Struct({ interrupted: Schema.Int }),
@@ -2664,7 +2691,19 @@ export class ReadOps extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
     },
-    success: NextContext,
+    /** With the images to count off the hot path (`chat/ImageTokenCounts.ts`), never published. */
+    success: Schema.Struct({
+      ...NextContext.fields,
+      uncounted: Schema.optionalKey(
+        Schema.Struct({
+          connectionId: Schema.String,
+          kind: Schema.String,
+          modelKey: Schema.String,
+          detail: Schema.String,
+          images: Schema.Array(Schema.Struct({ mediaId: Schema.String, sha256: Sha256 }))
+        })
+      )
+    }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's generation defaults; one naming something gone reads as none. */

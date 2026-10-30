@@ -4,6 +4,7 @@
 // first piece of the first differing message whose text differs says why.
 import type { ContextSource } from "@rp/shared/inspectorApi.ts"
 import { tokensOf } from "./st.ts"
+import { wireImages } from "./imageTokens.ts"
 import { wireContext, wireDigest } from "./wire.ts"
 import type { ContextSnapshot, Source, WireContext } from "./types.ts"
 
@@ -140,11 +141,14 @@ export const prefixChange = (
   const oldWire = prefix(mapped(last).messages, end)
   const allNext = mapped(next).messages
   const newWire = prefix(allNext, nextEnd)
-  const suffix = (at: number) => newWire.slice(at).reduce((sum, m) => sum + tokensOf(m), 0)
+  // A captured wire is text only: each message's images are the request's, estimated.
+  const nextImages = wireImages(allNext, next.request)
+  const cost = (m: WireContext["messages"][number], at: number) => tokensOf({ ...m, images: nextImages[at] })
+  const suffix = (at: number) => newWire.reduce((sum, m, i) => (i < at ? sum : sum + cost(m, i)), 0)
   if (end < 0 || nextEnd < 0 || oldWire.length === 0 || newWire.length === 0) {
     return {
       reason: "No reusable cache prefix is recorded.",
-      tokens: allNext.reduce((sum, m) => sum + tokensOf(m), 0)
+      tokens: allNext.reduce((sum, m, i) => sum + cost(m, i), 0)
     }
   }
   if (

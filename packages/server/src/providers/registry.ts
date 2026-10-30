@@ -11,6 +11,7 @@ import type { Price } from "@rp/shared/providers.ts"
 import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
 import type { UserPricing } from "./userCosts.ts"
 import type { Capture } from "./usage.ts"
+import type { ImageTokenCounter } from "./imageCounters.ts"
 
 export type Catalog = Readonly<Record<string, Model<Api>>>
 
@@ -104,6 +105,8 @@ export interface ProviderRegistryShape {
   readonly transforms: Registry<RequestTransform>
   readonly observers: Registry<ResponseObserver>
   readonly costs: Registry<CostFormula>
+  /** Exact image token counting endpoints (ARCHITECTURE §6). */
+  readonly imageCounters: Registry<ImageTokenCounter>
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
@@ -116,6 +119,7 @@ export const empty = Layer.sync(ProviderRegistry, () =>
     kinds: makeRegistry<ProviderKindEntry>(),
     transforms: makeRegistry<RequestTransform>(),
     observers: makeRegistry<ResponseObserver>(),
-    costs: makeRegistry<CostFormula>()
+    costs: makeRegistry<CostFormula>(),
+    imageCounters: makeRegistry<ImageTokenCounter>()
   })
 )

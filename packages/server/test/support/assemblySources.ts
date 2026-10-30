@@ -25,6 +25,7 @@ export interface FixtureMessage {
   readonly frozen?: Readonly<Record<string, string>>
   /** A template whose variable writes are recorded already. */
   readonly written?: boolean
+  readonly images?: ReadonlyArray<import("../../src/assembler/types.ts").RequestImage>
 }
 
 export interface AssemblyFixture {
@@ -62,6 +63,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     speaker: m.speaker ?? null,
     side: m.side,
     content: m.content,
+    ...(m.images ? { images: m.images } : {}),
     macroMode: m.macroMode ?? "verbatim",
     frozen: m.frozen ?? null,
     written: m.written ?? false,

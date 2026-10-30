@@ -1,6 +1,7 @@
 import { eventApplies, inFork, viewAt } from "./forkState.ts"
 import { selectSummaryLayer } from "./lcmLayer.ts"
 import { tokensOf } from "../assembler/st.ts"
+import { contextImage, wireImages } from "../assembler/imageTokens.ts"
 // The request inspector's reads (DESIGN §7.4; ARCHITECTURE §15): a version's context as it
 // was sent, from its rollout's stored snapshot, with each piece's source named for the user.
 import { createHash } from "node:crypto"
@@ -272,6 +273,8 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
         const requests = yield* rolloutUsage(sql, userId, row.rollout_id)
         const wire = row.sent_context_json ? (JSON.parse(row.sent_context_json) as WireContext) : null
         const display = wire?.display
+        // Captured wire messages are text; their images are the snapshot's, with its estimates.
+        const images = wire ? wireImages(wire.messages, snapshot.request) : []
         const current = new Map<string, { readonly revisionId: string; readonly fresh: boolean }>()
         yield* Effect.gen(function* () {
           if (snapshot.lcm?.selected.length) {
@@ -295,12 +298,13 @@ export const makeInspectorReadHandlers = Effect.gen(function* () {
           mode: snapshot.inputs.mode,
           capture: display ? "captured" : "unavailable",
           messages: display
-            ? wire!.messages.map((message) => ({
+            ? wire!.messages.map((message, at) => ({
                 role: message.role,
                 ...(message.prefill ? { prefill: message.prefill } : {}),
                 name: message.name ?? null,
                 content: message.content,
-                tokens: tokensOf(message),
+                tokens: tokensOf({ ...message, images: images[at] }),
+                ...(images[at]?.length ? { images: images[at].map(contextImage) } : {}),
                 sources: (message.sources ?? []).map((source) => {
                   if (!source.summary) return source
                   const now = current.get(source.summary.id)

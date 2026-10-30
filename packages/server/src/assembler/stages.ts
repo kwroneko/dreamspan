@@ -12,6 +12,7 @@ import {
 } from "@rp/shared/presetConditions.ts"
 import { schemaPrefillBudget } from "./prefill.ts"
 import { lcmStage, summaryBlock } from "./lcm.ts"
+import { imageTokensStage } from "./imageTokens.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
 import { contextBudget, targetBudget, loreAllowance, loreBudget } from "./budget.ts"
 // The built-in assembler stages, in registration order (ARCHITECTURE §15 lists them).
@@ -947,9 +948,11 @@ const chatLine = (
   const behavior = need(assembly, "preset").doc.names_behavior
   const text = scripted.text.replace(/\r/gm, "") || (projected.entry.images?.length ? "[Image]" : "")
   const pieces = [projected.piece]
+  const images = projected.entry.images?.length ? { images: projected.entry.images } : {}
   const named = (prefix: boolean): ChatLine => ({
     role: projected.role,
     content: prefix ? `${projected.name}: ${text}` : text,
+    ...images,
     pieces,
     // A depth-bounded regex script changes it as the chat grows: it isn't part of the stable prefix.
     kind: scripted.volatile ? "volatile" : "history"
@@ -2432,6 +2435,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   scriptsStage,
   historyStage,
   resolveStage,
+  imageTokensStage,
   rolesStage,
   noteGateStage,
   loreScanStage,

@@ -73,6 +73,8 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
     )
 }
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
+/** Notes about the next request just above the composer, such as its images' token estimate. */
+export const chatComposerNotes = defineSlot<{ view: ChatView }>("chat.composer-notes")
 
 export const accountSettingSections = defineSlot<import("./ChatDefaults.tsx").SummaryDefaultsProps>(
   "chat.account-setting-sections"

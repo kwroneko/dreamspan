@@ -1,7 +1,8 @@
 // SillyTavern 1.19's chat-completion prompt building, function by function (ARCHITECTURE §15,
 // "The one assembly path"; each function names the ST one it follows).
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
-import { AssemblyFailed, type Role } from "./types.ts"
+import { budgetTokens, type ImageEstimate } from "@rp/shared/imageTokens.ts"
+import { AssemblyFailed, type RequestImage, type Role } from "./types.ts"
 
 /** A prompt of the collection, as ST's PromptManager prepares it. */
 export interface StPrompt {
@@ -31,6 +32,8 @@ export interface StMessage {
   readonly tag?: "newMainChat" | "newChat"
   readonly pieces: ReadonlyArray<number>
   readonly kind: Stability
+  /** A history message's images, so the budget counts them with its text. */
+  readonly images?: ReadonlyArray<RequestImage>
 }
 
 /**
@@ -94,6 +97,7 @@ export interface ChatLine {
   readonly name?: string
   readonly pieces: ReadonlyArray<number>
   readonly kind: Stability
+  readonly images?: ReadonlyArray<RequestImage>
 }
 
 /**
@@ -168,8 +172,14 @@ export const injectInChat = (
  */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 
-export const tokensOf = (message: { readonly content: string; readonly name?: string | undefined }) =>
-  message.content.length === 0 ? 0 : estimateTokens(message.content + (message.name ?? "")) + 3
+export const tokensOf = (message: {
+  readonly content: string
+  readonly name?: string | undefined
+  /** Images count what their estimate says (`image-tokens` stage); unsent ones count nothing. */
+  readonly images?: ReadonlyArray<{ readonly estimate?: ImageEstimate | undefined }> | undefined
+}) =>
+  (message.content.length === 0 ? 0 : estimateTokens(message.content + (message.name ?? "")) + 3) +
+  (message.images ?? []).reduce((n, image) => n + budgetTokens(image.estimate), 0)
 
 /** ST's parseExampleIntoIndividual: one example block into user and character lines. */
 export const parseExampleBlock = (

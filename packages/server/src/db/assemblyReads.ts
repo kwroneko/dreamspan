@@ -11,6 +11,7 @@ import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
+import { nextImages } from "../assembler/imageTokens.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import {
@@ -211,7 +212,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               : null,
           leafSlotId: sources.pins().target.parentSlotId,
           historyStart: start ? { slotId: start.slotId, depth: start.depth } : null,
-          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth
+          summarizedThrough: (sources.pins().lcm?.cursorDepth ?? -1) < 0 ? null : sources.pins().lcm!.cursorDepth,
+          // The next request's images, and those whose model hasn't counted them (for ImageTokenCounts).
+          ...(next instanceof AssemblyFailed ? {} : nextImages(next))
         }
         if (next instanceof AssemblyFailed || !next.inputs.model || !last?.snapshot || last.model_id === null) {
           return { ...boundary, warmth: null }

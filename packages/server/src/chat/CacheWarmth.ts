@@ -3,7 +3,8 @@
 // The client counts the time down itself, so nothing polls.
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { Context, Effect, FiberSet, Layer, type Scope } from "effect"
+import { Context, Effect, FiberSet, Layer, Option, type Scope } from "effect"
+import { ImageTokenCounts } from "./ImageTokenCounts.ts"
 import { Reader } from "../db/Database.ts"
 import { ChatHub } from "./ChatHub.ts"
 
@@ -37,9 +38,17 @@ export class CacheWarmth extends Context.Service<
       const run = yield* FiberSet.runtime(yield* FiberSet.make())()
       const watched = new Map<ChatId, Watched>()
 
+      const counts = yield* Effect.serviceOption(ImageTokenCounts)
       const estimate = (chatId: ChatId, entry: Watched) =>
         reader.CacheWarmth({ userId: entry.userId, chatId }).pipe(
-          Effect.map((next) => hub.publish(chatId, { _tag: "Cache", ...next })),
+          Effect.flatMap(({ uncounted, ...next }) =>
+            Effect.gen(function* () {
+              hub.publish(chatId, { _tag: "Cache", ...next })
+              // Images the model hasn't counted: counted in the background, then estimated again.
+              if (uncounted && Option.isSome(counts))
+                yield* counts.value.request(entry.userId, uncounted, () => schedule(chatId))
+            })
+          ),
           Effect.catchTag("NotFound", () => Effect.void),
           Effect.catch((error) => Effect.logWarning(`estimating the cache of chat ${chatId} failed`, error)),
           Effect.ensuring(

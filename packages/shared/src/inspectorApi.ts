@@ -77,6 +77,23 @@ export type ContextSource = typeof ContextSource.Type
 /** Why a cache breakpoint follows a message: the end of the preset's prefix, or of the stable history. */
 const BreakpointReason = Schema.Literals(["prefix", "summary", "history", "pinned"])
 
+/** Where an image's token figure comes from (DESIGN §10.2a; `@rp/shared/imageTokens.ts`). */
+const ImageTokenBasis = Schema.Literals(["counted", "formula", "calibrated", "unknown"])
+
+/** One sent image's token estimate, as the context view shows it. */
+export const ContextImage = Schema.Struct({
+  /** Null when unknown; the budget then counts `bound`, or a reserve. */
+  tokens: Schema.NullOr(Schema.Int),
+  basis: ImageTokenBasis,
+  /** What the budget counted for it. */
+  budgeted: Schema.Int,
+  detail: Schema.optionalKey(Schema.String),
+  note: Schema.optionalKey(Schema.String),
+  /** False when the last-N image limit leaves it out of the request. */
+  sent: Schema.Boolean
+})
+export type ContextImage = typeof ContextImage.Type
+
 export const ContextMessage = Schema.Struct({
   role: Schema.Literals(["system", "developer", "user", "assistant", "model"]),
   name: Schema.NullOr(Schema.String),
@@ -87,8 +104,10 @@ export const ContextMessage = Schema.Struct({
     })
   ),
   content: Schema.String,
-  /** The assembler's estimate: a token per four characters, plus three per message. */
+  /** The assembler's estimate: a token per four characters, plus three per message, plus its images. */
   tokens: Schema.Int,
+  /** The message's images and their token estimates; absent without images. */
+  images: Schema.optionalKey(Schema.Array(ContextImage)),
   sources: Schema.Array(ContextSource),
   /**
    * Where each source's text sits in `content`: character offsets, in order, not overlapping, with
@@ -277,7 +296,18 @@ export const PresetContext = Schema.Struct({
 export type PresetContext = typeof PresetContext.Type
 
 /** The next request boundary, also available before a first send or without a cache TTL. */
+/** The next request's images, summed (counted in the budget and the cache estimate). */
+const NextImages = Schema.Struct({
+  count: Schema.Int,
+  tokens: Schema.Int,
+  /** Images whose cost nothing states yet: budgeted at a bound or a reserve. */
+  unknown: Schema.Int,
+  bases: Schema.Array(ImageTokenBasis)
+})
+
 export const NextContext = Schema.Struct({
+  /** The next request's images, when it has any. */
+  images: Schema.optionalKey(NextImages),
   /** Which fork the estimate describes, including when two forks share a tip. */
   forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
   presetContext: Schema.optionalKey(Schema.NullOr(PresetContext)),
