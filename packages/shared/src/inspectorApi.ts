@@ -93,6 +93,7 @@ export const ContextMessage = Schema.Struct({
   /**
    * Where each source's text sits in `content`: character offsets, in order, not overlapping, with
    * `source` an index into `sources`. Text between parts is the assembler's joins and wrappers.
+   * A rewritten piece is boxed where its text was (`rewritten`), never left to the joins.
    * Absent in captures from before parts were recorded.
    */
   parts: Schema.optionalKey(
@@ -102,7 +103,14 @@ export const ContextMessage = Schema.Struct({
         end: Schema.Int,
         source: Schema.Int,
         /** A wrapper its block's owner added, such as a card join prefix: framing, not content. */
-        frame: Schema.optionalKey(Schema.Literal(true))
+        frame: Schema.optionalKey(Schema.Literal(true)),
+        /**
+         * Its text isn't the piece's as assembled (a provider transform rewrote the message): the
+         * text where it was, between the parts around it.
+         */
+        rewritten: Schema.optionalKey(Schema.Literal(true)),
+        /** Other sources rewritten into the same text, indices into `sources`. */
+        also: Schema.optionalKey(Schema.Array(Schema.Int))
       })
     )
   ),
@@ -112,7 +120,16 @@ export const ContextMessage = Schema.Struct({
    * inside their outer ones; text in a group outside its parts is its framing. Absent in older
    * captures and when no part sits in a block.
    */
-  groups: Schema.optionalKey(Schema.Array(Schema.Struct({ start: Schema.Int, end: Schema.Int, source: Schema.Int }))),
+  groups: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        start: Schema.Int,
+        end: Schema.Int,
+        source: Schema.Int,
+        rewritten: Schema.optionalKey(Schema.Literal(true))
+      })
+    )
+  ),
   breakpoint: Schema.NullOr(BreakpointReason)
 })
 export type ContextMessage = typeof ContextMessage.Type

@@ -244,3 +244,36 @@ it.live("review: custom proxy credentials are scrubbed from the final stored pro
     }
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
 })
+
+it.live("a provider transform's rewritten piece keeps its source box, marked rewritten (inv A1)", () => {
+  const config = testConfig()
+  return Effect.gen(function* () {
+    const mock = yield* provider()
+    const api = yield* client()
+    const registry = yield* ProviderRegistry
+    yield* registry.transforms.register({
+      id: "rewrite-ledger",
+      appliesTo: (t) => t.api === "openai-completions",
+      transform: (p) => ({
+        ...p,
+        messages: (p.messages as Message[]).map((m) => ({
+          ...m,
+          content: m.content.replace("keeps the ledger", "guards the ledger")
+        }))
+      })
+    })
+    const { version } = yield* generateReply(api, {
+      connection: { kind: "openai-chat", baseUrl: mock.url + "/v1", cacheTtlS: 300 },
+      model: {}
+    })
+    const run = yield* api.GetRunContext({ versionId: version.id })
+    const message = run.messages.find((m) => m.content.includes("guards the ledger"))!
+    const part = message.parts!.find(
+      (p) => p.start <= message.content.indexOf("guards") && p.end > message.content.indexOf("guards")
+    )!
+    assert.isTrue(part.rewritten)
+    const source = message.sources[part.source]!
+    assert.isTrue(source.label.includes("Mira") && source.label.includes("description"))
+    assert.include(message.content.slice(part.start, part.end), "guards the ledger")
+  }).pipe(Effect.scoped, Effect.provide(Layer.merge(serverLayer(config), ProviderBuiltins.layer)))
+})

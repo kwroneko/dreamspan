@@ -75,12 +75,21 @@ const unsent = (source: ContextSource) =>
 const ViewedFork = createContext<{ readonly fork?: ForkId }>({})
 
 /** What the source is, where it's from: the inspector's own words, never prompt text. */
-function SourceTitle({ source, chatId }: { source: ContextSource; chatId: ChatId }) {
+function SourceTitle({
+  source,
+  chatId,
+  rewritten = false
+}: {
+  source: ContextSource
+  chatId: ChatId
+  rewritten?: boolean
+}) {
   const viewed = useContext(ViewedFork)
   const label = (
     <>
       {source.label}
       {source.version !== undefined && `, version ${source.version}`}
+      {rewritten && " (rewritten)"}
     </>
   )
   return (
@@ -124,23 +133,29 @@ function Box({
   sources,
   chatId,
   children,
-  group = false
+  group = false,
+  rewritten = false
 }: {
   sources: ReadonlyArray<ContextSource>
   chatId: ChatId
   children: ReactNode
   group?: boolean
+  /** Its text is where the sources' text was, rewritten after assembly. */
+  rewritten?: boolean
 }) {
   return (
     <section
-      aria-label={sources.map((source) => source.label).join(", ") || "No recorded source"}
+      aria-label={
+        sources.map((source) => (rewritten ? `${source.label} (rewritten)` : source.label)).join(", ") ||
+        "No recorded source"
+      }
       className="overflow-hidden rounded-md border border-border"
     >
       <header className="flex flex-col gap-1 border-b border-border bg-surface-raised px-2.5 py-1.5 font-sans text-xs">
         {sources.length === 0 ? (
           <span className="text-muted">No recorded source</span>
         ) : (
-          sources.map((source) => <SourceTitle key={source.id} source={source} chatId={chatId} />)
+          sources.map((source) => <SourceTitle key={source.id} source={source} chatId={chatId} rewritten={rewritten} />)
         )}
       </header>
       <div className={group ? "flex flex-col gap-1.5 bg-surface p-2" : "bg-canvas px-2.5 py-2"}>{children}</div>
@@ -169,13 +184,30 @@ function Frame({ text, owner, quiet }: { text: string; owner: string | null; qui
 }
 
 type Span = { start: number; end: number; source: number }
-type Node = Span & { frame: boolean; children: Array<Node> | null }
+type Node = Span & {
+  frame: boolean
+  rewritten: boolean
+  also: ReadonlyArray<number>
+  children: Array<Node> | null
+}
 
 /** The recorded parts nested in their groups by offsets: a group holds what lies inside it. */
 const treeOf = (message: ContextMessage): Array<Node> => {
   const items: Array<Node> = [
-    ...(message.groups ?? []).map((g) => ({ ...g, frame: false, children: [] })),
-    ...(message.parts ?? []).map((p) => ({ ...p, frame: p.frame === true, children: null }))
+    ...(message.groups ?? []).map((g) => ({
+      ...g,
+      frame: false,
+      rewritten: g.rewritten === true,
+      also: [],
+      children: []
+    })),
+    ...(message.parts ?? []).map((p) => ({
+      ...p,
+      frame: p.frame === true,
+      rewritten: p.rewritten === true,
+      also: p.also ?? [],
+      children: null
+    }))
   ].toSorted((a, b) => a.start - b.start || b.end - a.end || (a.children ? 0 : 1) - (b.children ? 0 : 1))
   const roots: Array<Node> = []
   const open: Array<Node> = []
@@ -223,13 +255,24 @@ function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId })
       const text = message.content.slice(node.start, node.end)
       out.push(
         node.children ? (
-          <Box key={`group-${node.start}-${node.end}`} sources={source ? [source] : []} chatId={chatId} group>
+          <Box
+            key={`group-${node.start}-${node.end}`}
+            sources={source ? [source] : []}
+            chatId={chatId}
+            group
+            rewritten={node.rewritten}
+          >
             {render(node.children, node.start, node.end, source ?? null)}
           </Box>
         ) : node.frame ? (
           <Frame key={`frame-${node.start}`} text={text} owner={source?.label ?? null} quiet />
         ) : (
-          <Box key={`part-${node.start}`} sources={source ? [source] : []} chatId={chatId}>
+          <Box
+            key={`part-${node.start}`}
+            sources={[node.source, ...node.also].flatMap((i) => message.sources[i] ?? [])}
+            chatId={chatId}
+            rewritten={node.rewritten}
+          >
             <PromptText text={text} />
           </Box>
         )
@@ -240,7 +283,12 @@ function Parts({ message, chatId }: { message: ContextMessage; chatId: ChatId })
     return out
   }
   // Sources with no box of their own, such as a join that's only whitespace.
-  const boxed = new Set([...(message.groups ?? []), ...message.parts].map((p) => sourceOf(p)?.id))
+  const boxed = new Set(
+    [
+      ...(message.groups ?? []).map((g) => g.source),
+      ...message.parts.flatMap((p) => [p.source, ...(p.also ?? [])])
+    ].map((i) => message.sources[i]?.id)
+  )
   const around = sent.filter((source) => !boxed.has(source.id))
   return (
     <>

@@ -612,3 +612,68 @@ test("a namespaced provenance source renders its title and library link", async 
     await save(original)
   }
 })
+
+// A provider transform rewrote a piece after assembly: its text keeps a box naming its source,
+// marked rewritten, rather than reading as the assembler's own text (inv A1). The worker
+// integration test (`inspectorCapture.test.ts`) covers locating it; this pins the UI.
+test("a rewritten piece shows in its source's box, labelled rewritten", async ({ page }) => {
+  const [rows] = await Effect.runPromise(
+    fixtureSql(
+      server().dataDir,
+      [
+        {
+          sql: "SELECT p.rollout_id, p.sent_context_json FROM rollout_payloads p JOIN versions v ON v.rollout_id = p.rollout_id WHERE v.id = ?",
+          params: [chat.reply]
+        }
+      ],
+      { readOnly: true }
+    )
+  )
+  const row = rows![0]!
+  const original = row.sent_context_json as string
+  const wire = JSON.parse(original) as WireContext
+  const before = "Mira keeps the harbor ledger."
+  // The same length, so the recorded offsets still hold.
+  const after = "Mira minds the harbor ledger."
+  const changed = {
+    ...wire,
+    messages: wire.messages.map((message) => {
+      const at = message.content.indexOf(before)
+      if (at === -1) return message
+      return {
+        ...message,
+        content: message.content.replace(before, after),
+        parts: message.parts?.map((part) =>
+          part.start <= at && part.end >= at + before.length ? { ...part, rewritten: true as const } : part
+        )
+      }
+    })
+  }
+  const save = (json: string) =>
+    Effect.runPromise(
+      fixtureSql(server().dataDir, [
+        {
+          sql: "UPDATE rollout_payloads SET sent_context_json = ? WHERE rollout_id = ?",
+          params: [json, row.rollout_id as string]
+        }
+      ])
+    )
+  try {
+    await save(JSON.stringify(changed))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
+      const messages = page.getByRole("region", { name: "Messages" })
+      const box = messages.getByRole("region", { name: "Card “Mira”: description (rewritten)" })
+      await expect(box.getByText(after, { exact: true })).toBeVisible()
+      await expect(box.getByRole("link", { name: "Card “Mira”: description (rewritten)" })).toBeVisible()
+      await expect(messages.getByText("Added by the assembler").filter({ hasText: after })).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+      await box.scrollIntoViewIfNeeded()
+      await shoot(page, `inspector-rewritten-${width}`)
+    }
+  } finally {
+    await save(original)
+  }
+})
