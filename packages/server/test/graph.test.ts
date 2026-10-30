@@ -108,6 +108,15 @@ const setup = (handle = "ana") =>
   })
 
 describe("message graph", () => {
+  it.live("stores only the last selected persona", () =>
+    Effect.gen(function* () {
+      const { reader, userId, chat, me, mira, addState } = yield* setup()
+      yield* addState(null, { key: "played_by_me.set", value: { entities: [mira, me] } })
+      const events = yield* reader.StateEventsAt({ userId, chatId: chat.id, slotId: null })
+      assert.deepStrictEqual(events.find((e) => e.data.key === "played_by_me.set")?.data.value, { entities: [me] })
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("a path runs from the root to the leaf, each slot showing its selection", () =>
     Effect.gen(function* () {
       const { me, mira, chat, append, path } = yield* setup()
@@ -630,7 +639,7 @@ describe("message graph", () => {
       yield* addState(reply.slotId, { key: "participant.leave", value: { entity: tomas } })
       const message = yield* writer.DeleteMessage({ userId, slotId: turn.slotId })
       const state = yield* stateAt(reply.slotId)
-      assert.deepStrictEqual([state.participants, state.playedByMe], [[mira, me], [me]])
+      assert.deepStrictEqual([state.participants, state.playedByMe], [[mira, me], []])
       assert.deepStrictEqual(state.presetBindings, {})
       yield* writer.RestoreBinItem({ userId, itemId: message.id })
       assert.deepStrictEqual((yield* stateAt(reply.slotId)).participants, [mira, me])

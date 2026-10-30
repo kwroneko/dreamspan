@@ -158,11 +158,12 @@ const stateStage: AssemblerStage = {
 const castOf = (state: ChatState, speakerId: string | null, ordinal: number) =>
   Effect.gen(function* () {
     const sources = yield* AssemblySources
-    const played = new Set(state.playedByMe)
+    const selected = state.playedByMe.slice(-1)
+    const played = new Set(selected)
     const wanted = [...new Set([...state.participants, ...state.playedByMe, ...(speakerId ? [speakerId] : [])])]
     const cards = new Map((yield* sources.cards(wanted, state.cardBindings)).map((c) => [c.entity, c]))
     const characters = wanted.filter((e) => !played.has(e)).flatMap((e) => cards.get(e) ?? [])
-    const personas = state.playedByMe.flatMap((e) => cards.get(e) ?? [])
+    const personas = selected.flatMap((e) => cards.get(e) ?? [])
     const absent = new Set(state.absent)
     // A muted character is never picked to speak (DESIGN §3.5); it speaks only when named.
     const speaker =
@@ -376,8 +377,9 @@ const namesFor = (state: ChatState, cast: Cast): Names => {
   const pinned = state.macroBindings
   const join = (cards: ReadonlyArray<CardInput>) => cards.map((c) => modelName(c.doc)).join(", ")
   const everyone = [...cast.characters, ...cast.personas]
+  const persona = cast.personas.at(-1)
   return {
-    user: pinned["user"] ?? (join(cast.personas) || "User"),
+    user: pinned["user"] ?? (persona ? modelName(persona.doc) || "User" : "User"),
     char: pinned["char"] ?? join(cast.characters),
     group: join(cast.characters),
     groupNotMuted: join(cast.characters.filter((c) => !cast.absent.has(c.entity))),

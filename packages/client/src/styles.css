@@ -7,6 +7,10 @@
  * A future design system changes the values here, not the components.
  */
 :root {
+  --message-main-default: #303039;
+  --message-italics-default: #666666;
+  --message-underline-default: #286044;
+  --message-quote-default: #925000;
   --canvas: oklch(98.5% 0.003 260);
   --surface: oklch(100% 0 0);
   --surface-raised: oklch(96.5% 0.005 260);
@@ -28,6 +32,10 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --message-main-default: #dcdcd2;
+    --message-italics-default: #919191;
+    --message-underline-default: #bce7cf;
+    --message-quote-default: #e18a24;
     --canvas: oklch(17% 0.01 260);
     --surface: oklch(21% 0.012 260);
     --surface-raised: oklch(25% 0.014 260);
@@ -49,6 +57,10 @@
 }
 
 :root[data-theme="dark"] {
+  --message-main-default: #dcdcd2;
+  --message-italics-default: #919191;
+  --message-underline-default: #bce7cf;
+  --message-quote-default: #e18a24;
   --canvas: oklch(17% 0.01 260);
   --surface: oklch(21% 0.012 260);
   --surface-raised: oklch(25% 0.014 260);
@@ -87,6 +99,10 @@
   /* The composer while its text is guidance for the next generation, not a message. */
   --color-guidance: var(--guidance);
   --color-guidance-surface: var(--guidance-surface);
+  --color-message-main: var(--message-main, var(--message-main-default));
+  --color-message-italics: var(--message-italics, var(--message-italics-default));
+  --color-message-underline: var(--message-underline, var(--message-underline-default));
+  --color-message-quote: var(--message-quote, var(--message-quote-default));
   --color-transparent: transparent;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -125,6 +141,7 @@ main:has(> [data-fill]) {
 
 /* Message text (ui/Markdown.tsx). */
 .markdown {
+  color: var(--color-message-main);
   overflow-wrap: anywhere;
   line-height: 1.6;
 }
@@ -149,7 +166,19 @@ main:has(> [data-fill]) {
   font-size: 1.1em;
 }
 .markdown em {
+  color: var(--color-message-italics);
   font-style: italic;
+}
+.markdown q {
+  color: var(--color-message-quote);
+  quotes: none;
+}
+.markdown q em {
+  color: inherit;
+}
+.markdown u {
+  color: var(--color-message-underline);
+  text-decoration: underline;
 }
 .markdown strong {
   font-weight: 600;
@@ -175,6 +204,7 @@ main:has(> [data-fill]) {
   color: var(--text-muted);
 }
 .markdown code {
+  color: var(--color-message-main);
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--surface-raised);

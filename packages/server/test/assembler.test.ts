@@ -1,6 +1,9 @@
 // The context assembler's pipeline over in-memory chats (ARCHITECTURE §15). What ST would
 // send for a preset is checked against ST itself by `npm run test:st`; these pin the rest:
 // macros by source, rebuilding, notes, the budget, prefill, breakpoints and our layouts.
+import { ReportBuilder } from "@rp/shared/importReport.ts"
+import { parseStChatPart } from "../src/formats/stChat.ts"
+import { chatStateChange, speakerMap, type FolderContext } from "../src/importer/stMapping.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
@@ -1464,6 +1467,111 @@ describe("several characters (DESIGN §5.0–§5.4)", () => {
   it("lets the user's character speak, with the impersonation prompt naming them", async () => {
     const snapshot = await assembled(group({ target: { speaker: "tobin" } }))
     expect(contents(snapshot).at(-1)).toMatch(/^user: \[Write your next reply from the point of view of Tobin/)
+  })
+
+  for (const sequence of [
+    ["oren", "tobin"],
+    ["tobin", "oren", "tobin"]
+  ]) {
+    for (const multipart of [false, true]) {
+      it(`imports two personas, selecting the last: ${sequence}, multipart=${multipart}`, async () => {
+        const folder: FolderContext = {
+          settings: null,
+          cards: new Map(),
+          worlds: new Map(),
+          personas: new Map([
+            ["oren.png", "oren" as EntityId],
+            ["tobin.png", "tobin" as EntityId]
+          ]),
+          personaNames: new Map([
+            ["Oren", ["oren.png"]],
+            ["Tobin", ["tobin.png"]]
+          ])
+        }
+        const spoke = new Set<EntityId>()
+        let selectedPersona: EntityId | null = null
+        const link = { card: null, group: null }
+        const lines = sequence.map((id) => ({
+          name: id === "oren" ? "Oren" : id === "tobin" ? "Tobin" : "Unknown",
+          is_user: true,
+          mes: id
+        }))
+        const chunks = multipart ? lines.map((line) => [line]) : [lines]
+        for (const [i, chunk] of chunks.entries()) {
+          const part = parseStChatPart(
+            new TextEncoder().encode(chunk.map((line) => JSON.stringify(line)).join("\n")),
+            { first: i === 0, firstIndex: i, carryAt: null },
+            new ReportBuilder()
+          )
+          const speakers = speakerMap(folder, link, null, part.speakers, spoke)
+          if (part.userTurns > 0) selectedPersona = speakers.get(part.lastUserSpeaker!) ?? null
+          for (const batch of part.batches) {
+            for (const message of JSON.parse(batch.messagesJson)) {
+              expect(speakers.get(message.speaker)).toBe(
+                message.versions[0].content === "unknown" ? null : message.versions[0].content
+              )
+            }
+          }
+        }
+        const change = chatStateChange(
+          folder,
+          {
+            link,
+            header: null,
+            spoke,
+            selectedPersona,
+            summaries: [],
+            messages: lines.length,
+            run: { length: 0, firstSlot: null, throughSlot: null }
+          },
+          null,
+          true
+        )
+        expect(change.state.played).toEqual(selectedPersona ? [selectedPersona] : [])
+        expect(change.state.participants).toContain("oren")
+        const snapshot = await assembled(
+          chat({
+            participants: [],
+            persona: "",
+            events: change.events.map((data) => at(null, data)),
+            preset: preset({ prompts: [{ identifier: "main", role: "system", content: "{{user}}" }] })
+          })
+        )
+        expect(contents(snapshot)[0]).toBe(selectedPersona ? "system: Tobin" : "system: User")
+        const cleared = chatStateChange(
+          folder,
+          {
+            link,
+            header: null,
+            spoke,
+            selectedPersona: null,
+            summaries: [],
+            messages: lines.length,
+            run: { length: 0, firstSlot: null, throughSlot: null }
+          },
+          { ...change.state, played: ["tobin"] },
+          false
+        )
+        expect(cleared.events).toContainEqual({ key: "played_by_me.set", value: { entities: [] } })
+      })
+    }
+  }
+
+  it("uses only the last selected persona in group user macros and keeps pins", async () => {
+    const prompts = preset({ prompts: [{ identifier: "main", role: "system", content: "{{user}} / {{char}}" }] })
+    const events = [at(null, { key: "played_by_me.set", value: { entities: ["oren", "tobin"] } as never })]
+    const snapshot = await assembled(group({ preset: prompts, events }))
+    expect(contents(snapshot)[0]).toBe("system: Tobin / Mira, Oren")
+    expect(
+      contents(
+        await assembled(
+          group({
+            preset: prompts,
+            events: [...events, at(null, { key: "macro.binding", value: { name: "user", value: "Captain" } })]
+          })
+        )
+      )[0]
+    ).toBe("system: Captain / Mira, Oren")
   })
 
   it("unpins prompt names to follow the cast without following the chosen speaker", async () => {
