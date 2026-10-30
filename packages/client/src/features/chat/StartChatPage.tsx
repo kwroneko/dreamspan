@@ -78,6 +78,13 @@ interface PendingGroup {
   readonly cards: ReadonlyArray<CardForChat>
 }
 
+interface PendingCast {
+  readonly greeters: ReadonlyArray<CardForChat>
+  readonly picks: ReadonlyArray<number>
+  readonly persona: string
+  readonly fallbackNote: string
+}
+
 /** One greeting of the chat not made yet, with its card's alternates to pick from. */
 function Greeting({
   card,
@@ -150,50 +157,58 @@ function Pending({
   const action = useAction()
   const navigate = useNavigate()
   const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string }
-  const [persona, setPersona] = useState<string>(() => {
+  // Keep cast and choices together: an in-flight card read must apply to the latest
+  // persona, members and greeting selections, including edits made while it loaded.
+  const [{ persona, greeters, picks, fallbackNote }, setPendingCast] = useState<PendingCast>(() => {
     const saved = savedPersona()
-    return cards.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
+    const persona = cards.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
+    const greeters = group?.cards ?? [card]
+    const count = new Set(greeters.filter((item) => item.card.entityId !== persona).map((item) => item.card.entityId))
+      .size
+    return {
+      persona,
+      greeters,
+      picks: greeters.map((greeter) => {
+        const options = offeredGreetings(greeter, count)
+        return group === null ? 0 : (options[Math.floor(Math.random() * Math.max(1, options.length))]?.index ?? 0)
+      }),
+      fallbackNote: ""
+    }
   })
   const listCards = useCallback(() => Promise.resolve({ ok: true as const, value: cards }), [cards])
   // No chat yet: the switcher names cards from the list, and there are no members to join.
   const pendingView = useMemo(() => castView(null, cards), [cards])
-  // Who greets: the card, or each of the group's characters in turn; the greeting picked of each.
-  const [greeters, setGreeters] = useState<ReadonlyArray<CardForChat>>(group?.cards ?? [card])
-  const [fallbackNote, setFallbackNote] = useState("")
   const characterCount = new Set(
     greeters.filter((item) => item.card.entityId !== persona).map((item) => item.card.entityId)
   ).size
   const options = greeters.map((item) => offeredGreetings(item, characterCount))
-  const [picks, setPicks] = useState<ReadonlyArray<number>>(() =>
-    greeters.map((greeter) =>
-      group === null
-        ? 0
-        : (offeredGreetings(greeter, characterCount)[
-            Math.floor(Math.random() * Math.max(1, offeredGreetings(greeter, characterCount).length))
-          ]?.index ?? 0)
-    )
-  )
   const effectivePicks = options.map((list, at) => greetingPick(list, picks[at] ?? 0)?.index ?? -1)
-  const changePendingCast = (next: ReadonlyArray<CardForChat>, nextPersona = persona, nextPicks = picks) => {
-    const count = new Set(next.filter((item) => item.card.entityId !== nextPersona).map((item) => item.card.entityId))
-      .size
-    const adjusted = next.map(
-      (item, at) => greetingPick(offeredGreetings(item, count), nextPicks[at] ?? 0)?.index ?? -1
-    )
-    if (
-      next.some(
+  const changePendingCast = (change: (current: PendingCast) => PendingCast) => {
+    setPendingCast((current) => {
+      const next = change(current)
+      const count = new Set(
+        next.greeters.filter((item) => item.card.entityId !== next.persona).map((item) => item.card.entityId)
+      ).size
+      const adjusted = next.greeters.map(
+        (item, at) => greetingPick(offeredGreetings(item, count), next.picks[at] ?? 0)?.index ?? -1
+      )
+      const fellBack = next.greeters.some(
         (item, at) =>
           item.groupGreetings.length > 0 &&
-          (nextPicks[at] ?? -1) >= item.greetings.length &&
-          adjusted[at] !== nextPicks[at]
+          (next.picks[at] ?? -1) >= item.greetings.length &&
+          adjusted[at] !== next.picks[at]
       )
-    ) {
-      setFallbackNote("The selected group greeting is no longer available. Using the card’s first greeting.")
-    }
-    setGreeters(next)
-    setPicks(adjusted)
+      return {
+        ...next,
+        picks: adjusted,
+        fallbackNote: fellBack
+          ? "The selected group greeting is no longer available. Using the card’s first greeting."
+          : next.fallbackNote
+      }
+    })
   }
-  const members = group === null ? null : greeters.map((item) => item.card)
+  const members = group === null && greeters.length === 1 ? null : greeters.map((item) => item.card)
+  const availableCharacters = [...(group?.cards.map((item) => item.card) ?? []), ...cards]
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).
   const [selectedSpeaker, setSelectedSpeaker] = useState<EntityId | null>(null)
   const [replier, setReplier] = useState<string>(card.card.entityId)
@@ -281,7 +296,8 @@ function Pending({
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
   const title = group?.group.name ?? name
-  const replyId = (greeters.some((item) => item.card.entityId === replier) ? replier : entityId) as EntityId
+  const repliers = greeters.filter((item) => item.card.entityId !== persona)
+  const replyId = (repliers.find((item) => item.card.entityId === replier) ?? repliers[0] ?? card).card.entityId
   const castCards = [
     ...new Map(
       [...greeters.map((greeter) => greeter.card), ...(playing ? [playing] : [])].map((item) => [item.entityId, item])
@@ -475,13 +491,11 @@ function Pending({
                 persona
                 pending
                 onPick={(picked) => {
-                  changePendingCast(greeters, picked.entityId)
-                  setPersona(picked.entityId)
+                  changePendingCast((current) => ({ ...current, persona: picked.entityId }))
                   savePersona(picked.entityId)
                 }}
                 onNone={() => {
-                  changePendingCast(greeters, NONE)
-                  setPersona(NONE)
+                  changePendingCast((current) => ({ ...current, persona: NONE }))
                   savePersona(NONE)
                 }}
               />
@@ -490,7 +504,7 @@ function Pending({
           {members !== null && (
             <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
               <Select
-                items={greeters.map(({ card: member }) => ({
+                items={repliers.map(({ card: member }) => ({
                   value: member.entityId as string,
                   label: `${member.name}${member.subtitle ? ` · ${member.subtitle}` : ""}`
                 }))}
@@ -510,11 +524,13 @@ function Pending({
                 variant="ghost"
                 aria-label={`Remove ${item.card.name} from pending cast`}
                 onClick={() => {
-                  changePendingCast(
-                    greeters.filter((_, index) => index !== at),
-                    persona,
-                    picks.filter((_, index) => index !== at)
-                  )
+                  changePendingCast((current) => ({
+                    ...current,
+                    greeters: current.greeters.filter((greeter) => greeter.card.entityId !== item.card.entityId),
+                    picks: current.picks.filter(
+                      (_, index) => current.greeters[index]!.card.entityId !== item.card.entityId
+                    )
+                  }))
                 }}
               >
                 Remove
@@ -525,7 +541,7 @@ function Pending({
         <Field label="Add character" className="w-full sm:w-56">
           <Select
             value={null}
-            items={cards
+            items={availableCharacters
               .filter(
                 (item) =>
                   item.entityId !== persona && !greeters.some((greeter) => greeter.card.entityId === item.entityId)
@@ -537,9 +553,12 @@ function Pending({
                 .run((client) => client("GetCardForChat", { entityId: id as EntityId }))
                 .then((result) => {
                   if (result.ok) {
-                    if (!greeters.some((item) => item.card.entityId === result.value.card.entityId)) {
-                      changePendingCast([...greeters, result.value], persona, [...picks, 0])
-                    }
+                    changePendingCast((current) =>
+                      current.persona === result.value.card.entityId ||
+                      current.greeters.some((item) => item.card.entityId === result.value.card.entityId)
+                        ? current
+                        : { ...current, greeters: [...current.greeters, result.value], picks: [...current.picks, 0] }
+                    )
                   }
                 })
             }}
@@ -573,8 +592,11 @@ function Pending({
               groupOnly={greetingPick(options[at]!, effectivePicks[at]!)!.groupOnly}
               index={options[at]!.findIndex((option) => option.index === effectivePicks[at])}
               onIndex={(index) => {
-                setFallbackNote("")
-                setPicks(effectivePicks.map((pick, i) => (i === at ? options[at]![index]!.index : pick)))
+                setPendingCast((current) => ({
+                  ...current,
+                  fallbackNote: "",
+                  picks: effectivePicks.map((pick, i) => (i === at ? options[at]![index]!.index : pick))
+                }))
               }}
               text={expandGreeting(at, effectivePicks[at]!)}
             />

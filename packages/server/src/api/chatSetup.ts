@@ -230,9 +230,18 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
               entityId: greeter.entityId,
               // A single card's greeting as asked, or a group's preview/random choice.
               greeting: picked,
-              frozen: options.map((option) =>
-                freezeTemplate(option.text, fields, names, option.index === picked ? (greeter.frozen ?? {}) : {})
-              )
+              // Resolve the registry once: workers persist this trusted snapshot instead
+              // of consulting a separate registry in another isolate.
+              options: options.map((option) => ({
+                index: option.index,
+                text: option.text,
+                frozen: freezeTemplate(
+                  option.text,
+                  fields,
+                  names,
+                  option.index === picked ? (greeter.frozen ?? {}) : {}
+                )
+              }))
             }
           })
         )

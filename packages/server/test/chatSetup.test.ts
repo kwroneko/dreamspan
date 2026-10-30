@@ -6,6 +6,7 @@ import { assert, describe, it } from "@effect/vitest"
 import type { Chat, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { DraftHistoryPolicy } from "@rp/shared/drafts.ts"
+import { greetingSources } from "@rp/shared/greetings.ts"
 import { Effect } from "effect"
 import { foldState } from "@rp/shared/state.ts"
 import { Generator } from "../src/chat/Generator.ts"
@@ -48,6 +49,70 @@ const pathOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("chat setup", () => {
+  for (const dbWorkers of ["source", "bundle"] as const) {
+    it.live(`greeting source overrides, disablement and restoration reach ${dbWorkers} storage`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const miraId = yield* card(api, "Mira", {
+          ...mira,
+          group_only_greetings: ["Together at {{time}}."]
+        })
+        const tobin = yield* card(api, "Tobin", { first_mes: "Tobin nods." })
+        const start = (greeting = 2) =>
+          api
+            .StartChat({
+              cards: [miraId, tobin],
+              persona: null,
+              greeting,
+              greeters: [{ entityId: miraId, greeting }],
+              first: { _tag: "Send", content: "Hello", speakerEntityId: null }
+            })
+            .pipe(
+              Effect.flatMap(({ chat }) => pathOf(api, chat.id)),
+              Effect.map((path) => path[0]!)
+            )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.disable("greetings.group-only")
+            const greeting = yield* start()
+            assert.strictEqual(greeting.version.content, mira.first_mes)
+            assert.strictEqual(greeting.versionCount, 2)
+          })
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.disable("greetings.ordinary")
+            const group = greetingSources.get("greetings.group-only")!
+            yield* greetingSources.register({
+              ...group,
+              offer: (card, count) =>
+                group.offer(card, count).map((option) => ({ ...option, text: `Custom ${option.text}` }))
+            })
+            const greeting = yield* start()
+            assert.strictEqual(greeting.version.content, "Custom Together at {{time}}.")
+            assert.strictEqual(greeting.versionCount, 1)
+            assert.ok(greeting.version.frozenMacros)
+          })
+        )
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* greetingSources.register({
+              id: "synthetic/greeting",
+              offer: () => [{ index: 99, text: "Plugin at {{time}}.", groupOnly: false }]
+            })
+            const greeting = yield* start(99)
+            assert.strictEqual(greeting.version.content, "Plugin at {{time}}.")
+            assert.strictEqual(greeting.versionCount, 4)
+            assert.ok(greeting.version.frozenMacros)
+          })
+        )
+        const restored = yield* start()
+        assert.strictEqual(restored.version.content, "Together at {{time}}.")
+        assert.strictEqual(restored.versionCount, 3)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ dbWorkers }), Generator.none)))
+    )
+  }
+
   it.live("group-only greetings are saved in groups and fall back with only one character, excluding persona", () =>
     Effect.gen(function* () {
       const api = yield* client()

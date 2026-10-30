@@ -1,4 +1,4 @@
-// Greeting policy is shared by the pending preview and the two server stages. Plugins
+// Greeting policy is shared by the pending preview and the server API. Plugins
 // can override or disable sources through the same scoped registry as other features.
 import { Effect, Scope } from "effect"
 import { makeRegistry } from "./registry.ts"
