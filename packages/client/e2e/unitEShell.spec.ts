@@ -210,7 +210,13 @@ for (const width of [1440, 390]) {
       const fork = data.forks.find((f) => f.current && f.cast.length > 1)!
       const card = fork.cast[0]!
       await page.goto(`${server().url}/chats/${fork.chat.id}?panel=card:${card}&forks=${fork.chat.id}`)
-      await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+      // In a chat, the card's tab has the Cast row's actions, Edit among them (f55e4e7).
+      await expect(
+        page
+          .getByRole("tabpanel")
+          .getByRole("button", { name: /^Edit / })
+          .first()
+      ).toBeVisible()
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
       await shoot("chat-card")
       for (const tab of ["Cast", "This chat", "Lorebooks", "Notes", "Summaries"]) {
