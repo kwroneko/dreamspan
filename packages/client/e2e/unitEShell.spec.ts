@@ -115,13 +115,17 @@ for (const width of [1440, 390]) {
       .filter({ hasText: "Current fork" })
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
+    // Current-fork URLs are canonicalized after the path loads. Wait before
+    // opening phone sheets; neither the fork nor its temporary leaf stays in the URL.
+    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
+    await expect.poll(() => new URL(page.url()).searchParams.get("leaf")).toBeNull()
+    await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
     if (width === 390 && (await page.getByRole("button", { name: "Close", exact: true }).isVisible()))
       await page.getByRole("button", { name: "Close", exact: true }).click()
     await openLeft()
     await expect(crumbs).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Current fork", exact: true })).toContainText(group.name)
-    expect(new URL(page.url()).searchParams.get("leaf")).toBe(group.leaf)
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
