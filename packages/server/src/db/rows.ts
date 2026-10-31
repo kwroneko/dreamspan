@@ -111,6 +111,9 @@ export interface VersionRow {
   readonly raw_content?: string | null
   readonly raw_reasoning?: string | null
   readonly rewrite_json?: string | null
+  /** Whether the raw texts are kept, where a query reads that instead of the texts (`shownVersionColumns`). */
+  readonly raw_kept?: number
+  readonly raw_reasoning_kept?: number
   readonly rollout_id: string | null
   /** Ordered image references (`versionExtras`); absent on a row just inserted without images. */
   readonly images_json?: string
@@ -149,7 +152,12 @@ const UNSHOWN: ReadonlySet<string> = new Set(["history_truncated", "last_turn_fi
 /** The record of what regex scripts did, and whether the text before is kept; never the text itself. */
 const toRewrite = (row: VersionRow) => {
   const { applied, failed } = JSON.parse(row.rewrite_json!) as Pick<VersionRewrite, "applied" | "failed">
-  return { applied, failed, raw: row.raw_content != null, rawReasoning: row.raw_reasoning != null }
+  return {
+    applied,
+    failed,
+    raw: row.raw_kept === 1 || row.raw_content != null,
+    rawReasoning: row.raw_reasoning_kept === 1 || row.raw_reasoning != null
+  }
 }
 
 /** The columns a stored rewrite sets on a version; all null without one. */

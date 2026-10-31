@@ -55,7 +55,11 @@ const scriptCharacter = (assembly: Assembly): CardInput | null => {
   const rewrite = assembly.request.rewrite
   if (rewrite) {
     if (rewriteSide(assembly, rewrite) === "user") return only
-    return cast.characters.find((card) => card.entity === rewrite.speaker) ?? null
+    // A reply recorded without a speaker is the turn's, as the cast stage resolved it.
+    return (
+      cast.characters.find((card) => card.entity === rewrite.speaker) ??
+      (cast.speaker && !cast.personas.includes(cast.speaker) ? cast.speaker : null)
+    )
   }
   return cast.speaker && !cast.personas.includes(cast.speaker) ? cast.speaker : only
 }

@@ -1,6 +1,8 @@
 // The assembler's sources over an in-memory chat, for tests and the ST harness: the same
 // pipeline the reader worker runs, without a database.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { RewriteOptions } from "../../src/assembler/scriptSources.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { FoldableEvent } from "@rp/shared/state.ts"
@@ -50,6 +52,8 @@ export interface AssemblyFixture {
   readonly lorebooks?: ReadonlyArray<LorebookInput>
   /** The ids of `lorebooks` the user marked global. */
   readonly globalLorebooks?: ReadonlyArray<string>
+  /** The account's global regex scripts. */
+  readonly globalRegex?: ReadonlyArray<RegexScript>
   readonly notes?: ReadonlyArray<NoteInput>
   /** A note's earlier revisions, newest first, by note: its history before the revision it's at. */
   readonly noteRevisions?: Readonly<Record<string, ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>>>
@@ -120,6 +124,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           .map((c) => ({ entity: c.entity, ref: `ref-${c.entity}`, revision: `rev-${c.entity}`, doc: c.doc }))
       ),
     globalLorebooks: Effect.succeed(fixture.globalLorebooks ?? []),
+    globalRegex: Effect.succeed(fixture.globalRegex ?? []),
     lorebooks: (refs) => Effect.succeed((fixture.lorebooks ?? []).filter((b) => refs.includes(b.id))),
     notes: (cards) =>
       Effect.succeed(
@@ -185,4 +190,19 @@ export const assembleFixture = (
       ...(options.summaryJob ? { summaryJob: options.summaryJob } : {}),
       random: options.random ?? (() => 0.5)
     })
+    .pipe(Effect.provide(fixtureSources(fixture)))
+
+/** A fixture's text as it's written at its target (`RewriteText`), through the scripts with neither flag. */
+export const rewriteFixture = (
+  fixture: AssemblyFixture,
+  options: RewriteOptions,
+  items: ReadonlyArray<{ readonly text: string; readonly kind: "message" | "reasoning" }>,
+  using?: Assembler
+) =>
+  (using ?? assembler())
+    .rewrite(
+      { now: fixture.now ?? Date.UTC(2026, 0, 1), timeZone: "UTC", frozen: {}, random: () => 0.5 },
+      options,
+      items
+    )
     .pipe(Effect.provide(fixtureSources(fixture)))
