@@ -7,6 +7,8 @@ import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/share
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
 import {
+  CONTINUE_NUDGE,
+  CONTINUE_TEXT,
   DIRECTION_PROMPT,
   endOfRequestText,
   FALLBACK_TEXT,
@@ -933,7 +935,7 @@ const override = (
 const prefill = (assembly: Assembly) => {
   if (assembly.request.summarizing) return
   const continues = need(assembly, "target").continues
-  if (continues) return continuePrefill(assembly, continues.text)
+  if (continues) return continuePrefill(assembly, continues)
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
@@ -954,23 +956,43 @@ const prefill = (assembly: Assembly) => {
 
 /**
  * Continue sends the text it continues as the start of the reply, in place of the preset's
- * prefill (ST's "continue prefill"), so the model writes on from its end. Without a model
- * that takes one it can't continue: the version fails and says so (DESIGN §7.5). Trailing
- * whitespace goes, which Anthropic refuses at the end of a prefill.
+ * prefill (ST's "continue prefill"), so the model writes on from its end. Trailing whitespace
+ * goes, which Anthropic refuses at the end of a prefill. A model that can't take one (its
+ * capability `none`, or an endpoint without the prefill, `continueUnavailable`) gets the text
+ * as its own last message instead, and the end-of-request instruction asks it to write only
+ * what follows (owner, 2026-10-31; ST's continue nudge).
  */
-const continuePrefill = (assembly: Assembly, text: string) => {
+const continuePrefill = (assembly: Assembly, continues: NonNullable<Target["continues"]>) => {
   const model = assembly.model
   if (!model) {
     throw new AssemblyFailed({ reason: "no_model", message: "Continue needs a model: none is chosen." })
   }
-  if (model.prefill === "none" || model.continueUnavailable) {
-    throw new AssemblyFailed({
-      reason: "no_prefill",
-      message: `Continue isn't available with ${model.key}: ${model.continueUnavailable ?? "no prefill support is declared. Set its Prefill capability in Connections if supported."}`
-    })
+  const text = continues.text
+  if (continuesWithoutPrefill(assembly)) {
+    const piece = need(assembly, "macros").verbatim(
+      `continue:${continues.version}`,
+      { kind: "message", slot: need(assembly, "target").slotId, version: continues.version },
+      text
+    )
+    const join = /\s$/.test(text) ? "" : need(assembly, "preset").doc.prefill.continue_postfix
+    assembly.continuation = { text, piece, join }
+    // A model that takes a prefill, but not here: say why it didn't get one.
+    if (model.prefill !== "none" && model.continueUnavailable)
+      assembly.issues.push({
+        kind: "prefill_dropped",
+        message: `Continue sent the reply as ${model.key}'s own last message with the continue instruction after it, not as a prefill: ${model.continueUnavailable}`
+      })
+    return
   }
   assembly.prefill = model.prefill === "tool_schema" ? text : text.trimEnd()
 }
+
+/** Continue on a model it can't prefill: the text it continues goes as the model's last message. */
+const continuesWithoutPrefill = (assembly: Assembly): boolean =>
+  need(assembly, "target").continues !== undefined &&
+  assembly.model !== undefined &&
+  assembly.model !== null &&
+  (assembly.model.prefill === "none" || assembly.model.continueUnavailable !== undefined)
 
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */
 const chatLine = (
@@ -1924,7 +1946,13 @@ const composeStage = sync("compose", (assembly) => {
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
   const schemaReserve =
     assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
-  const prefillInput = schemaReserve?.input ?? (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+  const prefillInput =
+    schemaReserve?.input ??
+    (assembly.prefill
+      ? tokensOf({ content: assembly.prefill })
+      : assembly.continuation
+        ? tokensOf({ content: assembly.continuation.text })
+        : 0)
   const prefixOutput = schemaReserve?.output ?? 0
   // A default response length gives way to the source prefix; only the model's own can exceed the limit.
   const outputLimit = assembly.model?.maxOutput
@@ -1949,7 +1977,9 @@ const composeStage = sync("compose", (assembly) => {
     ? tokensOf(assembly.endOfRequest)
     : !assembly.request.summarizing && !assembly.prefill
       ? tokensOf({
-          content: FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
+          content: assembly.continuation
+            ? CONTINUE_TEXT
+            : FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
         })
       : 0
   const reserve =
@@ -2350,7 +2380,8 @@ const composeStage = sync("compose", (assembly) => {
 /**
  * The end-of-request instruction (DESIGN §2.2, owner 2026-10-29): one user message, the
  * request's last, with the speaker's turn text (when your card speaks if the speaker is one you
- * play, else when a character speaks) and, when the version has a direction, the direction text
+ * play, else when a character speaks; when you continue a reply, on a Continue the model can't
+ * be prefilled for) and, when the version has a direction, the direction text
  * on a new line. Neither conditions nor ST's triggers apply to them. A summary request puts its
  * instruction there instead (`summary-request`), so it sends none. Expansion is deferred until
  * `compose` has prepared ordinary prompts and notes; `compose` budgets it and
@@ -2361,7 +2392,11 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
   assembly.renderEndOfRequest = () => {
     const doc = need(assembly, "preset").doc
     const { speaker, personas } = need(assembly, "cast")
-    const turn = speaker !== null && personas.includes(speaker) ? IMPERSONATION_PROMPT : GROUP_NUDGE
+    const turn = continuesWithoutPrefill(assembly)
+      ? CONTINUE_NUDGE
+      : speaker !== null && personas.includes(speaker)
+        ? IMPERSONATION_PROMPT
+        : GROUP_NUDGE
     const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []
     const parts = [turn, ...direction].flatMap((identifier) => {
       const content = doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
@@ -2407,17 +2442,28 @@ const messagesStage = sync("messages", (assembly) => {
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.
   const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
+  // Continue without a prefill (owner, 2026-10-31): the reply so far, the model's own message,
+  // then the instruction to write only what follows it.
+  const continuation = assembly.continuation
+  if (continuation)
+    messages.push({ role: "assistant", content: continuation.text, pieces: [continuation.piece], kind: "volatile" })
   if (end) messages.push({ ...end, kind: "volatile" })
   // The only fallback (DESIGN §2.2): without an end-of-request message, a request that would end
-  // on an assistant message, with no prefill to continue it, asks for the speaker's message.
-  // Decided on the whole final request, including trailing system prompts.
+  // on an assistant message, with no prefill to continue it, asks for the speaker's message (or,
+  // continuing, for the rest of it). Decided on the whole final request, including trailing system prompts.
   if (!end && !assembly.request.summarizing && !assembly.prefill && messages.at(-1)?.role === "assistant") {
     const env = need(assembly, "macros")
-    const piece = env.piece(
-      "assembler:last-turn",
-      { kind: "assembler", what: "end of request fallback: who writes next" },
-      FALLBACK_TEXT
-    )
+    const piece = continuation
+      ? env.piece(
+          "assembler:last-turn",
+          { kind: "assembler", what: "end of request fallback: continue the reply" },
+          CONTINUE_TEXT
+        )
+      : env.piece(
+          "assembler:last-turn",
+          { kind: "assembler", what: "end of request fallback: who writes next" },
+          FALLBACK_TEXT
+        )
     messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
   }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
@@ -2451,6 +2497,7 @@ const requestStage = sync("request", (assembly) => {
       assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES
     ),
     prefill: assembly.prefill ?? null,
+    ...(assembly.continuation ? { continuation: { join: assembly.continuation.join } } : {}),
     samplers: {
       temperature: s.temperature,
       frequency_penalty: s.frequency_penalty,

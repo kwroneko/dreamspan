@@ -1,6 +1,6 @@
 import { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import { conditionOf, editedDoc, presetWarnings, triggersFor, withEndOfRequest } from "@rp/shared/presetConditions.ts"
-import { DIRECTION_TEXT, endOfRequestText, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
+import { CONTINUE_TEXT, DIRECTION_TEXT, endOfRequestText, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
 import { Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
@@ -226,8 +226,8 @@ describe("ST's prompt and order sanitizing", () => {
       "scenario",
       "personaDescription"
     ])
-    // Every prompt but the end-of-request texts, which are never in the order.
-    expect(fromPartial.order).toHaveLength(fromPartial.prompts.length - 3)
+    // Every prompt but the four end-of-request texts, which are never in the order.
+    expect(fromPartial.order).toHaveLength(fromPartial.prompts.length - 4)
   })
 
   it("treats a prompt without `system_prompt` as ST does: not sent from the order", () => {
@@ -428,7 +428,7 @@ describe("exporting to an ST chat-completion preset", () => {
     const file = exportStPreset({ ...doc, unsupported: { ...doc.unsupported, temperature: 2, prompts: [] } })
     expect(file.temperature).toBe(1)
     // The turn texts go back to ST's utility prompts; ST has no field for the direction text.
-    expect(file.prompts).toHaveLength(doc.prompts.length - 3)
+    expect(file.prompts).toHaveLength(doc.prompts.length - 4)
   })
 
   it("writes the document's enums back as ST's values", () => {
@@ -822,6 +822,7 @@ describe("conditions (DESIGN §2.2)", () => {
       preset({
         group_nudge_prompt: "[Only {{char}} speaks; not {{ CHAR }}'s rival.]",
         impersonation_prompt: "[Write as {{user}}.]",
+        continue_nudge_prompt: "[Go on from {{char}}'s last line.]",
         prompt_order: [
           {
             character_id: 100001,
@@ -839,21 +840,30 @@ describe("conditions (DESIGN §2.2)", () => {
     expect(prompt(doc, "groupNudge")!.condition).toBeUndefined()
     expect(prompt(doc, "impersonationPrompt")).toMatchObject({ role: "user", content: "[Write as {{speaker}}.]" })
     expect(prompt(doc, "directionPrompt")).toMatchObject({ role: "user", content: DIRECTION_TEXT })
+    // ST's continue nudge, as it is: it speaks to the model, so its macros stay.
+    expect(prompt(doc, "continueNudge")).toMatchObject({
+      role: "user",
+      name: "When you continue a reply",
+      content: "[Go on from {{char}}'s last line.]"
+    })
     expect(doc.utility_prompts.group_nudge_prompt).toBe("")
     expect(doc.utility_prompts.impersonation_prompt).toBe("")
+    expect(doc.utility_prompts.continue_nudge_prompt).toBe("")
     const ids = doc.order.map((e) => e.identifier)
     expect(ids.slice(0, 4)).toEqual(["main", "chatHistory", "newestMessage", "jailbreak"])
-    for (const id of ["groupNudge", "impersonationPrompt", "directionPrompt"]) expect(ids).not.toContain(id)
+    for (const id of ["groupNudge", "impersonationPrompt", "continueNudge", "directionPrompt"])
+      expect(ids).not.toContain(id)
     expect(codes(result)).toEqual(expect.arrayContaining(["preset.group_nudge_prompt", "preset.impersonation_prompt"]))
     // Empty ones keep our defaults.
-    const none = load(preset({ group_nudge_prompt: "", impersonation_prompt: "" })).doc
+    const none = load(preset({ group_nudge_prompt: "", impersonation_prompt: "", continue_nudge_prompt: "" })).doc
     expect(prompt(none, "groupNudge")!.content).toBe(TURN_TEXT)
     expect(prompt(none, "impersonationPrompt")!.content).toBe(TURN_TEXT)
+    expect(prompt(none, "continueNudge")!.content).toBe(CONTINUE_TEXT)
   })
 
   it("gives every import the end-of-request texts once, and not again on a reimport", () => {
     const { doc } = load(fixture("full"))
-    for (const id of ["groupNudge", "impersonationPrompt", "directionPrompt"])
+    for (const id of ["groupNudge", "impersonationPrompt", "continueNudge", "directionPrompt"])
       expect(doc.prompts.filter((p) => p.identifier === id)).toHaveLength(1)
     const again = load(exportStPreset(doc)).doc
     expect(again).toEqual(doc)
@@ -866,6 +876,7 @@ describe("conditions (DESIGN §2.2)", () => {
       preset({
         group_nudge_prompt: "[Only {{char}}.]",
         impersonation_prompt: "[As {{user}}.]",
+        continue_nudge_prompt: "[Go on.]",
         prompts: [
           { identifier: "a", content: "a", system_prompt: false, injection_trigger: ["normal"] },
           { identifier: "b", content: "b", system_prompt: false }
@@ -889,6 +900,7 @@ describe("conditions (DESIGN §2.2)", () => {
     const file = exportStPreset(edited)
     expect(file.group_nudge_prompt).toBe("[Only {{char}}.]")
     expect(file.impersonation_prompt).toBe("[As {{user}}.]")
+    expect(file.continue_nudge_prompt).toBe("[Go on.]")
     const prompts = file.prompts as Array<Record<string, unknown>>
     expect(prompts.map((p) => p.identifier)).not.toContain("groupNudge")
     // ST has no field for the direction text: it isn't written.
@@ -961,7 +973,7 @@ describe("conditions (DESIGN §2.2)", () => {
 
   it("reads a preset saved before the end-of-request texts as the import would make it now, without rewriting it", () => {
     const fresh = load(preset({ group_nudge_prompt: "[Only {{char}}.]", impersonation_prompt: "[As {{user}}.]" })).doc
-    const moved = new Set(["groupNudge", "impersonationPrompt", "directionPrompt"])
+    const moved = new Set(["groupNudge", "impersonationPrompt", "continueNudge", "directionPrompt"])
     const stored = {
       ...fresh,
       prompts: fresh.prompts.filter((p) => !moved.has(p.identifier)),
@@ -969,7 +981,8 @@ describe("conditions (DESIGN §2.2)", () => {
       utility_prompts: {
         ...fresh.utility_prompts,
         group_nudge_prompt: "[Only {{char}}.]",
-        impersonation_prompt: "[As {{user}}.]"
+        impersonation_prompt: "[As {{user}}.]",
+        continue_nudge_prompt: CONTINUE_TEXT
       }
     }
     const before = JSON.stringify(stored)

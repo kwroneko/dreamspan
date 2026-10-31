@@ -4,7 +4,7 @@ import { Compartment, EditorState, Transaction } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
 import { useEffect, useLayoutEffect, useRef } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
-import { changeGutter, comparisonBase, lineChanges } from "./codeChanges.ts"
+import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { proseTheme } from "./codeTheme.ts"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
@@ -65,6 +65,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
         keymap.of([...defaultKeymap, ...historyKeymap]),
         lineChanges,
         changeGutter,
+        initial.quietMarkers ? quietMarkers : [],
         options.of(attributes()),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet || update.docChanged) {
@@ -131,7 +132,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
     props = next
     host.style.setProperty("--editor-font", next.mono ? "var(--font-mono)" : "var(--font-sans)")
     host.style.setProperty("--editor-max-height", next.fullHeight ? "none" : "min(60vh, 32rem)")
-    host.style.setProperty("--editor-min-height", `${Math.min(next.rows ?? 4, 10) * 1.6}em`)
+    host.style.setProperty("--editor-min-height", next.minHeight ?? `${Math.min(next.rows ?? 4, 10) * 1.6}em`)
     if (view.composing && next.value !== view.state.doc.toString()) deferred = next.value
     else {
       // An equal-text echo also supersedes any earlier queued external value.
@@ -163,7 +164,11 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
       view.dispatch({ effects: options.reconfigure(attributes()) })
   }
   update(initial)
-  if (initial.autoFocus) view.focus()
+  if (initial.autoFocus) {
+    // The caret at the end, where an edit usually goes on, scrolled into view with the page.
+    view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true })
+    view.focus()
+  }
   return {
     update,
     finishComposition() {

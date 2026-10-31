@@ -49,6 +49,9 @@ export const proseTheme = EditorView.theme({
     backgroundColor: "color-mix(in oklch, var(--danger) 15%, transparent)"
   },
   ".rp-line-unchanged": { color: "var(--text-muted)" },
+  // Quiet markers keep the gutter's width, so the text never shifts when the first change shows it.
+  "&.rp-unchanged .cm-gutters": { visibility: "hidden" },
+  "&.rp-quiet .rp-line-unchanged": { visibility: "hidden" },
   ".cm-changedLine, .cm-inlineChangedLine": { backgroundColor: "color-mix(in oklch, var(--success) 10%, transparent)" },
   "&.cm-merge-a .cm-changedLine, .cm-deletedChunk": {
     backgroundColor: "color-mix(in oklch, var(--danger) 10%, transparent)"

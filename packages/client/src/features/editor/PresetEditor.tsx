@@ -51,12 +51,12 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
   )
 }
 
-// The group nudge, impersonation prompt and direction have their fixed End of request section (DESIGN §2.2).
+// The group nudge, impersonation prompt, continue nudge and direction have their fixed End of
+// request section (DESIGN §2.2).
 const UTILITY: ReadonlyArray<readonly [key: string, label: string]> = [
   ["new_chat_prompt", "New chat"],
   ["new_group_chat_prompt", "New group chat"],
   ["new_example_chat_prompt", "New example chat"],
-  ["continue_nudge_prompt", "Continue nudge"],
   ["send_if_empty", "Sent when you send nothing"],
   ["wi_format", "Lorebook format ({0} is the entries)"],
   ["scenario_format", "Scenario format"],

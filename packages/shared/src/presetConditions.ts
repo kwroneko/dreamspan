@@ -1,12 +1,13 @@
 // Conditioned prompts (DESIGN §2.2, owner 2026-10-27): every prompt has a condition (always,
 // as a character, as {{user}}, with a direction) beside ST's per-prompt triggers (generation
 // types, owner 2026-10-28). Who writes next and the direction itself are the end-of-request
-// instruction (`endOfRequest.ts`, owner 2026-10-29): three texts of the preset outside the order.
-// ST's group nudge and impersonation prompt map onto two of them; the import and every read of a
-// stored preset go through the same conversion.
+// instruction (`endOfRequest.ts`, owner 2026-10-29): four texts of the preset outside the order.
+// ST's group nudge, impersonation prompt and continue nudge map onto three of them; the import
+// and every read of a stored preset go through the same conversion.
 import type { PresetDoc, PresetPrompt, PromptCondition, PromptOrderEntry } from "./docs/preset.ts"
 import {
   DIRECTION_PROMPT,
+  CONTINUE_NUDGE,
   END_OF_REQUEST,
   endOfRequestText,
   GROUP_NUDGE,
@@ -106,7 +107,8 @@ type ConditionedDoc = Pick<PresetDoc, "prompts" | "order" | "utility_prompts">
 /**
  * The preset with its end-of-request texts (DESIGN §2.2): ST's group nudge and impersonation
  * prompt move from the utility prompts into `groupNudge` and `impersonationPrompt` (their
- * macros as `{{speaker}}`), any of the three still missing gets its default, and none of them
+ * macros as `{{speaker}}`), its continue nudge into `continueNudge`, any of the texts still
+ * missing gets its default, and none of them
  * is in the order. The utility fields are emptied so the move happens once. Pure: a preset
  * already converted comes back as it is.
  */
@@ -116,16 +118,22 @@ export const withEndOfRequest = <D extends ConditionedDoc>(doc: D): { doc: D; ch
   const utility = { ...doc.utility_prompts }
   const ids = new Set(doc.prompts.map((p) => p.identifier))
   const moved = new Map<string, string>()
-  const move = (field: "group_nudge_prompt" | "impersonation_prompt", identifier: string, macro: "char" | "user") => {
+  const move = (
+    field: "group_nudge_prompt" | "impersonation_prompt" | "continue_nudge_prompt",
+    identifier: string,
+    macro: "char" | "user" | null
+  ) => {
     const text = utility[field]
     if (!text) return
     utility[field] = ""
     if (ids.has(identifier)) return
-    moved.set(identifier, toSpeaker(text, macro))
-    changes.push({ kind: macro === "char" ? "group_nudge" : "impersonation" })
+    moved.set(identifier, macro === null ? text : toSpeaker(text, macro))
+    if (macro !== null) changes.push({ kind: macro === "char" ? "group_nudge" : "impersonation" })
   }
   move("group_nudge_prompt", GROUP_NUDGE, "char")
   move("impersonation_prompt", IMPERSONATION_PROMPT, "user")
+  // ST's continue nudge speaks to the model ("your last message"): no macro to convert.
+  move("continue_nudge_prompt", CONTINUE_NUDGE, null)
   const added = END_OF_REQUEST.filter((text) => !ids.has(text.identifier)).map((text) =>
     prompt({
       identifier: text.identifier,
@@ -137,7 +145,8 @@ export const withEndOfRequest = <D extends ConditionedDoc>(doc: D): { doc: D; ch
   const inOrder = doc.order.some((e) => endOfRequestText(e.identifier))
   const emptied =
     utility.group_nudge_prompt !== doc.utility_prompts.group_nudge_prompt ||
-    utility.impersonation_prompt !== doc.utility_prompts.impersonation_prompt
+    utility.impersonation_prompt !== doc.utility_prompts.impersonation_prompt ||
+    utility.continue_nudge_prompt !== doc.utility_prompts.continue_nudge_prompt
   if (added.length === 0 && !inOrder && !emptied) return { doc, changes }
   return {
     doc: {

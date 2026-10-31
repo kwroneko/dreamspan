@@ -8,7 +8,7 @@ import type { SendResult } from "@rp/shared/chatApi.ts"
 import type { LcmSummary } from "@rp/shared/lcm.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { messageMenu } from "./support/message.ts"
+import { editHistory, messageMenu } from "./support/message.ts"
 import { openPanel } from "./support/panel.ts"
 import { level1 } from "./support/summaries.ts"
 
@@ -183,16 +183,16 @@ for (const width of [1440, 390])
       const mine = page.getByRole("article", { name: "Your message" }).first()
       await expectTextBox(mine.getByLabel("Message text"), "Accidental overwrite.")
       await expect(mine.locator(".rp-line-modified")).toHaveCount(1)
-      await mine.getByText("Compare with saved text", { exact: true }).click()
-      const messageDiff = mine.locator("details").filter({ hasText: "Compare with saved text" })
+      await editHistory(mine, "Compare with saved text…")
+      const messageDiff = page.getByRole("dialog", { name: "Compare with saved text", exact: true })
       await expectTextBox(
-        messageDiff.getByRole("textbox", { name: width > 639 ? "After" : "Changes", exact: true }),
+        messageDiff.getByRole("textbox", { name: width > 639 ? "This edit" : "Changes", exact: true }),
         "Accidental overwrite."
       )
       await mkdir(screens, { recursive: true })
       await page.screenshot({ animations: "disabled", path: `${screens}/message-editor-${width}-${theme}.png` })
       await page.reload()
-      await mine.getByRole("button", { name: "Earlier draft text" }).click()
+      await editHistory(mine, "Earlier draft text…")
       const history = page.getByRole("dialog", { name: "Earlier draft text", exact: true })
       await expect(history.getByRole("button", { name: "Restore draft text" })).toHaveCount(2)
       await mkdir(screens, { recursive: true })
@@ -200,21 +200,21 @@ for (const width of [1440, 390])
       await history.getByRole("button", { name: "Restore draft text" }).last().click()
       await expectTextBox(mine.getByLabel("Message text"), oldText)
       // Closing a portaled history must not bubble Escape into Cancel on the editor.
-      await mine.getByRole("button", { name: "Earlier draft text" }).click()
+      await editHistory(mine, "Earlier draft text…")
       await expect(history).toBeVisible()
       // Focus can still be on the trigger before the modal's focus effect runs. Send
       // Escape from there deterministically, rather than relying on machine timing.
       await page
         .locator("article")
         .first()
-        .getByRole("button", { name: "Earlier draft text", includeHidden: true })
+        .getByRole("button", { name: "History of this edit", includeHidden: true })
         .evaluate((trigger) => {
           trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
         })
       await expectTextBox(mine.getByLabel("Message text"), oldText)
       await expect(mine.getByRole("button", { name: "Save", exact: true })).toBeVisible()
       await expect(history).toBeHidden()
-      await mine.getByRole("button", { name: "Earlier draft text" }).click()
+      await editHistory(mine, "Earlier draft text…")
       await expect(history).toBeVisible()
       await history.getByRole("button", { name: "Close history", exact: true }).focus()
       await page.keyboard.press("Escape")

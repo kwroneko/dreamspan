@@ -146,7 +146,8 @@ test("a stopped reply keeps its text, and a message can be edited, linked to, br
     const walk = page.getByRole("article", { name: "Your message" }).filter({ hasText: "Walk away" })
     await showActions(walk)
     await walk.getByRole("button", { name: "Delete message", exact: true }).click()
-    await expect(page.getByText("Walk away instead.")).toHaveCount(0)
+    // The delete toast quotes it for its 10 s; the chat itself no longer shows it.
+    await expect(page.getByTestId("messages").getByText("Walk away instead.")).toHaveCount(0)
   } finally {
     await heldProvider.stop()
     await heldServer.stop()

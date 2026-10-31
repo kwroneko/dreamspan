@@ -27,12 +27,25 @@ export interface PanelDescriptor {
   readonly icon: IconName
   readonly component: ComponentType<PanelProps>
   readonly available?: (view: ChatView) => boolean
+  /**
+   * Where its tabs go: "tools" (the default), a row of icons and labels that never wraps, what
+   * doesn't fit under More; or "cast", the strip of the chat's characters, apart from the tools.
+   */
+  readonly placement?: "tools" | "cast"
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
   readonly matches?: (value: string) => boolean
-  readonly tabs?: (view: ChatView, selected: string | null) => ReadonlyArray<{ value: string; label: string }>
+  readonly tabs?: (view: ChatView, selected: string | null) => ReadonlyArray<PanelTabEntry>
   readonly default?: boolean
   readonly header?: boolean
   readonly preload?: () => void
+}
+
+/** One tab; in the cast strip it can carry a portrait, and a word such as "you". */
+export interface PanelTabEntry {
+  readonly value: string
+  readonly label: string
+  readonly avatar?: { readonly id: string; readonly name: string; readonly mediaId: string | null }
+  readonly note?: string
 }
 
 export const chatPanels = makeRegistry<PanelDescriptor>()
@@ -64,6 +77,26 @@ export function usePanelTabs(view: ChatView, selected: string | null) {
   const snapshot = useChatPanels()
   return panelTabs(view, selected, snapshot)
 }
+
+/**
+ * The tab to show for one asked for: itself when this chat offers it. A family's tab this chat
+ * doesn't offer (another chat's character, carried by a link's `?panel=` or this browser's
+ * memory) opens the panel's default tab instead, as a pick in the sidebar does; null otherwise.
+ */
+export const panelHere = (view: ChatView, value: string | null, snapshot = chatPanels.snapshot()) => {
+  if (value === null) return null
+  const tabs = panelTabs(view, value, snapshot)
+  if (tabs.some((tab) => tab.value === value)) return value
+  const family = resolvePanel(value, snapshot)?.matches !== undefined
+  return (family && tabs.find((tab) => tab.descriptor.default)?.value) || null
+}
+
+export const usePanelHere = (value: string | null, view: ChatView) =>
+  useSyncExternalStore(
+    chatPanels.subscribe,
+    () => panelHere(view, value),
+    () => panelHere(view, value)
+  )
 
 export const useIsPanelTab = (value: unknown, view?: ChatView) =>
   useSyncExternalStore(
