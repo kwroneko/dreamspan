@@ -10,11 +10,14 @@ import { client, serverLayer, testConfig } from "./support/config.ts"
 import { generateReply, eventually } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
-const config = testConfig()
+// The config (and its data directory) is made inside the test: the test is tagged slow, so
+// `npm test` loads this file without running it, and a directory made at load would outlive
+// the file (tempDir removes its directories after the file's tests, and none run).
 it.live(
   "lost claim acknowledgements recover after writer respawn without a second concurrent provider call",
-  () =>
-    Effect.gen(function* () {
+  () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
       let summaries = 0,
         inFlight = 0,
         maxInFlight = 0
@@ -158,6 +161,7 @@ it.live(
           assert.strictEqual(rows[2]![0]!.request_class, "background", "idle TTL is rechecked after restart")
         })
       )
-    }),
+    })
+  },
   { timeout: 120_000, tags: ["slow"] }
 )
