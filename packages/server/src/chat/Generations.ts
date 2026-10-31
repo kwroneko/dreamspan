@@ -12,6 +12,7 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effe
 import { Reader, Writer } from "../db/Database.ts"
 import type { QueueOutcome } from "../db/ops.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { rewriteText } from "./rewrites.ts"
 import { Notices } from "./Notices.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
@@ -126,6 +127,23 @@ export class Generations extends Context.Service<
               }
             }
           }
+          // A reply that ended with text goes through the scripts with neither flag, as ST's
+          // cleanUpMessage runs them on what it received (ARCHITECTURE §12, "Rewrites"): a
+          // continuation with the text it continues, which they rewrote already.
+          const written =
+            status === "complete" || status === "stopped"
+              ? yield* rewriteText(reader, {
+                  userId: request.userId,
+                  chatId: request.chatId,
+                  forkId: request.forkId,
+                  at: { slotId: request.slotId, versionId: request.versionId },
+                  edit: false,
+                  content: entry.text,
+                  reasoning: entry.reasoning || undefined
+                })
+              : { content: entry.text, ...(entry.reasoning ? { reasoning: entry.reasoning } : {}) }
+          entry.text = written.content
+          if (written.reasoning !== undefined) entry.reasoning = written.reasoning
           // The final save posts what was queued behind this reply, in the same transaction.
           const saved = yield* Effect.exit(
             writer.FinishGeneration({
@@ -134,7 +152,8 @@ export class Generations extends Context.Service<
               content: entry.text,
               ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
               status,
-              error
+              error,
+              ...(written.rewrite ? { rewrite: written.rewrite } : {})
             })
           )
           running.delete(request.versionId)

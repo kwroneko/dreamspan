@@ -38,6 +38,23 @@ import {
 } from "./support/config.ts"
 import { cardDoc, docFor, presetDoc } from "./support/docs.ts"
 
+/** A global regex script of the owner's, which no one else's list may show. */
+const ownerScript = {
+  id: "owner-script",
+  name: "Owner's script",
+  find_regex: "/secret/g",
+  replace_string: "",
+  trim_strings: [],
+  placement: [2],
+  disabled: false,
+  markdown_only: false,
+  prompt_only: false,
+  run_on_edit: false,
+  substitute_regex: "none" as const,
+  min_depth: null,
+  max_depth: null
+}
+
 type Api = Effect.Success<ReturnType<typeof client>>
 
 /** One user and what they own. */
@@ -903,6 +920,28 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetGlobalLorebooks(), before)
       })
   },
+  GetGlobalRegex: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Probes run each way round, so each run plants a script of its own.
+        const planted = { ...ownerScript, id: crypto.randomUUID() }
+        const read = yield* owner.api.GetGlobalRegex()
+        yield* owner.api.SetGlobalRegex({ scripts: [planted], expectedRevision: read.revision })
+        assert.notInclude(
+          (yield* actor.api.GetGlobalRegex()).scripts.map((script) => script.id),
+          planted.id
+        )
+      })
+  },
+  SetGlobalRegex: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const before = yield* owner.api.GetGlobalRegex()
+        const mine = yield* actor.api.GetGlobalRegex()
+        yield* actor.api.SetGlobalRegex({ scripts: [], expectedRevision: mine.revision })
+        assert.deepStrictEqual(yield* owner.api.GetGlobalRegex(), before)
+      })
+  },
   GetCardPromptUse: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
@@ -1282,6 +1321,33 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   VersionAmendments: {
     probe: (actor, owner) => refused(actor.api.VersionAmendments({ versionId: owner.chat.versionId }), "NotFound")
+  },
+  RawVersionText: {
+    probe: (actor, owner) => refused(actor.api.RawVersionText({ versionId: owner.chat.versionId }), "NotFound")
+  },
+  RestoreRawText: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.RestoreRawText({
+            slotId: owner.chat.slotId,
+            versionId: owner.chat.versionId,
+            forkId: owner.chat.forkId,
+            expectedRowVersion: theirs.rowVersion
+          }),
+          "NotFound"
+        )
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.RestoreRawText({
+            slotId: actor.chat.slotId,
+            versionId: owner.chat.versionId,
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
+      })
   },
   RestoreVersionAmendment: {
     probe: (actor, owner) =>

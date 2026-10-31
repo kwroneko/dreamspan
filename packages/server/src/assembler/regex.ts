@@ -6,11 +6,13 @@ export { run } from "@rp/shared/regexReplace.ts"
 import { setFlagsFromString } from "node:v8"
 import { createContext, Script } from "node:vm"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
+import type { ScriptFailure, ScriptRef, TextRewrite } from "@rp/shared/regexScripts.ts"
+import type { Assembly } from "./pipeline.ts"
 
 setFlagsFromString("--enable-experimental-regexp-engine")
 
 /** ST's placements: what a script applies to. */
-export const PLACEMENT = { userInput: 1, aiOutput: 2 } as const
+export const PLACEMENT = { userInput: 1, aiOutput: 2, worldInfo: 5, reasoning: 6 } as const
 
 const isLetter = (c: string) => /^[a-zA-Z]$/.test(c)
 const swap = (c: string) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase())
@@ -105,6 +107,8 @@ export const compileLinear = (pattern: string, flags: string): RegExp | "unsafe"
 
 /** A compiled script, its replacement and trim strings expanded. */
 export interface PromptScript {
+  /** Which list it came from, for the inspector and the message's record. */
+  readonly ref: ScriptRef
   readonly script: RegexScript
   readonly regex: RegExp
   readonly replacement: string
@@ -114,9 +118,17 @@ export interface PromptScript {
 const minBounded = (script: RegexScript) => script.min_depth !== null && script.min_depth >= -1
 const maxBounded = (script: RegexScript) => script.max_depth !== null && script.max_depth >= 0
 
-/** Whether ST runs a prompt-only script on a message at this depth (getRegexedString). */
-const withinDepth = (script: RegexScript, depth: number) =>
-  (!minBounded(script) || depth >= script.min_depth!) && (!maxBounded(script) || depth <= script.max_depth!)
+/** Whether ST runs a prompt-only script on a message at this depth (getRegexedString); no depth: always. */
+const withinDepth = (script: RegexScript, depth: number | null) =>
+  depth === null ||
+  ((!minBounded(script) || depth >= script.min_depth!) && (!maxBounded(script) || depth <= script.max_depth!))
+
+/** What a script that threw is reported with. */
+const why = (error: unknown) =>
+  error instanceof OutputLimit ? "it made more text than one context allows" : String(error)
+
+/** ST runs a script with neither flag on text as it's written; `markdown_only` ones only on display. */
+const rewritesStored = (script: RegexScript) => !script.prompt_only && !script.markdown_only
 
 /** Runs `job()` in a context of its own, so a timeout can stop it. */
 const JOB = new Script("job()")
@@ -167,44 +179,114 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
      * matches, or a script was skipped for it (out of time or output, which the messages
      * read before it spent). Messages the time didn't cover keep their text.
      */
-    apply: (items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>) => {
+    apply: (
+      items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number | null }>
+    ) => {
       const applies = (item: (typeof items)[number]) =>
         list.some(({ script }) => !script.disabled && script.prompt_only && script.placement.includes(item.placement))
-      const results = items.map((item) => ({ text: item.text, volatile: applies(item) }))
+      const results: Array<{ text: string; volatile: boolean; applied?: ReadonlyArray<ScriptRef> }> = items.map(
+        (item) => ({ text: item.text, volatile: applies(item) })
+      )
       const failed = new Map<PromptScript, string>()
       if (list.length === 0 || items.length === 0 || deadline.expired) return { results, failed }
       deadline.run(() => {
         items.forEach((item, i) => {
           let { text } = item
           let volatile = false
+          const applied: Array<ScriptRef> = []
           for (const entry of list) {
             const { script, regex } = entry
             if (script.disabled || !script.prompt_only || !script.placement.includes(item.placement)) continue
             try {
               if (!withinDepth(script, item.depth)) {
                 regex.lastIndex = 0
-                if (minBounded(script) && item.depth < script.min_depth! && regex.test(text)) volatile = true
+                if (minBounded(script) && item.depth! < script.min_depth! && regex.test(text)) volatile = true
                 continue
               }
               const next = run(regex, entry.replacement, entry.trim, text, output)
               if (maxBounded(script) && next !== text) volatile = true
+              if (next !== text) applied.push(entry.ref)
               text = next
             } catch (error) {
               volatile = true
-              if (!failed.has(entry)) {
-                failed.set(
-                  entry,
-                  error instanceof OutputLimit ? "it made more text than one context allows" : String(error)
-                )
-              }
+              if (!failed.has(entry)) failed.set(entry, why(error))
             }
           }
-          results[i] = { text, volatile }
+          results[i] = { text, volatile, ...(applied.length ? { applied } : {}) }
         })
       })
       return { results, failed }
-    }
+    },
+    /**
+     * Texts as they're written (ST's getRegexedString without `isPrompt` or `isMarkdown`): the
+     * scripts with neither flag, for the placement, in order, and with no depth, as ST passes
+     * none there. On an edit only those that run on edits. A script that throws is skipped
+     * for that text; one still running when the time runs out leaves the whole text as it was.
+     */
+    rewrite: (
+      items: ReadonlyArray<{ readonly text: string; readonly placement: number }>,
+      options: { readonly edit: boolean }
+    ): Array<TextRewrite> =>
+      items.map((item) => {
+        const scripts = list.filter(
+          ({ script }) =>
+            !script.disabled &&
+            rewritesStored(script) &&
+            script.placement.includes(item.placement) &&
+            (!options.edit || script.run_on_edit)
+        )
+        if (scripts.length === 0 || item.text === "") return { text: item.text, applied: [], failed: [] }
+        let text = item.text
+        const applied: Array<ScriptRef> = []
+        const failed: Array<ScriptFailure> = []
+        let current: PromptScript | undefined
+        const done = deadline.run(() => {
+          for (const entry of scripts) {
+            current = entry
+            try {
+              const next = run(entry.regex, entry.replacement, entry.trim, text, output)
+              if (next !== text) applied.push(entry.ref)
+              text = next
+            } catch (error) {
+              failed.push({ script: entry.ref, reason: `it failed: ${why(error)}` })
+            }
+          }
+          current = undefined
+        })
+        if (done) return { text, applied, failed }
+        // Out of time: nothing of this text's partial work is kept.
+        const reason = "it ran out of time, so the text was kept as it was"
+        return {
+          text: item.text,
+          applied: [],
+          failed: [{ script: (current ?? scripts[0]!).ref, reason }]
+        }
+      })
   }
 }
 
 export type ScriptRunner = ReturnType<typeof makeScriptRunner>
+
+/** One context's time for the regex scripts: V8 stops them once it's spent. */
+export const REGEX_MS = 200
+
+/** The scripts' text for these messages, as one batch; what stopped them is reported once. */
+export const applyScripts = (
+  assembly: Assembly,
+  runner: ScriptRunner,
+  items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number | null }>
+) => {
+  const expired = runner.expired
+  const { results, failed } = runner.apply(items)
+  const report = (message: string) => {
+    if (!assembly.issues.some((i) => i.message === message)) assembly.issues.push({ kind: "regex_skipped", message })
+  }
+  for (const [{ script }, why] of failed)
+    report(`The regex script "${script.name}" was skipped where it failed: ${why}.`)
+  if (!expired && runner.expired && runner.list.length > 0) {
+    report(
+      `The regex scripts ran out of time (${REGEX_MS} ms for one context): the rest of the messages are sent without them.`
+    )
+  }
+  return results
+}

@@ -33,6 +33,8 @@ export interface CardText {
   readonly description: string
   readonly personality: string
   readonly scenario: string
+  /** Its regex scripts, when the user allowed them. */
+  readonly regex?: ReadonlyArray<RegexScript>
 }
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")

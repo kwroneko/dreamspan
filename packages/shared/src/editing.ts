@@ -129,7 +129,7 @@ const setAt = (root: unknown, path: FieldPath, value: unknown): Refusal | null =
 
 /** Lists whose elements have ids, by kind: a path names their elements by id, never by index. */
 const IDENTIFIED: Partial<Record<EntityKind, ReadonlyArray<string>>> = {
-  card: ["modules", "character_book/entries"],
+  card: ["modules", "character_book/entries", "regex"],
   preset: ["prompts", "order", "regex"]
 }
 
@@ -150,7 +150,7 @@ const indexIntoIdentified = (kind: EntityKind, doc: unknown, path: FieldPath) =>
 
 /** Top-level fields a draft never changes: each changes through its own action, or never. */
 const PROTECTED: Partial<Record<EntityKind, ReadonlySet<string>>> = {
-  card: new Set(["schema_version", "avatar_media_id", "asset_media_ids"]),
+  card: new Set(["schema_version", "avatar_media_id", "asset_media_ids", "regex_approved"]),
   preset: new Set(["schema_version", "regex_approved"]),
   // A slot's link changes only by picking, saving as or unlinking a shared note.
   note: new Set(["schema_version", "owner", "link"])
@@ -296,7 +296,7 @@ export const canonicalJson = (value: unknown): string =>
   ) ?? "undefined"
 
 /**
- * Whether a preset keeps its regex approval through a change that isn't the user's own
+ * Whether a preset or card keeps its regex approval through a change that isn't the user's own
  * typing (a merge, a restored revision): only if it had it, and the scripts are the ones
  * it had (DESIGN §11). Approval is gained only by approving.
  */

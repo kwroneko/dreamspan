@@ -1,7 +1,7 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
-import { VersionRewrite } from "./regexScripts.ts"
+import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
 
 export const ChatId = idSchema("ChatId", "chat")
 export type ChatId = typeof ChatId.Type
@@ -270,6 +270,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   direction: Schema.optional(Schema.String),
   /** A continued version starts with the reasoning of the version it continues. */
   reasoning: Schema.optional(Schema.String),
+  /** What regex scripts did to `content` before it was written, and the text before (server only). */
+  rewrite: Schema.optional(StoredRewrite),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */
   error: Schema.optional(
     Schema.Struct({ class: Schema.String, message: Schema.String, detail: Schema.optional(Schema.Unknown) })

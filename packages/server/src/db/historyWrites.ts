@@ -111,6 +111,10 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
               if (!shared) {
                 // Copy every persisted version field, including frozen macros and provider metadata.
                 const excluded = new Set([
+                  // A history edit's text isn't what any script made.
+                  "raw_content",
+                  "raw_reasoning",
+                  "rewrite_json",
                   "seq",
                   "id",
                   "ordinal",

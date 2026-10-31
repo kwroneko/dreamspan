@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 39
+export const ASSEMBLER_VERSION = 40
 
 export type Role = "system" | "user" | "assistant"
 
@@ -109,6 +109,8 @@ export interface Piece {
   readonly messages: Array<number>
   /** The pieces whose text this one holds, such as the fields in a card's labelled block. */
   readonly parts?: ReadonlyArray<number>
+  /** The prompt regex scripts that changed its text, in the order they ran (the inspector shows them). */
+  scripts?: ReadonlyArray<import("@rp/shared/regexScripts.ts").ScriptRef>
 }
 
 /** A message of the assembled request, provider-neutral: Chat Completions' shape. */
@@ -386,6 +388,8 @@ export interface SourcePins {
   }>
   /** The user's global lorebook refs; absent in snapshots from before global books. */
   readonly globalLorebooks?: ReadonlyArray<string>
+  /** The account's global regex scripts as read; absent in snapshots from before them (none). */
+  readonly globalRegex?: ReadonlyArray<import("@rp/shared/docs/regexScript.ts").RegexScript>
   readonly lorebooks?: ReadonlyArray<{
     readonly key: string
     readonly found: ReadonlyArray<{

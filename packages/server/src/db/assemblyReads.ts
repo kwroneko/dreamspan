@@ -27,7 +27,7 @@ import type { RequestImage } from "../assembler/types.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousStartIn } from "./historyStart.ts"
 import { displayThrough } from "./displayPath.ts"
-import { readDefaults, readGlobalLorebooks } from "./generationSettings.ts"
+import { readDefaults, readGlobalLorebooks, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
@@ -318,6 +318,43 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),
+    GetGlobalRegex: ({ userId }) => readGlobalRegex(sql, userId).pipe(query("GetGlobalRegex")),
+
+    RawVersionText: ({ userId, versionId }) =>
+      sql<{ raw_content: string | null; raw_reasoning: string | null }>`
+        SELECT v.raw_content, v.raw_reasoning FROM versions v
+        JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+        WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+          AND v.deleted_at IS NULL AND v.purged_at IS NULL`.pipe(
+        Effect.flatMap(([row]) =>
+          row
+            ? Effect.succeed({ content: row.raw_content, reasoning: row.raw_reasoning })
+            : Effect.fail(new NotFound({ entity: "version", id: versionId }))
+        ),
+        query("RawVersionText")
+      ),
+
+    // Text being written, through the scripts at its position (ARCHITECTURE §12, "Rewrites").
+    RewriteText: ({ userId, chatId, forkId, at, edit, items }) =>
+      Effect.gen(function* () {
+        const existing = "versionId" in at
+        const [version] = existing
+          ? yield* sql<{ speaker_entity_id: string | null; writer: "human" | "model" }>`
+              SELECT v.speaker_entity_id, v.writer FROM versions v
+              JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              WHERE v.id = ${at.versionId} AND s.id = ${at.slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+          : []
+        if (existing && !version) return yield* new NotFound({ entity: "version", id: at.versionId })
+        const sources = existing
+          ? sqlSources(sql, { userId, chatId, slotId: at.slotId, versionId: at.versionId })
+          : sqlSources(sql, { userId, chatId, next: true, leafSlotId: at.leafSlotId })
+        const options = existing
+          ? { edit, speaker: version!.speaker_entity_id, writer: version!.writer }
+          : { edit, speaker: at.speakerEntityId, writer: "human" as const }
+        return yield* assembler
+          .rewrite({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random }, options, items)
+          .pipe(Effect.provide(sources.layer))
+      }).pipe(inFork(sql, chatId, forkId, "versionId" in at ? at.slotId : at.leafSlotId), query("RewriteText")),
     GetCardPromptUse: ({ userId }) => readCardPromptUse(sql, userId).pipe(query("GetCardPromptUse"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers

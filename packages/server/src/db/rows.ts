@@ -1,4 +1,5 @@
 // Row shapes and their mapping to domain types, shared by the writer and readers.
+import type { StoredRewrite, VersionRewrite } from "@rp/shared/regexScripts.ts"
 import {
   Chat,
   type ChatId,
@@ -106,6 +107,10 @@ export interface VersionRow {
   readonly reasoning?: string | null
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
+  /** Absent where a query doesn't select them. */
+  readonly raw_content?: string | null
+  readonly raw_reasoning?: string | null
+  readonly rewrite_json?: string | null
   readonly rollout_id: string | null
   /** Ordered image references (`versionExtras`); absent on a row just inserted without images. */
   readonly images_json?: string
@@ -141,6 +146,22 @@ const toVersionError = (json: string | null) => {
  */
 const UNSHOWN: ReadonlySet<string> = new Set(["history_truncated", "last_turn_filled"])
 
+/** The record of what regex scripts did, and whether the text before is kept; never the text itself. */
+const toRewrite = (row: VersionRow) => {
+  const { applied, failed } = JSON.parse(row.rewrite_json!) as Pick<VersionRewrite, "applied" | "failed">
+  return { applied, failed, raw: row.raw_content != null, rawReasoning: row.raw_reasoning != null }
+}
+
+/** The columns a stored rewrite sets on a version; all null without one. */
+export const rewriteColumns = (rewrite: StoredRewrite | undefined) => ({
+  raw_content: rewrite?.raw ?? null,
+  raw_reasoning: rewrite?.rawReasoning ?? null,
+  rewrite_json:
+    rewrite && (rewrite.applied.length > 0 || rewrite.failed.length > 0)
+      ? JSON.stringify({ applied: rewrite.applied, failed: rewrite.failed })
+      : null
+})
+
 export const toVersion = (row: VersionRow) =>
   new Version({
     id: row.id as VersionId,
@@ -162,6 +183,7 @@ export const toVersion = (row: VersionRow) =>
     error: toVersionError(row.error_json),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
     mark: row.mark ?? null,
+    ...(row.rewrite_json ? { rewrite: toRewrite(row) } : {}),
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context
       ? null

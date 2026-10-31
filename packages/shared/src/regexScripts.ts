@@ -28,9 +28,34 @@ export const VersionRewrite = Schema.Struct({
 })
 export type VersionRewrite = typeof VersionRewrite.Type
 
-/** The account's global scripts and their revision, which a write must name. */
-export const GlobalRegex = Schema.Struct({ scripts: Schema.Array(RegexScript), revision: Schema.Int })
-export type GlobalRegex = typeof GlobalRegex.Type
+/** One text through the scripts: what it became, which scripts changed it, which were skipped. */
+export const TextRewrite = Schema.Struct({
+  text: Schema.String,
+  applied: Schema.Array(ScriptRef),
+  failed: Schema.Array(ScriptFailure)
+})
+export type TextRewrite = typeof TextRewrite.Type
+
+/** What the server stores with a version it rewrote: the record, and the text before. */
+export const StoredRewrite = Schema.Struct({
+  applied: Schema.Array(ScriptRef),
+  failed: Schema.Array(ScriptFailure),
+  raw: Schema.NullOr(Schema.String),
+  rawReasoning: Schema.NullOr(Schema.String)
+})
+export type StoredRewrite = typeof StoredRewrite.Type
 
 /** At most this many global scripts. */
 export const MAX_GLOBAL_SCRIPTS = 100
+
+/** The global list: ids unique, as the editors address scripts by id, and at most MAX_GLOBAL_SCRIPTS. */
+export const GlobalScripts = Schema.Array(RegexScript).check(
+  Schema.isMaxLength(MAX_GLOBAL_SCRIPTS),
+  Schema.makeFilter((scripts: ReadonlyArray<RegexScript>) =>
+    new Set(scripts.map((script) => script.id)).size === scripts.length ? undefined : "two scripts have the same id"
+  )
+)
+
+/** The account's global scripts and their revision, which a write must name. */
+export const GlobalRegex = Schema.Struct({ scripts: GlobalScripts, revision: Schema.Int })
+export type GlobalRegex = typeof GlobalRegex.Type

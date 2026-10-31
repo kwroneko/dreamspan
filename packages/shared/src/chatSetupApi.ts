@@ -21,7 +21,7 @@ import { EditRefused } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
 import { RegexScript } from "./docs/regexScript.ts"
-import { GlobalRegex } from "./regexScripts.ts"
+import { GlobalRegex, GlobalScripts } from "./regexScripts.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
 export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
@@ -439,7 +439,7 @@ export class ChatSetupApi extends RpcGroup.make(
   Rpc.make("GetGlobalRegex", { success: GlobalRegex, error: Schema.Union([...Errors]) }),
   /** Replaces them; StaleWrite unless `expectedRevision` is the revision the caller read. */
   Rpc.make("SetGlobalRegex", {
-    payload: { scripts: Schema.Array(RegexScript), expectedRevision: Schema.Int },
+    payload: { scripts: GlobalScripts, expectedRevision: Schema.Int },
     success: GlobalRegex,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),

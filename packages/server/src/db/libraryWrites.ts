@@ -149,7 +149,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       SELECT doc_hash, schema_version FROM entity_revisions WHERE id = ${id}`.pipe(Effect.map(([r]) => r!))
 
     /**
-     * A merge grants nothing the head didn't have: a preset's regex approval survives only with
+     * A merge grants nothing the head didn't have: a preset's or card's regex approval survives only with
      * the scripts it was given for, so scripts merged in from a file never arrive approved, and
      * the agent's permission to edit a note or module stays off where it was off (DESIGN §11,
      * §4.1a; @rp/shared/editing.ts).
@@ -157,7 +157,9 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const withoutGrants = (ref: RefRow, doc: Doc) =>
       Effect.map(lib.loadDoc(ref.head_revision_id), (ours) => {
         const next = withoutGrantedAgentEdits(ref.kind, ours, doc)
-        return ref.kind === "preset" && next.regex_approved === true && !keepsRegexApproval(ours, next)
+        return (ref.kind === "preset" || ref.kind === "card") &&
+          next.regex_approved === true &&
+          !keepsRegexApproval(ours, next)
           ? { ...next, regex_approved: false }
           : next
       })

@@ -8,6 +8,7 @@ import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate, Schema } from "effect"
 import { Fields, isFiniteNumber } from "./fields.ts"
 import { lorebookFromCharacterBook } from "./lorebook.ts"
+import { readRegex } from "./preset.ts"
 import { fail, type Limits, type Path } from "./safety.ts"
 
 type CardVersion = "v1" | "v2" | "v3"
@@ -75,7 +76,10 @@ const isLanguageMap = (value: unknown): value is Record<string, string> =>
 const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, issues: ReportBuilder): CardDoc => {
   const fields = new Fields(data, path, issues)
   // Notes an export put in `extensions.rp_harness` stay there: the importer makes them card notes.
-  const extensions = fields.object("extensions")
+  // ST's scoped regex scripts become the card's `regex`, as data; the file's approval, if any,
+  // is never read (DESIGN §11).
+  const { regex_scripts, ...extensions } = fields.object("extensions")
+  const regex = readRegex(regex_scripts, issues, [...path, "extensions", "regex_scripts"], "card")
   const book = fields.value<Record<string, unknown> | undefined>(
     "character_book",
     undefined,
@@ -110,6 +114,7 @@ const fromData = (data: Record<string, unknown>, path: Path, limits: Limits, iss
     avatar_media_id: null,
     ...(fields.has("assets") ? { assets: assets.filter(isAsset) } : {}),
     ...(book ? { character_book: lorebookFromCharacterBook(book, [...path, "character_book"], limits, issues) } : {}),
+    ...(regex.length > 0 ? { regex } : {}),
     extensions,
     ...fields.unknown(DATA_KEYS)
   }

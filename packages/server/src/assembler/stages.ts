@@ -30,7 +30,18 @@ import { placeBreakpoints } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImages } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
-import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
+import {
+  applyScripts,
+  compile,
+  makeScriptRunner,
+  PLACEMENT,
+  REGEX_MS,
+  type PromptScript,
+  type ScriptRunner
+} from "./regex.ts"
+import { builtinScriptSources, type ScriptSource } from "./scriptSources.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import {
   type Assembly,
   type AssemblerStage,
@@ -445,9 +456,17 @@ const macrosStage = sync("macros", (assembly) => {
   })
 })
 
-const scriptsStage = sync("scripts", (assembly) => {
-  assembly.scripts = promptScripts(assembly)
-})
+const scriptsStage: AssemblerStage = {
+  id: "scripts",
+  run: (assembly) =>
+    Effect.gen(function* () {
+      const lists: Array<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }> = []
+      for (const source of assembly.request.scriptSources?.list() ?? builtinScriptSources)
+        lists.push({ source, scripts: yield* source.scripts(assembly) })
+      assembly.scripts = compileScripts(assembly, lists)
+      return assembly
+    })
+}
 
 const placementOf = (entry: HistoryEntry, cast: Cast) =>
   sideOf(entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
@@ -975,8 +994,6 @@ const chatLine = (
   }
 }
 
-/** One context's time for the preset's regex scripts: V8 stops them once it's spent. */
-const REGEX_MS = 200
 /** Characters of text the scripts may make for one context, copied or replaced. */
 const REGEX_OUTPUT = 8_000_000
 /** Patterns longer than this, after the case rewrite, are left out. */
@@ -984,34 +1001,48 @@ const MAX_PATTERN = 2_000
 /** Scripts after this many are left out. */
 const MAX_SCRIPTS = 100
 
+const SCOPE_NAMES = { global: "global", preset: "preset's", character: "character's" } as const
+
 /**
- * The preset's prompt-only regex scripts, once the user approved them (ARCHITECTURE §9):
- * the pattern compiled, with its macros expanded when the script asks for that, and the
- * replacement and trim strings expanded. A script that can't run safely is left out and reported.
+ * The scripts of every registered list, in order (ARCHITECTURE §15): the prompt-only ones for
+ * a context, or for a rewrite the ones with neither flag; the pattern compiled, with its macros
+ * expanded when the script asks for that, and the replacement and trim strings expanded. Each
+ * list decides whether its scripts may run (approval). A script that can't run safely is left
+ * out and reported.
  */
-const promptScripts = (assembly: Assembly): ScriptRunner => {
-  const doc = need(assembly, "preset").doc
+const compileScripts = (
+  assembly: Assembly,
+  lists: ReadonlyArray<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }>
+): ScriptRunner => {
   const limits = { ms: REGEX_MS, output: REGEX_OUTPUT }
-  if (!doc.regex_approved) return makeScriptRunner([], limits)
-  const usable = doc.regex.filter((script) => !script.disabled && script.prompt_only && script.find_regex)
+  const wanted = (script: RegexScript) =>
+    assembly.request.rewrite ? !script.prompt_only && !script.markdown_only : script.prompt_only
+  const usable = lists.flatMap(({ source, scripts }) =>
+    scripts
+      .filter((script) => !script.disabled && wanted(script) && script.find_regex)
+      .map((script) => ({ source, script }))
+  )
   if (usable.length > MAX_SCRIPTS) {
     assembly.issues.push({
       kind: "regex_skipped",
-      message: `Only the first ${MAX_SCRIPTS} of the preset's ${usable.length} prompt regex scripts run.`
+      message: `Only the first ${MAX_SCRIPTS} of the ${usable.length} ${assembly.request.rewrite ? "" : "prompt "}regex scripts run.`
     })
   }
-  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script): Array<PromptScript> => {
+  const list = usable.slice(0, MAX_SCRIPTS).flatMap(({ source, script }): Array<PromptScript> => {
+    const what = source.scope === "preset" ? "The" : `The ${SCOPE_NAMES[source.scope]}`
     const skip = (why: string) => {
       assembly.issues.push({
         kind: "regex_skipped",
-        message: `The regex script "${script.name}" was left out: ${why}.`
+        message: `${what} regex script "${script.name}" was left out: ${why}.`
       })
       return []
     }
+    // The preset's pieces keep their ids; other lists' are namespaced by scope.
+    const key = source.scope === "preset" ? `regex:${script.id}` : `regex:${source.scope}:${script.id}`
     if (script.substitute_regex === "escaped") return skip("macros escaped into its pattern aren't supported")
     const find =
       script.substitute_regex === "raw"
-        ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
+        ? presetText(assembly, `${key}:find`, script.find_regex).text
         : script.find_regex
     const regex = compile(find)
     if (regex === "unsafe") {
@@ -1021,34 +1052,11 @@ const promptScripts = (assembly: Assembly): ScriptRunner => {
     }
     if (regex === null) return skip("its pattern isn't a valid regular expression")
     if (regex.source.length > MAX_PATTERN) return skip("its pattern is too long")
-    const replacement = script.replace_string
-      ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text
-      : ""
-    const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
-    return [{ script, regex, replacement, trim }]
+    const replacement = script.replace_string ? presetText(assembly, `${key}:replace`, script.replace_string).text : ""
+    const trim = script.trim_strings.map((t, i) => presetText(assembly, `${key}:trim:${i}`, t).text)
+    return [{ ref: { scope: source.scope, id: script.id, name: script.name }, script, regex, replacement, trim }]
   })
   return makeScriptRunner(list, limits)
-}
-
-/** The scripts' text for these messages, as one batch; what stopped them is reported once. */
-const applyScripts = (
-  assembly: Assembly,
-  runner: ScriptRunner,
-  items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>
-) => {
-  const expired = runner.expired
-  const { results, failed } = runner.apply(items)
-  const report = (message: string) => {
-    if (!assembly.issues.some((i) => i.message === message)) assembly.issues.push({ kind: "regex_skipped", message })
-  }
-  for (const [{ script }, why] of failed)
-    report(`The regex script "${script.name}" was skipped where it failed: ${why}.`)
-  if (!expired && runner.expired && runner.list.length > 0) {
-    report(
-      `The regex scripts ran out of time (${REGEX_MS} ms for one context): the rest of the messages are sent without them.`
-    )
-  }
-  return results
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */
@@ -1736,7 +1744,9 @@ const composeStage = sync("compose", (assembly) => {
   const projected = need(assembly, "projected")
   // The history stage ran the scripts on the verbatim messages it read; templates run here.
   const read = need(assembly, "scripted")
-  const scripted: Array<{ readonly text: string; readonly volatile: boolean } | undefined> = projected.map((p, i) =>
+  const scripted: Array<
+    { readonly text: string; readonly volatile: boolean; readonly applied?: ReadonlyArray<ScriptRef> } | undefined
+  > = projected.map((p, i) =>
     read.get(p.entry.versionId)?.depth === projected.length - 1 - i ? read.get(p.entry.versionId) : undefined
   )
   const rest = scripted.flatMap((s, i) => (s ? [] : [i]))
@@ -1750,6 +1760,10 @@ const composeStage = sync("compose", (assembly) => {
     }))
   )
   rest.forEach((index, i) => (scripted[index] = { ...ran[i]!, text: clipForSummary(assembly, ran[i]!.text) }))
+  // The inspector names the scripts that changed a message beside its source.
+  scripted.forEach((result, i) => {
+    if (result?.applied?.length) assembly.pieces[projected[i]!.piece]!.scripts = result.applied
+  })
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
   // Lore above the history is pinned: what follows the first place it can go is stable only
