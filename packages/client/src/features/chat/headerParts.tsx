@@ -23,7 +23,12 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
   })
     .section("all")
     .rows.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
-  return fork ? <PinButton fork={fork} /> : null
+  // A phone's header keeps its room for the name; the chat lists' rows have ☆ too.
+  return fork ? (
+    <span className="contents max-sm:hidden">
+      <PinButton fork={fork} />
+    </span>
+  ) : null
 }
 
 export function HeaderPanel({ view, panel }: ChatHeaderActionProps) {
