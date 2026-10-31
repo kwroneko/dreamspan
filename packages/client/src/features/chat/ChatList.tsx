@@ -18,7 +18,7 @@ import { Input } from "../../ui/Field.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useUnseen } from "../notices.tsx"
-import { shellAtom } from "../characters/shellData.tsx"
+import { type ShellFork, useShellForks } from "../characters/shellData.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { chatName, formatDay, formatWhen } from "./chatTitle.ts"
 
@@ -60,20 +60,19 @@ const plural = (n: number, one: string) => `${n.toLocaleString()} ${one}${n === 
 function Row({
   chat,
   summary,
+  fork,
   active,
   onDelete
 }: {
   chat: Chat
   summary: ChatSummary | undefined
+  /** Its current fork's shell row, for the pin. */
+  fork: ShellFork | undefined
   active: boolean
   onDelete: () => void
 }) {
   const unseen = useUnseen(chat.id)
   const search = useSearch({ strict: false }) as { panel?: string }
-  const shell = useAtomValue(shellAtom)
-  const fork = AsyncResult.isSuccess(shell)
-    ? shell.value.forks.find((f) => f.chat.id === chat.id && f.current)
-    : undefined
   const { title, unfinished } = importState(chat.title)
   const characters = (summary?.cast ?? []).filter((card) => !card.persona)
   const name = chatName(title, characters)
@@ -177,12 +176,22 @@ function Rows({ chats, onDelete }: { chats: ReadonlyArray<Chat>; onDelete: (chat
   const byId = new Map(
     (AsyncResult.isSuccess(summaries) ? summaries.value : []).map((summary) => [summary.chatId as string, summary])
   )
+  // The page's chats' current forks, for their pins: one read for the page.
+  const forks = useShellForks({
+    entity: null,
+    chat: null,
+    chats: chats.map((chat) => chat.id),
+    search: "",
+    sort: "recent",
+    sections: [{ id: "current", limit: chats.length }]
+  }).section("current").rows
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   return chats.map((chat) => (
     <Row
       key={chat.id}
       chat={chat}
       summary={byId.get(chat.id)}
+      fork={forks.find((f) => f.chat.id === chat.id)}
       active={pathname.startsWith(`/chats/${chat.id}`)}
       onDelete={() => onDelete(chat)}
     />

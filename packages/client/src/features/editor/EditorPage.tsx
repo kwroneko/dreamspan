@@ -142,7 +142,7 @@ export function Editor({
       />
     )
   }
-  if (state.snapshot === null) return <Loading label="Opening the editor…" />
+  if (state.snapshot === null) return <Loading label="Opening the editor…" onRetry={() => void store.load()} />
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
 

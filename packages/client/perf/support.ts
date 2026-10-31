@@ -3,7 +3,7 @@
 // No account has a password, so loopback is the local admin: the harness's RPCs need no login.
 import { type ChildProcess, spawn } from "node:child_process"
 import { resolve } from "node:path"
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
@@ -66,7 +66,7 @@ export const startServer = async (dataDir: string, env: Record<string, string> =
   throw new Error("no free port after 5 attempts")
 }
 
-type Client = RpcClient.FromGroup<typeof AppApi, RpcClientError.RpcClientError>
+type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
 
 /** Runs `use` with an RPC client acting as the local user, as another tab would. */
 export const withClient = async <A>(server: PerfServer, use: (client: Client) => Effect.Effect<A, unknown>) => {

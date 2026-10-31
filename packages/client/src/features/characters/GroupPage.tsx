@@ -141,5 +141,5 @@ export function GroupPage() {
       <FailureView cause={result.cause} onRetry={refresh} />
     )
   }
-  return <Loading label="Loading the group…" />
+  return <Loading label="Loading the group…" onRetry={refresh} />
 }

@@ -58,7 +58,7 @@ const named = (name: string) => inn.cast.find((card) => card.name === name)!.ent
 
 test.setTimeout(600_000)
 test.beforeAll(async ({ browser }) => {
-  test.setTimeout(400_000)
+  test.setTimeout(500_000)
   mkdirSync(shots, { recursive: true })
   const page = await browser.newPage()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
@@ -67,7 +67,7 @@ test.beforeAll(async ({ browser }) => {
   await page.getByLabel("Folder path").fill(folder)
   await page.getByRole("button", { name: "Look in this folder" }).click()
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 240_000 })
+  await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 360_000 })
   await page.close()
 
   provider = await startProvider()

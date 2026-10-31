@@ -5,6 +5,7 @@
 import { open, opendir, readdir, realpath, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
+import { ST_HEAD_BYTES, stMainChat } from "@rp/shared/stPlan.ts"
 import { FolderListing, StFolderEntry, StFolderUnreadable } from "@rp/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { defaultLimits } from "../formats/safety.ts"
@@ -15,8 +16,6 @@ const MAX_DEPTH = 6
 const MAX_ENTRIES = 500_000
 /** Folders that hold code, never ST data. */
 const SKIPPED = new Set(["node_modules", ".git"])
-/** How much of a chat's start is read for the parent it names. */
-const HEAD_BYTES = 64 * 1024
 
 const unreadable = (message: string) => new StFolderUnreadable({ message })
 
@@ -33,20 +32,27 @@ const kindOf = (segments: ReadonlyArray<string>) => {
 const mainChatOf = async (file: string) => {
   const handle = await open(file, "r")
   try {
-    const buffer = Buffer.alloc(HEAD_BYTES)
-    const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0)
-    const header: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0]!)
-    const metadata =
-      typeof header === "object" && header !== null ? (header as Record<string, unknown>).chat_metadata : null
-    const name =
-      typeof metadata === "object" && metadata !== null ? (metadata as Record<string, unknown>).main_chat : null
-    return typeof name === "string" && name !== "" ? name : null
+    const buffer = Buffer.alloc(ST_HEAD_BYTES)
+    const { bytesRead } = await handle.read(buffer, 0, ST_HEAD_BYTES, 0)
+    return stMainChat(buffer.subarray(0, bytesRead).toString("utf8"))
   } catch {
     return null
   } finally {
     await handle.close()
   }
 }
+
+/** A file of an ST user's folder as it is now, for reading it again (a chat linked from a report). */
+export const statStFolderFile = (root: string, path: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      if (!isAbsolute(root)) throw new Refused("Enter the folder's full path.")
+      const { size, mtimeMs } = await stat(join(root, path))
+      return { size, modifiedMs: mtimeMs }
+    },
+    catch: (error) =>
+      unreadable(error instanceof Refused ? error.message : "The file isn't in the folder any more, or can't be read.")
+  })
 
 /** The files under `path` that the import reads or lists. Symbolic links inside aren't followed. */
 export const scanStFolder = (path: string) =>

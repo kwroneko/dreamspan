@@ -618,7 +618,7 @@ function ChatSurface({
             {view.loading ? (
               // Takes the messages' place, so the composer is where it will stay.
               <div className="mx-auto min-h-0 w-full max-w-3xl flex-1 px-4">
-                <Loading label="Loading the chat…" />
+                <Loading label="Loading the chat…" onRetry={() => void session.open(slot ?? null)} />
               </div>
             ) : (
               <MessageList
