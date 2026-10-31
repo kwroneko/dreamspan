@@ -19,7 +19,7 @@ export function Segmented<Value extends string>({
     <div
       role="group"
       aria-label={label}
-      className={`inline-flex rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"}`}
+      className={`inline-flex w-fit rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"}`}
     >
       {options.map((option) => (
         <button

@@ -31,12 +31,26 @@ export const messageHeaderDetails = defineSlot<{ entry: PathEntry; session: Chat
   "message.header-details"
 )
 /** In a reply's reasoning header, beside its toggle: Copy reasoning, Collapse all (Reasoning.tsx). */
-export const reasoningActions = defineSlot<{
+export interface ReasoningActionProps {
   readonly version: import("@rp/shared/chat.ts").Version
   /** The reasoning as stored, or as streamed so far: never the rendered Markdown. */
   readonly text: string
   readonly streaming: boolean
-}>("message.reasoning-actions")
+  /** Which panel: the provider's reasoning, or the reply's own tagged sections (spec/REPLY-SECTIONS.md). */
+  readonly kind: "reasoning" | "sections"
+  /** Whether it's the reply's first panel shown (Collapse all shows once, there). */
+  readonly first: boolean
+  readonly session: ChatSession
+}
+export const reasoningActions = defineSlot<ReasoningActionProps>("message.reasoning-actions")
+/**
+ * The collapsible panels above a reply's text: the provider's Reasoning, then the reply's
+ * own tagged sections ("Thinking in the reply", spec/REPLY-SECTIONS.md), each an entry here.
+ */
+export const reasoningPanels = defineSlot<{
+  readonly version: import("@rp/shared/chat.ts").Version
+  readonly session: ChatSession
+}>("message.reasoning-panels")
 /**
  * The message stream around a message: `below` it (each message), and `above` it (the first
  * message of the path). The insertion editor opens here (insertMessage/).
@@ -96,6 +110,10 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
     )
 }
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
+/** Actions beside a failed version's error, such as saving a context size its error states. */
+export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
+  "message.failure-actions"
+)
 /** Notes about the next request just above the composer, such as its images' token estimate. */
 export const chatComposerNotes = defineSlot<{ view: ChatView }>("chat.composer-notes")
 

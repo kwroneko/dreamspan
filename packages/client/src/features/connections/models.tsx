@@ -5,8 +5,8 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 // A connection's models: what the provider lists, merged with the user's edits
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
-import { type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
-import { type FormEvent, useState } from "react"
+import { type CatalogMatch, type FieldSource, type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
+import { type FormEvent, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -19,25 +19,58 @@ import type { ConnectionSectionProps } from "./detail.tsx"
 
 const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n))
 
+/** Where a field's value came from, in words. */
+export const sourceTitle = (
+  source: FieldSource,
+  model: { readonly catalog: CatalogMatch | null },
+  unknown = "Unknown: no source reports it, so a safe default is used"
+) =>
+  source === "user"
+    ? "Set by you"
+    : source === "learned"
+      ? "Learned from the provider's context-length error"
+      : source === "catalog" && model.catalog
+        ? `From ${model.catalog.label} (${model.catalog.match})`
+        : source === "unknown"
+          ? unknown
+          : "Reported by the provider"
+
 /** A field's value, marked when no source knows it (the default is shown, never as fact). */
 function Value({
   resolved,
-  show
+  model,
+  show,
+  assumed = false
 }: {
   resolved: ReturnType<typeof resolveModel>["context"]
+  model: ReturnType<typeof resolveModel>
   show: (n: number) => string
+  /** Says "assumed" instead of "?": the context window's default is a guess shown as one. */
+  assumed?: boolean
 }) {
   return resolved.source === "unknown" ? (
-    <span className="text-muted" title="Unknown: no source reports it, so a safe default is used">
-      {show(resolved.value)}?
+    <span
+      className="text-muted"
+      title={
+        assumed
+          ? "Assumed: nothing reports this model's window. Set it in Edit, or refresh to match it in a catalog."
+          : sourceTitle(resolved.source, model)
+      }
+    >
+      {show(resolved.value)}
+      {assumed ? " (assumed)" : "?"}
     </span>
   ) : (
-    <span title={resolved.source === "user" ? "Set by you" : "From the provider"}>
+    <span title={sourceTitle(resolved.source, model)}>
       {show(resolved.value)}
       {resolved.source === "user" && "*"}
+      {resolved.source === "learned" && " (learned)"}
     </span>
   )
 }
+
+/** The model settings fields a link can open at. */
+export type ModelField = "context" | "openai_max_context" | "openai_max_tokens"
 
 const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
   (
@@ -104,8 +137,25 @@ const DEFAULT_LABELS: Partial<Record<SamplerKey, string>> = {
 }
 
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
-export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?: () => void }) {
+export function ModelSettingsEditor({
+  model,
+  onSaved,
+  focus
+}: {
+  model: Model
+  onSaved?: () => void
+  /** A field to focus when it opens, as a link from the budget note asks. */
+  focus?: ModelField | undefined
+}) {
   const action = useAction()
+  const form = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    if (!focus) return
+    const input = form.current?.querySelector<HTMLInputElement>(`[data-model-field="${focus}"]`)
+    input?.scrollIntoView({ block: "center" })
+    input?.focus()
+  }, [focus])
+  const forget = useAction()
   const [committed, setCommitted] = useState<Model | null>(null)
   const savedModel = committed ?? model
   const durable = useUserDraft(
@@ -187,6 +237,8 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
     const overrides: ModelOverrides = Object.fromEntries(
       Object.entries({
         ...extra,
+        // A learned size is saved and forgotten by its own buttons, never by a draft's stale copy.
+        learned: savedModel.overrides.learned,
         settings: parsed,
         name: name.trim() || undefined,
         context: contextValue.value ?? undefined,
@@ -225,8 +277,13 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
       })
   }
 
+  // What an empty window field means: the sources under the user's own value.
+  const { context: _own, ...beneathOverrides } = savedModel.overrides
+  void _own
+  const effective = resolveModel(model.key, savedModel.upstream, beneathOverrides)
+  const learned = savedModel.overrides.learned
   return (
-    <form onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
+    <form ref={form} onSubmit={submit} className="flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" noValidate>
       <UserDraftStatus draft={durable} />
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
@@ -234,14 +291,34 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label="Context window (tokens)"
-          description="The most the model takes. Empty: what the provider reports."
+          description={
+            <>
+              The most the model takes. Empty:{" "}
+              {effective.context.source === "unknown" ? (
+                <>
+                  <strong className="font-medium text-warning">
+                    assumed {effective.context.value.toLocaleString()}
+                  </strong>
+                  , since nothing reports this model&rsquo;s window: set it here, or Refresh from provider to match it
+                  in a catalog.
+                </>
+              ) : (
+                `${effective.context.value.toLocaleString()}, ${sourceTitle(effective.context.source, effective).toLowerCase()}.`
+              )}
+            </>
+          }
           error={contextValue.problem}
         >
           <Input
             value={context}
             onValueChange={setContext}
             inputMode="numeric"
-            placeholder={model.upstream.context?.toString()}
+            data-model-field="context"
+            placeholder={
+              effective.context.source === "unknown"
+                ? `${effective.context.value} (assumed)`
+                : String(effective.context.value)
+            }
           />
         </Field>
         <Field
@@ -257,6 +334,30 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
           />
         </Field>
       </div>
+      {learned && (
+        <Alert
+          title={`Learned context size: ${learned.context.toLocaleString()} tokens`}
+          actions={
+            <Button
+              variant="ghost"
+              pending={forget.pending}
+              onClick={async () => {
+                const result = await forget.run(
+                  (client) => client("SaveLearnedContext", { modelId: model.id, context: null }),
+                  ["models"]
+                )
+                if (result.ok) setCommitted(result.value)
+              }}
+            >
+              Forget it
+            </Button>
+          }
+        >
+          Saved from the provider&rsquo;s context-length error on {new Date(learned.at).toLocaleDateString()}. It stands
+          in for the provider&rsquo;s figure; a window you set above wins over it.
+          <ErrorAlert error={forget.error} />
+        </Alert>
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Vision">
           <Select items={triItems} value={vision} onValueChange={setVision} />
@@ -280,6 +381,7 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
           return (
             <Field key={key} label={label}>
               <Input
+                data-model-field={key}
                 value={drafts[key] ?? (value === undefined ? "" : String(value))}
                 placeholder={DEFAULT_LABELS[key] ?? String(DEFAULT_SAMPLERS[key])}
                 inputMode={numeric ? "decimal" : undefined}
@@ -387,15 +489,78 @@ export function ModelSettingsEditor({ model, onSaved }: { model: Model; onSaved?
   )
 }
 
-function EditModelDialog({ model, onOpenChange }: { model: Model; onOpenChange: (open: boolean) => void }) {
+function EditModelDialog({
+  model,
+  onOpenChange,
+  focus
+}: {
+  model: Model
+  onOpenChange: (open: boolean) => void
+  focus?: ModelField | undefined
+}) {
   return (
     <Dialog
       open
       onOpenChange={onOpenChange}
       title={`Edit ${model.key}`}
       description="Model settings apply everywhere this connection and model are used."
+      initialFocus={
+        focus ? () => document.querySelector<HTMLElement>(`[role="dialog"] [data-model-field="${focus}"]`) : undefined
+      }
     >
-      <ModelSettingsEditor model={model} onSaved={() => onOpenChange(false)} />
+      <ModelSettingsEditor model={model} focus={focus} onSaved={() => onOpenChange(false)} />
+    </Dialog>
+  )
+}
+
+/** A model's settings in a dialog, opened at a field: the budget note's and the refusal's action. */
+export function ModelSettingsDialog({
+  connectionId,
+  modelId,
+  focus,
+  onOpenChange
+}: {
+  connectionId: string
+  modelId: string
+  focus?: ModelField | undefined
+  onOpenChange: (open: boolean) => void
+}) {
+  const load = useAction()
+  const [model, setModel] = useState<Model | null>(null)
+  const [missing, setMissing] = useState(false)
+  useEffect(() => {
+    let live = true
+    void load
+      .run((client) =>
+        client("ListModels", { connectionId: connectionId as Model["connectionId"], includeHidden: true })
+      )
+      .then((result) => {
+        if (!live || !result.ok) return
+        const found = result.value.find((entry) => entry.id === modelId) ?? null
+        setModel(found)
+        setMissing(found === null)
+      })
+    return () => {
+      live = false
+    }
+  }, [connectionId, modelId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // One dialog throughout: the form replaces the loading line, and focuses its field when it mounts.
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title={model ? `Edit ${model.key}` : "Model settings"}
+      description="Model settings apply everywhere this connection and model are used."
+    >
+      {model ? (
+        <ModelSettingsEditor model={model} focus={focus} onSaved={() => onOpenChange(false)} />
+      ) : load.error ? (
+        <ErrorAlert error={load.error} />
+      ) : missing ? (
+        <p className="text-sm text-muted">This model is gone: its connection or the model was deleted.</p>
+      ) : (
+        <p className="text-sm text-muted">Loading the model…</p>
+      )}
     </Dialog>
   )
 }
@@ -464,10 +629,10 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
         <p className="font-mono text-xs text-muted [overflow-wrap:anywhere]">{model.key}</p>
         <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
           <span>
-            Context <Value resolved={resolved.context} show={tokens} />
+            Context <Value resolved={resolved.context} model={resolved} show={tokens} assumed />
           </span>
           <span>
-            Output <Value resolved={resolved.maxOutput} show={tokens} />
+            Output <Value resolved={resolved.maxOutput} model={resolved} show={tokens} />
           </span>
           {resolved.price && (
             <span className="text-muted">
@@ -522,7 +687,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Models"
-        description="What the provider lists, with your edits on top. * marks your values, ? values nobody reports."
+        description="What the provider lists, with your edits on top. * marks your values, ? values nobody reports; a context size nobody reports is assumed."
         actions={
           <>
             <Button

@@ -118,8 +118,17 @@ export const makeProviderHandlers = Effect.gen(function* () {
       ),
     AddUserModel: ({ connectionId, key, overrides }) =>
       Effect.flatMap(userId, (id) =>
-        writer.AddUserModel({ userId: id, connectionId, key, overrides }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+        providers.catalogUpstream(id, connectionId, key).pipe(
+          Effect.flatMap((upstream) => writer.AddUserModel({ userId: id, connectionId, key, overrides, upstream })),
+          Effect.tap(() => warmth.refreshUser(id))
+        )
       ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("AddUserModel"))),
+    SaveLearnedContext: ({ modelId, context }) =>
+      Effect.flatMap(userId, (id) =>
+        writer
+          .SetLearnedContext({ userId: id, modelId, context, at: Date.now() })
+          .pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], toServerError("SaveLearnedContext"))),
     EditModel: ({ modelId, overrides, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer

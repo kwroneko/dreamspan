@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 39
+export const ASSEMBLER_VERSION = 40
 
 export type Role = "system" | "user" | "assistant"
 
@@ -250,6 +250,8 @@ export interface CardOverride {
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly contextBudget?: ContextBudget
+  /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
+  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
   readonly summaryFill?: import("@rp/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
@@ -431,6 +433,8 @@ export interface Generation {
   readonly leafSlotId: string | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
+  /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
+  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
   /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
   readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
   /** What the user should know about the context, kept on its rollout for the version to show. */
@@ -452,6 +456,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
     request: snapshot.request,
+    ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,
     variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
     issues: snapshot.lcm ? snapshot.issues.filter((issue) => issue.kind !== "history_truncated") : snapshot.issues,
@@ -522,6 +527,11 @@ export interface HistoryEntry {
    */
   readonly side: "user" | "assistant"
   readonly content: string
+  /**
+   * The reply's leading tagged sections in their tags, as they came (spec/REPLY-SECTIONS.md):
+   * not part of `content`; sent before it only where the preset sends sections back.
+   */
+  readonly sectionsPrefix?: string
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
   /** Whether a template's variable writes are recorded already, as state events of its version. */
@@ -614,6 +624,9 @@ export interface ModelInput {
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
   /** The context window when some source reported it. */
   readonly context: number | null
+  /** Where `context` came from, and the catalog entry when a catalog gave it; absent on older snapshots. */
+  readonly contextSource?: import("@rp/shared/providers.ts").FieldSource
+  readonly contextCatalog?: string
   /** A reported output ceiling; absent on older snapshots. */
   readonly vision?: boolean
   readonly maxImages?: number

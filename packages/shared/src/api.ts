@@ -255,6 +255,15 @@ export class AppApi extends RpcGroup.make(
     success: Model,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
+  /**
+   * Saves a context size a provider stated in its context-length error as the model's learned
+   * size (`ModelOverrides.learned`), when the user asks; null forgets it.
+   */
+  Rpc.make("SaveLearnedContext", {
+    payload: { modelId: ModelId, context: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))) },
+    success: Model,
+    error: Schema.Union([...StorageErrors])
+  }),
   Rpc.make("SetModelHidden", {
     payload: { modelId: ModelId, hidden: Schema.Boolean },
     success: Model,

@@ -1,7 +1,9 @@
-// A one-click public-place toggle, with concealment modes and account-owned portrait size.
+// A one-click public-place toggle (an eye, struck through while images are blurred or hidden),
+// with concealment modes and account-owned portrait size.
 import { useViewPrefs } from "./viewPrefs.ts"
 import { useState } from "react"
 import { Button } from "./Button.tsx"
+import { Icon } from "./Icon.tsx"
 import { Field } from "./Field.tsx"
 import { Popover } from "./Popover.tsx"
 import { Select } from "./Select.tsx"
@@ -17,14 +19,15 @@ export function ImageControls() {
     <div className="flex shrink-0 items-center gap-1">
       <Tooltip label={`${label} (${IMAGES_SHORTCUT})`} side="bottom">
         <Button
-          variant="secondary"
+          variant="ghost"
           aria-label={label}
           aria-keyshortcuts={IMAGES_SHORTCUT}
           aria-pressed={prefs.mode !== "show"}
-          className="h-8 px-2 text-xs"
+          className="h-8 px-2"
           onClick={toggleImages}
         >
-          Images: {prefs.mode === "show" ? "shown" : prefs.mode === "blur" ? "blurred" : "hidden"}
+          {/* An icon, so it doesn't take the header's room; the tooltip says what a click does. */}
+          <Icon name={prefs.mode === "show" ? "eye" : "eyeOff"} />
         </Button>
       </Tooltip>
       <Popover

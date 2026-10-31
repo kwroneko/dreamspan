@@ -152,7 +152,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
       assert.strictEqual((yield* api.GetGenerationDefaults()).preset, chosen)
     })
   )
-  it.effect("reports a selected file absent from the folder, including the built-in budget on failure", () =>
+  it.effect("reports a selected file absent from the folder, and the built-in budget's assumed size", () =>
     Effect.gen(function* () {
       const api = yield* client()
       yield* api.SetGenerationDefaults({ defaults: { model: null, preset: null } })
@@ -172,13 +172,19 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "90 secon
       )
       const chat = (yield* api.ListChats({ limit: 10, before: null }))[0]!
       const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
-      assert.isNull(next.historyStart)
+      // No model: the window is assumed at a modern size, and said to be (owner report 2026-10-31).
       assert.deepInclude(next.budget, {
-        maximum: 8192,
-        target: 6553,
+        maximum: 128_000,
+        target: 102_400,
         responseReserve: 4096,
         presetName: "Default (built-in)",
         builtinPreset: true
+      })
+      assert.deepStrictEqual(next.budget?.origins, {
+        context: "assumed",
+        reserve: "default",
+        target: "default",
+        model: null
       })
       assert.deepStrictEqual(next.preset, { ref: null, name: "Default (built-in)", scope: "builtin" })
       assert.isAbove(next.budget!.nonHistoryTokens, 5000)

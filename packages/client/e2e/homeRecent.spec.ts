@@ -1,0 +1,164 @@
+// The home page and sidebar after an ST import (UI audit, 2026-10-31): Recent orders the
+// characters by their chats' imported dates, in both grids; group tiles count their members
+// and lay out three faces with no empty slot; the sidebar's Start a chat searches the
+// characters, recent first; the header's image toggle is an icon; the open chat is marked.
+import { expect, test, type Page } from "@playwright/test"
+import { Effect } from "effect"
+import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
+import { asUser, loginCookie } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile(withAdmin)
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+test.setTimeout(120_000)
+
+test.beforeAll(async () => {
+  const cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  const run = await admin((api) => api.StartStImport({ unsupported: [] }))
+  // Imported in this order, so each card is newer than the one before and than every
+  // imported message (2025): the card's own time would put Cara first and Bob last.
+  const chat = (name: string, minute: number) =>
+    jsonl([
+      header({}),
+      message({ name, user: false, mes: `${name} waves.`, minute }),
+      message({ name: "Sam", user: true, mes: "Hello.", minute: minute + 1 })
+    ])
+  for (const [path, body] of [
+    ["characters/Bob.png", card("Bob", "Bob waves.")],
+    ["characters/Alice.png", card("Alice", "Alice waves.")],
+    ["characters/Cara.png", card("Cara", "Cara waves.")],
+    ["chats/Bob/Bob - late.jsonl", chat("Bob", 50)],
+    ["chats/Alice/Alice - early.jsonl", chat("Alice", 5)]
+  ] as const) {
+    const response = await fetch(
+      `${server().url}/st-import/file?${new URLSearchParams({ import: run.importId, path })}`,
+      {
+        method: "POST",
+        headers: { cookie, "content-type": "application/octet-stream" },
+        body: new Uint8Array(typeof body === "string" ? Buffer.from(body) : body)
+      }
+    )
+    expect(response.status).toBe(200)
+  }
+  await admin((api) =>
+    Effect.gen(function* () {
+      const ids = []
+      for (const name of ["Dax", "Eve", "Fin"]) ids.push((yield* api.CreateCard({ label: name, name })).entityId)
+      const trio = yield* api.CreateChat({ title: "The Trio" })
+      for (const entityId of ids)
+        yield* api.ChangeCast({ chatId: trio.id, slotId: null, change: { _tag: "Join", entityId } })
+      // Today, so the trio's members come first.
+      yield* api.SendMessage({ chatId: trio.id, parentSlotId: null, branch: false, content: "Three of us." })
+    })
+  )
+})
+
+const sidebar = (page: Page) => page.getByRole("complementary").first()
+const tiles = (page: Page) =>
+  page
+    .getByRole("main")
+    .getByLabel("Characters", { exact: true })
+    .getByRole("button", { name: /^Open / })
+const labels = (buttons: ReturnType<typeof tiles>) =>
+  buttons.evaluateAll((nodes) =>
+    nodes.map((n) =>
+      n
+        .getAttribute("aria-label")!
+        .replace(/^Open /, "")
+        .replace(/ · .*$/, "")
+    )
+  )
+
+for (const width of [1440, 390]) {
+  test(`${width}: Recent orders characters by their imported chats, the never-used last`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(server().url)
+    await expect.poll(() => labels(tiles(page))).toContain("Cara")
+    const order = await labels(tiles(page))
+    // The trio's chat is today's, Bob's imported one later than Alice's; Cara has none.
+    expect(order.slice(0, 3).sort()).toEqual(["Dax", "Eve", "Fin"])
+    expect(order.slice(3)).toEqual(["Bob", "Alice", "Cara"])
+    // No dead tab.
+    await expect(page.getByRole("group", { name: "Show", exact: true }).getByRole("button")).toHaveText([
+      "All",
+      "With chats",
+      "Never used",
+      "Groups"
+    ])
+    if (width === 1440) {
+      // The left panel's grid uses the same key.
+      await sidebar(page).getByRole("group", { name: "Left panel", exact: true }).getByText("Characters").click()
+      const side = sidebar(page).getByRole("button", { name: /^Open (?!chat )/ })
+      await expect(side.first()).toBeVisible()
+      expect((await labels(side)).slice(3)).toEqual(["Bob", "Alice", "Cara"])
+    }
+  })
+}
+
+test("a group tile counts its members and shows three faces with no empty slot", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  await page.getByRole("group", { name: "Show", exact: true }).getByRole("button", { name: "Groups" }).click()
+  const tile = page.getByRole("main").getByLabel("Groups", { exact: true }).getByRole("button", {
+    name: "Open chat The Trio"
+  })
+  await expect(tile).toContainText("3 members")
+  await expect(tile).not.toContainText("Dax, Eve")
+  const faces = await tile.locator("[data-portrait]").evaluateAll((nodes) =>
+    nodes.map((n) => {
+      const r = n.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y, w: r.width }
+    })
+  )
+  const box = (await tile.locator("[data-portrait]").first().locator("xpath=../..").boundingBox())!
+  expect(faces).toHaveLength(3)
+  // Two side by side, the third below them, centred, the same size.
+  expect(Math.abs(faces[0]!.y - faces[1]!.y)).toBeLessThan(1)
+  expect(faces[2]!.y).toBeGreaterThan(faces[0]!.y)
+  expect(Math.abs(faces[2]!.x - (box.x + box.width / 2))).toBeLessThan(2)
+  expect(Math.abs(faces[2]!.w - faces[0]!.w)).toBeLessThan(1)
+})
+
+for (const width of [1440, 390]) {
+  test(`${width}: Start a chat finds a character, recent first, and opens a new chat with it`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(server().url)
+    if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
+    const panel = width === 390 ? page.locator(".fixed.inset-0") : sidebar(page)
+    // The header holds the action and an icon image toggle, no "Images: shown" text.
+    await expect(panel.getByRole("button", { name: "Blur all images" })).toHaveText("")
+    await expect(panel.getByRole("button", { name: "Unsaved text", exact: true })).toBeVisible()
+    await panel.getByRole("button", { name: "Start a chat", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "Start a chat with…" })
+    const list = dialog.getByRole("list", { name: "Characters" }).getByRole("link")
+    await expect(list.first()).toBeVisible()
+    const names = await list.locator("span[title]").allTextContents()
+    expect(names.slice(3)).toEqual(["Bob", "Alice", "Cara"])
+    await expect(list.last()).toContainText("Never used")
+    await expect(dialog.getByLabel("Find a character")).toBeFocused()
+    await dialog.getByLabel("Find a character").fill("ali")
+    await expect(list).toHaveCount(1)
+    await page.keyboard.press("Enter")
+    await expect(page).toHaveURL(/\/cards\/[^/]+\/chat\?/)
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByRole("main")).toContainText("Alice waves.")
+    // The sheet closes on the pick, as on any other.
+    if (width === 390) await expect(page.getByRole("button", { name: "Close the menu" })).toHaveCount(0)
+  })
+}
+
+test("the chat open in the middle is marked in the left panel's list", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(server().url)
+  const row = sidebar(page)
+    .getByRole("button", { name: /^Open chat Bob/ })
+    .first()
+  await row.click()
+  await expect(page).toHaveURL(/\/chats\//)
+  await expect(row).toHaveAttribute("aria-current", "page")
+  await expect(sidebar(page).locator('[aria-current="page"]')).toHaveCount(1)
+})

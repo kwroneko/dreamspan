@@ -3,6 +3,7 @@
 // settings, and `groups/*.json` for group chats. Read from ST's public source
 // (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`, `global.d.ts`).
 // Only what the importer maps is read; the rest of `settings.json` is dropped unread.
+import { literalPattern, type ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { CARD_SCHEMA_VERSION, type CardDoc } from "@rp/shared/docs/card.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
@@ -47,10 +48,13 @@ interface StSummarySettings {
 }
 
 export interface StSettings {
+  /** `power_user` settings that are a preset's here, copied into each imported preset. */
   readonly textSwitches?: {
-    readonly pin_examples: boolean
-    readonly strip_examples: boolean
-    readonly collapse_newlines: boolean
+    readonly pin_examples?: boolean
+    readonly strip_examples?: boolean
+    readonly collapse_newlines?: boolean
+    /** ST's reasoning formatting (spec/REPLY-SECTIONS.md), its literal tags as patterns. */
+    readonly reply_sections?: ReplySectionSettings
   }
   readonly selectedPreset: string | null
   /** ST's default persona avatar, used by an imported chat without a user turn or lock. */
@@ -106,6 +110,25 @@ const object = (value: unknown): Record<string, unknown> => (Predicate.isObject(
 const numberOr = (value: unknown, fallback: number) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback
 
+/**
+ * ST's reasoning formatting (`power_user.reasoning`) as a preset's reply-section setting:
+ * Auto-parse is the switch, its prefix and suffix one pair matched literally and with case,
+ * as ST's `startsWith` and `includes` do; Add to prompts sends back the last `max_additions`.
+ */
+const replySectionsFrom = (reasoning: Record<string, unknown>): ReplySectionSettings => {
+  const prefix = typeof reasoning.prefix === "string" ? reasoning.prefix : ""
+  const suffix = typeof reasoning.suffix === "string" ? reasoning.suffix : ""
+  const additions = Math.trunc(numberOr(reasoning.max_additions, 1))
+  return {
+    enabled: reasoning.auto_parse === true && prefix !== "" && suffix !== "",
+    pairs:
+      prefix !== "" && suffix !== ""
+        ? [{ open: literalPattern(prefix), close: literalPattern(suffix), case_sensitive: true }]
+        : [],
+    send_back: reasoning.add_to_prompts === true ? Math.min(1000, Math.max(0, additions)) : 0
+  }
+}
+
 export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSettings => {
   const settings = object(parseJson(bytes, stDataLimits.maxSettingsBytes, defaultLimits, issues))
   const selectedPreset = object(settings.oai_settings).preset_settings_openai
@@ -153,15 +176,17 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
         ]
       : []
   })
+  const switches = ["pin_examples", "strip_examples", "collapse_newlines"].some((key) => powerUser[key] !== undefined)
+    ? {
+        pin_examples: Boolean(powerUser.pin_examples),
+        strip_examples: Boolean(powerUser.strip_examples),
+        collapse_newlines: Boolean(powerUser.collapse_newlines)
+      }
+    : null
+  const reasoning = Predicate.isObject(powerUser.reasoning) ? replySectionsFrom(powerUser.reasoning) : null
   return {
-    ...(["pin_examples", "strip_examples", "collapse_newlines"].some((key) => powerUser[key] !== undefined)
-      ? {
-          textSwitches: {
-            pin_examples: Boolean(powerUser.pin_examples),
-            strip_examples: Boolean(powerUser.strip_examples),
-            collapse_newlines: Boolean(powerUser.collapse_newlines)
-          }
-        }
+    ...(switches || reasoning
+      ? { textSwitches: { ...switches, ...(reasoning ? { reply_sections: reasoning } : {}) } }
       : {}),
     selectedPreset: typeof selectedPreset === "string" && selectedPreset !== "" ? bounded(selectedPreset) : null,
     defaultPersona:

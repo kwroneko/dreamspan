@@ -1,6 +1,7 @@
 import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // The format workers' operations (ARCHITECTURE.md §11.2): parsing an uploaded file and
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
+import { ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
 import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
@@ -130,10 +131,12 @@ const StPersona = Schema.Struct({
 })
 export type StPersona = typeof StPersona.Type
 
+/** ST's global `power_user` settings that are a preset's here, copied into each imported preset. */
 const StTextSwitches = Schema.Struct({
-  pin_examples: Schema.Boolean,
-  strip_examples: Schema.Boolean,
-  collapse_newlines: Schema.Boolean
+  pin_examples: Schema.optionalKey(Schema.Boolean),
+  strip_examples: Schema.optionalKey(Schema.Boolean),
+  collapse_newlines: Schema.optionalKey(Schema.Boolean),
+  reply_sections: Schema.optionalKey(ReplySectionSettings)
 })
 
 export class StSettings extends Schema.Class<StSettings>("StSettings")({

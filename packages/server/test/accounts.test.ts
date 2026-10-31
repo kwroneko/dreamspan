@@ -10,6 +10,8 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { AppConfig } from "../src/config.ts"
 import { Reader } from "../src/db/Database.ts"
+import { AddressResolver, type Resolve } from "../src/net/addressSet.ts"
+import { TrustedAddresses } from "../src/net/exposure.ts"
 import { ServerLive } from "../src/server.ts"
 import { client, login, outcome, post, serverPort, testConfig, withServer } from "./support/config.ts"
 
@@ -371,6 +373,34 @@ describe.skipIf(lanIp === undefined)("accounts beyond loopback", () => {
       )
     )
   })
+
+  it.live(
+    "an ALLOWED_IPS name grants passwordless use while it resolves to the peer, and only then",
+    () => {
+      const config = testConfig({ host: "0.0.0.0", allowedIps: ["lanbox"] })
+      let lanbox: ReadonlyArray<string> = [lanIp!]
+      const resolve: Resolve = async (name) => (name === "lanbox" ? lanbox : [])
+      const status = Effect.flatMap(serverPort, (port) =>
+        Effect.promise(() => fetch(`http://${lanIp}:${port}/healthz`).then((response) => response.status))
+      )
+      return Effect.gen(function* () {
+        const lan = yield* client({}, lanIp)
+        assert.strictEqual((yield* lan.Whoami()).handle, "local")
+        assert.strictEqual(yield* status, 200)
+        // The name stops resolving: the next resolution takes the address out. A refused
+        // connection asks for one 5 s after the last, rather than the background's 30 s.
+        lanbox = []
+        ;(yield* TrustedAddresses).allowedIps.refreshSoon()
+        assert.strictEqual((yield* lan.Whoami()).handle, "local")
+        yield* Effect.sleep("5500 millis")
+        // The socket opened while it was allowed stays open, but isn't the local admin any more.
+        assert.strictEqual(yield* outcome(lan.Whoami()), "Unauthorized")
+        assert.strictEqual(yield* status, 403)
+        assert.strictEqual((yield* (yield* client()).Whoami()).handle, "local")
+      }).pipe(Effect.scoped, withServer(config), Effect.provideService(AddressResolver, resolve))
+    },
+    60_000
+  )
 
   it.live("a peer can't claim to be loopback by sending the peer header itself", () => {
     const config = testConfig({ host: "0.0.0.0", allowedIps: [lanIp!], loopbackRequiresLogin: false })

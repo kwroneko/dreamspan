@@ -4,6 +4,7 @@
 import type { ChatId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import { Context, Layer, Option, Schema, type Stream } from "effect"
 
 /** A position in a chat to generate at: a new version of `slotId`, on the path through it. */
@@ -25,19 +26,38 @@ export interface GenerationRequest {
    * and what's generated is appended. The generator itself reads what it continues from the
    * version (its source), as the context assembler does.
    */
-  readonly initial?: { readonly text: string; readonly reasoning: string }
+  readonly initial?: {
+    readonly text: string
+    readonly reasoning: string
+    /** Its reply sections: one left open (a cutoff inside it) is where the text goes on. */
+    readonly sections?: ReplySections
+  }
 }
 
 /**
- * What a generator streams: text as plain strings, and the model's reasoning ("thinking")
- * apart from it, kept on the version and never sent back (DESIGN §7.4).
+ * What a generator streams: text as plain strings, the model's reasoning ("thinking") apart
+ * from it, kept on the version and never sent back (DESIGN §7.4), and the reply sections.
  */
-export type GenerationChunk = string | { readonly reasoning: string }
+export type GenerationChunk =
+  | string
+  | { readonly reasoning: string }
+  /**
+   * The reply's leading tagged sections as parsed so far (a reply parser's, replySections.ts),
+   * and the text this adds to their panel.
+   */
+  | { readonly sections: ReplySections; readonly text: string }
+  /**
+   * The text a reply parser holds back for now (a tag may be starting), where it goes if
+   * the reply ends here: a stop, a crash or a failure keeps it. Replaces the last one held.
+   */
+  | { readonly held: string; readonly into: "body" | "section" }
 
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
   class: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  /** A context-length error's stated limit and the model it applies to (`VersionError.contextLimit`). */
+  contextLimit: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, modelId: Schema.String }))
 }) {}
 
 export interface GeneratorShape {

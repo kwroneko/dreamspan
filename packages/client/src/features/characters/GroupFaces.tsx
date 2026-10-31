@@ -1,5 +1,6 @@
-// A group's members as one picture, as ST's group tiles show them: two side by side, three
-// as one tall and two stacked, four or more in a 2×2 grid with "+N" on the last for the rest.
+// A group's members as one picture: two side by side, three as two above one centred (every
+// face whole, the same size, and no empty slot), four or more in a 2×2 grid with "+N" on the
+// last for the rest.
 import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 
@@ -9,7 +10,10 @@ export function GroupFaces({ members }: { members: ChatGroup["members"] }) {
   return (
     <span aria-hidden="true" className="grid size-full grid-cols-2 content-center gap-1 bg-surface-raised p-2">
       {shown.map((member, i) => (
-        <span key={member.entityId} className="relative min-w-0">
+        <span
+          key={member.entityId}
+          className={`relative min-w-0 ${shown.length === 3 && i === 2 ? "col-span-2 w-[calc(50%-0.125rem)] justify-self-center" : ""}`}
+        >
           <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="fill" />
           {more > 0 && i === shown.length - 1 && (
             <span className="absolute inset-0 flex items-center justify-center bg-canvas/70 text-lg font-semibold text-text">

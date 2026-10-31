@@ -35,6 +35,7 @@ import {
   type EffectiveModel,
   type Model,
   type ModelId,
+  type ModelUpstream,
   type ProviderKind,
   ProviderKindInfo,
   type ProxyMode,
@@ -50,6 +51,8 @@ import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } fro
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
 import { Secrets } from "../secrets.ts"
 import { catalogEntry } from "./catalog.ts"
+import { fillFromCatalogs, withCatalogs } from "./contextCatalog.ts"
+import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
@@ -320,6 +323,11 @@ export interface ProvidersShape {
     { readonly added: number; readonly updated: number; readonly missing: number; readonly route: string | null },
     ProviderError | ServerError
   >
+  /**
+   * What the registered catalogs know of a model id on this connection (its window, its output
+   * limit), for a model the user adds by id; empty when nothing matches or the connection is gone.
+   */
+  readonly catalogUpstream: (userId: UserId, connectionId: ConnectionId, key: string) => Effect.Effect<ModelUpstream>
   /** Checks a connection by fetching its model list; reports the route it took. */
   readonly testConnection: (
     userId: UserId,
@@ -436,6 +444,22 @@ export const layer = (options: ProvidersOptions = {}) =>
       const network = yield* Network
       const registry = yield* ProviderRegistry
       const policy = options.retry ?? defaultRetryPolicy
+      /**
+       * A context-length error with the limit it states, for the user to save on the model. A
+       * request refused for its size under another status (a proxy's 400) is the same error.
+       */
+      const pickExtra = ({ status, retryAfterMs, category, afterTokens }: ProviderError) => ({
+        status,
+        retryAfterMs,
+        category,
+        afterTokens
+      })
+      const withStatedLimit = (error: ProviderError): ProviderError => {
+        if (!["context_overflow", "bad_request", "unknown"].includes(error.reason)) return error
+        const limit = statedContextLimit(registry.contextLimits.list(), error.message)
+        if (limit === null) return error
+        return providerError("context_overflow", error.message, { ...pickExtra(error), contextLimit: limit })
+      }
       const bindKeysToOrigins = options.bindKeysToOrigins ?? true
 
       const prepare = (userId: UserId, connectionId: ConnectionId) =>
@@ -721,12 +745,22 @@ export const layer = (options: ProvidersOptions = {}) =>
         Effect.gen(function* () {
           const prepared = yield* prepare(userId, connectionId)
           let route: string | null = null
-          const models = yield* listModels(prepared, (d) => (route = d))
+          const listed = yield* listModels(prepared, (d) => (route = d))
+          const models = yield* withCatalogs(registry.catalogs.list(), prepared.kind.id, listed)
           const result = yield* fromStorage(
             writer.SyncFetchedModels({ userId, connectionId, models, fetchedAt: Date.now() })
           )
           return { ...result, route }
         })
+
+      const catalogUpstream: ProvidersShape["catalogUpstream"] = (userId, connectionId, key) =>
+        reader.GetConnection({ userId, connectionId }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.promise(() => fillFromCatalogs(registry.catalogs.list(), connection.kind, { key, upstream: {} }))
+          ),
+          Effect.map((model) => model.upstream),
+          Effect.catch(() => Effect.succeed<ModelUpstream>({}))
+        )
 
       const testConnection: ProvidersShape["testConnection"] = (userId, connectionId) =>
         Effect.gen(function* () {
@@ -1238,7 +1272,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                   state.firstTokenAt !== null,
                   attribution.purpose !== "generation"
                 )
-          const error = classified === null ? null : scrubbed(prepared, classified)
+          const error = classified === null ? null : scrubbed(prepared, withStatedLimit(classified))
           return { message, error }
         })
 
@@ -1429,6 +1463,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         setHeaders,
         setProxy,
         refreshModels,
+        catalogUpstream,
         testConnection,
         stream
       })

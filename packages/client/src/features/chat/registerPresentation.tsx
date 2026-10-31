@@ -20,14 +20,16 @@ import {
   summarySettingFields,
   timelineBoundaries,
   timelineRails,
-  timelineSummaries
+  timelineSummaries,
+  versionFailureActions
 } from "./presentation.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
 import { AuthorNoteAction } from "./AuthorNoteAction.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
-import { Alert } from "../../ui/Surface.tsx"
+import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
+import { LearnContextLimit } from "./LearnContextLimit.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
   const Component = lazy(load)
   return (props: P) => (
@@ -80,13 +82,9 @@ export const registerPresentation = () => [
   chatComposerNotes.register({
     id: "composer.assembly-error",
     order: 5,
-    component: ({ view }) =>
-      view.history?.assemblyError ? (
-        <Alert tone="danger" title="Can't prepare the next reply">
-          {view.history.assemblyError}
-        </Alert>
-      ) : null
+    component: ({ view }) => (view.history?.assemblyError ? <AssemblyRefusal history={view.history} /> : null)
   }),
+  versionFailureActions.register({ id: "version.learn-context", order: 10, component: LearnContextLimit }),
   chatComposerNotes.register({
     id: "composer.image-tokens",
     order: 10,

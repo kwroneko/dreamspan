@@ -17,6 +17,7 @@ export function Dialog({
   description,
   wide = false,
   finalFocus,
+  initialFocus,
   children
 }: {
   open: boolean
@@ -27,13 +28,19 @@ export function Dialog({
   wide?: boolean
   /** Override focus restoration when an action navigates outside the dialog. */
   finalFocus?: (() => boolean) | undefined
+  /** The element to focus on open, such as the field a link opened the dialog at. */
+  initialFocus?: (() => HTMLElement | null) | undefined
   children: ReactNode
 }) {
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
-        <BaseDialog.Popup finalFocus={finalFocus} className={wide ? `${popup} sm:max-w-5xl` : popup}>
+        <BaseDialog.Popup
+          finalFocus={finalFocus}
+          {...(initialFocus ? { initialFocus: () => initialFocus() ?? true } : {})}
+          className={wide ? `${popup} sm:max-w-5xl` : popup}
+        >
           <div className="flex flex-col gap-1">
             <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
             {description && (

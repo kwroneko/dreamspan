@@ -12,6 +12,8 @@ import { modelListers } from "./modelLists.ts"
 import { empty, ProviderRegistry, type ProviderKindEntry } from "./registry.ts"
 import { builtinCostFormulas, usageObservers } from "./usage.ts"
 import { builtinImageCounters } from "./imageCounters.ts"
+import { builtinModelCatalogs } from "./contextCatalog.ts"
+import { builtinContextLimitParsers } from "./contextLimits.ts"
 
 const completions = openAICompletionsApi()
 
@@ -118,5 +120,8 @@ export const layer = Layer.effectDiscard(
     for (const formula of [...builtinCostFormulas, userCostFormula]) yield* registry.costs.register(formula)
     // Exact image token counts where the provider has an endpoint for them (ARCHITECTURE §6).
     for (const counter of builtinImageCounters) yield* registry.imageCounters.register(counter)
+    // A model's window by its id when the list doesn't say, and the limit a context-length error states.
+    for (const catalog of builtinModelCatalogs) yield* registry.catalogs.register(catalog)
+    for (const parser of builtinContextLimitParsers) yield* registry.contextLimits.register(parser)
   })
 ).pipe(Layer.provideMerge(empty))
