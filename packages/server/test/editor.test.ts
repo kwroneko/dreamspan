@@ -831,6 +831,32 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("discarding a removed list element keeps no text: a removal has none to recover", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const refId = (yield* importPreset(preset("default"))).ref.id
+      const count = Effect.map(api.ListRecoveredTexts({ limit: 100, before: null }), (texts) => texts.length)
+      const before = yield* count
+      const removal = yield* draft(api, refId, valueField(["prompts", "identifier=main"]), "null")
+      yield* api.DiscardEditorDraft({
+        refId,
+        field: valueField(["prompts", "identifier=main"]),
+        draftId: removal.id,
+        expectedRowVersion: removal.rowVersion
+      })
+      assert.strictEqual(yield* count, before)
+      // A text field's discarded text is still kept.
+      const text = yield* draft(api, refId, textField(["prompts", "identifier=main", "content"]), "Kept text")
+      yield* api.DiscardEditorDraft({
+        refId,
+        field: textField(["prompts", "identifier=main", "content"]),
+        draftId: text.id,
+        expectedRowVersion: text.rowVersion
+      })
+      assert.strictEqual(yield* count, before + 1)
+    })
+  )
+
   it.effect("another tab's field text a stale save goes over is kept, live or as a page closes", () =>
     Effect.gen(function* () {
       const api = yield* client()

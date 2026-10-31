@@ -49,6 +49,17 @@ const usedBy = (chats: number, some: string | null) =>
       ? `Used by 1 chat: saving changes it there.`
       : `Used by ${chats} chats: saving changes it in all of them.${some ? ` To change it in some only, ${some}.` : ""}`
 
+/**
+ * A lorebook's line: the chats it was added to. A global one is read in every chat besides,
+ * which its "Use in every chat" switch just below says (`LorebookUse`).
+ */
+const addedTo = (chats: number) =>
+  chats === 0
+    ? "Not added to any chat yet."
+    : chats === 1
+      ? "Added to 1 chat: saving changes it there."
+      : `Added to ${chats} chats: saving changes it in all of them. To change it in some only, make a variant.`
+
 /** What saving did to the refs that follow this one. */
 const savedNotice = (saved: SavedRef) => {
   const setAside = saved.setAside.length
@@ -204,6 +215,8 @@ export function Editor({
                 Only <OverrideChat chatId={ref.chatId} /> uses this version; the original's later changes still reach it
                 where you haven't edited the same text.
               </>
+            ) : ref.kind === "lorebook" ? (
+              addedTo(usedByChats)
             ) : (
               usedBy(usedByChats, ref.kind === "card" ? "fork it" : ref.kind === "note" ? null : "make a variant")
             )}

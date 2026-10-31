@@ -221,7 +221,7 @@ test("a card's own lorebook is listed by its name and entry count", async ({ pag
     })
   )
   await page.goto(`${server().url}/chats/${started.chat.id}?panel=lorebooks`)
-  const books = page.getByRole("list", { name: "Characters' books" })
+  const books = page.getByRole("list", { name: "Lorebooks in this chat" })
   await expect(books.getByRole("switch", { name: "Harbor secrets" })).toBeChecked()
   await expect(books).toContainText("Aria Vance's own lorebook · 1 entry")
 })
