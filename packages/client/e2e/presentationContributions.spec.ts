@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { resolve } from "node:path"
 import { createServer, type ViteDevServer } from "vite"
+import { openSummarySettings } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { level1 } from "./support/summaries.ts"
@@ -112,6 +113,8 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await expect(page.getByText("Plugin branches", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Plugin preview", { exact: true })).toHaveCount(0)
   await plugin(page, "fields")
+  // The summary fields are the Summaries tab's settings.
+  await openSummarySettings(page)
   await expect(page.getByText("Plugin summary fields", { exact: true })).toBeVisible()
   await plugin(page, "close")
   await expect(page.getByText("Plugin summary fields", { exact: true })).toHaveCount(0)
