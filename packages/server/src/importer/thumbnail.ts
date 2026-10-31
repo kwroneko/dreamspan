@@ -101,9 +101,16 @@ export const thumbnail = (input: { dataDir: string; path: string; width: number 
     catch: () => new ThumbnailFailed()
   })
 
-/** Every width the app shows (MEDIA_WIDTHS), made ahead, e.g. when an import stores a card's image. */
+/**
+ * The widths made ahead when an image is stored: the grid's tiles and the lists' avatars at
+ * 1× and 2×. 768 (a 3× phone's tile) is made on its first request: it alone took about
+ * 450 ms of a card's 600 ms, measured on a 2.4 MB portrait, which tripled an ST import's time per card.
+ */
+export const PREPARED_WIDTHS = MEDIA_WIDTHS.filter((width) => width <= 384)
+
+/** The widths of PREPARED_WIDTHS not on disk yet, e.g. when an import stores a card's image. */
 export const prepareThumbnails = (input: { dataDir: string; path: string }) =>
   Effect.tryPromise({
-    try: async () => void (await derive(input.dataDir, input.path, MEDIA_WIDTHS)),
+    try: async () => void (await derive(input.dataDir, input.path, PREPARED_WIDTHS)),
     catch: () => new ThumbnailFailed()
   })

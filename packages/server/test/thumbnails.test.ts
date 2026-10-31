@@ -1,7 +1,7 @@
 import { assert, layer } from "@effect/vitest"
 import { Effect } from "effect"
 import sharp from "sharp"
-import { readdirSync, rmSync, statSync, writeFileSync, watch } from "node:fs"
+import { existsSync, readdirSync, rmSync, statSync, writeFileSync, watch } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import { client, serverLayer, serverPort, testConfig } from "./support/config.ts"
 import { largeImagePng, oversizedPortraitPng } from "./support/stLargeImages.ts"
@@ -72,14 +72,16 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("an uploaded avatar has its thumbnails at every width before the browser asks", () =>
+  it.effect("an uploaded avatar has its grid and list thumbnails before the browser asks", () =>
     Effect.gen(function* () {
       const { id } = yield* upload(largeImagePng(7, 900, 1350), "Prepared")
       const reader = yield* Reader
       const api = yield* client(alice)
       const user = yield* api.Whoami()
       const source = yield* reader.GetMediaFile({ userId: user.id, mediaId: id })
-      for (const width of [96, 192, 384, 768]) {
+      // 768 is made on its first request (PREPARED_WIDTHS).
+      assert.isFalse(existsSync(join(config.dataDir, `${source.path}.thumb-v1-768.webp`)))
+      for (const width of [96, 192, 384]) {
         const file = join(config.dataDir, `${source.path}.thumb-v1-${width}.webp`)
         const made = statSync(file).mtimeMs
         const meta = yield* Effect.promise(() => sharp(file).metadata())
