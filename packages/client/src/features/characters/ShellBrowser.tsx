@@ -136,7 +136,8 @@ export function ForkRow({
           ))}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium" title={fork.name}>
+          {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
+          <span className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]" title={fork.name}>
             {fork.name}
           </span>
           {details && fork.cast.length > 1 && (
