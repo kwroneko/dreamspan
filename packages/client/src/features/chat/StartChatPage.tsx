@@ -293,7 +293,7 @@ function Pending({
   const playing = cards.find((p) => p.entityId === persona) ?? null
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
-  const phone = useCompactComposer()
+  const { compact: phone, ref: composerRef } = useCompactComposer()
   const guidance = viewPrefs.prefs.guidance
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
@@ -607,7 +607,7 @@ function Pending({
           )
         )}
       </div>
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+      <div ref={composerRef} className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
         <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
         {/* One bar, as the chat's composer: who's speaking, then the box with its actions. */}
