@@ -2256,7 +2256,14 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
     it("sends a reply's tagged sections back as the preset says, never in a summary request", async () => {
       const fixture = chat({
         messages: [
-          { side: "assistant", content: "You're late.", sectionsPrefix: "<think>Plan: be curt.</think>\n" },
+          {
+            side: "assistant",
+            content: "You're late.",
+            replySections: {
+              sections: [{ lead: "", open: "<think>", text: "Plan: be curt.", close: "</think>" }],
+              gap: "\n"
+            }
+          },
           { side: "user", content: "The road flooded." }
         ],
         preset: { ...preset(), reply_sections: { enabled: true, pairs: [], send_back: 1 } }

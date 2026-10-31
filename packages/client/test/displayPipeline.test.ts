@@ -10,7 +10,6 @@ import {
   macroDisplay,
   type DisplayInput
 } from "../src/features/chat/displayPipeline.ts"
-import { regexDisplay } from "../src/features/chat/displayWorker.ts"
 import { run, OutputLimit } from "@rp/shared/regexReplace.ts"
 import { runDisplayRegex } from "../src/features/chat/displayRegex.ts"
 
@@ -112,13 +111,14 @@ it("display regex respects placement, depth, disabled and display-only flags, ca
   for (const fields of [
     { disabled: true },
     { markdown_only: false },
-    { prompt_only: true },
     { placement: [1] },
     { min_depth: 1 },
     { max_depth: 0, min_depth: 1 }
   ]) {
     expect(regex([script(fields)]).text).toBe("Hi Ana")
   }
+  // Both flags: in the prompt and on display, as ST's getRegexedString runs it for either.
+  expect(regex([script({ prompt_only: true })]).text).toBe("Hi **Ana**")
   expect(regex([script({ max_depth: 0 })], "Hi Ana", 1).text).toBe("Hi Ana")
   expect(regex([script({ placement: [1], trim_strings: ["A"] })], "Hi Ana", 0, 1).text).toBe("Hi **na**")
   expect(
@@ -157,16 +157,24 @@ it("capture amplification is charged before building a replacement", () => {
   expect(() => run(/a+/, "$0".repeat(50_000), [], "a".repeat(50_000), { left: 100_000 })).toThrow(OutputLimit)
 })
 
+/** The worker queue as a page starts it: no worker yet, none idle. */
+const freshQueue = async () => {
+  vi.resetModules()
+  return (await import("../src/features/chat/displayWorker.ts")).regexDisplay
+}
+
 it("the worker deadline keeps the original and releases the queue for the next message", async () => {
+  const regexDisplay = await freshQueue()
   vi.useFakeTimers()
   let started = 0
   const terminate = vi.fn()
   class FakeWorker {
-    onmessage: ((event: { data: { text: string; issues: string[] } }) => void) | null = null
+    onmessage: ((event: { data: unknown }) => void) | null = null
     onerror = null
     terminate = terminate
     constructor() {
       started++
+      queueMicrotask(() => this.onmessage?.({ data: "ready" }))
     }
     postMessage() {
       if (started > 1) queueMicrotask(() => this.onmessage?.({ data: { text: "second", issues: [] } }))
@@ -181,13 +189,42 @@ it("the worker deadline keeps the original and releases the queue for the next m
     await vi.runAllTimersAsync()
     expect(await first).toMatchObject({ text: input.text, issues: [expect.stringContaining("time limit")] })
     expect(await second).toEqual({ text: "second", issues: [] })
-    expect(terminate).toHaveBeenCalledTimes(2)
+    // Only the worker that ran out of time goes; the one that answered takes the next jobs.
+    expect(terminate).toHaveBeenCalledTimes(1)
     // A human can write an assistant-side message, and a model can write a user-side turn.
     const humanAssistant = regexDisplay({ ...opt, version: { ...version, writer: "human" } })
     const modelUser = regexDisplay({ ...opt, placement: 1, scripts: [script({ placement: [1] })] })
     await vi.runAllTimersAsync()
     expect(await humanAssistant).toEqual({ text: "second", issues: [] })
     expect(await modelUser).toEqual({ text: "second", issues: [] })
+    expect(started).toBe(2)
+  } finally {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  }
+})
+
+it("a job's deadline starts once its worker has loaded, however long that takes", async () => {
+  const regexDisplay = await freshQueue()
+  vi.useFakeTimers()
+  class SlowStart {
+    onmessage: ((event: { data: unknown }) => void) | null = null
+    onerror = null
+    terminate = vi.fn()
+    constructor() {
+      // Loads in 3 s (a busy machine), then answers each job at once.
+      setTimeout(() => this.onmessage?.({ data: "ready" }), 3000)
+    }
+    postMessage() {
+      queueMicrotask(() => this.onmessage?.({ data: { text: "rewritten", issues: [] } }))
+    }
+  }
+  vi.stubGlobal("Worker", SlowStart)
+  try {
+    const opt = { ...input, prefs: { ...input.prefs, displayRegex: true }, scripts: [script()] }
+    const job = regexDisplay(opt)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(await job).toEqual({ text: "rewritten", issues: [] })
   } finally {
     vi.useRealTimers()
     vi.unstubAllGlobals()
@@ -224,6 +261,7 @@ it("global zero-width Unicode patterns advance over an entire surrogate pair", (
 })
 
 it("the display worker queue refuses excess work without starting more workers", async () => {
+  const regexDisplay = await freshQueue()
   vi.useFakeTimers()
   let started = 0
   class BusyWorker {

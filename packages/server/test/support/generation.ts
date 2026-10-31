@@ -53,6 +53,10 @@ export const generateReply = (
     readonly example?: string
     readonly greeting?: string
     readonly personality?: string
+    /** The preset's regex scripts allowed to run, as the user would allow them. */
+    readonly approveRegex?: boolean
+    /** More of Mira's card: her regex scripts, say. */
+    readonly mira?: Partial<CardDoc>
   }
 ) =>
   Effect.gen(function* () {
@@ -97,10 +101,15 @@ export const generateReply = (
       })
     const mira = yield* entity("card", "Mira", {
       ...cardDoc("Mira", "{{char}} keeps the ledger for {{user}}.", options.personality),
-      mes_example: options.example ?? ""
+      mes_example: options.example ?? "",
+      ...options.mira
     })
     const tobin = yield* entity("card", "Tobin", cardDoc("Tobin", "{{user}} draws maps."))
-    const preset = yield* entity("preset", "Preset", { ...presetDoc(options.preset ?? {}), ...options.presetFields })
+    const preset = yield* entity("preset", "Preset", {
+      ...presetDoc(options.preset ?? {}),
+      ...options.presetFields,
+      ...(options.approveRegex ? { regex_approved: true } : {})
+    })
     yield* api.SetGenerationDefaults({
       defaults: { model: { connection: connection.id, model: model.id }, preset: preset.ref.id }
     })
@@ -141,5 +150,14 @@ export const generateReply = (
     )
     const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
     yield* eventually(() => finished(events, entry.version.id) !== undefined)
-    return { version: finished(events, entry.version.id)!, chat, connection, model, events }
+    return {
+      version: finished(events, entry.version.id)!,
+      chat,
+      connection,
+      model,
+      events,
+      sent: sent.entry,
+      mira,
+      preset
+    }
   })

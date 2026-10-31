@@ -2,7 +2,7 @@
 const channel =
   typeof window === "undefined" || typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("rp.library")
 export const notifyLibraryChange = (keys: ReadonlyArray<string>) => {
-  if (keys.includes("library")) channel?.postMessage("changed")
+  if (keys.includes("library") || keys.includes("globalRegex")) channel?.postMessage("changed")
 }
 export const onLibraryChange = (refresh: () => void) => {
   channel?.addEventListener("message", refresh)
