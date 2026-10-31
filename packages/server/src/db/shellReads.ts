@@ -33,24 +33,18 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           edited: number
           ref: string
           revision: string
-          name: string
-          nickname: string
-          subtitle: string
-          avatar: string | null
+          fields: string
           book: number
-          book_name: string
           book_entries: number | null
           persona: number
         }>`
         SELECT e.id, e.created_at, max(e.created_at, coalesce((SELECT max(x.created_at) FROM entity_revisions x
             WHERE x.entity_id = e.id AND x.origin <> 'import'), 0)) AS edited, r.id AS ref, rev.id AS revision,
-          CASE WHEN json_type(rev.doc_json, '$.name') = 'text' THEN rev.doc_json ->> '$.name' ELSE '' END AS name,
-          CASE WHEN json_type(rev.doc_json, '$.nickname') = 'text' THEN rev.doc_json ->> '$.nickname' ELSE '' END AS nickname,
-          CASE WHEN json_type(rev.doc_json, '$.character_version') = 'text' THEN rev.doc_json ->> '$.character_version' ELSE '' END AS subtitle,
-          CASE WHEN json_type(rev.doc_json, '$.avatar_media_id') = 'text' THEN rev.doc_json ->> '$.avatar_media_id' END AS avatar,
+          -- One parse of the document for the strings (a missing or non-string value reads as empty
+          -- below), and the lorebook's type and size without returning its entries.
+          json_extract(rev.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
+            '$.character_book.name') AS fields,
           json_type(rev.doc_json, '$.character_book') = 'object' AS book,
-          CASE WHEN json_type(rev.doc_json, '$.character_book.name') = 'text'
-            THEN trim(rev.doc_json ->> '$.character_book.name') ELSE '' END AS book_name,
           CASE WHEN json_type(rev.doc_json, '$.character_book.entries') = 'array'
             THEN json_array_length(rev.doc_json, '$.character_book.entries') ELSE 0 END AS book_entries,
           EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
@@ -60,8 +54,20 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         ORDER BY r.label COLLATE NOCASE, e.id`
         // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
         const trusted = { disableChecks: true } as const
+        const text = (value: unknown) => (typeof value === "string" ? value : "")
+        const metadata = rows.map((row) => {
+          const [name, nickname, subtitle, avatar, bookName] = JSON.parse(row.fields) as Array<unknown>
+          return {
+            ...row,
+            name: text(name),
+            nickname: text(nickname),
+            subtitle: text(subtitle),
+            avatar: typeof avatar === "string" ? avatar : null,
+            bookName: text(bookName).trim()
+          }
+        })
         const byCard = new Map(
-          rows.map((m) => [
+          metadata.map((m) => [
             m.id,
             new CastCard(
               {
@@ -73,7 +79,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 persona: m.persona === 1,
                 inBin: false,
                 lorebook: m.book === 1,
-                ...(m.book === 1 && m.book_name !== "" ? { lorebookName: m.book_name } : {}),
+                ...(m.book === 1 && m.bookName !== "" ? { lorebookName: m.bookName } : {}),
                 ...(m.book === 1 ? { lorebookEntries: m.book_entries ?? 0 } : {}),
                 avatarMediaId: m.avatar
               },
@@ -81,7 +87,6 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             )
           ])
         )
-        const metadata = rows
         // The stamps first: what follows is read in the same transaction.
         const userStamp = yield* summaryStamps(sql, userId)
         // Each live fork with its chat and its stored summary, when there is one: only what the shell shows.
