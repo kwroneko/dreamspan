@@ -23,7 +23,7 @@ Some prompt presets ask the model to begin its visible reply with a planning sec
 ## Parsing (a registered reply parser)
 
 - `ExecutionRegistry.replyParsers`, built-in `reply-sections`. The generator runs every registered parser over the chunk stream, in registration order; a plugin can replace, wrap, disable or add one.
-- States: *lead* (holding the start of the reply until an opening pattern matches, or the held text can no longer start one: a line break after non-whitespace, 64 characters, or the end), *inside* (section text streams to the panel, the last 64 characters held back in case they start the closing tag), *after* (whitespace after a close is held until the next character shows whether another section opens), *body* (pass-through). A tag split across deltas parses; text never flashes into the body first. Tags are at most 64 characters.
+- States: *lead* (holding the start of the reply until an opening pattern matches, or the held text can no longer start one: a line break after non-whitespace, 64 characters, or the end), *inside* (section text streams to the panel, held back only from a character within the last 64 that may start the closing tag), *after* (whitespace after a close is held until the next character shows whether another section opens), *body* (pass-through). A tag split across deltas parses; text never flashes into the body first. Tags are at most 64 characters.
 - What the parser holds back is reported to the generation service, so a stop, crash or failure ends with it in the right place.
 - Never closed: the text stays in the panel; the panel says the section was never closed.
 - Continue: the prefill is the original reply (sections in their tags, then the body), as SillyTavern's prefix. A version cut off inside a section resumes inside it.
@@ -31,7 +31,7 @@ Some prompt presets ask the model to begin its visible reply with a planning sec
 
 ## Display
 
-- Two collapsible panels above the body: "Reasoning" (provider) first, then "Notes in the reply". Both follow the streaming open/closed preference; Copy and Collapse all cover both; selection copy maps both.
+- Two collapsible panels above the body: "Reasoning" (provider) first, then "Thinking in the reply". Both follow the streaming open/closed preference; Copy and Collapse all cover both; selection copy maps both.
 - The panels are entries of the `message.reasoning-panels` slot; their header actions are the existing `message.reasoning-actions` slot, with the panel's kind in its props.
 - "Show as reply text" (a header action of the sections panel) makes a new edited version whose text is the original reply, keeping the provider reasoning; the parsed version stays in the version picker. Model output stays frozen.
 - Streaming: `Section { versionId, offset, text }` events carry the panel text (sections joined by a blank line); `Hello` carries it for live versions.

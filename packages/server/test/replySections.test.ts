@@ -19,6 +19,8 @@ interface Run {
   readonly panel: string
   /** The body after each chunk, to check nothing showed there before it was known. */
   readonly bodies: ReadonlyArray<string>
+  /** The panel after each chunk, to check it keeps up with the stream. */
+  readonly panels: ReadonlyArray<string>
   readonly reasoning: string
 }
 
@@ -43,6 +45,7 @@ const run = (
   let reasoning = ""
   let held: { held: string; into: "body" | "section" } | null = null
   const bodies: Array<string> = []
+  const panels: Array<string> = []
   const apply = (out: ReadonlyArray<GenerationChunk>) => {
     for (const chunk of out) {
       if (typeof chunk === "string") body += chunk
@@ -53,14 +56,15 @@ const run = (
       else reasoning += chunk.reasoning
     }
     bodies.push(body)
+    panels.push(panel)
   }
   for (const chunk of chunks) apply(parse.push(chunk))
   if (options.stopped) {
     const settled = settleHeld(body, sections, held)
-    return { body: settled.text, sections: settled.sections, panel, bodies, reasoning }
+    return { body: settled.text, sections: settled.sections, panel, bodies, panels, reasoning }
   }
   apply(parse.end())
-  return { body, sections, panel, bodies, reasoning }
+  return { body, sections, panel, bodies, panels, reasoning }
 }
 
 /** Every split of `text` into two chunks, and into single characters. */
@@ -98,6 +102,32 @@ describe("reply sections", () => {
       expect(result.panel).toBe("Plan.")
       for (const shown of result.bodies) expect("The ledger says otherwise.".startsWith(shown)).toBe(true)
     }
+  })
+
+  it("shows a section's text in the panel as it streams, holding back only what may start its closing tag", () => {
+    const result = run(["<thinking>Plan", " the scene: the tide", " is late, a < b; </th", "ink>\n\nBody."])
+    expect(result.panels).toEqual([
+      "Plan",
+      "Plan the scene: the tide",
+      "Plan the scene: the tide is late, a ",
+      "Plan the scene: the tide is late, a < b; ",
+      "Plan the scene: the tide is late, a < b; "
+    ])
+    expect(result.body).toBe("Body.")
+    // With `<` in its text, every split still parses, the panel growing only by its own text.
+    const text = "<think>a < b, <i>so</i> </thin.</think>\n\nThe ledger <think>stays</think>."
+    for (const chunks of splits(text)) {
+      const split = run(chunks)
+      expect(split.body).toBe("The ledger <think>stays</think>.")
+      expect(split.panel).toBe("a < b, <i>so</i> </thin.")
+      for (const shown of split.panels) expect(split.panel.startsWith(shown)).toBe(true)
+    }
+    // A closing pattern with no plain first character: the last 64 characters wait.
+    const settings = { enabled: true, pairs: [{ open: "<plan>", close: "(?:END|STOP)" }], send_back: 0 }
+    const long = run(["<plan>" + "x".repeat(100), "STOP Body."], { settings })
+    expect(long.panels[0]).toBe("x".repeat(36))
+    expect(long.panel).toBe("x".repeat(100))
+    expect(long.body).toBe("Body.")
   })
 
   it("takes several leading sections, a blank line apart in the panel", () => {

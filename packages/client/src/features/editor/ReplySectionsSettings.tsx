@@ -10,6 +10,7 @@ import {
 } from "@rp/shared/replySections.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
+import { useState } from "react"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { type EditorStore, useValue } from "./store.ts"
@@ -79,24 +80,29 @@ function PairRow({
 export function ReplySectionsSettings({ store }: { store: EditorStore }) {
   const stored = useValue<ReplySectionSettings | undefined>(store, PATH)
   const settings = stored ?? DEFAULT_REPLY_SECTIONS
+  // What's typed in the number field while it isn't a valid count yet (empty, say).
+  const [typed, setTyped] = useState<string | null>(null)
+  const hasDefault = settings.pairs.some(
+    (pair) => pair.open === DEFAULT_SECTION_PAIR.open && pair.close === DEFAULT_SECTION_PAIR.close
+  )
   const change = (next: Partial<ReplySectionSettings>) => store.setValue(PATH, { ...settings, ...next })
   const setPair = (index: number, pair: SectionPair) =>
     change({ pairs: settings.pairs.map((other, i) => (i === index ? pair : other)) })
   return (
     <Card>
       <CardHeader
-        title="Notes at the start of a reply"
-        description="A section the reply starts with, in these tags, shows in its own folded panel above the reply instead of in its text."
+        title="Thinking at the start of a reply"
+        description="Some presets ask the model to think in tags before it replies. That part shows in a folded panel, “Thinking in the reply”, above the reply text."
       />
       <div className="flex flex-col gap-4" data-preset-section="reply-sections">
         <Switch checked={settings.enabled} onCheckedChange={(enabled) => change({ enabled })}>
-          Take tagged sections out of the reply
+          Move tagged thinking into its own panel
         </Switch>
         <p className="text-sm text-muted">
-          Only at the very start of the reply, after any blank space; several in a row are all taken. Tags later in the
-          text stay where they are. Each tag is a regular expression; the default accepts both{" "}
-          <code className="font-mono">&lt;think&gt;</code> and <code className="font-mono">&lt;thinking&gt;</code>, so
-          either closes either.
+          Only at the very start of the reply, after any blank space; several in a row are all moved. Tags later in the
+          reply stay where they are. Each tag is a regular expression (no lookaheads or backreferences); the default
+          pair accepts both <code className="font-mono">&lt;think&gt;</code> and{" "}
+          <code className="font-mono">&lt;thinking&gt;</code>, so either closes either.
         </p>
         <ul className="flex flex-col gap-2">
           {settings.pairs.map((pair, index) => (
@@ -111,25 +117,32 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
         </ul>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => change({ pairs: [...settings.pairs, { open: "", close: "" }] })}>Add a pair</Button>
-          <Button variant="ghost" onClick={() => change({ pairs: [...settings.pairs, DEFAULT_SECTION_PAIR] })}>
-            Add the default pair
-          </Button>
+          {!hasDefault && (
+            <Button variant="ghost" onClick={() => change({ pairs: [...settings.pairs, DEFAULT_SECTION_PAIR] })}>
+              Add the default pair
+            </Button>
+          )}
         </div>
         <Field
-          label="Send back on the last replies"
-          description="How many of the most recent replies with notes send them back to the model, in their tags. 0: never; the model sees only the reply text."
+          label="Send thinking back for the last replies"
+          description="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
         >
           <Input
             type="number"
             min={0}
             max={1000}
             step={1}
-            className="w-28"
-            value={settings.send_back}
+            inputMode="numeric"
+            className="max-w-28"
+            value={typed ?? String(settings.send_back)}
             onChange={(event) => {
-              const value = Number(event.currentTarget.value)
-              if (Number.isInteger(value) && value >= 0 && value <= 1000) change({ send_back: value })
+              const text = event.currentTarget.value
+              setTyped(text)
+              const value = Number(text)
+              if (text.trim() !== "" && Number.isInteger(value) && value >= 0 && value <= 1000)
+                change({ send_back: value })
             }}
+            onBlur={() => setTyped(null)}
           />
         </Field>
       </div>

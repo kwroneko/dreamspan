@@ -5,7 +5,7 @@
 // Its header carries the `reasoningActions` slot: Copy reasoning (the raw text) and Collapse
 // all (every reasoning block shown closes; the streaming preference stays as it is).
 // The reply's own leading tagged sections (spec/REPLY-SECTIONS.md) show in a second panel of
-// the same kind, "Notes in the reply", below the provider's. Both are entries of the
+// the same kind, "Thinking in the reply", below the provider's. Both are entries of the
 // `reasoningPanels` slot.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
@@ -44,6 +44,7 @@ function Reasoning({ version, session }: PanelProps) {
       text={text}
       streaming={version.status === "generating"}
       kind="reasoning"
+      first
       label="Reasoning"
     />
   )
@@ -52,6 +53,7 @@ function Reasoning({ version, session }: PanelProps) {
 /** The reply's own leading tagged sections, taken out of its text. */
 function ReplySections({ version, session }: PanelProps) {
   const live = useAtomValue(liveSections(version.id))
+  const reasoning = useAtomValue(liveReasoning(version.id)) ?? version.reasoning ?? ""
   const text = live ?? sectionsDisplay(version.replySections)
   const streaming = version.status === "generating"
   if (text === "" && !version.replySections) return null
@@ -63,10 +65,11 @@ function ReplySections({ version, session }: PanelProps) {
       text={text}
       streaming={streaming}
       kind="sections"
-      label="Notes in the reply"
+      first={reasoning === ""}
+      label="Thinking in the reply"
       notice={
         !streaming && sectionUnclosed(version.replySections)
-          ? "This section was never closed: the reply ended inside it."
+          ? "Never closed: the reply ended inside its thinking."
           : null
       }
     />
@@ -89,12 +92,14 @@ function ReasoningBlock({
   text,
   streaming,
   kind,
+  first,
   label,
   notice = null
 }: PanelProps & {
   text: string
   streaming: boolean
   kind: "reasoning" | "sections"
+  first: boolean
   label: string
   notice?: string | null
 }) {
@@ -125,7 +130,8 @@ function ReasoningBlock({
 
   return (
     <div className="flex flex-col gap-1" data-reasoning-panel={kind}>
-      <div className="flex flex-wrap items-center gap-x-1">
+      {/* The actions: beside the toggle, or a row of their own under it on a phone. */}
+      <div className="flex flex-wrap items-center gap-x-2">
         <button
           type="button"
           aria-expanded={open}
@@ -139,9 +145,11 @@ function ReasoningBlock({
           <span aria-hidden="true">·</span>
           <span>{words(text)}</span>
         </button>
-        <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, session }} />
+        <div className="flex w-full flex-wrap items-center gap-x-1 pl-4 empty:hidden sm:w-auto sm:pl-0">
+          <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, first, session }} />
+        </div>
       </div>
-      {notice && <p className="text-xs text-muted">{notice}</p>}
+      {notice && <p className="pl-4 text-xs text-muted">{notice}</p>}
       {open && (
         <div id={id} role="region" aria-label={label} className="border-l-2 border-border pl-3 text-sm text-muted">
           <MessageBody text={text}>

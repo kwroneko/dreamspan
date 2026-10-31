@@ -39,6 +39,8 @@ interface Pair {
   readonly close: RegExp
   /** The opening pattern's first character when it's a plain one, to rule a text out early. */
   readonly first: string | null
+  /** The closing pattern's, so a section's text shows up to where its closing tag may start. */
+  readonly closeFirst: string | null
   readonly caseless: boolean
 }
 
@@ -76,7 +78,7 @@ export const compilePairs = (settings: ReplySectionSettings): ReadonlyArray<Pair
     if (!(open instanceof RegExp) || !(close instanceof RegExp) || pair.open === "" || pair.close === "") return []
     close.lastIndex = 0
     if (open.test("") || close.test("")) return []
-    return [{ open, close, first: firstLiteral(pair.open), caseless }]
+    return [{ open, close, first: firstLiteral(pair.open), closeFirst: firstLiteral(pair.close), caseless }]
   })
 
 /** Where held text went when a reply ended without the parser's end: a stop, a crash, a failure. */
@@ -120,24 +122,25 @@ export const parseReply = (
   const snapshot = (): ReplySections => ({ sections, gap })
   const out: Array<GenerationChunk> = []
   const emitSections = (text: string) => out.push({ sections: snapshot(), text })
+  let lastInto: "body" | "section" = "body"
   const hold = (into: "body" | "section") => {
-    if (buffer === lastHeld) return
+    if (buffer === lastHeld && into === lastInto) return
     lastHeld = buffer
+    lastInto = into
     out.push({ held: buffer, into })
   }
   const setLast = (change: Partial<ReplySection>) => {
     sections = [...sections.slice(0, -1), { ...sections.at(-1)!, ...change }]
   }
 
+  const startsWith = (pair: Pair, first: string, c: string) =>
+    pair.caseless ? c.toLowerCase() === first.toLowerCase() : c === first
+
   /** Whether the start of `rest` may still become an opening tag. */
   const mayOpen = (rest: string) =>
     rest.length < TAG_HOLD &&
     !rest.includes("\n") &&
-    pairs.some(
-      (pair) =>
-        pair.first === null ||
-        (pair.caseless ? rest[0]!.toLowerCase() === pair.first.toLowerCase() : rest[0] === pair.first)
-    )
+    pairs.some((pair) => pair.first === null || startsWith(pair, pair.first, rest[0]!))
 
   const opening = (rest: string) => {
     for (const pair of pairs) {
@@ -145,6 +148,20 @@ export const parseReply = (
       if (match && match[0] !== "") return { pair, tag: match[0] }
     }
     return null
+  }
+
+  /**
+   * Where a closing tag may be starting in the text not shown yet: the first character in
+   * its last `TAG_HOLD` that a closing pattern's plain first character allows, so the panel
+   * keeps up with the stream (only `<…` waits, with the default tags).
+   */
+  const mayCloseAt = (text: string) => {
+    const from = Math.max(0, text.length - TAG_HOLD)
+    const candidates = closing ? [closing] : pairs
+    if (candidates.some((pair) => pair.closeFirst === null)) return from
+    for (let i = from; i < text.length; i++)
+      if (candidates.some((pair) => startsWith(pair, pair.closeFirst!, text[i]!))) return i
+    return text.length
   }
 
   const findClose = (text: string) => {
@@ -198,7 +215,7 @@ export const parseReply = (
       emitSections(text)
       return beforeSection(final)
     }
-    const shown = final ? buffer.length : Math.max(0, buffer.length - TAG_HOLD)
+    const shown = final ? buffer.length : mayCloseAt(buffer)
     if (shown > 0) {
       const text = buffer.slice(0, shown)
       setLast({ text: sections.at(-1)!.text + text })

@@ -17,6 +17,7 @@ const props: ReasoningActionProps = {
   text: "Synthetic *raw* thought.",
   streaming: false,
   kind: "reasoning",
+  first: true,
   session: {} as ChatSession
 }
 const render = () =>
@@ -59,9 +60,12 @@ describe("reasoning actions", () => {
         })
       )
     expect(of({ kind: "sections" })).toContain("Show as reply text")
-    expect(of({ kind: "sections" })).toContain("Copy notes")
+    expect(of({ kind: "sections" })).toContain("Copy thinking")
     expect(of({ kind: "reasoning" })).not.toContain("Show as reply text")
     expect(of({ kind: "sections", streaming: true })).not.toContain("Show as reply text")
+    // Collapse all once per reply: not on a panel below another.
+    expect(of({ kind: "sections" })).toContain("Collapse all")
+    expect(of({ kind: "sections", first: false })).not.toContain("Collapse all")
   })
 
   it("Collapse all tells every mounted block, which reads a new count", () => {

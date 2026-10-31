@@ -520,10 +520,12 @@ const historyStage: AssemblerStage = {
  * as the preset says: the last `send_back` replies of the card being written that have them,
  * in their original tags before the text, as ST's `add_to_prompts` / `max_additions` (only
  * the speaker's own, as ST does in a group). They're volatile: they leave as the chat grows.
+ * Never in a summary request.
  */
 const replySectionsStage = sync("reply-sections", (assembly) => {
   const { send_back: sendBack } = replySectionsOf(need(assembly, "preset").doc)
-  if (sendBack === 0) return
+  // A summary sees the replies' text only.
+  if (sendBack === 0 || assembly.request.summaryJob) return
   const speaker = need(assembly, "cast").speaker?.entity ?? null
   const scripted = new Map(need(assembly, "scripted"))
   let left = sendBack

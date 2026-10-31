@@ -1,8 +1,8 @@
 // The reasoning header's default actions (the `reasoningActions` slot, Reasoning.tsx): Copy
 // reasoning copies the raw text, stored or streamed so far; Collapse all closes every
 // reasoning block shown, the reply-section panels too, leaving the streaming preference as it
-// is. A reply-section panel also offers Show as reply text, for a wrong parse
-// (spec/REPLY-SECTIONS.md).
+// is; a reply with both panels shows it once, on the first. A reply-section panel also offers
+// Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md).
 import { useState } from "react"
 import { showToast } from "../../ui/Toast.tsx"
 import { type ReasoningActionProps, reasoningActions } from "./presentation.tsx"
@@ -32,20 +32,16 @@ export const registerReasoningActions = () => [
       <button
         type="button"
         className={actionClass}
-        onClick={() => void copy(text, kind === "reasoning" ? "Reasoning" : "Notes")}
+        onClick={() => void copy(text, kind === "reasoning" ? "Reasoning" : "Thinking")}
       >
-        {kind === "reasoning" ? "Copy reasoning" : "Copy notes"}
+        {kind === "reasoning" ? "Copy reasoning" : "Copy thinking"}
       </button>
     )
   }),
   reasoningActions.register({
     id: "reasoning.collapse-all",
     order: 20,
-    component: () => (
-      <button type="button" className={actionClass} onClick={collapseAllReasoning}>
-        Collapse all
-      </button>
-    )
+    component: CollapseAll
   }),
   reasoningActions.register({
     id: "reasoning.show-as-text",
@@ -53,6 +49,16 @@ export const registerReasoningActions = () => [
     component: ShowAsReplyText
   })
 ]
+
+/** Once per reply, on its first panel. */
+function CollapseAll({ first }: ReasoningActionProps) {
+  if (!first) return null
+  return (
+    <button type="button" className={actionClass} onClick={collapseAllReasoning}>
+      Collapse all
+    </button>
+  )
+}
 
 /** The reply's sections back in its text, as a new version; the parsed one stays among its versions. */
 function ShowAsReplyText({ version, kind, streaming, session }: ReasoningActionProps) {
@@ -64,7 +70,7 @@ function ShowAsReplyText({ version, kind, streaming, session }: ReasoningActionP
     setBusy(true)
     const result = await session.showSectionsAsText(entry)
     setBusy(false)
-    if (!result.ok) showToast({ title: "Couldn't show the notes as reply text", description: result.error.message })
+    if (!result.ok) showToast({ title: "Couldn't show the thinking as reply text", description: result.error.message })
   }
   return (
     <button type="button" className={actionClass} disabled={busy} onClick={() => void run()}>

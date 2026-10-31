@@ -11,8 +11,8 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({
   ...withAdmin,
-  FAKE_GENERATOR_TPS: "120",
-  FAKE_GENERATOR_TOKENS: "40",
+  FAKE_GENERATOR_TPS: "20",
+  FAKE_GENERATOR_TOKENS: "80",
   FAKE_GENERATOR_REASONING: "20",
   FAKE_GENERATOR_SECTION: "30"
 })
@@ -54,10 +54,17 @@ for (const width of [1440, 390])
         .click()
       const reply = page.getByRole("article").last()
       const reasoning = reply.getByRole("button", { name: /^Reasoning/ })
-      const notes = reply.getByRole("button", { name: /^Notes in the reply/ })
-      // Streaming, both open as the preference says; then both fold when the reply is done.
-      await expect(notes).toBeVisible()
-      await expect(notes).toHaveText(/^Notes in the reply·/, { timeout: 20_000 })
+      const notes = reply.getByRole("button", { name: /^Thinking in the reply/ })
+      const region = reply.getByRole("region", { name: "Thinking in the reply" })
+      // Streaming, both open as the preference says, the thinking growing in its panel while
+      // the reply is still being written; then both fold when the reply is done.
+      await expect(notes).toHaveText(/^Thinking in the reply…/)
+      await expect(region).toBeVisible()
+      await expect(region).toHaveText(/\S/)
+      await expect(region).not.toContainText("<think")
+      await shot("reply-sections-streaming")
+      await expect(notes).toHaveText(/^Thinking in the reply…/)
+      await expect(notes).toHaveText(/^Thinking in the reply·/, { timeout: 20_000 })
       await expect(reasoning).toHaveAttribute("aria-expanded", "false")
       await expect(notes).toHaveAttribute("aria-expanded", "false")
       // The provider's panel comes first.
@@ -65,13 +72,14 @@ for (const width of [1440, 390])
         .locator("[data-reasoning-panel]")
         .evaluateAll((panels) => panels.map((p) => p.getAttribute("data-reasoning-panel")))
       expect(order).toEqual(["reasoning", "sections"])
+      // Collapse all once per reply, on the first panel.
+      await expect(reply.getByRole("button", { name: "Collapse all" })).toHaveCount(1)
       // The body has no trace of the section.
-      const body = (await reply.innerText()).split(/Notes in the reply[^\n]*\n/).at(-1)!
+      const body = (await reply.innerText()).split(/Show as reply text\n/).at(-1)!
       expect(body).not.toMatch(/think/i)
       await shot("reply-sections-folded")
 
       await notes.click()
-      const region = reply.getByRole("region", { name: "Notes in the reply" })
       await expect(region).toBeVisible()
       await expect(region).not.toContainText("<think")
       expect((await region.innerText()).trim().length).toBeGreaterThan(20)
@@ -89,5 +97,27 @@ for (const width of [1440, 390])
       await expect(notes).toBeHidden()
       await expect(reasoning).toBeVisible()
       await shot("reply-sections-as-text")
+
+      // The preset's setting, beside End of request, on by default with the default pair.
+      const label = `Sections preset ${width} ${theme}`
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreatePreset({ label }))
+      await page.goto(`${server().url}/library`)
+      await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
+      const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
+      const heading = editor.getByRole("heading", { name: "Thinking at the start of a reply" })
+      await heading.scrollIntoViewIfNeeded()
+      const section = editor.locator('[data-preset-section="reply-sections"]')
+      await expect(section.getByRole("switch", { name: "Move tagged thinking into its own panel" })).toBeChecked()
+      await expect(section.getByRole("textbox", { name: "Opening tag" })).toHaveValue("<think(?:ing)?>")
+      await expect(section.getByRole("textbox", { name: "Closing tag" })).toHaveValue("</think(?:ing)?>")
+      await shot("reply-sections-editor")
+      await expect(section.getByRole("button", { name: "Add the default pair" })).toHaveCount(0)
+      const sendBack = section.getByRole("spinbutton", { name: "Send thinking back for the last replies" })
+      await sendBack.fill("")
+      await sendBack.fill("2")
+      await expect(sendBack).toHaveValue("2")
+      expect((await sendBack.boundingBox())!.width).toBeLessThan(150)
+      await sendBack.scrollIntoViewIfNeeded()
+      await shot("reply-sections-editor-send-back")
     })
   }
