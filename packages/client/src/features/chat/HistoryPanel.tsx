@@ -47,6 +47,7 @@ export function HistoryPanel({
   const revision = useRef(0)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
+  const idle = search.pairs.some((p) => !p.find)
   const history = useCallback(async () => {
     if (!forkId) return
     const result = await session.call((c) => c("ListHistoryEdits", { chatId: session.id, forkId }))
@@ -296,16 +297,21 @@ export function HistoryPanel({
           {error}
         </p>
       )}
+      {/* Until something is searched for there is nothing to count, and nothing a replacement re-reads. */}
       <p role="status">
-        {scanning
-          ? "Searching…"
-          : `${counts((h) => h.kind === "version_replace" && h.selected)} in messages, ${counts((h) => h.kind === "version_replace" && !h.selected)} in swipes, ${counts((h) => h.kind === "summary_revision")} in summaries`}
+        {idle
+          ? ""
+          : scanning
+            ? "Searching…"
+            : `${counts((h) => h.kind === "version_replace" && h.selected)} in messages, ${counts((h) => h.kind === "version_replace" && !h.selected)} in swipes, ${counts((h) => h.kind === "summary_revision")} in summaries`}
       </p>
-      <p className="text-muted">
-        {cost
-          ? `The model will re-read about ${cost.messages} messages and ${cost.summaries} summaries on the next reply (cache: ~${cost.tokens.toLocaleString()} tokens).`
-          : "The next reply will use the edited history. Choose a model to see the current context boundary."}
-      </p>
+      {!idle && !scanning && (
+        <p className="text-muted">
+          {cost
+            ? `The model will re-read about ${cost.messages} messages and ${cost.summaries} summaries on the next reply (cache: ~${cost.tokens.toLocaleString()} tokens).`
+            : "The next reply reads the history as edited."}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
