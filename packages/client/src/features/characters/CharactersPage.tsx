@@ -1,6 +1,8 @@
+import { useAtomRefresh } from "@effect/atom-react"
 import { useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
-import { AsyncView } from "../../actions.tsx"
+import { AsyncView, FailureView } from "../../actions.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
@@ -8,8 +10,8 @@ import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
 import { sortCards } from "./cardRecency.ts"
-import { CharacterTile, shellAtom, type ShellLibrary } from "./shellData.tsx"
-import { GroupTile, PinnedChats, SortSwitch, sortForks, type ShellSort } from "./ShellBrowser.tsx"
+import { CharacterTile, PAGE_ROWS, shellAtom, useShellForks, type ShellLibrary } from "./shellData.tsx"
+import { GroupTile, PinnedChats, ShowMore, SortSwitch, type ShellSort } from "./ShellBrowser.tsx"
 
 type Filter = "all" | "used" | "unused" | "groups"
 function Home({ data }: { data: ShellLibrary }) {
@@ -26,22 +28,12 @@ function Home({ data }: { data: ShellLibrary }) {
         (filter !== "unused" || c.card.chats === 0) &&
         [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(needle))
     ),
-    data.lastChatAt,
-    sort
-  )
-  const groups = sortForks(
-    data.forks.filter(
-      (f) =>
-        f.cast.length > 1 &&
-        (f.current || f.pinned || f.named) &&
-        [f.name, ...f.cast.flatMap((c) => [c.name, c.label])].some((n) => n.toLowerCase().includes(needle))
-    ),
     sort
   )
   return (
     <div className="flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
-      <PinnedChats data={data} home />
+      <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
       <div>
         <Segmented
           wrap
@@ -68,12 +60,7 @@ function Home({ data }: { data: ShellLibrary }) {
         <SortSwitch value={sort} onChange={setSort} />
       </div>
       {filter === "groups" ? (
-        <div aria-label="Groups" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-          {groups.map((f) => (
-            <GroupTile key={`${f.chat.id}/${f.forkId}`} fork={f} />
-          ))}
-          {!groups.length && <p className="text-muted">No chats with several characters yet.</p>}
-        </div>
+        <Groups needle={needle} sort={sort} />
       ) : (
         <div aria-label="Characters" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
           {cards.map((c) => (
@@ -91,6 +78,43 @@ function Home({ data }: { data: ShellLibrary }) {
     </div>
   )
 }
+/** Chats of several characters, read a page at a time. */
+function Groups({ needle, sort }: { needle: string; sort: ShellSort }) {
+  const [limit, setLimit] = useState({ key: "", limit: PAGE_ROWS })
+  const key = `${needle}/${sort}`
+  const shown = limit.key === key ? limit.limit : PAGE_ROWS
+  const forks = useShellForks({
+    entity: null,
+    chat: null,
+    search: needle,
+    sort,
+    sections: [{ id: "groups", limit: shown }]
+  })
+  const refresh = useAtomRefresh(forks.atom)
+  const groups = forks.section("groups")
+  if (forks.loading)
+    return forks.failure ? (
+      <FailureView cause={forks.failure.cause} onRetry={refresh} />
+    ) : (
+      <Loading label="Loading groups…" />
+    )
+  return (
+    <div className="flex flex-col gap-3">
+      <div aria-label="Groups" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+        {groups.rows.map((f) => (
+          <GroupTile key={`${f.chat.id}/${f.forkId}`} fork={f} />
+        ))}
+        {!groups.total && <p className="text-muted">No chats with several characters yet.</p>}
+      </div>
+      <ShowMore
+        shown={groups.rows.length}
+        total={groups.total}
+        onMore={() => setLimit({ key, limit: shown + PAGE_ROWS })}
+      />
+    </div>
+  )
+}
+
 export function CharactersPage() {
   useTitle("Characters")
   return (

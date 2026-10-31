@@ -18,7 +18,8 @@ export function Popover({
   side = "top",
   align = "start",
   initialFocus,
-  wide = false
+  wide = false,
+  keepMounted = false
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -38,6 +39,8 @@ export function Popover({
   initialFocus?: RefObject<HTMLElement | null>
   /** Wider and taller, for a long list with previews. */
   wide?: boolean
+  /** Stays mounted, hidden, while closed: what its controls opened (a dialog, say) stays open. */
+  keepMounted?: boolean
 }) {
   const button = (
     <BasePopover.Trigger aria-label={triggerLabel} className={triggerClassName}>
@@ -53,7 +56,7 @@ export function Popover({
           {button}
         </Tooltip>
       )}
-      <BasePopover.Portal>
+      <BasePopover.Portal keepMounted={keepMounted}>
         <BasePopover.Positioner className="z-50 outline-none" side={side} align={align} sideOffset={6}>
           <BasePopover.Popup
             {...(initialFocus === undefined ? {} : { initialFocus })}

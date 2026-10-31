@@ -84,6 +84,16 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
         })
       }).pipe(query("OpenEditor")),
 
+    // Indexed both ways (entities_forked_from): only cards in a relation are visited.
+    CardFamilyIndex: ({ userId }) =>
+      sql<{ entityId: EntityId; forks: number }>`
+        SELECT e.id AS "entityId", (SELECT count(*) FROM entities c WHERE c.forked_from_entity_id = e.id) AS forks
+        FROM entities e WHERE e.owner_user_id = ${userId} AND e.kind = 'card'
+          AND (e.forked_from_entity_id IS NOT NULL
+            OR e.id IN (SELECT forked_from_entity_id FROM entities WHERE forked_from_entity_id IS NOT NULL))`.pipe(
+        query("CardFamilyIndex")
+      ),
+
     CardFamily: ({ userId, entityId }) =>
       Effect.flatMap(lib.cardFamily(userId, entityId), (family) =>
         family === null ? Effect.fail(new NotFound({ entity: "card", id: entityId })) : Effect.succeed(family)

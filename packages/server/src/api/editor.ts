@@ -60,7 +60,8 @@ const saved = (change: RefChange) =>
     ref: change.ref,
     followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
     setAside: change.setAside ?? [],
-    recovered: change.recovered ?? 0
+    recovered: change.recovered ?? 0,
+    recoveredFields: change.recoveredFields ?? []
   })
 
 const draftKey = (refId: RefId, field: string) => new DraftKey({ targetKind: "entity_field", targetId: refId, field })
@@ -260,6 +261,9 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) =>
         writer.ForkCard({ userId: id, refId, name, nickname, characterVersion, moveDrafts })
       ).pipe(settle("ForkCard")),
+
+    CardFamilyIndex: () =>
+      Effect.flatMap(userId, (id) => reader.CardFamilyIndex({ userId: id })).pipe(settle("CardFamilyIndex")),
 
     CardFamily: ({ entityId }) =>
       Effect.flatMap(userId, (id) => reader.CardFamily({ userId: id, entityId })).pipe(settle("CardFamily")),

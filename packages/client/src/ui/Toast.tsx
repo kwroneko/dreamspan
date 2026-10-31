@@ -14,16 +14,20 @@ interface ToastData {
 
 const manager = BaseToast.createToastManager<ToastData>()
 
-/** Shows a toast for eight seconds, or until dismissed. */
+/**
+ * Shows a toast for eight seconds (or `timeout` ms), or until dismissed. Its time stands
+ * still while the pointer is over the toasts or focus is in them.
+ */
 export const showToast = (options: {
   readonly title: string
   readonly description?: string
   readonly actions?: ReadonlyArray<ToastAction>
+  readonly timeout?: number
 }) =>
   manager.add({
     title: options.title,
     ...(options.description ? { description: options.description } : {}),
-    timeout: 8000,
+    timeout: options.timeout ?? 8000,
     data: { actions: options.actions ?? [] }
   })
 

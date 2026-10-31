@@ -6,6 +6,27 @@ import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { Effect, Schema } from "effect"
 import { client, serverPort } from "./config.ts"
 
+type Api = Effect.Success<ReturnType<typeof client>>
+
+/** Waits for an import job to end, and returns it with its report. */
+export const jobEnded = (api: Api, importId: string, ms = 120_000) =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + ms
+    for (;;) {
+      const detail = yield* api.GetStImport({ importId })
+      if (detail.job.status !== "running") return detail
+      if (Date.now() > deadline) return yield* Effect.die(new Error(`import ${importId} still running`))
+      yield* Effect.sleep(20)
+    }
+  })
+
+/** Imports the folder at `path` on the server (StartStPathImport), its ST user `prefix`, to the end. */
+export const importStPath = (api: Api, path: string, prefix = "") =>
+  Effect.gen(function* () {
+    const { importId } = yield* api.StartStPathImport({ path, prefix })
+    return yield* jobEnded(api, importId)
+  })
+
 /** Cuts a chat file into parts of at most `max` bytes at line ends. */
 const chatParts = (bytes: Uint8Array, max: number) => {
   const parts: Array<Uint8Array> = []

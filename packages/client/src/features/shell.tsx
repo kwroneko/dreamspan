@@ -1,6 +1,11 @@
 import { TextActionHost } from "../textActions.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
+/**
+ * Lines across the top of every screen, above the page and below the phone bar: what the
+ * user should see wherever they are (a running import, say). Empty, it takes no room.
+ */
+export const appBanners = defineSlot<Record<string, never>>("app.banners")
 /** Actions in the sidebar's header row; `onNavigate` closes the phone sheet. */
 export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined }>("shell.sidebar.actions")
 // The app shell: it lets nobody past without a session (the server decides; this only
@@ -241,7 +246,7 @@ function AppShell() {
   if (AsyncResult.isInitial(result)) {
     return (
       <CenteredPage>
-        <Loading label="Connecting to the server…" />
+        <Loading label="Connecting to the server…" onRetry={retry} />
       </CenteredPage>
     )
   }
@@ -277,6 +282,7 @@ function AppShell() {
             <DesktopSidebar key={result.value.user.id} />
             <div className="flex min-w-0 flex-1 flex-col">
               <PhoneBar />
+              <SlotOutlet slot={appBanners} props={{}} />
               <Main />
             </div>
           </div>

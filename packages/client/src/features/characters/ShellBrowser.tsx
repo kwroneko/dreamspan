@@ -1,9 +1,11 @@
 import { chatName, formatDay } from "../chat/chatTitle.ts"
-import type { EntityId } from "@rp/shared/chat.ts"
+import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useAtomRefresh } from "@effect/atom-react"
+import type { ShellSection } from "@rp/shared/chatSetupApi.ts"
 import { useState } from "react"
-import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
+import { AsyncView, ErrorAlert, FailureView, useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
 import { rememberedPanel } from "../chat/ChatPanels.tsx"
@@ -13,11 +15,14 @@ import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { sortCards } from "./cardRecency.ts"
 import { GroupFaces } from "./GroupFaces.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 import {
   CharacterTile,
+  PAGE_ROWS,
   scopeSearch,
   shellAtom,
   sidebarCleared,
+  useShellForks,
   useShellNavigation,
   type ShellFork,
   type ShellLibrary
@@ -178,12 +183,6 @@ export function ForkRow({
 }
 
 export type ShellSort = "recent" | "created" | "name"
-export const sortForks = (forks: ReadonlyArray<ShellFork>, sort: ShellSort) =>
-  [...forks].sort((a, b) =>
-    sort === "name"
-      ? a.name.localeCompare(b.name)
-      : (sort === "created" ? b.createdAt - a.createdAt : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
-  )
 export function SortSwitch({
   value,
   onChange,
@@ -206,42 +205,84 @@ export function SortSwitch({
     />
   )
 }
+/** "Show N more of M", for a list read a page at a time. */
+export function ShowMore({ shown, total, onMore }: { shown: number; total: number; onMore: () => void }) {
+  const rest = total - shown
+  if (rest <= 0) return null
+  return (
+    <button type="button" onClick={onMore} className="mt-1 self-start px-2 py-1 text-xs text-accent">
+      Show {Math.min(rest, PAGE_ROWS).toLocaleString()} more of {rest.toLocaleString()}
+    </button>
+  )
+}
+
+/** A read's failure in a list, with a retry. */
+function ListFailure({ forks }: { forks: ReturnType<typeof useShellForks> }) {
+  const refresh = useAtomRefresh(forks.atom)
+  return forks.failure ? (
+    <FailureView cause={forks.failure.cause} onRetry={refresh} still="Still loading your chats…" />
+  ) : null
+}
+
 export function PinnedChats({
-  data,
-  forks = data.forks,
+  pinsCollapsed,
+  entity = null,
+  chat = null,
   home = false
 }: {
-  data: ShellLibrary
-  forks?: ReadonlyArray<ShellFork>
+  pinsCollapsed: boolean
+  entity?: EntityId | null
+  chat?: ChatId | null
   home?: boolean
 }) {
   const [sort, setSort] = useState<ShellSort>("recent")
+  const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
-  const pins = sortForks(
-    forks.filter((f) => f.pinned),
-    sort
-  )
-  if (!pins.length) return null
+  const open = !home || !pinsCollapsed
+  const forks = useShellForks({ entity, chat, search: "", sort, sections: [{ id: "pinned", limit }] })
+  const pins = forks.section("pinned")
+  if (!pins.total) return null
   return (
     <section aria-label="Pinned chats" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button
           variant="ghost"
-          aria-expanded={!home || !data.pinsCollapsed}
+          aria-expanded={open}
           onClick={() =>
-            home && void action.run((c) => c("SetHomePinsCollapsed", { collapsed: !data.pinsCollapsed }), ["pins"])
+            home && void action.run((c) => c("SetHomePinsCollapsed", { collapsed: !pinsCollapsed }), ["pins"])
           }
         >
-          {home ? (data.pinsCollapsed ? "▸ " : "▾ ") : ""}Pinned chats
+          {home ? (pinsCollapsed ? "▸ " : "▾ ") : ""}Pinned chats
         </Button>
-        {(!home || !data.pinsCollapsed) && <SortSwitch value={sort} onChange={setSort} label="Sort pinned chats" />}
+        {open && <SortSwitch value={sort} onChange={setSort} label="Sort pinned chats" />}
       </div>
-      {(!home || !data.pinsCollapsed) &&
-        pins.map((fork) => <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} />)}
+      {open && (
+        <>
+          {pins.rows.map((fork) => (
+            <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} />
+          ))}
+          <ShowMore shown={pins.rows.length} total={pins.total} onMore={() => setLimit((n) => n + PAGE_ROWS)} />
+        </>
+      )}
       <ErrorAlert error={action.error} />
     </section>
   )
 }
+
+/** The sections the left panel lists for each scope, under their headings. */
+const SECTIONS = {
+  all: [["chats", "Chats"]],
+  character: [
+    ["just", "Just"],
+    ["with", "With others"],
+    ["was", "Was in"]
+  ],
+  chat: [
+    ["current", "Current fork"],
+    ["peers", "Named and pinned peers"],
+    ["other", "Other forks"]
+  ]
+} as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>
 
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
@@ -252,38 +293,60 @@ function Browser({ data }: { data: ShellLibrary }) {
   const cardLabel = card
     ? `${card.card.label}${card.card.subtitle ? ` · ${card.card.subtitle}` : ""}`
     : "Character not found"
+  const needle = search.trim().toLowerCase()
+  const kind = scope.chat ? "chat" : scope.entity ? "character" : "all"
+  const sections = SECTIONS[kind]
+  // Each list's length, by scope and search: another scope or search starts from its first page.
+  const listKey = `${scope.entity}/${scope.chat}/${needle}`
+  const [limits, setLimits] = useState<{ key: string; limits: Partial<Record<ShellSection, number>> }>({
+    key: listKey,
+    limits: {}
+  })
+  const limitOf = (id: ShellSection) => (limits.key === listKey ? (limits.limits[id] ?? PAGE_ROWS) : PAGE_ROWS)
+  const more = (id: ShellSection) =>
+    setLimits({
+      key: listKey,
+      limits: { ...(limits.key === listKey ? limits.limits : {}), [id]: limitOf(id) + PAGE_ROWS }
+    })
+  const forks = useShellForks({
+    entity: scope.entity,
+    chat: scope.chat as ChatId | null,
+    search: needle,
+    sort: "recent",
+    sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
+  })
   // A chat by its current fork's name; inside it, the fork shown in the middle when that's another.
-  const chatForks = data.forks.filter((f) => f.chat.id === scope.chat)
-  const chat = chatForks.find((f) => f.current) ?? chatForks[0]
-  const open = params.chatId === scope.chat ? chatForks.find((f) => f.forkId === shown) : undefined
+  const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
+  const chat = forks.section("current").rows[0] ?? chatRows[0]
+  const open = params.chatId === scope.chat ? chatRows.find((f) => f.forkId === shown) : undefined
   const chatLabel = !chat
-    ? "Chat not found"
+    ? forks.loading
+      ? "…"
+      : "Chat not found"
     : open && open.forkId !== chat.forkId && open.name !== chat.name
       ? `${chat.name} › ${open.name}`
       : chat.name
-  const scoped = data.forks.filter(
-    (f) => (!scope.entity || f.joined.includes(scope.entity)) && (!scope.chat || f.chat.id === scope.chat)
-  )
-  const needle = search.trim().toLowerCase()
-  const rows = scoped.filter(
-    (f) => !needle || [f.name, ...f.cast.map((c) => c.label)].some((n) => n.toLowerCase().includes(needle))
-  )
-  const section = (title: string, forks: ReadonlyArray<ShellFork>) =>
-    forks.length > 0 && (
-      <section className="flex flex-col gap-1" aria-label={title}>
-        <h3 className="mt-3 truncate text-xs font-semibold text-muted" title={title}>
-          {title}
-        </h3>
-        {forks.map((f) => (
-          <ForkRow
-            key={`${f.chat.id}/${f.forkId}`}
-            fork={f}
-            here={f.chat.id === params.chatId && (shown ? f.forkId === shown : f.current)}
-          />
-        ))}
-      </section>
+  const section = (id: ShellSection, title: string) => {
+    const { rows, total } = forks.section(id)
+    return (
+      rows.length > 0 && (
+        <section key={id} className="flex flex-col gap-1" aria-label={title}>
+          <h3 className="mt-3 truncate text-xs font-semibold text-muted" title={title}>
+            {title}
+          </h3>
+          {rows.map((f) => (
+            <ForkRow
+              key={`${f.chat.id}/${f.forkId}`}
+              fork={f}
+              here={f.chat.id === params.chatId && (shown ? f.forkId === shown : f.current)}
+            />
+          ))}
+          <ShowMore shown={rows.length} total={total} onMore={() => more(id)} />
+        </section>
+      )
     )
-  const peers = rows.filter((f) => f.current || f.pinned || f.named)
+  }
+  const none = !forks.loading && sections.every(([id]) => forks.section(id).total === 0)
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <Segmented
@@ -348,7 +411,6 @@ function Browser({ data }: { data: ShellLibrary }) {
           <div className="grid grid-cols-2 gap-2">
             {sortCards(
               data.cards.filter((c) => c.card.label.toLowerCase().includes(needle)),
-              data.lastChatAt,
               "recent"
             ).map((c) => (
               <CharacterTile key={c.card.entityId} card={c} />
@@ -356,55 +418,13 @@ function Browser({ data }: { data: ShellLibrary }) {
           </div>
         ) : (
           <>
-            <PinnedChats data={data} forks={scoped} />
-            {scope.chat ? (
-              <>
-                {section(
-                  "Current fork",
-                  rows.filter((f) => f.current)
-                )}
-                {section(
-                  "Named and pinned peers",
-                  rows.filter((f) => !f.current && (f.pinned || f.named))
-                )}
-                {section(
-                  "Other forks",
-                  rows.filter((f) => !f.current && !f.pinned && !f.named)
-                )}
-              </>
-            ) : scope.entity ? (
-              <>
-                {(["just", "with", "was"] as const).map((category) => {
-                  const selected = rows
-                    .filter(
-                      (f) =>
-                        f.activity.find((a) => a.entityId === scope.entity)?.category === category ||
-                        (!f.activity.some((a) => a.entityId === scope.entity) &&
-                          category === (f.departed.some((id) => id === scope.entity) ? "was" : "with"))
-                    )
-                    .sort(
-                      (a, b) =>
-                        (b.activity.find((x) => x.entityId === scope.entity)?.at ?? -1) -
-                        (a.activity.find((x) => x.entityId === scope.entity)?.at ?? -1)
-                    )
-                  return (
-                    <div key={category}>
-                      {section(
-                        category === "just"
-                          ? `Just ${card?.card.label ?? "this character"}`
-                          : category === "with"
-                            ? "With others"
-                            : "Was in",
-                        selected
-                      )}
-                    </div>
-                  )
-                })}
-              </>
-            ) : (
-              section("Chats", peers)
+            <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} chat={scope.chat as ChatId | null} />
+            {sections.map(([id, title]) =>
+              section(id, id === "just" ? `Just ${card?.card.label ?? "this character"}` : title)
             )}
-            {!rows.length && <p className="p-2 text-sm text-muted">No chats here yet.</p>}
+            {forks.loading && !forks.failure && <Loading label="Still loading your chats…" />}
+            <ListFailure forks={forks} />
+            {none && <p className="p-2 text-sm text-muted">No chats here yet.</p>}
           </>
         )}
       </div>
@@ -415,7 +435,7 @@ export function ShellBrowser() {
   // Holds the panel's height while loading too, so the navigation below doesn't jump.
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <AsyncView atom={shellAtom} loading="Loading chats…">
+      <AsyncView atom={shellAtom} loading="Loading chats…" still="Still loading your chats…">
         {(data) => <Browser data={data} />}
       </AsyncView>
     </div>

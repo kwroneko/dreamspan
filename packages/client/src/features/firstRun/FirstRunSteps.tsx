@@ -43,7 +43,7 @@ export function FirstRunSteps({ data }: { data: ShellLibrary }) {
   if (!AsyncResult.isSuccess(defaults) || !AsyncResult.isSuccess(connections)) return null
   const chosen = defaults.value.model
   const cards = data.cards.length
-  const chatted = data.forks.length > 0 || data.cards.some((c) => c.card.chats > 0)
+  const chatted = data.cards.some((c) => c.card.chats > 0)
   const steps: ReadonlyArray<Step> = [
     chosen
       ? { title: "Connect a model", done: true, detail: <ModelName chosen={chosen} /> }

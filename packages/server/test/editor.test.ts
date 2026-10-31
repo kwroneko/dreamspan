@@ -143,6 +143,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       for (const [identifier, content] of [
         ["groupNudge", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
         ["impersonationPrompt", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
+        ["continueNudge", "[Continue your last message without repeating its original content.]"],
         ["directionPrompt", "[What happens next: {{direction}}]"]
       ]) {
         assert.strictEqual(prompts.find((p) => p.identifier === identifier)!.content, content)
@@ -844,8 +845,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId,
         revisionId: library.ref.headRevisionId
       })) as unknown as PresetDoc
-      // ST's twelve and the newest-message marker, the group nudge, the impersonation and direction prompts.
-      assert.strictEqual(imported.prompts.length, 16)
+      // ST's twelve and the newest-message marker, the group nudge, the impersonation, continue and direction prompts.
+      assert.strictEqual(imported.prompts.length, 17)
     })
   )
 })

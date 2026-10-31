@@ -131,7 +131,24 @@ test("Regenerate with… another model labels the new version with it", async ({
   await dialog.getByRole("combobox").click()
   await page.getByRole("option", { name: "Relay · prose-large", exact: true }).click()
   await expect(versions(reply)).toContainText("2/2")
-  await expect(reply.getByText("Relay · prose-large", { exact: true })).toBeVisible()
+  const label = reply.getByText("Relay · prose-large", { exact: true })
+  await expect(label).toBeVisible()
+  // A narrow header gives way in the connection's name first, down to nothing: the model's
+  // name stays whole, with no ellipsis, while any of the connection's shows (audit §7).
+  const widths = await label.evaluate((element) => {
+    const [connection, model] = [...element.children] as Array<HTMLElement>
+    const natural = (part: HTMLElement) => {
+      const range = document.createRange()
+      range.selectNodeContents(part)
+      return range.getBoundingClientRect().width
+    }
+    element.style.maxWidth = `${natural(model!) + 12}px`
+    return {
+      connection: connection!.getBoundingClientRect().width < natural(connection!),
+      model: model!.getBoundingClientRect().width >= natural(model!) - 0.01
+    }
+  })
+  expect(widths).toEqual({ connection: true, model: true })
   await settled(page)
   await versions(reply)
     .getByRole("button", { name: /choose a version/ })

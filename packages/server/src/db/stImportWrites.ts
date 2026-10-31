@@ -1,6 +1,7 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
+import { refreshChatSummaries } from "./forkSummaries.ts"
 import {
   inFork,
   viewAt,
@@ -838,6 +839,8 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         }
         yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
           WHERE id = ${input.recordId}`
+        // The shell's summaries of the finished chat, last, at the stamps this write left.
+        yield* refreshChatSummaries(sql, userId, chatId)
         return { notes, fork }
       }).pipe(transaction(sql, "StImportFinishChat")),
 

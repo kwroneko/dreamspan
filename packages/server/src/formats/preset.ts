@@ -26,7 +26,7 @@ import {
   triggersWithCondition,
   withEndOfRequest
 } from "@rp/shared/presetConditions.ts"
-import { endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
+import { CONTINUE_NUDGE, endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -878,12 +878,13 @@ export const exportStPreset = (stored: PresetDoc): Json => {
   // send every turn, off.
   const doc = withEndOfRequest(stored).doc
   const enabled = new Map(doc.order.map((e) => [e.identifier, e.enabled]))
-  const utility = (identifier: string, macro: "char" | "user") =>
-    fromSpeaker(doc.prompts.find((p) => p.identifier === identifier)?.content ?? "", macro)
+  const text = (identifier: string) => doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
+  const utility = (identifier: string, macro: "char" | "user") => fromSpeaker(text(identifier), macro)
   const utility_prompts = {
     ...doc.utility_prompts,
     group_nudge_prompt: utility(GROUP_NUDGE, "char"),
-    impersonation_prompt: utility(IMPERSONATION_PROMPT, "user")
+    impersonation_prompt: utility(IMPERSONATION_PROMPT, "user"),
+    continue_nudge_prompt: text(CONTINUE_NUDGE)
   }
   const prompts = doc.prompts
     .filter((p) => !endOfRequestText(p.identifier))

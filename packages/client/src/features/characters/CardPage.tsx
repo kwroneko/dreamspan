@@ -1,3 +1,4 @@
+import { useAtomRefresh } from "@effect/atom-react"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 // A card's page (DESIGN §2.1, §4): the card without entering a chat. Continue (its latest
 // chat), New chat and every chat it's in as peers, then its definition to read, each field
@@ -7,14 +8,15 @@ import type { CardUsage } from "@rp/shared/chatSetupApi.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { Link, useParams } from "@tanstack/react-router"
 import { useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AsyncView } from "../../actions.tsx"
+import { AsyncView, FailureView } from "../../actions.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { ForkRow } from "./ShellBrowser.tsx"
-import { shellAtom, type ShellFork } from "./shellData.tsx"
+import { shellAtom, useShellForks } from "./shellData.tsx"
 import { useOpenCharacter } from "./shellData.tsx"
 import { useTitle } from "../shell.tsx"
 import { usageLine } from "./data.ts"
@@ -135,21 +137,19 @@ export function Definition({ doc }: { doc: Doc }) {
   )
 }
 
-function CharacterChats({ card, forks }: { card: CardUsage; forks: ReadonlyArray<ShellFork> }) {
+function CharacterChats({ card }: { card: CardUsage }) {
   const [search, setSearch] = useState("")
   const [limit, setLimit] = useState(50)
   const needle = search.trim().toLowerCase()
-  const rows = forks
-    .filter(
-      (f) =>
-        f.joined.includes(card.entityId) &&
-        [f.name, ...f.cast.flatMap((c) => [c.label, c.name])].some((name) => name.toLowerCase().includes(needle))
-    )
-    .sort(
-      (a, b) =>
-        (b.activity.find((a) => a.entityId === card.entityId)?.at ?? -1) -
-          (a.activity.find((a) => a.entityId === card.entityId)?.at ?? -1) || b.recentAt - a.recentAt
-    )
+  const forks = useShellForks({
+    entity: card.entityId,
+    chat: null,
+    search: needle,
+    sort: "recent",
+    sections: [{ id: "card", limit }]
+  })
+  const refresh = useAtomRefresh(forks.atom)
+  const { rows, total } = forks.section("card")
   return (
     <div className="flex flex-col gap-2">
       <Input
@@ -161,18 +161,28 @@ function CharacterChats({ card, forks }: { card: CardUsage; forks: ReadonlyArray
         }}
         placeholder="Find a chat or character"
       />
-      <ul aria-label="Chats" className="flex flex-col gap-2">
-        {rows.slice(0, limit).map((fork) => (
-          <li key={`${fork.chat.id}/${fork.forkId}`}>
-            <ForkRow fork={fork} details />
-          </li>
-        ))}
-      </ul>
-      {!rows.length && <p className="text-sm text-muted">No chat's title or characters have “{search}”.</p>}
-      {limit < rows.length && (
-        <Button variant="ghost" onClick={() => setLimit((n) => n + 50)}>
-          Load more
-        </Button>
+      {forks.loading ? (
+        forks.failure ? (
+          <FailureView cause={forks.failure.cause} onRetry={refresh} />
+        ) : (
+          <Loading label="Loading chats…" onRetry={refresh} />
+        )
+      ) : (
+        <>
+          <ul aria-label="Chats" className="flex flex-col gap-2">
+            {rows.map((fork) => (
+              <li key={`${fork.chat.id}/${fork.forkId}`}>
+                <ForkRow fork={fork} details />
+              </li>
+            ))}
+          </ul>
+          {!total && <p className="text-sm text-muted">No chat's title or characters have “{search}”.</p>}
+          {rows.length < total && (
+            <Button variant="ghost" onClick={() => setLimit((n) => n + 50)}>
+              Load more
+            </Button>
+          )}
+        </>
       )}
     </div>
   )
@@ -183,9 +193,7 @@ function Chats({ card }: { card: CardUsage }) {
       <p>New chat shows its greeting; nothing is saved until you send the first message.</p>
     </EmptyState>
   ) : (
-    <AsyncView atom={shellAtom} loading="Loading chats…">
-      {(data) => <CharacterChats card={card} forks={data.forks} />}
-    </AsyncView>
+    <CharacterChats card={card} />
   )
 }
 

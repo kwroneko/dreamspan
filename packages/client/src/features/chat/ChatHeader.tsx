@@ -20,10 +20,8 @@ import { showToast } from "../../ui/Toast.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { NameDialog } from "./NameDialog.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { useAtomValue } from "@effect/atom-react"
-import { AsyncResult } from "effect/reactivity"
 import { PinButton } from "../characters/ShellBrowser.tsx"
-import { shellAtom, sidebarCleared } from "../characters/shellData.tsx"
+import { sidebarCleared, useShellForks } from "../characters/shellData.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import {
   Menu,
@@ -406,10 +404,17 @@ export function ChatHeader({
 }) {
   const characters = castCharacters(view)
   const navigate = useNavigate()
-  const shell = useAtomValue(shellAtom)
-  const fork = AsyncResult.isSuccess(shell)
-    ? shell.value.forks.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
-    : undefined
+  // The shown fork's shell row, for its pin: this chat's forks only.
+  const fork = useShellForks({
+    entity: null,
+    chat: view.chat?.id ?? null,
+    chats: view.chat ? [view.chat.id] : [],
+    search: "",
+    sort: "recent",
+    sections: [{ id: "all", limit: 1000 }]
+  })
+    .section("all")
+    .rows.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
   const name = view.chat ? chatName(importState(view.chat.title).title, characters) : null
   useTitle(name?.name ?? "Chat")
   const names = characters.map((card) => card.name)

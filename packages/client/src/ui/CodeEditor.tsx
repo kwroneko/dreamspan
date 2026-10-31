@@ -9,8 +9,13 @@ export interface CodeEditorProps {
   onRevealSelection?: ((host: HTMLElement, top: number) => void) | undefined
   label: string
   fullHeight?: boolean | undefined
+  /** Focus it when it opens, with the caret at the end of the text, in view. */
   autoFocus?: boolean | undefined
+  /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
+  quietMarkers?: boolean | undefined
   rows?: number | undefined
+  /** A CSS height the box is at least, overriding `rows`: a field opened large. */
+  minHeight?: string | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void

@@ -187,7 +187,7 @@ export const register = () => [
   chatPanels.register({
     id: "snippets",
     label: "Snippets",
-    icon: "note",
+    icon: "snippet",
     order: 75,
     component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets")
   }),

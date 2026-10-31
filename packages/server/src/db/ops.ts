@@ -13,7 +13,7 @@ import {
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { RoleProjectionOption, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -81,6 +81,7 @@ import {
   ComposerChoice
 } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { StImportJob } from "@rp/shared/stImportApi.ts"
 import {
   CardFamily,
   Doc,
@@ -177,7 +178,9 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
   /** Drafts a save set aside because what they were in is gone: their text is in the recovered texts. */
   setAside: Schema.optionalKey(Schema.Array(Schema.String)),
   /** How many earlier texts of the committed drafts went to the recovered texts. */
-  recovered: Schema.optionalKey(Schema.Int)
+  recovered: Schema.optionalKey(Schema.Int),
+  /** The fields those texts came from. */
+  recoveredFields: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** What merging a ref did, and the change that flowed on from it. */
@@ -407,6 +410,24 @@ const StChatRecord = Schema.Struct({
   firstAdded: Schema.NullOr(SlotId)
 })
 
+/**
+ * A chat's fork summaries (db/forkSummaries.ts), computed by a read at the stamps it read, for
+ * `StoreForkSummaries`. `forks` is their JSON, as the writer stores it: decoding thousands of
+ * them on the main thread only to encode them again cost as much as the read.
+ */
+const ChatSummariesAt = Schema.Struct({
+  chatId: Schema.String,
+  stamp: Schema.Int,
+  userStamp: Schema.Int,
+  forks: Schema.String
+})
+
+/** `ShellLibrary` and the summaries the read had to compute, which the caller stores (never sent to the client). */
+export const ShellLibraryRead = Schema.Struct({ ...ShellLibrary.fields, fresh: Schema.Array(ChatSummariesAt) })
+/** `ShellCards` and `ShellForks` with the summaries the read computed, as `ShellLibraryRead`. */
+const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array(ChatSummariesAt) })
+const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
+
 export class WriteOps extends RpcGroup.make(
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
@@ -457,6 +478,12 @@ export class WriteOps extends RpcGroup.make(
   }),
   Rpc.make("SetHomePinsCollapsed", {
     payload: { userId: UserId, collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** Each chat's summaries, if the chat's and its owner's stamps are still the ones they were computed at. */
+  Rpc.make("StoreForkSummaries", {
+    payload: { userId: UserId, chats: Schema.Array(ChatSummariesAt) },
     success: Schema.Void,
     error: StorageError
   }),
@@ -1698,6 +1725,81 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  // --- ST import jobs (stImportJobs.ts): what the import page lists.
+  /** A new job, running; an upload of the user's still running ends as interrupted (a new run fences it). */
+  Rpc.make("StImportJobStart", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      mode: Schema.Literals(["path", "upload"]),
+      source: Schema.String,
+      root: Schema.NullOr(Schema.String),
+      prefix: Schema.String,
+      filesTotal: Schema.Int,
+      bytesTotal: Schema.Number,
+      at: Schema.Number
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /**
+   * A running job's progress, and with `end` its outcome. Only a job still running changes,
+   * so a job ended elsewhere (cancelled, interrupted) stays as it ended. `report`, when
+   * given, replaces the stored one. Whether the job was running.
+   */
+  Rpc.make("StImportJobUpdate", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      at: Schema.Number,
+      filesTotal: Schema.Int,
+      filesDone: Schema.Int,
+      bytesTotal: Schema.Number,
+      bytesDone: Schema.Number,
+      currentFile: Schema.NullOr(Schema.String),
+      countsJson: Schema.String,
+      attention: Schema.Int,
+      reportJson: Schema.optionalKey(Schema.String),
+      notSentJson: Schema.optionalKey(Schema.String),
+      end: Schema.optionalKey(
+        Schema.Struct({
+          status: Schema.Literals(["complete", "failed", "cancelled", "interrupted"]),
+          error: Schema.NullOr(Schema.String)
+        })
+      )
+    },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /** A finished job's report again, after the user acted on it (a chat linked, a run un-hidden). */
+  Rpc.make("StImportJobReport", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      reportJson: Schema.String,
+      countsJson: Schema.String,
+      attention: Schema.Int
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** At startup: every job still running stopped with the server, keeping what it had. How many. */
+  Rpc.make("StImportJobsInterrupted", {
+    payload: { at: Schema.Number, error: Schema.String },
+    success: Schema.Int,
+    error: StorageError
+  }),
+  Rpc.make("StImportJobSeen", {
+    payload: { userId: UserId, id: Schema.String, at: Schema.Number },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Removes one finished job, or (null) all the user's finished ones; how many. */
+  Rpc.make("StImportJobsClear", {
+    payload: { userId: UserId, id: Schema.NullOr(Schema.String) },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("StImportStartChat", {
     payload: {
       userId: UserId,
@@ -2147,9 +2249,16 @@ export class ReadOps extends RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellLibrary", {
-    payload: { userId: UserId },
-    success: ShellLibrary,
+    /** `recompute`: ignore every stored summary (tests compare the two). */
+    payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },
+    success: ShellLibraryRead,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
+  Rpc.make("ShellForks", {
+    payload: { userId: UserId, view: ShellForksView },
+    success: ShellForksRead,
+    error: StorageError
   }),
   Rpc.make("GetSummaryDetails", {
     payload: { userId: UserId, summaryId: SummaryId },
@@ -2670,11 +2779,34 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: StorageError
   }),
+  /** The user's import jobs, newest first (at most 200). */
+  Rpc.make("ListStImportJobs", {
+    payload: { userId: UserId },
+    success: Schema.Array(StImportJob),
+    error: StorageError
+  }),
+  Rpc.make("GetStImportJob", {
+    payload: { userId: UserId, id: Schema.String },
+    success: Schema.Struct({
+      job: StImportJob,
+      root: Schema.NullOr(Schema.String),
+      prefix: Schema.String,
+      reportJson: Schema.NullOr(Schema.String),
+      notSentJson: Schema.String
+    }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   // --- The card and preset editors (editorReads.ts).
   Rpc.make("OpenEditor", {
     payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
     success: EditorSnapshot,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The user's cards that are a fork or have one, with their own forks' count (every state, as CardFamily). */
+  Rpc.make("CardFamilyIndex", {
+    payload: { userId: UserId },
+    success: Schema.Array(Schema.Struct({ entityId: EntityId, forks: Schema.Int })),
+    error: StorageError
   }),
   /** Every card connected to a live card of the user's by forking (`cardFamily` in library.ts). */
   Rpc.make("CardFamily", {

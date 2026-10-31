@@ -1375,8 +1375,9 @@ export class ChatSession {
 
   /**
    * Continue (ST's): a new version that starts as this one's text and streams on from its
-   * end, sent as the start of the reply to models that take one (DESIGN §7.5), with the
-   * composer's guidance as its direction.
+   * end, sent as the start of the reply to models that take one (DESIGN §7.5) and as the
+   * model's own last message to others (owner, 2026-10-31), with the composer's guidance as
+   * its direction.
    */
   async continueVersion(entry: PathEntry, useComposerGuidance = true): Promise<Outcome<unknown>> {
     const direction = useComposerGuidance ? (this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? "") : ""
