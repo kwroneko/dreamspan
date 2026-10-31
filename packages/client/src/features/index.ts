@@ -14,6 +14,7 @@ import * as editor from "./editor/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as regex from "./regex/index.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
 import * as shell from "./shell.tsx"
@@ -36,6 +37,7 @@ export const registerFeatures = () => {
   costs.register()
   credentials.register()
   network.register()
+  regex.register()
   accounts.register()
   notices.register()
   completionSound.register()
