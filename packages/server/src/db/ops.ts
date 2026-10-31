@@ -176,7 +176,9 @@ export class RefChange extends Schema.Class<RefChange>("RefChange")({
   /** Drafts a save set aside because what they were in is gone: their text is in the recovered texts. */
   setAside: Schema.optionalKey(Schema.Array(Schema.String)),
   /** How many earlier texts of the committed drafts went to the recovered texts. */
-  recovered: Schema.optionalKey(Schema.Int)
+  recovered: Schema.optionalKey(Schema.Int),
+  /** The fields those texts came from. */
+  recoveredFields: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** What merging a ref did, and the change that flowed on from it. */

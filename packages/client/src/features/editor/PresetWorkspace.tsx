@@ -9,7 +9,7 @@ import { EditorStore, useEditorState } from "./store.ts"
 
 const Editor = lazy(() => import("./EditorPage.tsx").then((m) => ({ default: m.Editor })))
 /** The chat the workspace is in, for what a card's save offers after it (a rename in the history). */
-export interface WorkspaceChat {
+interface WorkspaceChat {
   readonly chatId: string
   readonly forkId: string | null
 }

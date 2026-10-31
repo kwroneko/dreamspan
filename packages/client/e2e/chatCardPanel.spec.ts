@@ -114,7 +114,7 @@ for (const width of [1440, 390])
         await page.goto(`${server().url}/chats/${chat}?panel=card:${ref(name).entityId}`)
         await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible({ timeout: 30_000 })
         const tools = page.getByRole("tablist", { name: "Chat panel", exact: true })
-        const cast = page.getByRole("tablist", { name: "Characters in this chat", exact: true })
+        const cast = page.getByRole("tablist", { name: "Characters", exact: true })
         // The tools are one line at any width; the rest are under More.
         const box = (await tools.boundingBox())!
         expect(box.height).toBeLessThan(44)
@@ -132,7 +132,7 @@ for (const width of [1440, 390])
         await shoot(page, `panel-${label}-${tag}`)
       }
       // A tool under More opens like any tab.
-      const more = page.getByRole("button", { name: "More", exact: true })
+      const more = page.getByRole("button", { name: "More tools", exact: true })
       if (await more.isVisible()) {
         await more.click()
         await page.getByRole("menuitem", { name: "History edits" }).click()
@@ -188,13 +188,18 @@ for (const width of [1440, 390])
     )
     expect(saved[0]!.definition.description).toContain("Added in the panel.")
     expect(saved[0]!.definition.scenario).toContain("The kettle is on.")
-    // A large deletion keeps the text before it, and says so plainly.
+    // Text typed and then mostly replaced in one session is kept, and the notice says so plainly.
     await textBox(tab, "Personality").click()
+    await page.keyboard.press("Control+End")
+    await page.keyboard.type(" Keeps a dog called Ledger, who is older than the lighthouse.")
+    await page.waitForTimeout(1500)
     await page.keyboard.press("Control+A")
     await page.keyboard.type("Brisk.")
     await tab.getByRole("button", { name: "Save (1)", exact: true }).click()
     await save.getByRole("button", { name: "Save revision", exact: true }).click()
-    const notice = tab.getByText(/is kept in the bin, under Recovered text/)
+    const notice = tab.getByText(
+      "What Personality had before you replaced most of it is kept in the bin, under Recovered text, in case you want it back."
+    )
     await expect(notice).toBeVisible()
     await shoot(page, `bin-notice-${width}`)
     await tab.getByRole("button", { name: "Dismiss", exact: true }).click()

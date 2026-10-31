@@ -1,4 +1,5 @@
 // QA walkthrough regressions. All cards, portraits and history here are synthetic.
+import { panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { mkdir } from "node:fs/promises"
@@ -197,13 +198,13 @@ for (const width of [1440, 390])
       await expect(preview.locator("ins")).toHaveText("pier")
       await shoot(page, `summary-search-${width}-${theme}`)
       // Returning preserves the query; match navigation must open summaries too.
-      await page.getByRole("tab", { name: "History edits", exact: true }).click()
+      await panelTab(page, "History edits")
       await expect(page.getByRole("textbox", { name: "Find", exact: true })).toHaveValue("bridge")
       await expect(page.getByLabel("Skip match 1 in message 1", { exact: true })).toBeChecked()
       await page.getByRole("button", { name: "Next", exact: true }).click()
       await expect(row).toBeVisible()
       await expect(preview.locator("del")).toHaveText("bridge")
-      await page.getByRole("tab", { name: "History edits", exact: true }).click()
+      await panelTab(page, "History edits")
       await page.getByRole("button", { name: "Previous", exact: true }).click()
       await expect(row).toBeVisible()
       await expect(preview.locator("ins")).toHaveText("pier")

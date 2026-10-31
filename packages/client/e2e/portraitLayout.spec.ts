@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -105,7 +106,7 @@ test("permitted sidebar widths keep a group composer and Send inside the chat", 
 })
 
 for (const width of [1440, 390]) {
-  test(`all six panel tab labels fit at ${width}`, async ({ page }) => {
+  test(`the panel's tools fit one row at ${width}`, async ({ page }) => {
     await openChat(page, width)
     await page
       .locator("article")
@@ -114,13 +115,17 @@ for (const width of [1440, 390]) {
       .click()
     const list = page.getByRole("tablist", { name: "Chat panel", exact: true })
     const bounds = (await list.boundingBox())!
-    for (const name of ["Portrait", "Cast", "This chat", "Lorebooks", "Notes", "Summaries"]) {
-      const box = (await list.getByRole("tab", { name, exact: true }).boundingBox())!
+    // One row: what doesn't fit is under More tools, the tab open always shown.
+    expect(bounds.height).toBeLessThan(44)
+    await expect(list.getByRole("tab", { name: "Portrait", exact: true })).toHaveAttribute("aria-selected", "true")
+    for (const tab of await list.getByRole("tab").all()) {
+      const box = (await tab.boundingBox())!
       expect(box.x).toBeGreaterThanOrEqual(bounds.x)
-      expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width)
+      expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+      expect(box.y).toBeGreaterThanOrEqual(bounds.y - 1)
     }
     await shoot(page, `portrait-tabs-${width}`)
-    await page.getByRole("tab", { name: "Summaries", exact: true }).click()
+    await panelTab(page, "Summaries")
     await expect(page.getByRole("tab", { name: "Summaries", exact: true })).toHaveAttribute("aria-selected", "true")
     await shoot(page, `summaries-${width}`)
   })

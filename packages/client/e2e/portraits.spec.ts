@@ -87,9 +87,11 @@ for (const width of [1440, 390]) {
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
     await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
-    // In a chat, the card's tab has the Cast row's actions, Edit among them (f55e4e7).
+    // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
     await expect(
-      page.getByRole("tabpanel", { name: "Mira", exact: true }).getByRole("button", { name: "Edit Mira", exact: true })
+      page
+        .getByRole("tabpanel", { name: "Mira", exact: true })
+        .getByRole("button", { name: "Open Mira in the full editor", exact: true })
     ).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
     await page

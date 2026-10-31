@@ -8,13 +8,13 @@ import { Avatar } from "./Avatar.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Menu, MenuItem } from "./Menu.tsx"
 
-export interface ToolTab {
+interface ToolTab {
   readonly value: string
   readonly label: string
   readonly icon: IconName
 }
 
-export interface SubjectTab {
+interface SubjectTab {
   readonly value: string
   readonly label: string
   /** A portrait; without one the tab shows `icon` (the cast's own tab, say). */
@@ -53,6 +53,7 @@ export function ToolTabs({
   value,
   onValueChange,
   label,
+  moreLabel = MORE,
   end
 }: {
   tabs: ReadonlyArray<ToolTab>
@@ -60,6 +61,8 @@ export function ToolTabs({
   value: string
   onValueChange: (value: string) => void
   label: string
+  /** The More button's accessible name, its text in it: "More tools". */
+  moreLabel?: string
   /** After the row: a close button, say. */
   end?: ReactNode
 }) {
@@ -121,7 +124,7 @@ export function ToolTabs({
             <Menu
               label={`More of the ${label.toLowerCase()}`}
               trigger={
-                <button type="button" className={toolClass}>
+                <button type="button" aria-label={moreLabel} className={toolClass}>
                   <Icon name="more" />
                   {MORE}
                 </button>

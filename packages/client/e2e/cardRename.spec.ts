@@ -103,8 +103,11 @@ for (const width of [1440, 390])
       // An editor opened from a chat carries exactly that fork, even when another is current.
       await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}`)
       await openPanel(page, "Cast")
-      await page.getByRole("button", { name: `Edit Display Aria ${width} ${theme}`, exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`renameFork=${f.first.chat.currentForkId}`))
+      // Over the chat, which it names to the save.
+      await page
+        .getByRole("button", { name: `Open Display Aria ${width} ${theme} in the full editor`, exact: true })
+        .click()
+      await expect(page.getByRole("dialog", { name: "Card editor", exact: true })).toBeVisible()
       await modelBox(page).fill("Aria")
       await save(page)
       await prompt(page).getByRole("button", { name: /^No\./ }).click()
@@ -239,7 +242,7 @@ test("a recovered chat offer names its original target when opened from another 
   const f = await seed("Recovery target")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.sibling.id}&panel=cast`)
-  await page.getByRole("button", { name: "Edit Recovery target", exact: true }).click()
+  await page.getByRole("button", { name: "Open Recovery target in the full editor", exact: true }).click()
   await modelBox(page).fill("Ari")
   await save(page)
   await expect(prompt(page)).toBeVisible()

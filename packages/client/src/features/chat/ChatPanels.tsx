@@ -155,6 +155,7 @@ export function ChatSidePanel({
         value={tab}
         onValueChange={onTab}
         label="Chat panel"
+        moreLabel="More tools"
         end={wide && <IconButton label="Close the panel" icon="close" className="shrink-0" onClick={onClose} />}
       />
       <SubjectTabs
@@ -167,7 +168,7 @@ export function ChatSidePanel({
         }))}
         value={tab}
         onValueChange={onTab}
-        label="Characters in this chat"
+        label="Characters"
       />
       {cast.length === 0 && <div className="h-0.5" />}
     </div>

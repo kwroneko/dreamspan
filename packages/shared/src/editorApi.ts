@@ -48,7 +48,9 @@ export class SavedRef extends Schema.Class<SavedRef>("SavedRef")({
    * How many earlier texts of the saved drafts went to the bin's recovered texts: from
    * before a destructive change, or another tab's text a save went over.
    */
-  recovered: Schema.Int
+  recovered: Schema.Int,
+  /** The fields those texts came from. */
+  recoveredFields: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** Everything the editor opens with, read in one snapshot. */

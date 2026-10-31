@@ -574,7 +574,11 @@ export class EditorStore {
         }),
       ["library"]
     )
-    if (result.ok) this.noteRecovered(result.value.recovered)
+    if (result.ok) {
+      const fields = result.value.recoveredFields ?? []
+      this.noteRecovered(result.value.recovered - fields.length)
+      for (const field of fields) this.noteRecovered(1, field)
+    }
     if (result.ok || result.error.tag === "StaleWrite" || result.error.tag === "EditConflict") await this.refresh()
     return result
   }

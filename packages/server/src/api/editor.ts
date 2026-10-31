@@ -60,7 +60,8 @@ const saved = (change: RefChange) =>
     ref: change.ref,
     followers: change.followers.map(({ refId, outcome }) => ({ refId, outcome })),
     setAside: change.setAside ?? [],
-    recovered: change.recovered ?? 0
+    recovered: change.recovered ?? 0,
+    recoveredFields: change.recoveredFields ?? []
   })
 
 const draftKey = (refId: RefId, field: string) => new DraftKey({ targetKind: "entity_field", targetId: refId, field })

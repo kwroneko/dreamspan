@@ -145,15 +145,19 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
   await expect(members(page).getByRole("listitem")).toHaveCount(2)
 })
 
-test("Edit opens the card used everywhere", async ({ page }) => {
+test("the full editor opens the card used everywhere over the chat, and goes back to it", async ({ page }) => {
   await chatWithMira(page)
   await openCast(page)
   await expect(member(page, "Mira")).toContainText(/used by \d+ chats?/)
-  await page.getByRole("button", { name: "Edit Mira", exact: true }).click()
-  // The editor URL carries the chat and fork, for the rename offer after a save (U18).
-  await expect(page).toHaveURL(/\/library\/[^/?]+\?renameChat=[^&]+&renameFork=[^&]+$/)
-  await expect(page.getByText(/used by \d+ chats?/)).toBeVisible()
-  await expectTextBox(page.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
+  const chat = page.url()
+  await page.getByRole("button", { name: "Open Mira in the full editor", exact: true }).click()
+  const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
+  await expect(editor.getByText(/Used by \d+ chats?/)).toBeVisible()
+  await expectTextBox(editor.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
+  expect(page.url()).toBe(chat)
+  await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
+  await expect(editor).toHaveCount(0)
+  expect(page.url()).toBe(chat)
 })
 
 test("the composer regenerates the latest reply, apart from Generate", async ({ page }) => {
