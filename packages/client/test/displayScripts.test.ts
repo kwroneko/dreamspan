@@ -79,10 +79,11 @@ it("a model-side message takes its speaker's scripts; a user-side one the only o
   const solo = { participants: [ana, mira], playedByMe: [ana] }
   expect(messageCharacter(solo, mira, 2)).toBe(mira)
   expect(messageCharacter(solo, ana, 1)).toBe(mira)
-  expect(messageCharacter(solo, null, 2)).toBe(null)
+  expect(messageCharacter(solo, null, 2)).toBe(mira)
   const group = { participants: [ana, mira, kai], playedByMe: [ana] }
   expect(messageCharacter(group, kai, 2)).toBe(kai)
   expect(messageCharacter(group, ana, 1)).toBe(null)
+  expect(messageCharacter(group, null, 2)).toBe(null)
   expect(messageCharacter({ participants: [ana], playedByMe: [ana] }, ana, 1)).toBe(null)
   expect(messageCharacter(null, null, 1)).toBe(null)
 })

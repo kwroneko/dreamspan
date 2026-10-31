@@ -16,14 +16,15 @@ export const approvedScripts = (doc: Doc | null | undefined): ReadonlyArray<Rege
 
 /**
  * The character whose scripts apply to a message: on the model's side, its speaker; on the
- * user's side, the chat's only character the user doesn't play, when there's exactly one.
+ * user's side (or a reply with no recorded speaker), the chat's only character the user
+ * doesn't play, when there's exactly one.
  */
 export const messageCharacter = (
   cast: Pick<Cast, "participants" | "playedByMe"> | null,
   speaker: EntityId | null,
   placement: 1 | 2
 ): EntityId | null => {
-  if (placement === 2) return speaker
+  if (placement === 2 && speaker !== null) return speaker
   const others = (cast?.participants ?? []).filter((id) => !cast!.playedByMe.includes(id))
   return others.length === 1 ? others[0]! : null
 }
