@@ -102,7 +102,12 @@ function TitleCell({
         className="mt-0.5 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
       >
-        {keys ? keys : entry.constant ? "No keys · always included" : "No keys"}
+        {keys ||
+          (entry.constant
+            ? "No keys · always included"
+            : entry.vectorized
+              ? "No keys · by similarity"
+              : "No keys · never matched")}
       </button>
     </div>
   )
@@ -388,8 +393,9 @@ export function LorebookTable({
   const [enabled, setEnabled] = useState<EnabledFilter>("all")
   const [sortId, setSortId] = useState("order")
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set(added === null ? [] : [added]))
-  // An entry just added leads the table until the search, filter or sort changes.
-  const [first, setFirst] = useState<number | null>(added)
+  // Entries just added or duplicated lead the table, newest first, until the search, filter
+  // or sort changes: a second one doesn't push the first away to its sorted place.
+  const [pinned, setPinned] = useState<ReadonlyArray<number>>(added === null ? [] : [added])
   const [focus, setFocus] = useState<{ uid: number; at: "title" | "keys" } | null>(
     added === null ? null : { uid: added, at: "title" }
   )
@@ -398,14 +404,14 @@ export function LorebookTable({
 
   // The order is worked out when what decides it changes, not on every edit.
   const signature = book.entries.map((entry) => entry.uid).join(",")
-  const orderKey = JSON.stringify([signature, query, enabled, sort?.id, first])
+  const orderKey = JSON.stringify([signature, query, enabled, sort?.id, pinned])
   const arrange = () => {
     const changed = changedUids(store, root)
     return arrangeEntries(book.entries, {
       query,
       enabled,
       sort,
-      first,
+      pinned,
       facts: (entry, index) => {
         const path = entryPath(root, entry.uid)
         return {
@@ -474,7 +480,7 @@ export function LorebookTable({
   const reveal = (uid: number) => {
     setQuery("")
     setEnabled("all")
-    setFirst(uid)
+    setPinned((list) => [uid, ...list.filter((other) => other !== uid)])
     setOpened((set) => new Set(set).add(uid))
     setFocus({ uid, at: "title" })
   }
@@ -508,14 +514,15 @@ export function LorebookTable({
             <Icon name="insert" />
             Add entry
           </Button>
-          <div className="min-w-[12rem] flex-1">
+          {/* Wide enough for its placeholder: on a phone it takes its own line. */}
+          <div className="min-w-[16rem] flex-1">
             <Input
               type="search"
               aria-label="Search titles, keys and content"
               placeholder="Search titles, keys and content"
               value={query}
               onChange={(event) => {
-                setFirst(null)
+                setPinned([])
                 setQuery(event.currentTarget.value)
               }}
             />
@@ -526,7 +533,7 @@ export function LorebookTable({
             label="Show"
             value={enabled}
             onValueChange={(next) => {
-              setFirst(null)
+              setPinned([])
               setEnabled(next)
             }}
             options={[
@@ -543,7 +550,7 @@ export function LorebookTable({
                 items={sorts.map((s) => ({ value: s.id, label: s.label }))}
                 value={sort?.id ?? null}
                 onValueChange={(next) => {
-                  setFirst(null)
+                  setPinned([])
                   setSortId(next)
                 }}
               />
@@ -555,11 +562,14 @@ export function LorebookTable({
               Close all
             </Button>
           )}
-          <p role="status" className="text-sm text-muted">
-            {filtered
-              ? `${uids.length.toLocaleString()} of ${entriesLabel(book.entries.length)}`
-              : entriesLabel(book.entries.length)}
-          </p>
+          {/* A standalone book's header has its count; here it's how many the search leaves. */}
+          {(filtered || card) && (
+            <p role="status" className="text-sm text-muted">
+              {filtered
+                ? `${uids.length.toLocaleString()} of ${entriesLabel(book.entries.length)}`
+                : entriesLabel(book.entries.length)}
+            </p>
+          )}
         </div>
         <Removed store={store} root={root} uids={removed} />
       </div>

@@ -101,7 +101,8 @@ export type EnabledFilter = "all" | "on" | "off"
 
 /**
  * The rows shown, in order: those matching the search (title, keys and content, as typed)
- * and the enabled filter, sorted. `first` (an entry just added) leads whatever the sort.
+ * and the enabled filter, sorted. `pinned` (entries just added or duplicated, newest first)
+ * lead whatever the search, filter or sort.
  */
 export const arrangeEntries = (
   entries: ReadonlyArray<LorebookEntry>,
@@ -110,13 +111,14 @@ export const arrangeEntries = (
     readonly enabled: EnabledFilter
     readonly sort: LorebookSort | undefined
     readonly facts: (entry: LorebookEntry, index: number) => SortFacts & { readonly content: string }
-    readonly first?: number | null
+    readonly pinned?: ReadonlyArray<number>
   }
 ): ReadonlyArray<number> => {
   const words = options.query.toLowerCase().split(/\s+/).filter(Boolean)
+  const pinned = new Set(options.pinned)
   const facts = new Map(entries.map((entry, index) => [entry, options.facts(entry, index)]))
   const shown = entries.filter((entry) => {
-    if (entry.uid === options.first) return true
+    if (pinned.has(entry.uid)) return true
     if (options.enabled === "on" && !entry.enabled) return false
     if (options.enabled === "off" && entry.enabled) return false
     if (words.length === 0) return true
@@ -130,8 +132,9 @@ export const arrangeEntries = (
       )
     : shown
   const uids = sorted.map((entry) => entry.uid)
-  if (options.first == null || !uids.includes(options.first)) return uids
-  return [options.first, ...uids.filter((uid) => uid !== options.first)]
+  if (pinned.size === 0) return uids
+  const lead = (options.pinned ?? []).filter((uid) => uids.includes(uid))
+  return [...lead, ...uids.filter((uid) => !pinned.has(uid))]
 }
 
 /** ST's position names, short as its table shows them, with what each means. */

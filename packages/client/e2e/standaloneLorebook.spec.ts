@@ -31,7 +31,7 @@ for (const width of [1440, 390]) {
   test(`a standalone lorebook lists, filters, edits, saves, restores and exports its entries at ${width}`, async ({
     page
   }) => {
-    test.setTimeout(120_000)
+    test.setTimeout(180_000)
     await page.setViewportSize({ width, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const response = await page.request.post(`${server().url}/library/import?name=Saltmarsh ${width}.json`, {
@@ -61,6 +61,10 @@ for (const width of [1440, 390]) {
     await inUse.getByRole("button", { name: `Open Saltmarsh ${width}`, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await expect(page.getByRole("list", { name: "Entries" })).toBeVisible()
+    // A lorebook isn't a preset: its way out says where it goes.
+    await page.getByRole("button", { name: "Back to the chat", exact: true }).click()
+    await expect(page.getByRole("list", { name: "Entries" })).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)
     await expect(page.getByRole("switch", { name: /Use in every chat/ })).toBeVisible()
     await expect(page.getByText("3 entries · added to 1 chat")).toBeVisible()
@@ -265,4 +269,102 @@ test("find results go to a standalone entry's text and keys, even past the entry
       })
     )
     .toEqual({ text: "lantern", start: 5 })
+})
+
+test("a 400-entry book: rows virtualized, cells edited in place, new entries kept in view, a move, the diff by title", async ({
+  page
+}) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // A synthetic book of 400 entries, as ST's world info file holds them.
+  const entries = Object.fromEntries(
+    Array.from({ length: 400 }, (_, uid) => [
+      uid,
+      { uid, key: [`key${uid}`], comment: `Place ${uid}`, content: `Text of place ${uid}.`, order: uid }
+    ])
+  )
+  const imported = async (name: string, book: object) => {
+    const response = await page.request.post(`${server().url}/library/import?name=${name}.json`, {
+      headers: { "content-type": "application/octet-stream", origin: server().url },
+      data: Buffer.from(JSON.stringify({ name, ...book }))
+    })
+    expect(response.status()).toBe(200)
+    return (await response.json()).library.ref as { id: string }
+  }
+  const ref = await imported("Big book", { entries })
+  const other = await imported("Second book", { entries: {} })
+  await page.goto(`${server().url}/library/${ref.id}`)
+  const list = page.getByRole("list", { name: "Entries" })
+  await expect(list.getByRole("textbox", { name: "Title of Place 399", exact: true })).toBeVisible()
+  // Only the rows near the view are in the page.
+  expect(await list.getByRole("listitem").count()).toBeLessThan(60)
+  await expect(page.getByText("400 entries · not added to any chat")).toBeVisible()
+
+  // Find an entry, then change its strategy, position, depth, order and trigger % in its row.
+  await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("key123")
+  await expect(page.getByText("1 of 400 entries")).toBeVisible()
+  await page.getByRole("combobox", { name: "Strategy of Place 123" }).selectOption("constant")
+  await page.getByRole("combobox", { name: "Position of Place 123" }).selectOption("at_depth:assistant")
+  await page.getByRole("spinbutton", { name: "Depth of Place 123" }).fill("6")
+  await page.getByRole("spinbutton", { name: "Order of Place 123" }).fill("900")
+  await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).fill("40")
+  await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).blur()
+
+  // A new entry and then a copy of it both lead the table, the newest first.
+  await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("")
+  await page.getByRole("button", { name: "Add entry", exact: true }).click()
+  await page.keyboard.type("Lighthouse")
+  await page.getByRole("button", { name: "More for Lighthouse", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Duplicate" }).click()
+  const titles = () =>
+    list
+      .getByRole("textbox", { name: /^Title of / })
+      .evaluateAll((inputs) => inputs.slice(0, 3).map((input) => (input as HTMLInputElement).value))
+  await expect.poll(titles).toEqual(["Lighthouse (copy)", "Lighthouse", "Place 123"])
+
+  // Move an entry to another book: saved there at once; here its removal waits for Save.
+  await page.getByRole("button", { name: "More for Place 398", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Move to another lorebook…" }).click()
+  const move = page.getByRole("dialog", { name: "Move “Place 398” to another lorebook" })
+  await move.getByRole("button", { name: "Second book" }).click()
+  await move.getByRole("button", { name: "Move to Second book" }).click()
+  await expect(move).toHaveCount(0)
+  const doc = async (id: string) =>
+    (await admin((api) => api.OpenEditor({ refId: id as never }))).doc as unknown as LorebookDoc
+  expect((await doc(other.id)).entries.map((e) => e.comment)).toEqual(["Place 398"])
+  await expect(page.getByRole("status").filter({ hasText: "Deleted, until you save:" })).toContainText("Place 398")
+
+  // The diff names entries by title, the removed one too, and the fields as the table does.
+  await page.getByRole("button", { name: /^Save \(/ }).click()
+  const dialog = page.getByRole("dialog", { name: "Save a revision" })
+  const labels = dialog.getByRole("list", { name: "Changes" }).locator(":scope > li > span")
+  await expect
+    .poll(() => labels.allTextContents())
+    .toEqual(
+      expect.arrayContaining([
+        "Entry “Lighthouse”",
+        "Entry “Lighthouse (copy)”",
+        "Entry “Place 398”",
+        "Entry “Place 123”: Strategy (constant)",
+        "Entry “Place 123”: Position",
+        "Entry “Place 123”: Position (role)",
+        "Entry “Place 123”: Depth",
+        "Entry “Place 123”: Order",
+        "Entry “Place 123”: Trigger %"
+      ])
+    )
+  await dialog.getByRole("button", { name: "Save revision" }).click()
+  await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+  const saved = await doc(ref.id)
+  expect(saved.entries).toHaveLength(401)
+  expect(saved.entries.find((e) => e.uid === 123)).toMatchObject({
+    constant: true,
+    position: "at_depth",
+    role: "assistant",
+    depth: 6,
+    order: 900,
+    probability: 40
+  })
+  expect(saved.entries.some((e) => e.comment === "Place 398")).toBe(false)
 })

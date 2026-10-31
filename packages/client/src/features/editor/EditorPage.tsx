@@ -240,7 +240,8 @@ export function Editor({
             <div className="flex min-w-0 items-center justify-between gap-2">
               <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{ref.label}</span>
               <Button className="shrink-0" onClick={onClose}>
-                Close preset editor
+                {/* A lorebook or card opened from the chat's panel goes back to the chat. */}
+                {ref.kind === "preset" ? "Close preset editor" : "Back to the chat"}
               </Button>
             </div>
           )}

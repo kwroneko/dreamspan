@@ -211,7 +211,7 @@ export function EntryDetails({
   const selective = useValue<boolean>(store, [...path, "selective"])
   return (
     <div role="group" aria-label={`Lorebook entry ${uid}`} className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-col gap-1 empty:hidden">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 empty:hidden">
         <RowFieldChange store={store} path={path} label={title} />
         {ROW_FIELDS.map(([at, label]) => (
           <RowFieldChange key={label} store={store} path={[...path, ...at]} label={label} />

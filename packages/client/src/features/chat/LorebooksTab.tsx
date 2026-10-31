@@ -179,8 +179,11 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
           Open
         </Button>
       )}
-      {row.menu.length > 0 && (
+      {row.menu.length > 0 ? (
         <ActionMenu label={`More for ${row.name}`} trigger={<Icon name="more" />} items={row.menu} />
+      ) : (
+        // The ⋯'s room, so every row's Open lines up.
+        <span aria-hidden="true" className="w-8 shrink-0" />
       )}
     </li>
   )

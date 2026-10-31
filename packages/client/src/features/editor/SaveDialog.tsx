@@ -180,7 +180,7 @@ export function SaveDialog({
           ) : (
             <ul aria-label="Changes" className="flex flex-col gap-3">
               {view.changes.map((change) => {
-                const label = fieldLabel(kind, view.working.doc, change.path)
+                const label = fieldLabel(kind, view.working.doc, change.path, store.head)
                 return (
                   <li key={label} className="flex flex-col gap-1">
                     <span className="text-sm font-medium [overflow-wrap:anywhere]">{label}</span>

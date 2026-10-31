@@ -17,7 +17,8 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
   return (
     <details className="group rounded-lg border border-border p-3">
       <summary className="cursor-pointer text-sm font-medium">
-        Book settings <span className="font-normal text-muted">· name, description, scan depth, budget</span>
+        Book settings{" "}
+        <span className="hidden font-normal text-muted sm:inline">· name, description, scan depth, budget</span>
       </summary>
       <div className="mt-3 flex flex-col gap-4">
         <TextField store={store} path={[...root, "name"]} label="Lorebook name" />
