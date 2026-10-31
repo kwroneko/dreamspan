@@ -1,9 +1,10 @@
 // Regex scripts while a reply streams (ARCHITECTURE §12, "Live rewrites"), with synthetic
-// fixtures only: a provider streams a reply a few characters at a time that opens with a
-// `<thinking>` section and then a `<cot>` chain of thought. The preset strips the chain of
-// thought (AI output) and hides a word in reasoning (placement 6). Every render of the body
-// and of the "Thinking in the reply" panel is recorded in the page: the stripped and hidden
-// text never shows, mid-stream or after, and the finished reply is what the stream ended on.
+// fixtures only: a provider streams its reasoning, then a reply a few characters at a time
+// that opens with a `<thinking>` section and then a `<cot>` chain of thought. The preset
+// strips the chain of thought (AI output) and hides a word in reasoning (placement 6). Every
+// render of the body, the "Reasoning" panel and the "Thinking in the reply" panel is recorded
+// in the page: the stripped and hidden text never shows, mid-stream or after, and the
+// finished reply is what the stream ended on.
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { join } from "node:path"
@@ -19,6 +20,9 @@ const REPLY =
   "<cot>secret chain of thought about the mill, the road and the weather tonight</cot>" +
   "Hello there, traveller. The road is long and the mill is closed tonight, so *Mira* points at the lantern. " +
   "She waits by the door while the rain keeps on, counting the carts that pass, and says nothing more until morning."
+
+/** The provider's own reasoning, streamed before the reply. */
+const REASONING = "Weighing the PRIVATE matter of the mill before answering the traveller."
 
 let provider: Server
 let baseUrl = ""
@@ -38,8 +42,16 @@ test.beforeAll(async () => {
     request.on("end", () => {
       response.writeHead(200, { "content-type": "text/event-stream" })
       let at = 0
+      let thought = 0
       const next = () => {
         if (response.destroyed) return
+        if (thought < REASONING.length) {
+          const reasoning_content = REASONING.slice(thought, thought + 3)
+          response.write(chunk({ choices: [{ index: 0, delta: { reasoning_content }, finish_reason: null }] }))
+          thought += 3
+          setTimeout(next, 30)
+          return
+        }
         if (at < REPLY.length) {
           const content = REPLY.slice(at, at + 3)
           response.write(chunk({ choices: [{ index: 0, delta: { content }, finish_reason: null }] }))
@@ -134,15 +146,22 @@ for (const width of [1440, 390])
       await expect(page.locator("article[data-slot]").last()).toContainText("Hello")
       // Every render of the reply's body and thinking panel, from before the first token.
       await page.evaluate(() => {
-        const frames: Array<{ body: string; thinking: string }> = []
+        const frames: Array<{ body: string; thinking: string; reasoning: string }> = []
         ;(window as unknown as { frames_: typeof frames }).frames_ = frames
         const before = [...document.querySelectorAll("article[data-slot]")].at(-1)
         const record = () => {
           const reply = [...document.querySelectorAll("article[data-slot]")].at(-1)
           if (!reply || reply === before) return
           const thinking = reply.querySelector('[role="region"][aria-label="Thinking in the reply"]')
-          const body = [...reply.querySelectorAll(".markdown")].filter((node) => !thinking?.contains(node)).at(-1)
-          frames.push({ body: body?.textContent ?? "", thinking: thinking?.textContent ?? "" })
+          const reasoning = reply.querySelector('[role="region"][aria-label="Reasoning"]')
+          const body = [...reply.querySelectorAll(".markdown")]
+            .filter((node) => !thinking?.contains(node) && !reasoning?.contains(node))
+            .at(-1)
+          frames.push({
+            body: body?.textContent ?? "",
+            thinking: thinking?.textContent ?? "",
+            reasoning: reasoning?.textContent ?? ""
+          })
         }
         new MutationObserver(record).observe(document.body, { subtree: true, childList: true, characterData: true })
       })
@@ -152,6 +171,10 @@ for (const width of [1440, 390])
       const reply = page.locator("article[data-slot]").last()
       const notes = reply.getByRole("button", { name: /^Thinking in the reply/ })
       const region = reply.getByRole("region", { name: "Thinking in the reply" })
+      // The provider's reasoning streams first, its word hidden from the start.
+      await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText("[hidden] matter", {
+        timeout: 20_000
+      })
       const body = reply.locator(".markdown").last()
       // Mid-stream: the thinking open with its word hidden, the body going without the chain of thought.
       await expect(region).toContainText("[hidden]", { timeout: 20_000 })
@@ -177,14 +200,16 @@ for (const width of [1440, 390])
       await expect(body).toHaveText(finalText)
 
       const frames = await page.evaluate(
-        () => (window as unknown as { frames_: Array<{ body: string; thinking: string }> }).frames_
+        () => (window as unknown as { frames_: Array<{ body: string; thinking: string; reasoning: string }> }).frames_
       )
-      const streamed = frames.filter((frame) => frame.body !== "" || frame.thinking !== "")
+      const streamed = frames.filter((frame) => frame.body !== "" || frame.thinking !== "" || frame.reasoning !== "")
+      expect(streamed.filter((frame) => frame.reasoning.includes("[hidden]")).length).toBeGreaterThan(3)
       expect(streamed.length).toBeGreaterThan(10)
       for (const frame of streamed) {
         for (const word of ["secret", "chain of thought", "weather", "<cot", "<thinking", "Plan:"])
           expect(frame.body, `body frame "${frame.body}"`).not.toContain(word)
         expect(frame.thinking, `thinking frame "${frame.thinking}"`).not.toContain("PRIVATE")
+        expect(frame.reasoning, `reasoning frame "${frame.reasoning}"`).not.toContain("PRIVATE")
       }
       // No jump at the end: the body only ever grew towards the stored text.
       const bodies = streamed.map((frame) => frame.body).filter((text) => text !== "")

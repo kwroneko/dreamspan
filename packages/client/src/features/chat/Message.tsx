@@ -89,7 +89,14 @@ function BodyText({
   return (
     <>
       <MessageBody text={text}>
-        <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+        {shown.pending ? (
+          // Its place kept, not shown, until the display scripts answer.
+          <div className="invisible" aria-hidden>
+            <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+          </div>
+        ) : (
+          <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+        )}
       </MessageBody>
       {shown.issues.map((issue, i) => (
         <p key={i} role="note" className="text-xs text-muted">

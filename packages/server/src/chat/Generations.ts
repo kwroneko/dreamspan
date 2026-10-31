@@ -16,6 +16,7 @@ import { ChatHub } from "./ChatHub.ts"
 import { fromItems, type Rewritten, rewriteItems, rewriteText } from "./rewrites.ts"
 import { settleHeld } from "./replySections.ts"
 import { executionRegistry } from "../execution.ts"
+import { OUT_OF_TIME } from "@rp/shared/regexScripts.ts"
 import type { LiveRewrite } from "./liveRewrites.ts"
 import { Notices } from "./Notices.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
@@ -23,14 +24,10 @@ import { type GenerationFailed, type GenerationRequest, Generator, type Generato
 /** How often a generating version's text so far is saved. */
 const SAVE_EVERY_MS = 2000
 
-/**
- * Past this many milliseconds of script time per rewrite (long replies, heavy scripts), text
- * that arrives while the next one runs is shown after the last rewritten text as it came, so
- * it keeps reaching the screen at the rate it streams; the next rewrite replaces it.
- */
-const RAW_TAIL_MS = 24
-/** Shorter texts are never slow on their own (a busy host is): their rewrites are always waited for. */
-const RAW_TAIL_CHARS = 2000
+/** The longest pause between two live rewrites of one reply (see `pump`). */
+const LIVE_PAUSE_MS = 100
+/** How many times in a row a failed live rewrite is tried again before waiting for more text. */
+const LIVE_RETRIES = 5
 
 interface Running {
   readonly request: GenerationRequest
@@ -54,16 +51,10 @@ interface Running {
   /** Texts changed since the last rewrite started, and whether one is running. */
   dirty: boolean
   pumping: boolean
-  /** The last rewrite: the texts it took (their lengths), what it made of them, its script time. */
-  last: {
-    readonly lengths: { readonly [K in keyof Running["shown"]]: number }
-    readonly made: { readonly [K in keyof Running["shown"]]: string }
-    readonly ms: number
-  } | null
-  /** Once a rewrite was slow (`RAW_TAIL_MS`), text that comes between rewrites shows as it came. */
-  tailing: boolean
   /** Scripts already reported as failing while this reply streamed. */
   reported: Set<string>
+  /** Live rewrites that failed in a row (`pump`). */
+  failures: number
   /** Ended: nothing more is sent as it streams. */
   closed: boolean
   waitingCache: boolean
@@ -311,17 +302,20 @@ export class Generations extends Context.Service<
       /**
        * Rewrites the texts so far and sends them, again while they changed meanwhile: one
        * rewrite at a time per reply, each on the newest text, so chunks that arrive during one
-       * are taken together by the next. A rewrite that fails shows the texts as they are.
+       * are taken together by the next. A rewrite that fails sends nothing: the texts shown
+       * stay as they were and the next rewrite tries again, since what failed may be a script
+       * that would take something out (a worker that's busy or restarting, say).
        */
       const pump = (entry: Running, steps: ReadonlyArray<LiveRewrite>): Effect.Effect<void> =>
         Effect.gen(function* () {
           while (entry.dirty && !entry.closed) {
             entry.dirty = false
-            const { text, reasoning, sections, sectionsText } = entry
+            const { text, reasoning, sections } = entry
+            const started = Date.now()
             const items = rewriteItems(text, reasoning || undefined, sections)
             let current: ReadonlyArray<{ readonly text: string }> = items
             let active = false
-            let ms = 0
+            let failed = false
             for (const step of steps) {
               // Each rewrite takes what the one before made.
               const given = current.map((item, i) => ({ text: item.text, kind: items[i]!.kind }))
@@ -330,15 +324,31 @@ export class Generations extends Context.Service<
                   Cause.hasInterruptsOnly(cause)
                     ? Effect.interrupt
                     : Effect.as(
-                        Effect.logWarning(`live rewrite ${step.id} failed; the text shows as it is`, cause),
-                        null
+                        entry.failures++ === 0
+                          ? Effect.logWarning(
+                              `live rewrite ${step.id} failed; the shown text waits for the next`,
+                              cause
+                            )
+                          : Effect.void,
+                        "failed" as const
                       )
                 )
               )
+              if (result === "failed") {
+                failed = true
+                break
+              }
               if (result === null) continue
+              // A script that ran out of time (a busy host) left a text as it came, which may
+              // hold what it takes out: as a failure, what's shown waits for the next rewrite.
+              if (result.texts.some((text) => text.failed.some((failure) => failure.reason === OUT_OF_TIME))) {
+                if (entry.failures++ === 0)
+                  yield* Effect.logWarning(`live rewrite ${step.id} ran out of time; tried again`)
+                failed = true
+                break
+              }
               active = true
               current = result.texts
-              ms += result.ms
               for (const failure of result.texts.flatMap((r) => r.failed)) {
                 const key = `${failure.script.scope}:${failure.script.id}`
                 if (entry.reported.has(key)) continue
@@ -349,20 +359,31 @@ export class Generations extends Context.Service<
               }
             }
             if (entry.closed) return
+            if (failed) {
+              // Tried again soon even if nothing more arrives, a few times; then with the next chunk.
+              if (entry.failures <= LIVE_RETRIES) {
+                entry.dirty = true
+                yield* Effect.sleep(LIVE_PAUSE_MS)
+              }
+              continue
+            }
+            entry.failures = 0
             if (!active) {
               // Nothing changes this reply's text: it streams as it is from now on.
               entry.mode = "direct"
               return sendRaw(entry)
             }
             entry.mode = "rewrite"
+            // Only text that went through the scripts is ever shown: what came meanwhile waits
+            // for the next rewrite, so nothing a script takes out shows for a moment.
             const next = fromItems(current, text, reasoning || undefined, sections)
-            entry.last = {
-              lengths: { text: text.length, reasoning: reasoning.length, sections: sectionsText.length },
-              made: { text: next.content, reasoning: next.reasoning ?? "", sections: sectionsDisplay(next.sections) },
-              ms
-            }
-            // With what came meanwhile, if it's shown as it came (`RAW_TAIL_MS`).
-            sendLast(entry)
+            send(entry, "text", next.content)
+            send(entry, "reasoning", next.reasoning ?? "")
+            send(entry, "sections", sectionsDisplay(next.sections))
+            // As long again before the next one (at most 100 ms), so a long reply under heavy
+            // scripts takes about half a reader worker, not all of one, while it streams.
+            const spent = Date.now() - started
+            if (entry.dirty && spent >= 5) yield* Effect.sleep(Math.min(spent, LIVE_PAUSE_MS))
           }
         }).pipe(
           Effect.ensuring(
@@ -372,23 +393,9 @@ export class Generations extends Context.Service<
           )
         )
 
-      /** The last rewrite's texts, and after them what came since if rewrites are slow. */
-      const sendLast = (entry: Running) => {
-        const last = entry.last
-        if (last === null) return
-        // Sticky, so a text shown as it came isn't taken back by a quicker rewrite next.
-        const { text, reasoning, sections } = last.lengths
-        if (last.ms > RAW_TAIL_MS && text + reasoning + sections >= RAW_TAIL_CHARS) entry.tailing = true
-        const tail = entry.tailing
-        const raw = { text: entry.text, reasoning: entry.reasoning, sections: entry.sectionsText }
-        for (const field of ["text", "reasoning", "sections"] as const)
-          send(entry, field, last.made[field] + (tail ? raw[field].slice(last.lengths[field]) : ""))
-      }
-
       /** After a chunk: sends it, or has the texts so far rewritten (`pump`). */
       const changed = (entry: Running) => {
         if (entry.mode === "direct") return Effect.sync(() => sendRaw(entry))
-        if (entry.mode === "rewrite" && entry.tailing) sendLast(entry)
         entry.dirty = true
         if (entry.pumping) return Effect.void
         entry.pumping = true
@@ -472,9 +479,8 @@ export class Generations extends Context.Service<
             mode: liveRewrites.list().length > 0 ? "pending" : "direct",
             dirty: false,
             pumping: false,
-            last: null,
-            tailing: false,
             reported: new Set(),
+            failures: 0,
             closed: false,
             waitingCache: false,
             savedAt: Date.now(),

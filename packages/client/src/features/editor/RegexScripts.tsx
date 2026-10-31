@@ -10,11 +10,13 @@ import { useContext, useEffect, useState, type ReactNode } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
+import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { ConfirmDialog } from "../../ui/Dialog.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import type { DisplayResult } from "../chat/displayPipeline.ts"
+import { runRegexJob } from "../chat/displayWorker.ts"
 import type { Caller } from "./caller.ts"
 import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
@@ -247,8 +249,92 @@ function ScriptPlacement({ binding }: { binding: ScriptBinding }) {
   )
 }
 
+/** What a script's two flags make it change, as ST's getRegexedString reads them. */
+const effect = (script: RegexScript) =>
+  script.markdown_only && script.prompt_only
+    ? "Changes what's shown and the prompt sent; the saved message keeps its text."
+    : script.markdown_only
+      ? "Changes only what's shown; the saved message and the prompt keep its text."
+      : script.prompt_only
+        ? "Changes only the prompt sent to the model; the saved message keeps its text."
+        : "Rewrites the message itself as it's saved (and while a reply streams); its original text can still be shown and restored."
+
+/** A short label of the same, for the script's row. */
+const effectBadge = (script: RegexScript) =>
+  script.markdown_only && script.prompt_only
+    ? "display and prompt"
+    : script.markdown_only
+      ? "display only"
+      : script.prompt_only
+        ? "prompt only"
+        : "rewrites messages"
+
+const TRY_NAMES = { user: "User", char: "Character" }
+
+/**
+ * ST's test mode: the script alone on a sample text, as on a reply, whatever its placement,
+ * flags and depths. It runs on the display-regex worker, within its deadline.
+ */
+function TryIt({ script }: { script: RegexScript }) {
+  const [sample, setSample] = useState("")
+  const [result, setResult] = useState<{ readonly sample: string; readonly value: DisplayResult } | null>(null)
+  useEffect(() => {
+    if (sample === "" || script.find_regex === "") return
+    let active = true
+    const job = {
+      text: sample,
+      scripts: [{ ...script, disabled: false, markdown_only: true, placement: [2], min_depth: null, max_depth: null }],
+      placement: 2,
+      depth: null,
+      names: TRY_NAMES,
+      card: {}
+    }
+    void Promise.resolve(runRegexJob(job)).then((value) => {
+      if (active) setResult({ sample, value })
+    })
+    return () => {
+      active = false
+    }
+  }, [sample, script])
+  const shown = sample !== "" && script.find_regex !== "" && result?.sample === sample ? result.value : null
+  return (
+    <details className="group rounded-md border border-border">
+      <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none">Try it</summary>
+      <div className="flex flex-col gap-2 border-t border-border p-3">
+        <Field
+          label="Sample text"
+          description="The script alone, as on a reply, whatever its options; {{user}} and {{char}} read “User” and “Character”."
+        >
+          <Textarea
+            rows={3}
+            className="resize-y font-mono"
+            spellCheck={false}
+            value={sample}
+            onChange={(event) => setSample(event.currentTarget.value)}
+          />
+        </Field>
+        {shown && (
+          <section aria-label="Result" className="flex flex-col gap-1">
+            <h4 className="text-sm font-medium">
+              Result{shown.text === sample && shown.issues.length === 0 ? " (no match)" : ""}
+            </h4>
+            <pre className="max-h-60 overflow-auto rounded-md border border-border bg-canvas p-3 font-mono text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
+              {shown.text}
+            </pre>
+            {shown.issues.map((issue) => (
+              <p key={issue} className="text-sm text-warning">
+                {issue}
+              </p>
+            ))}
+          </section>
+        )}
+      </div>
+    </details>
+  )
+}
+
 /** A script's fields, in the same layout whatever holds it. */
-function ScriptFields({ binding }: { binding: ScriptBinding }) {
+function ScriptFields({ binding, script }: { binding: ScriptBinding; script: RegexScript }) {
   return (
     <div className="flex flex-col gap-3">
       <ScriptText binding={binding} field="name" label="Name" />
@@ -257,21 +343,24 @@ function ScriptFields({ binding }: { binding: ScriptBinding }) {
       <ScriptText binding={binding} field="replace_string" label="Replace with" rows={2} mono />
       <ScriptLines binding={binding} />
       <ScriptPlacement binding={binding} />
-      <div className="flex flex-wrap gap-4">
-        <ScriptCheck binding={binding} field="disabled" label="Off" />
-        <ScriptCheck binding={binding} field="prompt_only" label="Only in the prompt" />
-        <ScriptCheck binding={binding} field="markdown_only" label="Only in what's shown" />
-        <ScriptCheck binding={binding} field="run_on_edit" label="Run on edits" />
-      </div>
+      <Fieldset legend="Leave the saved message as it is, and change only">
+        <div className="flex flex-wrap gap-4">
+          <ScriptCheck binding={binding} field="markdown_only" label="What's shown" />
+          <ScriptCheck binding={binding} field="prompt_only" label="The prompt sent" />
+        </div>
+        <p className="text-sm text-muted">{effect(script)}</p>
+      </Fieldset>
+      <ScriptCheck binding={binding} field="run_on_edit" label="Run on edits" />
       <div className="grid gap-3 sm:grid-cols-2">
         <ScriptDepth binding={binding} field="min_depth" label="From depth (empty: any)" />
         <ScriptDepth binding={binding} field="max_depth" label="To depth (empty: any)" />
       </div>
+      <TryIt script={script} />
     </div>
   )
 }
 
-/** One script in a list: its name and flags, opened to edit it. */
+/** One script in a list: on or off, its name and what it changes, opened to edit it. */
 export function ScriptItem({
   script,
   name,
@@ -288,22 +377,31 @@ export function ScriptItem({
   /** Under the fields: delete, and moves in a list that orders its scripts. */
   actions: ReactNode
 }) {
+  const setOn = (on: boolean) =>
+    binding.kind === "store"
+      ? binding.store.setValue([...binding.at, "disabled"], !on)
+      : binding.change({ disabled: !on })
   return (
     <li className="flex flex-col gap-2 py-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium [overflow-wrap:anywhere]">
-          {name}
-          {script.disabled && <Badge>off</Badge>}
-          {script.prompt_only && <Badge>prompt only</Badge>}
-          {script.markdown_only && <Badge>display only</Badge>}
-        </span>
+        <div className="flex min-w-0 items-center gap-1">
+          <Switch checked={!script.disabled} onCheckedChange={setOn}>
+            <span className="sr-only">Run {name}</span>
+          </Switch>
+          <span
+            className={`flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium [overflow-wrap:anywhere] ${script.disabled ? "text-muted" : ""}`}
+          >
+            {name}
+            <Badge>{script.disabled ? "off" : effectBadge(script)}</Badge>
+          </span>
+        </div>
         <Button variant="ghost" aria-expanded={open} aria-label={`Edit ${name}`} onClick={() => onOpenChange(!open)}>
           {open ? "Close" : "Edit"}
         </Button>
       </div>
       {open && (
         <div className="flex flex-col gap-3">
-          <ScriptFields binding={binding} />
+          <ScriptFields binding={binding} script={script} />
           <div className="flex flex-wrap gap-2">{actions}</div>
         </div>
       )}

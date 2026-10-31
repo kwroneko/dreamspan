@@ -16,7 +16,8 @@ export interface LiveRewrite {
    * The texts of a generating reply so far (`rewriteItems`: body, reasoning, each section)
    * as they're shown, item for item, and how long the rewriting itself took (`ms`, not
    * counting the way there and back). `null`: this rewrite never changes this reply's text,
-   * so its later texts needn't come here. A failure shows the texts as they are.
+   * so its later texts needn't come here. A failure leaves what's shown as it was, and the
+   * next change tries again.
    */
   readonly rewrite: (
     services: { readonly reader: Context.Service.Shape<typeof Reader> },

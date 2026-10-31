@@ -31,6 +31,9 @@ export const VersionRewrite = Schema.Struct({
 })
 export type VersionRewrite = typeof VersionRewrite.Type
 
+/** Why a text was kept as it was: the scripts' time ran out while one of them ran. */
+export const OUT_OF_TIME = "it ran out of time, so the text was kept as it was"
+
 /** One text through the scripts: what it became, which scripts changed it, which were skipped. */
 export const TextRewrite = Schema.Struct({
   text: Schema.String,

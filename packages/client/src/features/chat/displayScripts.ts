@@ -2,7 +2,8 @@
 // transformations"): the registered lists, by default the account's global scripts, then the
 // preset's, then the message's character's, as ST 1.19 orders them. Global scripts are the user's own and always run; the
 // preset's and a card's only once the user allowed them (`regex_approved`). The display
-// runner then keeps only enabled `markdown_only && !prompt_only` ones for the placement.
+// runner then keeps only enabled `markdown_only` ones for the placement (with `prompt_only` too, they run in
+// both, as in ST).
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { Doc } from "@rp/shared/library.ts"
@@ -69,9 +70,7 @@ export const displayScripts = (
 
 /** Whether a display transform would run any of these scripts on a text at this placement. */
 export const displayRegexApplies = (scripts: ReadonlyArray<RegexScript>, placement: number) =>
-  scripts.some(
-    (s) => !s.disabled && s.find_regex !== "" && s.markdown_only && !s.prompt_only && s.placement.includes(placement)
-  )
+  scripts.some((s) => !s.disabled && s.find_regex !== "" && s.markdown_only && s.placement.includes(placement))
 
 /**
  * Cards' approved scripts by chat member, read with GetCardForChat (its `regex` is present
@@ -112,8 +111,10 @@ export class CardScripts {
     const generation = this.generation
     this.reading.set(entityId, generation)
     void this.read(entityId).then((scripts) => {
-      if (this.reading.get(entityId) !== generation) return
-      this.reading.delete(entityId)
+      // A newer read is on its way: this one still counts if nothing was read before, so
+      // reads restarted again and again (context changes while a chat opens) still land.
+      if (this.reading.get(entityId) !== generation && this.known.has(entityId)) return
+      if (this.reading.get(entityId) === generation) this.reading.delete(entityId)
       // A card in the bin or gone runs none, as in assembly.
       const next = scripts && scripts.length > 0 ? scripts : NONE
       const previous = this.known.get(entityId)

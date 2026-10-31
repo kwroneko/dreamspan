@@ -28,14 +28,16 @@ export interface DisplayAt {
  * The text through the display transforms. Until they answer it shows their last answer for
  * the version, or its macros expanded. A streaming text runs them one at a time, each on the
  * newest text, so a frame never shows text a display script hides; before their first answer
- * it shows nothing where a display script applies (`text: null`).
+ * it shows nothing where a display script applies (`text: null`). A finished text that waits
+ * for its first answer is `pending`: shown invisibly, so it keeps its place without showing
+ * what a display script hides.
  */
 export function useDisplayed(
   at: DisplayAt,
   text: string,
   placement: 1 | 2 | 6,
   streaming: boolean
-): { readonly text: string | null; readonly issues: ReadonlyArray<string> } {
+): { readonly text: string | null; readonly issues: ReadonlyArray<string>; readonly pending?: boolean } {
   const { version, session, parentSlotId, depth } = at
   const viewer = useViewPrefs()
   const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
@@ -136,10 +138,8 @@ export function useDisplayed(
   // finished keeps its streamed display rather than flashing its text without the scripts).
   if (result && result.input.version.id === version.id)
     return { text: result.text, issues: streaming ? [] : result.issues }
-  if (streaming && viewer.prefs.displayRegex && displayRegexApplies(scripts, placement))
-    return { text: null, issues: [] }
-  return {
-    text: displayText(text, version.macroMode, input.names, input.card, version.frozenMacros ?? {}),
-    issues: []
-  }
+  const expanded = displayText(text, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
+  if (viewer.prefs.displayRegex && displayRegexApplies(scripts, placement))
+    return streaming ? { text: null, issues: [] } : { text: expanded, issues: [], pending: true }
+  return { text: expanded, issues: [] }
 }

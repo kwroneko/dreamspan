@@ -6,7 +6,7 @@ export { run } from "@rp/shared/regexReplace.ts"
 import { setFlagsFromString } from "node:v8"
 import { createContext, Script } from "node:vm"
 import type { RegexScript } from "@rp/shared/docs/preset.ts"
-import type { ScriptFailure, ScriptRef, TextRewrite } from "@rp/shared/regexScripts.ts"
+import { OUT_OF_TIME, type ScriptFailure, type ScriptRef, type TextRewrite } from "@rp/shared/regexScripts.ts"
 import type { Assembly } from "./pipeline.ts"
 
 setFlagsFromString("--enable-experimental-regexp-engine")
@@ -255,7 +255,7 @@ export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms
         })
         if (done) return { text, applied, failed }
         // Out of time: nothing of this text's partial work is kept.
-        const reason = "it ran out of time, so the text was kept as it was"
+        const reason = OUT_OF_TIME
         return {
           text: item.text,
           applied: [],

@@ -70,9 +70,9 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
       }}
     >
       <p className="text-sm text-muted">
-        Global scripts run in every chat, before the preset's and the character's. A script with neither “Only in the
-        prompt” nor “Only in what's shown” rewrites messages as they're saved; you can still see and restore a message's
-        original text.
+        Global scripts run in every chat, before the preset's and the character's. Unless it's set to change only what's
+        shown or only the prompt sent, a script rewrites messages as they're saved; you can still see and restore a
+        message's original text.
       </p>
       <UserDraftStatus draft={durable} />
       {values.revision !== saved.revision && (

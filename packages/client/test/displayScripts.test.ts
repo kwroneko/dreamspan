@@ -142,3 +142,23 @@ it("card scripts are read once per member, refreshed without dropping them, and 
   await vi.waitFor(() => expect(listener).toHaveBeenCalledTimes(2))
   expect(cards.get(mira)).toEqual([])
 })
+
+it("a member's first read lands even when refreshes keep restarting it", async () => {
+  // Each read answers only after the next refresh began (context changes while a chat opens).
+  const pending: Array<() => void> = []
+  const read = vi.fn(
+    (_: EntityId) =>
+      new Promise<ReadonlyArray<RegexScript> | null>((resolve) =>
+        pending.push(() => resolve([script("c", "/a/", "b")]))
+      )
+  )
+  const cards = new CardScripts(read)
+  expect(cards.get(mira)).toEqual([])
+  cards.refresh()
+  pending.shift()!()
+  await vi.waitFor(() => expect(cards.get(mira).map((s) => s.id)).toEqual(["c"]))
+  // The newer read still answers for it afterwards.
+  pending.shift()!()
+  await Promise.resolve()
+  expect(cards.get(mira).map((s) => s.id)).toEqual(["c"])
+})
