@@ -1,12 +1,12 @@
 // The preset editor's End of request section and its warning (DESIGN §2.2, owner 2026-10-29):
-// three fixed texts outside the prompt order, and a warning when the direction text would
+// four fixed texts outside the prompt order, and a warning when the direction text would
 // lose the direction.
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import type { FieldPath } from "@rp/shared/editing.ts"
 import type { PresetPrompt } from "@rp/shared/docs/preset.ts"
-import { DIRECTION_TEXT, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
+import { CONTINUE_TEXT, DIRECTION_TEXT, TURN_TEXT } from "@rp/shared/endOfRequest.ts"
 import type { EditorStore } from "../src/features/editor/store.ts"
 
 vi.hoisted(() => {
@@ -82,22 +82,27 @@ const defaults = [
   prompt("main", "Write."),
   prompt("groupNudge", TURN_TEXT),
   prompt("impersonationPrompt", "[As {{speaker}}.]"),
+  prompt("continueNudge", CONTINUE_TEXT),
   prompt("directionPrompt", DIRECTION_TEXT)
 ]
 
 describe("the End of request section", () => {
-  it("shows the three texts, labelled, each with when it's sent, and nothing to move, delete or condition", () => {
+  it("shows the four texts, labelled, each with when it's sent, and nothing to move, delete or condition", () => {
     const html = renderToStaticMarkup(createElement(EndOfRequest, { store: storeOf(defaults) }))
     expect(html).toContain("End of request")
     const fields = [...html.matchAll(/data-path="([^"]+)">([^<]+)</g)].map((m) => [m[1], m[2]])
     expect(fields).toEqual([
       ["prompts/identifier=groupNudge/content", "When a character speaks"],
       ["prompts/identifier=impersonationPrompt/content", "When your card speaks"],
+      ["prompts/identifier=continueNudge/content", "When you continue a reply"],
       ["prompts/identifier=directionPrompt/content", "When you give a direction (added after the turn text)"]
     ])
     expect(html).toContain("[As {{speaker}}.]")
     expect(html).toContain("Sent last when the model writes as a card you don&#x27;t play.")
     expect(html).toContain("Sent last instead when the model writes as a card you play.")
+    expect(html).toContain(
+      "Sent last instead when Continue writes on from a reply and the model doesn&#x27;t take a prefill."
+    )
     expect(html).toContain("Sent on a new line after the turn text when you give a direction")
     for (const control of ["Delete", "Condition", "Generation types", 'role="switch"', "Drag"])
       expect(html).not.toContain(control)

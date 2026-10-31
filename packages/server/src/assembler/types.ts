@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 40
+export const ASSEMBLER_VERSION = 41
 
 export type Role = "system" | "user" | "assistant"
 
@@ -159,6 +159,11 @@ export interface AssembledRequest {
   readonly messages: ReadonlyArray<RequestMessage>
   /** Starts the model's reply, when the model can be prefilled; dropped and reported otherwise. */
   readonly prefill: string | null
+  /**
+   * Continue without a prefill (owner, 2026-10-31): the reply so far is the last assistant
+   * message, and `join` goes before the new text unless that starts with whitespace.
+   */
+  readonly continuation?: { readonly join: string }
   readonly samplers: Samplers
   /** Send leading system messages as the provider's system parameter (the preset's `use_sysprompt`). */
   readonly useSystemPrompt: boolean
