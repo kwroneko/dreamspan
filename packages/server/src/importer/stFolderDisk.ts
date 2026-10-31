@@ -3,6 +3,7 @@
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
 import { createHash } from "node:crypto"
+import { createReadStream } from "node:fs"
 import { open, opendir, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
@@ -208,12 +209,29 @@ export const readStFolderFile = (
 
 class Refused extends Error {}
 
-/** What a library file is in the library, as `importLibrary` matches an earlier import's file by its bytes. */
+/**
+ * What a library file is in the library, as `importLibrary` matches an earlier import's file
+ * by its bytes. Not a persona's avatar: its import's hash takes in the persona's settings too.
+ */
 const LIBRARY_KINDS: Partial<Record<string, string>> = {
   card: "card",
-  persona_avatar: "card",
   world: "lorebook",
   preset: "preset"
+}
+
+/** Above this a file is hashed 1 MiB at a time, so no file holds the main thread for long. */
+const WHOLE_HASH_BYTES = 8 * 1024 * 1024
+
+/**
+ * A file's sha256. A card of a few MiB is read whole and hashed in a few milliseconds (on a
+ * heavily loaded host, faster than streaming it, and no slower for other requests); a larger
+ * one (up to 64 MiB) is streamed, so it never holds the main thread for its whole length.
+ */
+const hashFile = async (path: string, size: number) => {
+  const hash = createHash("sha256")
+  if (size <= WHOLE_HASH_BYTES) return hash.update(await readFile(path)).digest("hex")
+  for await (const chunk of createReadStream(path, { highWaterMark: 1 << 20 })) hash.update(chunk as Buffer)
+  return hash.digest("hex")
 }
 
 const safeSegments = (path: string) =>
@@ -261,10 +279,7 @@ export const previewStFiles = (
         if (library !== undefined && hashed.has(library)) {
           const { size } = await stat(full)
           if (size > defaultLimits.maxFileBytes) return
-          const digest = createHash("sha256")
-            .update(await readFile(full))
-            .digest("hex")
-          if (hashes.has(`${library}:${digest}`)) same.push(path)
+          if (hashes.has(`${library}:${await hashFile(full, size)}`)) same.push(path)
         } else if (kind === "chat" || kind === "group_chat") {
           const { size } = await stat(full)
           if (size <= ST_HEAD_BYTES && greetingOnly(await readFile(full, "utf8"))) skipped.push(path)

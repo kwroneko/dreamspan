@@ -1902,6 +1902,9 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         const paths = [`characters/${owner.user.handle}.png`]
         assert.deepStrictEqual((yield* owner.api.StImportPreview({ paths })).known, paths)
         assert.deepStrictEqual((yield* actor.api.StImportPreview({ paths })).known, [])
+        // Naming a folder reads its files: an admin's alone, as ScanStFolder.
+        if (actor.user.role !== "admin")
+          yield* refused(actor.api.StImportPreview({ paths, folder: { root: "/", prefix: "" } }), "Forbidden")
       })
   },
   StartStPathImport: {

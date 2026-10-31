@@ -8,16 +8,15 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { StRoot } from "@rp/shared/stFolder.ts"
-import {
-  importState,
-  type StFolderEntry,
-  type StHiddenRun,
-  type StImportedChat,
-  type StImportJob,
-  type StImportJobDetail,
-  type StImportReport,
-  type StLinkChoice,
-  type StNotSent
+import type {
+  StFolderEntry,
+  StHiddenRun,
+  StImportedChat,
+  StImportJob,
+  StImportJobDetail,
+  StImportReport,
+  StLinkChoice,
+  StNotSent
 } from "@rp/shared/stImportApi.ts"
 import { type StSentKind, stPlan, stPlanKinds } from "@rp/shared/stPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
@@ -34,6 +33,7 @@ import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { readableChatTitle } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
@@ -249,10 +249,12 @@ function NextSteps({ latestChat }: { latestChat: StImportedChat | null }) {
         <Link
           to="/chats/$chatId"
           params={{ chatId: latestChat.chatId }}
-          className={`${buttonClass("primary")} min-w-0 max-w-full`}
+          // The chat's name wraps on a phone rather than being cut off.
+          className={`${buttonClass("primary")} h-auto! min-h-9 max-w-full py-2 text-left whitespace-normal!`}
         >
-          <span className="min-w-0 truncate">
-            Continue your latest chat{latestChat.title ? `: ${importState(latestChat.title).title}` : ""}
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {/* As the chat list names it, never ST's file name (DESIGN §2.1). */}
+            Continue your latest chat{latestChat.title ? `: ${readableChatTitle(latestChat.title)}` : ""}
           </span>
         </Link>
       )}
@@ -388,7 +390,7 @@ function ReportActions({
                     params={{ chatId: run.chatId }}
                     className="font-medium text-accent underline-offset-4 [overflow-wrap:anywhere] hover:underline"
                   >
-                    {run.title}
+                    {readableChatTitle(run.title)}
                   </Link>
                   <span className="text-sm text-muted">
                     {run.hidden} messages hidden.{" "}
@@ -678,6 +680,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
     0
   )
   const skipped = rows.reduce((sum, row) => sum + row.skipped, 0)
+  const here = rows.reduce((sum, row) => sum + row.known, 0)
   const pending = known === null ? (AsyncResult.isFailure(result) ? "?" : "…") : null
   return (
     <div className="flex flex-col gap-2">
@@ -734,8 +737,12 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
             ? "What's already here couldn't be read; importing still adds only what's new."
             : null
           : fresh === 0
-            ? "Everything here is already imported. Importing again takes in what changed since: new messages, edited cards."
-            : `${fresh} new to import. What's already here is read again, and only what changed in it goes in.`}
+            ? here === 0
+              ? "Nothing here to import."
+              : "Everything here is already imported. Importing again takes in what changed since: new messages, edited cards."
+            : here === 0
+              ? `${fresh} new to import.`
+              : `${fresh} new to import. What's already here is read again, and only what changed in it goes in.`}
         {skipped > 0 &&
           ` ${skipped} ${skipped === 1 ? "chat holds" : "chats hold"} only a greeting, as ST makes one when a card is opened: no import takes ${skipped === 1 ? "it" : "them"}.`}
       </p>
@@ -1048,7 +1055,7 @@ export function StImportPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Import ST data</h1>
         <Link to="/import" className={buttonClass("ghost")}>
-          Back to importing files
+          Back to Import
         </Link>
       </header>
       <SlotOutlet slot={stImportSections} props={{ opened, open }} />
