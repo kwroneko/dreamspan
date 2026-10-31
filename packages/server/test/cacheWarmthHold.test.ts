@@ -102,5 +102,10 @@ it.live("a posted message holds for the reply it expects, until the reply holds 
     yield* Effect.sleep("1 second")
     assert.strictEqual(state.calls, 2)
     yield* eventually(() => state.calls === 3, 10_000)
+    // A read waits no longer than that (an API caller that posts and never asks for the reply).
+    warmth.expectReply(chatId)
+    const started = Date.now()
+    yield* warmth.next(user, chatId, null, null)
+    assert.isBelow(Date.now() - started, 4000)
   }).pipe(Effect.scoped, Effect.provide(layer))
 })

@@ -16,8 +16,11 @@ import { ChatHub } from "./ChatHub.ts"
 /** Changes that come together (a send, then its reply starting) make one estimate. */
 const SETTLE_MS = 250
 
-/** How long a posted message holds its chat's estimate for the reply its sender asks for next. */
-const REPLY_EXPECTED_MS = 5000
+/**
+ * How long a posted message holds its chat's estimate for the reply its sender asks for next.
+ * The client asks within a round trip; an API caller that never does delays reads this long.
+ */
+const REPLY_EXPECTED_MS = 2000
 
 type Estimate = Omit<Effect.Success<ReturnType<Reader["Service"]["CacheWarmth"]>>, "uncounted">
 type EstimateError = Effect.Error<ReturnType<Reader["Service"]["CacheWarmth"]>>
