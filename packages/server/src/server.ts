@@ -49,6 +49,7 @@ import { EventLoopMonitor } from "./eventLoop.ts"
 import * as Formats from "./importer/Formats.ts"
 import * as ImportRoutes from "./importer/routes.ts"
 import { MediaHolds } from "./importer/MediaHolds.ts"
+import { StImportJobs } from "./importer/StImportJobs.ts"
 import { StImports } from "./importer/StImports.ts"
 import {
   crossSiteProblem,
@@ -407,7 +408,13 @@ const HttpServerLive = Layer.unwrap(
 
 /** The format workers (ARCHITECTURE.md §11.3), started alongside the database's. */
 const FormatsLive = Layer.unwrap(
-  Effect.map(AppConfig, (config) => Formats.layer({ workers: config.dbWorkers, size: config.formatWorkers }))
+  Effect.map(AppConfig, (config) =>
+    Formats.layer({
+      workers: config.dbWorkers,
+      size: config.formatWorkers,
+      thumbnailSize: config.thumbnailWorkers
+    })
+  )
 )
 
 /**
@@ -436,6 +443,8 @@ export const serverWith = <E>(
   ).pipe(
     // --- ST data folder import (ARCHITECTURE.md §13)
     // Provided on, so a plugin can register folder handlers into it (PLUGINS §8).
+    // Import jobs (StImportJobs) run the path imports in their own scope, past any request.
+    Layer.provideMerge(StImportJobs.layer),
     Layer.provideMerge(StImports.layer.pipe(Layer.provideMerge(MediaHolds.layer))),
     Layer.provide(
       Layer.merge(Generations.layer, CacheWarmth.layer.pipe(Layer.provideMerge(ImageTokenCounts.layer))).pipe(

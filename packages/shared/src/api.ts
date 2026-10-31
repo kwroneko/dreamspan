@@ -345,3 +345,10 @@ export class AppApi extends RpcGroup.make(
   // --- Inserting messages anywhere in the history (messagesApi.ts).
   .merge(MessagesApi)
   .middleware(Authentication) {}
+
+/**
+ * The API's RPCs, read off the group's `requests`. `RpcGroup.Rpcs` infers through every method
+ * of the group's type, and past about 200 RPCs that exceeds TypeScript's instantiation limit
+ * (TS2589), leaving a client typed from it with unknown results.
+ */
+export type AppRpcs = (typeof AppApi)["requests"] extends ReadonlyMap<string, infer R extends Rpc.Any> ? R : never

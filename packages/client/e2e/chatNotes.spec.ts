@@ -2,6 +2,7 @@
 // at the latest message, reaches the request the provider receives, and stops reaching it
 // once turned off; a card's note is edited as the card's. The provider is a fake on
 // loopback, and the cards are made up.
+import { panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
@@ -118,7 +119,7 @@ test("the notes fit a phone, under the Content-Security-Policy", async ({ browse
   await page.goto(`${server().url}/chats/${chatId}`)
   // A phone opens the panel as a sheet over the chat.
   await page.getByRole("button", { name: "Chat panel" }).click()
-  await page.getByRole("dialog").getByRole("tab", { name: "Notes" }).click()
+  await panelTab(page, "Notes")
   const hers = page.getByRole("tabpanel", { name: "Notes" }).getByRole("region", { name: "Mira's notes" })
   await hers.getByRole("button", { name: /^Outfit/ }).click()
   await expect(hers.getByRole("textbox", { name: /^Content/ })).toBeVisible()

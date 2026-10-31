@@ -28,6 +28,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   dataDir: tempDir("server"),
   dbReaders: 1,
   formatWorkers: 1,
+  thumbnailWorkers: 1,
   dbAllowNetworkFs: false,
   // The run's own bundles (bundles.ts); tests of the source entry points ask for source.
   dbWorkers: "bundle",

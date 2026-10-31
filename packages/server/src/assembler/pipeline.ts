@@ -274,6 +274,12 @@ export interface Assembly {
   postNames?: AssembledRequest["names"]
   /** The prefill to send, when the model takes one. */
   prefill?: string
+  /**
+   * Continue on a model that takes no prefill (owner, 2026-10-31): the reply so far, sent as the
+   * model's own message just before the end-of-request instruction, its piece, and what goes
+   * between it and the new text (the preset's `continue_postfix`, ST's, when it doesn't end in a space).
+   */
+  continuation?: { readonly text: string; readonly piece: number; readonly join: string }
   breakpoints?: AssembledRequest["breakpoints"]
   result?: AssembledRequest
   readonly pieces: Array<Piece>

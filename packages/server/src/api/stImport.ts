@@ -1,16 +1,17 @@
-// Client RPC handlers for the ST data folder import (ARCHITECTURE.md §13). The files go
-// over HTTP (importer/routes.ts); these start an import, read its report, and act on it.
+// Client RPC handlers for the ST data folder import (ARCHITECTURE.md §13). A folder named by
+// its path is imported on the server as a job (StImportJobs); a browser's files go over
+// HTTP (importer/routes.ts). These start an import, list and read the jobs, and act on a
+// report.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import { Forbidden, NotFound, ServerError } from "@rp/shared/errors.ts"
-import { classifyStPath } from "@rp/shared/stFolder.ts"
-import { StFolderUnreadable } from "@rp/shared/stImportApi.ts"
+import { Forbidden, ServerError } from "@rp/shared/errors.ts"
 import { homedir } from "node:os"
 import { Effect, Option } from "effect"
 import { AppConfig } from "../config.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
 import { Writer } from "../db/Database.ts"
+import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImports } from "../importer/StImports.ts"
-import { listFolder, readStFolderFile, scanStFolder } from "../importer/stFolderDisk.ts"
+import { listFolder, scanStFolder } from "../importer/stFolderDisk.ts"
 
 /** Reading a folder by its path is for admins: anyone else could read any user's files. */
 const adminOnly = Effect.flatMap(CurrentUser, (user) =>
@@ -21,39 +22,44 @@ const adminOnly = Effect.flatMap(CurrentUser, (user) =>
 
 export const makeStImportHandlers = Effect.gen(function* () {
   const imports = yield* StImports
+  const jobs = yield* StImportJobs
   const writer = yield* Writer
   const hub = yield* ChatHub
   const config = yield* AppConfig
   const start = Option.getOrElse(config.importStartDir, homedir)
   return {
-    StartStImport: ({ unsupported }) =>
-      Effect.flatMap(CurrentUser, (user) => Effect.map(imports.start(user, unsupported), (importId) => ({ importId }))),
+    StartStImport: ({ unsupported, source, files, bytes }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        Effect.map(
+          jobs.startUpload(user, unsupported, {
+            source: source ?? "A folder sent from a browser",
+            files: files ?? 0,
+            bytes: bytes ?? 0
+          }),
+          (importId) => ({ importId })
+        )
+      ),
+    StartStPathImport: ({ path, prefix }) =>
+      Effect.flatMap(adminOnly, (user) => Effect.map(jobs.startPath(user, path, prefix), (importId) => ({ importId }))),
+    FinishStImport: ({ importId, notSent }) =>
+      Effect.flatMap(CurrentUser, (user) => jobs.finishUpload(user, importId, notSent)),
+    ListStImports: () => Effect.flatMap(CurrentUser, (user) => jobs.list(user)),
+    GetStImport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => jobs.get(user, importId)),
+    SeenStImport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => jobs.seen(user, importId)),
+    CancelStImport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => jobs.cancel(user, importId)),
+    ClearStImports: ({ importId }) =>
+      Effect.flatMap(CurrentUser, (user) => Effect.map(jobs.clear(user, importId), (cleared) => ({ cleared }))),
+    LinkStImportChat: ({ importId, path, card }) =>
+      Effect.flatMap(adminOnly, (user) => jobs.link(user, importId, path, card)),
     ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path, start)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
-    ImportStFolderFile: ({ importId, root, path, size, modifiedMs, start, part, card, orphan }) =>
-      Effect.gen(function* () {
-        const user = yield* adminOnly
-        const file = classifyStPath(path)
-        if (file === null || file.kind === "unsupported")
-          return yield* new StFolderUnreadable({ message: "That isn't a file the import reads." })
-        if (!imports.exists(user, importId)) return yield* new NotFound({ entity: "import", id: importId })
-        const chat = file.kind === "chat" || file.kind === "group_chat"
-        const read = yield* readStFolderFile(root, path, { size, modifiedMs }, start, chat)
-        const result = yield* imports.file(user, importId, path, read.bytes, {
-          part,
-          last: read.last,
-          card,
-          orphan,
-          createdAt: read.ctimeMs
-        })
-        return { result, next: read.next, last: read.last }
-      }).pipe(Effect.catchTag("StImportFailed", (error) => Effect.fail(new ServerError({ message: error.message })))),
     GetStImportReport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => imports.report(user, importId)),
-    UnhideImportedRun: ({ chatId, throughSlotId }) =>
+    UnhideImportedRun: ({ chatId, throughSlotId, importId }) =>
       Effect.gen(function* () {
         const user = yield* CurrentUser
         const done = yield* writer.StImportUnhide({ userId: user.id, chatId, throughSlotId })
-        imports.unhidden(user, chatId)
+        if (importId === undefined) imports.unhidden(user, chatId)
+        else yield* jobs.unhidden(user, importId, chatId)
         // Open tabs read the chat again.
         hub.publish(chatId, { _tag: "Reload" })
         return done

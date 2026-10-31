@@ -130,7 +130,7 @@ test("viewer preferences belong to the account and patches preserve independent 
     await expect(page.locator("article .chat-portrait").first()).toHaveCSS("height", "126px")
     await page.locator("article .chat-portrait").first().click()
     await expect(page.getByText("This card has no image.")).toBeVisible()
-    await closePanel(page)
+    await page.keyboard.press("Escape")
     await apiLogin(page.request, server(), "viewer", "viewer-password-1")
     const otherChat = await withCookie(server(), otherCookie, (api) =>
       Effect.gen(function* () {

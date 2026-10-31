@@ -3,13 +3,13 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@rp/shared/library.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
-import { Link, useSearch } from "@tanstack/react-router"
+import { Link, useCanGoBack, useRouter, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { useContext, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { sessionAtom } from "../../session.ts"
-import { buttonClass } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
@@ -84,6 +84,8 @@ function UploadRow({ upload }: { upload: Upload }) {
 
 export function ImportPage() {
   useTitle("Import")
+  const router = useRouter()
+  const canGoBack = useCanGoBack()
   const registry = useContext(RegistryContext)
   const action = useAction()
   const search: { into?: unknown } = useSearch({ strict: false })
@@ -133,9 +135,16 @@ export function ImportPage() {
               Import a SillyTavern folder
             </Link>
           )}
-          <Link to="/library" className={buttonClass("ghost")}>
-            Back to the library
-          </Link>
+          {canGoBack ? (
+            // Wherever the user came from: the shell's Import link is on every screen.
+            <Button variant="ghost" onClick={() => router.history.back()}>
+              Back
+            </Button>
+          ) : (
+            <Link to="/library" className={buttonClass("ghost")}>
+              Back to the library
+            </Link>
+          )}
         </div>
       </header>
       <Card>

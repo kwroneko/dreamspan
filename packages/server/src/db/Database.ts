@@ -76,6 +76,9 @@ export const bundleEntry = (dir: string, name: string) =>
     return pathToFileURL(path)
   })
 
+/** Reads that browse, and can be slow at scale: they never hold the last free reader (readerPool.ts). */
+const BACKGROUND_READS: ReadonlySet<string> = new Set(["ShellLibrary", "ShellCards", "ShellForks", "CacheWarmth"])
+
 /** The writer's and readers' entry points. */
 const workerEntries = (options: DatabaseOptions) =>
   Effect.gen(function* () {
@@ -200,7 +203,14 @@ export const layer = (options: DatabaseOptions) => {
             )
           ).pipe(
             // Reads are idempotent, so one whose reader crashed can run again.
-            Layer.provide(ReaderPool.layer(options.readers, { retryCrashed: true })),
+            // Reads of what the user browses (the shell's lists, cache estimates) leave one reader
+            // free whenever there are two, so a reply's reads never wait behind them.
+            Layer.provide(
+              ReaderPool.layer(options.readers, {
+                retryCrashed: true,
+                background: { tags: BACKGROUND_READS, max: Math.max(1, options.readers - 1) }
+              })
+            ),
             Layer.provide(
               workerThreads(
                 entries.reader,

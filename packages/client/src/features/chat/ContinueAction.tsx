@@ -1,9 +1,10 @@
 // Continue (ST's, DESIGN §7.5): on the latest message, when the version shown is finished with
 // text (stopped, interrupted, cut off or complete), whoever wrote it (an edit of a reply is
 // the user's), a new generated version that starts as its text and streams on from its end.
-// The old version stays. It needs a model
-// that takes the start of its reply (a prefill); with another, the button says why it isn't
-// available, and a click (or a tap, where there's no tooltip) shows the reason in full.
+// The old version stays. A model that takes the start of its reply (a prefill) gets it so; any
+// other gets the reply as its own last message and is asked to write only what follows (owner,
+// 2026-10-31). Without a model, or while its capability is unknown, the button says why it
+// isn't available, and a click (or a tap, where there's no tooltip) shows the reason in full.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { useSyncExternalStore } from "react"
 import { IconButton } from "../../ui/Tooltip.tsx"
@@ -17,13 +18,9 @@ type NextModel = NonNullable<ReturnType<ChatSession["snapshot"]>["history"]>["mo
 const continueBlocked = (model: NextModel): string | null => {
   if (model === undefined) return "Continue is waiting for the next model’s prefill capability."
   if (model === null) return "Continue needs a model: none is chosen for this chat. Choose one in This chat."
-  const name = model.modelKey ?? "this model"
-  const where = model.connectionName ? ` (${model.connectionName})` : ""
   if (model.prefill === undefined)
     return "Continue is unavailable while the next model’s prefill capability is unresolved."
-  if (model.continueUnavailable) return `Continue isn't available with ${name}${where}: ${model.continueUnavailable}`
-  if (model.prefill === "assistant" || model.prefill === "tool_schema") return null
-  return `Continue isn't available with ${name}${where}: it isn't known to take the start of its reply (a prefill). If it does, set its Prefill capability in Settings → Connections.`
+  return null
 }
 
 /** The latest finished version with text can continue, whoever wrote it. */

@@ -11,6 +11,7 @@ import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import {
+  type ComponentProps,
   memo,
   type MouseEvent,
   type PointerEvent,
@@ -257,6 +258,10 @@ function Editor({
       : ""
 
   const commandSnapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
+  // The editor opens where the message is: when its text takes focus the first time, Save
+  // and Cancel under it come into view too, with the caret at the end just above them.
+  const actions = useRef<HTMLDivElement>(null)
+  const revealed = useRef(false)
   const commands: ChatCommandContext = {
     session,
     view: session.snapshot(),
@@ -267,6 +272,11 @@ function Editor({
   return (
     <form
       className="flex flex-col gap-2"
+      onFocus={() => {
+        if (revealed.current) return
+        revealed.current = true
+        actions.current?.scrollIntoView({ block: "nearest" })
+      }}
       onSubmit={(event) => {
         event.preventDefault()
         invokeChatCommand("message.save", commands)
@@ -299,7 +309,14 @@ function Editor({
       ) : (
         <SlotOutlet
           slot={messageTextEditor}
-          props={{ label, value: text, base, autoFocus: true, onChange: (value) => draft.setText(value) }}
+          props={{
+            label,
+            value: text,
+            base,
+            autoFocus: true,
+            quietMarkers: true,
+            onChange: (value) => draft.setText(value)
+          }}
         />
       )}
       {error && (
@@ -314,20 +331,7 @@ function Editor({
           switchText={() => draft.switchConflict()}
         />
       )}
-      {base !== undefined && (
-        <SlotOutlet
-          slot={messageEditorTools}
-          props={{
-            draft,
-            base,
-            images:
-              (draft.target._tag === "Edit"
-                ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
-                : entry.version.images) ?? []
-          }}
-        />
-      )}
-      <div className="flex gap-2">
+      <div ref={actions} className="flex flex-wrap items-center gap-2">
         <Tooltip label={`${saveLabel} (Ctrl+Enter)`}>
           <Button
             type="submit"
@@ -345,6 +349,20 @@ function Editor({
           <Icon name="close" />
           Cancel
         </Button>
+        <span className="flex-1" />
+        {base !== undefined && (
+          <SlotOutlet
+            slot={messageEditorTools}
+            props={{
+              draft,
+              base,
+              images:
+                (draft.target._tag === "Edit"
+                  ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
+                  : entry.version.images) ?? []
+            }}
+          />
+        )}
       </div>
     </form>
   )
@@ -463,6 +481,26 @@ function Mark({
         <span className="sr-only">: {reason}</span>
       </span>
     </Tooltip>
+  )
+}
+
+/**
+ * "connection · model" (Version.model) in a narrow header: the connection's name gives way
+ * first, down to nothing, so the model's own name is what stays readable. The model's part
+ * doesn't shrink (shrinking is shared out, so it would lose a pixel and its end to an ellipsis
+ * while the connection's name still showed); it's cut only when it alone is wider than the label.
+ */
+function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"span">) {
+  const at = model.indexOf(" · ")
+  return (
+    <span
+      {...props}
+      tabIndex={0}
+      className="flex min-w-0 text-xs whitespace-nowrap text-muted outline-none sm:max-w-64"
+    >
+      {at > 0 && <span className="mr-1 min-w-0 truncate">{model.slice(0, at)}&nbsp;· </span>}
+      <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
+    </span>
   )
 }
 
@@ -604,8 +642,23 @@ export const Message = memo(function Message({
     onReveal(revealed ? null : entry.slotId)
   }
 
-  // Every generated message has its arrows, to generate another; any with versions, to step through them.
+  const latest = useSyncExternalStore(
+    session.subscribe,
+    useCallback(() => {
+      const view = session.snapshot()
+      return view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
+    }, [session, entry.slotId])
+  )
+  // Every generated message has its arrows, to generate another; any with versions, to step
+  // through them. Before the latest message, the one that generates shows on hover or focus.
   const showVersions = generated || entry.versionCount > 1
+  /** After an edit saved as a new version, its number, so the counter's jump says why. */
+  const [savedAs, setSavedAs] = useState<number | null>(null)
+  useEffect(() => {
+    if (savedAs === null) return
+    const timer = setTimeout(() => setSavedAs(null), 6000)
+    return () => clearTimeout(timer)
+  }, [savedAs])
 
   const hidden = entry.contextExcluded
   // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
@@ -699,9 +752,7 @@ export const Message = memo(function Message({
           <span className="shrink-0 text-xs text-muted tabular-nums">#{positionOf(entry) + 1}</span>
           {version.writer === "model" && version.model !== null ? (
             <Tooltip label={`Generated with ${version.model}`}>
-              <span tabIndex={0} className="min-w-0 truncate text-xs text-muted outline-none sm:max-w-64">
-                {version.model}
-              </span>
+              <ModelLabel model={version.model} />
             </Tooltip>
           ) : (
             // A turn on the user's side the model wrote says so, as a reply the user wrote does.
@@ -795,6 +846,9 @@ export const Message = memo(function Message({
                   : await session.writeVersion(entry, text, draft, images)
               report(outcome)
               if (!outcome.ok) return
+              // An edit of a generated version, or of one being written, is saved as a new one.
+              if (editing === "edit" && (source!.writer !== "human" || source!.status === "generating"))
+                setSavedAs((outcome.value as PathEntry).versionCount)
               // Text typed while it was being saved stays in the editor, which stays open.
               if (!editor.committed(submitted)) return
               // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
@@ -846,12 +900,18 @@ export const Message = memo(function Message({
                 </div>
               )}
               <span className="flex-1" />
+              {savedAs !== null && (
+                <span role="status" className="mr-1 text-xs text-muted">
+                  Saved as version {savedAs}
+                </span>
+              )}
               {showVersions && (
                 <SlotOutlet
                   slot={messageVersions}
                   props={{
                     entry,
                     generated,
+                    latest,
                     versions,
                     position,
                     onStep: (step) => void swipe(step),

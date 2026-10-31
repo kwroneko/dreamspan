@@ -51,6 +51,14 @@ export class Formats extends Context.Service<
       readonly path: string
       readonly width: (typeof MEDIA_WIDTHS)[number]
     }) => Effect.Effect<ThumbnailResult, ThumbnailFailed | FormatWorkerFailed>
+    /**
+     * Makes an image's thumbnails at every width ahead of its first view, on the format
+     * workers (an import's lane), so the browser's requests find them on disk.
+     */
+    readonly prepareThumbnails: (input: {
+      readonly dataDir: string
+      readonly path: string
+    }) => Effect.Effect<void, ThumbnailFailed | FormatWorkerFailed>
     /** Parses a file in a worker. A buffer of its own is transferred, and unusable here afterwards. */
     readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
     /** Writes a document as a file in a worker. Files' buffers of their own are transferred. */
@@ -90,6 +98,11 @@ interface FormatsOptions {
   readonly workers: "source" | "bundle"
   /** How many files are parsed or written at once. */
   readonly size: number
+  /**
+   * How many thumbnails are made at once, in workers of their own: a thumbnail the browser
+   * waits for never queues behind an import's files. 1 by default.
+   */
+  readonly thumbnailSize?: number
   readonly bundleDir?: string
   /** A test's own worker script. */
   readonly entry?: URL
@@ -121,24 +134,60 @@ const workerFailures = <A, E>(effect: Effect.Effect<A, E | RpcClientError.RpcCli
     failed
   ).pipe(Effect.catchDefect(failed))
 
+/** The thumbnail lane: the same worker code in a pool of its own (FormatsOptions.thumbnailSize). */
+class ThumbnailLane extends Context.Service<ThumbnailLane, { readonly thumbnail: Formats["Service"]["thumbnail"] }>()(
+  "rp/importer/ThumbnailLane"
+) {}
+
 export const layer = (options: FormatsOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      // The newest thread of each worker id, so a job past its deadline can be stopped.
-      const threads = new Map<number, Worker>()
       const parsers = yield* StParsers.StParserRegistry
       const parser = (id: Parameters<typeof parsers.get>[0]) => parsers.get(id) ?? null
       const bundleDir = options.workers === "bundle" ? (options.bundleDir ?? (yield* WorkerBundleDir)) : undefined
       const entry =
         options.entry ??
         (bundleDir === undefined ? new URL("./worker.ts", import.meta.url) : yield* bundleEntry(bundleDir, "formats"))
+      /** A pool of format workers; a job past the deadline has its worker stopped. */
+      const pool = (size: number, name: string) => {
+        // The newest thread of each worker id, so a job past its deadline can be stopped.
+        const threads = new Map<number, Worker>()
+        return <A, E, R>(service: Layer.Layer<A, E, R>) =>
+          service.pipe(
+            Layer.provide(
+              ReaderPool.layer(size, {
+                name,
+                // No retryCrashed: a file that stopped one worker would stop the next, and its
+                // bytes went with the first.
+                jobDeadline: {
+                  ms: options.jobDeadlineMs ?? JOB_DEADLINE_MS,
+                  terminate: (id) => void threads.get(id)?.terminate()
+                }
+              })
+            ),
+            Layer.provide(
+              workerThreads(entry, {}, bundleDir, { maxOldGenerationSizeMb: MAX_HEAP_MB }, (id, thread) =>
+                threads.set(id, thread)
+              )
+            )
+          )
+      }
+      const thumbnails = Layer.effect(
+        ThumbnailLane,
+        Effect.map(ReaderPool.client(FormatOps), (client) =>
+          ThumbnailLane.of({ thumbnail: (input) => workerFailures(client.Thumbnail(input)) })
+        )
+      ).pipe(pool(options.thumbnailSize ?? 1, "thumbnail worker"))
       return Layer.effect(
         Formats,
-        Effect.map(ReaderPool.client(FormatOps), (client) =>
-          Formats.of({
+        Effect.gen(function* () {
+          const client = yield* ReaderPool.client(FormatOps)
+          const lane = yield* ThumbnailLane
+          return Formats.of({
             listExports: workerFailures(client.ListExportFormats()),
             previewStSettings: (text, surface) => workerFailures(client.PreviewStSettings({ text, surface })),
-            thumbnail: (input) => workerFailures(client.Thumbnail(input)),
+            thumbnail: lane.thumbnail,
+            prepareThumbnails: (input) => workerFailures(client.PrepareThumbnails(input)),
             parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>
               workerFailures(
@@ -183,24 +232,7 @@ export const layer = (options: FormatsOptions) =>
                 )
             }
           })
-        )
-      ).pipe(
-        Layer.provide(
-          ReaderPool.layer(options.size, {
-            name: "format worker",
-            // No retryCrashed: a file that stopped one worker would stop the next, and its
-            // bytes went with the first.
-            jobDeadline: {
-              ms: options.jobDeadlineMs ?? JOB_DEADLINE_MS,
-              terminate: (id) => void threads.get(id)?.terminate()
-            }
-          })
-        ),
-        Layer.provide(
-          workerThreads(entry, {}, bundleDir, { maxOldGenerationSizeMb: MAX_HEAP_MB }, (id, thread) =>
-            threads.set(id, thread)
-          )
-        )
-      )
+        })
+      ).pipe(pool(options.size, "format worker"), Layer.provide(thumbnails))
     })
   ).pipe(Layer.provideMerge(StParsers.layer))

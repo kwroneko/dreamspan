@@ -515,7 +515,7 @@ export function NoteEditor({
     <section aria-label={`Note ${noteRef.label}`} className="flex flex-col gap-3 rounded-md border border-border p-3">
       {notice}
       <RestoredNotice count={state.restored} />
-      <RecoveredNotice count={state.recovered} />
+      <RecoveredNotice store={store} />
       <NoteFields
         chatNote={chatNote}
         store={store}

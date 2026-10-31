@@ -14,6 +14,7 @@ export function CardTextEditor({
   value,
   label,
   rows,
+  minHeight,
   fullHeight,
   mono,
   readOnly,
@@ -27,6 +28,7 @@ export function CardTextEditor({
   label: string
   fullHeight?: boolean | undefined
   rows?: number | undefined
+  minHeight?: string | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void
@@ -65,6 +67,7 @@ export function CardTextEditor({
         base={comparison?.revision === revision ? comparison.value : value}
         label={label}
         rows={rows}
+        minHeight={minHeight}
         fullHeight={fullHeight}
         mono={mono}
         readOnly={readOnly}

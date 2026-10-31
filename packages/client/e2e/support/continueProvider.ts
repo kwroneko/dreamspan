@@ -1,4 +1,5 @@
-// A slow, synthetic reasoning model with native assistant prefill, for Continue's browser tests.
+// A slow, synthetic reasoning model with native assistant prefill, for Continue's browser tests;
+// without a prefill, it answers the continue nudge with the rest of the reply.
 import { createServer } from "node:http"
 import type { AddressInfo } from "node:net"
 
@@ -21,7 +22,9 @@ export const startContinueProvider = async () => {
       const parsed = JSON.parse(body) as (typeof requests)[number]
       requests.push(parsed)
       const prefix = parsed.tools?.[0]?.function.parameters.properties.text.description
-      const continuing = prefix !== undefined || parsed.messages.at(-1)?.role === "assistant"
+      // Continue without a prefill (owner, 2026-10-31) ends on the continue nudge: only what follows, no leading space.
+      const nudged = parsed.messages.at(-1)?.content.startsWith("[Continue your last message") === true
+      const continuing = prefix !== undefined || nudged || parsed.messages.at(-1)?.role === "assistant"
       const hold = holdNext && !continuing
       holdNext = false
       const tokens = [
@@ -29,7 +32,9 @@ export const startContinueProvider = async () => {
           .match(/\S+\s*/g)!
           .map((t) => ({ reasoning_content: t })),
         ...(prefix === undefined
-          ? (continuing ? MORE : START.repeat(8)).match(/\s*\S+\s*/g)!.map((t) => ({ content: t }))
+          ? (continuing ? (nudged ? MORE.trimStart() : MORE) : START.repeat(8))
+              .match(/\s*\S+\s*/g)!
+              .map((t) => ({ content: t }))
           : Array.from(JSON.stringify({ text: prefix + MORE }), (t, index) => ({
               tool_calls: [
                 {

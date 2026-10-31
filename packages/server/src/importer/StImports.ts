@@ -30,6 +30,7 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
+import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
@@ -263,6 +264,10 @@ export class StImports extends Context.Service<
     ) => Effect.Effect<StFileResult, NotFound | StImportFailed>
     readonly unhidden: (user: User, chatId: ChatId) => void
     readonly exists: (user: User, importId: string) => boolean
+    /** Ends the user's import if it's this one: its files are refused from now on. */
+    readonly end: (user: User, importId: string) => void
+    /** Where the import found the library entry of an entity, by an earlier import's records too. */
+    readonly sourcesOf: (user: User, importId: string, entityId: EntityId) => ReadonlyArray<string>
     /** The folder-file handlers by kind, for a plugin to register into, wrap or disable. */
     readonly handlers: Registry<StFolderHandler>
   }
@@ -435,6 +440,8 @@ export class StImports extends Context.Service<
             report.count(countAs, "failed")
             return { outcome: result("failed", "it couldn't be stored"), entity: null, created: false, note: null }
           }
+          // The grid's thumbnails, on this import's lane, so its cards show from disk.
+          yield* prepareAvatarThumbnails(formats, config.dataDir, parsed.media)
           const entry: LibraryEntry = {
             refId: imported.ref.id,
             entityId: imported.ref.entityId,
@@ -1232,6 +1239,14 @@ export class StImports extends Context.Service<
           ),
         unhidden: (user, chatId) => void sessions.get(user.id)?.report.hiddenRuns.delete(chatId),
         exists: (user, importId) => sessions.get(user.id)?.id === importId,
+        end: (user, importId) => {
+          if (sessions.get(user.id)?.id === importId) sessions.delete(user.id)
+        },
+        sourcesOf: (user, importId, entityId) => {
+          const session = sessions.get(user.id)
+          if (session?.id !== importId) return []
+          return [...session.library].flatMap(([path, entry]) => (entry.entityId === entityId ? [path] : []))
+        },
         handlers
       })
     })

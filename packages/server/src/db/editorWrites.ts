@@ -247,13 +247,17 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           ? chatNoteEdit(userId, ref, valid.doc, message, chatNote)
           : userEdit(ref, valid.doc, message, null)
         let recovered = 0
+        const recoveredFields: Array<string> = []
         for (const row of rows) {
           const orphan = orphans.has(row.field)
           const ended = yield* drafts.end(row, orphan ? "discarded" : "committed")
           // A set-aside draft is reported as such; what the others' sessions lost is counted.
-          if (!orphan) recovered += ended.recovered
+          if (!orphan && ended.recovered > 0) {
+            recovered += ended.recovered
+            recoveredFields.push(row.field)
+          }
         }
-        return new RefChange({ ...change, setAside: [...orphans], recovered })
+        return new RefChange({ ...change, setAside: [...orphans], recovered, recoveredFields })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
     RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion }) =>

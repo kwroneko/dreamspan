@@ -80,15 +80,31 @@ describe("group read scale", () => {
         // The groups (two or three characters a chat, each chat titled apart): one read too.
         const plans = yield* fixtureSql(
           config.dataDir,
-          [shellSlotsQuery, shellEventsQuery].map((query) => ({ sql: `EXPLAIN QUERY PLAN ${query}`, params: [me.id] })),
+          [shellSlotsQuery, shellEventsQuery].map((query) => ({
+            sql: `EXPLAIN QUERY PLAN ${query}`,
+            params: [JSON.stringify(["c-00000", "c-00001"])]
+          })),
           { readOnly: true }
         )
         for (const plan of plans) {
           const details = plan.map((row) => String(row.detail))
-          assert.isTrue(details.some((detail) => /SEARCH c .*owner_user_id/.test(detail)))
+          assert.isTrue(details.some((detail) => /SEARCH c USING .*\(id=\?\)/.test(detail)))
           assert.isFalse(details.some((detail) => /^SCAN [se] /.test(detail)))
         }
+        // The first read walks every chat and stores the summaries after answering
+        // (db/forkSummaries.ts); the timed read is the steady state, once they're stored.
         yield* api.GetShellLibrary()
+        for (let stored = 0; stored < 5000;) {
+          yield* Effect.sleep("200 millis")
+          const [row] = yield* fixtureSql(
+            config.dataDir,
+            [{ sql: "SELECT count(*) AS n FROM fork_summaries", params: [] }],
+            {
+              readOnly: true
+            }
+          )
+          stored = Number(row![0]!.n)
+        }
         const groupsStarted = performance.now()
         const groups = yield* api.GetShellLibrary()
         const groupsTook = performance.now() - groupsStarted

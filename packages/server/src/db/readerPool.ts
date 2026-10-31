@@ -104,8 +104,19 @@ export const layer = (
   {
     name = "database reader",
     retryCrashed = false,
-    jobDeadline
-  }: { name?: string; retryCrashed?: boolean; jobDeadline?: JobDeadline } = {}
+    jobDeadline,
+    background
+  }: {
+    name?: string
+    retryCrashed?: boolean
+    jobDeadline?: JobDeadline
+    /**
+     * Requests (by tag) that may hold at most `max` readers at once: with `size - 1`, one
+     * reader is always left for the rest, so what a reply waits on never queues behind them.
+     * Others queued behind a held-back one go first.
+     */
+    background?: { readonly tags: ReadonlySet<string>; readonly max: number }
+  } = {}
 ) =>
   Layer.effect(
     RpcClient.Protocol,
@@ -126,7 +137,13 @@ export const layer = (
                 i++
                 continue
               }
-              const job = queue.shift()!
+              const held =
+                background !== undefined &&
+                readers.filter((r) => r.job !== undefined && background.tags.has(r.job.request.tag)).length >=
+                  background.max
+              const next = held ? queue.findIndex((job) => !background.tags.has(job.request.tag)) : 0
+              if (next === -1) break
+              const job = queue.splice(next, 1)[0]!
               // Reserved before sending, so a concurrent dispatch can't pick the same reader;
               // released again if the send fails.
               reader.job = job

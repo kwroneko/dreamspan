@@ -20,7 +20,6 @@ const matching = (data: ShellLibrary, needle: string) => {
   const words = needle.trim().toLowerCase()
   return sortCards(
     data.cards.filter((c) => [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(words))),
-    data.lastChatAt,
     "recent"
   )
 }
@@ -46,7 +45,7 @@ function Choices({ needle, onPick }: { needle: string; onPick: () => void }) {
   return (
     <ul aria-label="Characters" className="-mx-1 flex min-h-0 flex-col overflow-y-auto">
       {matches.slice(0, SHOWN).map((c) => {
-        const last = data.lastChatAt.get(c.card.entityId)
+        const last = c.recentAt ?? undefined
         return (
           <li key={c.card.entityId}>
             <Link

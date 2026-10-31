@@ -36,4 +36,14 @@ describe("draft patches", () => {
     expect(isDestructive(diffPatch(text, "x"), text.length)).toBe(true)
     expect(isDestructive(diffPatch(text, text + " More."), text.length)).toBe(false)
   })
+
+  it("doesn't count an imported text's CRLF turned into LF as a deletion", () => {
+    const imported = "She keeps the lighthouse.\r\n\r\nShe names every gull.\r\n".repeat(20)
+    const typed = imported.replaceAll("\r\n", "\n") + "x"
+    expect(isDestructive(diffPatch(imported, typed), imported.length)).toBe(false)
+    // A real deletion among rewritten line endings still counts.
+    expect(isDestructive(diffPatch(imported, "x"), imported.length)).toBe(true)
+    const cut = imported.replaceAll("\r\n", "\n").slice(0, 100)
+    expect(isDestructive(diffPatch(imported, cut), imported.length)).toBe(true)
+  })
 })
