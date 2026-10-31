@@ -160,7 +160,7 @@ function MemberMore({
       keepMounted
     >
       <div
-        className="flex flex-col items-stretch gap-0.5 [&_button]:w-full [&_button]:justify-start"
+        className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
         onClickCapture={() => setOpen(false)}
       >
         <Button variant="ghost" onClick={() => writeAs(session, card.entityId)}>

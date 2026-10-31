@@ -251,6 +251,7 @@ test("a recovered chat offer names its original target when opened from another 
   await expect(prompt(page)).toBeVisible()
   await page.keyboard.press("Escape")
   await page.goto(`${server().url}/chats/${f.other.chat.id}?panel=cast`)
+  await page.getByRole("button", { name: "More for Recovery target", exact: true }).click()
   await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
   await expect(prompt(page).getByRole("status").filter({ hasText: "Only this chat refers to:" })).toContainText(
     "The lantern garden · Garden sibling"

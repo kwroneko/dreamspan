@@ -107,6 +107,7 @@ for (const width of [1440, 390])
       // Three messages back, using the real message menu: the new branch inherits the swap.
       await closePanel(page)
       await messageMenu(page.locator("article[data-slot]").first(), "Branch from here")
+      await openCast(page)
       const forked = await openPanel(page, name)
       await expect(forked).toContainText("Storm")
       await forked.getByRole("button", { name: `Use another version: ${name}`, exact: true }).click()

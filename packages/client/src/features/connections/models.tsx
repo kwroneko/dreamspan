@@ -167,6 +167,14 @@ function Limit({
 }) {
   const [editing, setEditing] = useState(initiallyOpen)
   const open = editing || value !== ""
+  // The pencil's click moves the cursor into the field it opens, once that's there.
+  const input = useRef<HTMLInputElement>(null)
+  const [focusing, setFocusing] = useState(false)
+  useEffect(() => {
+    if (!focusing) return
+    input.current?.focus()
+    setFocusing(false)
+  }, [focusing])
   const unknown = resolved.source === "unknown"
   const source =
     unknown && assumed
@@ -192,9 +200,7 @@ function Limit({
             label={`Set the ${label.toLowerCase()} yourself`}
             onClick={() => {
               setEditing(true)
-              requestAnimationFrame(() =>
-                document.querySelector<HTMLInputElement>(`[data-model-field="${field}"]`)?.focus()
-              )
+              setFocusing(true)
             }}
           />
         )}
@@ -207,6 +213,7 @@ function Limit({
             error={problem}
           >
             <Input
+              ref={input}
               value={value}
               onValueChange={onValueChange}
               inputMode="numeric"
