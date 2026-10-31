@@ -13,6 +13,7 @@ import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { lastBreakpoint, prefixChange, tokensBetween } from "../assembler/warmth.ts"
 import { nextImages, estimateImage } from "../assembler/imageTokens.ts"
+import { budgetOrigins } from "../assembler/budget.ts"
 import { describer, inspectionInputs } from "./inspectorReads.ts"
 import { NotFound } from "@rp/shared/errors.ts"
 import {
@@ -237,6 +238,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         }
         const boundary = {
           assemblyError: next instanceof AssemblyFailed ? next.message : null,
+          assemblyErrorReason: next instanceof AssemblyFailed ? next.reason : null,
           forkId: nextFork,
           presetContext: next instanceof AssemblyFailed ? null : yield* presetContext(sql, userId, next),
           ...(chosen === undefined
@@ -268,7 +270,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               ? {
                   ...budget,
                   presetName,
-                  builtinPreset: preset.scope === "builtin"
+                  builtinPreset: preset.scope === "builtin",
+                  origins: budgetOrigins(resolved ?? null)
                 }
               : null,
           leafSlotId: sources.pins().target.parentSlotId,

@@ -43,8 +43,11 @@ export const ModelSettings = Schema.Struct({
 })
 export type ModelSettings = typeof ModelSettings.Type
 
-/** The context size assumed when no source reports the model's window. */
-const FALLBACK_CONTEXT = 8192
+/**
+ * The window assumed when no source reports the model's (its setting, the provider's list, a
+ * catalog, a limit learned from an error): a modern size, always shown as assumed.
+ */
+export const ASSUMED_CONTEXT = 128_000
 /** The response length a model without its own gets, within its output limit and half its context. */
 export const DEFAULT_RESPONSE = 4096
 
@@ -61,7 +64,7 @@ export const withModelSettings = (
 ): LegacyPresetDoc => {
   const { context_target, ...text } = doc
   void context_target
-  const window = context ?? FALLBACK_CONTEXT
+  const window = context ?? ASSUMED_CONTEXT
   // The context size the budget will use: the model's own, within its reported window.
   const size = Math.min(settings.samplers?.openai_max_context ?? window, context ?? Number.POSITIVE_INFINITY)
   return {

@@ -1,6 +1,6 @@
 // Connections and models (spec/PROVIDERS.md §2, §3). Shared so the client can show the
 // same kinds, fields and merged model descriptions the server uses.
-import { ModelSettings } from "./modelSettings.ts"
+import { ASSUMED_CONTEXT, ModelSettings } from "./modelSettings.ts"
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
 import { RefId } from "./library.ts"
@@ -152,16 +152,49 @@ const capabilityFields = {
   sampling: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown))
 }
 
+/**
+ * A context size the provider stated in a context-length error, saved by the user from that
+ * error (never applied without them). Its own source: below the user's setting, above the list.
+ */
+export const LearnedContext = Schema.Struct({
+  context: Schema.Int.check(Schema.isGreaterThan(0)),
+  at: Schema.Number
+})
+export type LearnedContext = typeof LearnedContext.Type
+
 /** What the user changed. Always wins over the upstream (DATA-MODEL §11). */
-export const ModelOverrides = Schema.Struct(capabilityFields)
+export const ModelOverrides = Schema.Struct({ ...capabilityFields, learned: Schema.optionalKey(LearnedContext) })
 export type ModelOverrides = typeof ModelOverrides.Type
 
+/**
+ * The catalog entry that filled fields the list didn't report: which registered catalog, the
+ * entry's id there (a router's or a dated id matches its family's), and the fields it gave.
+ */
+export const CatalogMatch = Schema.Struct({
+  catalog: Schema.String,
+  label: Schema.String,
+  match: Schema.String,
+  fields: Schema.Array(Schema.String)
+})
+export type CatalogMatch = typeof CatalogMatch.Type
+
 /** What pi-ai's catalog and the upstream list report. Rewritten by every refresh. */
-export const ModelUpstream = Schema.Struct({ ...capabilityFields, price: Schema.optionalKey(Price) })
+export const ModelUpstream = Schema.Struct({
+  ...capabilityFields,
+  price: Schema.optionalKey(Price),
+  catalog: Schema.optionalKey(CatalogMatch)
+})
 export type ModelUpstream = typeof ModelUpstream.Type
 
+/**
+ * Where a field's value came from: the user's setting, a limit learned from a provider's error,
+ * the provider's list, a catalog matched by the model's id, or `unknown`: no source knows it and
+ * a default is used (for the context window, `ASSUMED_CONTEXT`, shown as assumed).
+ */
+export type FieldSource = "user" | "learned" | "upstream" | "catalog" | "unknown"
+
 /** A field's value and where it came from; `unknown` means no source knows it. */
-type Resolved<A> = { readonly value: A; readonly source: "user" | "upstream" | "unknown" }
+type Resolved<A> = { readonly value: A; readonly source: FieldSource }
 
 export interface EffectiveModel {
   readonly name: Resolved<string>
@@ -180,14 +213,17 @@ export interface EffectiveModel {
   readonly sampling: Readonly<Record<string, unknown>>
   readonly settings: ModelSettings
   readonly price: ModelUpstream["price"] | null
+  /** The catalog entry behind `catalog` sources. */
+  readonly catalog: CatalogMatch | null
 }
 
 /** Defaults for fields no source knows: the safe choice, shown as unknown, never as "no". */
-const DEFAULT_CONTEXT = 8192
 const DEFAULT_MAX_OUTPUT = 4096
 
 /**
- * Merges a model's sources, user edits first (PROVIDERS §3.1). `connectionCompat` sits
+ * Merges a model's sources, user edits first (PROVIDERS §3.1): the user's value, for the context
+ * window a limit learned from the provider's error, what the provider's list reports, what a
+ * catalog matched by id reports, then a default. `connectionCompat` sits
  * under the model's own compat overrides.
  */
 export const resolveModel = (
@@ -196,17 +232,19 @@ export const resolveModel = (
   overrides: ModelOverrides,
   connectionCompat: Compat = {}
 ): EffectiveModel => {
-  const pick = <K extends keyof ModelOverrides, A>(
+  const pick = <K extends Exclude<keyof ModelOverrides, "learned">, A>(
     field: K,
     fallback: A
   ): Resolved<NonNullable<ModelOverrides[K]> | A> => {
     if (overrides[field] !== undefined) return { value: overrides[field]!, source: "user" }
-    if (upstream[field] !== undefined) return { value: upstream[field]!, source: "upstream" }
+    if (field === "context" && overrides.learned) return { value: overrides.learned.context as A, source: "learned" }
+    if (upstream[field] !== undefined)
+      return { value: upstream[field]!, source: upstream.catalog?.fields.includes(field) ? "catalog" : "upstream" }
     return { value: fallback, source: "unknown" }
   }
   return {
     name: pick("name", key),
-    context: pick("context", DEFAULT_CONTEXT),
+    context: pick("context", ASSUMED_CONTEXT),
     maxOutput: pick("maxOutput", DEFAULT_MAX_OUTPUT),
     vision: pick("vision", false),
     maxImages: pick("maxImages", 4),
@@ -220,7 +258,8 @@ export const resolveModel = (
     compat: { ...connectionCompat, ...upstream.compat, ...overrides.compat },
     sampling: { ...upstream.sampling, ...overrides.sampling },
     settings: { ...upstream.settings, ...overrides.settings },
-    price: upstream.price ?? null
+    price: upstream.price ?? null,
+    catalog: upstream.catalog ?? null
   }
 }
 

@@ -37,7 +37,9 @@ export type GenerationChunk = string | { readonly reasoning: string }
 /** Why a generation failed, as its failed version records it (DESIGN §3.1). */
 export class GenerationFailed extends Schema.TaggedError<GenerationFailed>()("GenerationFailed", {
   class: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  /** A context-length error's stated limit and the model it applies to (`VersionError.contextLimit`). */
+  contextLimit: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, modelId: Schema.String }))
 }) {}
 
 export interface GeneratorShape {

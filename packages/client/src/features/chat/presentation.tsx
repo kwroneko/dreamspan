@@ -96,6 +96,10 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
     )
 }
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
+/** Actions beside a failed version's error, such as saving a context size its error states. */
+export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
+  "message.failure-actions"
+)
 /** Notes about the next request just above the composer, such as its images' token estimate. */
 export const chatComposerNotes = defineSlot<{ view: ChatView }>("chat.composer-notes")
 

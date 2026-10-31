@@ -131,8 +131,19 @@ export const versionExtras = (alias: string) =>
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
-  const error = JSON.parse(json) as { class?: unknown; message?: unknown }
-  return { class: String(error.class ?? "unknown"), message: String(error.message ?? "") }
+  const error = JSON.parse(json) as {
+    class?: unknown
+    message?: unknown
+    contextLimit?: { tokens?: unknown; modelId?: unknown }
+  }
+  const limit = error.contextLimit
+  return {
+    class: String(error.class ?? "unknown"),
+    message: String(error.message ?? ""),
+    ...(limit && Number.isSafeInteger(limit.tokens) && typeof limit.modelId === "string"
+      ? { contextLimit: { tokens: limit.tokens as number, modelId: limit.modelId } }
+      : {})
+  }
 }
 
 /**

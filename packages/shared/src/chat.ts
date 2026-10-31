@@ -92,7 +92,12 @@ export const FrozenMacros = Schema.Record(Schema.String, Schema.String).check(
 )
 
 /** Why a generation failed, shown on its version (DESIGN §3.1). */
-export const VersionError = Schema.Struct({ class: Schema.String, message: Schema.String })
+export const VersionError = Schema.Struct({
+  class: Schema.String,
+  message: Schema.String,
+  /** A context-length error's stated limit, and the model it was stated for, to save it there. */
+  contextLimit: Schema.optionalKey(Schema.Struct({ tokens: Schema.Int, modelId: Schema.String }))
+})
 
 /**
  * Something about an assembled context the user should know: a prefill dropped, a piece
