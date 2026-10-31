@@ -217,7 +217,8 @@ for (const width of [1440, 390])
     await page.keyboard.press("Escape")
     await overlay.getByRole("button", { name: "Back to the chat", exact: true }).click()
     await expect(overlay).toHaveCount(0)
-    expect(page.url()).toBe(url)
+    // The same chat and fork; on a phone the sheet closed as the editor opened, as for a preset.
+    expect(page.url()).toBe(width === 390 ? url.replace(/\?panel=.*$/, "") : url)
     await expect(page.getByLabel("Message", { exact: true })).toBeVisible()
   })
 
