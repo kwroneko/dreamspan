@@ -20,7 +20,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { shellAtom } from "../characters/shellData.tsx"
-import { castView } from "./cast.ts"
+import { addableGroups, castView } from "./cast.ts"
 import { PlusIcon } from "./icons.tsx"
 import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
@@ -29,33 +29,6 @@ import { ChatCardActions } from "./presentation.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-
-/**
- * The cards to offer, in the order people look for them: characters first, the ones in the
- * latest chats first, then by name; personas apart, after them. A version shows only to tell
- * two of the same name apart.
- */
-export const addableGroups = (cards: ReadonlyArray<CastCard>, recency: ReadonlyMap<string, number>, needle: string) => {
-  const found = cards.filter(
-    (card) =>
-      needle === "" || card.name.toLowerCase().includes(needle) || (card.subtitle ?? "").toLowerCase().includes(needle)
-  )
-  const names = new Map<string, number>()
-  for (const card of found) names.set(card.name, (names.get(card.name) ?? 0) + 1)
-  const order = (a: CastCard, b: CastCard) =>
-    (recency.get(b.entityId) ?? -1) - (recency.get(a.entityId) ?? -1) || a.name.localeCompare(b.name)
-  const entry = (card: CastCard) => ({ card, version: (names.get(card.name) ?? 0) > 1 ? (card.subtitle ?? "") : "" })
-  return {
-    characters: found
-      .filter((card) => !card.persona)
-      .sort(order)
-      .map(entry),
-    personas: found
-      .filter((card) => card.persona)
-      .sort(order)
-      .map(entry)
-  }
-}
 
 /** A searchable list of the user's cards not in the chat; the one picked joins it (DESIGN §2.1). */
 function AddCharacter({
@@ -216,6 +189,7 @@ function Member({
   session,
   card,
   info,
+  version,
   muted,
   writing,
   onChange,
@@ -225,6 +199,8 @@ function Member({
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
+  /** Its version, shown only to tell it from another of the same name. */
+  version: string
   muted: boolean
   /** The model is writing their turn at the end of the chat. */
   writing: boolean
@@ -257,6 +233,7 @@ function Member({
         >
           {name}
         </button>
+        {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
         {(writing || muted || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
             {writing && <Badge tone="success">writing…</Badge>}
@@ -360,6 +337,8 @@ export function CastTab({ session }: { session: ChatSession }) {
   // The characters: everyone in the chat but who you play (PHASE1 26, 27).
   const characters = participants.filter((id) => !playedByMe.includes(id))
   const muted = cast?.absent.filter((id) => characters.includes(id)).length ?? 0
+  const sameName = (card: CastCard) =>
+    characters.filter((id) => id !== card.entityId && view.cards.get(id)?.name === card.name).length > 0
   /**
    * Who `{{user}}` is from here on (DESIGN §2.2): one persona, in one write. A card not in the
    * chat joins; a persona-folder card played until now leaves, since it isn't one of the characters.
@@ -399,6 +378,7 @@ export function CastTab({ session }: { session: ChatSession }) {
                   session={session}
                   card={card}
                   info={info.get(id)}
+                  version={sameName(card) ? (card.subtitle ?? "") : ""}
                   muted={cast.absent.includes(id)}
                   writing={writing === id}
                   onChange={(next) => void change(next)}

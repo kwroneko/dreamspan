@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { loginCookie, withCookie, type Client } from "./support/rpc.ts"
-import { openPanel, closePanel } from "./support/panel.ts"
+import { openPanel, closePanel, openSummarySettings } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 test.describe.configure({ mode: "serial" })
@@ -81,13 +81,13 @@ for (const width of [1440, 390])
         })
       )
       await page.goto(`${server().url}/chats/${started.chat.id}`)
-      await openPanel(page, "This chat")
+      await openSummarySettings(page)
       const forkBox = page.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
       await forkBox.fill(`Fork direction ${width} ${theme}`)
       const targetId = `chat:${started.chat.id}:fork:${started.chat.currentForkId}`
       await expect.poll(() => draftText(targetId, "Summarization instruction")).toBe(`Fork direction ${width} ${theme}`)
       await closePanel(page)
-      await openPanel(page, "This chat")
+      await openSummarySettings(page)
       await expect(forkBox).toHaveText(`Fork direction ${width} ${theme}`)
       await page.getByRole("button", { name: "Field undo history", exact: true }).scrollIntoViewIfNeeded()
       await shot(page, `fork-${width}-${theme}`)
@@ -157,7 +157,7 @@ for (const width of [1440, 390])
         `Unsent opening ${width} ${theme}`
       )
       await device.goto(`${server().url}/chats/${started.chat.id}`)
-      await openPanel(device, "This chat")
+      await openSummarySettings(device)
       await expect(
         device.getByRole("textbox", { name: "This chat's summarization instruction", exact: true })
       ).toHaveText(`Fork direction ${width} ${theme}`)
@@ -222,7 +222,7 @@ for (const scope of ["account", "fork"] as const)
       chatId = started.chat.id
       targetId = `chat:${chatId}:fork:${started.chat.currentForkId}`
       await page.goto(`${server().url}/chats/${chatId}`)
-      await openPanel(page, "This chat")
+      await openSummarySettings(page)
     } else await page.goto(`${server().url}/settings/chats`)
     const box =
       scope === "account"
@@ -247,7 +247,7 @@ for (const scope of ["account", "fork"] as const)
     await expect.poll(() => draftText(targetId, "Summarization instruction")).toBe("Text typed during Save")
     await page.reload()
     if (scope === "fork") {
-      await openPanel(page, "This chat")
+      await openSummarySettings(page)
       await expect(box).toHaveText("Text typed during Save")
     } else await expect(box).toHaveValue("Text typed during Save")
     if (scope === "account")

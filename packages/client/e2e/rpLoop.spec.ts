@@ -217,15 +217,15 @@ for (const width of [1440, 390])
       await expect(page.getByRole("tab", { name: "Personas", selected: true })).toBeVisible()
       await shot("08-persona-control")
       await page.keyboard.press("Escape")
-      await expect(cast.getByText("muted", { exact: true }).first()).toBeVisible()
+      await expect(cast.getByText("Muted", { exact: true }).first()).toBeVisible()
       await expect(cast.getByRole("heading", { level: 2 })).toContainText("1 muted")
       const mutedRow = cast
         .getByRole("list", { name: "Characters in this chat" })
         .getByRole("listitem")
-        .filter({ has: page.getByText("muted", { exact: true }) })
+        .filter({ has: page.getByText("Muted", { exact: true }) })
         .first()
       const mutedName = (await mutedRow.getAttribute("aria-label"))!
-      await expect(mutedRow.getByRole("switch")).toBeChecked()
+      await expect(mutedRow.getByRole("button", { name: `Unmute ${mutedName}`, exact: true })).toBeVisible()
       await shot("09-cast-tab-muted")
       // Never picked automatically: it's not offered to reply.
       if (width < 1024) await closePanel(page)

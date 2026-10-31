@@ -41,6 +41,7 @@ function Binding({
   const { label, follows } = LABELS[name]
   return (
     <form
+      aria-label={label}
       className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
@@ -55,7 +56,7 @@ function Binding({
         }
         description={
           <span className="line-clamp-3 [overflow-wrap:anywhere]">
-            {pinned ? "Kept as you set it." : `${follows}: ${resolved || "(empty)"}.`}
+            {`${pinned ? "Kept as you set it" : follows}: ${resolved || "(empty)"}.`}
           </span>
         }
         error={error}

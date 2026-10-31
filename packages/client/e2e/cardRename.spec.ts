@@ -186,6 +186,7 @@ test("forking a card for this chat replaces history only in the viewed fork", as
   const f = await seed("Forked Aria")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "More for Forked Aria", exact: true }).click()
   await page.getByRole("button", { name: "Fork for this chat: Forked Aria", exact: true }).click()
   const fork = page.getByRole("dialog", { name: "Fork for this chat", exact: true })
   await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("Renamed")
@@ -270,6 +271,7 @@ test("using a renamed family member can replace history only in the viewed fork"
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "More for Family source", exact: true }).click()
   await page.getByRole("button", { name: "Use another version: Family source", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Use another version", exact: true })

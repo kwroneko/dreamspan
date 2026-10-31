@@ -1,4 +1,4 @@
-// The summarization settings (DESIGN §8) in the browser: This chat → Summaries (each field saved
+// The summarization settings (DESIGN §8) in the browser: the Summaries tab's settings (each field saved
 // and read back, reset to the account default, the fit problems, Advanced), Settings → Chats →
 // the defaults for new chats, the enable dialog switching the imported summary off, the Notes
 // tab's summary note and the preset editor's `{{summary}}` badge. The realistic synthetic ST
@@ -13,7 +13,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
-import { closePanel, openPanel } from "./support/panel.ts"
+import { closePanel, openPanel, openSummarySettings } from "./support/panel.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 test.describe.configure({ mode: "serial" })
@@ -94,12 +94,16 @@ const open = async (page: Page, width: number, colorScheme: "light" | "dark" = "
   await page.goto(`${server().url}/chats/${chat}`)
 }
 
+/** The summary settings, with the summaries in their tab. */
 const summaries = async (page: Page) => {
-  const tab = await openPanel(page, "This chat")
-  const section = tab.getByRole("region", { name: "Summaries" })
+  const section = await openSummarySettings(page)
   await expect(section.getByRole("group", { name: "Recent messages kept as written" })).toBeVisible()
   return section
 }
+
+/** Summaries on or off: in This chat, with what a person touches first. */
+const summarySwitch = async (page: Page) =>
+  (await openPanel(page, "This chat")).getByRole("switch", { name: "Summarize older messages" })
 
 const pair = (section: Locator, legend: string) => section.getByRole("group", { name: legend })
 
@@ -119,11 +123,11 @@ const setNumber = async (field: Locator, value: string) => {
 }
 
 for (const width of [1440, 390])
-  test(`This chat → Summaries saves each field, resets, shows misfits and Advanced at ${width}`, async ({ page }) => {
+  test(`the Summaries tab saves each field, resets, shows misfits and Advanced at ${width}`, async ({ page }) => {
     await open(page, width)
-    let section = await summaries(page)
     // An imported chat: off, with the account default copied.
-    await expect(section.getByRole("switch", { name: "Summarize older messages" })).not.toBeChecked()
+    await expect(await summarySwitch(page)).not.toBeChecked()
+    let section = await summaries(page)
     const recent = pair(section, "Recent messages kept as written")
     await expect(recent.getByLabel("Target")).toHaveValue("12000")
     await expect(recent.getByLabel("Maximum")).toHaveValue("20000")
@@ -219,7 +223,7 @@ test("Settings → Chats sets the defaults a new chat copies", async ({ page }) 
   const section = await summaries(page)
   await expect(pair(section, "Recent messages kept as written").getByLabel("Maximum")).toHaveValue("25000")
   await expect(section.getByRole("radio", { name: "With the next reply" })).toBeChecked()
-  await expect(section.getByRole("switch", { name: "Summarize older messages" })).toBeChecked()
+  await expect(await summarySwitch(page)).toBeChecked()
   // A later change of the default leaves the chat as it was made.
   await admin((api) => api.ChangeGenerationDefaults({ change: { lcm: { recentMax: null, when: null } } }))
   await page.reload()
@@ -242,8 +246,7 @@ for (const width of [390, 1440])
     expect(name.height).toBeLessThan(30)
     if (width === 1440) {
       // The enable dialog says the note goes off, and turning summaries on does it.
-      const section = await summaries(page)
-      await section.getByRole("switch", { name: "Summarize older messages" }).click()
+      await (await summarySwitch(page)).click()
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(dialog).toContainText("The imported summary's note is switched off in the same step")
       await dialog.getByRole("button", { name: "Enable summaries" }).click()
@@ -308,8 +311,7 @@ for (const width of [1440, 390])
       const badge = await openPanel(page, "Prompt preset")
       await badge.getByText(/\{\{summary\}\}: Summary \(from ST\) note/).scrollIntoViewIfNeeded()
       await shoot(page, `preset-badge-imported-${width}-${colorScheme}`)
-      const off = await summaries(page)
-      await off.getByRole("switch", { name: "Summarize older messages" }).click()
+      await (await summarySwitch(page)).click()
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(dialog).toContainText("switched off in the same step")
       await shoot(page, `enable-dialog-${width}-${colorScheme}`)

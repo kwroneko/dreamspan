@@ -212,7 +212,7 @@ export function SummariesSwitch({ session }: { session: ChatSession }) {
           </>
         }
       >
-        Summaries
+        Summarize older messages
       </Switch>
       {enabling && (
         <EnableLcmDialog
@@ -233,30 +233,32 @@ export function SummarySettings({ session }: { session: ChatSession }) {
   const { view, settings, error, write } = useLcmSettings(session)
   return (
     <Disclosure title="Summary settings">
-      {settings === null ? (
-        <Loading />
-      ) : (
-        <SlotOutlet
-          slot={summarySettingFields}
-          props={{
-            scope: "chat",
-            view: settings,
-            fallback: resolveLcm(null, settings.account),
-            write,
-            disabled: false,
-            instruction: (
-              <Instruction
-                key={view.forkId}
-                targetId={`chat:${session.id}:fork:${view.forkId}`}
-                view={settings}
-                write={write}
-                disabled={false}
-              />
-            )
-          }}
-        />
-      )}
-      <Problem error={error} />
+      <section aria-label="Summary settings" className="flex flex-col gap-4">
+        {settings === null ? (
+          <Loading />
+        ) : (
+          <SlotOutlet
+            slot={summarySettingFields}
+            props={{
+              scope: "chat",
+              view: settings,
+              fallback: resolveLcm(null, settings.account),
+              write,
+              disabled: false,
+              instruction: (
+                <Instruction
+                  key={view.forkId}
+                  targetId={`chat:${session.id}:fork:${view.forkId}`}
+                  view={settings}
+                  write={write}
+                  disabled={false}
+                />
+              )
+            }}
+          />
+        )}
+        <Problem error={error} />
+      </section>
     </Disclosure>
   )
 }
