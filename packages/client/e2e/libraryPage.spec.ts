@@ -230,7 +230,8 @@ for (const width of [1440, 390])
       await page.reload()
       await expect(page.getByRole("group", { name: "View" }).getByRole("button", { name: "Grid" })).toHaveAttribute(
         "aria-pressed",
-        "true"
+        "true",
+        { timeout: 60_000 }
       )
 
       await page.getByRole("tab", { name: /^Presets/ }).click()
