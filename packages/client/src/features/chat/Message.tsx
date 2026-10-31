@@ -486,7 +486,9 @@ function Mark({
 
 /**
  * "connection · model" (Version.model) in a narrow header: the connection's name gives way
- * first, down to nothing, so the model's own name is what stays readable.
+ * first, down to nothing, so the model's own name is what stays readable. The model's part
+ * doesn't shrink (shrinking is shared out, so it would lose a pixel and its end to an ellipsis
+ * while the connection's name still showed); it's cut only when it alone is wider than the label.
  */
 function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"span">) {
   const at = model.indexOf(" · ")
@@ -496,8 +498,8 @@ function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"spa
       tabIndex={0}
       className="flex min-w-0 text-xs whitespace-nowrap text-muted outline-none sm:max-w-64"
     >
-      {at > 0 && <span className="mr-1 min-w-0 shrink-[1000] truncate">{model.slice(0, at)}&nbsp;·</span>}
-      <span className="min-w-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
+      {at > 0 && <span className="mr-1 min-w-0 truncate">{model.slice(0, at)}&nbsp;· </span>}
+      <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
     </span>
   )
 }

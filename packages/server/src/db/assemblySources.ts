@@ -168,8 +168,6 @@ type Settings = {
   }
   /** A model chosen for this context over the chat's bindings: "Retry with…", a summary job's fallback. */
   readonly modelOverride?: { readonly connection: string; readonly model: string }
-  /** Continue's "Try it once": a model whose capabilities say it takes no prefill takes the reply's start this once. */
-  readonly prefillOnce?: boolean
 } & (
   | { readonly userId: UserId; readonly chatId: ChatId; readonly slotId: string; readonly versionId: string }
   | { readonly userId: UserId; readonly chatId: ChatId; readonly next: true; readonly leafSlotId?: string | null }
@@ -812,8 +810,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         const c = toConnection(connection)
         const m = toModel(model)
         const effective = resolveModel(m.key, m.upstream, m.overrides, c.compat)
-        const prefill =
-          settings.prefillOnce && effective.prefill.value === "none" ? "assistant" : effective.prefill.value
         resolvedModel = {
           connectionId: c.id,
           connectionRevision: connection.cache_revision,
@@ -831,8 +827,11 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           kind: c.kind,
           api: c.api,
           key: m.key,
-          prefill,
-          continueUnavailable: prefillUnavailable({ kind: c.kind, api: c.api, key: m.key, prefill }, c.baseUrl),
+          prefill: effective.prefill.value,
+          continueUnavailable: prefillUnavailable(
+            { kind: c.kind, api: c.api, key: m.key, prefill: effective.prefill.value },
+            c.baseUrl
+          ),
           cacheBreakpoints: effective.cacheBreakpoints.value,
           vision: effective.vision.value,
           maxImages: effective.maxImages.value,

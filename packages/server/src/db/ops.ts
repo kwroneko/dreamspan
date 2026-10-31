@@ -2744,8 +2744,6 @@ export class ReadOps extends RpcGroup.make(
       partialBatch: Schema.optionalKey(Schema.Boolean),
       /** "Retry with…": this model instead of the chat's. */
       model: Schema.optionalKey(ModelChoice),
-      /** Continue's "Try it once": a model said to take no prefill takes one for this context. */
-      prefillOnce: Schema.optionalKey(Schema.Boolean),
       userId: UserId,
       chatId: ChatId,
       slotId: SlotId,

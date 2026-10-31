@@ -178,4 +178,63 @@ describe("reply sections in generation", () => {
       assert.strictEqual(messagesOf(completions(mock.requests())[1]!).at(-1)!.content, "<think>Plan: the tide")
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
+
+  it.live("continues inside a section cut off on a model that takes no prefill", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      let first = true
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startMockProvider((_request, res) => {
+            if (first) {
+              first = false
+              return sse(res, [
+                chunk({ role: "assistant", content: "<think>Plan: the tide" }),
+                chunk({}, "length"),
+                usage
+              ])
+            }
+            // Only what follows, with no space of its own (owner, 2026-10-31).
+            return sse(res, [
+              chunk({ role: "assistant", content: "is late.</thi" }),
+              chunk({ content: "nking>\nMira looks up." }),
+              chunk({}, "stop"),
+              usage
+            ])
+          })
+        ),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      assert.strictEqual(version.status, "failed")
+      const path = yield* api.ReadPath({
+        chatId: chat.id,
+        leafSlotId: version.slotId,
+        range: { _tag: "Bottom" },
+        limit: 10
+      })
+      const continued = yield* api.ContinueVersion({
+        versionId: version.id,
+        expectedRowVersion: path.entries.at(-1)!.rowVersion
+      })
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      const done = finished(events, continued.version.id)!
+      assert.strictEqual(done.status, "complete")
+      assert.strictEqual(done.content, "Mira looks up.")
+      assert.deepStrictEqual(done.replySections, {
+        sections: [{ lead: "", open: "<think>", text: "Plan: the tide is late.", close: "</thinking>" }],
+        gap: "\n"
+      })
+      // The reply as it came, its section in its tag, as the model's own message; the nudge last.
+      const messages = messagesOf(completions(mock.requests())[1]!)
+      assert.deepStrictEqual(messages.slice(-2), [
+        { role: "assistant", content: "<think>Plan: the tide" },
+        { role: "user", content: "[Continue your last message without repeating its original content.]" }
+      ])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
 })

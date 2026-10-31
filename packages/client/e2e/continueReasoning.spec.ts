@@ -46,7 +46,7 @@ const setup = (kind = "openai-chat", prefill: "assistant" | "tool_schema" = "ass
       const plain = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "no-prefill",
-        overrides: { prefill: "none", context: 1 }
+        overrides: { prefill: "none" }
       })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
@@ -155,7 +155,9 @@ for (const width of [1440, 390]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
   })
 
-  test(`unavailable Continue explains why and reasoning preferences survive reload at ${width}px`, async ({ page }) => {
+  test(`Continue writes on without a prefill and reasoning preferences survive reload at ${width}px`, async ({
+    page
+  }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const { chat, connection, plain } = await setup()
@@ -188,24 +190,40 @@ for (const width of [1440, 390]) {
       })
     )
     await showActions(reply)
-    // A model not set up for a prefill: Continue says why and offers to enable it or try it once.
-    const setUp = reply.getByRole("button", { name: "Continue: set up first" })
-    await expect(setUp).toBeEnabled()
-    await setUp.click()
-    const popover = page.getByRole("dialog", { name: "Continue this reply" })
-    await expect(popover).toContainText("no-prefill")
-    await expect(popover.getByRole("button", { name: "Enable", exact: true })).toBeVisible()
-    await expect(popover.getByRole("button", { name: "Try it once" })).toBeVisible()
-    await shoot(page, "09-unavailable-budget")
-    await page.keyboard.press("Escape")
-    await expect(popover).toHaveCount(0)
+    // A model that takes no prefill (owner, 2026-10-31): Continue is an ordinary button, and the
+    // reply goes as the model's own message with the continue nudge after it.
+    const before = (
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      )
+    ).entries.at(-1)!.version
+    const sentBefore = provider.requests.length
+    await reply.getByRole("button", { name: /^Continue: write on/ }).click()
+    await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
+    await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes")
+    await shoot(page, "09-continued-without-prefill")
+    expect(provider.requests.length).toBe(sentBefore + 1)
+    expect(provider.requests.at(-1)!.messages.slice(-2)).toEqual([
+      { role: "assistant", content: before.content },
+      { role: "user", content: "[Continue your last message without repeating its original content.]" }
+    ])
     const versions = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
     )
-    expect(versions.entries.at(-1)!.versionCount).toBe(2)
+    expect(versions.entries.at(-1)!.versionCount).toBe(3)
+    // Appended to the reply: a space between unless the reply already ends in one.
+    expect(versions.entries.at(-1)!.version.content).toBe(
+      before.content + (/\s$/.test(before.content) ? "" : " ") + MORE.trimStart()
+    )
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText(THOUGHT)
+    // The inspector names the nudge by its preset setting.
+    await messageMenu(reply, "Context it was generated from")
+    const nudge = page.getByText("End of request: when you continue a reply").first()
+    await nudge.scrollIntoViewIfNeeded()
+    await expect(nudge).toBeVisible()
+    await shoot(page, "10-inspector-nudge")
   })
   for (const adapter of ["deepseek", "schema"] as const) {
     test(`${adapter} Continue sends its protocol and exposes it in inspection at ${width}px`, async ({ page }) => {

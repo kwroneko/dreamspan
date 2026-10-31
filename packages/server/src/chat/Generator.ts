@@ -32,8 +32,6 @@ export interface GenerationRequest {
     /** Its reply sections: one left open (a cutoff inside it) is where the text goes on. */
     readonly sections?: ReplySections
   }
-  /** Continue's "Try it once": a model said to take no prefill is sent one this time (ContinueVersion). */
-  readonly prefillOnce?: boolean
 }
 
 /**

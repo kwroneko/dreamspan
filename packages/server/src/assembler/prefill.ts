@@ -6,7 +6,7 @@ export const prefillUnavailable = (
   baseUrl: string | null
 ): string | undefined => {
   if (model.prefill === "none")
-    return `${model.key} isn't set up to take the start of its reply (a prefill). If it can, turn on its Prefill capability (Settings → Connections, or Continue on a reply).`
+    return `${model.key} isn't set up to take the start of its reply (a prefill). If it can, turn on its Prefill capability in Settings → Connections.`
   if (model.prefill === "tool_schema" && model.api !== "openai-responses" && model.api !== "openai-completions")
     return `${model.key} declares tool-schema prefill, but this provider API has no schema-prefill adapter. Choose an OpenAI Responses or Chat Completions connection.`
   if (

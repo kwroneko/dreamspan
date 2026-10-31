@@ -1,7 +1,8 @@
 // Continue and reasoning (DESIGN §7.4, §7.5) through real generation: a mock OpenAI-compatible
 // provider streams reasoning beside its text, which is kept on the version and never sent
 // back; Continue sends the reply as the start of the next one (a prefill) and keeps the old
-// version as it was; a model that takes no prefill makes Continue fail saying so.
+// version as it was; to a model that takes no prefill, it sends the reply as the model's own
+// message and the continue nudge after it (owner, 2026-10-31).
 import { assert, describe, it } from "@effect/vitest"
 import type { Version } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
@@ -359,11 +360,24 @@ describe("continue and reasoning", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("tries a prefill once with a model that takes none, without changing the model", () => {
+  it.live("continues with a model that takes no prefill: the reply as its own message, the nudge after it", () => {
     const config = testConfig()
     return Effect.gen(function* () {
+      // Asked to continue without a prefill, the model writes only what follows, with no space of its own.
       const mock = yield* Effect.acquireRelease(
-        Effect.promise(() => startMockProvider(provider)),
+        Effect.promise(() =>
+          startMockProvider((request, res) =>
+            messagesOf(request).at(-1)?.content.startsWith("[Continue your last message")
+              ? sse(res, [
+                  chunk({ role: "assistant", reasoning_content: "Finish the thought." }),
+                  chunk({ content: "and the tide" }),
+                  chunk({ content: " is late." }),
+                  chunk({}, "stop"),
+                  usage
+                ])
+              : provider(request, res)
+          )
+        ),
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
@@ -371,27 +385,65 @@ describe("continue and reasoning", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {}
       })
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      assert.strictEqual(next.model?.prefill, "none")
       const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       const reply = window.entries.at(-1)!
       const continued = yield* api.ContinueVersion({
         versionId: version.id,
         expectedRowVersion: reply.rowVersion,
-        prefillOnce: true
+        direction: "Mira hesitates."
       })
       yield* eventually(() => finished(events, continued.version.id) !== undefined)
-      assert.notStrictEqual(finished(events, continued.version.id)!.status, "failed")
+      const done = finished(events, continued.version.id)!
+      assert.strictEqual(done.status, "complete")
+      // Appended to the reply, a space between (the preset's continue_postfix, ST's default).
+      assert.strictEqual(done.content, "The ledger says otherwise, and the tide is late.")
+      assert.strictEqual(done.reasoning, "Mira is wary; keep it short.\n\nFinish the thought.")
+      const delta = events.find((e) => e._tag === "Delta" && e.versionId === continued.version.id)
+      assert.strictEqual(delta?._tag === "Delta" ? delta.offset : -1, "The ledger says otherwise,".length)
+
+      // The request: the reply so far as the model's own last message, then the end-of-request
+      // instruction, the continue nudge with the direction, last (owner, 2026-10-31).
       const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
       assert.strictEqual(sent.length, 2)
-      const last = (sent[1]!.body as { messages: Array<{ role: string; content: unknown }> }).messages.at(-1)!
-      assert.strictEqual(last.role, "assistant")
-      assert.include(JSON.stringify(last.content), version.content.trimEnd())
-      // The model still takes none: the next Continue without it is refused as before.
-      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
-      assert.strictEqual(next.model?.prefill, "none")
+      assert.deepStrictEqual(messagesOf(sent[1]!).slice(-3), [
+        { role: "user", content: "The road flooded." },
+        { role: "assistant", content: "The ledger says otherwise," },
+        {
+          role: "user",
+          content:
+            "[Continue your last message without repeating its original content.]\n[What happens next: Mira hesitates.]"
+        }
+      ])
+      assert.notInclude(JSON.stringify(sent[1]!.body), "Write the next reply only as Mira")
+      for (const request of sent) assert.notInclude(JSON.stringify(request.body), "wary")
+
+      // The inspector shows both: the message continued and the nudge, by the editor's label.
+      const run = yield* api.GetRunContext({ versionId: continued.version.id })
+      assert.strictEqual(run.type, "continue")
+      const [partial, last] = run.messages.slice(-2)
+      assert.strictEqual(partial!.role, "assistant")
+      assert.strictEqual(partial!.sources[0]!.label, "Message 3")
+      assert.strictEqual(last!.role, "user")
+      assert.deepStrictEqual(
+        last!.sources.map((s) => s.label),
+        ["End of request: when you continue a reply", "End of request: when you give a direction"]
+      )
+      assert.isNull(partial!.prefill ?? null)
+      assert.isFalse(run.issues.some((issue) => issue.kind === "prefill_dropped"))
+
+      // The model is unchanged, and both versions stay.
+      assert.strictEqual((yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })).model?.prefill, "none")
+      const versions = yield* api.ListVersions({ slotId: reply.slotId })
+      assert.deepStrictEqual(
+        versions.map((v) => v.content),
+        ["The ledger says otherwise,", "The ledger says otherwise, and the tide is late."]
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
-  it.live("fails a continuation with a model that takes no prefill, and says so", () => {
+  it.live("refuses to continue a version with no text", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* Effect.acquireRelease(
@@ -399,23 +451,10 @@ describe("continue and reasoning", () => {
         (m) => Effect.promise(() => m.close())
       )
       const api = yield* client()
-      const { version, chat, events } = yield* generateReply(api, {
+      const { chat } = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {}
       })
-      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
-      assert.strictEqual(next.model?.prefill, "none")
-      const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
-      const reply = window.entries.at(-1)!
-      const continued = yield* api.ContinueVersion({ versionId: version.id, expectedRowVersion: reply.rowVersion })
-      yield* eventually(() => finished(events, continued.version.id) !== undefined)
-      const done = finished(events, continued.version.id)!
-      assert.strictEqual(done.status, "failed")
-      assert.strictEqual(done.error?.class, "no_prefill")
-      assert.include(done.error?.message ?? "", "Continue isn't available with mock-model")
-      // Only the first reply reached the provider.
-      assert.strictEqual(mock.requests().filter((r) => r.path === "/v1/chat/completions").length, 1)
-
       // Only a finished version with text can be continued.
       const now = (yield* api.ReadPath({
         chatId: chat.id,

@@ -335,7 +335,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     // streams on from its end, the old version left as it was. Whoever wrote the version
     // continued (an edit is the user's), the new one is the model's. The slot is published before
     // the generation starts, so every tab has the starting text before the first delta.
-    ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction, prefillOnce }) =>
+    ContinueVersion: ({ versionId, forkId, expectedRowVersion, direction }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -375,8 +375,7 @@ export const makeChatHandlers = Effect.gen(function* () {
             text: added.version.content,
             reasoning: added.version.reasoning ?? "",
             ...(added.version.replySections ? { sections: added.version.replySections } : {})
-          },
-          ...(prefillOnce ? { prefillOnce: true } : {})
+          }
         })
         return entry
       }).pipe(Effect.uninterruptible, internal("ContinueVersion")),
