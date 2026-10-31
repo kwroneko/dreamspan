@@ -3,11 +3,19 @@ import { type Connection, type ConnectionId, originOf, type ProviderKindInfo } f
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 
-const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
+export const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
 const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
 const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: "5 minutes" })
 /** What the connection and key screens need, requested together. */
 export const providerSetupAtom = allOf({ kinds: kindsAtom, connections: connectionsAtom, credentials: credentialsAtom })
+
+/** The account's defaults; the writes that change them name "settings". */
+export const generationDefaultsAtom = AppClient.query("GetGenerationDefaults", undefined, {
+  reactivityKeys: ["settings"]
+})
+
+/** Connections just created here, whose page fetches their model list once as it opens. */
+export const freshConnections = new Set<ConnectionId>()
 
 export const modelsAtom = (connectionId: ConnectionId, includeHidden: boolean) =>
   AppClient.query("ListModels", { connectionId, includeHidden }, { reactivityKeys: ["models"] })

@@ -4,6 +4,7 @@
 
 import { chatName } from "@rp/shared/chatName.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
+import type { ChatView } from "./session.ts"
 
 export { chatName }
 
@@ -27,3 +28,15 @@ export const readableChatTitle = (title: string) => {
   const name = chatName(importState(title).title, [])
   return name.started ? `${name.name}, started ${formatDay(name.started)}` : name.name
 }
+
+/** The characters in the chat shown, the user's own left out: the header's faces and names. */
+export const castCharacters = (view: Pick<ChatView, "cast">) => {
+  const cast = view.cast
+  return (cast?.participants ?? [])
+    .filter((id) => !cast!.playedByMe.includes(id))
+    .flatMap((id) => cast!.cards.filter((card) => card.entityId === id))
+}
+
+/** The chat's readable name, as the header shows it (never ST's file name). */
+export const chatDisplayName = (view: Pick<ChatView, "cast" | "chat">) =>
+  view.chat ? chatName(importState(view.chat.title).title, castCharacters(view)).name : "Chat"

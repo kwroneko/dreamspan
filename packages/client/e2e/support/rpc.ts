@@ -2,7 +2,7 @@
 // client uses, over a WebSocket carrying a session cookie.
 import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcGroup, type RpcClientError, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import type { TestServer } from "./server.ts"
 
@@ -46,7 +46,7 @@ export const withCookie = async <A>(
         Layer.provide(RpcSerialization.layerJson)
       )
     )
-    const client = yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol))
+    const client = yield* RpcClient.make(AppApi as RpcGroup.RpcGroup<AppRpcs>).pipe(Effect.provide(protocol))
     return yield* use(client)
   })
   const exit = await Effect.runPromiseExit(Effect.scoped(program))

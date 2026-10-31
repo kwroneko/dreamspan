@@ -117,13 +117,13 @@ const shoot = async (page: Page, name: string) => {
 test("import an ST folder, link a chat by choosing its card, and un-hide a summarized run", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import`)
-  await page.getByRole("link", { name: "Import a SillyTavern folder" }).click()
+  await page.getByRole("link", { name: "Choose the folder" }).click()
   await page.getByLabel("Choose the folder").setInputFiles(join(root, "ST"))
 
   // Two ST users: choose one.
   await page.getByRole("combobox", { name: "ST user" }).click()
   await page.getByRole("option", { name: /^default-user/ }).click()
-  await expect(page.getByText("8 files to import")).toBeVisible()
+  await expect(page.getByText("8 files (")).toBeVisible()
   await shoot(page, "picked")
   await page.getByRole("button", { name: "Import", exact: true }).click()
 
@@ -174,7 +174,7 @@ test("a chain of branches sorted the wrong way is sent once each, parents first"
   })
   await page.goto(`${server().url}/import/st`)
   await page.getByLabel("Choose the folder").setInputFiles(chain)
-  await expect(page.getByText("21 files to import")).toBeVisible()
+  await expect(page.getByText("21 files (")).toBeVisible()
   await page.getByRole("button", { name: "Import", exact: true }).click()
   await expect(page.getByRole("list", { name: "Imported" })).toContainText("Group chats: 1 added, 20 updated")
   expect(uploads).toBe(21)

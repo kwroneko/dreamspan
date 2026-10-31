@@ -10,7 +10,7 @@ import { planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
-const { ChatSession, liveReasoning, liveText } = await import("../src/features/chat/session.ts")
+const { ChatSession, liveReasoning, liveSections, liveText } = await import("../src/features/chat/session.ts")
 
 const chatId = "chat-1" as ChatId
 const chat = {
@@ -339,6 +339,31 @@ describe("ChatSession", () => {
     expect(s.snapshot().entries[1]!.version.reasoning).toBe("Plan one. Plan two.")
     expect(registry.get(liveReasoning(reply.id))).toBeNull()
     expect(registry.get(liveText(reply.id))).toBeNull()
+  })
+
+  it("a replace delta sets the text from its offset on, even shorter; a plain one only adds", async () => {
+    vi.stubGlobal("requestAnimationFrame", () => 1)
+    vi.stubGlobal("cancelAnimationFrame", () => {})
+    const { s, registry, answers, receive, flush } = session()
+    const opening = s.open(null)
+    answers[0]!(window([first, entry("s2", "s1", reply)]))
+    await opening
+    receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: " <cot>plan" })
+    flush()
+    expect(registry.get(liveText(reply.id))).toBe("The tide <cot>plan")
+    // Scripts rewrote the text so far: the chain of thought goes, the text gets shorter.
+    receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: "", replace: true })
+    receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: " turned." })
+    receive({ _tag: "Section", versionId: reply.id, offset: 0, text: "Plan: PRIV" })
+    receive({ _tag: "Section", versionId: reply.id, offset: 6, text: "[hidden]", replace: true })
+    flush()
+    expect(registry.get(liveText(reply.id))).toBe("The tide turned.")
+    expect(registry.get(liveSections(reply.id))).toBe("Plan: [hidden]")
+    // A plain delta that repeats what's shown changes nothing.
+    receive({ _tag: "Delta", versionId: reply.id, offset: 8, text: " t" })
+    flush()
+    expect(registry.get(liveText(reply.id))).toBe("The tide turned.")
+    s.dispose()
   })
 
   it("loads live reasoning from Hello before a window arrives", async () => {

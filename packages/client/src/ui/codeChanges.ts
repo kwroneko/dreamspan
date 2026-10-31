@@ -1,7 +1,7 @@
 // Incremental line comparisons shared by the editor gutter and its state tests.
 import { Chunk } from "@codemirror/merge"
 import { StateEffect, StateField, type Text } from "@codemirror/state"
-import { gutter, GutterMarker } from "@codemirror/view"
+import { EditorView, gutter, GutterMarker } from "@codemirror/view"
 
 export const comparisonBase = StateEffect.define<string>()
 const diffConfig = { scanLimit: 2000, timeout: 30 }
@@ -89,3 +89,11 @@ export const changeGutter = gutter({
     update.docChanged || update.startState.field(lineChanges) !== update.state.field(lineChanges),
   initialSpacer: () => markers.unchanged
 })
+
+/**
+ * Quiet markers: no gutter while the text is the saved text, and no marks on unchanged lines
+ * after, so the editor reads as a plain text box until there's a change to show.
+ */
+export const quietMarkers = EditorView.editorAttributes.compute([lineChanges], (state) => ({
+  class: state.field(lineChanges).chunks.length === 0 ? "rp-quiet rp-unchanged" : "rp-quiet"
+}))

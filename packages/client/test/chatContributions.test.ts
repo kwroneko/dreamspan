@@ -7,6 +7,7 @@ import {
   availableCommands,
   chatCommands,
   runCommandShortcut,
+  shortcutText,
   type ChatCommandContext
 } from "../src/features/chat/commands.tsx"
 import { registerHistoryCommands } from "../src/features/chat/historyContributions.ts"
@@ -237,7 +238,7 @@ describe("chat contributions", () => {
     const onHistory = vi.fn()
     const alternative = vi.fn()
     const context = { view, onHistory } as unknown as ChatCommandContext
-    original.run(context)
+    original.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(1)
     await Effect.runPromise(
       Effect.scoped(
@@ -264,7 +265,14 @@ describe("chat contributions", () => {
     )
     expect(chatCommands.get(original.id)).toBe(original)
     expect(availableCommands(context).map((entry) => entry.label)).toEqual(["Search and replace", "History edits"])
-    chatCommands.get(original.id)!.run(context)
+    chatCommands.get(original.id)!.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(2)
   })
+})
+
+// ⋯ Keyboard shortcuts lists each command's keys as its label would write them.
+it("writes a command's keys as the labels do", () => {
+  expect(shortcutText({ key: "h", mod: true })).toBe("Ctrl+H")
+  expect(shortcutText({ key: "Enter", mod: false, alt: true })).toBe("Alt+Enter")
+  expect(shortcutText({ key: "ArrowUp", mod: false })).toBe("ArrowUp")
 })

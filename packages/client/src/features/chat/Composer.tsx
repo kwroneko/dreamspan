@@ -27,6 +27,7 @@ import { planReply } from "./replyPolicy.ts"
 import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
+import { StripRow } from "./nextReplyStrip.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
@@ -37,6 +38,10 @@ const subscribePhone = (notify: () => void) => {
   media.addEventListener("change", notify)
   return () => media.removeEventListener("change", notify)
 }
+
+/** A phone's width: the composers' compact layout. */
+export const useCompactComposer = () =>
+  useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
 
 /** A send whose text was typed on a branch the chat view has left since. */
 const BRANCH_CHANGED: AppError = {
@@ -142,11 +147,10 @@ export function Composer({
 }: {
   session: ChatSession
   view: ChatView
-  onSettings: (tab: "model" | "preset") => void
+  onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
-  const phone = useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
-  const [secondaryOpen, setSecondaryOpen] = useState(false)
+  const phone = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -283,6 +287,29 @@ export function Composer({
   )
 
   /**
+   * Who `{{user}}` is from here on (DESIGN §2.2), the Cast tab's one write: definitions swap,
+   * the history keeps its names. Speaking as the persona went on speaking as them, it goes on
+   * speaking as the new one.
+   */
+  const choosePersona = useCallback(
+    async (card: CastCard) => {
+      const before = cast?.playedByMe[0] ?? null
+      if (card.entityId === before) return
+      const outcome = await session.changeCast({ _tag: "Persona", entityId: card.entityId })
+      setError(outcome.ok ? null : outcome.error)
+      if (outcome.ok && choice.speaker !== null && choice.speaker === before)
+        void choices.change({ speaker: card.entityId }).then((picked) => setError(picked.ok ? null : picked.error))
+    },
+    [cast, session, choice.speaker, choices, setError]
+  )
+  const listCards = useCallback(() => session.listCards(), [session])
+  const persona = cast?.playedByMe[0] ?? null
+  const personas = useMemo(
+    () => ({ current: persona, listCards, onPick: (card: CastCard) => void choosePersona(card) }),
+    [persona, listCards, choosePersona]
+  )
+
+  /**
    * The text leaves the box as it's submitted, so whatever is typed while the request is out
    * stays. It's sent from the draft it was typed into, in that draft's fork, which commits
    * it, so a reload never shows it; if the chat view went to another fork since, it isn't
@@ -395,7 +422,9 @@ export function Composer({
       : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
-  const generateText = editing !== null ? "New version" : name ? `Write for ${name}` : "Reply"
+  // Before the cast is read, "Write for …" rather than a "Reply" that flashes first.
+  const generateText =
+    editing !== null ? "New version" : name ? `Write for ${name}` : cast === null ? "Write for …" : "Reply"
   const generateHint =
     editing !== null
       ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
@@ -407,8 +436,6 @@ export function Composer({
               : `The model writes ${name}'s turn`
         }${guidance && hasText ? ", following the guidance" : ""}${guidance ? ` (${submitHint})` : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
-  // The draft's earlier text, while the box shows the draft.
-  const history = editing === null && <History draft={draft} />
 
   const controls: ComposerControlContext = {
     compact: phone,
@@ -420,7 +447,7 @@ export function Composer({
     session,
     view,
     onSettings,
-    speaker: { speaker, recent: switcherRecent, onPick },
+    speaker: { speaker, recent: switcherRecent, onPick, personas, onAddToChat: () => onSettings("cast") },
     recent: recent.map((id) => ({
       id,
       name: nameOf(castView, id) ?? "?",
@@ -444,7 +471,7 @@ export function Composer({
       muted: cast?.absent ?? [],
       next,
       picked: pickedReply,
-      disabled: !ready,
+      loading: turnEntries === null,
       onPick: (id) => void choices.change({ replyFrom: id }).then(report)
     },
     leaf,
@@ -460,6 +487,7 @@ export function Composer({
     generate,
     send,
     replyNow,
+    history: editing === null ? <History draft={draft} /> : null,
     report
   }
   const onKeyDown = composerKeyDown(
@@ -468,8 +496,7 @@ export function Composer({
   )
 
   return (
-    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
-      {!phone && <ComposerControls placement="settings" context={controls} />}
+    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2 max-sm:px-2">
       <ComposerControls placement="banner" context={controls} />
       <ComposerControls placement="queue" context={controls} />
       {conflict && (
@@ -494,46 +521,24 @@ export function Composer({
           went over.
         </p>
       )}
-      <div className="flex flex-col gap-1.5 @min-[640px]:flex-row @min-[640px]:items-end">
+      {/* The next reply: what it uses and who writes it, as chips; one row, scrolled sideways on a phone. */}
+      <StripRow scroll={phone}>
+        <ComposerControls placement="strip" context={controls} />
+      </StripRow>
+      <div className="flex min-w-0 items-end gap-1.5">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
-        <div className="flex min-w-0 items-center gap-1 max-sm:[&>button]:max-w-32 @min-[640px]:h-11">
+        <div className="flex h-[46px] shrink-0 items-center gap-1">
           <ComposerControls placement="speaker" context={controls} />
-          {phone && (
-            <>
-              <ComposerControls placement="guidance" context={controls} />
-              <Popover
-                open={secondaryOpen}
-                onOpenChange={setSecondaryOpen}
-                triggerLabel="Composer options"
-                trigger="Options"
-                title="Next reply"
-                triggerClassName={`${buttonClass("ghost")} ml-auto px-2! text-xs`}
-              >
-                <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
-                  <ComposerControls placement="settings" context={controls} />
-                  <ComposerControls placement="reply" context={controls} />
-                  <ComposerControls placement="help" context={controls} />
-                  {history}
-                </div>
-              </Popover>
-            </>
-          )}
-          <span className={`${phone ? "hidden" : "ml-auto"} @min-[640px]:hidden`}>{history}</span>
         </div>
         <div
           data-guidance={guidance || undefined}
-          className={`flex min-w-0 flex-1 flex-wrap items-end gap-1 rounded-lg border p-1 focus-within:ring-2 @min-[640px]:flex-nowrap ${
+          className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
             guidance
               ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
               : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
           }`}
         >
-          <div className="grid w-full min-w-0 @min-[640px]:flex-1">
-            {guidance && (
-              <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
-                Guidance
-              </span>
-            )}
+          <div className="grid min-w-0 flex-1">
             <label htmlFor="composer" className="sr-only">
               {guidance ? "Guidance" : "Message"}
             </label>
@@ -544,7 +549,7 @@ export function Composer({
               value={text}
               readOnly={editing === null && !textReady}
               aria-busy={editing === null && !textReady}
-              aria-describedby={(!phone || secondaryOpen) && (hasText || guidance) ? "composer-hint" : undefined}
+              aria-describedby="composer-hint"
               placeholder={
                 editing !== null
                   ? "Guidance for this reply…"
@@ -562,22 +567,18 @@ export function Composer({
               onKeyDown={onKeyDown}
             />
           </div>
-          {/* Under the text box when it's narrow, beside it otherwise. */}
-          <div className="ml-auto flex items-end gap-1">
-            <span className="hidden @min-[640px]:inline-flex">{history}</span>
+          <div className="flex shrink-0 items-end gap-0.5">
+            <ComposerControls placement="tools" context={controls} />
             {attachmentInput?.action}
             <ComposerControls placement="actions" context={controls} />
           </div>
         </div>
       </div>
+      {/* What the text is for, read with the box; its tooltip on the guidance switch shows it. */}
+      <p id="composer-hint" className="sr-only">
+        {controls.hint}
+      </p>
       {attachmentInput?.editor}
-      {!phone && (
-        <>
-          <ComposerControls placement="guidance" context={controls} />
-          <ComposerControls placement="reply" context={controls} />
-          <ComposerControls placement="help" context={controls} />
-        </>
-      )}
       {impersonationNotice && (
         <div
           role="status"

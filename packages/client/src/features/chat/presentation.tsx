@@ -124,8 +124,10 @@ export const accountSettingSections = defineSlot<import("./ChatDefaults.tsx").Su
 )
 export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.tsx").Composer>>("chat.composer")
 
-export const chatBranchControls =
-  defineSlot<ComponentProps<typeof import("./ChatHeader.tsx").BranchMenu>>("chat.branch-controls")
+/** The header's branch control (`chat.branches`: BranchControl.tsx). */
+export const chatBranchControls = defineSlot<import("./BranchControl.tsx").BranchControlProps>("chat.branch-controls")
+/** The header's buttons at the end of its row, after the branch control: ☆, the panel, ⋯. */
+export const chatHeaderActions = defineSlot<import("./ChatHeader.tsx").ChatHeaderActionProps>("chat.header-actions")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
 export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(
   "summary.previews"

@@ -18,6 +18,7 @@ import { builtinImageTokenRules, type ImageTokenRule } from "@rp/shared/imageTok
 import { registerBuiltinMacros } from "@rp/shared/macros/builtins.ts"
 import { makeMacroRegistry, type MacroRegistry } from "@rp/shared/macros/registry.ts"
 import { Context, Effect, type Scope } from "effect"
+import type { AssemblySources, SourceError } from "./pipeline.ts"
 import {
   assemble,
   type AssemblyRequest,
@@ -30,6 +31,18 @@ import { makeRegistry, type Registry } from "../registry.ts"
 import { makeSummaryRequestTransform } from "../lcm/request.ts"
 import type { AssemblyTransform, TransformRegistry } from "./pipeline.ts"
 import { registerBuiltinProjections, registerBuiltinStages } from "./stages.ts"
+import { assembleThrough } from "./pipeline.ts"
+import {
+  builtinScriptSources,
+  type MessageRewrite,
+  regexRewrite,
+  type RewriteOptions,
+  rewriteSide,
+  type ScriptSource,
+  unchanged
+} from "./scriptSources.ts"
+import { makeScriptRunner, PLACEMENT, REGEX_MS, REGEX_OUTPUT } from "./regex.ts"
+import type { TextRewrite } from "@rp/shared/regexScripts.ts"
 
 export interface Assembler {
   readonly sourceDescriptors: Registry<SourceDescriptor>
@@ -43,12 +56,46 @@ export interface Assembler {
   readonly projections: ProjectionRegistry
   /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
   readonly imageTokens: Registry<ImageTokenRule>
+  /** Where regex scripts come from, in the order they run (global, preset, character). */
+  readonly scriptSources: Registry<ScriptSource>
+  /** What rewrites text as it's written, in order (ARCHITECTURE §12, "Rewrites"). */
+  readonly rewrites: Registry<MessageRewrite>
   readonly projectionOptions: Effect.Effect<
     ReadonlyArray<{ readonly id: string; readonly label: string; readonly description?: string }>
   >
   readonly assemble: (
     request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens">
   ) => ReturnType<typeof assemble>
+  /**
+   * Texts as they're written at the request's position: the stages through `scripts`, which
+   * compiles the scripts with neither flag, then each registered rewrite in turn. A message's
+   * placement is its side's (ST: user input or AI output), reasoning's ST's reasoning.
+   */
+  readonly rewrite: (
+    request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens" | "rewrite">,
+    options: RewriteOptions,
+    items: ReadonlyArray<RewriteItem>
+  ) => Effect.Effect<Array<TextRewrite>, SourceError, AssemblySources>
+  /**
+   * The same, prepared once for texts that keep changing (a reply as it streams): the stages
+   * run once, and each `run` takes the registered rewrites with time and output of its own.
+   */
+  readonly prepareRewrite: (
+    request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens" | "rewrite">,
+    options: RewriteOptions
+  ) => Effect.Effect<PreparedRewrite, SourceError, AssemblySources>
+}
+
+/** A text to rewrite: a message's own, or reasoning (the provider's, or a reply section's). */
+interface RewriteItem {
+  readonly text: string
+  readonly kind: "message" | "reasoning"
+}
+
+export interface PreparedRewrite {
+  /** Whether a run can change anything: scripts compiled for it, or a rewrite of a plugin's. */
+  readonly active: boolean
+  readonly run: (items: ReadonlyArray<RewriteItem>) => Array<TextRewrite>
 }
 
 export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>()("rp/assembler/WorkerAssembler") {}
@@ -73,6 +120,10 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   const projections = makeProjectionRegistry()
   const imageTokens = makeRegistry<ImageTokenRule>()
   for (const rule of builtinImageTokenRules) yield* imageTokens.register(rule)
+  const scriptSources = makeRegistry<ScriptSource>()
+  for (const source of builtinScriptSources) yield* scriptSources.register(source)
+  const rewrites = makeRegistry<MessageRewrite>()
+  yield* rewrites.register(regexRewrite)
   yield* registerBuiltinStages(stages)
   yield* registerBuiltinProjections(projections)
   yield* registerBuiltinMacros(macros)
@@ -87,6 +138,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     macros,
     projections,
     imageTokens,
+    scriptSources,
+    rewrites,
     projectionOptions: Effect.suspend(() =>
       withAssemblyModules(
         assembler,
@@ -98,7 +151,56 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
       )
     ),
     assemble: (request) =>
-      withAssemblyModules(assembler, assemble(stages, { ...request, macros, projections, imageTokens }, transforms))
+      withAssemblyModules(
+        assembler,
+        assemble(stages, { ...request, macros, projections, imageTokens, scriptSources }, transforms)
+      ),
+    rewrite: (request, options, items) =>
+      Effect.map(assembler.prepareRewrite(request, options), (prepared) => prepared.run(items)),
+    prepareRewrite: (request, options) =>
+      withAssemblyModules(
+        assembler,
+        Effect.gen(function* () {
+          const assembly = yield* assembleThrough(
+            stages,
+            { ...request, macros, projections, imageTokens, scriptSources, rewrite: options },
+            "scripts"
+          )
+          const side = rewriteSide(assembly, options)
+          const compiled = assembly.scripts
+          const steps = rewrites.list()
+          return {
+            active: (compiled?.list.length ?? 0) > 0 || steps.some((step) => step !== regexRewrite),
+            run: (items) => {
+              // Each run gets the time and output one rewrite has, whatever the runs before spent.
+              if (compiled) assembly.scripts = makeScriptRunner(compiled.list, { ms: REGEX_MS, output: REGEX_OUTPUT })
+              const placed = items.map((item) => ({
+                text: item.text,
+                placement:
+                  item.kind === "reasoning"
+                    ? PLACEMENT.reasoning
+                    : side === "user"
+                      ? PLACEMENT.userInput
+                      : PLACEMENT.aiOutput
+              }))
+              let results: Array<TextRewrite> = placed.map(unchanged)
+              for (const step of steps) {
+                const next = step.run(
+                  assembly,
+                  results.map((result, i) => ({ text: result.text, placement: placed[i]!.placement })),
+                  options
+                )
+                results = results.map((result, i) => ({
+                  text: next[i]?.text ?? result.text,
+                  applied: [...result.applied, ...(next[i]?.applied ?? [])],
+                  failed: [...result.failed, ...(next[i]?.failed ?? [])]
+                }))
+              }
+              return results
+            }
+          } satisfies PreparedRewrite
+        })
+      )
   }
   return assembler
 })

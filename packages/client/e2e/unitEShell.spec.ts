@@ -115,8 +115,8 @@ for (const width of [1440, 390]) {
     await page
       .getByRole("main")
       .getByLabel("Groups", { exact: true })
-      .getByRole("button", { name: `Open chat ${group.name}`, exact: true })
-      .filter({ hasText: "Current fork" })
+      .getByRole("button", { name: `Open chat ${group.chatName}`, exact: true })
+      .first()
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
     // Current-fork URLs are canonicalized after the path loads. Wait before
@@ -129,7 +129,7 @@ for (const width of [1440, 390]) {
     await openLeft()
     await expect(crumbs).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
-    await expect(page.getByRole("region", { name: "Current fork", exact: true })).toContainText(group.name)
+    await expect(page.getByRole("region", { name: "Latest branch", exact: true })).toContainText(group.name)
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
@@ -140,12 +140,13 @@ for (const width of [1440, 390]) {
         content: "Synthetic navigation regression: the pinned fork continues."
       })
     )
-    await expect(
-      page
-        .getByRole("main")
-        .locator("header")
-        .getByRole("button", { name: `${group.pinned ? "Unpin" : "Pin"} ${group.name}`, exact: true })
-    ).toBeVisible()
+    // The chat header's ☆ (a phone's header leaves it to the chat lists' rows).
+    const headerPin = page
+      .getByRole("main")
+      .locator("header")
+      .getByRole("button", { name: `${group.pinned ? "Unpin" : "Pin"} ${group.name}`, exact: true })
+    if (width === 390) await expect(headerPin).toBeHidden()
+    else await expect(headerPin).toBeVisible()
     const newLeaf = await admin((api) =>
       Effect.gen(function* () {
         const forked = yield* api.SendMessage({
@@ -173,7 +174,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
     await page.goto(`${server().url}/chats/${group.chat.id}?fork=${await forkEndingAt(appended.entry.slotId)}`)
     await page.getByRole("button", { name: /not the latest/ }).click()
-    await page.getByRole("menuitem", { name: "Back to the latest branch", exact: true }).click()
+    await page.getByRole("button", { name: "Back to the latest branch", exact: true }).click()
     // The link names no fork: the chat's current one, which is where the newest branch went.
     await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
     await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
@@ -243,10 +244,11 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("img", { name: /full portrait$/ })).toBeVisible()
       await shoot("portrait")
       await page.keyboard.press("Escape")
+      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image settings.
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
       await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
       await shoot("image-settings")
       await page.keyboard.press("Escape")
-      if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
       await shoot("left-chats")
       await page
         .getByRole("group", { name: "Left panel", exact: true })

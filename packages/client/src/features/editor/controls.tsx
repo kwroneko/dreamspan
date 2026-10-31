@@ -343,6 +343,38 @@ export function SwitchField({
   )
 }
 
+/** A list of strings, one per line. Kept as typed, so a new empty line can be typed; empty lines aren't kept. */
+export function LinesField({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
+  const lines = useValue<ReadonlyArray<string>>(store, path) ?? []
+  const [typed, setTyped] = useState<string | null>(null)
+  const field = valueField(path)
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <Field label={<FieldLabel store={store} field={field} label={label} />}>
+        <Textarea
+          rows={2}
+          spellCheck={false}
+          className="resize-y font-mono"
+          value={typed ?? lines.join("\n")}
+          onChange={(event) => {
+            const text = event.currentTarget.value
+            setTyped(text)
+            store.setValue(
+              path,
+              text.split("\n").filter((line) => line !== "")
+            )
+          }}
+          onBlur={() => {
+            setTyped(null)
+            void store.save(field)
+          }}
+        />
+      </Field>
+      <FieldTools store={store} field={field} label={label} />
+    </div>
+  )
+}
+
 /** One of a few values. `text` when the field is a string the user could also type. */
 export function SelectField<Value extends string>({
   store,

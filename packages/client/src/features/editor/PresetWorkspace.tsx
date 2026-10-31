@@ -89,7 +89,11 @@ function WorkspaceOverlay({
   const store = workspace.store(selection.ref)
   const kind = useEditorState(store).snapshot?.ref.kind
   return (
-    <ColumnOverlay page={page} onClose={workspace.close} label={kind === "card" ? "Card editor" : "Preset editor"}>
+    <ColumnOverlay
+      page={page}
+      onClose={workspace.close}
+      label={kind === "card" ? "Card editor" : kind === "lorebook" ? "Lorebook editor" : "Preset editor"}
+    >
       <div
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
         data-testid="preset-scroll"

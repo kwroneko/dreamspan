@@ -1,7 +1,7 @@
 import { nextSeq, eventApplies } from "./forkState.ts"
 // Generation's writes: rollouts and the user's defaults (ARCHITECTURE §15).
 import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
+import { NotFound, StaleWrite } from "@rp/shared/errors.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
@@ -12,7 +12,9 @@ import {
   DEFAULT_MODEL,
   DEFAULT_PRESET,
   GLOBAL_LOREBOOKS,
+  GLOBAL_REGEX,
   globalLorebookRefs,
+  readGlobalRegex,
   ownedLorebook,
   ownedModel,
   ownedPreset,
@@ -257,6 +259,23 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         yield* putSetting(userId, GLOBAL_LOREBOOKS, next.length ? next : null)
         return yield* readGlobalLorebooks(sql, userId)
       }).pipe(transaction(sql, "SetGlobalLorebook")),
+
+    /** The global regex scripts replaced, if the caller read the revision stored (ST's "Global scripts"). */
+    SetGlobalRegex: ({ userId, scripts, expectedRevision }) =>
+      Effect.gen(function* () {
+        const stored = yield* readGlobalRegex(sql, userId)
+        if (stored.revision !== expectedRevision)
+          return yield* new StaleWrite({
+            entity: "global regex scripts",
+            id: userId,
+            expected: expectedRevision,
+            actual: stored.revision
+          })
+        // The schema refused repeated ids and more than MAX_GLOBAL_SCRIPTS.
+        const next = { scripts, revision: stored.revision + 1 }
+        yield* putSetting(userId, GLOBAL_REGEX, next)
+        return next
+      }).pipe(transaction(sql, "SetGlobalRegex")),
 
     // One transaction from the read of the stored summary defaults to the write, so another
     // tab's change to a setting not named here stays.

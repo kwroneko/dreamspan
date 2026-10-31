@@ -2,7 +2,9 @@
 // dismissal; this layer carries the look. Items are plain actions, links, or a choice of one.
 import { Menu as BaseMenu } from "@base-ui/react/menu"
 import type { ComponentProps, ReactElement, ReactNode } from "react"
+import { buttonClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 export function Menu({
   trigger,
@@ -10,6 +12,7 @@ export function Menu({
   side = "bottom",
   align = "end",
   label,
+  defaultOpen = false,
   onOpenChange
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
@@ -19,11 +22,17 @@ export function Menu({
   align?: "start" | "center" | "end"
   /** An accessible name for the list, when the trigger's text doesn't say what it holds. */
   label?: string
+  /** Open as it mounts: a menu mounted only once its trigger is first used, as a long list's rows do. */
+  defaultOpen?: boolean
   /** Told when it opens and closes: to read what it lists, say. */
   onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root modal={false} {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}>
+    <BaseMenu.Root
+      modal={false}
+      defaultOpen={defaultOpen}
+      {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}
+    >
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner
@@ -126,34 +135,58 @@ export function MenuGroup({ label, children }: { label: ReactNode; children: Rea
   )
 }
 
-/** A choice of one among `children` (`MenuRadioItem`s). */
-export function MenuRadioGroup<Value>({
-  value,
-  onValueChange,
-  children
+export type ActionMenuItem =
+  | { readonly label: string; readonly onSelect: () => void; readonly tone?: "danger" }
+  | { readonly label: string; readonly checked: boolean; readonly onCheckedChange: (checked: boolean) => void }
+
+/** A ghost icon button (named by `label`, with it as its tooltip) opening a list of actions and switches. */
+export function ActionMenu({
+  label,
+  trigger,
+  items
 }: {
-  value: Value
-  onValueChange: (value: Value) => void
-  children: ReactNode
+  label: string
+  trigger: ReactNode
+  items: ReadonlyArray<ActionMenuItem>
 }) {
   return (
-    <BaseMenu.RadioGroup value={value} onValueChange={(next) => onValueChange(next as Value)}>
-      {children}
-    </BaseMenu.RadioGroup>
-  )
-}
-
-export function MenuRadioItem({ value, children }: { value: unknown; children: ReactNode }) {
-  return (
-    <BaseMenu.RadioItem
-      value={value}
-      closeOnClick
-      className="grid min-h-9 cursor-default grid-cols-[1rem_1fr] items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-highlighted:bg-surface-raised"
-    >
-      <BaseMenu.RadioItemIndicator className="col-start-1 text-accent">
-        <Icon name="check" />
-      </BaseMenu.RadioItemIndicator>
-      <span className="col-start-2 min-w-0">{children}</span>
-    </BaseMenu.RadioItem>
+    <BaseMenu.Root>
+      <Tooltip label={label}>
+        <BaseMenu.Trigger aria-label={label} className={`${buttonClass("ghost")} h-8! w-8 px-0!`}>
+          {trigger}
+        </BaseMenu.Trigger>
+      </Tooltip>
+      <BaseMenu.Portal>
+        <BaseMenu.Positioner className="z-50 outline-none" positionMethod="fixed" sideOffset={4} align="end">
+          <BaseMenu.Popup className="flex min-w-48 origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
+            {items.map((entry) =>
+              "checked" in entry ? (
+                <BaseMenu.CheckboxItem
+                  key={entry.label}
+                  checked={entry.checked}
+                  onCheckedChange={(checked) => entry.onCheckedChange(checked)}
+                  closeOnClick
+                  className={itemClass("default")}
+                >
+                  <span aria-hidden="true" className="inline-flex w-4 justify-center text-accent">
+                    {entry.checked ? <Icon name="check" /> : null}
+                  </span>
+                  {entry.label}
+                </BaseMenu.CheckboxItem>
+              ) : (
+                <BaseMenu.Item
+                  key={entry.label}
+                  onClick={() => entry.onSelect()}
+                  className={itemClass(entry.tone ?? "default")}
+                >
+                  <span aria-hidden="true" className="inline-flex w-4" />
+                  {entry.label}
+                </BaseMenu.Item>
+              )
+            )}
+          </BaseMenu.Popup>
+        </BaseMenu.Positioner>
+      </BaseMenu.Portal>
+    </BaseMenu.Root>
   )
 }

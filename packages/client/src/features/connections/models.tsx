@@ -726,7 +726,9 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
           {model.hidden && <Badge>hidden</Badge>}
           {model.missingSince !== null && <Badge tone="warning">no longer listed</Badge>}
         </div>
-        <p className="font-mono text-xs text-muted [overflow-wrap:anywhere]">{model.key}</p>
+        {resolved.name.value !== model.key && (
+          <p className="font-mono text-xs text-muted [overflow-wrap:anywhere]">{model.key}</p>
+        )}
         <p className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
           <span>
             Context <Value resolved={resolved.context} model={resolved} show={tokens} assumed />

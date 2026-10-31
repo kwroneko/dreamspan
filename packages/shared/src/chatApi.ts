@@ -24,6 +24,7 @@ import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState, insertDr
 import { NextContext } from "./inspectorApi.ts"
 import { ModelChoice } from "./lcmSettings.ts"
 import { RefId } from "./library.ts"
+import { RawText } from "./regexScripts.ts"
 
 /** Earlier saved text of a human-written version, newest first. */
 export const VersionAmendment = Schema.Struct({
@@ -106,7 +107,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   timeline: "originals",
   coverageRail: false,
   outputMacros: false,
-  displayRegex: false,
+  displayRegex: true,
   enterSends: "automatic",
   guidance: false
 }
@@ -147,6 +148,8 @@ export class PathWindow extends Schema.Class<PathWindow>("PathWindow")({
   newer: Schema.NullOr(SlotId)
 }) {}
 
+const LiveReplace = Schema.optionalKey(Schema.Boolean)
+
 /** Pushed to a chat's subscribers. Streamed text comes as deltas, never as whole messages. */
 export const ChatEvent = Schema.Union([
   /** The first event of every subscription, with the text so far of each version generating now. */
@@ -163,12 +166,26 @@ export const ChatEvent = Schema.Union([
       })
     )
   }),
-  /** Text appended to a generating version at `offset`, so a client can tell a repeat from a gap. */
-  Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  /**
+   * Text appended to a generating version at `offset`, so a client can tell a repeat from a gap.
+   * `replace`: the shown text from `offset` on is now `text`, as regex scripts rewrote the text
+   * so far (ARCHITECTURE §12, "Live rewrites"); the text may get shorter.
+   */
+  Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String, replace: LiveReplace }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
-  Schema.TaggedStruct("Reasoning", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  Schema.TaggedStruct("Reasoning", {
+    versionId: VersionId,
+    offset: Schema.Int,
+    text: Schema.String,
+    replace: LiveReplace
+  }),
   /** Reply-section text appended at `offset` of the panel's text (`sectionsDisplay`), as `Delta` is. */
-  Schema.TaggedStruct("Section", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  Schema.TaggedStruct("Section", {
+    versionId: VersionId,
+    offset: Schema.Int,
+    text: Schema.String,
+    replace: LiveReplace
+  }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),
@@ -597,6 +614,29 @@ export class ChatApi extends RpcGroup.make(
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])
   }),
+  /**
+   * A version's text, reasoning and reply sections as they were before regex scripts rewrote
+   * them, when they did (null: unchanged). Only the owner reads it; it's never sent to a model.
+   */
+  Rpc.make("RawVersionText", {
+    payload: { versionId: VersionId },
+    success: RawText,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Puts a version's text from before the scripts back, as a new selected version of the slot
+   * (an edit of it, `sourceVersionId` the version), which no script rewrites.
+   */
+  Rpc.make("RestoreRawText", {
+    payload: {
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      versionId: VersionId,
+      expectedRowVersion: Schema.Int
+    },
+    success: PathEntry,
+    error: Schema.Union([...WriteErrors])
+  }),
   Rpc.make("VersionAmendments", {
     payload: { versionId: VersionId },
     success: Schema.Array(VersionAmendment),
@@ -732,7 +772,9 @@ export class ChatApi extends RpcGroup.make(
       chatId: ChatId,
       fromForkId: Schema.NullOr(ForkId),
       atSlotId: Schema.NullOr(SlotId),
-      notes: Schema.optionalKey(ForkNoteSelection)
+      notes: Schema.optionalKey(ForkNoteSelection),
+      /** An automatic name ("From #14"): shown like a given one, and the user renames it as one. */
+      name: Schema.optionalKey(BranchNameInput)
     },
     success: Schema.Struct({ fork: Fork, chat: Chat }),
     error: Schema.Union([...Errors, ForkNotesChanged])

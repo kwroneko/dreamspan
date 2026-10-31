@@ -1,9 +1,12 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { positionOf } from "./position.ts"
 import { AsyncResult, Atom } from "effect/reactivity"
+import type { EntityId } from "@rp/shared/chat.ts"
+import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import type { EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import type { RegexScript } from "@rp/shared/docs/preset.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { GlobalRegex } from "@rp/shared/regexScripts.ts"
 import { createContext, useContext, useMemo, useEffect, useState, type ReactNode } from "react"
 import { AppClient } from "../../rpc.ts"
 import { RadioGroup, Switch } from "../../ui/Choice.tsx"
@@ -11,14 +14,32 @@ import { Fieldset } from "../../ui/Field.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
+import { globalRegexAtom } from "../regex/data.ts"
+import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
 import { MessageColorSettings } from "./MessageColors.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
-const DisplayContext = createContext<{ scripts: ReadonlyArray<RegexScript>; leafDepth: number | null }>({
-  scripts: [],
+
+/**
+ * What a message's display regex reads (displayScripts.ts): the global and approved preset
+ * scripts, the approved card scripts by member, and the cast that names a user-side
+ * message's character. Empty while the viewer's switch is off.
+ */
+export interface DisplayScriptSources {
+  readonly global: ReadonlyArray<RegexScript>
+  readonly preset: ReadonlyArray<RegexScript>
+  readonly cards: CardScripts | null
+  readonly cast: Pick<Cast, "participants" | "playedByMe"> | null
+  readonly leafDepth: number | null
+}
+const DisplayContext = createContext<DisplayScriptSources>({
+  global: NO_SCRIPTS,
+  preset: NO_SCRIPTS,
+  cards: null,
+  cast: null,
   leafDepth: null
 })
 export const useDisplayContext = () => useContext(DisplayContext)
@@ -27,14 +48,22 @@ const presetQuery = Atom.family((key: string): Atom.Atom<AsyncResult.AsyncResult
   if (!refId) return Atom.make(AsyncResult.success(null))
   return AppClient.query("OpenEditor", { refId }, { reactivityKeys: ["library"] })
 })
-function PresetDisplay({
+const globalQuery = Atom.family((key: string): Atom.Atom<AsyncResult.AsyncResult<GlobalRegex | null, unknown>> => {
+  const [, on] = JSON.parse(key) as [string, boolean]
+  return on ? globalRegexAtom : Atom.make(AsyncResult.success(null))
+})
+function ScriptDisplay({
   session,
   refId,
+  on,
+  cast,
   leafDepth,
   children
 }: {
   session: ChatSession
   refId: string | null
+  on: boolean
+  cast: Cast | null
   leafDepth: number | null
   children: ReactNode
 }) {
@@ -42,34 +71,58 @@ function PresetDisplay({
   const query = presetQuery(JSON.stringify([userId, refId]))
   const result = useAtomValue(query)
   const refresh = useAtomRefresh(query)
+  const global = globalQuery(JSON.stringify([userId, on]))
+  const globalResult = useAtomValue(global)
+  const refreshGlobal = useAtomRefresh(global)
+  const cards = useMemo(
+    () =>
+      on
+        ? new CardScripts((entityId: EntityId) =>
+            session
+              .call((client) => client("GetCardForChat", { entityId }))
+              .then((read) => (read.ok ? (read.value.regex ?? null) : null))
+          )
+        : null,
+    [session, on]
+  )
   useEffect(() => {
-    if (!refId) return
+    if (!on) return
     // Server context notifications include edits from other devices, even when the
     // preset's id and prompt context did not change. Focus also refreshes after a
-    // suspended tab resumes; the library signal covers same-origin editor tabs.
-    const stopContext = session.subscribeContext(refresh)
-    const stopLibrary = onLibraryChange(refresh)
+    // suspended tab resumes; the library signal covers same-origin editor and settings tabs.
+    const all = () => {
+      if (refId) refresh()
+      refreshGlobal()
+      cards?.refresh()
+    }
+    const stopContext = session.subscribeContext(all)
+    const stopLibrary = onLibraryChange(all)
     return () => {
       stopContext()
       stopLibrary()
     }
-  }, [session, refId, refresh])
+  }, [session, on, refId, refresh, refreshGlobal, cards])
   // Only committed document content, never unsaved drafts or a previous failed read.
-  const doc = AsyncResult.isSuccess(result) ? result.value?.doc : null
-  const scripts = doc?.regex_approved === true ? (doc.regex as ReadonlyArray<RegexScript>) : NO_SCRIPTS
-  const value = useMemo(() => ({ scripts, leafDepth }), [scripts, leafDepth])
+  const preset = approvedScripts(AsyncResult.isSuccess(result) ? result.value?.doc : null)
+  const globalScripts =
+    AsyncResult.isSuccess(globalResult) && globalResult.value ? globalResult.value.scripts : NO_SCRIPTS
+  const value = useMemo(
+    () => ({ global: globalScripts, preset, cards, cast: on ? cast : null, leafDepth }),
+    [globalScripts, preset, cards, on, cast, leafDepth]
+  )
   return <DisplayContext value={value}>{children}</DisplayContext>
 }
 export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   const viewer = useViewPrefs()
-  const refId = viewer.prefs.displayRegex ? (view.history?.preset?.ref ?? null) : null
+  const on = viewer.prefs.displayRegex
+  const refId = on ? (view.history?.preset?.ref ?? null) : null
   const chatId = view.chat?.id
   const key = `${view.forkId}:${view.leafSlotId}`
   const loadedEntry = view.entries.find((entry) => entry.slotId === view.leafSlotId)
   const loadedDepth = loadedEntry && positionOf(loadedEntry)
   const [tip, setTip] = useState<{ key: string; depth: number } | null>(null)
   useEffect(() => {
-    if (!chatId || !refId || loadedDepth !== undefined || view.leafSlotId === null) return
+    if (!chatId || !on || loadedDepth !== undefined || view.leafSlotId === null) return
     let active = true
     void session
       .call((client) =>
@@ -88,12 +141,12 @@ export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
     return () => {
       active = false
     }
-  }, [session, chatId, refId, loadedDepth, view.forkId, view.leafSlotId, key])
+  }, [session, chatId, on, loadedDepth, view.forkId, view.leafSlotId, key])
   const leafDepth = loadedDepth ?? (tip?.key === key ? tip.depth : view.leafSlotId === null ? 0 : null)
   return (
-    <PresetDisplay session={session} refId={refId} leafDepth={leafDepth}>
+    <ScriptDisplay session={session} refId={refId} on={on} cast={view.cast} leafDepth={leafDepth}>
       {children}
-    </PresetDisplay>
+    </ScriptDisplay>
   )
 }
 export function DisplaySettings() {
@@ -136,13 +189,13 @@ export function DisplaySettings() {
           checked={viewer.prefs.displayRegex}
           disabled={!viewer.ready || viewer.pending}
           onCheckedChange={(displayRegex) => void viewer.change({ displayRegex })}
-          description="Use display-only scripts from the current prompt preset, after macros. The preset's scripts must also be approved in its editor. Rules can apply to human and model messages; prompt-only and storage rewrite scripts are excluded."
+          description="On unless you turn it off. Runs display-only scripts after macros: your global scripts, then the current preset's, then the message's character's. A preset's or a card's scripts run only once you allow them in its editor. Rules can apply to human and model messages; prompt-only scripts and scripts that rewrite saved messages aren't run here."
         >
-          Use preset display regex
+          Use display regex scripts
         </Switch>
         <p className="text-sm text-muted">
-          Slow or oversized rules are skipped with an explanation beside the message. Turn these switches off to see the
-          original text.
+          Slow or oversized rules are skipped with an explanation beside the message. Turn these switches off to see
+          messages as saved. A message that scripts rewrote as it was saved offers “Show the original text” in its menu.
         </p>
         {viewer.error && (
           <p role="alert" className="text-sm text-danger">

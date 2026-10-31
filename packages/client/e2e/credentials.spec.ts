@@ -41,7 +41,7 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name").fill("Uses the saved key")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
-  await page.getByRole("radio", { name: "Use a saved key" }).click()
+  await page.getByRole("button", { name: "Use a saved key instead" }).click()
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("saved as “Gateway key”")).toBeVisible()
 
@@ -95,7 +95,7 @@ test("replacing a key without its connections' address warns first, and the conn
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name").fill("Strandable")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
-  await page.getByLabel("Key", { exact: true }).fill("sk-strandable-key-0001")
+  await page.getByLabel("API key", { exact: true }).fill("sk-strandable-key-0001")
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: "Strandable", level: 1 })).toBeVisible()
   const connectionUrl = page.url()

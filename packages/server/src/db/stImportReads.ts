@@ -80,6 +80,16 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
           notSentJson: row.not_sent_json
         }
       }).pipe(query("GetStImportJob")),
+    StImportLatestChat: ({ userId }) =>
+      Effect.map(
+        sql<{ id: string; title: string }>`
+          SELECT c.id, c.title FROM jobs j
+          JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
+          WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD} AND c.deleted_at IS NULL
+            AND c.status = 'active'
+          ORDER BY c.last_message_at DESC, c.id DESC LIMIT 1`,
+        ([row]) => (row === undefined ? null : { chatId: row.id as ChatId, title: row.title })
+      ).pipe(query("StImportLatestChat")),
     StImportSources: ({ userId }) =>
       Effect.gen(function* () {
         const records = yield* sql<{ id: string; status: string; payload_json: string; deleted_at: number | null }>`

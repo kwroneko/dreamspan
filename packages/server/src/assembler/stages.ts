@@ -1,5 +1,5 @@
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
-import { replySectionsOf } from "@rp/shared/replySections.ts"
+import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
@@ -7,6 +7,8 @@ import { charDefinitions, newestMessage, presetOrder, withMain } from "@rp/share
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX, type PromptCondition } from "@rp/shared/docs/preset.ts"
 import { conditionOf, triggersFor } from "@rp/shared/presetConditions.ts"
 import {
+  CONTINUE_NUDGE,
+  CONTINUE_TEXT,
   DIRECTION_PROMPT,
   endOfRequestText,
   FALLBACK_TEXT,
@@ -31,7 +33,19 @@ import { placeBreakpoints } from "./breakpoints.ts"
 import { DEFAULT_MAX_IMAGES, imagesStage, messageImages } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
-import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
+import {
+  applyScripts,
+  compile,
+  makeScriptRunner,
+  PLACEMENT,
+  REGEX_MS,
+  REGEX_OUTPUT,
+  type PromptScript,
+  type ScriptRunner
+} from "./regex.ts"
+import { builtinScriptSources, type ScriptSource } from "./scriptSources.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import {
   type Assembly,
   type AssemblerStage,
@@ -446,9 +460,17 @@ const macrosStage = sync("macros", (assembly) => {
   })
 })
 
-const scriptsStage = sync("scripts", (assembly) => {
-  assembly.scripts = promptScripts(assembly)
-})
+const scriptsStage: AssemblerStage = {
+  id: "scripts",
+  run: (assembly) =>
+    Effect.gen(function* () {
+      const lists: Array<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }> = []
+      for (const source of assembly.request.scriptSources?.list() ?? builtinScriptSources)
+        lists.push({ source, scripts: yield* source.scripts(assembly) })
+      assembly.scripts = compileScripts(assembly, lists)
+      return assembly
+    })
+}
 
 const placementOf = (entry: HistoryEntry, cast: Cast) =>
   sideOf(entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
@@ -532,11 +554,29 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
   for (const entry of [...need(assembly, "history")].reverse()) {
     if (left === 0) break
     // Another card's (both known and different) are skipped without counting.
-    if (!entry.inContext || !entry.sectionsPrefix) continue
+    if (!entry.inContext || !entry.replySections?.sections.length) continue
     if (speaker !== null && entry.speaker !== null && entry.speaker !== speaker) continue
     const read = scripted.get(entry.versionId)
     if (!read) continue
-    scripted.set(entry.versionId, { ...read, text: entry.sectionsPrefix + read.text, volatile: true })
+    // Each section's text through the prompt-only reasoning scripts at the message's depth,
+    // as ST runs them on the reasoning it adds to a prompt, then back in its tags.
+    const sections = entry.replySections
+    const texts = applyScripts(
+      assembly,
+      need(assembly, "scripts"),
+      sections.sections.map((section) => ({ text: section.text, placement: PLACEMENT.reasoning, depth: read.depth }))
+    )
+    const prefix = sectionsPrefix({
+      ...sections,
+      sections: sections.sections.map((section, i) => ({ ...section, text: texts[i]!.text }))
+    })
+    const applied = [...(read.applied ?? []), ...texts.flatMap((text) => text.applied ?? [])]
+    scripted.set(entry.versionId, {
+      ...read,
+      text: prefix + read.text,
+      volatile: true,
+      ...(applied.length ? { applied } : {})
+    })
     left--
   }
   assembly.scripted = scripted
@@ -933,7 +973,7 @@ const override = (
 const prefill = (assembly: Assembly) => {
   if (assembly.request.summarizing) return
   const continues = need(assembly, "target").continues
-  if (continues) return continuePrefill(assembly, continues.text)
+  if (continues) return continuePrefill(assembly, continues)
   const doc = need(assembly, "preset").doc
   const type = need(assembly, "cast").type
   const raw = type === "impersonate" ? doc.prefill.impersonation : doc.prefill.assistant
@@ -954,23 +994,43 @@ const prefill = (assembly: Assembly) => {
 
 /**
  * Continue sends the text it continues as the start of the reply, in place of the preset's
- * prefill (ST's "continue prefill"), so the model writes on from its end. Without a model
- * that takes one it can't continue: the version fails and says so (DESIGN §7.5). Trailing
- * whitespace goes, which Anthropic refuses at the end of a prefill.
+ * prefill (ST's "continue prefill"), so the model writes on from its end. Trailing whitespace
+ * goes, which Anthropic refuses at the end of a prefill. A model that can't take one (its
+ * capability `none`, or an endpoint without the prefill, `continueUnavailable`) gets the text
+ * as its own last message instead, and the end-of-request instruction asks it to write only
+ * what follows (owner, 2026-10-31; ST's continue nudge).
  */
-const continuePrefill = (assembly: Assembly, text: string) => {
+const continuePrefill = (assembly: Assembly, continues: NonNullable<Target["continues"]>) => {
   const model = assembly.model
   if (!model) {
     throw new AssemblyFailed({ reason: "no_model", message: "Continue needs a model: none is chosen." })
   }
-  if (model.prefill === "none" || model.continueUnavailable) {
-    throw new AssemblyFailed({
-      reason: "no_prefill",
-      message: `Continue isn't available with ${model.key}: ${model.continueUnavailable ?? "no prefill support is declared. Set its Prefill capability in Connections if supported."}`
-    })
+  const text = continues.text
+  if (continuesWithoutPrefill(assembly)) {
+    const piece = need(assembly, "macros").verbatim(
+      `continue:${continues.version}`,
+      { kind: "message", slot: need(assembly, "target").slotId, version: continues.version },
+      text
+    )
+    const join = /\s$/.test(text) ? "" : need(assembly, "preset").doc.prefill.continue_postfix
+    assembly.continuation = { text, piece, join }
+    // A model that takes a prefill, but not here: say why it didn't get one.
+    if (model.prefill !== "none" && model.continueUnavailable)
+      assembly.issues.push({
+        kind: "prefill_dropped",
+        message: `Continue sent the reply as ${model.key}'s own last message with the continue instruction after it, not as a prefill: ${model.continueUnavailable}`
+      })
+    return
   }
   assembly.prefill = model.prefill === "tool_schema" ? text : text.trimEnd()
 }
+
+/** Continue on a model it can't prefill: the text it continues goes as the model's last message. */
+const continuesWithoutPrefill = (assembly: Assembly): boolean =>
+  need(assembly, "target").continues !== undefined &&
+  assembly.model !== undefined &&
+  assembly.model !== null &&
+  (assembly.model.prefill === "none" || assembly.model.continueUnavailable !== undefined)
 
 /** A message of the path as ST sends it, with the preset's names behavior (setOpenAIMessages). */
 const chatLine = (
@@ -1003,43 +1063,53 @@ const chatLine = (
   }
 }
 
-/** One context's time for the preset's regex scripts: V8 stops them once it's spent. */
-const REGEX_MS = 200
-/** Characters of text the scripts may make for one context, copied or replaced. */
-const REGEX_OUTPUT = 8_000_000
 /** Patterns longer than this, after the case rewrite, are left out. */
 const MAX_PATTERN = 2_000
 /** Scripts after this many are left out. */
 const MAX_SCRIPTS = 100
 
+const SCOPE_NAMES = { global: "global", preset: "preset's", character: "character's" } as const
+
 /**
- * The preset's prompt-only regex scripts, once the user approved them (ARCHITECTURE §9):
- * the pattern compiled, with its macros expanded when the script asks for that, and the
- * replacement and trim strings expanded. A script that can't run safely is left out and reported.
+ * The scripts of every registered list, in order (ARCHITECTURE §15): the prompt-only ones for
+ * a context, or for a rewrite the ones with neither flag; the pattern compiled, with its macros
+ * expanded when the script asks for that, and the replacement and trim strings expanded. Each
+ * list decides whether its scripts may run (approval). A script that can't run safely is left
+ * out and reported.
  */
-const promptScripts = (assembly: Assembly): ScriptRunner => {
-  const doc = need(assembly, "preset").doc
+const compileScripts = (
+  assembly: Assembly,
+  lists: ReadonlyArray<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }>
+): ScriptRunner => {
   const limits = { ms: REGEX_MS, output: REGEX_OUTPUT }
-  if (!doc.regex_approved) return makeScriptRunner([], limits)
-  const usable = doc.regex.filter((script) => !script.disabled && script.prompt_only && script.find_regex)
+  const wanted = (script: RegexScript) =>
+    assembly.request.rewrite ? !script.prompt_only && !script.markdown_only : script.prompt_only
+  const usable = lists.flatMap(({ source, scripts }) =>
+    scripts
+      .filter((script) => !script.disabled && wanted(script) && script.find_regex)
+      .map((script) => ({ source, script }))
+  )
   if (usable.length > MAX_SCRIPTS) {
     assembly.issues.push({
       kind: "regex_skipped",
-      message: `Only the first ${MAX_SCRIPTS} of the preset's ${usable.length} prompt regex scripts run.`
+      message: `Only the first ${MAX_SCRIPTS} of the ${usable.length} ${assembly.request.rewrite ? "" : "prompt "}regex scripts run.`
     })
   }
-  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script): Array<PromptScript> => {
+  const list = usable.slice(0, MAX_SCRIPTS).flatMap(({ source, script }): Array<PromptScript> => {
+    const what = source.scope === "preset" ? "The" : `The ${SCOPE_NAMES[source.scope]}`
     const skip = (why: string) => {
       assembly.issues.push({
         kind: "regex_skipped",
-        message: `The regex script "${script.name}" was left out: ${why}.`
+        message: `${what} regex script "${script.name}" was left out: ${why}.`
       })
       return []
     }
+    // The preset's pieces keep their ids; other lists' are namespaced by scope.
+    const key = source.scope === "preset" ? `regex:${script.id}` : `regex:${source.scope}:${script.id}`
     if (script.substitute_regex === "escaped") return skip("macros escaped into its pattern aren't supported")
     const find =
       script.substitute_regex === "raw"
-        ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
+        ? presetText(assembly, `${key}:find`, script.find_regex).text
         : script.find_regex
     const regex = compile(find)
     if (regex === "unsafe") {
@@ -1049,34 +1119,11 @@ const promptScripts = (assembly: Assembly): ScriptRunner => {
     }
     if (regex === null) return skip("its pattern isn't a valid regular expression")
     if (regex.source.length > MAX_PATTERN) return skip("its pattern is too long")
-    const replacement = script.replace_string
-      ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text
-      : ""
-    const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
-    return [{ script, regex, replacement, trim }]
+    const replacement = script.replace_string ? presetText(assembly, `${key}:replace`, script.replace_string).text : ""
+    const trim = script.trim_strings.map((t, i) => presetText(assembly, `${key}:trim:${i}`, t).text)
+    return [{ ref: { scope: source.scope, id: script.id, name: script.name }, script, regex, replacement, trim }]
   })
   return makeScriptRunner(list, limits)
-}
-
-/** The scripts' text for these messages, as one batch; what stopped them is reported once. */
-const applyScripts = (
-  assembly: Assembly,
-  runner: ScriptRunner,
-  items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>
-) => {
-  const expired = runner.expired
-  const { results, failed } = runner.apply(items)
-  const report = (message: string) => {
-    if (!assembly.issues.some((i) => i.message === message)) assembly.issues.push({ kind: "regex_skipped", message })
-  }
-  for (const [{ script }, why] of failed)
-    report(`The regex script "${script.name}" was skipped where it failed: ${why}.`)
-  if (!expired && runner.expired && runner.list.length > 0) {
-    report(
-      `The regex scripts ran out of time (${REGEX_MS} ms for one context): the rest of the messages are sent without them.`
-    )
-  }
-  return results
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */
@@ -1764,7 +1811,9 @@ const composeStage = sync("compose", (assembly) => {
   const projected = need(assembly, "projected")
   // The history stage ran the scripts on the verbatim messages it read; templates run here.
   const read = need(assembly, "scripted")
-  const scripted: Array<{ readonly text: string; readonly volatile: boolean } | undefined> = projected.map((p, i) =>
+  const scripted: Array<
+    { readonly text: string; readonly volatile: boolean; readonly applied?: ReadonlyArray<ScriptRef> } | undefined
+  > = projected.map((p, i) =>
     read.get(p.entry.versionId)?.depth === projected.length - 1 - i ? read.get(p.entry.versionId) : undefined
   )
   const rest = scripted.flatMap((s, i) => (s ? [] : [i]))
@@ -1778,6 +1827,10 @@ const composeStage = sync("compose", (assembly) => {
     }))
   )
   rest.forEach((index, i) => (scripted[index] = { ...ran[i]!, text: clipForSummary(assembly, ran[i]!.text) }))
+  // The inspector names the scripts that changed a message beside its source.
+  scripted.forEach((result, i) => {
+    if (result?.applied?.length) assembly.pieces[projected[i]!.piece]!.scripts = result.applied
+  })
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
   // Lore above the history is pinned: what follows the first place it can go is stable only
@@ -1924,7 +1977,13 @@ const composeStage = sync("compose", (assembly) => {
   const newExampleChat = optional("utility.new_example_chat_prompt", utility.new_example_chat_prompt)
   const schemaReserve =
     assembly.prefill && assembly.model?.prefill === "tool_schema" ? schemaPrefillBudget(assembly.prefill) : null
-  const prefillInput = schemaReserve?.input ?? (assembly.prefill ? tokensOf({ content: assembly.prefill }) : 0)
+  const prefillInput =
+    schemaReserve?.input ??
+    (assembly.prefill
+      ? tokensOf({ content: assembly.prefill })
+      : assembly.continuation
+        ? tokensOf({ content: assembly.continuation.text })
+        : 0)
   const prefixOutput = schemaReserve?.output ?? 0
   // A default response length gives way to the source prefix; only the model's own can exceed the limit.
   const outputLimit = assembly.model?.maxOutput
@@ -1949,7 +2008,9 @@ const composeStage = sync("compose", (assembly) => {
     ? tokensOf(assembly.endOfRequest)
     : !assembly.request.summarizing && !assembly.prefill
       ? tokensOf({
-          content: FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
+          content: assembly.continuation
+            ? CONTINUE_TEXT
+            : FALLBACK_TEXT.replace("{{speaker}}", cast.speaker ? modelName(cast.speaker.doc) : names.char)
         })
       : 0
   const reserve =
@@ -2350,7 +2411,8 @@ const composeStage = sync("compose", (assembly) => {
 /**
  * The end-of-request instruction (DESIGN §2.2, owner 2026-10-29): one user message, the
  * request's last, with the speaker's turn text (when your card speaks if the speaker is one you
- * play, else when a character speaks) and, when the version has a direction, the direction text
+ * play, else when a character speaks; when you continue a reply, on a Continue the model can't
+ * be prefilled for) and, when the version has a direction, the direction text
  * on a new line. Neither conditions nor ST's triggers apply to them. A summary request puts its
  * instruction there instead (`summary-request`), so it sends none. Expansion is deferred until
  * `compose` has prepared ordinary prompts and notes; `compose` budgets it and
@@ -2361,7 +2423,11 @@ const endOfRequestStage = sync("end-of-request", (assembly) => {
   assembly.renderEndOfRequest = () => {
     const doc = need(assembly, "preset").doc
     const { speaker, personas } = need(assembly, "cast")
-    const turn = speaker !== null && personas.includes(speaker) ? IMPERSONATION_PROMPT : GROUP_NUDGE
+    const turn = continuesWithoutPrefill(assembly)
+      ? CONTINUE_NUDGE
+      : speaker !== null && personas.includes(speaker)
+        ? IMPERSONATION_PROMPT
+        : GROUP_NUDGE
     const direction = need(assembly, "target").direction?.trim() ? [DIRECTION_PROMPT] : []
     const parts = [turn, ...direction].flatMap((identifier) => {
       const content = doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
@@ -2407,17 +2473,28 @@ const messagesStage = sync("messages", (assembly) => {
   messages = postProcess(messages, doc.postprocess, need(assembly, "postNames"))
   // DESIGN §2.2 requires one separate final user message, even in merging/single modes.
   const end = assembly.request.summarizing ? undefined : assembly.endOfRequest
+  // Continue without a prefill (owner, 2026-10-31): the reply so far, the model's own message,
+  // then the instruction to write only what follows it.
+  const continuation = assembly.continuation
+  if (continuation)
+    messages.push({ role: "assistant", content: continuation.text, pieces: [continuation.piece], kind: "volatile" })
   if (end) messages.push({ ...end, kind: "volatile" })
   // The only fallback (DESIGN §2.2): without an end-of-request message, a request that would end
-  // on an assistant message, with no prefill to continue it, asks for the speaker's message.
-  // Decided on the whole final request, including trailing system prompts.
+  // on an assistant message, with no prefill to continue it, asks for the speaker's message (or,
+  // continuing, for the rest of it). Decided on the whole final request, including trailing system prompts.
   if (!end && !assembly.request.summarizing && !assembly.prefill && messages.at(-1)?.role === "assistant") {
     const env = need(assembly, "macros")
-    const piece = env.piece(
-      "assembler:last-turn",
-      { kind: "assembler", what: "end of request fallback: who writes next" },
-      FALLBACK_TEXT
-    )
+    const piece = continuation
+      ? env.piece(
+          "assembler:last-turn",
+          { kind: "assembler", what: "end of request fallback: continue the reply" },
+          CONTINUE_TEXT
+        )
+      : env.piece(
+          "assembler:last-turn",
+          { kind: "assembler", what: "end of request fallback: who writes next" },
+          FALLBACK_TEXT
+        )
     messages.push({ role: "user", content: env.text(piece), pieces: [piece], kind: "volatile" })
   }
   assembly.messages = messages.map(({ role, content, name, pieces, kind }) => ({
@@ -2451,6 +2528,7 @@ const requestStage = sync("request", (assembly) => {
       assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES
     ),
     prefill: assembly.prefill ?? null,
+    ...(assembly.continuation ? { continuation: { join: assembly.continuation.join } } : {}),
     samplers: {
       temperature: s.temperature,
       frequency_penalty: s.frequency_penalty,

@@ -5,7 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { resolve } from "node:path"
 import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcGroup, type RpcClientError, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 
 const root = resolve(import.meta.dirname, "../../..")
@@ -78,7 +78,7 @@ export const withClient = async <A>(server: PerfServer, use: (client: Client) =>
         Layer.provide(RpcSerialization.layerJson)
       )
     )
-    return yield* use(yield* RpcClient.make(AppApi).pipe(Effect.provide(protocol)))
+    return yield* use(yield* RpcClient.make(AppApi as RpcGroup.RpcGroup<AppRpcs>).pipe(Effect.provide(protocol)))
   })
   const exit = await Effect.runPromiseExit(Effect.scoped(program))
   if (Exit.isFailure(exit)) throw new Error(`RPC failed: ${String(exit.cause)}`)

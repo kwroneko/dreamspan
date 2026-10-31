@@ -7,6 +7,7 @@ import { MessageColorPreferences } from "./MessageColors.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
 import { displayTransforms, macroDisplay } from "./displayPipeline.ts"
 import { regexDisplay } from "./displayWorker.ts"
+import { builtinDisplayScriptLists, displayScriptLists } from "./displayScripts.ts"
 import { chatPanels } from "./panels.tsx"
 import { chatSurfaceProviders } from "./presentation.tsx"
 import { DisplayProvider, DisplaySettings } from "./DisplaySettings.tsx"
@@ -23,7 +24,8 @@ export const registerDisplay = () => [
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
   displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),
-  displayTransforms.register({ id: "display.preset-regex", order: 20, transform: regexDisplay }),
+  displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
+  ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
   chatPanels.register({ id: "display", label: "Display", order: 85, icon: "type", component: DisplaySettings })
 ]

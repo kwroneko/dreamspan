@@ -101,9 +101,11 @@ for (const width of [1440, 390])
       // The preset's setting, beside End of request, on by default with the default pair.
       const label = `Sections preset ${width} ${theme}`
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreatePreset({ label }))
+      // From the library a preset opens at its own address (the Presets tab, Edit as a link).
       await page.goto(`${server().url}/library`)
-      await page.getByRole("button", { name: `Edit ${label}`, exact: true }).click()
-      const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
+      await page.getByRole("tab", { name: /^Presets/ }).click()
+      await page.getByRole("link", { name: `Edit ${label}`, exact: true }).click()
+      const editor = page.getByRole("main")
       const heading = editor.getByRole("heading", { name: "Thinking at the start of a reply" })
       await heading.scrollIntoViewIfNeeded()
       const section = editor.locator('[data-preset-section="reply-sections"]')

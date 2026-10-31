@@ -4,6 +4,7 @@
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
 import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import { scriptLabel } from "./rewrites.tsx"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type {
   ContextMessage,
@@ -120,8 +121,15 @@ function SourceTitle({
       {source.summary?.stale && <span className="text-warning">Stale when this reply was generated.</span>}
       {source.summary?.changed && <span className="text-warning">Summary stale or replaced since this reply.</span>}
       {source.activation && <span className="break-words text-muted">{activationText(source.activation)}</span>}
+      <ScriptsNote source={source} />
     </span>
   )
+}
+
+/** The prompt regex scripts that changed the source's text in this request, in the order they ran. */
+function ScriptsNote({ source }: { source: ContextSource }) {
+  if (!source.scripts || source.scripts.length === 0) return null
+  return <span className="break-words text-muted">Changed by regex: {source.scripts.map(scriptLabel).join(", ")}</span>
 }
 
 /** Prompt text exactly as sent: monospace, so it never reads as the inspector's own labels. */
@@ -369,6 +377,7 @@ function Message({
                     {source.activation && (
                       <span className="break-words text-muted">{activationText(source.activation)}</span>
                     )}
+                    <ScriptsNote source={source} />
                   </span>
                 ))}
               </span>

@@ -50,6 +50,7 @@ import {
 import { GroupFaces } from "../characters/GroupFaces.tsx"
 import { useTitle } from "../shell.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
+import { useCompactComposer } from "./Composer.tsx"
 import { expandForDisplay } from "./macros.ts"
 
 const PERSONA_KEY = "rp.lastPersona"
@@ -292,6 +293,7 @@ function Pending({
   const playing = cards.find((p) => p.entityId === persona) ?? null
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
+  const phone = useCompactComposer()
   const guidance = viewPrefs.prefs.guidance
   const name = card.card.name
   /** What the chat is with: the card, or the group. */
@@ -429,6 +431,7 @@ function Pending({
   }
 
   const controls: PendingComposerContext = {
+    compact: phone,
     speaker: { speaker: speakerId, recent: [], pending: true, onPick: (picked) => setSelectedSpeaker(picked.entityId) },
     speakerName,
     submitHint: composerSubmitHint(viewPrefs.prefs.enterSends),
@@ -605,54 +608,58 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+        <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <CastContext value={speakerView}>
-            <PendingComposerControls placement="speaker" context={controls} />
-          </CastContext>
-          <PendingComposerControls placement="guidance" context={controls} />
-        </div>
-        <div
-          data-guidance={guidance || undefined}
-          className={`flex min-w-0 flex-col items-stretch gap-1 rounded-lg border p-1 sm:flex-row sm:items-end focus-within:ring-2 ${
-            guidance
-              ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
-              : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
-          }`}
-        >
-          <div className="grid min-w-0 flex-1">
-            {guidance && (
-              <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
-                Guidance
-              </span>
-            )}
-            <label htmlFor="composer" className="sr-only">
-              {guidance ? "Guidance" : "Message"}
-            </label>
-            <AutoGrowTextarea
-              id="composer"
-              data-testid="composer"
-              value={text}
-              // Short, so it fits one line on a phone, as the chat's composer does.
-              placeholder={guidance ? "Direction for the next message…" : "Write a message…"}
-              aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
-              onKeyDown={(event) =>
-                composerKeyDown(async () => {
-                  await invokePendingComposer(controls)
-                }, viewPrefs.prefs.enterSends)(event)
-              }
-              onChange={(event) => {
-                const value = event.currentTarget.value
-                typed.current = value
-                setText(value)
-                // While the first send is out, the copy keeps both, as a failed send leaves them.
-                const out = sending.current
-                void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
-              }}
-            />
+        {/* One bar, as the chat's composer: who's speaking, then the box with its actions. */}
+        <div className="flex min-w-0 items-end gap-1.5">
+          <div className="flex h-[46px] shrink-0 items-center">
+            <CastContext value={speakerView}>
+              <PendingComposerControls placement="speaker" context={controls} />
+            </CastContext>
           </div>
-          <div className="flex max-w-full shrink-0 flex-wrap items-center gap-1">
-            <PendingComposerControls placement="actions" context={controls} />
+          <div
+            data-guidance={guidance || undefined}
+            className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
+              guidance
+                ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
+                : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
+            }`}
+          >
+            <div className="grid min-w-0 flex-1">
+              {guidance && (
+                <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
+                  Guidance
+                </span>
+              )}
+              <label htmlFor="composer" className="sr-only">
+                {guidance ? "Guidance" : "Message"}
+              </label>
+              <AutoGrowTextarea
+                id="composer"
+                data-testid="composer"
+                value={text}
+                // Short, so it fits one line on a phone, as the chat's composer does.
+                placeholder={guidance ? "Direction for the next message…" : "Message…"}
+                aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
+                onKeyDown={(event) =>
+                  composerKeyDown(async () => {
+                    await invokePendingComposer(controls)
+                  }, viewPrefs.prefs.enterSends)(event)
+                }
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  typed.current = value
+                  setText(value)
+                  // While the first send is out, the copy keeps both, as a failed send leaves them.
+                  const out = sending.current
+                  void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
+                }}
+              />
+            </div>
+            <div className="flex shrink-0 items-end gap-0.5">
+              <PendingComposerControls placement="guidance" context={controls} />
+              <PendingComposerControls placement="actions" context={controls} />
+            </div>
           </div>
         </div>
         {(guidance || text.trim() !== "") && (

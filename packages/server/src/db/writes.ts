@@ -30,7 +30,7 @@ import {
   writeSelect
 } from "./forkState.ts"
 import { reachableSlot } from "./graphReachability.ts"
-import { type ChatRow, type ForkRow, toChat, toFork, toVersion } from "./rows.ts"
+import { type ChatRow, type ForkRow, rewriteColumns, toChat, toFork, toVersion } from "./rows.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
 /**
@@ -52,7 +52,12 @@ const copiedFresh = new Set([
   "usage_json",
   "deleted_at",
   "bin_item_id",
-  "purged_at"
+  "purged_at",
+  // An amended copy's text is the user's: what scripts did to the copied text doesn't apply.
+  "raw_content",
+  "raw_reasoning",
+  "raw_sections",
+  "rewrite_json"
 ])
 
 type Count = Effect.Effect<ReadonlyArray<{ readonly n: number }>, SqlError.SqlError>
@@ -289,7 +294,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* drafts.commit(userId, commitDraft, {
             targetKind: "version_edit",
             targetId: version.sourceVersionId ?? "",
-            content: row.content,
+            content: version.rewrite?.raw ?? row.content,
             images: toVersion(row).images ?? []
           })
           return toVersion(row)
@@ -398,20 +403,20 @@ export const makeWriteHandlers = (bin: Bin) =>
               ? {
                   targetKind: "version_edit",
                   targetId: version.sourceVersionId,
-                  content: row.content,
+                  content: version.rewrite?.raw ?? row.content,
                   images: toVersion(row).images ?? []
                 }
               : {
                   targetKind: "scratchpad",
                   targetId: slotId,
-                  content: row.content,
+                  content: version.rewrite?.raw ?? row.content,
                   images: toVersion(row).images ?? []
                 }
           )
           return { chatId: slot.chat_id as ChatId, forkId: fork.id as ForkId, version: toVersion(row) }
         }).pipe(transaction("AddSelectedVersion")),
 
-      AmendVersion: ({ userId, versionId, forkId, content, images, expectedRowVersion, commitDraft }) =>
+      AmendVersion: ({ userId, versionId, forkId, content, images, expectedRowVersion, commitDraft, rewrite }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, true)
           if (row.writer !== "human") return yield* new NotAmendable({ versionId })
@@ -432,7 +437,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* drafts.commit(userId, commitDraft ?? null, {
             targetKind: "version_edit",
             targetId: versionId,
-            content,
+            content: rewrite?.raw ?? content,
             images: images ?? (JSON.parse(row.images_json ?? "[]") as MessageImages)
           })
           // The images it had, as its history keeps them, when this amend changes them.
@@ -457,8 +462,13 @@ export const makeWriteHandlers = (bin: Bin) =>
             // No other fork shows it: the trigger keeps the previous text in version_history (DESIGN §3.1).
             yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
             const at = Date.now()
-            if (content !== row.content)
-              yield* sql`UPDATE versions SET content = ${content}, updated_at = ${at} WHERE id = ${versionId}`
+            if (content !== row.content) {
+              const rewritten = rewriteColumns(rewrite)
+              yield* sql`UPDATE versions SET content = ${content}, raw_content = ${rewritten.raw_content},
+                raw_reasoning = ${rewritten.raw_reasoning}, raw_sections = ${rewritten.raw_sections},
+                rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
+                WHERE id = ${versionId}`
+            }
             if (before !== null) {
               if (content === row.content) yield* sql`UPDATE versions SET updated_at = ${at} WHERE id = ${versionId}`
               // The trigger kept the earlier text, if it changed; that entry keeps the earlier images too.
@@ -489,6 +499,9 @@ export const makeWriteHandlers = (bin: Bin) =>
              FROM versions v WHERE v.id = ?`,
             [copy, content, original, fork.id, at, at, versionId]
           )
+          const rewritten = rewriteColumns(rewrite)
+          yield* sql`UPDATE versions SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},
+            raw_sections = ${rewritten.raw_sections}, rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
           yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
             SELECT ${copy}, content, replaced_at, images_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
           yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
@@ -621,7 +634,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* forkOut(fork.id)
         }).pipe(transaction("SetForkPinned")),
 
-      CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes }) =>
+      CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes, name }) =>
         Effect.gen(function* () {
           const from = yield* ownedFork(userId, chatId, fromForkId)
           if (atSlotId !== null)
@@ -642,7 +655,14 @@ export const makeWriteHandlers = (bin: Bin) =>
             return yield* new ForkNotesChanged({
               message: "Notes changed while this dialog was open. Close it and branch again to review them."
             })
-          const fork = yield* createFork(chatId, from, atSlotId, Date.now())
+          const at = Date.now()
+          const fork = yield* createFork(chatId, from, atSlotId, at)
+          // Making it is the user's activity in it: the shell's Recent counts it (db/shellReads.ts).
+          yield* sql`UPDATE forks SET last_chatted_at = ${at} WHERE id = ${fork.id}`
+          // An automatic name, not the user's (`name_user` stays 0): a label of the slot's own
+          // (an ST import's) still wins among the alternates, and a rename replaces it.
+          const automatic = cleanName(name ?? "")
+          if (automatic !== "") yield* sql`UPDATE forks SET name = ${automatic} WHERE id = ${fork.id}`
           for (const row of comparison) {
             const choice = notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then"
             // Positional inheritance already gives "then". Rewriting it would detach

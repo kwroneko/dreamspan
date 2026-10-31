@@ -20,6 +20,8 @@ import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { EditRefused } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
+import { RegexScript } from "./docs/regexScript.ts"
+import { GlobalRegex, GlobalScripts } from "./regexScripts.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
 export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
@@ -30,7 +32,9 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   groupGreetings: Schema.Array(Schema.String),
   description: Schema.String,
   personality: Schema.String,
-  scenario: Schema.String
+  scenario: Schema.String,
+  /** Its regex scripts when the user allowed them (`regex_approved`); absent otherwise or without any. */
+  regex: Schema.optionalKey(Schema.Array(RegexScript))
 }) {}
 
 /**
@@ -113,12 +117,20 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   /** Only what the rows show; the chat's own record is read when it opens. */
   chat: Schema.Struct({ id: ChatId, title: Schema.String }),
   leaf: Schema.NullOr(SlotId),
+  /** The fork's name, else its chat's. */
   name: Schema.String,
+  /** Its chat's readable name: what a row standing for the chat shows. */
+  chatName: Schema.String,
   current: Schema.Boolean,
   named: Schema.Boolean,
   pinned: Schema.Boolean,
   createdAt: Schema.Number,
+  /** Its last shown message (else its chat's start), or its making when it was branched from another. */
   recentAt: Schema.Number,
+  /** Its chat's Recent: the latest `recentAt` of the chat's live forks. */
+  chatRecentAt: Schema.Number,
+  /** How many live forks (branches) its chat has. */
+  branches: Schema.Int,
   /** Present characters the model writes, by id; `ShellLibrary.people` describes each once. */
   cast: Schema.Array(EntityId),
   joined: Schema.Array(EntityId),
@@ -150,12 +162,14 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
  * The lists of fork rows a screen shows (GetShellForks): each a part of the forks in the view's
  * scope (a card's chats, one chat's forks, or every chat), matching its search.
  * - `pinned`: the pinned ones, by `sort`;
- * - `chats`: each chat's current, pinned and named forks, newest first (All chats);
- * - `just`, `with`, `was`: the scope card's chats by how it is in them, its latest turn first;
+ * - `chats`: each chat once, by its current fork, the most recent chat first (All chats);
+ * - `just`, `with`, `was`: the scope card's chats, once each, by how it is in them, its latest turn first;
  * - `current`, `peers`, `other`: a chat's current fork, its pinned and named ones, the rest;
- * - `groups`: forks of two or more characters, current, pinned or named, by `sort`;
- * - `card`: every fork the scope card joined, its latest turn first, then newest;
+ * - `groups`: chats of two or more characters, once each, by `sort`;
+ * - `card`: each chat the scope card joined, once, its latest turn first, then newest;
  * - `all`: every fork in scope, newest first.
+ * A chat listed once is its current fork's row when that one is in the list, else its first
+ * there; `branches` says how many it has. Recent sorts chats by `chatRecentAt`.
  */
 export const ShellSection = Schema.Literals([
   "pinned",
@@ -499,6 +513,14 @@ export class ChatSetupApi extends RpcGroup.make(
     payload: { ref: RefId, global: Schema.Boolean },
     success: Schema.Array(RefId),
     error: Schema.Union([...Errors])
+  }),
+  /** The account's global regex scripts (ST's "Global scripts"), which run in every chat. */
+  Rpc.make("GetGlobalRegex", { success: GlobalRegex, error: Schema.Union([...Errors]) }),
+  /** Replaces them; StaleWrite unless `expectedRevision` is the revision the caller read. */
+  Rpc.make("SetGlobalRegex", {
+    payload: { scripts: GlobalScripts, expectedRevision: Schema.Int },
+    success: GlobalRegex,
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   /** What the preset in use does with a card's own prompts, for the card editor. */
   Rpc.make("GetCardPromptUse", { success: CardPromptUse, error: Schema.Union([...Errors]) }),

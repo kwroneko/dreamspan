@@ -317,6 +317,13 @@ export const baseline: ReadonlyArray<string> = [
     context_form TEXT,
     display_form TEXT,
     reasoning TEXT,
+    -- The text and reasoning as they were before regex scripts rewrote them (ARCHITECTURE §12),
+    -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json.
+    raw_content TEXT,
+    raw_reasoning TEXT,
+    -- The reply sections before the reasoning scripts rewrote their text, as JSON.
+    raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)),
+    rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
     reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
@@ -955,6 +962,9 @@ export const baseline: ReadonlyArray<string> = [
     -- A message to post, or a reply to generate.
     kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')),
     content TEXT NOT NULL,
+    -- As on versions: the typed text before regex scripts rewrote it, and what they did.
+    raw_content TEXT,
+    rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
     speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     -- For 'message': who replies to it once it posts, picked when it was sent, as an
     -- immediate send's reply is.

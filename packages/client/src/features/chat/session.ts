@@ -129,6 +129,9 @@ const withInContext = (entry: PathEntry, version: Version) =>
 const withPosition = (entry: PathEntry, position: number | undefined) =>
   position === undefined || entry.position === position ? entry : ({ ...entry, position } as PathEntry)
 
+/** A streamed text's change (`Delta`, `Reasoning`, `Section`); `replace`: from `offset` on. */
+type LiveDelta = { readonly offset: number; readonly text: string; readonly replace?: boolean }
+
 export class ChatSession {
   private view: ChatView = {
     chat: null,
@@ -165,11 +168,11 @@ export class ChatSession {
   /** Unmounts for the live atoms kept alive while their version generates, shown or not. */
   private readonly live = new Map<VersionId, () => void>()
   /** Deltas received since the last frame, by version. */
-  private readonly pending = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  private readonly pending = new Map<VersionId, Array<LiveDelta>>()
   /** Reasoning received since the last frame, by version, applied as the text's deltas are. */
-  private readonly pendingReasoning = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  private readonly pendingReasoning = new Map<VersionId, Array<LiveDelta>>()
   /** Reply-section text received since the last frame, by version, as reasoning is. */
-  private readonly pendingSections = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  private readonly pendingSections = new Map<VersionId, Array<LiveDelta>>()
   private frame: number | null = null
   private hellos = 0
   private subscription: Fiber.Fiber<void, unknown> | null = null
@@ -832,8 +835,9 @@ export class ChatSession {
       Atom.batch(() => {
         for (const [id, deltas] of pending) {
           let text = this.registry.get(atom(id)) ?? stored(id)
-          for (const { offset, text: added } of deltas) {
-            if (offset <= text.length && offset + added.length > text.length) text = text.slice(0, offset) + added
+          for (const { offset, text: added, replace } of deltas) {
+            if (offset <= text.length && (replace || offset + added.length > text.length))
+              text = text.slice(0, offset) + added
           }
           this.setLiveSide(atom, id, text)
         }
@@ -844,10 +848,12 @@ export class ChatSession {
     Atom.batch(() => {
       for (const [id, deltas] of this.pending) {
         let text = this.registry.get(liveText(id)) ?? ""
-        for (const { offset, text: added } of deltas) {
+        // A delta adds text past what's shown; a `replace` one (scripts rewrote the text so far)
+        // is the text from its offset on, even if shorter.
+        for (const { offset, text: added, replace } of deltas) {
           if (offset > text.length) {
             if (PERF) perf.gaps++
-          } else if (offset + added.length > text.length) text = text.slice(0, offset) + added
+          } else if (replace || offset + added.length > text.length) text = text.slice(0, offset) + added
         }
         this.setLive(id, text)
         if (PERF) {
@@ -1375,8 +1381,9 @@ export class ChatSession {
 
   /**
    * Continue (ST's): a new version that starts as this one's text and streams on from its
-   * end, sent as the start of the reply to models that take one (DESIGN §7.5), with the
-   * composer's guidance as its direction.
+   * end, sent as the start of the reply to models that take one (DESIGN §7.5) and as the
+   * model's own last message to others (owner, 2026-10-31), with the composer's guidance as
+   * its direction.
    */
   async continueVersion(entry: PathEntry, useComposerGuidance = true): Promise<Outcome<unknown>> {
     const direction = useComposerGuidance ? (this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? "") : ""
@@ -1466,6 +1473,21 @@ export class ChatSession {
         content,
         expectedRowVersion: entry.rowVersion,
         ...commit
+      })
+    )
+  }
+
+  /**
+   * Puts the text from before regex scripts rewrote the version back, as a new selected
+   * version of the message (as an edit is), which no script rewrites.
+   */
+  restoreRawText(entry: PathEntry): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("RestoreRawText", {
+        slotId: entry.slotId,
+        forkId: this.view.forkId,
+        versionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion
       })
     )
   }
@@ -1657,21 +1679,23 @@ export class ChatSession {
 
   /**
    * "Branch from here": a fork of the one shown, at `at`, which becomes the chat's current
-   * fork. Its composer starts as a copy of this one's (DESIGN §6.2).
+   * fork, named `name` ("From #14"). Its composer starts as a copy of this one's (DESIGN §6.2).
    */
-  async branchFrom(at: SlotId, notes?: ForkNoteSelection, fromForkId = this.view.forkId) {
+  async branchFrom(at: SlotId, notes?: ForkNoteSelection, fromForkId = this.view.forkId, name?: string) {
     const result = await this.call((client) =>
       client("CreateFork", {
         chatId: this.chatId,
         fromForkId,
         atSlotId: at,
-        ...(notes ? { notes } : {})
+        ...(notes ? { notes } : {}),
+        ...(name === undefined ? {} : { name })
       })
     )
     if (result.ok) {
       this.branchStart = result.value.fork.id
       this.update({ chat: result.value.chat })
-      this.showFork(null, null)
+      // Opened at the message it was made at, which the URL keeps (ForkNotesDialog.tsx).
+      this.showFork(null, at)
     }
     return result
   }

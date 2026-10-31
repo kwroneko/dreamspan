@@ -6,18 +6,25 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
   return <section className={`rounded-lg border border-border bg-surface p-4 sm:p-5 ${className}`}>{children}</section>
 }
 
-/** A card's heading row: title and description, with actions to the right (below on phones). */
+/**
+ * A card's heading row: title and description, with actions to the right (below on phones,
+ * unless `inline`: for one small icon button that fits beside the title anywhere).
+ */
 export function CardHeader({
   title,
   description,
-  actions
+  actions,
+  inline = false
 }: {
   title: ReactNode
   description?: ReactNode
   actions?: ReactNode
+  inline?: boolean
 }) {
   return (
-    <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div
+      className={`mb-4 flex gap-3 ${inline ? "flex-row items-start justify-between" : "flex-col sm:flex-row sm:items-start sm:justify-between"}`}
+    >
       <div className="flex min-w-0 flex-col gap-1">
         <h2 className="text-base font-semibold">{title}</h2>
         {description && <p className="text-sm text-muted">{description}</p>}
