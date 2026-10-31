@@ -20,6 +20,8 @@ import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { EditRefused } from "./editorApi.ts"
 import { Doc, LibraryRef, RefId, RevisionId } from "./library.ts"
 import { ConnectionId, ModelId } from "./providers.ts"
+import { RegexScript } from "./docs/regexScript.ts"
+import { GlobalRegex } from "./regexScripts.ts"
 
 /** A card's greetings and the fields its macros read, for a chat that isn't made yet. */
 export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
@@ -430,6 +432,14 @@ export class ChatSetupApi extends RpcGroup.make(
     payload: { ref: RefId, global: Schema.Boolean },
     success: Schema.Array(RefId),
     error: Schema.Union([...Errors])
+  }),
+  /** The account's global regex scripts (ST's "Global scripts"), which run in every chat. */
+  Rpc.make("GetGlobalRegex", { success: GlobalRegex, error: Schema.Union([...Errors]) }),
+  /** Replaces them; StaleWrite unless `expectedRevision` is the revision the caller read. */
+  Rpc.make("SetGlobalRegex", {
+    payload: { scripts: Schema.Array(RegexScript), expectedRevision: Schema.Int },
+    success: GlobalRegex,
+    error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
   /** What the preset in use does with a card's own prompts, for the card editor. */
   Rpc.make("GetCardPromptUse", { success: CardPromptUse, error: Schema.Union([...Errors]) }),

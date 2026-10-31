@@ -3,6 +3,9 @@
 // value means what it means in ST. Arrays of prompts, order entries and regex scripts are
 // keyed by `identifier` or `id`, so the library merge combines them per element.
 import { Schema } from "effect"
+import { RegexScript } from "./regexScript.ts"
+
+export { RegexScript } from "./regexScript.ts"
 
 export const PRESET_SCHEMA_VERSION = 1
 
@@ -122,36 +125,6 @@ export const PostProcessing = Schema.Literals([
   "strict_tools",
   "single"
 ])
-
-/**
- * A regex script from the preset. Stored as data and never compiled at import; compiling
- * one needs a ReDoS guard. `prompt_only` scripts rewrite text only in the assembled prompt;
- * `markdown_only` ones only in what's displayed (display rules); a script with neither
- * rewrites message text as it's sent or received.
- */
-export const RegexScript = Schema.Struct({
-  id: Schema.NonEmptyString,
-  name: Schema.String,
-  find_regex: Schema.String,
-  replace_string: Schema.String,
-  trim_strings: Schema.Array(Schema.String),
-  /** ST's numbers: 1 user input, 2 AI output, 3 slash commands, 5 world info, 6 reasoning. */
-  placement: Schema.Array(Schema.Int),
-  disabled: Schema.Boolean,
-  markdown_only: Schema.Boolean,
-  prompt_only: Schema.Boolean,
-  run_on_edit: Schema.Boolean,
-  /** Whether macros in `find_regex` are expanded first, and how (escaped for use in a regex). */
-  substitute_regex: Schema.Literals(["none", "raw", "escaped"]),
-  /**
-   * Message depths the script applies to; null means unbounded. ST reads an infinite minimum
-   * as "never at any depth", imported as `Number.MAX_VALUE`.
-   */
-  min_depth: Schema.NullOr(Schema.Finite),
-  max_depth: Schema.NullOr(Schema.Finite),
-  unsupported: Schema.optionalKey(Json)
-})
-export type RegexScript = typeof RegexScript.Type
 
 const uniqueBy =
   <A>(key: (a: A) => string, what: string) =>

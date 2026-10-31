@@ -6,6 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, ContextIssue, ForkId, SlotId, VersionId } from "./chat.ts"
 import { NotFound, ServerError } from "./errors.ts"
 import { LlmRequestId, RequestStatus, UsageSource } from "./usage.ts"
+import { ScriptRef } from "./regexScripts.ts"
 
 /** Historical activation decisions; keyword text is scrubbed with the sent request. */
 export const SourceActivation = Schema.Union([
@@ -70,7 +71,9 @@ export const ContextSource = Schema.Struct({
   /** A history message's version, by its place among the slot's versions when it was sent, from 1. */
   version: Schema.optionalKey(Schema.Int),
   /** The library item it came from (a card, lorebook or preset), to link to; absent in older captures. */
-  ref: Schema.optionalKey(Schema.String)
+  ref: Schema.optionalKey(Schema.String),
+  /** The prompt regex scripts that changed its text in this request, in the order they ran; absent: none. */
+  scripts: Schema.optionalKey(Schema.Array(ScriptRef))
 })
 export type ContextSource = typeof ContextSource.Type
 

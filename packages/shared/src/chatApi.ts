@@ -106,7 +106,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   timeline: "originals",
   coverageRail: false,
   outputMacros: false,
-  displayRegex: false,
+  displayRegex: true,
   enterSends: "automatic",
   guidance: false
 }
@@ -576,6 +576,29 @@ export class ChatApi extends RpcGroup.make(
     },
     success: Version,
     error: Schema.Union([...WriteErrors, NotAmendable])
+  }),
+  /**
+   * A version's text and reasoning as they were before regex scripts rewrote them, when they
+   * did (null: unchanged). Only the owner reads it; it's never sent to a model.
+   */
+  Rpc.make("RawVersionText", {
+    payload: { versionId: VersionId },
+    success: Schema.Struct({ content: Schema.NullOr(Schema.String), reasoning: Schema.NullOr(Schema.String) }),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Puts a version's text from before the scripts back, as a new selected version of the slot
+   * (an edit of it, `sourceVersionId` the version), which no script rewrites.
+   */
+  Rpc.make("RestoreRawText", {
+    payload: {
+      slotId: SlotId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      versionId: VersionId,
+      expectedRowVersion: Schema.Int
+    },
+    success: PathEntry,
+    error: Schema.Union([...WriteErrors])
   }),
   Rpc.make("VersionAmendments", {
     payload: { versionId: VersionId },
