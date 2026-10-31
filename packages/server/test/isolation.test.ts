@@ -1962,6 +1962,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
+  StImportPreview: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const paths = [`characters/${owner.user.handle}.png`]
+        assert.deepStrictEqual((yield* owner.api.StImportPreview({ paths })).known, paths)
+        assert.deepStrictEqual((yield* actor.api.StImportPreview({ paths })).known, [])
+        // Naming a folder reads its files: an admin's alone, as ScanStFolder.
+        if (actor.user.role !== "admin")
+          yield* refused(actor.api.StImportPreview({ paths, folder: { root: "/", prefix: "" } }), "Forbidden")
+      })
+  },
   StartStPathImport: {
     adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
   },
@@ -3091,7 +3102,8 @@ const seed = Effect.gen(function* () {
         doc: cardDoc(`${user.handle} card`, { first_mes: "Hello, {{user}}." }),
         schemaVersion: 1,
         origin: "user",
-        sourcePath: null
+        // As an ST import records its file, for StImportPreview's probe.
+        sourcePath: `characters/${user.handle}.png`
       })
       yield* writer.SetEntityTags({ userId: user.id, entityId: card.entityId, tags: ["persona"] })
       // A card with an avatar, a note and a draft, for the editors' probes.

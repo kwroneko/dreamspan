@@ -1188,13 +1188,18 @@ export class StImports extends Context.Service<
             const parsed = yield* formats.st.group(bytes, file.file)
             session.report.file(path, parsed.report)
             const group = parsed.group
-            if (group === null) return result("failed")
+            if (group === null) {
+              session.report.count("group", "failed")
+              return result("failed")
+            }
             const size = [group.name, ...group.members, ...group.disabledMembers, ...group.chats].reduce(
               (sum, text) => sum + text.length + 16,
               0
             )
             if (!hold(session, path, "group", size)) return result("failed", "too much in one import")
             for (const chat of group.chats) session.groups.set(chat, group)
+            // A group isn't kept as an entry, only read for its chats' casts: counted as read.
+            session.report.count("group", "unchanged")
             return result("added")
           })
         ),

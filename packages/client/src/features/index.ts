@@ -11,6 +11,7 @@ import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
+import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
@@ -36,6 +37,7 @@ export const registerFeatures = () => {
   snippets.register()
   bin.register()
   connections.register()
+  firstRun.register()
   costs.register()
   credentials.register()
   network.register()

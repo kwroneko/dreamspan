@@ -16,13 +16,15 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name").fill("Models test")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
-  await page.getByRole("radio", { name: "No key" }).click()
+  // Left empty, the key is optional for this kind: no key is sent.
   await page.getByRole("button", { name: "Create connection" }).click()
 
+  // Creating it fetches the models, and the first becomes the default for new chats.
   const models = page.getByRole("list", { name: "Models" })
-  await expect(page.getByText("No models")).toBeVisible()
+  await expect(page.getByText("Found 2 models.")).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "for new chats" })).toContainText("Using Fake Large")
   await page.getByRole("button", { name: "Refresh from provider" }).click()
-  await expect(page.getByText("2 added, 0 updated")).toBeVisible()
+  await expect(page.getByText("0 added, 2 updated")).toBeVisible()
   await expect(models.getByText("Fake Large")).toBeVisible()
   // The listed context, from the provider; the output limit nobody reported is marked unknown.
   await expect(models.locator("li", { hasText: "Fake Large" })).toContainText("Context 131.1k")
@@ -57,10 +59,8 @@ test("model generation settings take typed decimals and keep the reply length ap
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name").fill("Settings test")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
-  await page.getByRole("radio", { name: "No key" }).click()
   await page.getByRole("button", { name: "Create connection" }).click()
-  await page.getByRole("button", { name: "Refresh from provider" }).click()
-  await expect(page.getByText("2 added, 0 updated")).toBeVisible()
+  await expect(page.getByText("Found 2 models.")).toBeVisible()
 
   const models = page.getByRole("list", { name: "Models" })
   const dialog = page.getByRole("dialog")

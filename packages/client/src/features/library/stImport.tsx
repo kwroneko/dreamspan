@@ -11,13 +11,14 @@ import type { StRoot } from "@rp/shared/stFolder.ts"
 import type {
   StFolderEntry,
   StHiddenRun,
+  StImportedChat,
   StImportJob,
   StImportJobDetail,
   StImportReport,
   StLinkChoice,
   StNotSent
 } from "@rp/shared/stImportApi.ts"
-import { stPlan } from "@rp/shared/stPlan.ts"
+import { type StSentKind, stPlan, stPlanKinds } from "@rp/shared/stPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Context, Effect } from "effect"
 import { AsyncResult, AtomRegistry } from "effect/reactivity"
@@ -32,6 +33,7 @@ import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
+import { readableChatTitle } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
 import { FolderBrowser } from "./FolderBrowser.tsx"
@@ -40,6 +42,7 @@ import {
   megabytes,
   percentOf,
   ST_IMPORTS,
+  ST_PREVIEW,
   STATUS_LABELS,
   STATUS_TONES,
   stImportsAtom,
@@ -57,17 +60,50 @@ import {
   stRoots
 } from "./stUpload.ts"
 
+/** The report's kinds, as `StImportReport.counts` names them. */
 const KINDS: ReadonlyArray<readonly [string, string]> = [
   ["card", "Cards"],
   ["persona", "Personas"],
+  ["chat", "Chats"],
+  ["group_chat", "Group chats"],
+  ["group", "Groups"],
   ["character_note", "Character author's notes"],
   ["lorebook", "Lorebooks"],
-  ["preset", "Presets"],
+  ["preset", "Presets"]
+]
+
+/** The preview's kinds, as the folder's files are found (`stPlan`). */
+const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
+  ["card", "Cards"],
+  ["persona_avatar", "Personas"],
   ["chat", "Chats"],
-  ["group_chat", "Group chats"]
+  ["group_chat", "Group chats"],
+  ["group", "Groups"],
+  ["world", "Lorebooks"],
+  ["preset", "Presets"],
+  ["settings", "Settings"]
 ]
 
 const OUTCOMES = ["added", "updated", "failed"] as const
+
+/** How the report words each outcome; `unchanged` for a group is a group read for its chats. */
+const OUTCOME_WORDS = { added: "added", updated: "updated", unchanged: "already here", failed: "failed" }
+// Not `skipped`: the report holds only what the user must act on (DESIGN §1.4), and skipped
+// chats hold only a greeting.
+const SHOWN_OUTCOMES = ["added", "updated", "unchanged", "failed"] as const
+
+/** Where the folder browser starts: the folder last looked in on this device, else the newest path import's. */
+const LAST_FOLDER = "rp.st-import.folder"
+
+const lastFolder = (jobs: ReadonlyArray<StImportJob>) => {
+  try {
+    const stored = localStorage.getItem(LAST_FOLDER)
+    if (stored) return stored
+  } catch {
+    // Storage refused (a private window): the newest import's folder still serves.
+  }
+  return jobs.find((job) => job.mode === "path")?.source ?? null
+}
 
 const TONES = { info: "neutral", warning: "warning", error: "danger" } as const
 
@@ -180,12 +216,14 @@ const linkUploaded = async (importId: string, path: string, card: EntityId | "no
 
 // --- The report
 
-/** What the import did, in one line per kind: what changed and what failed. Details aren't listed. */
+/** What the import did, in one line per kind: what changed, what was already here, what failed. Details aren't listed. */
 function Counts({ report }: { report: StImportReport }) {
   const rows = KINDS.flatMap(([kind, label]) => {
     const count = report.counts[kind]
-    const shown = count ? OUTCOMES.filter((outcome) => count[outcome] > 0) : []
-    return count && shown.length ? [{ kind, label, text: shown.map((o) => `${count[o]} ${o}`).join(", ") }] : []
+    const shown = count ? SHOWN_OUTCOMES.filter((outcome) => count[outcome] > 0) : []
+    const words = (outcome: (typeof SHOWN_OUTCOMES)[number]) =>
+      kind === "group" && outcome === "unchanged" ? "read for their chats" : OUTCOME_WORDS[outcome]
+    return count && shown.length ? [{ kind, label, text: shown.map((o) => `${count[o]} ${words(o)}`).join(", ") }] : []
   })
   return rows.length ? (
     <ul aria-label="Imported" className="flex flex-col gap-1.5 text-sm">
@@ -197,6 +235,30 @@ function Counts({ report }: { report: StImportReport }) {
     </ul>
   ) : (
     <p className="text-sm text-muted">Nothing new: everything was imported as it is before.</p>
+  )
+}
+
+/** Where to go once an import is in: the characters, and the newest imported chat. */
+function NextSteps({ latestChat }: { latestChat: StImportedChat | null }) {
+  return (
+    <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
+      <Link to="/" className={buttonClass(latestChat ? "secondary" : "primary")}>
+        Open your characters
+      </Link>
+      {latestChat && (
+        <Link
+          to="/chats/$chatId"
+          params={{ chatId: latestChat.chatId }}
+          // The chat's name wraps on a phone rather than being cut off.
+          className={`${buttonClass("primary")} h-auto! min-h-9 max-w-full py-2 text-left whitespace-normal!`}
+        >
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {/* As the chat list names it, never ST's file name (DESIGN §2.1). */}
+            Continue your latest chat{latestChat.title ? `: ${readableChatTitle(latestChat.title)}` : ""}
+          </span>
+        </Link>
+      )}
+    </div>
   )
 }
 
@@ -328,7 +390,7 @@ function ReportActions({
                     params={{ chatId: run.chatId }}
                     className="font-medium text-accent underline-offset-4 [overflow-wrap:anywhere] hover:underline"
                   >
-                    {run.title}
+                    {readableChatTitle(run.title)}
                   </Link>
                   <span className="text-sm text-muted">
                     {run.hidden} messages hidden.{" "}
@@ -522,6 +584,7 @@ function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionPro
             <Card>
               <CardHeader title="Report" />
               <Counts report={detail.report} />
+              <NextSteps latestChat={detail.latestChat} />
             </Card>
           )}
           <NotSentList notSent={detail.notSent} />
@@ -573,6 +636,120 @@ function JobSection({ opened, open }: StImportSectionProps) {
 
 // --- Starting one
 
+type Plan = ReturnType<typeof stPlan<{ path: string; size: number }>>
+
+/** At most this many paths go to StImportPreview; any beyond count as new. */
+const PREVIEW_PATHS = 50_000
+
+const cell = "px-2 py-1.5 text-right tabular-nums"
+
+/**
+ * The folder by kind: how many files, how many are new, how many earlier imports hold. A
+ * folder named by its path (`folder`) is read too: files an earlier import holds under
+ * another name, and chats holding only a greeting, which no import takes.
+ */
+function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; prefix: string } | null }) {
+  const atom = useMemo(
+    () =>
+      AppClient.query(
+        "StImportPreview",
+        {
+          paths: plan.send.slice(0, PREVIEW_PATHS).map((entry) => entry.path),
+          ...(folder === null ? {} : { folder })
+        },
+        { reactivityKeys: [ST_PREVIEW] }
+      ),
+    // The folder is a new object per render; its root and prefix are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, folder?.root, folder?.prefix]
+  )
+  const result = useAtomValue(atom)
+  const known = AsyncResult.isSuccess(result) ? new Set(result.value.known) : null
+  const kinds = stPlanKinds(
+    plan.send,
+    known ?? new Set(),
+    AsyncResult.isSuccess(result) ? new Set(result.value.skipped) : new Set()
+  )
+  const rows = FOLDER_KINDS.flatMap(([kind, label]) => {
+    const count = kinds.get(kind)
+    return count === undefined ? [] : [{ kind, label, ...count }]
+  })
+  const bytes = plan.send.reduce((sum, entry) => sum + entry.size, 0)
+  const fresh = rows.reduce(
+    (sum, row) => sum + (row.kind === "settings" || row.kind === "group" ? 0 : row.files - row.known - row.skipped),
+    0
+  )
+  const skipped = rows.reduce((sum, row) => sum + row.skipped, 0)
+  const here = rows.reduce((sum, row) => sum + row.known, 0)
+  const pending = known === null ? (AsyncResult.isFailure(result) ? "?" : "…") : null
+  return (
+    <div className="flex flex-col gap-2">
+      <table aria-label="What's in the folder" className="w-full text-sm">
+        <thead className="text-muted">
+          <tr className="border-b border-border">
+            <th scope="col" className="px-2 py-1.5 text-left font-medium">
+              Kind
+            </th>
+            <th scope="col" className={`${cell} font-medium`}>
+              In the folder
+            </th>
+            <th scope="col" className={`${cell} font-medium`}>
+              New
+            </th>
+            <th scope="col" className={`${cell} font-medium`}>
+              Already here
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.kind} className="border-b border-border last:border-b-0">
+              <th scope="row" className="px-2 py-1.5 text-left font-medium">
+                {row.label}
+              </th>
+              <td className={cell}>{row.files}</td>
+              {row.kind === "settings" || row.kind === "group" ? (
+                // Not kept as entries: read for what they say about the rest.
+                <td colSpan={2} className="px-2 py-1.5 text-right text-muted">
+                  read on every import
+                </td>
+              ) : (
+                <>
+                  <td
+                    className={`${cell} ${row.files - row.known - row.skipped > 0 && pending === null ? "font-semibold" : ""}`}
+                  >
+                    {pending ?? row.files - row.known - row.skipped}
+                  </td>
+                  <td className={`${cell} text-muted`}>{pending ?? row.known}</td>
+                </>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-sm text-muted">
+        {plan.send.length} files ({megabytes(bytes)})
+        {plan.unsupported.length > 0 &&
+          `, and ${plan.unsupported.length} that only text completion uses, which aren't read`}
+        .{" "}
+        {known === null
+          ? AsyncResult.isFailure(result)
+            ? "What's already here couldn't be read; importing still adds only what's new."
+            : null
+          : fresh === 0
+            ? here === 0
+              ? "Nothing here to import."
+              : "Everything here is already imported. Importing again takes in what changed since: new messages, edited cards."
+            : here === 0
+              ? `${fresh} new to import.`
+              : `${fresh} new to import. What's already here is read again, and only what changed in it goes in.`}
+        {skipped > 0 &&
+          ` ${skipped} ${skipped === 1 ? "chat holds" : "chats hold"} only a greeting, as ST makes one when a card is opened: no import takes ${skipped === 1 ? "it" : "them"}.`}
+      </p>
+    </div>
+  )
+}
+
 type Chosen =
   | { readonly _tag: "Path"; readonly root: string; readonly files: ReadonlyArray<StFolderEntry> }
   | { readonly _tag: "Picked"; readonly files: ReadonlyArray<StFound> }
@@ -583,14 +760,18 @@ function StartSection({ open }: StImportSectionProps) {
   const admin = useSession().user.role === "admin"
   const jobs = useAtomValue(stImportsAtom)
   const running = AsyncResult.isSuccess(jobs) && jobs.value.some((job) => job.status === "running")
+  // The folder last looked in (on this device, else the newest path import's), so coming back
+  // goes on from there.
+  const last = AsyncResult.isSuccess(jobs) ? lastFolder(jobs.value) : null
   // Null until the user types or opens a folder: the field shows where the browser starts
-  // (IMPORT_START_DIR, else the home folder), so a deployment can point it at ST's data.
+  // (the last folder, else IMPORT_START_DIR, else the home folder), so a deployment can point it at ST's data.
   const [typedPath, setFolderPath] = useState<string | null>(null)
   const startAtom = useMemo(() => AppClient.query("ListFolder", { path: null }), [])
   const start = useAtomValue(startAtom)
-  const folderPath = typedPath ?? (AsyncResult.isSuccess(start) ? start.value.path : "")
-  // Where the browser starts: a typed folder once looked in; null is the home folder.
+  const folderPath = typedPath ?? last ?? (AsyncResult.isSuccess(start) ? start.value.path : "")
+  // Where the browser starts: a typed folder once looked in, else the last folder; null is the home folder.
   const [browsed, setBrowsed] = useState<string | null>(null)
+  const browserStart = browsed ?? last
   const [chosen, setChosen] = useState<Chosen | null>(null)
   const [roots, setRoots] = useState<ReadonlyArray<StRoot>>([])
   const [prefix, setPrefix] = useState<string | null>(null)
@@ -610,12 +791,22 @@ function StartSection({ open }: StImportSectionProps) {
       .run((client) => client("ScanStFolder", { path: folderPath.trim() }))
       .finally(() => setScanning(false))
     if (!scanned.ok) return
+    try {
+      localStorage.setItem(LAST_FOLDER, scanned.value.root)
+    } catch {
+      // Not kept on this device: the newest import's folder still is.
+    }
+    // What's already here is read again: an import may have ended since the last look.
+    invalidateKeys(registry, [ST_PREVIEW])
     choose({ _tag: "Path", root: scanned.value.root, files: scanned.value.files })
     // The browser shows a typed folder once it's known to be one.
     if (scanned.value.root !== browsed) setBrowsed(scanned.value.root)
   }
 
-  const plan = prefix === null || chosen === null ? null : stPlan<{ path: string; size: number }>(chosen.files, prefix)
+  const plan = useMemo(
+    () => (prefix === null || chosen === null ? null : stPlan<{ path: string; size: number }>(chosen.files, prefix)),
+    [chosen, prefix]
+  )
 
   const runImport = async () => {
     if (chosen === null || prefix === null) return
@@ -686,16 +877,19 @@ function StartSection({ open }: StImportSectionProps) {
               </Button>
             </form>
             <div className="mt-3">
-              <FolderBrowser
-                key={browsed ?? ""}
-                start={browsed}
-                disabled={false}
-                onOpen={(path) => {
-                  setFolderPath(path)
-                  // What was found in another folder no longer applies.
-                  choose(null)
-                }}
-              />
+              {/* After the imports are read, so it starts at the last folder rather than moving there. */}
+              {!AsyncResult.isInitial(jobs) && (
+                <FolderBrowser
+                  key={browserStart ?? ""}
+                  start={browserStart}
+                  disabled={false}
+                  onOpen={(path) => {
+                    setFolderPath(path)
+                    // What was found in another folder no longer applies.
+                    choose(null)
+                  }}
+                />
+              )}
             </div>
             <p className="mt-4 mb-2 text-sm text-muted">
               Using a browser on another computer, where the folder is? Choose it here instead, and it's sent from this
@@ -738,10 +932,10 @@ function StartSection({ open }: StImportSectionProps) {
               </Field>
             )}
             {plan && (
-              <p className="text-sm text-muted">
-                {plan.send.length} files to import ({megabytes(plan.send.reduce((sum, f) => sum + f.size, 0))})
-                {plan.unsupported.length > 0 && `, ${plan.unsupported.length} that only text completion uses`}.
-              </p>
+              <FolderPreview
+                plan={plan}
+                folder={chosen?._tag === "Path" && prefix !== null ? { root: chosen.root, prefix } : null}
+              />
             )}
             {chosen?._tag === "Path" ? (
               <p className="text-sm text-muted">The server reads the folder and imports it, whatever this tab does.</p>
@@ -861,7 +1055,7 @@ export function StImportPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Import ST data</h1>
         <Link to="/import" className={buttonClass("ghost")}>
-          Back to importing files
+          Back to Import
         </Link>
       </header>
       <SlotOutlet slot={stImportSections} props={{ opened, open }} />

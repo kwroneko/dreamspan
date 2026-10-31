@@ -8,10 +8,10 @@ import { homedir } from "node:os"
 import { Effect, Option } from "effect"
 import { AppConfig } from "../config.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
-import { Writer } from "../db/Database.ts"
+import { Reader, Writer } from "../db/Database.ts"
 import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImports } from "../importer/StImports.ts"
-import { listFolder, scanStFolder } from "../importer/stFolderDisk.ts"
+import { listFolder, previewStFiles, scanStFolder } from "../importer/stFolderDisk.ts"
 
 /** Reading a folder by its path is for admins: anyone else could read any user's files. */
 const adminOnly = Effect.flatMap(CurrentUser, (user) =>
@@ -24,6 +24,7 @@ export const makeStImportHandlers = Effect.gen(function* () {
   const imports = yield* StImports
   const jobs = yield* StImportJobs
   const writer = yield* Writer
+  const reader = yield* Reader
   const hub = yield* ChatHub
   const config = yield* AppConfig
   const start = Option.getOrElse(config.importStartDir, homedir)
@@ -53,6 +54,35 @@ export const makeStImportHandlers = Effect.gen(function* () {
       Effect.flatMap(adminOnly, (user) => jobs.link(user, importId, path, card)),
     ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path, start)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
+    // The user's own records only: no file is read, so it isn't for admins alone.
+    StImportPreview: ({ paths, folder }) =>
+      Effect.gen(function* () {
+        const user = folder === undefined ? yield* CurrentUser : yield* adminOnly
+        const sources = yield* reader.StImportSources({ userId: user.id })
+        const known = new Set([
+          ...sources.library.map((entry) => entry.sourcePath),
+          ...sources.chats.filter((record) => record.complete).map((record) => record.source)
+        ])
+        const found = paths.filter((path) => known.has(path))
+        if (folder === undefined) return { known: found, skipped: [] }
+        const hashes = new Set(
+          sources.library.flatMap((entry) =>
+            entry.sourceHash === null || entry.binned ? [] : [`${entry.kind}:${entry.sourceHash}`]
+          )
+        )
+        const read = yield* previewStFiles(
+          folder,
+          paths.filter((path) => !known.has(path)),
+          hashes
+        )
+        return { known: [...found, ...read.same], skipped: read.skipped }
+      }).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
+          Effect.logError("StImportPreview failed", error).pipe(
+            Effect.andThen(Effect.fail(new ServerError({ message: "The folder's preview couldn't be read." })))
+          )
+        )
+      ),
     GetStImportReport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => imports.report(user, importId)),
     UnhideImportedRun: ({ chatId, throughSlotId, importId }) =>
       Effect.gen(function* () {

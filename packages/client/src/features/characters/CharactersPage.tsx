@@ -1,12 +1,14 @@
 import { useAtomRefresh } from "@effect/atom-react"
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { AsyncView, FailureView } from "../../actions.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
+import { homeIntro } from "./homeSlots.ts"
 import { sortCards } from "./cardRecency.ts"
 import { CharacterTile, PAGE_ROWS, shellAtom, useShellForks, type ShellLibrary } from "./shellData.tsx"
 import { GroupTile, PinnedChats, ShowMore, SortSwitch, type ShellSort } from "./ShellBrowser.tsx"
@@ -16,6 +18,16 @@ function Home({ data }: { data: ShellLibrary }) {
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<ShellSort>("recent")
   const [search, setSearch] = useState("")
+  // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
+  const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
+  // Then the filters and search, having nothing to work on, stay out of the way too.
+  if (intro && data.cards.length === 0)
+    return (
+      <div className="flex flex-col gap-5">
+        <SlotOutlet slot={homeIntro} props={{ data }} />
+        <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
+      </div>
+    )
   const needle = search.trim().toLowerCase()
   const cards = sortCards(
     data.cards.filter(
@@ -28,6 +40,7 @@ function Home({ data }: { data: ShellLibrary }) {
   )
   return (
     <div className="flex flex-col gap-5">
+      <SlotOutlet slot={homeIntro} props={{ data }} />
       <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
       <div>
         <Segmented

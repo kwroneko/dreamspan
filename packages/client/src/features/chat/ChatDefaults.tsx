@@ -1,4 +1,4 @@
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { accountSettingSections, summarySettingFields } from "./presentation.tsx"
 // Settings → Chats: what applies to all of the user's chats (DESIGN §5.2, §8): the model and
@@ -13,6 +13,7 @@ import { BUILTIN_PRESET_LABEL, type GenerationDefaults, type GenerationDefaultsC
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { LCM_BUILTIN, lcmMisfits, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import { Effect } from "effect"
+import { Link } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useTitle } from "../shell.tsx"
@@ -62,7 +63,7 @@ export function ChatDefaultsPage() {
   const change = (next: GenerationDefaultsChange) => {
     const write = queue.current.then(() =>
       action
-        .run((client) => client("ChangeGenerationDefaults", { change: next }))
+        .run((client) => client("ChangeGenerationDefaults", { change: next }), ["settings"])
         .then((result) => {
           if (result.ok) setDefaults(result.value)
           return result.ok
@@ -75,7 +76,7 @@ export function ChatDefaultsPage() {
   const writeLcm: Write = (lcm) => {
     const write = queue.current.then(() =>
       action
-        .run((client) => client("ChangeGenerationDefaults", { change: { lcm } }))
+        .run((client) => client("ChangeGenerationDefaults", { change: { lcm } }), ["settings"])
         .then((result) => {
           if (result.ok) setDefaults(result.value)
           return result.ok ? null : result.error.message
@@ -103,16 +104,24 @@ export function ChatDefaultsPage() {
     <div className="flex flex-col gap-6">
       <Card>
         <CardHeader
-          title="Current model and prompt preset"
-          description="These account settings apply to every chat. You can also switch them in the composer."
+          title="Replies"
+          description="What every chat's replies use. You can also switch the model and preset in the composer."
         />
         <div className="flex flex-col gap-4">
           <Field
             label="Default model"
             description={
-              models.length === 0
-                ? "Add a connection with models first, in Connections."
-                : "Choose a model to generate replies."
+              models.length === 0 ? (
+                <>
+                  Add a connection with models first, in{" "}
+                  <Link to="/settings/connections" className="text-accent underline-offset-4 hover:underline">
+                    Connections
+                  </Link>
+                  .
+                </>
+              ) : (
+                "The model that writes replies."
+              )
             }
           >
             <Select
@@ -134,6 +143,17 @@ export function ChatDefaultsPage() {
               value={defaults ? (defaults.preset ?? NONE) : null}
               placeholder={BUILTIN_PRESET_LABEL}
               onValueChange={(value) => void change({ preset: value === NONE ? null : (value as LibraryRef["id"]) })}
+            />
+          </Field>
+          <Field
+            label="Refusal judge"
+            description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught."
+          >
+            <Select
+              items={items}
+              value={defaults ? choice(defaults.judge) : null}
+              placeholder="None"
+              onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
             />
           </Field>
         </div>
@@ -199,17 +219,6 @@ export function SummaryDefaults({
         description="For all your chats with summaries on. A chat turns summaries on or off in its side panel."
       />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
-        <Field
-          label="Refusal judge"
-          description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught."
-        >
-          <Select
-            items={items}
-            value={defaults ? choice(defaults.judge) : null}
-            placeholder="None"
-            onValueChange={(value) => void change({ judge: value === NONE ? null : parseModelValue(value) })}
-          />
-        </Field>
         <Field label="Fallback summarizer" description="Tried once when a summary keeps failing on its own model.">
           <Select
             items={items}
@@ -232,11 +241,12 @@ export function SummaryDefaults({
         >
           <Textarea value={tail} onChange={(event) => type(event.target.value)} rows={5} disabled={!defaults} />
         </Field>
-        <UserDraftStatus draft={instructionDraft} />
+        <UserDraftNotices draft={instructionDraft} />
         <div className="flex flex-wrap items-center gap-3">
           <Button disabled={!defaults || pending || !unsaved} onClick={() => void saveTail()}>
             Save summarization instruction
           </Button>
+          <UserDraftUndo draft={instructionDraft} />
           {saved && !unsaved ? (
             <span role="status" className="text-sm text-muted">
               Saved.
