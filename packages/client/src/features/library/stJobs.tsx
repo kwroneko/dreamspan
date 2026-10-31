@@ -11,7 +11,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useContext, useEffect } from "react"
 import { invalidateKeys } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
-import { Spinner } from "../../ui/Spinner.tsx"
+import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 
 /** The reactivity key of the import jobs. */
@@ -124,12 +124,7 @@ export function StImportIndicator() {
         {running ? `Importing ST data · ${percent}%` : endedLine(job)}
       </span>
       {running && (
-        <progress
-          className="hidden h-1.5 w-32 shrink-0 accent-accent sm:block"
-          max={100}
-          value={percent}
-          aria-label="Imported"
-        />
+        <ProgressBar className="hidden h-1.5 w-32 shrink-0 sm:block" max={100} value={percent} label="Imported" />
       )}
       <Link
         to="/import/st"

@@ -43,9 +43,9 @@ function MemberLink({ member }: { member: FamilyMember }) {
 }
 function FamilyTree({ family, entityId }: { family: CardFamily; entityId: EntityId }) {
   const usage = useAtomValue(shellAtom)
-  // The shell counts visible fork views as chats and dates each card by its own speech.
-  // Family metadata alone counts containers, so it disagrees as soon as a chat branches.
-  const forks = AsyncResult.isSuccess(usage) ? usage.value.forks : null
+  // The shell counts visible fork views as chats and dates each card by its Recent, as its
+  // tile does. Family metadata alone counts containers, so it disagrees as soon as a chat branches.
+  const cards = AsyncResult.isSuccess(usage) ? new Map(usage.value.cards.map((c) => [c.card.entityId, c])) : null
   const walk = (parent: EntityId | null, depth = 0): Array<{ member: FamilyMember; depth: number }> =>
     family.members
       .filter((m) => m.parentEntityId === parent)
@@ -53,10 +53,9 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
   return (
     <ul aria-label="Forks tree" className="flex flex-col gap-3">
       {walk(null).map(({ member, depth }) => {
-        const used = forks?.filter((fork) => fork.joined.includes(member.entityId))
-        const spoken = used?.flatMap((fork) => fork.activity.filter((a) => a.entityId === member.entityId))
-        const last =
-          spoken?.reduce<number | null>((latest, a) => (latest === null ? a.at : Math.max(latest, a.at)), null) ?? null
+        const shown = cards?.get(member.entityId)
+        const chats = shown?.card.chats
+        const last = shown?.recentAt ?? null
         return (
           <li
             key={member.entityId}
@@ -75,12 +74,12 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
               </div>
             </div>
             <p className="text-xs text-muted">
-              {used ? (
+              {chats !== undefined ? (
                 <>
-                  {used.length} {used.length === 1 ? "chat" : "chats"} ·{" "}
+                  {chats} {chats === 1 ? "chat" : "chats"} ·{" "}
                   {last === null ? "Never used" : `Last used ${new Date(last).toLocaleDateString()}`}
                 </>
-              ) : AsyncResult.isFailure(usage) ? (
+              ) : AsyncResult.isFailure(usage) || cards !== null ? (
                 "Usage unavailable"
               ) : (
                 "Loading usage…"

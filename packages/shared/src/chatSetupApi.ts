@@ -85,12 +85,26 @@ export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
   latestChatId: ChatId
 }) {}
 
+/** Where a card's tile opens: the line it last spoke, else its latest chat's end. */
+const ShellOpen = Schema.Struct({
+  chatId: ChatId,
+  forkId: Schema.String,
+  leaf: Schema.NullOr(SlotId),
+  slot: Schema.NullOr(SlotId)
+})
+
 /** The independent shell's cards and individual fork rows. */
 export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   /** The shell uses character_version as the subtitle, independent of a legacy ref subtitle. */
   card: CardUsage,
   createdAt: Schema.Number,
-  recentAt: Schema.Number
+  /** Null: the card is in no chat yet, and its tile starts one. */
+  open: Schema.NullOr(ShellOpen),
+  /**
+   * Its Recent: the latest activity in any chat it joined (a fork's `recentAt`), imported dates
+   * included, as ST's date_last_chat; null while it has none. (`card.lastMessageAt` is its own last turn.)
+   */
+  recentAt: Schema.NullOr(Schema.Number)
 }) {}
 export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   forkId: Schema.String,
@@ -124,6 +138,58 @@ export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
   /** Every card some fork's cast names, once, rather than repeated in each of 5,000 rows. */
   people: Schema.Array(CastCard),
   pinsCollapsed: Schema.Boolean
+}) {}
+
+/** The shell's cards without their forks: what home, the grids and Start a chat read (GetShellCards). */
+export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
+  cards: Schema.Array(ShellCard),
+  pinsCollapsed: Schema.Boolean
+}) {}
+
+/**
+ * The lists of fork rows a screen shows (GetShellForks): each a part of the forks in the view's
+ * scope (a card's chats, one chat's forks, or every chat), matching its search.
+ * - `pinned`: the pinned ones, by `sort`;
+ * - `chats`: each chat's current, pinned and named forks, newest first (All chats);
+ * - `just`, `with`, `was`: the scope card's chats by how it is in them, its latest turn first;
+ * - `current`, `peers`, `other`: a chat's current fork, its pinned and named ones, the rest;
+ * - `groups`: forks of two or more characters, current, pinned or named, by `sort`;
+ * - `card`: every fork the scope card joined, its latest turn first, then newest;
+ * - `all`: every fork in scope, newest first.
+ */
+export const ShellSection = Schema.Literals([
+  "pinned",
+  "chats",
+  "just",
+  "with",
+  "was",
+  "current",
+  "peers",
+  "other",
+  "groups",
+  "card",
+  "all"
+])
+export type ShellSection = typeof ShellSection.Type
+const ShellForkSort = Schema.Literals(["recent", "created", "name"])
+export const ShellForksView = Schema.Struct({
+  entity: Schema.NullOr(EntityId),
+  chat: Schema.NullOr(ChatId),
+  /** Only these chats (a list's rows), when given. */
+  chats: Schema.optionalKey(Schema.Array(ChatId).check(Schema.isMaxLength(500))),
+  /** Matched against each fork's name and its cast's names, ignoring case. */
+  search: Schema.String,
+  sort: ShellForkSort,
+  sections: Schema.Array(
+    Schema.Struct({ id: ShellSection, limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5000 })) })
+  ).check(Schema.isMaxLength(12))
+})
+export type ShellForksView = typeof ShellForksView.Type
+export class ShellForks extends Schema.Class<ShellForks>("ShellForks")({
+  /** In the view's order: each section's first `limit` rows, and how many it has. */
+  sections: Schema.Array(Schema.Struct({ id: ShellSection, rows: Schema.Array(ShellFork), total: Schema.Int })),
+  /** Every card the rows' casts name, once. */
+  people: Schema.Array(CastCard)
 }) {}
 
 /** An open id, resolved against the server's role-projection registry when a context is assembled. */
@@ -294,7 +360,10 @@ export class ChatCard extends Schema.Class<ChatCard>("ChatCard")({
 const Errors = [NotFound, ServerError] as const
 
 export class ChatSetupApi extends RpcGroup.make(
+  /** Every card and every fork row at once: for tools and tests; the app pages it (the two below). */
   Rpc.make("GetShellLibrary", { success: ShellLibrary, error: Schema.Union([...Errors]) }),
+  Rpc.make("GetShellCards", { success: ShellCards, error: Schema.Union([...Errors]) }),
+  Rpc.make("GetShellForks", { payload: ShellForksView, success: ShellForks, error: Schema.Union([...Errors]) }),
   Rpc.make("SetChatPin", {
     payload: {
       chatId: ChatId,

@@ -21,7 +21,7 @@ import { stPlan } from "@rp/shared/stPlan.ts"
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Context, Effect } from "effect"
 import { AsyncResult, AtomRegistry } from "effect/reactivity"
-import { useContext, useEffect, useMemo, useState } from "react"
+import { useContext, useEffect, useMemo, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, invalidateKeys, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { sessionAtom, useSession } from "../../session.ts"
@@ -30,7 +30,7 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Spinner } from "../../ui/Spinner.tsx"
+import { ProgressBar, Spinner } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
 import { libraryAtom } from "./data.ts"
@@ -421,11 +421,11 @@ function RunningJob({ job }: { job: StImportJob }) {
           Importing, {job.filesDone} of {job.filesTotal} files · {percentOf(job)}%
         </span>
         {job.currentFile && <span className="text-muted [overflow-wrap:anywhere]">{job.currentFile}</span>}
-        <progress
-          className="h-2 w-full accent-accent"
+        <ProgressBar
+          className="h-2 w-full"
           max={Math.max(1, job.bytesTotal)}
           value={job.bytesDone}
-          aria-label="Imported so far"
+          label="Imported so far"
         />
         <span className="text-muted">
           {megabytes(job.bytesDone)} of {megabytes(job.bytesTotal)}
@@ -545,16 +545,30 @@ function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionPro
 /** The import opened (`?job=`), else the one running. */
 function JobSection({ opened, open }: StImportSectionProps) {
   const result = useAtomValue(stImportsAtom)
-  if (!AsyncResult.isSuccess(result)) return null
+  const top = useRef<HTMLDivElement>(null)
+  // An import opened from the list below shows up here, at the top: on a phone the list is
+  // screens further down, so the page goes to it.
+  useEffect(() => {
+    if (opened !== null) top.current?.scrollIntoView({ block: "start" })
+  }, [opened])
+  if (!AsyncResult.isSuccess(result)) return <div ref={top} />
   const job =
     opened === null ? result.value.find((j) => j.status === "running") : result.value.find((j) => j.id === opened)
-  if (job === undefined)
-    return opened === null ? null : (
-      <Alert tone="warning" title="That import isn't in the list">
-        <p>It was removed from the list. What it imported is still in your library and chats.</p>
-      </Alert>
-    )
-  return job.status === "running" ? <RunningJob job={job} /> : <FinishedJob key={job.id} job={job} open={open} />
+  return (
+    <div ref={top} className="flex scroll-mt-4 flex-col gap-6 empty:hidden">
+      {job === undefined ? (
+        opened !== null && (
+          <Alert tone="warning" title="That import isn't in the list">
+            <p>It was removed from the list. What it imported is still in your library and chats.</p>
+          </Alert>
+        )
+      ) : job.status === "running" ? (
+        <RunningJob job={job} />
+      ) : (
+        <FinishedJob key={job.id} job={job} open={open} />
+      )}
+    </div>
+  )
 }
 
 // --- Starting one
@@ -581,6 +595,7 @@ function StartSection({ open }: StImportSectionProps) {
   const [roots, setRoots] = useState<ReadonlyArray<StRoot>>([])
   const [prefix, setPrefix] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [scanning, setScanning] = useState(false)
 
   const choose = (next: Chosen | null) => {
     const users = next === null ? [] : stRoots(next.files.map((file) => file.path))
@@ -590,7 +605,10 @@ function StartSection({ open }: StImportSectionProps) {
   }
 
   const scan = async () => {
-    const scanned = await action.run((client) => client("ScanStFolder", { path: folderPath.trim() }))
+    setScanning(true)
+    const scanned = await action
+      .run((client) => client("ScanStFolder", { path: folderPath.trim() }))
+      .finally(() => setScanning(false))
     if (!scanned.ok) return
     choose({ _tag: "Path", root: scanned.value.root, files: scanned.value.files })
     // The browser shows a typed folder once it's known to be one.
@@ -662,8 +680,9 @@ function StartSection({ open }: StImportSectionProps) {
                 variant="primary"
                 className="justify-self-start"
                 disabled={folderPath.trim() === "" || action.pending}
+                pending={scanning}
               >
-                Look in this folder
+                {scanning ? "Looking through the folder…" : "Look in this folder"}
               </Button>
             </form>
             <div className="mt-3">

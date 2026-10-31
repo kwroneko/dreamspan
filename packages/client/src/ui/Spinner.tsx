@@ -65,3 +65,33 @@ export function Loading({ label = "Loading…", onRetry }: { label?: string | un
     </div>
   )
 }
+
+/**
+ * How far something is, as a bar in the theme's colours (a native `<progress>` takes the
+ * browser's own, green on Chromium). `value` of `max`.
+ */
+export function ProgressBar({
+  value,
+  max,
+  label,
+  className = ""
+}: {
+  value: number
+  max: number
+  label: string
+  className?: string
+}) {
+  const share = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0
+  return (
+    <div
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      className={`overflow-hidden rounded-full bg-border ${className}`}
+    >
+      <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${share * 100}%` }} />
+    </div>
+  )
+}

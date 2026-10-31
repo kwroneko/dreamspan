@@ -353,6 +353,32 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
       })
   },
+  GetShellCards: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.GetShellCards(), (data) =>
+        assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
+      )
+  },
+  GetShellForks: {
+    probe: (actor, owner) =>
+      Effect.map(
+        actor.api.GetShellForks({
+          entity: null,
+          chat: owner.chat.chatId,
+          chats: [owner.chat.chatId],
+          search: "",
+          sort: "recent",
+          sections: [
+            { id: "all", limit: 100 },
+            { id: "chats", limit: 100 }
+          ]
+        }),
+        (data) => {
+          for (const section of data.sections) assert.strictEqual(section.total, 0)
+          assert.deepStrictEqual(data.people, [])
+        }
+      )
+  },
   SetChatPin: {
     probe: (actor, owner) =>
       refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")

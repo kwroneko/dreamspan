@@ -14,7 +14,7 @@ import { importStPath } from "./support/stUpload.ts"
 const layer = () => serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)
 describe("independent shell reads", () => {
   it.live(
-    "orders character activity independently of unrelated chat activity; preserves Created and advances Recent on revisions",
+    "orders character activity independently of unrelated chat activity; preserves Created; Recent is the latest activity in any chat the card joined, never a revision",
     () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -86,7 +86,11 @@ describe("independent shell reads", () => {
           aria.createdAt,
           (yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === a.entityId)!.createdAt
         )
-        assert.isAtLeast(aria.recentAt, aria.createdAt)
+        // Aria's latest chat activity is Bryn's turn in the first chat, after her own in the second.
+        const latest = Math.max(...data.forks.filter((f) => f.joined.includes(a.entityId)).map((f) => f.recentAt))
+        assert.strictEqual(latest, data.forks.find((f) => f.chat.id === first.chat.id)!.recentAt)
+        assert.strictEqual(aria.recentAt, latest)
+        assert.isNull(data.cards.find((c) => c.card.entityId === versioned.entityId)!.recentAt)
         yield* Effect.sleep("5 millis")
         const me = yield* api.Whoami()
         yield* (yield* Writer).EditRef({
@@ -99,7 +103,7 @@ describe("independent shell reads", () => {
         })
         const changed = (yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === a.entityId)!
         assert.strictEqual(changed.createdAt, aria.createdAt)
-        assert.isAbove(changed.recentAt, aria.recentAt)
+        assert.strictEqual(changed.recentAt, aria.recentAt)
       }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 

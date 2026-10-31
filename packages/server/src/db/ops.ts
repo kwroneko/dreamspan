@@ -13,7 +13,7 @@ import {
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
-import { RoleProjectionOption, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import { RoleProjectionOption, ShellCards, ShellForks, ShellForksView, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { LcmSettingsChange, ModelChoice } from "@rp/shared/lcmSettings.ts"
 import {
   LcmCoverage,
@@ -422,6 +422,9 @@ const ChatSummariesAt = Schema.Struct({
 
 /** `ShellLibrary` and the summaries the read had to compute, which the caller stores (never sent to the client). */
 export const ShellLibraryRead = Schema.Struct({ ...ShellLibrary.fields, fresh: Schema.Array(ChatSummariesAt) })
+/** `ShellCards` and `ShellForks` with the summaries the read computed, as `ShellLibraryRead`. */
+const ShellCardsRead = Schema.Struct({ ...ShellCards.fields, fresh: Schema.Array(ChatSummariesAt) })
+const ShellForksRead = Schema.Struct({ ...ShellForks.fields, fresh: Schema.Array(ChatSummariesAt) })
 
 export class WriteOps extends RpcGroup.make(
   Rpc.make("ChangeBinLimit", {
@@ -2248,6 +2251,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },
     success: ShellLibraryRead,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ShellCards", { payload: { userId: UserId }, success: ShellCardsRead, error: StorageError }),
+  Rpc.make("ShellForks", {
+    payload: { userId: UserId, view: ShellForksView },
+    success: ShellForksRead,
+    error: StorageError
   }),
   Rpc.make("GetSummaryDetails", {
     payload: { userId: UserId, summaryId: SummaryId },

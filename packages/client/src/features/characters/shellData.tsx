@@ -1,34 +1,86 @@
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import type { ShellCard, ShellFork as ShellForkRow, ShellLibrary as ShellLibraryRows } from "@rp/shared/chatSetupApi.ts"
+import type {
+  ShellCard,
+  ShellCards,
+  ShellFork as ShellForkRow,
+  ShellForks,
+  ShellForksView,
+  ShellSection
+} from "@rp/shared/chatSetupApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { AsyncResult, Atom } from "effect/reactivity"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
-import { lastChatAt } from "./cardRecency.ts"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
-export type ShellLibrary = Omit<ShellLibraryRows, "forks" | "people"> & {
-  readonly forks: ReadonlyArray<ShellFork>
-  /** Each card's latest chat activity, the characters' Recent key (cardRecency.ts). */
-  readonly lastChatAt: ReadonlyMap<string, number>
+/** The shell's cards (GetShellCards): home, the grids, Start a chat and the card pages read them. */
+export type ShellLibrary = ShellCards
+
+const SHELL_KEYS = ["chats", "library", "pins"]
+
+/** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
+export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
+
+/** A section's rows, with their cast's cards, and how many it has. */
+export interface ShellRows {
+  readonly rows: ReadonlyArray<ShellFork>
+  readonly total: number
 }
-const withCast = (data: ShellLibraryRows): ShellLibrary => {
+const withCast = (data: ShellForks): ReadonlyMap<ShellSection, ShellRows> => {
   const people = new Map(data.people.map((c) => [c.entityId, c]))
+  return new Map(
+    data.sections.map((section) => [
+      section.id,
+      {
+        total: section.total,
+        rows: section.rows.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) }))
+      }
+    ])
+  )
+}
+/** One atom per view, by its JSON: each screen's lists are read with only the rows they show. */
+const shellForksAtom = Atom.family((key: string) =>
+  Atom.mapResult(
+    AppClient.query("GetShellForks", JSON.parse(key) as ShellForksView, {
+      reactivityKeys: SHELL_KEYS,
+      timeToLive: "2 minutes"
+    }),
+    withCast
+  )
+)
+/** Rows shown at first, and added by each "Show more". */
+export const PAGE_ROWS = 100
+const empty: ShellRows = { rows: [], total: 0 }
+
+/**
+ * The fork rows of `view`'s sections. While a longer list or another search of the same lists
+ * is read, the last answer stays, so lists don't flash a spinner; another scope shows none
+ * until its own. `loading`: nothing to show yet. `failure`: the read's error, for a retry.
+ */
+export function useShellForks(view: ShellForksView) {
+  const atom = shellForksAtom(JSON.stringify(view))
+  const result = useAtomValue(atom)
+  const lists = JSON.stringify([view.entity, view.chat, view.chats, view.sort, view.sections.map((s) => s.id)])
+  const [last, setLast] = useState<{ lists: string; data: ReadonlyMap<ShellSection, ShellRows> } | null>(null)
+  // Kept as React's "state from the previous render": set again only when the answer changes.
+  if (AsyncResult.isSuccess(result) && (last?.data !== result.value || last.lists !== lists))
+    setLast({ lists, data: result.value })
+  const shown = AsyncResult.isSuccess(result) ? { lists, data: result.value } : last
+  const data = shown?.lists === lists ? shown.data : null
   return {
-    ...data,
-    forks: data.forks.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) })),
-    lastChatAt: lastChatAt(data.forks)
+    atom,
+    loading: data === null,
+    waiting: !AsyncResult.isSuccess(result) || result.waiting,
+    failure: AsyncResult.isFailure(result) ? result : null,
+    section: (id: ShellSection) => data?.get(id) ?? empty
   }
 }
-export const shellAtom = Atom.mapResult(
-  AppClient.query("GetShellLibrary", undefined, { reactivityKeys: ["chats", "library", "pins"] }),
-  withCast
-)
+
 type Scope = { entity: EntityId | null; chat: string | null }
 type SidebarSearch = { character?: string; forks?: string; side?: string }
 
@@ -79,18 +131,6 @@ export function useShellNavigation() {
   }
 }
 
-const latestFor = (card: ShellCard, forks: ReadonlyArray<ShellFork>) =>
-  [...forks.filter((f) => f.joined.includes(card.card.entityId))].sort(
-    (a, b) =>
-      (b.activity.find((x) => x.entityId === card.card.entityId)?.at ?? -1) -
-        (a.activity.find((x) => x.entityId === card.card.entityId)?.at ?? -1) ||
-      Number(b.leaf !== null) - Number(a.leaf !== null) ||
-      Number(a.activity.find((x) => x.entityId === card.card.entityId)?.category === "was") -
-        Number(b.activity.find((x) => x.entityId === card.card.entityId)?.category === "was") ||
-      Number(b.current) - Number(a.current) ||
-      b.createdAt - a.createdAt
-  )[0]
-
 export function useOpenCharacter() {
   const navigation = useShellNavigation()
   const result = useAtomValue(shellAtom)
@@ -99,7 +139,7 @@ export function useOpenCharacter() {
   return (entity: EntityId) => {
     navigation.picked()
     const card = AsyncResult.isSuccess(result) ? result.value.cards.find((c) => c.card.entityId === entity) : undefined
-    const latest = card && AsyncResult.isSuccess(result) ? latestFor(card, result.value.forks) : undefined
+    const latest = card?.open ?? null
     const panel = `card:${entity}`
     try {
       localStorage.setItem(`rp.chatPanel.${userId}`, panel)
@@ -109,16 +149,14 @@ export function useOpenCharacter() {
     if (latest)
       void navigate({
         to: "/chats/$chatId",
-        params: { chatId: latest.chat.id },
+        params: { chatId: latest.chatId },
         search: {
           ...sidebarCleared,
           character: entity,
           fork: latest.forkId,
           panel,
           ...(latest.leaf ? { leaf: latest.leaf } : {}),
-          ...(latest.activity.find((a) => a.entityId === entity)?.slot
-            ? { slot: latest.activity.find((a) => a.entityId === entity)!.slot }
-            : {})
+          ...(latest.slot ? { slot: latest.slot } : {})
         }
       })
     else

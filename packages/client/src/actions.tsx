@@ -5,7 +5,7 @@ import { notifyLibraryChange } from "./libraryChanges.ts"
 import { RegistryContext, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Cause, Context, Effect, Exit } from "effect"
 import { AsyncResult, Atom, AtomRegistry, Reactivity } from "effect/reactivity"
-import { type ReactNode, useContext, useEffect, useState } from "react"
+import { type ReactNode, useContext, useEffect, useRef, useState } from "react"
 import { type AppError, describeCause } from "./errors.ts"
 import { AppClient } from "./rpc.ts"
 import { sessionAtom } from "./session.ts"
@@ -91,13 +91,70 @@ export function ErrorAlert({ error, title, actions }: { error: AppError | null; 
   )
 }
 
-export function FailureView({ cause, onRetry }: { cause: Cause.Cause<unknown>; onRetry: () => void }) {
+/** When reads were last asked again by themselves after the connection dropped (see FailureView). */
+const autoRetries: Array<number> = []
+const AUTO_RETRIES = 5
+const AUTO_RETRY_WINDOW_MS = 60_000
+
+/** Whether the server answers its health check, over plain HTTP, within a few seconds. */
+const serverAnswers = async () => {
+  try {
+    const response = await fetch("/healthz", { cache: "no-store", signal: AbortSignal.timeout(5_000) })
+    return response.ok
+  } catch {
+    return false
+  }
+}
+
+/**
+ * A query's failure, with a retry. A read lost with the connection isn't a dead server: the
+ * socket drops when the server's answers are slow to arrive (a missed ping), and reconnects.
+ * While the server answers its health check, the read is asked again by itself and this says
+ * `still` with a spinner; "Can't reach the server" shows only when the server doesn't answer,
+ * or when the connection keeps dropping (more than five times a minute).
+ */
+export function FailureView({
+  cause,
+  onRetry,
+  still = "Still loading…"
+}: {
+  cause: Cause.Cause<unknown>
+  onRetry: () => void
+  still?: string | undefined
+}) {
   const registry = useContext(RegistryContext)
   const error = describeCause(cause)
   const unauthorized = error.tag === "Unauthorized"
+  const transport = error.tag === "RpcClientError"
+  const [reachable, setReachable] = useState<boolean | null>(null)
+  const retry = useRef(onRetry)
+  useEffect(() => {
+    retry.current = onRetry
+  })
   useEffect(() => {
     if (unauthorized) registry.refresh(sessionAtom)
   }, [unauthorized, registry])
+  useEffect(() => {
+    if (!transport) return
+    let live = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    void serverAnswers().then((answers) => {
+      if (!live) return
+      const now = Date.now()
+      while (autoRetries.length > 0 && autoRetries[0]! < now - AUTO_RETRY_WINDOW_MS) autoRetries.shift()
+      const again = answers && autoRetries.length < AUTO_RETRIES
+      setReachable(again)
+      if (again) {
+        autoRetries.push(now)
+        timer = setTimeout(() => retry.current(), 1_000)
+      }
+    })
+    return () => {
+      live = false
+      clearTimeout(timer)
+    }
+  }, [transport])
+  if (transport && reachable !== false) return <Loading label={still} />
   return (
     <ErrorAlert
       error={error}
@@ -133,17 +190,20 @@ export const allOf = <const Atoms extends Record<string, Atom.Atom<AsyncResult.A
 export function AsyncView<A, E>({
   atom,
   loading,
+  still,
   children
 }: {
   atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>
   loading?: string | undefined
+  /** What a read lost with the connection says while it's asked again (FailureView). */
+  still?: string | undefined
   children: (value: A, waiting: boolean) => ReactNode
 }) {
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
   return AsyncResult.match(result, {
     onInitial: () => <Loading label={loading} onRetry={refresh} />,
-    onFailure: (failure) => <FailureView cause={failure.cause} onRetry={refresh} />,
+    onFailure: (failure) => <FailureView cause={failure.cause} onRetry={refresh} still={still} />,
     onSuccess: (success) => children(success.value, success.waiting)
   })
 }
