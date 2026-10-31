@@ -33,8 +33,9 @@ export const rewriteText = (
   const { content, reasoning } = params
   const unchanged: Rewritten = { content, ...(reasoning === undefined ? {} : { reasoning }) }
   if (content === "" && !reasoning) return Effect.succeed(unchanged)
-  return reader
-    .RewriteText({
+  // Suspended, so even a reader that can't take the call leaves the text as it is.
+  return Effect.suspend(() =>
+    reader.RewriteText({
       userId: params.userId,
       chatId: params.chatId,
       ...(params.forkId === undefined ? {} : { forkId: params.forkId }),
@@ -45,29 +46,26 @@ export const rewriteText = (
         ...(reasoning ? [{ text: reasoning, kind: "reasoning" as const }] : [])
       ]
     })
-    .pipe(
-      Effect.map(([text, thought]): Rewritten => {
-        const applied = [...(text?.applied ?? []), ...(thought?.applied ?? [])]
-        const failed = [...(text?.failed ?? []), ...(thought?.failed ?? [])]
-        const nextContent = text?.text ?? content
-        const nextReasoning = thought?.text ?? reasoning
-        if (applied.length === 0 && failed.length === 0) return unchanged
-        return {
-          content: nextContent,
-          ...(nextReasoning === undefined ? {} : { reasoning: nextReasoning }),
-          rewrite: {
-            applied,
-            failed,
-            raw: nextContent === content ? null : content,
-            rawReasoning: reasoning === undefined || nextReasoning === reasoning ? null : reasoning
-          }
+  ).pipe(
+    Effect.map(([text, thought]): Rewritten => {
+      const applied = [...(text?.applied ?? []), ...(thought?.applied ?? [])]
+      const failed = [...(text?.failed ?? []), ...(thought?.failed ?? [])]
+      const nextContent = text?.text ?? content
+      const nextReasoning = thought?.text ?? reasoning
+      if (applied.length === 0 && failed.length === 0) return unchanged
+      return {
+        content: nextContent,
+        ...(nextReasoning === undefined ? {} : { reasoning: nextReasoning }),
+        rewrite: {
+          applied,
+          failed,
+          raw: nextContent === content ? null : content,
+          rawReasoning: reasoning === undefined || nextReasoning === reasoning ? null : reasoning
         }
-      }),
-      Effect.catchCause((cause) =>
-        Effect.as(
-          Effect.logWarning("rewriting text with the regex scripts failed; it's kept as it is", cause),
-          unchanged
-        )
-      )
+      }
+    }),
+    Effect.catchCause((cause) =>
+      Effect.as(Effect.logWarning("rewriting text with the regex scripts failed; it's kept as it is", cause), unchanged)
     )
+  )
 }
