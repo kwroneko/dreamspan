@@ -32,7 +32,7 @@ interface PanelProps {
 }
 
 /** The provider's reasoning field. */
-export function Reasoning({ version, session }: PanelProps) {
+function Reasoning({ version, session }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
   const text = live ?? version.reasoning ?? ""
   if (text === "") return null
@@ -50,7 +50,7 @@ export function Reasoning({ version, session }: PanelProps) {
 }
 
 /** The reply's own leading tagged sections, taken out of its text. */
-export function ReplySections({ version, session }: PanelProps) {
+function ReplySections({ version, session }: PanelProps) {
   const live = useAtomValue(liveSections(version.id))
   const text = live ?? sectionsDisplay(version.replySections)
   const streaming = version.status === "generating"

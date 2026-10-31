@@ -95,8 +95,8 @@ const bytes = (column: string) => `coalesce(length(CAST(${column} AS BLOB)), 0)`
 /** The bytes deleting version `v` for good frees: what purgeVersions empties or deletes. */
 const versionBytes = (v: string) =>
   [
-    ...["content", "reasoning", "reply_sections", "display_form", "context_form", "direction", "frozen_macros"].map((column) =>
-      bytes(`${v}.${column}`)
+    ...["content", "reasoning", "reply_sections", "display_form", "context_form", "direction", "frozen_macros"].map(
+      (column) => bytes(`${v}.${column}`)
     ),
     `(SELECT coalesce(sum(${bytes("h.content")}), 0) FROM version_history h WHERE h.version_id = ${v}.id)`,
     `(SELECT coalesce(sum(${bytes("a.alt_text")}), 0) FROM version_attachments a WHERE a.version_id = ${v}.id)`

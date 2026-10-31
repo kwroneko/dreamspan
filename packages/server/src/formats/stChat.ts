@@ -122,7 +122,7 @@ const ST_PARSED = { open: "<think>", close: "</think>", gap: "\n" }
  * (`reasoning_type: "parsed"`), which is a reply section here (spec/REPLY-SECTIONS.md), or the
  * provider sent it (any other type), which is the version's reasoning.
  */
-export const stReasoningOf = (source: unknown) => {
+const stReasoningOf = (source: unknown) => {
   const text =
     Predicate.isObject(source) && typeof source.reasoning === "string" && source.reasoning !== ""
       ? source.reasoning

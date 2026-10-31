@@ -14,7 +14,7 @@ import { compileLinear } from "../assembler/regex.ts"
 import type { GenerationChunk, GenerationFailed, GenerationRequest } from "./Generator.ts"
 
 /** The longest tag a stream can split: the text held back while one may be starting. */
-export const TAG_HOLD = 64
+const TAG_HOLD = 64
 
 export interface ReplyParse {
   /** What one chunk of the reply becomes. */
