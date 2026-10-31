@@ -56,7 +56,12 @@ function SettingsNavigation() {
 
 function SettingsLayout() {
   useTitle("Settings")
-  const atList = useLocation({ select: (location) => /^\/settings\/?$/.test(location.pathname) })
+  const pathname = useLocation({ select: (location) => location.pathname })
+  const atList = /^\/settings\/?$/.test(pathname)
+  // The open page's own name, for a phone, where the list isn't beside it.
+  const open = useSettingsNav()
+    .flatMap((section) => section.pages)
+    .find((entry) => pathname === fullPath(entry) || pathname.startsWith(`${fullPath(entry)}/`))
   return (
     <div className="flex flex-col gap-4 md:flex-row md:gap-8">
       <div className={`md:sticky md:top-0 md:block md:w-48 md:shrink-0 md:self-start ${atList ? "" : "hidden"}`}>
@@ -65,13 +70,16 @@ function SettingsLayout() {
       </div>
       <div className={`min-w-0 flex-1 ${atList ? "hidden md:block" : ""}`}>
         {!atList && (
-          <Link
-            to="/settings"
-            className="-ml-1 mb-3 inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm text-muted hover:text-text md:hidden"
-          >
-            <Icon name="back" />
-            Settings
-          </Link>
+          <div className="mb-4 flex flex-col items-start gap-1 md:hidden">
+            <Link
+              to="/settings"
+              className="-ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm text-muted hover:text-text"
+            >
+              <Icon name="back" />
+              Settings
+            </Link>
+            {open && <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>}
+          </div>
         )}
         <Outlet />
       </div>
