@@ -39,6 +39,7 @@ const AppConfigFromEnv = Config.all({
    * Exposure safety (net/exposure.ts). Security settings, so configurable only here.
    * ALLOWED_IPS: addresses besides loopback that may connect in single mode.
    * TRUSTED_PROXIES: the only addresses that may connect in proxy mode (loopback when unset).
+   * Both take IPs, CIDR ranges and host names, kept resolved (net/addressSet.ts).
    * ALLOW_INSECURE_EXPOSURE: serve every address, without protection.
    * PUBLIC_ORIGINS: the origins the app is served at besides localhost and IP addresses,
    * e.g. https://rp.example.com behind a reverse proxy.
