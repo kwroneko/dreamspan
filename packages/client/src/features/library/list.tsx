@@ -1,151 +1,347 @@
-import { CardSurface } from "../cardForks/surfaces.tsx"
-import { PresetWorkspace, PresetOverlayHost, usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
-// The library: cards, lorebooks and presets by label, each exportable as a file.
+// The library: every card, lorebook and preset, found by name and opened from here. Each
+// item shows what identifies it, a direct action or two, and the rest in its menu.
+import { useAtomValue } from "@effect/atom-react"
+import type { CastCard } from "@rp/shared/chat.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
-import { type ExportFormat, type ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
-import { AsyncView, useAction } from "../../actions.tsx"
-import { Button, buttonClass } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
-import { Field } from "../../ui/Field.tsx"
-import { Select } from "../../ui/Select.tsx"
-import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { AsyncResult } from "effect/reactivity"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { AsyncView } from "../../actions.tsx"
+import { useSession } from "../../session.ts"
 import { SlotOutlet } from "../../slots.tsx"
-import { libraryActions } from "./slots.ts"
+import { Avatar } from "../../ui/Avatar.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Field, Input } from "../../ui/Field.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Segmented } from "../../ui/Segmented.tsx"
+import { Select } from "../../ui/Select.tsx"
+import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
+import { Tabs } from "../../ui/Tabs.tsx"
+import { CardSurface } from "../cardForks/surfaces.tsx"
+import { usageLine } from "../characters/data.ts"
+import { shellAtom } from "../characters/shellData.tsx"
+import { PresetOverlayHost, PresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { useTitle } from "../shell.tsx"
 import { LISTED, libraryAtom } from "./data.ts"
-import { downloadExport } from "./files.ts"
+import { itemName, LibraryItemActions } from "./itemActions.tsx"
+import { libraryActions } from "./slots.ts"
 
-/** In the persona folder or not (DESIGN §2.2): personas are what the user plays. */
-function PersonaToggle({ entry, persona }: { entry: LibraryRef; persona: boolean }) {
-  const action = useAction()
+type Kind = (typeof LISTED)[number]["kind"]
+type Show = "all" | "characters" | "personas"
+type Sort = "used" | "name" | "chats" | "changed"
+type View = "list" | "grid"
+interface Prefs {
+  readonly kind: Kind
+  readonly show: Show
+  readonly sort: Sort
+  readonly view: View
+}
+const DEFAULTS: Prefs = { kind: "card", show: "all", sort: "used", view: "list" }
+
+/** The page's choices, remembered per account in this browser. */
+function usePrefs() {
+  const key = `rp.library.${useSession().user.id}`
+  const [prefs, setPrefs] = useState<Prefs>(() => {
+    try {
+      return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(key) ?? "{}") as Partial<Prefs>) }
+    } catch {
+      return DEFAULTS
+    }
+  })
+  const update = (change: Partial<Prefs>) => {
+    const next = { ...prefs, ...change }
+    setPrefs(next)
+    try {
+      localStorage.setItem(key, JSON.stringify(next))
+    } catch {
+      /* Not remembered, still applied. */
+    }
+  }
+  return [prefs, update] as const
+}
+
+/** True once the element has come near the viewport: per-item reads wait for it. */
+function useSeen<E extends Element>() {
+  const ref = useRef<E>(null)
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    const element = ref.current
+    if (seen || !element) return
+    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setSeen(true), {
+      rootMargin: "400px 0px"
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [seen])
+  return [ref, seen] as const
+}
+
+interface Usage {
+  readonly chats: number
+  readonly lastMessageAt: number | null
+}
+interface Item {
+  readonly entry: LibraryRef
+  readonly card: CastCard | undefined
+  readonly usage: Usage | undefined
+}
+const persona = (item: Item) => item.card?.persona === true
+
+const SORTS: Record<Sort, (a: Item, b: Item) => number> = {
+  used: (a, b) => (b.usage?.lastMessageAt ?? -1) - (a.usage?.lastMessageAt ?? -1),
+  name: () => 0,
+  chats: (a, b) => (b.usage?.chats ?? -1) - (a.usage?.chats ?? -1),
+  changed: (a, b) => b.entry.updatedAt - a.entry.updatedAt
+}
+const byName = (a: Item, b: Item) =>
+  a.entry.label.localeCompare(b.entry.label) || a.entry.subtitle.localeCompare(b.entry.subtitle)
+
+const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
+  texts.some((text) => text?.toLowerCase().includes(needle))
+
+/** What an item says under its name: its version, then how it's used. */
+function Meta({ item }: { item: Item }) {
+  const usage = persona(item) ? "Persona" : item.usage ? usageLine(item.usage) : null
+  return [item.entry.subtitle, usage].filter(Boolean).join(" · ")
+}
+
+function Badges({ item, seen }: { item: Item; seen: boolean }) {
+  const { entry } = item
   return (
     <>
-      <Checkbox
-        checked={persona}
-        onCheckedChange={(next) =>
-          void action.run((client) => client("SetPersona", { entityId: entry.entityId, persona: next }), ["library"])
-        }
-      >
-        <span className="sr-only">{entry.label}: </span>Persona
-      </Checkbox>
-      {action.error && (
-        <p role="alert" className="text-sm text-danger">
-          {action.error.message}
-        </p>
-      )}
+      {persona(item) && <Badge tone="accent">Persona</Badge>}
+      {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
+      {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
+      {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} />}
     </>
   )
 }
 
-function LibraryRow({
-  entry,
-  persona,
-  exporters
-}: {
-  entry: LibraryRef
-  persona?: boolean | undefined
-  exporters: ReadonlyArray<ExportFormatInfo>
-}) {
-  const workspace = usePresetWorkspace()
-  const formats = exporters.filter((format) => format.kind === entry.kind)
-  const [selectedFormat, setFormat] = useState<ExportFormat | null>(null)
-  const format = formats.find((entry) => entry.id === selectedFormat)?.id ?? formats[0]?.id ?? null
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+/** Where an item's picture and name lead: a character's page, else its editor. */
+function OpenLink({ item, className, children }: { item: Item; className: string; children: ReactNode }) {
+  const { entry } = item
+  const label = `Open ${itemName(entry)}`
+  if (entry.kind === "card" && !persona(item))
+    return (
+      <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} aria-label={label} className={className}>
+        {children}
+      </Link>
+    )
+  if (entry.kind === "card")
+    return (
+      <Link to="/library/$refId" params={{ refId: entry.id }} aria-label={label} className={className}>
+        {children}
+      </Link>
+    )
+  return <span className={className}>{children}</span>
+}
 
-  const exportEntry = async () => {
-    if (format === null) return
-    setPending(true)
-    setError(await downloadExport(entry.id, format, entry.label))
-    setPending(false)
-  }
-
+function Picture({ item, size }: { item: Item; size: "md" | "fill" }) {
+  const { entry } = item
+  if (entry.kind === "card")
+    return <Avatar id={entry.entityId} name={entry.label} mediaId={item.card?.avatarMediaId ?? null} size={size} />
   return (
-    <li className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{entry.label}</span>
-          {entry.subtitle && (
-            <span className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">{entry.subtitle}</span>
-          )}
-          {entry.kind === "card" && <CardSurface placement="badge" entityId={entry.entityId} />}
-          {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
-          {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
-        </div>
-        {entry.kind === "card" && <CardSurface placement="provenance" entityId={entry.entityId} />}
-        {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error}
-          </p>
-        )}
+    <span className="inline-flex h-12 w-8 shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted">
+      <Icon name={entry.kind === "lorebook" ? "book" : "sliders"} />
+    </span>
+  )
+}
+
+function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportFormatInfo> }) {
+  const [ref, seen] = useSeen<HTMLLIElement>()
+  const meta = <Meta item={item} />
+  return (
+    <li
+      ref={ref}
+      className="flex min-w-0 items-center gap-3 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]"
+    >
+      <OpenLink item={item} className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <Picture item={item} size="md" />
+      </OpenLink>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span title={itemName(item.entry)} className="line-clamp-2 font-medium [overflow-wrap:anywhere]">
+          {item.entry.label}
+        </span>
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+          <Badges item={item} seen={seen} />
+          <span className="min-w-0 truncate">{meta}</span>
+        </span>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {entry.kind === "card" && <CardSurface placement="actions" entityId={entry.entityId} />}
-        {persona !== undefined && <PersonaToggle entry={entry} persona={persona} />}
-        {entry.kind === "card" && (
-          <Link
-            to="/cards/$entityId/chat"
-            params={{ entityId: entry.entityId }}
-            aria-label={`Start a chat with ${entry.label}`}
-            className={buttonClass("primary")}
-          >
-            Chat
-          </Link>
-        )}
-        {entry.kind === "preset" ? (
-          <Button aria-label={`Edit ${entry.label}`} onClick={() => workspace?.open(entry.id)}>
-            Edit
-          </Button>
-        ) : (
-          entry.kind !== "lorebook" && (
-            <Link
-              to="/library/$refId"
-              params={{ refId: entry.id }}
-              aria-label={`Edit ${entry.label}`}
-              className={buttonClass("secondary")}
-            >
-              Edit
-            </Link>
-          )
-        )}
-        {entry.refKind === "upstream" && (entry.kind !== "card" || entry.hasImport) && (
-          <Link
-            to="/import"
-            search={{ into: entry.id }}
-            aria-label={`Update ${entry.label} from a file`}
-            className={buttonClass("ghost")}
-          >
-            Update from file
-          </Link>
-        )}
-        {formats.length > 1 && (
-          <Field label={<span className="sr-only">Export format for {entry.label}</span>} className="w-28">
-            <Select
-              items={formats.map(({ id, label }) => ({ value: id, label }))}
-              value={format}
-              onValueChange={setFormat}
-            />
-          </Field>
-        )}
-        <Button
-          disabled={format === null}
-          pending={pending}
-          onClick={() => void exportEntry()}
-          aria-label={`Export ${entry.label}`}
-        >
-          Export
-        </Button>
+      <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
+    </li>
+  )
+}
+
+function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportFormatInfo> }) {
+  const [ref, seen] = useSeen<HTMLLIElement>()
+  return (
+    <li
+      ref={ref}
+      className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface [contain-intrinsic-size:auto_22rem] [content-visibility:auto]"
+    >
+      <OpenLink
+        item={item}
+        className="block aspect-[2/3] w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
+      >
+        <Picture item={item} size="fill" />
+      </OpenLink>
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
+        <span title={itemName(item.entry)} className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]">
+          {item.entry.label}
+        </span>
+        <span className="truncate text-xs text-muted">
+          <Meta item={item} />
+        </span>
+        <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-1 text-xs">
+          <Badges item={item} seen={seen} />
+        </span>
+        <div className="mt-auto flex justify-end pt-1">
+          <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
+        </div>
       </div>
     </li>
   )
 }
 
+function Items({
+  title,
+  items,
+  view,
+  formats
+}: {
+  title: string
+  items: ReadonlyArray<Item>
+  view: View
+  formats: ReadonlyArray<ExportFormatInfo>
+}) {
+  return view === "grid" ? (
+    <ul aria-label={title} className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
+      {items.map((item) => (
+        <Tile key={item.entry.id} item={item} formats={formats} />
+      ))}
+    </ul>
+  ) : (
+    <Card className="py-2!">
+      <ul aria-label={title} className="flex flex-col divide-y divide-border">
+        {items.map((item) => (
+          <Row key={item.entry.id} item={item} formats={formats} />
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function Section({
+  kind,
+  title,
+  all,
+  prefs,
+  setPrefs,
+  formats
+}: {
+  kind: Kind
+  title: string
+  all: ReadonlyArray<Item>
+  prefs: Prefs
+  setPrefs: (change: Partial<Prefs>) => void
+  formats: ReadonlyArray<ExportFormatInfo>
+}) {
+  const [search, setSearch] = useState("")
+  const needle = search.trim().toLowerCase()
+  const cards = kind === "card"
+  const shown = cards
+    ? all.filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
+    : all
+  const items = shown
+    .filter((item) => matches(needle, item.entry.label, item.entry.subtitle, item.entry.modelName))
+    .sort((a, b) => (cards ? SORTS[prefs.sort](a, b) : 0) || byName(a, b))
+  const personas = all.filter(persona).length
+  const noun = title.toLowerCase()
+  if (all.length === 0)
+    return (
+      <EmptyState title={`No ${noun} yet`}>
+        <Link to="/import" className="text-accent">
+          Import files to add some.
+        </Link>
+      </EmptyState>
+    )
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="search"
+          aria-label={`Search ${noun}`}
+          placeholder={cards ? "Search by name, version or in-chat name" : "Search by name"}
+          value={search}
+          onChange={(e) => setSearch(e.currentTarget.value)}
+          className="min-w-0 flex-1 basis-60"
+        />
+        {cards && (
+          <Segmented
+            label="Show"
+            value={prefs.show}
+            onValueChange={(show) => setPrefs({ show })}
+            options={[
+              { value: "all", label: "All" },
+              { value: "characters", label: "Characters" },
+              { value: "personas", label: `Personas · ${personas}` }
+            ]}
+          />
+        )}
+        {cards && (
+          <Field label={<span className="sr-only">Sort cards</span>} className="w-40 shrink-0">
+            <Select<Sort>
+              items={[
+                { value: "used", label: "Last used" },
+                { value: "name", label: "Name" },
+                { value: "chats", label: "Most chats" },
+                { value: "changed", label: "Recently changed" }
+              ]}
+              value={prefs.sort}
+              onValueChange={(sort) => setPrefs({ sort })}
+            />
+          </Field>
+        )}
+        {cards && (
+          <Segmented
+            label="View"
+            value={prefs.view}
+            onValueChange={(view) => setPrefs({ view })}
+            options={[
+              { value: "list", label: "List" },
+              { value: "grid", label: "Grid" }
+            ]}
+          />
+        )}
+      </div>
+      <p className="text-sm text-muted" aria-live="polite">
+        {items.length === all.length
+          ? `${all.length.toLocaleString()} ${noun}`
+          : `${items.length.toLocaleString()} of ${all.length.toLocaleString()} ${noun}`}
+      </p>
+      {items.length === 0 ? (
+        <EmptyState title={needle ? `No ${noun} match “${search.trim()}”` : `No ${noun} here`}>
+          {needle && (
+            <Button variant="ghost" onClick={() => setSearch("")}>
+              Clear the search
+            </Button>
+          )}
+        </EmptyState>
+      ) : (
+        <Items title={title} items={items} view={cards ? prefs.view : "list"} formats={formats} />
+      )}
+    </div>
+  )
+}
+
 function LibraryContent() {
   useTitle("Library")
+  const [prefs, setPrefs] = usePrefs()
+  const shell = useAtomValue(shellAtom)
+  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c.card]) : [])
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Library</h1>
         <div className="flex flex-wrap gap-2">
@@ -156,33 +352,34 @@ function LibraryContent() {
         </div>
       </header>
       <AsyncView atom={libraryAtom} loading="Loading the library…">
-        {(lists) =>
-          LISTED.map(({ kind, title }) => (
-            <Card key={kind}>
-              <CardHeader title={title} />
-              {lists[kind].length === 0 ? (
-                <EmptyState title={`No ${title.toLowerCase()} yet`}>
-                  <p>Import files to add some.</p>
-                </EmptyState>
-              ) : (
-                <ul aria-label={title} className="flex flex-col divide-y divide-border">
-                  {lists[kind].map((entry) => (
-                    <LibraryRow
-                      key={entry.id}
-                      entry={entry}
-                      exporters={lists.exportFormats}
-                      persona={
-                        kind === "card"
-                          ? lists.castCards.some((card) => card.entityId === entry.entityId && card.persona)
-                          : undefined
-                      }
-                    />
-                  ))}
-                </ul>
-              )}
-            </Card>
-          ))
-        }
+        {(lists) => {
+          const cards = new Map(lists.castCards.map((card) => [card.entityId, card]))
+          return (
+            <Tabs
+              label="Library sections"
+              value={prefs.kind}
+              onValueChange={(kind) => setPrefs({ kind })}
+              tabs={LISTED.map(({ kind, title }) => ({
+                value: kind,
+                label: `${title} · ${lists[kind].length.toLocaleString()}`,
+                panel: (
+                  <Section
+                    kind={kind}
+                    title={title}
+                    all={lists[kind].map((entry) => ({
+                      entry,
+                      card: cards.get(entry.entityId),
+                      usage: usage.get(entry.entityId)
+                    }))}
+                    prefs={prefs}
+                    setPrefs={setPrefs}
+                    formats={lists.exportFormats}
+                  />
+                )
+              }))}
+            />
+          )
+        }}
       </AsyncView>
     </div>
   )
