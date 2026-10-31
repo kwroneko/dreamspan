@@ -188,10 +188,15 @@ export const inspectionInputs = (
         ? macros.filter((m) => piece.text.includes(snapshot.pieces[m]!.text))
         : []
     }
+    // A source with the prompt regex scripts that changed its piece's text, as the inspector names them.
+    const describePiece = (piece: (typeof snapshot.pieces)[number]): ContextSource => {
+      const source = describe(piece.source)
+      return piece.scripts?.length ? { ...source, scripts: piece.scripts } : source
+    }
     // A labelled block's text is found by its parts: the card fields, the entries, the wrappers.
     const nodeOf = (index: number, i: number, inBlock: boolean): InspectionNode => {
       const piece = snapshot.pieces[index]!
-      const source = describe(piece.source)
+      const source = describePiece(piece)
       if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)
       const parts = childrenOf(index, inBlock).map((part) => nodeOf(part, i, true))
       const frame =
@@ -203,7 +208,7 @@ export const inspectionInputs = (
     // Each message's outermost pieces, in recording order: those not held by another piece in it.
     const placed = snapshot.request.messages.map((): Array<number> => [])
     for (const [index, piece] of snapshot.pieces.entries()) {
-      const source = describe(piece.source)
+      const source = describePiece(piece)
       for (const i of piece.messages) {
         placed[i]?.push(index)
         if (!sources[i]!.some((s) => s.id === source.id)) sources[i]!.push(source)

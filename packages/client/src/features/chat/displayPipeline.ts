@@ -12,7 +12,8 @@ export interface DisplayInput {
   readonly card: CardFields
   readonly prefs: DisplayPrefs
   readonly scripts: ReadonlyArray<RegexScript>
-  readonly placement: 1 | 2
+  /** ST's placement: 1 user input, 2 AI output, 6 reasoning. */
+  readonly placement: 1 | 2 | 6
   readonly depth: number | null
 }
 export interface DisplayResult {

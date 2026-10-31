@@ -20,6 +20,11 @@ export interface FakeGeneratorOptions {
    * closed `</think>`, the opening tag split across two chunks; none when unset.
    */
   readonly sectionTokens?: number | undefined
+  /**
+   * About how many tokens of a chain of thought the body starts with, in `<cot>` / `</cot>`
+   * split across chunks, for a regex script to strip; none when unset.
+   */
+  readonly cotTokens?: number | undefined
 }
 
 /**
@@ -40,9 +45,13 @@ export const layer = (options: FakeGeneratorOptions) =>
           const section: ReadonlyArray<GenerationChunk> = options.sectionTokens
             ? ["<thin", "king>\n", ...tokenize(syntheticReasoning(seed + 1, options.sectionTokens)), "\n</think>\n\n"]
             : []
+          const cot: ReadonlyArray<GenerationChunk> = options.cotTokens
+            ? ["<c", "ot>", ...tokenize(syntheticReasoning(seed + 2, options.cotTokens)), "</c", "ot>\n"]
+            : []
           const tokens: ReadonlyArray<GenerationChunk> = [
             ...reasoning,
             ...section,
+            ...cot,
             ...tokenize(syntheticMarkdown(seed, options.tokens))
           ]
           const interval = options.burstMs ?? Math.min(100, Math.max(10, 1000 / options.tokensPerSecond))

@@ -118,6 +118,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
+import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -1474,7 +1475,9 @@ export class WriteOps extends RpcGroup.make(
       images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       /** The edit's draft (`version_edit`, this version), committed with it if it still holds that text. */
-      commitDraft: Schema.optionalKey(CommitDraft)
+      commitDraft: Schema.optionalKey(CommitDraft),
+      /** What regex scripts did to `content` (an edit's run-on-edit scripts), and the text typed. */
+      rewrite: Schema.optionalKey(StoredRewrite)
     },
     success: Version,
     error: Schema.Union([NotFound, StaleWrite, NotAmendable, StorageError])
@@ -1605,7 +1608,9 @@ export class WriteOps extends RpcGroup.make(
       noReply: Schema.optionalKey(Schema.Boolean),
       direction: Schema.NullOr(Schema.String),
       /** The composer the text came from, committed with the post or the queued entry. */
-      commitDraft: CommitDraft
+      commitDraft: CommitDraft,
+      /** What regex scripts did to `content` as it was sent, and the text typed. */
+      rewrite: Schema.optionalKey(StoredRewrite)
     },
     success: Schema.Union([
       Schema.TaggedStruct("Posted", { result: AppendResult }),
@@ -1626,7 +1631,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       speakerEntityId: Schema.NullOr(EntityId),
       expectedRowVersion: Schema.Int,
-      draft: Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int }))
+      draft: Schema.optionalKey(Schema.Struct({ draftId: Schema.String, session: Schema.Int })),
+      rewrite: Schema.optionalKey(StoredRewrite)
     },
     success: Schema.Struct({ queued: QueuedMessage, queue: Schema.Array(QueuedMessage) }),
     error: Schema.Union([NotFound, StaleWrite, StorageError])
@@ -1674,7 +1680,9 @@ export class WriteOps extends RpcGroup.make(
       /** The reply's leading tagged sections; left as they are when absent. */
       replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
-      error: Schema.NullOr(VersionError)
+      error: Schema.NullOr(VersionError),
+      /** What regex scripts did to `content` and `reasoning` as it finished, and the text before. */
+      rewrite: Schema.optionalKey(StoredRewrite)
     },
     success: Schema.Struct({ ...QueueOutcome.fields, version: Version }),
     error: Schema.Union([NotFound, StorageError])
@@ -2156,6 +2164,12 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, ref: RefId, global: Schema.Boolean },
     success: Schema.Array(RefId),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Replaces the account's global regex scripts, at the revision the caller read (StaleWrite otherwise). */
+  Rpc.make("SetGlobalRegex", {
+    payload: { userId: UserId, scripts: GlobalScripts, expectedRevision: Schema.Int },
+    success: GlobalRegex,
+    error: Schema.Union([StaleWrite, StorageError])
   }),
   /**
    * A chat's summarization settings changed field by field (DESIGN §8): read and written as a
@@ -2971,6 +2985,56 @@ export class ReadOps extends RpcGroup.make(
   }),
   /** The user's global lorebooks: live library lorebooks of theirs, in the order marked. */
   Rpc.make("GetGlobalLorebooks", { payload: { userId: UserId }, success: Schema.Array(RefId), error: StorageError }),
+  Rpc.make("GetGlobalRegex", { payload: { userId: UserId }, success: GlobalRegex, error: StorageError }),
+  /** A version's text, reasoning and reply sections from before regex scripts rewrote them (null: unchanged). */
+  Rpc.make("RawVersionText", {
+    payload: { userId: UserId, versionId: VersionId },
+    success: RawText,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A generating reply's text so far through the scripts its finish runs (`RewriteText` at
+   * the version, not an edit), for what's shown while it streams (ARCHITECTURE §12, "Live
+   * rewrites"). Each worker prepares the scripts once per reply; every call has the time and
+   * output of one rewrite.
+   */
+  Rpc.make("RewriteLive", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: SlotId,
+      versionId: VersionId,
+      items: Schema.Array(Schema.Struct({ text: Schema.String, kind: Schema.Literals(["message", "reasoning"]) }))
+    },
+    /**
+     * `active`: whether any script or rewrite can change the text; without one, `texts` is
+     * empty. `ms`: how long the rewrites took, in the worker.
+     */
+    success: Schema.Struct({ active: Schema.Boolean, texts: Schema.Array(TextRewrite), ms: Schema.Number }),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
+  /**
+   * Regex scripts rewriting text before it's written (ARCHITECTURE §12, "Rewrites"): the
+   * assembler's stages up to `scripts` for the position, then the registered rewrites.
+   * `at`: an existing version (a reply finishing, an edit), or the next message after a leaf
+   * (a send), written as `speakerEntityId`. `edit`: only scripts that run on edits.
+   */
+  Rpc.make("RewriteText", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      at: Schema.Union([
+        Schema.Struct({ slotId: SlotId, versionId: VersionId }),
+        Schema.Struct({ leafSlotId: Schema.NullOr(SlotId), speakerEntityId: Schema.NullOr(EntityId) })
+      ]),
+      edit: Schema.Boolean,
+      items: Schema.Array(Schema.Struct({ text: Schema.String, kind: Schema.Literals(["message", "reasoning"]) }))
+    },
+    success: Schema.Array(TextRewrite),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
+  }),
   /** What the preset the user's chats use does with a card's own prompts (DESIGN §5.0). */
   Rpc.make("GetCardPromptUse", { payload: { userId: UserId }, success: CardPromptUse, error: StorageError }),
   /** The user's display choices; the defaults where none are stored. */

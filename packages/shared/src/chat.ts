@@ -1,6 +1,7 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
+import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
 import { ReplySections } from "./replySections.ts"
 
 export const ChatId = idSchema("ChatId", "chat")
@@ -176,6 +177,11 @@ export class Version extends Schema.Class<Version>("Version")({
    */
   mark: Schema.NullOr(Schema.Literals(["refused"])),
   /**
+   * What regex scripts did to its text when it was written (ARCHITECTURE §12, "Rewrites"):
+   * absent when none applied or failed.
+   */
+  rewrite: Schema.optionalKey(VersionRewrite),
+  /**
    * For text whose macros resolve on display (a greeting): the values its random and time
    * macros drew when it was made, so it reads the same every time (DESIGN §5.6).
    */
@@ -275,6 +281,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   direction: Schema.optional(Schema.String),
   /** A continued version starts with the reasoning of the version it continues. */
   reasoning: Schema.optional(Schema.String),
+  /** What regex scripts did to `content` before it was written, and the text before (server only). */
+  rewrite: Schema.optional(StoredRewrite),
   /** And with its reply sections. */
   replySections: Schema.optional(ReplySections),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */

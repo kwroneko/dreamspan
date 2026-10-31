@@ -9,7 +9,7 @@
 // `reasoningPanels` slot.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
-import type { Version } from "@rp/shared/chat.ts"
+import type { SlotId, Version } from "@rp/shared/chat.ts"
 import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
 import { sectionsDisplay, sectionUnclosed } from "@rp/shared/replySections.ts"
 import { useId, useState, useSyncExternalStore } from "react"
@@ -20,6 +20,7 @@ import { SlotOutlet } from "../../slots.tsx"
 import { reasoningActions, reasoningPanels } from "./presentation.tsx"
 import { collapseCount, subscribeCollapses } from "./reasoningActions.tsx"
 import { liveReasoning, liveSections, type ChatSession } from "./session.ts"
+import { useDisplayed } from "./useDisplayed.ts"
 
 const words = (text: string) => {
   const count = text.trim() === "" ? 0 : text.trim().split(/\s+/).length
@@ -29,10 +30,13 @@ const words = (text: string) => {
 interface PanelProps {
   readonly version: Version
   readonly session: ChatSession
+  /** The message's place, for its display scripts (useDisplayed.ts); absent: the chat's end. */
+  readonly parentSlotId?: SlotId | null | undefined
+  readonly depth?: number | undefined
 }
 
 /** The provider's reasoning field. */
-function Reasoning({ version, session }: PanelProps) {
+function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
   const text = live ?? version.reasoning ?? ""
   if (text === "") return null
@@ -41,6 +45,8 @@ function Reasoning({ version, session }: PanelProps) {
       key={version.id}
       version={version}
       session={session}
+      parentSlotId={parentSlotId}
+      depth={depth}
       text={text}
       streaming={version.status === "generating"}
       kind="reasoning"
@@ -51,7 +57,7 @@ function Reasoning({ version, session }: PanelProps) {
 }
 
 /** The reply's own leading tagged sections, taken out of its text. */
-function ReplySections({ version, session }: PanelProps) {
+function ReplySections({ version, session, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveSections(version.id))
   const reasoning = useAtomValue(liveReasoning(version.id)) ?? version.reasoning ?? ""
   const text = live ?? sectionsDisplay(version.replySections)
@@ -62,6 +68,8 @@ function ReplySections({ version, session }: PanelProps) {
       key={version.id}
       version={version}
       session={session}
+      parentSlotId={parentSlotId}
+      depth={depth}
       text={text}
       streaming={streaming}
       kind="sections"
@@ -89,6 +97,8 @@ export function ReasoningPanels(props: PanelProps) {
 function ReasoningBlock({
   version,
   session,
+  parentSlotId = null,
+  depth = 0,
   text,
   streaming,
   kind,
@@ -105,6 +115,8 @@ function ReasoningBlock({
 }) {
   const id = useId()
   const viewer = useViewPrefs()
+  // Both panels display through the reasoning placement's display scripts, as ST's do.
+  const shown = useDisplayed({ version, session, parentSlotId, depth }, text, 6, streaming)
   const preferred: ReasoningDisplay = viewer.prefs.reasoning
   // What the user chose for this block; until then, open while streaming (as they prefer),
   // folded once the reply is done.
@@ -153,8 +165,20 @@ function ReasoningBlock({
       {open && (
         <div id={id} role="region" aria-label={label} className="border-l-2 border-border pl-3 text-sm text-muted">
           <MessageBody text={text}>
-            <Markdown text={text} streaming={streaming} />
+            {shown.pending ? (
+              // Its place kept, not shown, until the display scripts answer.
+              <div className="invisible" aria-hidden>
+                <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+              </div>
+            ) : (
+              <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+            )}
           </MessageBody>
+          {shown.issues.map((issue, i) => (
+            <p key={i} role="note" className="text-xs">
+              {issue}
+            </p>
+          ))}
         </div>
       )}
       {viewer.error && (
