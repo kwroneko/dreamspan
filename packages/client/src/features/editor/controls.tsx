@@ -6,17 +6,19 @@ import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
-import { Button } from "../../ui/Button.tsx"
+import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import type { CallResult } from "./caller.ts"
-import { type EditorStore, useDirty, useEditorKind, useText, useValue } from "./store.ts"
+import { draftLabel } from "./fields.ts"
+import { type EditorStore, useDirty, useEditorKind, useEditorState, useText, useValue } from "./store.ts"
 
 /** "Edited" while the field has changes, with its undo, history and revert. */
 function FieldLabel({ store, field, label }: { store: EditorStore; field: string; label: string }) {
@@ -131,7 +133,8 @@ export function TextField({
   rows,
   description,
   mono = false,
-  readOnly = false
+  readOnly = false,
+  expandable = false
 }: {
   store: EditorStore
   path: FieldPath
@@ -140,7 +143,10 @@ export function TextField({
   description?: ReactNode
   mono?: boolean
   readOnly?: boolean
+  /** A button opening the field large over the page, as ST's maximize does: a narrow panel's long field. */
+  expandable?: boolean
 }) {
+  const [large, setLarge] = useState(false)
   const match = useSearchMatch(path)
   const target = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -170,7 +176,16 @@ export function TextField({
     onBlur: () => void store.save(field)
   }
   return (
-    <div ref={target} className="flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
+    <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
+      {expandable && rows !== undefined && (
+        <IconButton
+          label={`Open ${label} large`}
+          icon="expand"
+          className="absolute -top-1.5 right-0 size-7!"
+          onClick={() => setLarge(true)}
+        />
+      )}
+      {large && <LargeField store={store} path={path} field={field} label={label} onClose={() => setLarge(false)} />}
       <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
         {rows === undefined ? (
           <Input {...props} onChange={(event) => store.setText(path, event.currentTarget.value)} />
@@ -199,6 +214,46 @@ export function TextField({
       </Field>
       <FieldTools store={store} field={field} label={label} />
     </div>
+  )
+}
+
+/** One text field at the size of the screen, over the page; the same draft as the field in place. */
+function LargeField({
+  store,
+  path,
+  field,
+  label,
+  onClose
+}: {
+  store: EditorStore
+  path: FieldPath
+  field: string
+  label: string
+  onClose: () => void
+}) {
+  const value = useText(store, path)
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()} title={label} wide>
+      <div>
+        <CardTextEditor
+          store={store}
+          field={field}
+          path={path}
+          value={value}
+          label={label}
+          minHeight="min(65dvh, 48rem)"
+          fullHeight
+          onChange={(next) => store.setText(path, next)}
+          onBlur={() => void store.save(field)}
+        />
+      </div>
+      <FieldTools store={store} field={field} label={label} />
+      <DialogActions>
+        <Button variant="primary" onClick={onClose}>
+          Done
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }
 
@@ -359,23 +414,47 @@ export function TriggersField({
   )
 }
 
-/** Says that changes kept in this browser when a page closed came back (backup.ts). */
-/** Text a save of a revision put in the bin's recovered texts, with the way there (DESIGN §6.2). */
-export function RecoveredNotice({ count }: { count: number }) {
-  if (count === 0) return null
+/** Names in a sentence: "A", "A and B", "A, B and C". */
+const listed = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+
+/**
+ * Text the user's own save sent to the bin's recovered texts (DESIGN §6.2): what a field had
+ * before most of it was deleted or replaced, or another tab's text a save went over. It names
+ * the fields when the store knows them, says where the text is, and goes when dismissed.
+ */
+export function RecoveredNotice({ store }: { store: EditorStore }) {
+  const state = useEditorState(store)
+  if (state.recovered === 0 || !state.snapshot) return null
+  // The saved document names list elements well enough, without following every key typed.
+  const { doc, ref } = state.snapshot
+  const fields = state.recoveredFields.map((field) => draftLabel(ref.kind, doc, field))
+  const one = state.recovered === 1
   return (
-    <Alert tone="neutral" title="Earlier text is in the bin">
+    <Alert
+      tone="neutral"
+      title={one ? "Your earlier text is in the bin" : "Your earlier texts are in the bin"}
+      actions={
+        <>
+          <Link to="/bin" search={{ section: "recovered" }} className={buttonClass("ghost")}>
+            Open the bin
+          </Link>
+          <Button variant="ghost" onClick={() => store.dismissRecovered()}>
+            Dismiss
+          </Button>
+        </>
+      }
+    >
       <p>
-        Saving put {count === 1 ? "an earlier text" : `${count} earlier texts`} of these fields in the{" "}
-        <Link to="/bin" search={{ section: "recovered" }}>
-          bin, under recovered text
-        </Link>
-        : what was there before a large deletion, or another tab&apos;s text a save went over.
+        {fields.length > 0
+          ? `What ${listed(fields)} had before you replaced most of it is kept in the bin, under Recovered text, in case you want it back.`
+          : `What you replaced or deleted is kept in the bin, under Recovered text, in case you want it back.`}
       </p>
     </Alert>
   )
 }
 
+/** Says that changes kept in this browser when a page closed came back (backup.ts). */
 export function RestoredNotice({ count }: { count: number }) {
   if (count === 0) return null
   return (

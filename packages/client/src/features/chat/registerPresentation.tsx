@@ -151,9 +151,10 @@ export const registerPresentation = () => [
   chatSurfaceProviders.register({
     id: "chat.preset-workspace",
     order: 20,
-    component: ({ children, view, wide, onOpenPanel }) => (
+    component: ({ children, session, view, wide, onOpenPanel }) => (
       <PresetWorkspace
         context={view.history?.presetContext ?? null}
+        chat={{ chatId: session.id, forkId: view.forkId }}
         onOpen={() => {
           if (!wide) onOpenPanel(null)
         }}

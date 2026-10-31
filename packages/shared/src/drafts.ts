@@ -138,12 +138,23 @@ export const invertPatch = (patch: Patch): Patch => ({
 export const isEmptyPatch = (patch: Patch) => patch.removed.length === 0 && patch.inserted.length === 0
 
 /**
+ * What a patch throws away. Line endings rewritten don't count: a text box turns an imported
+ * file's CRLF into LF at the first key typed, which replaces nearly the whole text.
+ */
+const lost = (patch: Patch) =>
+  patch.removed.includes("\r")
+    ? diffPatch(patch.removed.replaceAll("\r\n", "\n"), patch.inserted.replaceAll("\r\n", "\n")).removed.length
+    : patch.removed.length
+
+/**
  * A change that throws away a lot of text. It always gets its own history entry, so the
- * text before it can be restored in one step. Only lengths matter, so history can be
+ * text before it can be restored in one step. Only the patch matters, so history can be
  * scanned without rebuilding earlier texts.
  */
-export const isDestructive = (patch: Patch, beforeLength: number) =>
-  patch.removed.length > 200 || (beforeLength >= 20 && patch.removed.length > beforeLength / 2)
+export const isDestructive = (patch: Patch, beforeLength: number) => {
+  const removed = lost(patch)
+  return removed > 200 || (beforeLength >= 20 && removed > beforeLength / 2)
+}
 
 /** History tuning. Saves arrive debounced from the client, roughly once a second while typing. */
 export const DraftHistoryPolicy = {
