@@ -7,6 +7,8 @@ import { composerControls } from "../../src/features/chat/composerControls.tsx"
 import { messageActions } from "../../src/features/chat/messageActions.tsx"
 import { cardContributions } from "../../src/features/cardForks/surfaces.tsx"
 import { chatPanels } from "../../src/features/chat/panels.tsx"
+import { libraryItemActions } from "../../src/features/library/itemActions.tsx"
+import { MenuItem } from "../../src/ui/Menu.tsx"
 
 const scopes = new Map<string, Scope.Closeable>()
 
@@ -44,7 +46,8 @@ export const install = async (
           id: `card-forks.${suffix}`,
           placement,
           order: 0,
-          component: () => createElement("p", null, `Plugin card ${placement}`)
+          component: () => createElement("p", null, `Plugin card ${placement}`),
+          ...(placement === "actions" ? { menu: () => createElement(MenuItem, null, "Plugin card actions") } : {})
         })
       )
     await own(
@@ -52,11 +55,20 @@ export const install = async (
         id: "synthetic.card-action",
         placement: "actions",
         order: 0,
-        component: () => createElement("p", null, "Added card action")
+        component: () => createElement("p", null, "Added card action"),
+        menu: () => createElement(MenuItem, null, "Added card action")
+      })
+    )
+    await own(
+      libraryItemActions.register({
+        id: "synthetic.library-action",
+        order: 0,
+        menu: () => createElement(MenuItem, null, "Added library action")
       })
     )
   } else if (id === "card-hide") {
     await own(cardContributions.disable("card-forks.fork"))
+    await own(libraryItemActions.disable("library.edit"))
   } else if (id === "settings") {
     await own(chatPanels.disable("model"))
     await own(chatPanels.disable("preset"))

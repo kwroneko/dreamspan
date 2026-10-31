@@ -3,14 +3,17 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardFamily, FamilyMember, RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { allOf, AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { MenuItem } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
+import { showToast } from "../../ui/Toast.tsx"
 import { Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "../editor/caller.ts"
@@ -18,7 +21,7 @@ import { ValueDiff } from "../editor/diff.tsx"
 import { changedFields, fieldLabel } from "../editor/fields.ts"
 import { ForkDialog } from "../editor/RefDialogs.tsx"
 import { EditorStore } from "../editor/store.ts"
-import type { CardSurfaceContext } from "./surfaces.tsx"
+import type { CardMenuProps, CardSurfaceContext } from "./surfaces.tsx"
 
 const familyQuery = (entityId: EntityId) => AppClient.query("CardFamily", { entityId }, { reactivityKeys: ["library"] })
 const name = (member: FamilyMember) =>
@@ -157,14 +160,16 @@ export function ForkBadge({ entityId }: CardSurfaceContext) {
   const children = result.value.members.filter((m) => m.parentEntityId === entityId).length
   return (
     <>
-      <Button
-        variant="ghost"
-        className="h-auto! px-1! py-1! text-xs!"
+      {/* A badge that opens the family tree: shaped like the other badges beside it. */}
+      <button
+        type="button"
+        className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         onClick={() => setOpen(true)}
         aria-label={`Forks of ${result.value.members.find((m) => m.entityId === entityId)?.label}`}
       >
+        <Icon name="branch" size={12} />
         {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
-      </Button>
+      </button>
       {open && <FamilyDialog entityId={entityId} onClose={() => setOpen(false)} />}
     </>
   )
@@ -235,6 +240,87 @@ export function ForkCommand({
         <CompareDialog family={family} member={member} onClose={() => setOpen(null)} />
       )}
     </>
+  )
+}
+type Command = "fork" | "family" | "compare" | "parent" | "unlink"
+const useMember = (entityId: EntityId) => {
+  const result = useAtomValue(useMemo(() => familyQuery(entityId), [entityId]))
+  const family = AsyncResult.isSuccess(result) ? result.value : null
+  return { family, member: family?.members.find((m) => m.entityId === entityId) }
+}
+/** A command's item in a card's overflow menu; its dialog is `ForkMenuDialog`, mounted by the host. */
+export function ForkMenuItem({ entityId, openDialog, command }: CardMenuProps & { command: Command }) {
+  const { family, member } = useMember(entityId)
+  const action = useAction()
+  if (command === "fork")
+    return (
+      <MenuItem icon="branch" disabled={!member?.refId} onClick={openDialog}>
+        Fork…
+      </MenuItem>
+    )
+  if (command === "family")
+    return (
+      <MenuItem disabled={!family} onClick={openDialog}>
+        Forks
+      </MenuItem>
+    )
+  if (command === "compare")
+    return (
+      <MenuItem icon="compare" disabled={!family || family.members.length < 2} onClick={openDialog}>
+        {member?.parentEntityId ? "Compare with parent" : "Compare with family"}
+      </MenuItem>
+    )
+  if (command === "parent") return <MenuItem onClick={openDialog}>Mark as a fork of…</MenuItem>
+  if (!member?.parentEntityId) return null
+  return (
+    <MenuItem
+      onClick={() =>
+        void action
+          .run((api) => api("SetCardParent", { entityId, parentEntityId: null }), ["library"])
+          .then(
+            (result) =>
+              !result.ok && showToast({ title: "Couldn’t unlink the card", description: result.error.message })
+          )
+      }
+    >
+      Unlink from parent
+    </MenuItem>
+  )
+}
+export function ForkMenuDialog({ entityId, store, closeDialog, command }: CardMenuProps & { command: Command }) {
+  const { family, member } = useMember(entityId)
+  if (command === "fork")
+    return <ForkFromMenu entityId={entityId} {...(store ? { store } : {})} onClose={closeDialog} />
+  if (command === "family") return <FamilyDialog entityId={entityId} onClose={closeDialog} />
+  if (command === "parent") return <ParentDialog entityId={entityId} onClose={closeDialog} />
+  if (command === "compare" && family && member)
+    return <CompareDialog family={family} member={member} onClose={closeDialog} />
+  return null
+}
+function ForkFromMenu({ entityId, store, onClose }: CardSurfaceContext & { onClose: () => void }) {
+  const { member } = useMember(entityId)
+  const call = useCaller()
+  const user = useSession().user.id
+  const refId = member?.refId ?? null
+  const [loaded, setLoaded] = useState<EditorStore | null>(null)
+  useEffect(() => {
+    if (store || refId === null) return
+    let live = true
+    const next = new EditorStore(refId, user, call)
+    void next.load().then(() => live && setLoaded(next))
+    return () => {
+      live = false
+    }
+  }, [store, refId, user, call])
+  const ready = store ?? loaded
+  if (ready?.snapshot) return <ForkDialog store={ready} onClose={onClose} />
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()} title="Fork card">
+      {loaded?.loadError ? <ErrorAlert error={loaded.loadError} /> : <p className="text-muted">Loading the card…</p>}
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+      </DialogActions>
+    </Dialog>
   )
 }
 function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () => void }) {
