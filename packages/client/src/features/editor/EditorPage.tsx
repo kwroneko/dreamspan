@@ -248,14 +248,7 @@ export function Editor({
             <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
               Save{dirty > 0 ? ` (${dirty})` : ""}
             </Button>
-            {ref.kind === "preset" ? (
-              <Button aria-expanded={searching} aria-controls="preset-search" onClick={() => setSearching(!searching)}>
-                <Icon name="search" />
-                Search
-              </Button>
-            ) : (
-              <Button onClick={() => setOpen("search")}>Search</Button>
-            )}
+            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
             <Button onClick={() => setOpen("history")}>History</Button>
             {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
             {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
@@ -272,18 +265,33 @@ export function Editor({
               {clash}
             </p>
           )}
+          {/* A preset's search toggle ends the state line: on a phone the buttons above fill a row. */}
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <p role="status" className="text-sm text-muted">
+              {state.saving
+                ? "Keeping your changes…"
+                : dirty === 0
+                  ? "Everything is saved."
+                  : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
+            </p>
+            {ref.kind === "preset" && (
+              <Button
+                variant="ghost"
+                className="h-7! shrink-0 px-2!"
+                aria-expanded={searching}
+                aria-controls="preset-search"
+                onClick={() => setSearching(!searching)}
+              >
+                <Icon name="search" />
+                Search
+              </Button>
+            )}
+          </div>
           {ref.kind === "preset" && searching && (
             <div id="preset-search">
               <SearchDialog store={store} inline onReveal={setSearchMatch} />
             </div>
           )}
-          <p role="status" className="text-sm text-muted">
-            {state.saving
-              ? "Keeping your changes…"
-              : dirty === 0
-                ? "Everything is saved."
-                : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
-          </p>
         </div>
 
         {state.saveError && (
