@@ -375,13 +375,21 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
             ))
           )}
         </div>
-        <div role="group" aria-labelledby={`${listId}-personas`} className="mt-2 flex flex-col border-t border-border pt-2">
+        <div
+          role="group"
+          aria-labelledby={`${listId}-personas`}
+          className="mt-2 flex flex-col border-t border-border pt-2"
+        >
           <p id={`${listId}-personas`} className="px-2 pb-1 text-sm font-semibold">
             Your persona
           </p>
           {personaShown.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-muted">
-              {loading ? "Loading…" : typed !== "" ? `No persona is called “${typed}”.` : "No cards in the persona folder."}
+              {loading
+                ? "Loading…"
+                : typed !== ""
+                  ? `No persona is called “${typed}”.`
+                  : "No cards in the persona folder."}
             </p>
           ) : (
             personaShown.map((card, at) => (

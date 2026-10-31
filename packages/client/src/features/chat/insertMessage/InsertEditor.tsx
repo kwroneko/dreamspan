@@ -82,7 +82,8 @@ export function InsertEditor({
       reread === null
         ? null
         : {
-            short: rereads === null ? "re-reads the rest" : `re-reads ${rereads} ${rereads === 1 ? "message" : "messages"}`,
+            short:
+              rereads === null ? "re-reads the rest" : `re-reads ${rereads} ${rereads === 1 ? "message" : "messages"}`,
             text: reread
           }
     )

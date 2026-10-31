@@ -237,8 +237,7 @@ export const registerComposerControls = () => [
     order: 10,
     placement: "actions",
     // A phone regenerates from the reply itself, to leave the box its width.
-    available: ({ leaf, leafGenerating, compact }) =>
-      !compact && leaf?.version.writer === "model" && !leafGenerating,
+    available: ({ leaf, leafGenerating, compact }) => !compact && leaf?.version.writer === "model" && !leafGenerating,
     run: async ({ session, leaf, report }) => {
       if (leaf) report(await session.regenerate(leaf))
     },
@@ -250,18 +249,6 @@ export const registerComposerControls = () => [
         onClick={invoke}
       >
         <RegenerateIcon />
-      </SquareIconButton>
-    )
-  }),
-  composerControls.register({
-    id: "composer.stop",
-    order: 10,
-    placement: "actions",
-    available: ({ leafGenerating }) => leafGenerating === true,
-    run: ({ stop }) => stop(),
-    component: ({ invoke }) => (
-      <SquareIconButton label="Stop the reply" hint="Stop the reply being written" onClick={invoke}>
-        <Icon name="stop" size={14} />
       </SquareIconButton>
     )
   }),

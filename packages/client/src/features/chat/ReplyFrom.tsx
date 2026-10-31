@@ -50,7 +50,9 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
       ]}
       value={picked ?? AUTO}
       onChoose={(value) => onPick(value === AUTO ? null : value)}
-      footer={() => <p className="px-2 py-1 text-xs text-muted">A pick is for one reply; then turns go on round the cast.</p>}
+      footer={() => (
+        <p className="px-2 py-1 text-xs text-muted">A pick is for one reply; then turns go on round the cast.</p>
+      )}
     />
   )
 }

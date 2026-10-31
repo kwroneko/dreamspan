@@ -482,9 +482,6 @@ export function Composer({
     generate,
     send,
     replyNow,
-    stop: async () => {
-      if (leaf !== undefined && leafGenerating) report(await session.stop(leaf.version.id))
-    },
     history: editing === null ? <History draft={draft} /> : null,
     report
   }

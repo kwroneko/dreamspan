@@ -4,7 +4,7 @@
 // - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) above the box;
 // - `speaker`: left of the box;
 // - `tools`: icon buttons inside the box, after the text;
-// - `actions`: the box's last buttons (write, send, stop).
+// - `actions`: the box's last buttons (guidance, regenerate, write, send).
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
 import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
@@ -46,8 +46,6 @@ export interface ComposerControlContext {
   readonly generate: () => Promise<void>
   readonly send: () => Promise<void>
   readonly replyNow: () => Promise<void>
-  /** Stops the reply being written at the end of the chat. */
-  readonly stop: () => Promise<void>
   /** The draft's earlier text (null while a reply's guidance is edited). */
   readonly history: ReactNode
   readonly report: (outcome: Outcome<unknown>) => void

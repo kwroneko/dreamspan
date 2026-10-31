@@ -63,7 +63,8 @@ export function ModelChip({
   const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
   const models = useModelChoices(true, current)
   const chosen = models.find((model) => model.value === current)
-  if (view.loading || defaults === null || (current !== null && chosen === undefined)) return <LoadingChip label="Model" />
+  if (view.loading || defaults === null || (current !== null && chosen === undefined))
+    return <LoadingChip label="Model" />
   const short = chosen ? chosen.label.slice(chosen.label.indexOf(" · ") + 3) : "Choose a model"
   return (
     <>
