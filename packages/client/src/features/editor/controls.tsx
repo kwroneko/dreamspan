@@ -431,25 +431,21 @@ export function RecoveredNotice({ store }: { store: EditorStore }) {
   const fields = state.recoveredFields.map((field) => draftLabel(ref.kind, doc, field))
   const one = state.recovered === 1
   return (
-    <Alert
-      tone="neutral"
-      title={one ? "Your earlier text is in the bin" : "Your earlier texts are in the bin"}
-      actions={
-        <>
-          <Link to="/bin" search={{ section: "recovered" }} className={buttonClass("ghost")}>
-            Open the bin
-          </Link>
-          <Button variant="ghost" onClick={() => store.dismissRecovered()}>
-            Dismiss
-          </Button>
-        </>
-      }
-    >
+    <Alert tone="neutral" title={one ? "Your earlier text is in the bin" : "Your earlier texts are in the bin"}>
       <p>
         {fields.length > 0
           ? `What ${listed(fields)} had before you replaced most of it is kept in the bin, under Recovered text, in case you want it back.`
           : `What you replaced or deleted is kept in the bin, under Recovered text, in case you want it back.`}
       </p>
+      {/* Under the text, so a narrow panel keeps the sentence readable. */}
+      <div className="mt-1 flex flex-wrap gap-2">
+        <Link to="/bin" search={{ section: "recovered" }} className={buttonClass("ghost")}>
+          Open the bin
+        </Link>
+        <Button variant="ghost" onClick={() => store.dismissRecovered()}>
+          Dismiss
+        </Button>
+      </div>
     </Alert>
   )
 }
