@@ -179,7 +179,10 @@ test("a reply finishing in a chat not looked at is counted in the list, the titl
   await box(page).fill("And now?")
   await page.getByRole("button", { name: "Send" }).click()
   await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
-  await page.getByRole("main").getByRole("link", { name: "Chats", exact: true }).click()
+  // Back to the Chats page in the app, no reload: on a wide screen the left panel stands in
+  // for a header link to it.
+  await page.goBack()
+  await expect(page).toHaveURL(/\/chats$/)
   await expect(page.getByRole("link", { name: "Elsewhere" })).toBeVisible()
   await expect(page.getByText("new reply")).toHaveCount(0)
   await expect(page).toHaveTitle(/^Chats/)

@@ -33,15 +33,37 @@ import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDr
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
+/** A phone's width, the composers' compact layout's breakpoint. */
+const COMPACT_WIDTH = 640
+/**
+ * The narrowest composer that holds the full bar (speaker and recent faces, the box with its
+ * tools, Write for, Send). A desktop chat between both panels at their defaults is wider.
+ */
+const FULL_BAR_WIDTH = 520
+
 const subscribePhone = (notify: () => void) => {
-  const media = matchMedia("(max-width: 639px)")
+  const media = matchMedia(`(max-width: ${COMPACT_WIDTH - 1}px)`)
   media.addEventListener("change", notify)
   return () => media.removeEventListener("change", notify)
 }
 
-/** A phone's width: the composers' compact layout. */
-export const useCompactComposer = () =>
-  useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
+/**
+ * The composers' compact layout: on a phone, and wherever the composer is too narrow for the full bar,
+ * as between a wide sidebar and a wide chat panel. `ref` goes on the composer's own box.
+ */
+export const useCompactComposer = () => {
+  const phone = useSyncExternalStore(subscribePhone, () => matchMedia(`(max-width: ${COMPACT_WIDTH - 1}px)`).matches)
+  const [narrow, setNarrow] = useState(false)
+  const ref = useCallback((node: HTMLElement | null) => {
+    if (node === null) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setNarrow(entry.contentRect.width < FULL_BAR_WIDTH)
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  return { compact: phone || narrow, ref }
+}
 
 /** A send whose text was typed on a branch the chat view has left since. */
 const BRANCH_CHANGED: AppError = {
@@ -150,7 +172,7 @@ export function Composer({
   onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
-  const phone = useCompactComposer()
+  const { compact: phone, ref: composerRef } = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -496,7 +518,10 @@ export function Composer({
   )
 
   return (
-    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2 max-sm:px-2">
+    <div
+      ref={composerRef}
+      className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2 max-sm:px-2"
+    >
       <ComposerControls placement="banner" context={controls} />
       <ComposerControls placement="queue" context={controls} />
       {conflict && (
@@ -525,7 +550,8 @@ export function Composer({
       <StripRow scroll={phone}>
         <ComposerControls placement="strip" context={controls} />
       </StripRow>
-      <div className="flex min-w-0 items-end gap-1.5">
+      {/* On a phone the box takes the 2 px: its text keeps 40% of the width beside four icon actions. */}
+      <div className="flex min-w-0 items-end gap-1.5 max-sm:gap-1">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex h-[46px] shrink-0 items-center gap-1">
           <ComposerControls placement="speaker" context={controls} />

@@ -9,6 +9,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { showAppNavigation } from "./support/appMenu.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -243,7 +244,8 @@ for (const width of [1440, 390]) {
     await expect(box(page)).toHaveValue(draft)
     await page.getByRole("button", { name: "Edit guidance" }).click()
     await expect(bar(page)).toBeVisible()
-    await page.getByRole("link", { name: "Characters", exact: true }).first().click()
+    await showAppNavigation(page)
+    await page.getByRole("link", { name: "Characters", exact: true }).filter({ visible: true }).first().click()
     await page.goBack()
     await expect(bar(page)).toHaveCount(0)
     await expect(box(page)).toHaveValue(draft)

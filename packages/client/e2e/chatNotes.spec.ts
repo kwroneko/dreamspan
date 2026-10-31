@@ -2,7 +2,7 @@
 // at the latest message, reaches the request the provider receives, and stops reaching it
 // once turned off; a card's note is edited as the card's. The provider is a fake on
 // loopback, and the cards are made up.
-import { panelTab } from "./support/panel.ts"
+import { openPanel, panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
@@ -71,7 +71,7 @@ test("a note made in the chat goes into the request once on, and out once off", 
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByText("The river is rising.")).toBeVisible()
 
-  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Notes" }).click()
+  await openPanel(page, "Notes")
   const dialog = page.getByRole("tabpanel", { name: "Notes" })
   await dialog.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
   await page.getByRole("menuitem", { name: "New note" }).click()
@@ -132,7 +132,7 @@ test("an open Notes tab follows another connection's State changes", async ({ pa
   const note = await admin((api) => api.CreateChatNote({ chatId: chatId as never, title: "Remote" }))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
-  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Notes" }).click()
+  await openPanel(page, "Notes")
   const toggle = page.getByRole("tabpanel", { name: "Notes" }).getByRole("switch", { name: "Remote" })
   await expect(toggle).not.toBeChecked()
   const chat = await admin((api) => api.GetChat({ chatId: chatId as never }))

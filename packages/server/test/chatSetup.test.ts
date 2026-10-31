@@ -206,7 +206,8 @@ describe("chat setup", () => {
         greeting: 1,
         first: { _tag: "Send", content: "Hello.", speakerEntityId: anaId }
       })
-      assert.strictEqual(started.chat.title, "Mira & Ana")
+      // Named by its character and day, the persona left out (DESIGN §2.1).
+      assert.match(started.chat.title, /^Mira, [A-Z][a-z]{2} \d{1,2}$/)
       const me = yield* api.Whoami()
       const initial = foldState(
         yield* (yield* Reader).StateEventsAt({ userId: me.id, chatId: started.chat.id, slotId: null })

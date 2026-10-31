@@ -52,7 +52,15 @@ for (const width of [1440, 390]) {
         .click()
       const portrait = page.locator("main img").first()
       await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)$/)
-      await page.getByRole("link", { name: "New chat", exact: true }).last().click()
+      // With no chat yet the tile opens a new one, the card's panel offering New chat; with one,
+      // its latest chat at the card's tab, whose More menu starts another (fpanel).
+      const newChat = page.getByRole("link", { name: "New chat", exact: true }).filter({ visible: true })
+      const more = page.getByRole("button", { name: "More for Synthetic 001", exact: true })
+      await expect(newChat.or(more).first()).toBeVisible()
+      if (await more.isVisible()) {
+        await more.click()
+        await page.getByRole("menuitem", { name: "New chat with Synthetic 001", exact: true }).click()
+      } else await newChat.last().click()
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
       await page.getByRole("button", { name: /^Send as / }).click()

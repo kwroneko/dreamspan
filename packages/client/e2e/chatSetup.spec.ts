@@ -116,7 +116,8 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
-  await expect(page.getByRole("heading", { level: 1, name: "Mira & Bo" })).toBeVisible()
+  // Named by its character and day, the persona left out.
+  await expect(page.getByRole("heading", { level: 1, name: /^Mira, [A-Z][a-z]{2} \d{1,2}$/ })).toBeVisible()
   // The greeting picked, as a version of the first message, with its macros resolved for Bo.
   const first = replies(page).first()
   await expect(first).toContainText("Mira waves at Bo from the pier.")

@@ -1,7 +1,7 @@
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
@@ -12,6 +12,7 @@ import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
 let chatId: ChatId
+let originalFork: ForkId
 let entries: ReadonlyArray<PathEntry>
 
 test.beforeAll(async () => {
@@ -70,6 +71,7 @@ test.beforeAll(async () => {
       })
       const chats = yield* api.ListChats({ limit: 10, before: null })
       chatId = chats[0]!.id
+      originalFork = chats[0]!.currentForkId!
       entries = (yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 })).entries
     })
   )
@@ -161,6 +163,32 @@ test("two tabs and an inactive-path deep link keep their own context boundary", 
   await other.close()
 })
 
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`insertion before retained history explains that the next reply cannot see it (${width}px, ${theme})`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      // Before the summarized test below, which summarizes these messages in this chat: here they're
+      // only dropped. The imported branch, named.
+      await page.goto(`${server().url}/chats/${chatId}?fork=${originalFork}&slot=${entries[1]!.slotId}`)
+      const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
+      await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+      await messageMenu(dropped, "Insert message below")
+      const editor = page.getByTestId("insert-editor")
+      await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
+      // Nor does the strip's cache chip say what the next reply re-reads from it.
+      await expect(page.getByText(/re-reads? (the rest|\d)/)).toHaveCount(0)
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({
+          path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
+        })
+      await editor.getByRole("button", { name: "Cancel", exact: true }).click()
+    })
+
 test("summarized messages are distinct from dropped and hidden messages", async ({ page }) => {
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
@@ -211,27 +239,3 @@ test("summarized messages are distinct from dropped and hidden messages", async 
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")
   await expect(dropped).not.toHaveAttribute("data-summarized")
 })
-
-for (const width of [1440, 390])
-  for (const theme of ["light", "dark"] as const)
-    test(`insertion before retained history explains that the next reply cannot see it (${width}px, ${theme})`, async ({
-      page
-    }) => {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.goto(`${server().url}/chats/${chatId}?slot=${entries[1]!.slotId}`)
-      const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
-      await expect(dropped).toHaveAttribute("data-out-of-context", "true")
-      await messageMenu(dropped, "Insert message below")
-      const editor = page.getByTestId("insert-editor")
-      await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
-      // Nor does the strip's cache chip say what the next reply re-reads from it.
-      await expect(page.getByText(/re-reads? (the rest|\d)/)).toHaveCount(0)
-      if (process.env.SCREENSHOT_DIR)
-        await page.screenshot({
-          path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
-        })
-      await editor.getByRole("button", { name: "Cancel", exact: true }).click()
-    })

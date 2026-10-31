@@ -7,6 +7,7 @@ import { textField } from "@rp/shared/editing.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -143,16 +144,13 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/chats/${chatId}`)
     await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible()
     await shoot("chat-header")
-    const tab = page.getByRole("tab", { name: "Cast", exact: true })
-    if (width === 390) {
-      await page.getByRole("button", { name: "Chat panel", exact: true }).click()
-      await tab.click()
-    } else if (await tab.isVisible()) await tab.click()
-    else
-      await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+    await openPanel(page, "Cast")
     const castList = page.getByRole("list", { name: "Characters in this chat" })
     await expect(castList).toContainText("Aria Vance")
-    await expect(castList.getByRole("listitem", { name: "Aria Vance", exact: true })).toContainText("1")
+    // A Cast row shows the version only to tell two cards of one name apart; Aria's is unique here.
+    const row = castList.getByRole("listitem", { name: "Aria Vance", exact: true })
+    await expect(row).toContainText("Aria Vance")
+    await expect(row).not.toContainText("1")
     await shoot("chat-cast")
     // A normal name/version save refreshes the mounted sidebar, and History cannot
     // restore an occupied imported pair. All surrounding data is the realistic import.

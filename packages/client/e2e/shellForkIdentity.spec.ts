@@ -31,6 +31,8 @@ for (const width of [1440, 390])
           yield* api.PinFork({ forkId: peer.id, pinned: true })
           return {
             a,
+            chatName: `Identity ${width} ${theme} & Companion ${width} ${theme}`,
+            currentForkId: (yield* api.GetChat({ chatId: start.chat.id })).currentForkId,
             original: { ...original, name: `Original ${width} ${theme}` },
             peer: { ...peer, name: `Checkpoint ${width} ${theme}` },
             chatId: start.chat.id
@@ -43,8 +45,11 @@ for (const width of [1440, 390])
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await page.goto(server().url)
       const pins = page.getByRole("main").getByRole("region", { name: "Pinned chats", exact: true })
-      await expect(pins.getByRole("button", { name: `Open chat ${data.original.name}`, exact: true })).toBeVisible()
-      await expect(pins.getByRole("button", { name: `Open chat ${data.peer.name}`, exact: true })).toBeVisible()
+      // Pins are branches: each row names its chat, then the branch (fheader).
+      const pin = (name: string) =>
+        pins.getByRole("button", { name: `Open chat ${data.chatName} › ${name}`, exact: true })
+      await expect(pin(data.original.name)).toBeVisible()
+      await expect(pin(data.peer.name)).toBeVisible()
       await expect(page.locator("html")).toHaveCSS("color-scheme", theme)
       const screens = process.env.SCREENSHOT_DIR
       if (screens) {
@@ -52,7 +57,7 @@ for (const width of [1440, 390])
         await page.screenshot({ path: join(screens, `shell-forks-${width}-${theme}.png`), fullPage: true })
       }
       // The original shares its tip with the current peer; a leaf-only URL opens the peer.
-      await pins.getByRole("button", { name: `Open chat ${data.original.name}`, exact: true }).click()
+      await pin(data.original.name).click()
       await expect(page).toHaveURL(new RegExp(`fork=${data.original.id}`))
       await expect(page.getByRole("article").filter({ hasText: "Shared checkpoint text" })).toBeVisible()
       await page.goto(server().url)
@@ -61,25 +66,32 @@ for (const width of [1440, 390])
         .getByRole("group", { name: "Show", exact: true })
         .getByRole("button", { name: "Groups", exact: true })
         .click()
+      // A group tile is the chat, shown once: it opens the chat's current branch by its id.
       await page
         .getByRole("main")
-        .getByRole("button", { name: `Open chat ${data.original.name}`, exact: true })
+        .getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
         .last()
         .click()
-      await expect(page).toHaveURL(new RegExp(`fork=${data.original.id}`))
+      await expect(page).toHaveURL(new RegExp(`fork=${data.currentForkId}`))
       await page.goto(server().url)
       await page
         .getByRole("main")
         .getByRole("button", { name: `Open ${data.a.label}`, exact: true })
         .click()
       await expect(page).toHaveURL(/fork=/)
-      // Opening a character scopes the left list on desktop; its original row keeps the fork id.
+      // Opening a character scopes the left list on desktop; its chat's row opens that chat at its
+      // current branch, never another one.
       if (width === 1440) {
         await page
-          .getByRole("button", { name: `Open chat ${data.original.name}`, exact: true })
+          .getByRole("button", { name: `Open chat ${data.chatName}`, exact: true })
           .last()
           .click()
-        await expect(page).toHaveURL(new RegExp(`fork=${data.original.id}`))
+        await expect
+          .poll(() => {
+            const at = new URL(page.url())
+            return { path: at.pathname, fork: at.searchParams.get("fork") ?? data.currentForkId }
+          })
+          .toEqual({ path: `/chats/${data.chatId}`, fork: data.currentForkId })
       }
     })
   }

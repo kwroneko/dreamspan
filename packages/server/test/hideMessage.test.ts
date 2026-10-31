@@ -149,7 +149,7 @@ describe("a new chat of a group", () => {
         inn.members.map((member) => member.name),
         ["Ana", "Mira"]
       )
-      assert.isTrue(groups.some((group) => group.name === "Ana & Mira & Sam"))
+      assert.isTrue(groups.some((group) => group.name === "Ana & Mira"))
       // The first member greets, as the chat's first message, with `{{user}}` as the persona.
       const path = yield* api.ReadPath({
         chatId: second.chat.id,

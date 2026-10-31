@@ -9,6 +9,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40" })
 test.setTimeout(240_000)
@@ -149,6 +150,7 @@ for (const width of [1440, 390])
       await expect(full).toHaveCSS("object-fit", "contain")
       await shoot(page, `portrait-lightbox-${width}-${colorScheme}`)
       await page.keyboard.press("Escape")
+      await showAppNavigation(page)
       const imageSettings = page
         .getByRole("button", { name: "Image settings", exact: true })
         .filter({ visible: true })
@@ -159,6 +161,7 @@ for (const width of [1440, 390])
       await shoot(page, `portrait-size-${width}-${colorScheme}`)
       await page.keyboard.press("Escape")
       await page.keyboard.press("Escape")
+      await hideAppNavigation(page)
       const cast = await openPanel(page, "Cast")
       await expect(cast.getByRole("list", { name: "Characters in this chat" })).toBeVisible()
       await shoot(page, `cast-portraits-${width}-${colorScheme}`)
