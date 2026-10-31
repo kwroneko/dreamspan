@@ -136,7 +136,7 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
 })
 
-test("a dynamic family obeys individual disablement and rejects unlisted URLs", async ({ page }) => {
+test("a dynamic family obeys individual disablement and never opens an unlisted URL", async ({ page }) => {
   await setup(page)
   await contribution(page, "install", "plugin")
   await contribution(page, "install", "family-tab")
@@ -144,8 +144,11 @@ test("a dynamic family obeys individual disablement and rejects unlisted URLs", 
   await contribution(page, "close", "family-tab")
   await page.getByRole("button", { name: "Plugin panel", exact: true }).click()
   await page.getByRole("button", { name: "Unlisted family URL", exact: true }).click()
-  await expect(page).toHaveURL(/panel=synthetic%3Aabsent/)
-  await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
+  // A family's tab this chat doesn't offer opens the panel's default tab instead (panelHere).
+  await expect(page).toHaveURL(/panel=chat(&|$)/)
+  const panel = page.getByRole("complementary", { name: "Chat panel", exact: true })
+  await expect(panel.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(panel.getByRole("tabpanel", { name: /absent/i })).toHaveCount(0)
 })
 
 test("card contributions update every mounted placement and restore built-ins", async ({ page }) => {
