@@ -70,19 +70,24 @@ export const stMainChat = (head: string): string | null => {
 }
 
 /**
- * The plan by kind: how many files, and how many of them earlier imports hold (`known`,
- * from StImportPreview). `settings` and `group` files aren't kept as entries, so they're
- * read again on every import and never counted as known.
+ * The plan by kind: how many files, how many of them earlier imports hold (`known`), and how
+ * many chats hold only a greeting, which no import takes (`skipped`), both from
+ * StImportPreview. `settings` and `group` files aren't kept as entries, so they're read
+ * again on every import and counted as neither.
  */
 export const stPlanKinds = (
   send: ReadonlyArray<{ readonly path: string; readonly kind: StSentKind }>,
-  known: ReadonlySet<string>
-): ReadonlyMap<StSentKind, { readonly files: number; readonly known: number }> => {
-  const counts = new Map<StSentKind, { files: number; known: number }>()
+  known: ReadonlySet<string>,
+  skipped: ReadonlySet<string> = new Set()
+): ReadonlyMap<StSentKind, { readonly files: number; readonly known: number; readonly skipped: number }> => {
+  const counts = new Map<StSentKind, { files: number; known: number; skipped: number }>()
   for (const entry of send) {
-    const count = counts.get(entry.kind) ?? { files: 0, known: 0 }
+    const count = counts.get(entry.kind) ?? { files: 0, known: 0, skipped: 0 }
     count.files++
-    if (known.has(entry.path) && entry.kind !== "settings" && entry.kind !== "group") count.known++
+    if (entry.kind !== "settings" && entry.kind !== "group") {
+      if (known.has(entry.path)) count.known++
+      else if (skipped.has(entry.path)) count.skipped++
+    }
     counts.set(entry.kind, count)
   }
   return counts

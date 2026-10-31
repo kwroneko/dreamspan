@@ -124,6 +124,25 @@ describe("ST import jobs", () => {
         }
         assert.isTrue([...known].some((path) => path.startsWith("chats/")))
         assert.isFalse(known.has(added))
+        // Read from the folder: a copy of an imported lorebook under another name is here, as
+        // the import finds it by its bytes, and a chat of only a greeting is one no import takes.
+        const user = join(root, "data/default-user")
+        writeFileSync(join(user, "worlds/Hollow copy.json"), files.get("data/default-user/worlds/Hollow.json")!)
+        mkdirSync(join(user, "chats/Nobody"), { recursive: true })
+        writeFileSync(
+          join(user, "chats/Nobody/Hi.jsonl"),
+          jsonl([header({}), message({ name: "Nobody", mes: "Hi.", minute: 0 })])
+        )
+        writeFileSync(
+          join(user, added),
+          jsonl([header({}), message({ name: "Sam", user: true, mes: "Hey.", minute: 0 })])
+        )
+        const read = yield* api.StImportPreview({
+          paths: ["worlds/Hollow copy.json", "chats/Nobody/Hi.jsonl", added],
+          folder: { root, prefix: "data/default-user/" }
+        })
+        assert.deepStrictEqual(read.known, ["worlds/Hollow copy.json"])
+        assert.deepStrictEqual(read.skipped, ["chats/Nobody/Hi.jsonl"])
         const detail = yield* api.GetStImport({ importId })
         assert.isAtLeast(detail.report!.counts.group?.unchanged ?? 0, 1)
         assert.isAtLeast(detail.report!.counts.persona?.added ?? 0, 1)

@@ -2,7 +2,8 @@
 // ARCHITECTURE.md §13): listing the files the import reads, and reading one of them, a chat
 // in parts cut at line ends as the browser upload sends it. Plain file reads on the main
 // thread; parsing stays in the format workers.
-import { open, opendir, readdir, realpath, stat } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { open, opendir, readdir, readFile, realpath, stat } from "node:fs/promises"
 import { dirname, isAbsolute, join } from "node:path"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { ST_HEAD_BYTES, stMainChat } from "@rp/shared/stPlan.ts"
@@ -206,3 +207,73 @@ export const readStFolderFile = (
   })
 
 class Refused extends Error {}
+
+/** What a library file is in the library, as `importLibrary` matches an earlier import's file by its bytes. */
+const LIBRARY_KINDS: Partial<Record<string, string>> = {
+  card: "card",
+  persona_avatar: "card",
+  world: "lorebook",
+  preset: "preset"
+}
+
+const safeSegments = (path: string) =>
+  path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..")
+
+/** Whether a chat file holds no message, or one that isn't the user's: ST's greeting-only chat, which the import skips. */
+const greetingOnly = (text: string) => {
+  const lines = text.split("\n").filter((line) => line.trim() !== "")
+  if (lines.length <= 1) return true
+  if (lines.length > 2) return false
+  try {
+    const message: unknown = JSON.parse(lines[1]!)
+    return !(typeof message === "object" && message !== null && (message as Record<string, unknown>).is_user === true)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * For the import page's preview of a folder named by its path (StImportPreview), the files
+ * of `paths` (relative to the ST user's folder `prefix` of `root`) no earlier import recorded by path:
+ * library files whose bytes an earlier import already holds (`hashes`, `<kind>:<sha256>`,
+ * read only for kinds that have any), and chats small enough to read at once that hold only
+ * a greeting, which every import skips.
+ */
+export const previewStFiles = (
+  folder: { readonly root: string; readonly prefix: string },
+  paths: ReadonlyArray<string>,
+  hashes: ReadonlySet<string>
+) =>
+  Effect.tryPromise({
+    try: async () => {
+      if (!isAbsolute(folder.root)) throw new Refused("Enter the folder's full path.")
+      if (folder.prefix !== "" && !safeSegments(folder.prefix.replace(/\/$/, "")))
+        throw new Refused("That isn't an ST user's folder.")
+      const root = join(folder.root, folder.prefix)
+      const hashed = new Set([...hashes].map((key) => key.slice(0, key.indexOf(":"))))
+      const same: Array<string> = []
+      const skipped: Array<string> = []
+      const check = async (path: string) => {
+        if (!safeSegments(path)) return
+        const kind = classifyStPath(path)?.kind
+        const library = kind === undefined ? undefined : LIBRARY_KINDS[kind]
+        const full = join(root, path)
+        if (library !== undefined && hashed.has(library)) {
+          const { size } = await stat(full)
+          if (size > defaultLimits.maxFileBytes) return
+          const digest = createHash("sha256")
+            .update(await readFile(full))
+            .digest("hex")
+          if (hashes.has(`${library}:${digest}`)) same.push(path)
+        } else if (kind === "chat" || kind === "group_chat") {
+          const { size } = await stat(full)
+          if (size <= ST_HEAD_BYTES && greetingOnly(await readFile(full, "utf8"))) skipped.push(path)
+        }
+      }
+      // A few files at a time, as the scan reads them.
+      for (let at = 0; at < paths.length; at += 16)
+        await Promise.all(paths.slice(at, at + 16).map((path) => check(path).catch(() => undefined)))
+      return { same, skipped }
+    },
+    catch: (error) => unreadable(error instanceof Refused ? error.message : "The folder can't be read.")
+  })

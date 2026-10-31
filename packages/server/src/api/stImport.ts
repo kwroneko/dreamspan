@@ -11,7 +11,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImports } from "../importer/StImports.ts"
-import { listFolder, scanStFolder } from "../importer/stFolderDisk.ts"
+import { listFolder, previewStFiles, scanStFolder } from "../importer/stFolderDisk.ts"
 
 /** Reading a folder by its path is for admins: anyone else could read any user's files. */
 const adminOnly = Effect.flatMap(CurrentUser, (user) =>
@@ -55,15 +55,27 @@ export const makeStImportHandlers = Effect.gen(function* () {
     ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path, start)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
     // The user's own records only: no file is read, so it isn't for admins alone.
-    StImportPreview: ({ paths }) =>
+    StImportPreview: ({ paths, folder }) =>
       Effect.gen(function* () {
-        const user = yield* CurrentUser
+        const user = folder === undefined ? yield* CurrentUser : yield* adminOnly
         const sources = yield* reader.StImportSources({ userId: user.id })
         const known = new Set([
           ...sources.library.map((entry) => entry.sourcePath),
           ...sources.chats.filter((record) => record.complete).map((record) => record.source)
         ])
-        return { known: paths.filter((path) => known.has(path)) }
+        const found = paths.filter((path) => known.has(path))
+        if (folder === undefined) return { known: found, skipped: [] }
+        const hashes = new Set(
+          sources.library.flatMap((entry) =>
+            entry.sourceHash === null || entry.binned ? [] : [`${entry.kind}:${entry.sourceHash}`]
+          )
+        )
+        const read = yield* previewStFiles(
+          folder,
+          paths.filter((path) => !known.has(path)),
+          hashes
+        )
+        return { known: [...found, ...read.same], skipped: read.skipped }
       }).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
           Effect.logError("StImportPreview failed", error).pipe(

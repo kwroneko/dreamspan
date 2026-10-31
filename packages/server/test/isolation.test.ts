@@ -1899,16 +1899,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   StImportPreview: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
-        const card = JSON.stringify({ spec: "chara_card_v2", spec_version: "2.0", data: { name: "Preview" } })
-        const sent = yield* http(
-          owner,
-          `/st-import/file?${new URLSearchParams({ import: importId, path: "characters/Preview.json" })}`,
-          card,
-          "application/octet-stream"
-        )
-        assert.strictEqual(sent.status, 200)
-        const paths = ["characters/Preview.json"]
+        const paths = [`characters/${owner.user.handle}.png`]
         assert.deepStrictEqual((yield* owner.api.StImportPreview({ paths })).known, paths)
         assert.deepStrictEqual((yield* actor.api.StImportPreview({ paths })).known, [])
       })
@@ -3042,7 +3033,8 @@ const seed = Effect.gen(function* () {
         doc: cardDoc(`${user.handle} card`, { first_mes: "Hello, {{user}}." }),
         schemaVersion: 1,
         origin: "user",
-        sourcePath: null
+        // As an ST import records its file, for StImportPreview's probe.
+        sourcePath: `characters/${user.handle}.png`
       })
       yield* writer.SetEntityTags({ userId: user.id, entityId: card.entityId, tags: ["persona"] })
       // A card with an avatar, a note and a draft, for the editors' probes.

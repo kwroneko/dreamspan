@@ -196,12 +196,19 @@ export class StImportApi extends RpcGroup.make(
    * Which of these paths of an ST user's folder (as `stPlan` gives them) the caller's earlier
    * imports already hold, for the preview's "already here": library files recorded by their
    * path, and chats whose import finished. A file is read again when it's imported, so one
-   * that changed since still goes in; an unfinished chat isn't here yet.
+   * that changed since still goes in; an unfinished chat isn't here yet. With `folder` (one
+   * named by its path: ScanStFolder's root and the ST user's prefix; admin only, as reading
+   * it is), files are also read: a library file whose bytes an earlier import holds under
+   * another path is known, and `skipped` lists the chats holding only a greeting, which no
+   * import takes.
    */
   Rpc.make("StImportPreview", {
-    payload: { paths: Schema.Array(FolderPath).check(Schema.isMaxLength(50_000)) },
-    success: Schema.Struct({ known: Schema.Array(Schema.String) }),
-    error: ServerError
+    payload: {
+      paths: Schema.Array(FolderPath).check(Schema.isMaxLength(50_000)),
+      folder: Schema.optionalKey(Schema.Struct({ root: FolderPath, prefix: FolderPath }))
+    },
+    success: Schema.Struct({ known: Schema.Array(Schema.String), skipped: Schema.Array(Schema.String) }),
+    error: Schema.Union([Forbidden, StFolderUnreadable, ServerError])
   }),
   /**
    * Starts an upload import for the caller, ending any earlier upload of theirs (a running

@@ -586,6 +586,12 @@ function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionPro
             <Card>
               <CardHeader title="Report" />
               <Counts report={detail.report} />
+              {detail.report.greetingOnly > 0 && (
+                <p className="mt-2 text-sm text-muted">
+                  {detail.report.greetingOnly} skipped {detail.report.greetingOnly === 1 ? "chat holds" : "chats hold"}{" "}
+                  only a greeting, as ST makes one when a card is opened.
+                </p>
+              )}
               <NextSteps latestChat={detail.latestChat} />
             </Card>
           )}
@@ -645,29 +651,43 @@ const PREVIEW_PATHS = 50_000
 
 const cell = "px-2 py-1.5 text-right tabular-nums"
 
-/** The folder by kind: how many files, how many are new, how many earlier imports hold. */
-function FolderPreview({ plan }: { plan: Plan }) {
+/**
+ * The folder by kind: how many files, how many are new, how many earlier imports hold. A
+ * folder named by its path (`folder`) is read too: files an earlier import holds under
+ * another name, and chats holding only a greeting, which no import takes.
+ */
+function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; prefix: string } | null }) {
   const atom = useMemo(
     () =>
       AppClient.query(
         "StImportPreview",
-        { paths: plan.send.slice(0, PREVIEW_PATHS).map((entry) => entry.path) },
+        {
+          paths: plan.send.slice(0, PREVIEW_PATHS).map((entry) => entry.path),
+          ...(folder === null ? {} : { folder })
+        },
         { reactivityKeys: [ST_PREVIEW] }
       ),
-    [plan]
+    // The folder is a new object per render; its root and prefix are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [plan, folder?.root, folder?.prefix]
   )
   const result = useAtomValue(atom)
   const known = AsyncResult.isSuccess(result) ? new Set(result.value.known) : null
-  const kinds = stPlanKinds(plan.send, known ?? new Set())
+  const kinds = stPlanKinds(
+    plan.send,
+    known ?? new Set(),
+    AsyncResult.isSuccess(result) ? new Set(result.value.skipped) : new Set()
+  )
   const rows = FOLDER_KINDS.flatMap(([kind, label]) => {
     const count = kinds.get(kind)
     return count === undefined ? [] : [{ kind, label, ...count }]
   })
   const bytes = plan.send.reduce((sum, entry) => sum + entry.size, 0)
   const fresh = rows.reduce(
-    (sum, row) => sum + (row.kind === "settings" || row.kind === "group" ? 0 : row.files - row.known),
+    (sum, row) => sum + (row.kind === "settings" || row.kind === "group" ? 0 : row.files - row.known - row.skipped),
     0
   )
+  const skipped = rows.reduce((sum, row) => sum + row.skipped, 0)
   const pending = known === null ? (AsyncResult.isFailure(result) ? "?" : "…") : null
   return (
     <div className="flex flex-col gap-2">
@@ -702,8 +722,10 @@ function FolderPreview({ plan }: { plan: Plan }) {
                 </td>
               ) : (
                 <>
-                  <td className={`${cell} ${row.files - row.known > 0 && pending === null ? "font-semibold" : ""}`}>
-                    {pending ?? row.files - row.known}
+                  <td
+                    className={`${cell} ${row.files - row.known - row.skipped > 0 && pending === null ? "font-semibold" : ""}`}
+                  >
+                    {pending ?? row.files - row.known - row.skipped}
                   </td>
                   <td className={`${cell} text-muted`}>{pending ?? row.known}</td>
                 </>
@@ -724,6 +746,8 @@ function FolderPreview({ plan }: { plan: Plan }) {
           : fresh === 0
             ? "Everything here is already imported. Importing again takes in what changed since: new messages, edited cards."
             : `${fresh} new to import. What's already here is read again, and only what changed in it goes in.`}
+        {skipped > 0 &&
+          ` ${skipped} ${skipped === 1 ? "chat holds" : "chats hold"} only a greeting, as ST makes one when a card is opened: no import takes ${skipped === 1 ? "it" : "them"}.`}
       </p>
     </div>
   )
@@ -910,7 +934,12 @@ function StartSection({ open }: StImportSectionProps) {
                 />
               </Field>
             )}
-            {plan && <FolderPreview plan={plan} />}
+            {plan && (
+              <FolderPreview
+                plan={plan}
+                folder={chosen?._tag === "Path" && prefix !== null ? { root: chosen.root, prefix } : null}
+              />
+            )}
             {chosen?._tag === "Path" ? (
               <p className="text-sm text-muted">The server reads the folder and imports it, whatever this tab does.</p>
             ) : (
