@@ -12,6 +12,7 @@ export function Menu({
   side = "bottom",
   align = "end",
   label,
+  defaultOpen = false,
   onOpenChange
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
@@ -21,11 +22,17 @@ export function Menu({
   align?: "start" | "center" | "end"
   /** An accessible name for the list, when the trigger's text doesn't say what it holds. */
   label?: string
+  /** Open as it mounts: a menu mounted only once its trigger is first used, as a long list's rows do. */
+  defaultOpen?: boolean
   /** Told when it opens and closes: to read what it lists, say. */
   onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root modal={false} {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}>
+    <BaseMenu.Root
+      modal={false}
+      defaultOpen={defaultOpen}
+      {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}
+    >
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner
