@@ -94,7 +94,7 @@ for (const width of [1440, 390]) {
     await entry.getByRole("button", { name: "Revert Entry content", exact: true }).click()
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     await entry.getByRole("textbox", { name: "Entry content" }).fill("The tide turns at dawn.")
-    await entry.getByRole("switch", { name: "Use secondary keys", exact: true }).click()
+    await entry.getByRole("switch", { name: /^Use secondary keys/ }).click()
     await entry.getByRole("textbox", { name: "Secondary keys" }).fill("storm\nwind")
     await entry.getByRole("combobox", { name: "Logic" }).click()
     await page.getByRole("option", { name: "NOT ANY: none of them appears", exact: true }).click()

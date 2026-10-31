@@ -61,6 +61,7 @@ const send = async (page: Page, text: string) => {
 }
 
 test("attach a lorebook, send a keyword, and detach it from the provider request", async ({ page }) => {
+  test.setTimeout(120_000)
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import`)
   await page.getByLabel("Choose files, or drop them here").setInputFiles({

@@ -17,11 +17,8 @@ export function LorebookUse({ store, call }: { store: EditorStore; call: Caller 
   const entries = useValue<LorebookDoc | undefined>(store, BOOK)?.entries.length ?? 0
   const chats = useEditorState(store).snapshot?.usedByChats ?? 0
   return (
-    <section
-      aria-label="Where it's used"
-      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <p className="text-sm">
+    <section aria-label="Where it's used" className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+      <p className="shrink-0 text-sm">
         <strong>{count(entries, "entry", "entries")}</strong>
         <span className="text-muted">
           {" · "}
