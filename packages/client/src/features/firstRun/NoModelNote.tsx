@@ -21,7 +21,7 @@ function ChooseModel() {
       open={open}
       onOpenChange={setOpen}
       trigger="Choose"
-      triggerLabel="Choose a model"
+      triggerLabel="Choose a model for all chats"
       triggerClassName={`${link} outline-none focus-visible:ring-2 focus-visible:ring-focus rounded-sm`}
       title="Model for new replies"
     >
