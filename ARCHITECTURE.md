@@ -60,7 +60,7 @@ Bun was measured as an alternative (2026-10-10) and not adopted. On this server 
 | `AUTH_MODE` | `single` | `single` or `proxy` (§4) |
 | `AUTH_PROXY_HEADER` | `remote-user` | Identity header in proxy mode |
 | `ALLOWED_IPS` | unset | IPs, CIDR ranges and host names besides loopback that may connect in single mode (§4) |
-| `TRUSTED_PROXIES` | unset (loopback) | The only addresses that may connect in proxy mode: IPs, CIDR ranges and host names, e.g. `traefik,127.0.0.1` (§4) |
+| `TRUSTED_PROXIES` | unset (loopback) | The only addresses that may connect in proxy mode: IPs, CIDR ranges and host names, e.g. `proxy,127.0.0.1` (§4) |
 | `ALLOW_INSECURE_EXPOSURE` | `false` | Serve every address without protection (§4) |
 | `LOOPBACK_REQUIRES_LOGIN` | `true` | Once an account has a password, loopback needs a login too (§4) |
 | `ADMIN_PASSWORD_FILE`, `ADMIN_PASSWORD`, `ADMIN_USER` | unset | The first admin's password, for headless servers. Applies only while no enabled admin has one (§4) |
@@ -641,7 +641,7 @@ Fork independence unit 8 (`shared/historyApi.ts`, `db/historyReads.ts`, `db/hist
 **Exposure** (`net/exposure.ts`, DESIGN §11). Who may connect at all, decided per connection from the socket's source address, never from a forwarded header. Configuration is environment-only, as for every security setting.
 - **Single mode:** loopback, plus `ALLOWED_IPS`. Without `ALLOWED_IPS`, every address may connect while an enabled user has a password, since everyone then has to log in. This is checked per connection, so if the last password goes, access beyond loopback goes with it. An allowlist stays a restriction even with passwords.
 - **Proxy mode:** `TRUSTED_PROXIES` only, or loopback when it's unset. Anyone else who could connect could send the identity header and be any user. `ALLOWED_IPS` is a startup error here.
-- **Host names** (`net/addressSet.ts`): an entry of `ALLOWED_IPS` or `TRUSTED_PROXIES` may be a name, since a container's address changes when it restarts and its name doesn't. (A moved Traefik once got every request refused for a day, with nothing in the log.) The `TrustedAddresses` service holds both lists as live sets, shared by the gate and passwordless login (above).
+- **Host names** (`net/addressSet.ts`): an entry of `ALLOWED_IPS` or `TRUSTED_PROXIES` may be a name, since a container's address changes when it restarts and its name doesn't. The `TrustedAddresses` service holds both lists as live sets, shared by the gate and passwordless login (above).
   - A name trusts every address `getaddrinfo` gives it (A and AAAA). It's resolved at startup, before the server listens, then every 30 s, and at most once every 5 s when a connection arrives from an address that isn't trusted, so a proxy that moved is let in within seconds. Connections only read the current set, never resolve.
   - It fails closed. A name that doesn't exist trusts nothing, and the server still starts (the proxy may come up later). A successful answer replaces the name's addresses at once, so an address the proxy left stops being trusted. When the resolver can't answer (a timeout or an error other than "no such name"), the last addresses stand for 5 minutes (ten attempts, enough to ride out a resolver restart), then the name trusts nothing.
   - A name is only as trustworthy as whatever answers for it, so use names your own DNS answers: a container name on a Docker network (its embedded DNS), not a public domain someone else's records could point elsewhere.
@@ -889,7 +889,7 @@ It fails with a typed `ProviderError`.
 - `.dockerignore` keeps data directories, databases (`*.db*`, `*.sqlite*`), `secret.key`, `instance.lock` and `.env` files out of the build context at any depth (`**/`). Verified with throwaway builds: files planted in `packages/server/data/` (including `.sqlite`), `packages/shared/` (`.db-wal`, `.sqlite3`) and `packages/server/.env` didn't reach the image.
 - It runs as the `node` user with `DATA_DIR=/data` as a volume, `HOST=0.0.0.0`, and a health check on `/healthz`.
 - **It doesn't start without exposure settings** (§4), since `HOST=0.0.0.0` is beyond loopback; CI checks this. Connections from the host arrive from the bridge gateway (e.g. `172.17.0.1`).
-  - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's name on the shared network (e.g. `traefik`), not its address, which changes when the container restarts, and `PUBLIC_ORIGINS` set to the public URL.
+  - Behind a reverse proxy: `AUTH_MODE=proxy`, `TRUSTED_PROXIES` set to the proxy container's name on the shared network, not its address, which changes when the container restarts, and `PUBLIC_ORIGINS` set to the public URL.
   - Built-in login: set `ADMIN_PASSWORD_FILE` (a Docker secret). The server then starts with the admin protected, and no browser needs to reach loopback.
   - Single user without a password: publish on loopback only (`-p 127.0.0.1:8080:8080`) and set `ALLOWED_IPS` to the gateway.
   - Publishing beyond loopback (`-p 8080:8080`) makes the gateway allowlist unsafe: where Docker doesn't pass the client's address through (rootless Docker's default port driver, `docker-proxy` for IPv6 clients), outside clients also appear to come from it.
