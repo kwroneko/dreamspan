@@ -550,7 +550,8 @@ export function Composer({
       <StripRow scroll={phone}>
         <ComposerControls placement="strip" context={controls} />
       </StripRow>
-      <div className="flex min-w-0 items-end gap-1.5">
+      {/* On a phone the box takes the 2 px: its text keeps 40% of the width beside four icon actions. */}
+      <div className="flex min-w-0 items-end gap-1.5 max-sm:gap-1">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex h-[46px] shrink-0 items-center gap-1">
           <ComposerControls placement="speaker" context={controls} />

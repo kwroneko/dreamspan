@@ -611,7 +611,7 @@ function Pending({
         <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
         {/* One bar, as the chat's composer: who's speaking, then the box with its actions. */}
-        <div className="flex min-w-0 items-end gap-1.5">
+        <div className="flex min-w-0 items-end gap-1.5 max-sm:gap-1">
           <div className="flex h-[46px] shrink-0 items-center">
             <CastContext value={speakerView}>
               <PendingComposerControls placement="speaker" context={controls} />
