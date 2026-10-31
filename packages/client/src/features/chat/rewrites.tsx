@@ -32,7 +32,8 @@ function RewriteNotes({ entry }: { entry: PathEntry; session: ChatSession }) {
   return (
     <div className="flex flex-col gap-0.5 text-xs text-muted [overflow-wrap:anywhere]">
       {rewrite.applied.length > 0 && (
-        <p role="note">Changed by regex: {rewrite.applied.map(scriptLabel).join(", ")}.</p>
+        // A script that changed the reply and its thinking is named once.
+        <p role="note">Changed by regex: {[...new Set(rewrite.applied.map(scriptLabel))].join(", ")}.</p>
       )}
       {rewrite.failed.map((failure, i) => (
         <p key={i} role="note" className="text-warning">
