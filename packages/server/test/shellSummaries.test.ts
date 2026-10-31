@@ -9,9 +9,9 @@ import type { ShellLibraryRead } from "../src/db/ops.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
-const database = () =>
-  Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, workers: "source" })
+const database = () => Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, ...testWorkers })
 
 type Read = typeof ShellLibraryRead.Type
 

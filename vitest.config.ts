@@ -18,7 +18,7 @@ const SLOW_SERVER_FILES = [
 
 /**
  * Tests in the other files that measure time or load: tagged `slow`, run by test:slow only.
- * `it.live("…", () => …, { tags: ["slow"] })`.
+ * `slowIt.live(…)` (packages/server/test/support/slow.ts), or `tags: ["slow"]` in the options.
  */
 const tags = [{ name: "slow", description: "Timing, scale or soak: run by npm run test:slow, not npm test." }]
 
