@@ -1,7 +1,6 @@
-// A read of the next context right after a change never answers with the estimate from
-// before it (chat/CacheWarmth.ts `next`), over a real server: an edit, a new branch, a
-// deleted message and the user's default preset, each read at once, without waiting for
-// the pushed estimate. The mechanism for every kind of change is in cacheWarmthHold.test.ts.
+// A read of the next context right after a change answers with what's stored then
+// (chat/CacheWarmth.ts `next`), over a real server: an edit, a new branch, a deleted message
+// and the user's default preset, each read at once, without waiting for the pushed estimate.
 import { assert, it } from "@effect/vitest"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
@@ -32,8 +31,6 @@ it.live(
       const leaf = window.entries.at(-1)!.slotId as SlotId
       const warm = yield* next(leaf)
       assert.strictEqual(warm.warmth?.changed ?? null, null)
-      // The same read again is the same estimate.
-      assert.deepStrictEqual(yield* next(leaf), warm)
 
       const sent = window.entries[1]!
       yield* api.EditVersion({

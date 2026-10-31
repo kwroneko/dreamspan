@@ -4,8 +4,8 @@
 //
 // An estimate assembles the whole next request, as a reply does, so it stays off a reply's
 // path: while a reply is being prepared or written in a chat (`hold`), its changes wait,
-// and one estimate follows when it ends. A read of the next context (`next`) takes the
-// pushed estimate when nothing changed since it was worked out, instead of assembling again.
+// and one estimate follows when it ends. A read of the next context (`next`) waits the same
+// way, then is worked out from what's stored then.
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Context, Effect, FiberSet, Layer, Option, type Scope } from "effect"
@@ -19,9 +19,6 @@ const SETTLE_MS = 250
 /** How long a posted message holds its chat's estimate for the reply its sender asks for next. */
 const REPLY_EXPECTED_MS = 5000
 
-/** How long a pushed estimate answers a read of the next context, at most: macros can read the time. */
-const REUSE_MS = 60_000
-
 type Estimate = Omit<Effect.Success<ReturnType<Reader["Service"]["CacheWarmth"]>>, "uncounted">
 type EstimateError = Effect.Error<ReturnType<Reader["Service"]["CacheWarmth"]>>
 
@@ -34,12 +31,6 @@ interface Watched {
   again: boolean
   /** A change arrived while the chat was held: estimate once the hold ends. */
   deferred: boolean
-  /** Counts the changes, so an estimate knows whether one came after it started. */
-  changes: number
-  /** The last estimate, with the change count it saw and when it was worked out. */
-  latest: { readonly estimate: Estimate; readonly changes: number; readonly at: number } | undefined
-  /** Reads of the next context waiting for the estimate to settle. */
-  waiting: Array<() => void>
 }
 
 export class CacheWarmth extends Context.Service<
@@ -57,7 +48,7 @@ export class CacheWarmth extends Context.Service<
     readonly hold: (chatId: ChatId) => () => void
     /** A message was posted whose sender asks for a reply next: holds briefly, until the reply holds. */
     readonly expectReply: (chatId: ChatId) => void
-    /** The next context at a leaf: the pushed estimate when it's current for it, else worked out now. */
+    /** The next context at a leaf, worked out once nothing holds the chat. */
     readonly next: (
       userId: UserId,
       chatId: ChatId,
@@ -75,21 +66,16 @@ export class CacheWarmth extends Context.Service<
       const watched = new Map<ChatId, Watched>()
       const holds = new Map<ChatId, number>()
       const expected = new Map<ChatId, ReturnType<typeof setTimeout>>()
+      /** Reads of the next context waiting for a chat's holds to end. */
+      const waiting = new Map<ChatId, Array<() => void>>()
 
       const held = (chatId: ChatId) => (holds.get(chatId) ?? 0) > 0 || expected.has(chatId)
-      const settled = (entry: Watched, chatId: ChatId) =>
-        !entry.running && entry.timer === undefined && !(entry.deferred && held(chatId))
-      const wake = (entry: Watched) => {
-        for (const resume of entry.waiting.splice(0)) resume()
-      }
 
       const counts = yield* Effect.serviceOption(ImageTokenCounts)
-      const estimate = (chatId: ChatId, entry: Watched) => {
-        const changes = entry.changes
-        return reader.CacheWarmth({ userId: entry.userId, chatId }).pipe(
+      const estimate = (chatId: ChatId, entry: Watched) =>
+        reader.CacheWarmth({ userId: entry.userId, chatId }).pipe(
           Effect.flatMap(({ uncounted, ...next }) =>
             Effect.gen(function* () {
-              entry.latest = { estimate: next, changes, at: Date.now() }
               hub.publish(chatId, { _tag: "Cache", ...next })
               // Images the model hasn't counted: counted in the background, then estimated again.
               if (uncounted && Option.isSome(counts))
@@ -105,15 +91,15 @@ export class CacheWarmth extends Context.Service<
               entry.running = false
               if (entry.again) {
                 entry.again = false
-                start(chatId, entry)
+                schedule(chatId)
               }
-              if (settled(entry, chatId)) wake(entry)
             })
           )
         )
-      }
 
-      const start = (chatId: ChatId, entry: Watched) => {
+      const schedule = (chatId: ChatId) => {
+        const entry = watched.get(chatId)
+        if (entry === undefined) return
         if (held(chatId)) {
           entry.deferred = true
           return
@@ -135,38 +121,25 @@ export class CacheWarmth extends Context.Service<
         }, SETTLE_MS)
       }
 
-      const schedule = (chatId: ChatId) => {
-        const entry = watched.get(chatId)
-        if (entry === undefined) return
-        entry.changes++
-        start(chatId, entry)
-      }
-
-      // A hold ended: the changes it kept back make one estimate.
+      // A hold ended: reads waiting go on, and the changes it kept back make one estimate.
       const released = (chatId: ChatId) => {
         if (held(chatId)) return
+        for (const resume of waiting.get(chatId) ?? []) resume()
+        waiting.delete(chatId)
         const entry = watched.get(chatId)
         if (entry === undefined || !entry.deferred) return
         entry.deferred = false
-        start(chatId, entry)
+        schedule(chatId)
       }
 
       yield* hub.listen(schedule)
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
-          for (const entry of watched.values()) {
-            clearTimeout(entry.timer)
-            wake(entry)
-          }
+          for (const entry of watched.values()) clearTimeout(entry.timer)
           for (const timer of expected.values()) clearTimeout(timer)
+          for (const resumes of waiting.values()) for (const resume of resumes) resume()
         })
       )
-
-      // What the pushed estimate was asked (the active path), or its leaf in its fork.
-      const sameLeaf = (estimate: Estimate, leafSlotId: SlotId | null, forkId: ForkId | null) =>
-        leafSlotId === null
-          ? forkId === null
-          : estimate.leafSlotId === leafSlotId && (estimate.forkId ?? null) === forkId
 
       return CacheWarmth.of({
         watch: (userId, chatId) =>
@@ -178,10 +151,7 @@ export class CacheWarmth extends Context.Service<
                 timer: undefined,
                 running: false,
                 again: false,
-                deferred: false,
-                changes: 0,
-                latest: undefined,
-                waiting: []
+                deferred: false
               }
               entry.watchers++
               watched.set(chatId, entry)
@@ -194,7 +164,6 @@ export class CacheWarmth extends Context.Service<
                 if (entry === undefined || --entry.watchers > 0) return
                 clearTimeout(entry.timer)
                 watched.delete(chatId)
-                wake(entry)
               })
           ),
         refreshAll: Effect.sync(() => {
@@ -232,26 +201,17 @@ export class CacheWarmth extends Context.Service<
         },
         next: (userId, chatId, leafSlotId, forkId) =>
           Effect.gen(function* () {
-            const entry = watched.get(chatId)
-            if (entry !== undefined && entry.userId === userId) {
-              if (!settled(entry, chatId))
-                yield* Effect.callback<void>((resume) => {
-                  const done = () => resume(Effect.void)
-                  entry.waiting.push(done)
-                  return Effect.sync(() => {
-                    const at = entry.waiting.indexOf(done)
-                    if (at >= 0) entry.waiting.splice(at, 1)
-                  })
+            if (held(chatId))
+              yield* Effect.callback<void>((resume) => {
+                const done = () => resume(Effect.void)
+                waiting.set(chatId, [...(waiting.get(chatId) ?? []), done])
+                return Effect.sync(() => {
+                  const left = (waiting.get(chatId) ?? []).filter((other) => other !== done)
+                  if (left.length > 0) waiting.set(chatId, left)
+                  else waiting.delete(chatId)
                 })
-              const latest = entry.latest
-              if (
-                latest !== undefined &&
-                latest.changes === entry.changes &&
-                Date.now() - latest.at < REUSE_MS &&
-                sameLeaf(latest.estimate, leafSlotId, forkId)
-              )
-                return latest.estimate
-            }
+              })
+            // What to count is the server's own business (ImageTokenCounts).
             const { uncounted: _, ...next } = yield* reader.CacheWarmth({ userId, chatId, leafSlotId, forkId })
             return next
           })

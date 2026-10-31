@@ -1,13 +1,11 @@
-// The cache estimate's holds and its reuse by a read of the next context (chat/CacheWarmth.ts):
-// estimates wait while a reply is prepared or written, and a read takes the pushed estimate
-// only while nothing changed since. Every change reaches the service the same two ways, as a
-// published chat event (an edit, a delete, a branch, a swipe, a summary) or a refresh of the
-// user's chats (a lorebook, a preset, a model), and both are covered here.
+// The cache estimate's holds (chat/CacheWarmth.ts): estimates, and reads of the next
+// context, wait while a reply is prepared or written in the chat, so they never assemble
+// beside it; the changes meanwhile make one estimate when it ends. A read is always worked
+// out from what's stored when it runs.
 import { assert, it } from "@effect/vitest"
-import { Effect, Exit, Fiber, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { NotFound } from "@rp/shared/errors.ts"
 import { CacheWarmth } from "../src/chat/CacheWarmth.ts"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Reader } from "../src/db/Database.ts"
@@ -18,16 +16,14 @@ const chatId = "chat-1" as ChatId
 const fork = "fork-1" as ForkId
 
 const fixture = () => {
-  const state = { calls: 0, leaf: "leaf-1", slow: 0, gone: false }
+  const state = { calls: 0 }
   const reader = Layer.succeed(Reader)({
     CacheWarmth: ({ leafSlotId }: { leafSlotId?: string | null }) =>
-      Effect.gen(function* () {
+      Effect.sync(() => {
         state.calls++
-        if (state.slow > 0) yield* Effect.sleep(`${state.slow} millis`)
-        if (state.gone) return yield* new NotFound({ entity: "chat", id: chatId })
         return {
           warmth: null,
-          leafSlotId: leafSlotId ?? state.leaf,
+          leafSlotId: leafSlotId ?? "leaf-1",
           forkId: fork,
           historyStart: { slotId: null, depth: state.calls },
           summarizedThrough: null
@@ -52,87 +48,37 @@ const open = (state: { calls: number }) =>
 const change = (hub: ChatHub["Service"]) =>
   hub.publish(chatId, { _tag: "Queue", queue: [] } as unknown as Parameters<ChatHub["Service"]["publish"]>[1])
 
-it.live("a read takes the pushed estimate until a chat event or a refresh changes it", () => {
+it.live("a read of the next context is worked out each time, from what's stored then", () => {
   const { state, layer } = fixture()
   return Effect.gen(function* () {
-    const { hub, warmth } = yield* open(state)
-    // The active path, and its leaf in its fork, are what was pushed: no second assembly.
-    const pushed = yield* warmth.next(user, chatId, null, null)
-    assert.strictEqual(yield* warmth.next(user, chatId, "leaf-1" as SlotId, fork), pushed)
-    assert.strictEqual(state.calls, 1)
-    // Another leaf or fork is worked out for itself.
-    yield* warmth.next(user, chatId, "leaf-0" as SlotId, fork)
-    assert.strictEqual(state.calls, 2)
-    // A chat event (an edit, a delete, a branch, a swipe, a summary): the read waits for the
-    // estimate it starts, and takes that one.
-    change(hub)
-    const afterEvent = yield* warmth.next(user, chatId, null, null)
+    const { warmth } = yield* open(state)
+    const first = yield* warmth.next(user, chatId, "leaf-1" as SlotId, fork)
+    const second = yield* warmth.next(user, chatId, "leaf-1" as SlotId, fork)
     assert.strictEqual(state.calls, 3)
-    assert.notStrictEqual(afterEvent, pushed)
-    assert.strictEqual(yield* warmth.next(user, chatId, null, null), afterEvent)
-    // A refresh (a lorebook, a preset or a model of the user's changed) does the same.
-    yield* warmth.refreshUser(user)
-    const afterRefresh = yield* warmth.next(user, chatId, null, null)
-    assert.strictEqual(state.calls, 4)
-    assert.notStrictEqual(afterRefresh, afterEvent)
-    yield* warmth.refreshAll
-    yield* warmth.next(user, chatId, null, null)
-    assert.strictEqual(state.calls, 5)
-    // Another user's read never takes it.
-    yield* warmth.next("other" as UserId, chatId, null, null)
-    assert.strictEqual(state.calls, 6)
+    assert.notStrictEqual(first.historyStart?.depth, second.historyStart?.depth)
   }).pipe(Effect.scoped, Effect.provide(layer))
 })
 
-it.live("an estimate that fails after a change leaves nothing to reuse", () => {
-  const { state, layer } = fixture()
-  return Effect.gen(function* () {
-    const { hub, warmth } = yield* open(state)
-    // The chat went (or the read failed): the estimate before the change isn't the answer.
-    state.gone = true
-    change(hub)
-    const read = yield* Effect.exit(warmth.next(user, chatId, null, null))
-    assert.isTrue(Exit.isFailure(read))
-    assert.strictEqual(state.calls, 3)
-  }).pipe(Effect.scoped, Effect.provide(layer))
-})
-
-it.live("a change during an estimate makes the read wait for the next one", () => {
-  const { state, layer } = fixture()
-  return Effect.gen(function* () {
-    const { hub, warmth } = yield* open(state)
-    state.slow = 300
-    change(hub)
-    yield* eventually(() => state.calls === 2)
-    // Arrives while the estimate runs: that one is stale before it ends.
-    change(hub)
-    const read = yield* warmth.next(user, chatId, null, null)
-    assert.strictEqual(state.calls, 3)
-    assert.strictEqual(read.historyStart?.depth, 3)
-  }).pipe(Effect.scoped, Effect.provide(layer))
-})
-
-it.live("changes wait while a reply is held, and make one estimate when it ends", () => {
+it.live("changes wait while a reply is held, and make one estimate when it ends; reads wait too", () => {
   const { state, layer } = fixture()
   return Effect.gen(function* () {
     const { hub, warmth } = yield* open(state)
     const release = warmth.hold(chatId)
     const second = warmth.hold(chatId)
     for (let i = 0; i < 5; i++) change(hub)
+    const read = yield* Effect.forkChild(warmth.next(user, chatId, null, null))
     yield* Effect.sleep("600 millis")
-    assert.strictEqual(state.calls, 1, "no estimate while held")
+    assert.strictEqual(state.calls, 1, "no estimate and no read while held")
     release()
     release()
     yield* Effect.sleep("600 millis")
     assert.strictEqual(state.calls, 1, "still held by the other")
-    // A read meanwhile at the pushed leaf takes the one estimate the release makes.
-    const read = yield* Effect.forkChild(warmth.next(user, chatId, null, null))
     second()
-    const estimate = yield* Fiber.join(read)
-    assert.strictEqual(state.calls, 2)
-    assert.strictEqual(estimate.historyStart?.depth, 2)
+    yield* Fiber.join(read)
+    // The read, and the one estimate the five changes made.
+    yield* eventually(() => state.calls === 3)
     yield* Effect.sleep("600 millis")
-    assert.strictEqual(state.calls, 2)
+    assert.strictEqual(state.calls, 3)
   }).pipe(Effect.scoped, Effect.provide(layer))
 })
 
