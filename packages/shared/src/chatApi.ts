@@ -157,7 +157,9 @@ export const ChatEvent = Schema.Union([
         text: Schema.String,
         waitingCache: Schema.optionalKey(Schema.Boolean),
         /** The reasoning streamed so far, when there is any. */
-        reasoning: Schema.optionalKey(Schema.String)
+        reasoning: Schema.optionalKey(Schema.String),
+        /** The reply sections' panel text streamed so far, when there is any (spec/REPLY-SECTIONS.md). */
+        sections: Schema.optionalKey(Schema.String)
       })
     )
   }),
@@ -165,6 +167,8 @@ export const ChatEvent = Schema.Union([
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
   Schema.TaggedStruct("Reasoning", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  /** Reply-section text appended at `offset` of the panel's text (`sectionsDisplay`), as `Delta` is. */
+  Schema.TaggedStruct("Section", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),

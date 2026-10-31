@@ -1,4 +1,5 @@
 // Row shapes and their mapping to domain types, shared by the writer and readers.
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import {
   Chat,
   type ChatId,
@@ -104,6 +105,8 @@ export interface VersionRow {
   readonly error_json: string | null
   /** Absent where a query doesn't select it. */
   readonly reasoning?: string | null
+  /** Its leading tagged sections as JSON (spec/REPLY-SECTIONS.md); absent where a query doesn't select it. */
+  readonly reply_sections?: string | null
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   readonly rollout_id: string | null
@@ -161,6 +164,7 @@ export const toVersion = (row: VersionRow) =>
     model: row.model_label ?? null,
     error: toVersionError(row.error_json),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+    ...(row.reply_sections ? { replySections: JSON.parse(row.reply_sections) as ReplySections } : {}),
     mark: row.mark ?? null,
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context

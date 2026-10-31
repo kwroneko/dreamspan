@@ -1,6 +1,7 @@
 // Chat RPC handlers (@rp/shared/chatApi.ts). Every handler acts as the authenticated user;
 // storage enforces ownership, so another user's ids are NotFound. Each change is published
 // to the chat's subscribers, from every tab of the user, after it's committed.
+import { originalReply } from "@rp/shared/replySections.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, ForkId, NewVersion, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { BranchSwitch, GenerationUnavailable, messageDraftKey, NotContinuable } from "@rp/shared/chatApi.ts"
@@ -341,7 +342,8 @@ export const makeChatHandlers = Effect.gen(function* () {
         const source = yield* reader.GetVersion({ userId: id, versionId })
         const refuse = (message: string) => Effect.fail(new NotContinuable({ versionId, message }))
         if (source.status === "generating") return yield* refuse("It's still being written.")
-        if (source.content.trim() === "") return yield* refuse("It has no text to continue.")
+        if (originalReply(source.content, source.replySections).trim() === "")
+          return yield* refuse("It has no text to continue.")
         const { chatId, entry: before } = yield* reader.GetSlot({
           userId: id,
           slotId: source.slotId,
@@ -357,7 +359,8 @@ export const makeChatHandlers = Effect.gen(function* () {
             speakerEntityId: yield* speakerNow(id, chatId, before, source.speakerEntityId),
             sourceVersionId: source.id,
             ...(direction?.trim() ? { direction } : {}),
-            ...(source.reasoning ? { reasoning: source.reasoning } : {})
+            ...(source.reasoning ? { reasoning: source.reasoning } : {}),
+            ...(source.replySections ? { replySections: source.replySections } : {})
           },
           expectedRowVersion
         })
@@ -368,7 +371,11 @@ export const makeChatHandlers = Effect.gen(function* () {
           slotId: source.slotId,
           versionId: added.version.id,
           forkId: added.forkId,
-          initial: { text: added.version.content, reasoning: added.version.reasoning ?? "" }
+          initial: {
+            text: added.version.content,
+            reasoning: added.version.reasoning ?? "",
+            ...(added.version.replySections ? { sections: added.version.replySections } : {})
+          }
         })
         return entry
       }).pipe(Effect.uninterruptible, internal("ContinueVersion")),

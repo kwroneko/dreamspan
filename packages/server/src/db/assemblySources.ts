@@ -1,4 +1,5 @@
 import { sharedNote } from "./sharedNotes.ts"
+import { originalReply, type ReplySections } from "@rp/shared/replySections.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -375,12 +376,15 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
       direction: string | null
       continues: string | null
       continued_text: string | null
+      continued_sections: string | null
     }>`
       SELECT s.depth, s.parent_slot_id, v.ordinal, v.speaker_entity_id, v.direction,
         -- A generated version with a source continues it (ContinueVersion); the source is
         -- a version of the same slot (graphIntegrity.ts), frozen once it was written.
         CASE WHEN v.writer = 'model' AND v.origin = 'generated' THEN v.source_version_id END AS continues,
-        (SELECT x.content FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text
+        (SELECT x.content FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id) AS continued_text,
+        (SELECT x.reply_sections FROM versions x WHERE x.id = v.source_version_id AND x.slot_id = v.slot_id)
+          AS continued_sections
       FROM versions v JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
       WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}
         AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`.pipe(
@@ -397,7 +401,16 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
               direction: row.direction,
               ...(row.continues === null
                 ? {}
-                : { continues: { version: row.continues, text: row.continued_text ?? "" } })
+                : {
+                    // The reply as it came, its leading sections in their tags (spec/REPLY-SECTIONS.md).
+                    continues: {
+                      version: row.continues,
+                      text: originalReply(
+                        row.continued_text ?? "",
+                        row.continued_sections === null ? null : (JSON.parse(row.continued_sections) as ReplySections)
+                      )
+                    }
+                  })
             })
           : Effect.fail(new NotFound({ entity: "version", id: versionId }))
       ),
