@@ -1,7 +1,7 @@
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
-import type { ChatId, PathEntry } from "@rp/shared/chat.ts"
+import type { ChatId, ForkId, PathEntry } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
@@ -12,6 +12,7 @@ import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
 let chatId: ChatId
+let originalFork: ForkId
 let entries: ReadonlyArray<PathEntry>
 
 test.beforeAll(async () => {
@@ -70,6 +71,7 @@ test.beforeAll(async () => {
       })
       const chats = yield* api.ListChats({ limit: 10, before: null })
       chatId = chats[0]!.id
+      originalFork = chats[0]!.currentForkId!
       entries = (yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 50 })).entries
     })
   )
@@ -221,7 +223,9 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.goto(`${server().url}/chats/${chatId}?slot=${entries[1]!.slotId}`)
+      // The imported branch: the summarized test above branched this chat, and its branch summarizes
+      // these messages rather than dropping them.
+      await page.goto(`${server().url}/chats/${chatId}?fork=${originalFork}&slot=${entries[1]!.slotId}`)
       const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
       await expect(dropped).toHaveAttribute("data-out-of-context", "true")
       await messageMenu(dropped, "Insert message below")

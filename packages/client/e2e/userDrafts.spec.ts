@@ -392,14 +392,20 @@ test("creation and rename forms keep non-secret text without copying a typed key
   const ref = await api((client) =>
     Effect.map(client.OpenEditor({ refId: refId as import("@rp/shared/library.ts").RefId }), (opened) => opened.ref)
   )
-  const started = await api((client) =>
-    client.StartChat({
-      cards: [ref.entityId],
-      persona: null,
-      greeting: null,
-      first: { _tag: "Send", content: "A synthetic start", speakerEntityId: null }
-    })
-  )
+  // A lone chat renames in place (Enter renames, Escape keeps the name); the rename dialog,
+  // and its draft, is for a chat in a group of several: two chats with the same two characters.
+  const companion = await api((client) => client.CreateCard({ label: "Draft companion", name: "Draft companion" }))
+  const start = () =>
+    api((client) =>
+      client.StartChat({
+        cards: [ref.entityId, companion.entityId],
+        persona: null,
+        greeting: null,
+        first: { _tag: "Send", content: "A synthetic start", speakerEntityId: null }
+      })
+    )
+  await start()
+  const started = await start()
   await page.goto(`${server().url}/chats/${started.chat.id}`)
   await page.getByRole("heading", { level: 1 }).getByRole("button").click()
   const rename = page.getByRole("dialog", { name: "Rename chat", exact: true })

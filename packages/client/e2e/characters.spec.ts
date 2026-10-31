@@ -85,6 +85,10 @@ test("on a phone the home tiles open a card sheet and Chats is its own page", as
   await page.getByRole("main").getByRole("button", { name: "Open Mira", exact: true }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
   await page.getByRole("button", { name: "Close", exact: true }).click()
+  // The tile opened Mira's latest chat under her sheet; a phone's chat has its own header in
+  // place of the app bar, so back to the home screen, whose bar has Chats.
+  await expect(page).toHaveURL(/\/chats\//)
+  await page.goBack()
   await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Chats", exact: true }).click()
   await expect(page.getByRole("main").getByRole("list", { name: "Chats" }).getByRole("link")).toHaveCount(2)
   await context.close()

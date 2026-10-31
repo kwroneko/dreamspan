@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
+import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
@@ -55,12 +56,16 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await chat(page)
     if (width === 390) {
+      // A phone's chat header takes the app bar's place (fheader): its ← opens the menu, the
+      // chats first, then Characters and the rest.
+      await showAppNavigation(page)
       await expect(
-        page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Characters", exact: true })
+        page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Characters", exact: true })
       ).toBeVisible()
       await expect(
-        page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Chats", exact: true })
+        page.getByRole("group", { name: "Left panel" }).getByRole("button", { name: "Chats", exact: true })
       ).toBeVisible()
+      await hideAppNavigation(page)
     }
     const portrait = page.locator("article[data-slot] .chat-portrait").first()
     await expect(portrait).toHaveCSS("width", "60px")
@@ -94,9 +99,10 @@ for (const width of [1440, 390]) {
     // The lightbox closes alone: the panel (a sheet on a phone) stays where it was.
     await expect(card).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
+    // Mira among the characters, Bo, the persona, under "Your persona" above them (ftabs).
     for (const name of ["Mira", "Bo"]) {
       await page
-        .getByRole("list", { name: "Characters in this chat" })
+        .getByRole("tabpanel", { name: "Cast", exact: true })
         .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
         .click()
       await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
