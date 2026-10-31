@@ -1428,6 +1428,21 @@ export class ChatSession {
     )
   }
 
+  /**
+   * Puts the text from before regex scripts rewrote the version back, as a new selected
+   * version of the message (as an edit is), which no script rewrites.
+   */
+  restoreRawText(entry: PathEntry): Promise<Outcome<PathEntry>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("RestoreRawText", {
+        slotId: entry.slotId,
+        forkId: this.view.forkId,
+        versionId: entry.version.id,
+        expectedRowVersion: entry.rowVersion
+      })
+    )
+  }
+
   /** "Write your own version" (DESIGN §3.1): a new version of the user's, selected. */
   writeVersion(
     entry: PathEntry,

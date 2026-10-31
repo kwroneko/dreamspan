@@ -50,8 +50,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
       durable.text,
       async () => {
         const result = await action.run(
-          (client) =>
-            client("SetGlobalRegex", { scripts: values.scripts, expectedRevision: values.revision }),
+          (client) => client("SetGlobalRegex", { scripts: values.scripts, expectedRevision: values.revision }),
           ["globalRegex"]
         )
         if (result.ok) revision = result.value.revision
@@ -72,8 +71,8 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
     >
       <p className="text-sm text-muted">
         Global scripts run in every chat, before the preset's and the character's. A script with neither “Only in the
-        prompt” nor “Only in what's shown” rewrites messages as they're saved; you can still see and restore a
-        message's original text.
+        prompt” nor “Only in what's shown” rewrites messages as they're saved; you can still see and restore a message's
+        original text.
       </p>
       <UserDraftStatus draft={durable} />
       {values.revision !== saved.revision && (
