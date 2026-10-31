@@ -661,7 +661,7 @@ describe("chat setup", () => {
 // chat so posting/withdrawing the queue entry cannot invalidate an in-flight draft save.
 describe("queued edits", () => {
   for (const changes of [105, DraftHistoryPolicy.maxEntries + 5])
-    slowIt.live(`exposes and restores queue edit history after ${changes} changes`, () =>
+    (changes > 1000 ? slowIt : it).live(`exposes and restores queue edit history after ${changes} changes`, () =>
       Effect.gen(function* () {
         const api = yield* client()
         const chat = yield* api.CreateChat({ title: "Long queue edit history" })

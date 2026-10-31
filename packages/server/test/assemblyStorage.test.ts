@@ -847,7 +847,7 @@ describe("context assembly from the database", () => {
         assert.ok(rebuilt._tag === "Rebuilt")
         assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), first)
       }).pipe(Effect.provide(database())),
-    { timeout: 120000, tags: ["slow"] }
+    120000
   )
 
   it.live(
