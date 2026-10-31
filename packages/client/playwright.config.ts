@@ -7,11 +7,15 @@ import { defineConfig, devices } from "@playwright/test"
 
 /**
  * Each worker runs a browser and a server with its database workers, about three cores when
- * busy. So: a third of the host's free cores, at least 3, at most 12. PLAYWRIGHT_WORKERS
- * overrides it.
+ * busy. So: a third of the host's free cores, at most 12, but at least a sixth of the cores
+ * (and 3), so a saturated host still gets a run that finishes: on the 48-core host at a load
+ * average of 140, 8 workers ran 2.1 times as many tests in the same time as 3, none failing.
+ * PLAYWRIGHT_WORKERS overrides it.
  */
-const free = availableParallelism() - loadavg()[0]
-const workers = Number(process.env.PLAYWRIGHT_WORKERS) || Math.max(3, Math.min(12, Math.floor(free / 3)))
+const cores = availableParallelism()
+const free = cores - loadavg()[0]
+const workers =
+  Number(process.env.PLAYWRIGHT_WORKERS) || Math.max(3, Math.floor(cores / 6), Math.min(12, Math.floor(free / 3)))
 
 export default defineConfig({
   testDir: "e2e",
