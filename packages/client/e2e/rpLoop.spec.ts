@@ -12,6 +12,7 @@ import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { unsentEditorCopies } from "./support/editorCopies.ts"
 import { choices, nextChip, nextName, pickReply } from "./support/strip.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
@@ -349,7 +350,7 @@ for (const width of [1440, 390])
       await page.getByRole("option", { name: "Always" }).click()
       await expect(warnings).toHaveCount(0)
       // Back as it was, and the server has it: the next test opens this preset in a fresh browser.
-      await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+      await expect.poll(() => unsentEditorCopies(page)).toBe(0)
 
       // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
       if (theme === "light") {

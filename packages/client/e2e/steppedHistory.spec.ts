@@ -163,6 +163,32 @@ test("two tabs and an inactive-path deep link keep their own context boundary", 
   await other.close()
 })
 
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`insertion before retained history explains that the next reply cannot see it (${width}px, ${theme})`, async ({
+      page
+    }) => {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      // Before the summarized test below, which summarizes these messages in this chat: here they're
+      // only dropped. The imported branch, named.
+      await page.goto(`${server().url}/chats/${chatId}?fork=${originalFork}&slot=${entries[1]!.slotId}`)
+      const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
+      await expect(dropped).toHaveAttribute("data-out-of-context", "true")
+      await messageMenu(dropped, "Insert message below")
+      const editor = page.getByTestId("insert-editor")
+      await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
+      // Nor does the strip's cache chip say what the next reply re-reads from it.
+      await expect(page.getByText(/re-reads? (the rest|\d)/)).toHaveCount(0)
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({
+          path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
+        })
+      await editor.getByRole("button", { name: "Cancel", exact: true }).click()
+    })
+
 test("summarized messages are distinct from dropped and hidden messages", async ({ page }) => {
   await Effect.runPromise(
     fixtureSql(server().dataDir, [
@@ -213,29 +239,3 @@ test("summarized messages are distinct from dropped and hidden messages", async 
   await expect(dropped).toHaveAttribute("data-out-of-context", "true")
   await expect(dropped).not.toHaveAttribute("data-summarized")
 })
-
-for (const width of [1440, 390])
-  for (const theme of ["light", "dark"] as const)
-    test(`insertion before retained history explains that the next reply cannot see it (${width}px, ${theme})`, async ({
-      page
-    }) => {
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
-      await page.emulateMedia({ colorScheme: theme })
-      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      // The imported branch: the summarized test above branched this chat, and its branch summarizes
-      // these messages rather than dropping them.
-      await page.goto(`${server().url}/chats/${chatId}?fork=${originalFork}&slot=${entries[1]!.slotId}`)
-      const dropped = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
-      await expect(dropped).toHaveAttribute("data-out-of-context", "true")
-      await messageMenu(dropped, "Insert message below")
-      const editor = page.getByTestId("insert-editor")
-      await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
-      // Nor does the strip's cache chip say what the next reply re-reads from it.
-      await expect(page.getByText(/re-reads? (the rest|\d)/)).toHaveCount(0)
-      if (process.env.SCREENSHOT_DIR)
-        await page.screenshot({
-          path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
-        })
-      await editor.getByRole("button", { name: "Cancel", exact: true }).click()
-    })
