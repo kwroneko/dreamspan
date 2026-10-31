@@ -112,6 +112,24 @@ test("Branch from here names the branch, shows it at once, keeps the URL, and th
   await expect(at).toBeVisible()
 })
 
+test("while a chat loads, it shows the shapes of its header and messages, not a spinner", async ({ page }) => {
+  const { chatId } = await forked()
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // Hold the chat view's code until the placeholder has been seen.
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(/\/assets\/ChatPage-[^/]*\.js$/, async (route) => {
+    await held
+    await route.continue()
+  })
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(page.getByTestId("messages-loading")).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "Loading the chat…" })).toBeAttached()
+  release()
+  await expect(message(page, "We wait for the tide.")).toBeVisible()
+  await expect(page.getByTestId("messages-loading")).toHaveCount(0)
+})
+
 test("a message shows its number and versions; one is picked from the list, and one's own written", async ({
   page
 }) => {

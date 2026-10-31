@@ -64,3 +64,19 @@ export function SkeletonMessages({ onRetry }: { onRetry: () => void }) {
     </div>
   )
 }
+
+/**
+ * The chat as it looks while its code loads (the route's fallback, before ChatPage and its
+ * header exist): the header's faces and title as placeholders, then the messages' shapes.
+ */
+export function ChatSkeleton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <div className="flex min-h-13 w-full shrink-0 items-center gap-3 border-b border-border px-2 py-1.5 sm:px-4">
+        <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none" />
+        <span className="h-5 w-40 animate-pulse rounded bg-surface-raised motion-reduce:animate-none" />
+      </div>
+      <SkeletonMessages onRetry={onRetry} />
+    </div>
+  )
+}
