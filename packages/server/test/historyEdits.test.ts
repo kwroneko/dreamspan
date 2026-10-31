@@ -7,6 +7,7 @@ import type { HistoryCursor, HistoryHit, HistorySearch } from "@rp/shared/histor
 import { Reader, Writer } from "../src/db/Database.ts"
 import { scanHistory } from "../src/db/historyScan.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
+import { slowIt } from "./support/slow.ts"
 
 const search: HistorySearch = {
   pairs: [{ find: "Aria", replace: "Ari" }],
@@ -347,7 +348,7 @@ describe("history edits", () => {
       assert.isFalse(stale.layer[0]!.fresh)
     }).pipe(Effect.provide(serverLayer(config)))
   )
-  it.effect("scans beyond a window and FTS does not lose Unicode boundary matches", () =>
+  slowIt.effect("scans beyond a window and FTS does not lose Unicode boundary matches", () =>
     Effect.gen(function* () {
       const f = yield* setup
       for (let i = 0; i < 105; i++)

@@ -18,6 +18,7 @@ import { writeRealisticStFolder } from "./support/stRealistic.ts"
 import { importStFolder } from "./support/stUpload.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { slowIt } from "./support/slow.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -98,7 +99,7 @@ describe("chat groups", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
-  it.live(
+  slowIt.live(
     "finds a realistic ST folder's groups by their names, among its one-character chats",
     () =>
       Effect.gen(function* () {
@@ -123,7 +124,7 @@ describe("chat groups", () => {
           }
         )
       }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none))),
-    { timeout: 120_000, tags: ["slow"] }
+    120_000
   )
 
   it.live("compatibility model/preset changes update account settings without chat bindings", () =>
@@ -353,43 +354,40 @@ describe("group event validity", () => {
 })
 
 describe("group read scale", () => {
-  it.live(
-    "groups and searches 5,000 active ten-message paths within the read budget",
-    () => {
-      const config = testConfig()
-      return Effect.gen(function* () {
-        const api = yield* client()
-        const me = yield* api.Whoami()
-        const now = Date.now()
-        // Written straight into the file: 5,000 chats through the RPCs would take minutes.
-        const series = (n: number) =>
-          `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ${n - 1})`
-        const doc = `json_object('name', 'Card ' || i, 'description', printf('%.4000c', 'x'), 'first_mes', 'Hello.')`
-        yield* fixtureSql(config.dataDir, [
-          {
-            sql: `INSERT INTO entities (id, owner_user_id, kind, created_at) ${series(1000)}
+  slowIt.live("groups and searches 5,000 active ten-message paths within the read budget", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const api = yield* client()
+      const me = yield* api.Whoami()
+      const now = Date.now()
+      // Written straight into the file: 5,000 chats through the RPCs would take minutes.
+      const series = (n: number) => `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ${n - 1})`
+      const doc = `json_object('name', 'Card ' || i, 'description', printf('%.4000c', 'x'), 'first_mes', 'Hello.')`
+      yield* fixtureSql(config.dataDir, [
+        {
+          sql: `INSERT INTO entities (id, owner_user_id, kind, created_at) ${series(1000)}
             SELECT printf('e-%04d', i), ?, 'card', ? FROM n`,
-            params: [me.id, now]
-          },
-          {
-            sql: `INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
+          params: [me.id, now]
+        },
+        {
+          sql: `INSERT INTO entity_revisions (id, entity_id, doc_json, doc_hash, schema_version, origin, created_at)
             ${series(1000)} SELECT printf('v-%04d', i), printf('e-%04d', i), ${doc}, 'h' || i, 1, 'import', ? FROM n`,
-            params: [now]
-          },
-          {
-            sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
+          params: [now]
+        },
+        {
+          sql: `INSERT INTO entity_refs (id, entity_id, ref_kind, head_revision_id, label, created_at, updated_at)
             ${series(1000)} SELECT printf('r-%04d', i), printf('e-%04d', i), 'upstream', printf('v-%04d', i),
               'Card ' || i, ?, ? FROM n`,
-            params: [now, now]
-          },
-          {
-            sql: `INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at) ${series(5000)}
+          params: [now, now]
+        },
+        {
+          sql: `INSERT INTO chats (id, owner_user_id, kind, status, title, created_at, last_message_at) ${series(5000)}
             SELECT printf('c-%05d', i), ?, 'rp', 'active', 'Chat ' || i, ?, ? + i FROM n`,
-            params: [me.id, now, now]
-          },
-          // Two cards a chat, every third chat a group of three, and other settings around them.
-          {
-            sql: `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at) ${series(5000)}
+          params: [me.id, now, now]
+        },
+        // Two cards a chat, every third chat a group of three, and other settings around them.
+        {
+          sql: `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at) ${series(5000)}
             SELECT printf('s-%05d-%d', i, k.k), printf('c-%05d', i), k.k,
               CASE WHEN k.k < 3 THEN 'participant.join' ELSE 'model.binding' END,
               CASE WHEN k.k < 3 THEN json_object('entity', printf('e-%04d', (i * (k.k + 1) * 7) % 800))
@@ -397,65 +395,61 @@ describe("group read scale", () => {
               'import', ?
             FROM n JOIN (SELECT 0 AS k UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) k
             WHERE k.k <> 2 OR i % 3 = 0`,
-            params: [now]
-          },
-          {
-            sql: `INSERT INTO lanes (id, chat_id, name, created_at) ${series(5000)}
+          params: [now]
+        },
+        {
+          sql: `INSERT INTO lanes (id, chat_id, name, created_at) ${series(5000)}
             SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM n`,
-            params: [now]
-          },
-          {
-            sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at)
+          params: [now]
+        },
+        {
+          sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, created_at, updated_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
             SELECT 'v-slot-' || i || '-' || d, 'slot-' || i || '-' || d, 0, 'complete', 'human', 'verbatim', 'imported', ?, ? FROM n, depths`,
-            params: [now, now]
-          },
-          {
-            sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
+          params: [now, now]
+        },
+        {
+          sql: `INSERT INTO slots (id, chat_id, lane_id, parent_slot_id, depth, selected_version_id, created_at)
             ${series(5000)}, depths(d) AS (SELECT 0 UNION ALL SELECT d + 1 FROM depths WHERE d < 9)
             SELECT 'slot-' || i || '-' || d, printf('c-%05d', i), 'l-' || i,
               CASE WHEN d = 0 THEN NULL ELSE 'slot-' || i || '-' || (d - 1) END, d, 'v-slot-' || i || '-' || d, ? FROM n, depths ORDER BY d, i`,
-            params: [now]
-          },
-          { sql: "UPDATE chats SET active_leaf_slot_id = 'slot-' || CAST(substr(id, 3) AS INTEGER) || '-9'" },
-          {
-            sql: `INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at)
+          params: [now]
+        },
+        { sql: "UPDATE chats SET active_leaf_slot_id = 'slot-' || CAST(substr(id, 3) AS INTEGER) || '-9'" },
+        {
+          sql: `INSERT INTO state_events (id, chat_id, slot_id, seq, key, value_json, origin, created_at)
             ${series(5000)} SELECT 'played-' || i || '-' || k, printf('c-%05d', i), 'slot-' || i || '-9', k,
               'played_by_me.set', CASE WHEN k = 0 THEN json_object('entities', json_array(printf('e-%04d', i * 7 % 800))) ELSE json_object('entities', json_array()) END, 'import', ? FROM n JOIN (SELECT 0 AS k UNION ALL SELECT 1)`,
-            params: [now]
-          }
-        ])
-        // The groups (two or three characters a chat, each chat titled apart): one read too.
-        yield* api.ListChatGroups()
-        const groupsStarted = performance.now()
-        const groups = yield* api.ListChatGroups()
-        const groupsTook = performance.now() - groupsStarted
-        assert.strictEqual(
-          groups.reduce((sum, group) => sum + group.chats, 0),
-          [...Array(5000).keys()].filter((i) => distinctCards(i) >= 2).length
-        )
-        process.stdout.write(`ListChatGroups: 5,000 active ten-message paths in ${groupsTook.toFixed(0)} ms\n`)
-        assert.isBelow(groupsTook, 2000)
-        // Search resolves the cast only for chats a card in them could match: a search that
-        // matches nothing mustn't resolve all 5,000.
-        for (const [search, hits] of [
-          ["Card 1", 50],
-          ["no-such-name", 0]
-        ] as const) {
-          yield* api.ListChats({ limit: 50, before: null, search })
-          const searchStarted = performance.now()
-          const found = yield* api.ListChats({ limit: 50, before: null, search })
-          const searchTook = performance.now() - searchStarted
-          assert.strictEqual(found.length, hits)
-          process.stdout.write(
-            `ListChats search ${JSON.stringify(search)}: 5,000 chats in ${searchTook.toFixed(0)} ms\n`
-          )
-          assert.isBelow(searchTook, 500)
+          params: [now]
         }
-      }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
-    },
-    { tags: ["slow"] }
-  )
+      ])
+      // The groups (two or three characters a chat, each chat titled apart): one read too.
+      yield* api.ListChatGroups()
+      const groupsStarted = performance.now()
+      const groups = yield* api.ListChatGroups()
+      const groupsTook = performance.now() - groupsStarted
+      assert.strictEqual(
+        groups.reduce((sum, group) => sum + group.chats, 0),
+        [...Array(5000).keys()].filter((i) => distinctCards(i) >= 2).length
+      )
+      process.stdout.write(`ListChatGroups: 5,000 active ten-message paths in ${groupsTook.toFixed(0)} ms\n`)
+      assert.isBelow(groupsTook, 2000)
+      // Search resolves the cast only for chats a card in them could match: a search that
+      // matches nothing mustn't resolve all 5,000.
+      for (const [search, hits] of [
+        ["Card 1", 50],
+        ["no-such-name", 0]
+      ] as const) {
+        yield* api.ListChats({ limit: 50, before: null, search })
+        const searchStarted = performance.now()
+        const found = yield* api.ListChats({ limit: 50, before: null, search })
+        const searchTook = performance.now() - searchStarted
+        assert.strictEqual(found.length, hits)
+        process.stdout.write(`ListChats search ${JSON.stringify(search)}: 5,000 chats in ${searchTook.toFixed(0)} ms\n`)
+        assert.isBelow(searchTook, 500)
+      }
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+  })
 })
 
 /** The cards fixture chat `i` names, each once (the read counts distinct chats). */

@@ -16,6 +16,7 @@ import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { cardDoc } from "./support/docs.ts"
+import { slowIt } from "./support/slow.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -660,59 +661,56 @@ describe("chat setup", () => {
 // chat so posting/withdrawing the queue entry cannot invalidate an in-flight draft save.
 describe("queued edits", () => {
   for (const changes of [105, DraftHistoryPolicy.maxEntries + 5])
-    it.live(
-      `exposes and restores queue edit history after ${changes} changes`,
-      () =>
-        Effect.gen(function* () {
-          const api = yield* client()
-          const chat = yield* api.CreateChat({ title: "Long queue edit history" })
-          // Queue drafts belong to the chat after the queued row has gone, too.
-          const target = { _tag: "Queue" as const, chatId: chat.id, queuedId: "posted-item", rowVersion: 1 }
-          const original = "An early passage that must remain reachable. ".repeat(8)
-          let draft = yield* api.SaveMessageDraft({
+    slowIt.live(`exposes and restores queue edit history after ${changes} changes`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const chat = yield* api.CreateChat({ title: "Long queue edit history" })
+        // Queue drafts belong to the chat after the queued row has gone, too.
+        const target = { _tag: "Queue" as const, chatId: chat.id, queuedId: "posted-item", rowVersion: 1 }
+        const original = "An early passage that must remain reachable. ".repeat(8)
+        let draft = yield* api.SaveMessageDraft({
+          target,
+          draftId: null,
+          content: original,
+          expectedRowVersion: null,
+          expectedSession: null
+        })
+        const passage = (i: number) => `${i}: ${String.fromCharCode(65 + (i % 26)).repeat(400)}`
+        for (let i = 0; i < changes; i++) {
+          // Destructive replacements cannot coalesce, independent of host timing.
+          draft = yield* api.SaveMessageDraft({
             target,
-            draftId: null,
-            content: original,
-            expectedRowVersion: null,
-            expectedSession: null
-          })
-          const passage = (i: number) => `${i}: ${String.fromCharCode(65 + (i % 26)).repeat(400)}`
-          for (let i = 0; i < changes; i++) {
-            // Destructive replacements cannot coalesce, independent of host timing.
-            draft = yield* api.SaveMessageDraft({
-              target,
-              draftId: draft.id,
-              content: passage(i),
-              expectedRowVersion: draft.rowVersion,
-              expectedSession: draft.session
-            })
-          }
-          const history = yield* api.QueueDraftHistory({ chatId: chat.id, queuedId: target.queuedId })
-          assert.deepStrictEqual(
-            yield* api.MessageDraftHistory({ target, limit: DraftHistoryPolicy.maxEntries + 1 }),
-            history
-          )
-          assert.lengthOf(history, Math.min(changes, DraftHistoryPolicy.maxEntries) + 1)
-          const initial = history.at(-1)!
-          const oldest = Math.max(0, changes - DraftHistoryPolicy.maxEntries)
-          assert.strictEqual(initial.seq, oldest)
-          const restored = yield* api.RestoreQueueDraft({
-            chatId: chat.id,
-            queuedId: target.queuedId,
             draftId: draft.id,
-            seq: initial.seq,
-            expectedRowVersion: draft.rowVersion
+            content: passage(i),
+            expectedRowVersion: draft.rowVersion,
+            expectedSession: draft.session
           })
-          assert.strictEqual(restored.content, oldest === 0 ? original : passage(oldest - 1))
-          const sharedRestore = yield* api.RestoreMessageDraft({
-            target,
-            draftId: restored.id,
-            seq: history[0]!.seq,
-            expectedRowVersion: restored.rowVersion
-          })
-          assert.strictEqual(sharedRestore.content, passage(changes - 1))
-        }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none))),
-      { tags: ["slow"] }
+        }
+        const history = yield* api.QueueDraftHistory({ chatId: chat.id, queuedId: target.queuedId })
+        assert.deepStrictEqual(
+          yield* api.MessageDraftHistory({ target, limit: DraftHistoryPolicy.maxEntries + 1 }),
+          history
+        )
+        assert.lengthOf(history, Math.min(changes, DraftHistoryPolicy.maxEntries) + 1)
+        const initial = history.at(-1)!
+        const oldest = Math.max(0, changes - DraftHistoryPolicy.maxEntries)
+        assert.strictEqual(initial.seq, oldest)
+        const restored = yield* api.RestoreQueueDraft({
+          chatId: chat.id,
+          queuedId: target.queuedId,
+          draftId: draft.id,
+          seq: initial.seq,
+          expectedRowVersion: draft.rowVersion
+        })
+        assert.strictEqual(restored.content, oldest === 0 ? original : passage(oldest - 1))
+        const sharedRestore = yield* api.RestoreMessageDraft({
+          target,
+          draftId: restored.id,
+          seq: history[0]!.seq,
+          expectedRowVersion: restored.rowVersion
+        })
+        assert.strictEqual(sharedRestore.content, passage(changes - 1))
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
     )
 
   for (const kind of ["message", "direction"] as const) {

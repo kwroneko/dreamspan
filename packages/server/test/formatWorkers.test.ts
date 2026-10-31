@@ -152,7 +152,7 @@ describe("format workers", () => {
           })
         )
       ),
-    60_000
+    { timeout: 60_000, tags: ["slow"] }
   )
 
   describe("bundled", () => {
