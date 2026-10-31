@@ -11,6 +11,8 @@ export interface CodeEditorProps {
   fullHeight?: boolean | undefined
   autoFocus?: boolean | undefined
   rows?: number | undefined
+  /** A CSS height the box is at least, overriding `rows`: a field opened large. */
+  minHeight?: string | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined
   onChange: (value: string) => void

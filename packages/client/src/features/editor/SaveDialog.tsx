@@ -28,13 +28,17 @@ const contentOf = (field: string, value: unknown) =>
 export function SaveDialog({
   store,
   onClose,
-  onSaved
+  onSaved,
+  current
 }: {
   store: EditorStore
   onClose: () => void
   onSaved: (saved: SavedRef) => void
+  /** The chat it's edited from, for the rename offer after a save; else the URL's (`renameChat`). */
+  current?: { readonly chatId: string; readonly forkId: string | null } | undefined
 }) {
-  const search = useSearch({ strict: false }) as { renameChat?: unknown; renameFork?: unknown }
+  const url = useSearch({ strict: false }) as { renameChat?: unknown; renameFork?: unknown }
+  const search = current ? { renameChat: current.chatId, renameFork: current.forkId } : url
   const [followup, setFollowup] = useState<{
     change: CardSaved
     saved: SavedRef

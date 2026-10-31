@@ -14,6 +14,7 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import type { ChatSession } from "./session.ts"
 
 export interface ChatCardActionProps {
@@ -22,24 +23,27 @@ export interface ChatCardActionProps {
   info: ChatCard | undefined
 }
 
+/** The full card editor, over the chat (the chat stays as it was); without the workspace, its page. */
 export function EditChatCard({ session, card, info }: ChatCardActionProps) {
   const navigate = useNavigate()
+  const workspace = usePresetWorkspace()
   return (
     <Button
       variant="ghost"
       className="h-8! px-2!"
-      aria-label={`Edit ${card.name}`}
+      aria-label={`Open ${card.name} in the full editor`}
       disabled={!info}
-      onClick={() =>
-        info &&
+      onClick={() => {
+        if (!info) return
+        if (workspace) return workspace.open(info.refId)
         void navigate({
           to: "/library/$refId",
           params: { refId: info.refId },
           search: { renameChat: session.id, renameFork: session.snapshot().forkId }
         })
-      }
+      }}
     >
-      Edit
+      Full editor
     </Button>
   )
 }

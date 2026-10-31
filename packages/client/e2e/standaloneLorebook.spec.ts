@@ -60,14 +60,17 @@ for (const width of [1440, 390]) {
     await expect(inUse.getByRole("switch", { name: new RegExp(`^Saltmarsh ${width}`) })).toBeChecked()
     await inUse.getByRole("button", { name: `Open Saltmarsh ${width}`, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
-    await expect(page.getByRole("list", { name: "Entries" })).toBeVisible()
+    await expect(
+      page.getByRole("dialog", { name: "Lorebook editor" }).getByRole("list", { name: "Entries" })
+    ).toBeVisible()
     // A lorebook isn't a preset: its way out says where it goes.
     await page.getByRole("button", { name: "Back to the chat", exact: true }).click()
     await expect(page.getByRole("list", { name: "Entries" })).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)
     await expect(page.getByRole("switch", { name: /Use in every chat/ })).toBeVisible()
-    await expect(page.getByText("3 entries · added to 1 chat")).toBeVisible()
+    await expect(page.getByText("Added to 1 chat: saving changes it there.")).toBeVisible()
+    await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("3 entries")
     // One row per entry, highest order first, as ST's Priority sort; rows open to the whole entry.
     const titles = () =>
       page
@@ -299,7 +302,8 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await expect(list.getByRole("textbox", { name: "Title of Place 399", exact: true })).toBeVisible()
   // Only the rows near the view are in the page.
   expect(await list.getByRole("listitem").count()).toBeLessThan(60)
-  await expect(page.getByText("400 entries · not added to any chat")).toBeVisible()
+  await expect(page.getByText("Not added to any chat yet.")).toBeVisible()
+  await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("400 entries")
 
   // Find an entry, then change its strategy, position, depth, order and trigger % in its row.
   await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("key123")
@@ -310,6 +314,21 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await page.getByRole("spinbutton", { name: "Order of Place 123" }).fill("900")
   await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).fill("40")
   await page.getByRole("spinbutton", { name: "Trigger % of Place 123" }).blur()
+  // The entry's text opens large, over the page, as a card's fields do.
+  await page.getByRole("button", { name: "Open Place 123", exact: true }).click()
+  await page
+    .getByRole("group", { name: "Lorebook entry 123", exact: true })
+    .getByRole("button", { name: "Open Entry content large", exact: true })
+    .click()
+  const large = page.getByRole("dialog", { name: "Entry content", exact: true })
+  await large.getByRole("textbox").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.type(" The bridge is out.")
+  await large.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(
+    page.getByRole("group", { name: "Lorebook entry 123", exact: true }).getByRole("textbox", { name: "Entry content" })
+  ).toHaveValue("Text of place 123. The bridge is out.")
+  await page.getByRole("button", { name: "Close Place 123", exact: true }).click()
 
   // A new entry and then a copy of it both lead the table, the newest first.
   await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("")
@@ -351,7 +370,8 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
         "Entry “Place 123”: Position (role)",
         "Entry “Place 123”: Depth",
         "Entry “Place 123”: Order",
-        "Entry “Place 123”: Trigger %"
+        "Entry “Place 123”: Trigger %",
+        "Entry “Place 123”: Content"
       ])
     )
   await dialog.getByRole("button", { name: "Save revision" }).click()
@@ -364,7 +384,8 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
     role: "assistant",
     depth: 6,
     order: 900,
-    probability: 40
+    probability: 40,
+    content: "Text of place 123. The bridge is out."
   })
   expect(saved.entries.some((e) => e.comment === "Place 398")).toBe(false)
 })

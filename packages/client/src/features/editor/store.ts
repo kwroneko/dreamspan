@@ -61,8 +61,10 @@ export interface EditorState {
   readonly saving: boolean
   /** Changes the last open brought back from this browser's copies. */
   readonly restored: number
-  /** Earlier texts the last save of a revision sent to the bin's recovered texts. */
+  /** Earlier texts this page's saves sent to the bin's recovered texts, until dismissed. */
   readonly recovered: number
+  /** The fields those texts were known to come from (a revision's save doesn't say). */
+  readonly recoveredFields: ReadonlyArray<string>
 }
 
 /** The most a `keepalive` request may carry, in bytes, in the browsers that cap it. */
@@ -134,7 +136,8 @@ export class EditorStore {
           dirty: this.dirtyFields().length,
           saving: this.isSaving(),
           restored: this.restored,
-          recovered: this.recovered
+          recovered: this.recovered,
+          recoveredFields: [...this.recoveredFields]
         }
       }
     }
@@ -200,8 +203,22 @@ export class EditorStore {
 
   /** How many changes the last open brought back from this browser's copies. */
   restored = 0
-  /** Earlier texts the last save of a revision sent to the recovered texts. */
+  /** Earlier texts this page's saves sent to the recovered texts. */
   recovered = 0
+  private readonly recoveredFields = new Set<string>()
+
+  private noteRecovered(count: number, key?: string) {
+    if (count <= 0) return
+    this.recovered += count
+    if (key !== undefined) this.recoveredFields.add(key)
+  }
+
+  /** The notice about recovered texts read: it goes until a save sends more. */
+  dismissRecovered() {
+    this.recovered = 0
+    this.recoveredFields.clear()
+    this.bump(DRAFTS)
+  }
 
   /** Replay every copy with its original base: only the writer decides a stale save. */
   private async restoreCopies() {
@@ -235,8 +252,8 @@ export class EditorStore {
       field.replayedAt = copy.at
       if (result.ok) {
         if (result.value.displaced !== null) field.conflict = { ...result.value.displaced, typedAt: copy.at }
-        if (unchanged) this.hold(field, result.value)
-        else this.recovered += result.value.recovered
+        if (unchanged) this.hold(field, result.value, copy.field)
+        else this.noteRecovered(result.value.recovered, copy.field)
         field.replayedAt = null
         await dropCopy(copy)
       } else {
@@ -441,8 +458,8 @@ export class EditorStore {
         field.replayedAt = null
         // The draft holds exactly this text: it's the field's base now.
         const descendant = field.pending?.ancestors.includes(copy.key) === true
-        if (field.pending === copy || descendant) this.hold(field, result.value)
-        else this.recovered += result.value.recovered
+        if (field.pending === copy || descendant) this.hold(field, result.value, key)
+        else this.noteRecovered(result.value.recovered, key)
         if (field.pending === copy) {
           field.local = null
           field.pending = null
@@ -475,8 +492,8 @@ export class EditorStore {
   }
 
   /** The draft as the server returned it. */
-  private hold(field: FieldDraft, draft: Draft) {
-    this.recovered += draft.recovered
+  private hold(field: FieldDraft, draft: Draft, key?: string) {
+    this.noteRecovered(draft.recovered, key)
     field.draftId = draft.id
     field.baseRevision = draft.baseRevision as RevisionId | null
     field.saved = draft.status === "active" ? draft.content : null
@@ -558,7 +575,11 @@ export class EditorStore {
         }),
       ["library"]
     )
-    if (result.ok) this.recovered += result.value.recovered
+    if (result.ok) {
+      const fields = result.value.recoveredFields ?? []
+      this.noteRecovered(result.value.recovered - fields.length)
+      for (const field of fields) this.noteRecovered(1, field)
+    }
     if (result.ok || result.error.tag === "StaleWrite" || result.error.tag === "EditConflict") await this.refresh()
     return result
   }
@@ -732,7 +753,7 @@ export class EditorStore {
     void this.env.keepalive("/library/drafts", body).then((ok) => {
       if (!(typeof ok === "boolean" ? ok : ok.ok)) return
       if (typeof ok !== "boolean") {
-        this.recovered += ok.recovered
+        this.noteRecovered(ok.recovered)
         this.bump(DRAFTS)
       }
       for (const copy of copies) {
@@ -748,9 +769,9 @@ export class EditorStore {
    * its save goes on top.
    */
   private async settle(key: string, draft: Draft): Promise<void> {
-    if (this.field(key).local !== null) this.recovered += draft.recovered
+    if (this.field(key).local !== null) this.noteRecovered(draft.recovered, key)
     const field = this.field(key)
-    if (field.local === null) this.hold(field, draft)
+    if (field.local === null) this.hold(field, draft, key)
     else this.schedule(key)
     if (key.startsWith("=")) this.rebuild()
     this.bump(key, STRUCTURE, DRAFTS)

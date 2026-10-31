@@ -103,7 +103,7 @@ test("a new card's fields save as a revision, after a diff, and survive a reload
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Wren")
   await page.getByRole("button", { name: "Create" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
-  await expect(page.getByText("used by 0 chats")).toBeVisible()
+  await expect(page.getByText("No chat uses it yet.", { exact: true })).toBeVisible()
 
   await field(page, "Description").fill("A lighthouse keeper who talks to gulls.")
   await kept(page)

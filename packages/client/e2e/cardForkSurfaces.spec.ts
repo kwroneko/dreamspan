@@ -1,7 +1,7 @@
 // Realistic synthetic ST import only. Walkthrough forks are made through the UI.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
@@ -9,6 +9,11 @@ import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
+/** An editor action under More actions, opened. */
+const more = async (page: Page, name: string) => {
+  await page.getByRole("button", { name: "More actions", exact: true }).click()
+  return page.getByRole("button", { name, exact: true })
+}
 const server = serverPerFile(withAdmin)
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(300_000)
@@ -75,7 +80,7 @@ for (const width of [1440, 390])
       const childUrl = page.url()
       await expect(page.getByRole("list", { name: "Forks tree" })).toContainText(version)
       await shot("editor")
-      await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+      await (await more(page, "Compare with parent")).click()
       const compare = page.getByRole("dialog", { name: "Compare with parent", exact: true })
       await expect(compare.getByLabel("Card differences")).toContainText("Captain Aria")
       await shot("compare")
@@ -86,7 +91,7 @@ for (const width of [1440, 390])
       await dialog.getByRole("button", { name: "Fork card", exact: true }).click()
       await expect(page).not.toHaveURL(childUrl)
       await expect(page.getByRole("list", { name: "Forks tree" })).toContainText(`${version} child`)
-      await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+      await (await more(page, "Compare with parent")).click()
       await compare.getByRole("combobox").click()
       await page
         .getByRole("option", { name: `${parent.label}${parent.subtitle ? ` · ${parent.subtitle}` : ""}`, exact: true })
@@ -94,22 +99,22 @@ for (const width of [1440, 390])
       await expect(compare.getByLabel("Card differences")).toContainText("Captain Aria")
       await compare.getByRole("button", { name: "Close", exact: true }).click()
       await page.goto(childUrl)
-      await page.getByRole("button", { name: "Mark as a fork of…", exact: true }).click()
+      await (await more(page, "Mark as a fork of…")).click()
       const picker = page.getByRole("dialog", { name: "Mark as a fork of…", exact: true })
       await picker.getByRole("textbox", { name: "Find a parent card" }).fill(`${version} child`)
       await picker.getByRole("button", { name: `${parent.label} · ${version} child`, exact: true }).click()
       await expect(picker.getByRole("alert")).toBeVisible() // descendant would make a cycle
       await picker.getByRole("button", { name: "Cancel", exact: true }).click()
-      await page.getByRole("button", { name: "Unlink", exact: true }).click()
+      await (await more(page, "Unlink")).click()
       await expect(page.getByRole("button", { name: "Unlink", exact: true })).toHaveCount(0)
-      await page.getByRole("button", { name: "Mark as a fork of…", exact: true }).click()
+      await (await more(page, "Mark as a fork of…")).click()
       await picker.getByRole("textbox", { name: "Find a parent card" }).fill(parent.label)
       await shot("parent-picker")
       await picker
         .getByRole("button", { name: `${parent.label}${parent.subtitle ? ` · ${parent.subtitle}` : ""}`, exact: true })
         .click()
       await expect(picker).not.toBeVisible()
-      await expect(page.getByRole("button", { name: "Compare with parent", exact: true })).toBeEnabled()
+      await expect(await more(page, "Compare with parent")).toBeEnabled()
       await page.goto(`${server().url}/library`)
       const row = page
         .getByRole("list", { name: "Cards", exact: true })
@@ -180,7 +185,7 @@ test("chat provenance and deleted family members remain visible", async ({ page 
   )
   await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("in the bin")
   await expect(page.getByText("Forked from").locator("..")).toContainText("Deleted parent")
-  await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+  await (await more(page, "Compare with parent")).click()
   await expect(page.getByRole("dialog", { name: "Compare with parent", exact: true })).toContainText(
     "Restore it from the bin"
   )
@@ -192,7 +197,7 @@ test("chat provenance and deleted family members remain visible", async ({ page 
   )
   await page.reload()
   await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("purged")
-  await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+  await (await more(page, "Compare with parent")).click()
   await expect(page.getByRole("dialog", { name: "Compare with parent", exact: true })).toContainText("deleted for good")
 })
 
@@ -218,7 +223,7 @@ test("the parent picker finds archived cards by their in-character name", async 
     ])
   )
   await page.goto(`${server().url}/library/${seed.child.id}`)
-  await page.getByRole("button", { name: "Mark as a fork of…", exact: true }).click()
+  await (await more(page, "Mark as a fork of…")).click()
   const picker = page.getByRole("dialog", { name: "Mark as a fork of…", exact: true })
   await picker.getByRole("textbox", { name: "Find a parent card" }).fill("captain searchable")
   await picker.getByRole("button", { name: "Library title · old", exact: true }).click()
@@ -267,7 +272,7 @@ test("family comparison reads both current saved heads and excludes drafts", asy
     })
   )
   await page.goto(`${server().url}/library/${seed.child.id}`)
-  await page.getByRole("button", { name: "Compare with parent", exact: true }).click()
+  await (await more(page, "Compare with parent")).click()
   const diff = page.getByRole("dialog", { name: "Compare with parent", exact: true }).getByLabel("Card differences")
   await expect(diff).toContainText("The parent’s later saved premise.")
   await expect(diff).toContainText("The saved lighthouse keeper.")

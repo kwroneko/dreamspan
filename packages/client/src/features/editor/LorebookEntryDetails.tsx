@@ -219,7 +219,7 @@ export function EntryDetails({
       </div>
       <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""}`}>
         <div className="flex min-w-0 flex-col gap-4">
-          <TextField store={store} path={[...path, "content"]} label="Entry content" rows={8} />
+          <TextField store={store} path={[...path, "content"]} label="Entry content" rows={8} expandable />
           <Keys store={store} path={[...path, "keys"]} label="Primary keys" id={`lore-keys-${uid}`} />
           <section className={group} aria-label="Secondary keys">
             <SwitchField
