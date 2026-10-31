@@ -284,7 +284,7 @@ export function Editor({
                 ? "Keeping your changes…"
                 : dirty === 0
                   ? "Everything is saved."
-                  : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save.`}
+                  : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
             </p>
           </div>
           {clash && (

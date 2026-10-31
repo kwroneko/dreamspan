@@ -21,6 +21,8 @@ export const openPanel = async (page: Page, tab: string) => {
  * Cast) in the cast strip.
  */
 export const panelTab = async (page: Page, tab: string) => {
+  // The tools row stays invisible until it has measured which tools fit.
+  await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
   const shown = page
     .getByRole("tablist", { name: "Chat panel" })
     .or(page.getByRole("tablist", { name: "Characters", exact: true }))
