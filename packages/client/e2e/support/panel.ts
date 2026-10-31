@@ -39,3 +39,14 @@ export const closePanel = async (page: Page) => {
   else await page.getByRole("button", { name: "Close the panel" }).click()
   await expect(page.getByRole("tablist", { name: "Chat panel" })).toHaveCount(0)
 }
+
+/** The Summaries tab's settings, opened: they stay open while the tab is mounted. */
+export const openSummarySettings = async (page: Page) => {
+  const tab = await openPanel(page, "Summaries")
+  const open = tab.getByText("Summary settings", { exact: true })
+  await expect(open).toBeVisible()
+  const section = tab.getByRole("region", { name: "Summary settings" })
+  if (!(await section.isVisible())) await open.click()
+  await expect(section).toBeVisible()
+  return section
+}

@@ -8,8 +8,9 @@
 // filtered in memory and only the first rows are drawn.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
-import { type KeyboardEvent, memo, useEffect, useId, useMemo, useRef, useState } from "react"
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -195,6 +196,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   persona = false,
   pending = false,
   onNone,
+  trigger,
   personas,
   onAddToChat,
   compact = false
@@ -215,6 +217,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   pending?: boolean
   /** Offered as "No persona". */
   onNone?: () => void
+  /** Its button's text in place of the chip ("Switch persona" where the name is already shown). */
+  trigger?: ReactNode
   /** The composer's second section, "Your persona", under "Speak as"; one search filters both. */
   personas?: PersonaSection
   /** Offered when no one in the chat has the name searched for: adding a card is the Cast tab's. */
@@ -429,23 +433,29 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       wide={personas !== undefined}
       triggerLabel={persona ? `Playing as ${name}. Change your persona` : `Speaking as ${name}. Change the speaker`}
       hint={persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`}
-      triggerClassName={`inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`}
+      triggerClassName={
+        trigger
+          ? buttonClass("secondary")
+          : `inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`
+      }
       title={persona ? "Your persona" : "Speak as"}
       trigger={
-        <>
-          {speaker !== null ? (
-            <Avatar
-              id={speaker}
-              name={name}
-              mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
-              size="chip"
-            />
-          ) : (
-            <span aria-hidden="true" className="size-1" />
-          )}
-          {!compact && <span className="min-w-0 truncate">{name}</span>}
-          <ChevronIcon up />
-        </>
+        trigger ?? (
+          <>
+            {speaker !== null ? (
+              <Avatar
+                id={speaker}
+                name={name}
+                mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
+                size="chip"
+              />
+            ) : (
+              <span aria-hidden="true" className="size-1" />
+            )}
+            {!compact && <span className="min-w-0 truncate">{name}</span>}
+            <ChevronIcon up />
+          </>
+        )
       }
     >
       <Input

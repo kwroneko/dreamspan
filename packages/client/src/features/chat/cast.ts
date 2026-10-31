@@ -72,3 +72,30 @@ export const recentSpeakers = (entries: ReadonlyArray<PathEntry>, count: number)
 
 export const modelNameOf = (view: CastView, id: EntityId | null) =>
   id === null ? null : (view.cards.get(id)?.modelName ?? view.cards.get(id)?.name ?? null)
+
+/**
+ * The cards to offer, in the order people look for them: characters first, the ones in the
+ * latest chats first, then by name; personas apart, after them. A version shows only to tell
+ * two of the same name apart.
+ */
+export const addableGroups = (cards: ReadonlyArray<CastCard>, recency: ReadonlyMap<string, number>, needle: string) => {
+  const found = cards.filter(
+    (card) =>
+      needle === "" || card.name.toLowerCase().includes(needle) || (card.subtitle ?? "").toLowerCase().includes(needle)
+  )
+  const names = new Map<string, number>()
+  for (const card of found) names.set(card.name, (names.get(card.name) ?? 0) + 1)
+  const order = (a: CastCard, b: CastCard) =>
+    (recency.get(b.entityId) ?? -1) - (recency.get(a.entityId) ?? -1) || a.name.localeCompare(b.name)
+  const entry = (card: CastCard) => ({ card, version: (names.get(card.name) ?? 0) > 1 ? (card.subtitle ?? "") : "" })
+  return {
+    characters: found
+      .filter((card) => !card.persona)
+      .sort(order)
+      .map(entry),
+    personas: found
+      .filter((card) => card.persona)
+      .sort(order)
+      .map(entry)
+  }
+}

@@ -25,14 +25,6 @@ export const HistoryIcon = () => (
   </svg>
 )
 
-export const MoreIcon = () => (
-  <svg {...base} width={20} height={20}>
-    <circle cx="3" cy="8" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none" />
-    <circle cx="13" cy="8" r="1.6" fill="currentColor" stroke="none" />
-  </svg>
-)
-
 export const ChevronIcon = ({ up = false }: { up?: boolean }) => (
   <svg {...base} width={12} height={12}>
     <path d={up ? "M4 10l4-4 4 4" : "M4 6l4 4 4-4"} />

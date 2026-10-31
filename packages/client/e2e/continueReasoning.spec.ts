@@ -281,7 +281,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Edit native-prefill", exact: true }).click()
     const prefill = page.getByRole("combobox", { name: "Prefill", exact: true })
     await prefill.click()
-    await expect(page.getByRole("option", { name: "Unknown: no provider information", exact: true })).toBeVisible()
+    await expect(page.getByRole("option", { name: "Not known: the provider doesn't say", exact: true })).toBeVisible()
     await expect(page.getByRole("option", { name: "Through a tool schema", exact: true })).toBeVisible()
     await shoot(page, "10-model-capabilities")
   })

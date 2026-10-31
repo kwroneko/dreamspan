@@ -1,111 +1,34 @@
-// The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who the user plays (the persona, who
-// `{{user}}` is), then everyone in the chat, as ST's group panel and character panel show
-// them. Each can be made to speak now, written as, muted (never picked to reply; its card
-// stays in the context), have their card shown, edited or forked, be made
-// the persona, and be removed; and any card can be added. Changes to who's here are state
-// events at the leaf shown, so they apply from the latest message on, on this branch.
+// The chat's Cast tab (DESIGN §2.1, §2.2, §3.5, §4): who you play (the persona, who
+// `{{user}}` is), then everyone in the chat, one quiet row each: portrait, name (which opens
+// their tab, where the card is edited), Mute (never picked to reply; the card stays in the
+// context: PHASE1 "Muting and presence") and Speak now. Everything else is under each row's ⋯:
+// write as them, the card's actions (`chatCardActions`, so a plugin's join them), make them the
+// persona, remove them. Any card can be added. Changes to who's here are state events at the
+// leaf shown, so they apply from the latest message on, on this branch.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
 import { AsyncResult } from "effect/reactivity"
-import { useCallback, useId, useMemo, useState, useSyncExternalStore } from "react"
+import { useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
-import { ActionMenu } from "../../ui/Menu.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
-import { useOpenCharacter } from "../characters/shellData.tsx"
-import { castView, CastContext } from "./cast.ts"
-import { MoreIcon, PlusIcon } from "./icons.tsx"
+import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
+import { addableGroups, castView } from "./cast.ts"
+import { PlusIcon } from "./icons.tsx"
+import { useShowPanel } from "./panels.tsx"
+import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
-import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-
-/** Longer than this, a field shows its start and "Show more". */
-const LONG = 320
-
-function DefinitionField({ label, text }: { label: string; text: string }) {
-  const [open, setOpen] = useState(false)
-  const id = useId()
-  const long = text.length > LONG || text.split("\n").length > 6
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-xs font-semibold tracking-wide text-muted uppercase">{label}</dt>
-      <dd
-        id={id}
-        className={`text-sm whitespace-pre-wrap [overflow-wrap:anywhere] ${long && !open ? "line-clamp-6" : ""}`}
-      >
-        {text}
-      </dd>
-      {long && (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={() => setOpen(!open)}
-          className="self-start text-xs text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          {open ? "Show less" : "Show more"}
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** Which version a chat reads, in words, when it isn't simply the library's latest. */
-const versionNote = (info: ChatCard) =>
-  info.binding === "revision"
-    ? "This chat uses an earlier saved version of the card here, not the library's latest."
-    : null
-
-/** The card's definition as this chat uses it, read-only (ST's character panel). */
-function Definition({ name, info }: { name: string; info: ChatCard }) {
-  const { definition } = info
-  const note = versionNote(info)
-  const fields: ReadonlyArray<readonly [string, string]> = [
-    ["Description", definition.description],
-    ["Personality", definition.personality],
-    ["Scenario", definition.scenario],
-    ["First message", definition.firstMessage],
-    ["Example dialogue", definition.exampleDialogue],
-    ["Creator's notes", definition.creatorNotes]
-  ]
-  const shown = fields.filter(([, text]) => text.trim() !== "")
-  const empty = fields.filter(([, text]) => text.trim() === "").map(([label]) => label.toLowerCase())
-  return (
-    <section
-      aria-label={`${name}'s card`}
-      className="flex flex-col gap-3 rounded-md border border-border bg-canvas p-3"
-    >
-      {note && <p className="text-xs text-muted">{note}</p>}
-      {shown.length > 0 && (
-        <dl className="flex flex-col gap-3">
-          {shown.map(([label, text]) => (
-            <DefinitionField key={label} label={label} text={text} />
-          ))}
-        </dl>
-      )}
-      <p className="text-xs text-muted">
-        {[
-          definition.alternateGreetings > 0
-            ? `${plural(definition.alternateGreetings, "alternate greeting", "alternate greetings")}.`
-            : "",
-          empty.length > 0 ? `Empty: ${empty.join(", ")}.` : ""
-        ]
-          .filter((part) => part !== "")
-          .join(" ")}
-      </p>
-    </section>
-  )
-}
 
 /** A searchable list of the user's cards not in the chat; the one picked joins it (DESIGN §2.1). */
 function AddCharacter({
@@ -120,19 +43,49 @@ function AddCharacter({
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
   const [query, setQuery] = useState("")
+  // The shell's cards carry when each was last in a chat; read while the app runs anyway.
+  const shell = useAtomValue(shellAtom)
+  const recency = useMemo(
+    () =>
+      new Map<string, number>(
+        AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c.recentAt ?? 0]) : []
+      ),
+    [shell]
+  )
   const openChange = (next: boolean) => {
     setOpen(next)
     if (!next) return setQuery("")
     void session.listCards().then((result) => setAll(result.ok ? result.value : []))
   }
-  const needle = query.trim().toLowerCase()
-  const addable = (all ?? []).filter(
-    (card) =>
-      !participants.includes(card.entityId) &&
-      (needle === "" ||
-        card.name.toLowerCase().includes(needle) ||
-        (card.subtitle ?? "").toLowerCase().includes(needle))
+  const groups = useMemo(
+    () =>
+      addableGroups(
+        (all ?? []).filter((card) => !participants.includes(card.entityId)),
+        recency,
+        query.trim().toLowerCase()
+      ),
+    [all, participants, recency, query]
   )
+  const option = ({ card, version }: { card: CastCard; version: string }) => (
+    <li key={card.entityId}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(false)
+          setQuery("")
+          onJoin(card)
+        }}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate">{card.name}</span>
+          {version && <span className="truncate text-xs text-muted">{version}</span>}
+        </span>
+      </button>
+    </li>
+  )
+  const empty = groups.characters.length === 0 && groups.personas.length === 0
   return (
     <Popover
       open={open}
@@ -148,8 +101,10 @@ function AddCharacter({
         </>
       }
     >
+      {/* Never squeezed by a long list under it. */}
       <Input
         type="search"
+        className="shrink-0"
         aria-label="Search your cards"
         placeholder="Search your cards"
         value={query}
@@ -157,34 +112,77 @@ function AddCharacter({
       />
       {all === null ? (
         <p className="px-1 py-2 text-sm text-muted">Loading…</p>
-      ) : addable.length === 0 ? (
+      ) : empty ? (
         <p className="px-1 py-2 text-sm text-muted">
-          {needle === "" ? "Every card you have is in this chat." : "No card matches."}
+          {query.trim() === "" ? "Every card you have is in this chat." : "No card matches."}
         </p>
       ) : (
-        <ul aria-label="Cards to add" className="flex min-h-0 flex-col overflow-y-auto">
-          {addable.map((card) => (
-            <li key={card.entityId}>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false)
-                  setQuery("")
-                  onJoin(card)
-                }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-              >
-                <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{card.name}</span>
-                  {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
-                </span>
-                {card.persona && <Badge>persona</Badge>}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+          {groups.characters.length > 0 && <ul aria-label="Characters">{groups.characters.map(option)}</ul>}
+          {groups.personas.length > 0 && (
+            <section aria-label="Personas" className="flex flex-col gap-1">
+              <h3 className="px-2 pt-1 text-xs font-medium text-muted">Personas</h3>
+              <ul aria-label="Personas">{groups.personas.map(option)}</ul>
+            </section>
+          )}
+        </div>
       )}
+    </Popover>
+  )
+}
+
+/** The row's ⋯: what's used less, each a button in a panel that stays mounted for the dialogs they open. */
+function MemberMore({
+  session,
+  card,
+  info,
+  onChange,
+  onPersona
+}: {
+  session: ChatSession
+  card: CastCard
+  info: ChatCard | undefined
+  onChange: (change: CastChange) => void
+  onPersona: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const showPanel = useShowPanel()
+  const name = card.name
+  return (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger={<Icon name="more" />}
+      triggerLabel={`More for ${name}`}
+      hint={`More for ${name}`}
+      triggerClassName={iconButtonClass()}
+      title={name}
+      side="bottom"
+      align="end"
+      keepMounted
+    >
+      <div
+        className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
+        onClickCapture={() => setOpen(false)}
+      >
+        <Button variant="ghost" onClick={() => writeAs(session, card.entityId)}>
+          Write as {name}
+        </Button>
+        <Button variant="ghost" onClick={() => showPanel(`card:${card.entityId}`)}>
+          Edit the card here
+        </Button>
+        <ChatCardActions session={session} card={card} info={info} />
+        <Button variant="ghost" onClick={onPersona}>
+          Use as my persona
+        </Button>
+        <Button
+          variant="ghost"
+          className="text-danger!"
+          onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
+        >
+          Remove from chat
+        </Button>
+      </div>
     </Popover>
   )
 }
@@ -193,8 +191,8 @@ function Member({
   session,
   card,
   info,
+  version,
   muted,
-  played,
   writing,
   onChange,
   onPersona,
@@ -203,18 +201,18 @@ function Member({
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
+  /** Its version, shown only to tell it from another of the same name. */
+  version: string
   muted: boolean
-  played: boolean
   /** The model is writing their turn at the end of the chat. */
   writing: boolean
   onChange: (change: CastChange) => void
   onPersona: () => void
   onError: (error: AppError | null) => void
 }) {
-  const [showCard, setShowCard] = useState(false)
   const [speaking, setSpeaking] = useState(false)
+  const showPanel = useShowPanel()
   const name = card.name
-  const openCharacter = useOpenCharacter()
   const speak = async () => {
     setSpeaking(true)
     // The composer's Generate for this speaker, without a direction: the model writes their turn.
@@ -222,89 +220,74 @@ function Member({
     setSpeaking(false)
     onError(outcome.ok ? null : outcome.error)
   }
-  const small = "h-8! px-2!"
   return (
-    <li aria-label={name} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
-      <div className={`flex items-start gap-3 ${muted ? "opacity-60" : ""}`}>
+    <li aria-label={name} className="flex items-center gap-3 py-2">
+      <span className={muted ? "opacity-50" : ""}>
         <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <button
-            type="button"
-            onClick={() => openCharacter(card.entityId)}
-            className="truncate text-left font-medium text-accent"
-          >
-            {name}
-          </button>
-          {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
-          {info && <span className="text-xs text-muted">used by {plural(info.usedByChats, "chat", "chats")}</span>}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+        <button
+          type="button"
+          title={name}
+          aria-label={`${name}: open their card`}
+          onClick={() => showPanel(`card:${card.entityId}`)}
+          className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
+        >
+          {name}
+        </button>
+        {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
+        {(writing || muted || card.inBin) && (
           <span className="flex flex-wrap items-center gap-1">
-            {played && <Badge tone="accent">your persona</Badge>}
             {writing && <Badge tone="success">writing…</Badge>}
-            {muted && !played && <Badge tone="warning">muted</Badge>}
+            {muted && <Badge tone="warning">Muted</Badge>}
             {card.inBin && <Badge tone="danger">in the bin</Badge>}
           </span>
-        </div>
-        {/* Muting stops them being picked to reply (DESIGN §3.5); they can still be made to speak. */}
-        {/* Not on the card you play: the model never writes it, so muting means nothing. */}
-        {!played && (
-          <Switch
-            checked={muted}
-            onCheckedChange={(next) => onChange({ _tag: "Presence", entityId: card.entityId, present: !next })}
-          >
-            <span className="sr-only">{name} is </span>Muted
-          </Switch>
         )}
-        <span className="-mt-1 -mr-2">
-          <ActionMenu
-            label={`More for ${name}`}
-            trigger={<MoreIcon />}
-            items={[
-              ...(played ? [] : [{ label: "Use as my persona", onSelect: onPersona }]),
-              {
-                label: "Remove from chat",
-                tone: "danger",
-                onSelect: () => onChange({ _tag: "Leave", entityId: card.entityId })
-              }
-            ]}
-          />
-        </span>
       </div>
-      <div className="-ml-2 flex flex-wrap items-center gap-0.5">
-        <Tooltip label={`The model writes ${name}'s turn now`}>
-          <Button
-            variant="ghost"
-            className={small}
-            aria-label={`Speak now: ${name}`}
-            pending={speaking}
-            onClick={() => void speak()}
-          >
-            Speak now
-          </Button>
-        </Tooltip>
-        <Tooltip label={`Your next message is sent as ${name}`}>
-          <Button
-            variant="ghost"
-            className={small}
-            aria-label={`Write as ${name}`}
-            onClick={() => writeAs(session, card.entityId)}
-          >
-            Write as
-          </Button>
-        </Tooltip>
-        <Button
-          variant="ghost"
-          className={small}
-          aria-label={`${showCard ? "Hide" : "Show"} card: ${name}`}
-          aria-expanded={showCard}
-          onClick={() => setShowCard(!showCard)}
-        >
-          {showCard ? "Hide card" : "Show card"}
-        </Button>
-        <ChatCardActions session={session} card={card} info={info} />
-      </div>
-      {showCard &&
-        (info ? <Definition name={name} info={info} /> : <p className="text-sm text-muted">Loading the card…</p>)}
+      {/* Muting stops them being picked to reply (DESIGN §3.5); they can still be made to speak. */}
+      <IconButton
+        icon={muted ? "muted" : "volume"}
+        label={muted ? `Unmute ${name}` : `Mute ${name}`}
+        hint={muted ? "Muted: never picked to reply. Unmute" : "Mute: never picked to reply"}
+        className={muted ? "text-warning!" : ""}
+        onClick={() => onChange({ _tag: "Presence", entityId: card.entityId, present: muted })}
+      />
+      <IconButton
+        icon="play"
+        label={`Speak now: ${name}`}
+        hint={`${name} speaks now: the model writes their turn`}
+        disabled={speaking || writing}
+        onClick={() => void speak()}
+      />
+      <MemberMore session={session} card={card} info={info} onChange={onChange} onPersona={onPersona} />
     </li>
+  )
+}
+
+/** Who you play: one row, apart from the characters, with no count of the chats it's in. */
+function You({ session, card }: { session: ChatSession; card: CastCard | undefined }) {
+  const showPanel = useShowPanel()
+  return (
+    <div role="group" aria-label="Your persona" className="flex items-center gap-3">
+      {card && <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />}
+      <div className="flex min-w-0 flex-1 flex-col items-start">
+        <span className="text-xs text-muted">You play</span>
+        {card ? (
+          <button
+            type="button"
+            title={card.name}
+            aria-label={`${card.name}: open your persona`}
+            onClick={() => showPanel(`card:${card.entityId}`)}
+            className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {card.name}
+          </button>
+        ) : (
+          <span className="font-medium">No persona</span>
+        )}
+      </div>
+      <PersonaSwitch session={session} trigger="Switch" />
+    </div>
   )
 }
 
@@ -325,9 +308,8 @@ export function CastTab({ session }: { session: ChatSession }) {
   const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
   // Cards in the bin, or purged, have no definition to read.
   const key = participants.filter((id) => view.cards.get(id)?.inBin === false).join(" ")
-  // The library entry, "used by N chats", and the definition the
-  // next request reads; read again at a new leaf, after any library change (an editor
-  // save), or a card fork made here.
+  // The library entry each card's actions need (the ref to edit or fork); read again at a new
+  // leaf, after any library change (an editor save), or a card fork made here.
   const infoAtom = useMemo(
     () =>
       AppClient.query(
@@ -354,7 +336,11 @@ export function CastTab({ session }: { session: ChatSession }) {
     setError(outcome.ok ? null : outcome.error)
   }
   const playedByMe = cast?.playedByMe ?? []
-  const muted = cast?.absent.filter((id) => participants.includes(id) && !playedByMe.includes(id)).length ?? 0
+  // The characters: everyone in the chat but who you play (PHASE1 26, 27).
+  const characters = participants.filter((id) => !playedByMe.includes(id))
+  const muted = cast?.absent.filter((id) => characters.includes(id)).length ?? 0
+  const sameName = (card: CastCard) =>
+    characters.filter((id) => id !== card.entityId && view.cards.get(id)?.name === card.name).length > 0
   /**
    * Who `{{user}}` is from here on (DESIGN §2.2): one persona, in one write. A card not in the
    * chat joins; a persona-folder card played until now leaves, since it isn't one of the characters.
@@ -363,76 +349,58 @@ export function CastTab({ session }: { session: ChatSession }) {
     if (cast === null || (playedByMe.length === 1 && playedByMe[0] === card.entityId)) return
     await change({ _tag: "Persona", entityId: card.entityId })
   }
-  const listCards = useCallback(() => session.listCards(), [session])
   const persona = playedByMe[0] ?? null
 
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs text-muted">Changes here apply from the latest message on, on this branch.</p>
-      {/* Who you are ({{user}}): set here, not by who you write as (DESIGN §2.2). */}
-      <div className="flex flex-wrap items-center gap-2" aria-label="Your persona" role="group">
-        <span className="text-sm font-medium">You:</span>
-        <CastContext value={view}>
-          <SpeakerSwitcher
-            listCards={listCards}
-            speaker={persona}
-            recent={[]}
-            persona
-            onPick={(card) => void choosePersona(card)}
+    <div className="flex flex-col gap-4">
+      <You session={session} card={persona === null ? undefined : view.cards.get(persona)} />
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+          <h2 className="text-sm font-semibold">
+            {plural(characters.length, "character", "characters")}
+            {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
+          </h2>
+          <AddCharacter
+            session={session}
+            participants={participants}
+            onJoin={(card) => void change({ _tag: "Join", entityId: card.entityId })}
           />
-        </CastContext>
-        <span className="text-xs text-muted">{"{{user}}"} in prompts. Writing as someone else doesn't change it.</span>
+        </div>
+        {characters.length === 0 ? (
+          <p className="py-2 text-sm text-muted">No one is in this chat. Add a character to start.</p>
+        ) : (
+          <ul aria-label="Characters in this chat" className="flex flex-col">
+            {characters.map((id) => {
+              const card = view.cards.get(id)
+              if (card === undefined) return null
+              return (
+                <Member
+                  key={id}
+                  session={session}
+                  card={card}
+                  info={info.get(id)}
+                  version={sameName(card) ? (card.subtitle ?? "") : ""}
+                  muted={cast.absent.includes(id)}
+                  writing={writing === id}
+                  onChange={(next) => void change(next)}
+                  onPersona={() => void choosePersona(card)}
+                  onError={setError}
+                />
+              )
+            })}
+          </ul>
+        )}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">
-          {plural(
-            participants.length - playedByMe.filter((id) => participants.includes(id)).length,
-            "character",
-            "characters"
-          )}
-          {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
-        </h2>
-        <AddCharacter
-          session={session}
-          participants={participants}
-          onJoin={(card) => void change({ _tag: "Join", entityId: card.entityId })}
-        />
-      </div>
-      {participants.length === 0 ? (
-        <p className="text-sm text-muted">No one is in this chat. Add a character to start.</p>
-      ) : (
-        <ul aria-label="Characters in this chat" className="flex flex-col divide-y divide-border">
-          {participants.map((id) => {
-            const card = view.cards.get(id)
-            if (card === undefined) return null
-            return (
-              <Member
-                key={id}
-                session={session}
-                card={card}
-                info={info.get(id)}
-                muted={cast.absent.includes(id)}
-                played={playedByMe.includes(id)}
-                writing={writing === id}
-                onChange={(next) => void change(next)}
-                onPersona={() => void choosePersona(card)}
-                onError={setError}
-              />
-            )
-          })}
-        </ul>
-      )}
       {AsyncResult.isFailure(infoResult) && (
-        <p className="text-sm text-muted">
-          The cards' details couldn't be read; showing and editing them may not work.
-        </p>
+        <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error.message}
         </p>
       )}
+      <p className="text-xs text-muted">Changes here apply from the latest message on, on this branch.</p>
     </div>
   )
 }

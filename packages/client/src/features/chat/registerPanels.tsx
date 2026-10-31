@@ -1,5 +1,7 @@
 import { Loading } from "../../ui/Spinner.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { chatPanels, lazyPanel, type PanelProps } from "./panels.tsx"
+import { summaryPanelSections } from "./presentation.tsx"
 
 const loadNotes = () =>
   import("./ChatNotes.tsx").then((module) => ({
@@ -97,12 +99,17 @@ export const registerPanels = () => [
     component: lazyPanel(
       () =>
         import("./SummaryPanel.tsx").then((m) => ({
-          default: ({ session, view, focus, onJump, onEnable }: PanelProps) =>
-            view.lcm === null ? (
-              <Loading label="Loading the summaries…" />
-            ) : (
-              <m.SummaryPanel session={session} lcm={view.lcm} focus={focus} onJump={onJump} onEnable={onEnable} />
-            )
+          // The summaries, then what's registered after them (their settings), shown before they load too.
+          default: ({ session, view, focus, onJump, onEnable }: PanelProps) => (
+            <div className="flex flex-col gap-4">
+              {view.lcm === null ? (
+                <Loading label="Loading the summaries…" />
+              ) : (
+                <m.SummaryPanel session={session} lcm={view.lcm} focus={focus} onJump={onJump} onEnable={onEnable} />
+              )}
+              <SlotOutlet slot={summaryPanelSections} props={{ session }} />
+            </div>
+          )
         })),
       "summaries"
     )

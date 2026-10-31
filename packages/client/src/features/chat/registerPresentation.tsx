@@ -18,6 +18,7 @@ import {
   messageRetries,
   messageVersions,
   summarySettingFields,
+  summaryPanelSections,
   timelineBoundaries,
   timelineRails,
   timelineSummaries,
@@ -70,8 +71,21 @@ const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").B
 )
 const Composer = lazy(() => import("./Composer.tsx").then((m) => ({ default: m.Composer })))
 const Summary = lazy(() => import("./TimelineSummary.tsx").then((m) => ({ default: m.TimelineSummary })))
-const RolesSetting = lazy(() => import("./ThisChatTab.tsx").then((m) => ({ default: m.RolesSetting })))
-const SummariesSetting = lazy(() => import("./ThisChatTab.tsx").then((m) => ({ default: m.SummariesSetting })))
+const ChatIdentity = deferred<Parameters<typeof import("./ThisChatTab.tsx").ChatIdentity>[0]>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.ChatIdentity }))
+)
+const SummariesSwitch = deferred<Parameters<typeof import("./ThisChatTab.tsx").SummariesSwitch>[0]>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.SummariesSwitch }))
+)
+const SummarySettings = deferred<Parameters<typeof import("./ThisChatTab.tsx").SummarySettings>[0]>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.SummarySettings }))
+)
+const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").RolesSetting>[0]>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.RolesSetting }))
+)
+const AccountSettingsNote = deferred<{ session: import("./session.ts").ChatSession }>(() =>
+  import("./ThisChatTab.tsx").then((m) => ({ default: m.AccountSettingsNote }))
+)
 
 export const registerPresentation = () => [
   ...registerTimelineTransforms(),
@@ -103,25 +117,13 @@ export const registerPresentation = () => [
   chatNoteActions.register({ id: "note.author-note", order: 10, component: AuthorNoteAction }),
   chatCardActions.register({ id: "card.fork-for-chat", order: 20, component: ForkChatCard }),
   chatCardActions.register({ id: "card.choose-version", order: 30, component: ChooseChatCard }),
-  chatSettingSections.register({
-    id: "settings.summaries",
-    order: 10,
-    component: (props) => (
-      <Suspense fallback={null}>
-        <SummariesSetting {...props} />
-      </Suspense>
-    )
-  }),
-  chatSettingSections.register({ id: "settings.macro-bindings", order: 5, component: MacroBindings }),
-  chatSettingSections.register({
-    id: "settings.roles",
-    order: 20,
-    component: (props) => (
-      <Suspense fallback={null}>
-        <RolesSetting {...props} />
-      </Suspense>
-    )
-  }),
+  // This chat leads with what a person touches; what few need comes after, collapsed.
+  chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
+  chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
+  chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),
+  chatSettingSections.register({ id: "settings.roles", order: 90, component: RolesSetting }),
+  chatSettingSections.register({ id: "settings.account", order: 100, component: AccountSettingsNote }),
+  summaryPanelSections.register({ id: "summaries.settings", order: 100, component: SummarySettings }),
   summarySettingFields.register({ id: "settings.summary-fields", order: 10, component: LcmFields }),
   timelineBoundaries.register({ id: "timeline.lcm-boundary", order: 10, component: LcmBoundary }),
   timelineSummaries.register({

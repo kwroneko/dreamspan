@@ -6,7 +6,7 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
 import { type CatalogMatch, type FieldSource, type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -14,6 +14,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { modelsAtom, parseOptionalInt } from "./data.ts"
 import type { ConnectionSectionProps } from "./detail.tsx"
 
@@ -70,7 +71,7 @@ function Value({
 }
 
 /** The model settings fields a link can open at. */
-export type ModelField = "context" | "openai_max_context" | "openai_max_tokens"
+export type ModelField = "context" | "maxOutput" | "openai_max_context" | "openai_max_tokens"
 
 const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
   (
@@ -83,8 +84,15 @@ const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
 
 type Tri = "auto" | "yes" | "no"
 const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
-const triItems = [
-  { value: "auto" as const, label: "As the provider says" },
+/** "Auto" names what the provider says, so the choice reads without opening it. */
+const triItems = (upstream: boolean | undefined) => [
+  {
+    value: "auto" as const,
+    label:
+      upstream === undefined
+        ? "Not known: the provider doesn't say"
+        : `As the provider says: ${upstream ? "yes" : "no"}`
+  },
   { value: "yes" as const, label: "Yes" },
   { value: "no" as const, label: "No" }
 ]
@@ -99,12 +107,12 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
     value: "auto" as const,
     label:
       upstream === undefined
-        ? "Unknown: no provider information"
+        ? "Not known: the provider doesn't say"
         : upstream === "assistant"
-          ? "Provider: assistant prefill"
+          ? "As the provider says: yes"
           : upstream === "tool_schema"
-            ? "Provider: tool schema"
-            : "Provider: no prefill"
+            ? "As the provider says: through a tool schema"
+            : "As the provider says: no"
   },
   { value: "assistant" as const, label: "Yes: start an assistant reply" },
   { value: "none" as const, label: "No" },
@@ -115,8 +123,8 @@ type SamplerKey = keyof NonNullable<ModelSettings["samplers"]>
 
 /** The generation settings with fields of their own; the rest are in the JSON below them. */
 const SETTING_FIELDS: ReadonlyArray<readonly [key: SamplerKey, label: string, numeric: boolean]> = [
-  ["openai_max_context", "Context size (tokens)", true],
-  ["openai_max_tokens", "Response length (tokens)", true],
+  ["openai_max_context", "Context to send (tokens)", true],
+  ["openai_max_tokens", "Reply length (tokens)", true],
   ["temperature", "Temperature", true],
   ["top_p", "Top P", true],
   ["top_k", "Top K", true],
@@ -132,8 +140,119 @@ const SETTING_FIELDS: ReadonlyArray<readonly [key: SamplerKey, label: string, nu
 
 /** What an empty field means where the default isn't a fixed number. */
 const DEFAULT_LABELS: Partial<Record<SamplerKey, string>> = {
-  openai_max_context: "Its window",
+  openai_max_context: "All of its window",
   openai_max_tokens: `Up to ${DEFAULT_RESPONSE}`
+}
+
+/**
+ * One of the model's limits as its sources report it, read-only; the pencil opens the user's
+ * own value, which wins over theirs. Open from the start when the user has one, or when a link
+ * asked for this field.
+ */
+function Limit({
+  label,
+  field,
+  resolved,
+  model,
+  value,
+  onValueChange,
+  problem,
+  open: initiallyOpen,
+  assumed = false
+}: {
+  label: string
+  field: ModelField
+  /** What the sources under the user's own value say. */
+  resolved: ReturnType<typeof resolveModel>["context"]
+  model: ReturnType<typeof resolveModel>
+  value: string
+  onValueChange: (value: string) => void
+  problem: string | null
+  open: boolean
+  /** A window nobody reports is assumed, and says so (`ASSUMED_CONTEXT`). */
+  assumed?: boolean
+}) {
+  const [editing, setEditing] = useState(initiallyOpen)
+  const open = editing || value !== ""
+  // The pencil's click moves the cursor into the field it opens, once that's there.
+  const input = useRef<HTMLInputElement>(null)
+  const focusing = useRef(false)
+  useEffect(() => {
+    if (!open || !focusing.current) return
+    focusing.current = false
+    input.current?.focus()
+  }, [open])
+  const unknown = resolved.source === "unknown"
+  const source =
+    unknown && assumed
+      ? "Assumed: nothing reports this model's window. Set it, or Refresh from provider to match it in a catalog."
+      : unknown
+        ? "Not reported: a safe default is used."
+        : `${sourceTitle(resolved.source, model)}.`
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-start gap-2">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-sm">
+            <span className={`tabular-nums ${unknown && assumed ? "font-medium text-warning" : ""}`}>
+              {resolved.value.toLocaleString()} tokens
+            </span>{" "}
+            <span className="text-xs text-muted">{source}</span>
+          </span>
+        </div>
+        {!open && (
+          <IconButton
+            icon="edit"
+            label={`Set the ${label.toLowerCase()} yourself`}
+            onClick={() => {
+              focusing.current = true
+              setEditing(true)
+            }}
+          />
+        )}
+      </div>
+      {open && (
+        <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
+          <Field
+            label={`Your ${label.toLowerCase()} (tokens)`}
+            description="It wins over what's reported. Empty: what's reported."
+            error={problem}
+          >
+            <Input
+              ref={input}
+              value={value}
+              onValueChange={onValueChange}
+              inputMode="numeric"
+              data-model-field={field}
+              placeholder={String(resolved.value)}
+            />
+          </Field>
+          <Button
+            variant="ghost"
+            className="self-start"
+            onClick={() => {
+              onValueChange("")
+              setEditing(false)
+            }}
+          >
+            Use what&rsquo;s reported
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** A headed part of the form: what's reported, what it can do, your settings. A fieldset, named by its title. */
+function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-3 pt-2">
+      <legend className="text-base font-semibold text-text">{title}</legend>
+      <p className="-mt-2 text-sm text-muted">{description}</p>
+      {children}
+    </fieldset>
+  )
 }
 
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
@@ -277,9 +396,10 @@ export function ModelSettingsEditor({
       })
   }
 
-  // What an empty window field means: the sources under the user's own value.
-  const { context: _own, ...beneathOverrides } = savedModel.overrides
+  // What an empty limit means: the sources under the user's own values.
+  const { context: _own, maxOutput: _ownOutput, ...beneathOverrides } = savedModel.overrides
   void _own
+  void _ownOutput
   const effective = resolveModel(model.key, savedModel.upstream, beneathOverrides)
   const learned = savedModel.overrides.learned
   return (
@@ -288,52 +408,32 @@ export function ModelSettingsEditor({
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Context window (tokens)"
-          description={
-            <>
-              The most the model takes. Empty:{" "}
-              {effective.context.source === "unknown" ? (
-                <>
-                  <strong className="font-medium text-warning">
-                    assumed {effective.context.value.toLocaleString()}
-                  </strong>
-                  , since nothing reports this model&rsquo;s window: set it here, or Refresh from provider to match it
-                  in a catalog.
-                </>
-              ) : (
-                `${effective.context.value.toLocaleString()}, ${sourceTitle(effective.context.source, effective).toLowerCase()}.`
-              )}
-            </>
-          }
-          error={contextValue.problem}
-        >
-          <Input
-            value={context}
-            onValueChange={setContext}
-            inputMode="numeric"
-            data-model-field="context"
-            placeholder={
-              effective.context.source === "unknown"
-                ? `${effective.context.value} (assumed)`
-                : String(effective.context.value)
-            }
-          />
-        </Field>
-        <Field
-          label="Max output (tokens)"
-          description="The most it writes in one reply. Empty: what the provider reports."
-          error={maxOutputValue.problem}
-        >
-          <Input
-            value={maxOutput}
-            onValueChange={setMaxOutput}
-            inputMode="numeric"
-            placeholder={model.upstream.maxOutput?.toString()}
-          />
-        </Field>
-      </div>
+      <Section
+        title="Model limits (from the provider)"
+        description="The most this model takes and writes, as reported. Set one yourself only if that's wrong."
+      >
+        <Limit
+          label="Context window"
+          field="context"
+          resolved={effective.context}
+          model={effective}
+          value={context}
+          onValueChange={setContext}
+          problem={contextValue.problem}
+          open={focus === "context"}
+          assumed
+        />
+        <Limit
+          label="Longest reply"
+          field="maxOutput"
+          resolved={effective.maxOutput}
+          model={effective}
+          value={maxOutput}
+          onValueChange={setMaxOutput}
+          problem={maxOutputValue.problem}
+          open={focus === "maxOutput"}
+        />
+      </Section>
       {learned && (
         <Alert
           title={`Learned context size: ${learned.context.toLocaleString()} tokens`}
@@ -358,61 +458,71 @@ export function ModelSettingsEditor({
           <ErrorAlert error={forget.error} />
         </Alert>
       )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Vision">
-          <Select items={triItems} value={vision} onValueChange={setVision} />
-        </Field>
-        <Field label="Reasoning">
-          <Select items={triItems} value={reasoning} onValueChange={setReasoning} />
-        </Field>
-        <Field label="Tools">
-          <Select items={triItems} value={tools} onValueChange={setTools} />
-        </Field>
-      </div>
-      <Field
-        label="Prefill"
-        description="Whether it takes the start of its reply: the preset's prefill and Continue need it. Unknown support leaves Continue unavailable until declared."
-      >
-        <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
-      </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {SETTING_FIELDS.map(([key, label, numeric]) => {
-          const value = current?.samplers?.[key]
-          return (
-            <Field key={key} label={label}>
-              <Input
-                data-model-field={key}
-                value={drafts[key] ?? (value === undefined ? "" : String(value))}
-                placeholder={DEFAULT_LABELS[key] ?? String(DEFAULT_SAMPLERS[key])}
-                inputMode={numeric ? "decimal" : undefined}
-                disabled={current === null}
-                onValueChange={(text) => {
-                  if (current === null) return
-                  const { [key]: _, ...rest } = current.samplers ?? {}
-                  void _
-                  const number = Number(text)
-                  // Empty means the default; a number not yet complete stays a draft.
-                  const samplers =
-                    text.trim() === ""
-                      ? rest
-                      : !numeric
-                        ? { ...rest, [key]: text }
-                        : Number.isFinite(number)
-                          ? { ...rest, [key]: number }
-                          : (current.samplers ?? {})
-                  durable.setText(
-                    JSON.stringify({
-                      ...values,
-                      settings: JSON.stringify({ ...current, samplers }, null, 2),
-                      drafts: { ...drafts, [key]: text }
-                    })
-                  )
-                }}
-              />
+      <Section title="What it can do" description="As the provider says, unless you choose otherwise.">
+        {/* Two columns only where there's room for the choices (a dialog, not the chat's panel). */}
+        <div className="@container">
+          <div className="grid gap-4 @lg:grid-cols-2">
+            <Field label="Vision">
+              <Select items={triItems(model.upstream.vision)} value={vision} onValueChange={setVision} />
             </Field>
-          )
-        })}
-      </div>
+            <Field label="Reasoning">
+              <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
+            </Field>
+            <Field label="Tools">
+              <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
+            </Field>
+          </div>
+        </div>
+        <Field
+          label="Prefill"
+          description="Whether it carries on from text put at the start of its reply. The preset's prefill and Continue need it: while it isn't known, Continue stays off. Choose Yes if you know it can."
+        >
+          <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+        </Field>
+      </Section>
+      <Section
+        title="Your settings for this model"
+        description="Used in every chat that uses this model. Empty: the default shown. How much of the window to fill and how long a reply may be stay within its limits above."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          {SETTING_FIELDS.map(([key, label, numeric]) => {
+            const value = current?.samplers?.[key]
+            return (
+              <Field key={key} label={label}>
+                <Input
+                  data-model-field={key}
+                  value={drafts[key] ?? (value === undefined ? "" : String(value))}
+                  placeholder={DEFAULT_LABELS[key] ?? String(DEFAULT_SAMPLERS[key])}
+                  inputMode={numeric ? "decimal" : undefined}
+                  disabled={current === null}
+                  onValueChange={(text) => {
+                    if (current === null) return
+                    const { [key]: _, ...rest } = current.samplers ?? {}
+                    void _
+                    const number = Number(text)
+                    // Empty means the default; a number not yet complete stays a draft.
+                    const samplers =
+                      text.trim() === ""
+                        ? rest
+                        : !numeric
+                          ? { ...rest, [key]: text }
+                          : Number.isFinite(number)
+                            ? { ...rest, [key]: number }
+                            : (current.samplers ?? {})
+                    durable.setText(
+                      JSON.stringify({
+                        ...values,
+                        settings: JSON.stringify({ ...current, samplers }, null, 2),
+                        drafts: { ...drafts, [key]: text }
+                      })
+                    )
+                  }}
+                />
+              </Field>
+            )
+          })}
+        </div>
+      </Section>
       <Field
         label="Advanced model settings (JSON)"
         description='Stop strings, logit bias, streaming, cache retention, provider routing and wire roles. Example: {"stop":["END"],"squash":true,"names_behavior":"content","cacheRetention":"long"}'

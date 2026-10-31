@@ -103,7 +103,8 @@ for (const width of [1440, 390])
       // An editor opened from a chat carries exactly that fork, even when another is current.
       await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}`)
       await openPanel(page, "Cast")
-      // Over the chat, which it names to the save.
+      // Over the chat, which it names to the save; from the row's ⋯.
+      await page.getByRole("button", { name: `More for Display Aria ${width} ${theme}`, exact: true }).click()
       await page
         .getByRole("button", { name: `Open Display Aria ${width} ${theme} in the full editor`, exact: true })
         .click()
@@ -186,6 +187,7 @@ test("forking a card for this chat replaces history only in the viewed fork", as
   const f = await seed("Forked Aria")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "More for Forked Aria", exact: true }).click()
   await page.getByRole("button", { name: "Fork for this chat: Forked Aria", exact: true }).click()
   const fork = page.getByRole("dialog", { name: "Fork for this chat", exact: true })
   await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("Renamed")
@@ -242,12 +244,14 @@ test("a recovered chat offer names its original target when opened from another 
   const f = await seed("Recovery target")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.sibling.id}&panel=cast`)
+  await page.getByRole("button", { name: "More for Recovery target", exact: true }).click()
   await page.getByRole("button", { name: "Open Recovery target in the full editor", exact: true }).click()
   await modelBox(page).fill("Ari")
   await save(page)
   await expect(prompt(page)).toBeVisible()
   await page.keyboard.press("Escape")
   await page.goto(`${server().url}/chats/${f.other.chat.id}?panel=cast`)
+  await page.getByRole("button", { name: "More for Recovery target", exact: true }).click()
   await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
   await expect(prompt(page).getByRole("status").filter({ hasText: "Only this chat refers to:" })).toContainText(
     "The lantern garden · Garden sibling"
@@ -270,6 +274,7 @@ test("using a renamed family member can replace history only in the viewed fork"
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}&panel=cast`)
+  await page.getByRole("button", { name: "More for Family source", exact: true }).click()
   await page.getByRole("button", { name: "Use another version: Family source", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Use another version", exact: true })

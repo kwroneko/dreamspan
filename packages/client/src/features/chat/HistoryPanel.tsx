@@ -47,6 +47,7 @@ export function HistoryPanel({
   const revision = useRef(0)
   const forkId = view.forkId ?? view.chat?.currentForkId
   const target = forkId ? { chatId: session.id, forkId } : null
+  const idle = search.pairs.some((p) => !p.find)
   const history = useCallback(async () => {
     if (!forkId) return
     const result = await session.call((c) => c("ListHistoryEdits", { chatId: session.id, forkId }))
@@ -296,16 +297,21 @@ export function HistoryPanel({
           {error}
         </p>
       )}
+      {/* Until something is searched for there is nothing to count, and nothing a replacement re-reads. */}
       <p role="status">
-        {scanning
-          ? "Searching…"
-          : `${counts((h) => h.kind === "version_replace" && h.selected)} in messages, ${counts((h) => h.kind === "version_replace" && !h.selected)} in swipes, ${counts((h) => h.kind === "summary_revision")} in summaries`}
+        {idle
+          ? ""
+          : scanning
+            ? "Searching…"
+            : `${counts((h) => h.kind === "version_replace" && h.selected)} in messages, ${counts((h) => h.kind === "version_replace" && !h.selected)} in swipes, ${counts((h) => h.kind === "summary_revision")} in summaries`}
       </p>
-      <p className="text-muted">
-        {cost
-          ? `The model will re-read about ${cost.messages} messages and ${cost.summaries} summaries on the next reply (cache: ~${cost.tokens.toLocaleString()} tokens).`
-          : "The next reply will use the edited history. Choose a model to see the current context boundary."}
-      </p>
+      {!idle && !scanning && (
+        <p className="text-muted">
+          {cost
+            ? `The model will re-read about ${cost.messages} messages and ${cost.summaries} summaries on the next reply (cache: ~${cost.tokens.toLocaleString()} tokens).`
+            : "The next reply reads the history as edited."}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
@@ -326,16 +332,18 @@ export function HistoryPanel({
           Next
         </Button>
       </div>
-      {(["Messages", "Swipes", "Summaries"] as const).map((kind) => (
-        <section key={kind} className="flex flex-col gap-2">
-          <h3 className="font-medium">{kind}</h3>
-          {hits
-            .filter((h) =>
-              kind === "Summaries"
-                ? h.kind === "summary_revision"
-                : h.kind === "version_replace" && h.selected === (kind === "Messages")
-            )
-            .map((hit) => (
+      {(["Messages", "Swipes", "Summaries"] as const).map((kind) => {
+        const found = hits.filter((h) =>
+          kind === "Summaries"
+            ? h.kind === "summary_revision"
+            : h.kind === "version_replace" && h.selected === (kind === "Messages")
+        )
+        // A group shows once it has something found: before a search, no empty headings.
+        if (found.length === 0) return null
+        return (
+          <section key={kind} className="flex flex-col gap-2">
+            <h3 className="font-medium">{kind}</h3>
+            {found.map((hit) => (
               <article key={keyOf(hit)} className="rounded-md border border-border p-2">
                 <div className="flex items-center justify-between gap-2">
                   <button className="text-accent underline" onClick={() => openHit(hit)}>
@@ -387,8 +395,9 @@ export function HistoryPanel({
                 </div>
               </article>
             ))}
-        </section>
-      ))}
+          </section>
+        )
+      })}
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold">History edits</h2>
         {!records.length && <p className="text-muted">No history edits yet.</p>}

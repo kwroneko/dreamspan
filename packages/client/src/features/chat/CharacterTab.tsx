@@ -1,7 +1,9 @@
 // A character's tab in the chat's panel, as ST's character panel: every definition field is a
 // text box, edited right here with the editor's drafts and field undo (ARCHITECTURE §14.6),
 // each long one openable large over the chat. The full editor opens over the chat, never
-// instead of it. Card data and actions stay in their feature; the panel host only sees its descriptor.
+// instead of it. The persona's tab is the same with its one field, the description (ST's
+// persona panel), and Switch persona. Card data and actions stay in their feature; the panel
+// host only sees its descriptor.
 import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -21,7 +23,9 @@ import { RecoveredNotice } from "../editor/controls.tsx"
 import { TextField } from "../editor/controls.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
+import { ChatDefinition } from "./ChatDefinition.tsx"
 import { useIsPanelTab, type PanelProps } from "./panels.tsx"
+import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import type { CastCard } from "@rp/shared/chat.ts"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -39,6 +43,9 @@ const FIELDS: ReadonlyArray<{ path: string; label: string; rows: number }> = [
   { path: "post_history_instructions", label: "Post-history instructions", rows: 3 },
   { path: "creator_notes", label: "Creator's notes", rows: 3 }
 ]
+
+/** A persona is its description (DESIGN §2.2: ST's persona text is the persona card's description). */
+const PERSONA_FIELDS: typeof FIELDS = [{ path: "description", label: "Description", rows: 12 }]
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
@@ -65,6 +72,7 @@ function ChatCharacterPanel({
       ? view.cast.cards.find((item) => item.entityId === entityId)
       : undefined
   const live = card !== undefined && !card.inBin
+  const persona = view.cast?.playedByMe.includes(entityId) ?? false
   const query = useMemo(
     () =>
       AppClient.query(
@@ -87,33 +95,50 @@ function ChatCharacterPanel({
       <header className="flex items-start gap-3">
         <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {persona && <p className="text-xs text-muted">You play</p>}
           <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{card.label}</h2>
           {card.subtitle && <p className="text-sm text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
         </div>
-        <CardMenu entityId={entityId} card={card} onNotes={notesPanel ? onNotes : undefined} />
+        <CardMenu
+          entityId={entityId}
+          card={card}
+          persona={persona}
+          refId={info?.refId}
+          onNotes={notesPanel ? onNotes : undefined}
+        />
       </header>
+      {persona && (
+        <div className="flex flex-wrap items-center gap-2">
+          <PersonaSwitch session={session} trigger="Switch persona" />
+        </div>
+      )}
       {card.inBin && <p className="text-sm text-muted">This card is in the bin: restore it to edit it.</p>}
       {AsyncResult.isFailure(result) && (
         <p role="alert" className="text-sm text-danger">
           The card couldn't be read.
         </p>
       )}
-      {info && <CardFields key={info.refId} session={session} view={view} card={card} info={info} />}
+      {info && <CardFields key={info.refId} session={session} view={view} card={card} info={info} persona={persona} />}
       {live && !info && !AsyncResult.isFailure(result) && <p className="text-sm text-muted">Loading the card…</p>}
     </div>
   )
 }
 
-/** What's used less: a new chat, the card's notes. */
+/** What's used less: a new chat (a persona's: its full editor), the card's notes. */
 function CardMenu({
   entityId,
   card,
+  persona,
+  refId,
   onNotes
 }: {
   entityId: EntityId
   card: CastCard
+  persona: boolean
+  refId: RefId | undefined
   onNotes: (() => void) | undefined
 }) {
+  const workspace = usePresetWorkspace()
   return (
     <Menu
       label={`More for ${card.name}`}
@@ -123,12 +148,25 @@ function CardMenu({
         </Button>
       }
     >
-      <MenuLinkItem
-        icon="chat"
-        render={<Link to="/cards/$entityId/chat" params={{ entityId }} search={{ panel: `card:${entityId}` }} />}
-      >
-        New chat with {card.name}
-      </MenuLinkItem>
+      {persona ? (
+        refId &&
+        (workspace ? (
+          <MenuItem icon="edit" onClick={() => workspace.open(refId)}>
+            Full editor
+          </MenuItem>
+        ) : (
+          <MenuLinkItem icon="edit" render={<Link to="/library/$refId" params={{ refId }} />}>
+            Full editor
+          </MenuLinkItem>
+        ))
+      ) : (
+        <MenuLinkItem
+          icon="chat"
+          render={<Link to="/cards/$entityId/chat" params={{ entityId }} search={{ panel: `card:${entityId}` }} />}
+        >
+          New chat with {card.name}
+        </MenuLinkItem>
+      )}
       {onNotes && (
         <MenuItem icon="note" onClick={onNotes}>
           {card.name}'s notes
@@ -151,12 +189,15 @@ function CardFields({
   session,
   view,
   card,
-  info
+  info,
+  persona
 }: {
   session: ChatSession
   view: ChatView
   card: CastCard
   info: ChatCard
+  /** The card you play: its description only, which saving changes wherever you play it. */
+  persona: boolean
 }) {
   const store = useCardStore(info.refId)
   const workspace = usePresetWorkspace()
@@ -174,17 +215,22 @@ function CardFields({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <div className="-mx-2 flex flex-wrap items-center gap-x-1">
-          <ChatCardActions session={session} card={card} info={info} />
-        </div>
+        {!persona && (
+          <div className="-mx-2 flex flex-wrap items-center gap-x-1">
+            <ChatCardActions session={session} card={card} info={info} />
+          </div>
+        )}
         {/* The consequence, once, where it matters (DESIGN §6.2). */}
         <p className="text-sm">
           {info.binding === "revision"
             ? `This chat uses an earlier version of ${card.name}: saving changes the card, not what this chat uses.`
-            : others === 0
-              ? `Saving changes ${card.name} for this chat; no other chat uses it.`
-              : `Saving changes ${card.name} in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
+            : persona
+              ? `Saving changes ${card.name} in every chat where you play them.`
+              : others === 0
+                ? `Saving changes ${card.name} for this chat; no other chat uses it.`
+                : `Saving changes ${card.name} in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
         </p>
+        {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
       </div>
       {/* Save stays in sight while a field further down is edited: drafts reach the chat only once saved. */}
       <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">
@@ -212,7 +258,7 @@ function CardFields({
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
       )}
       <RecoveredNotice store={store} />
-      {FIELDS.map((field) => (
+      {(persona ? PERSONA_FIELDS : FIELDS).map((field) => (
         <TextField
           key={field.path}
           store={store}
@@ -222,23 +268,25 @@ function CardFields({
           expandable
         />
       ))}
-      <Alert tone="neutral">
-        <p>
-          Greetings, tags, the card's lorebook and its other fields are in the{" "}
-          {workspace ? (
-            <button
-              type="button"
-              className="text-accent underline-offset-4 hover:underline"
-              onClick={() => workspace.open(info.refId)}
-            >
-              full editor
-            </button>
-          ) : (
-            "full editor"
-          )}
-          .
-        </p>
-      </Alert>
+      {!persona && (
+        <Alert tone="neutral">
+          <p>
+            Greetings, tags, the card's lorebook and its other fields are in the{" "}
+            {workspace ? (
+              <button
+                type="button"
+                className="text-accent underline-offset-4 hover:underline"
+                onClick={() => workspace.open(info.refId)}
+              >
+                full editor
+              </button>
+            ) : (
+              "full editor"
+            )}
+            .
+          </p>
+        </Alert>
+      )}
       {saving && (
         <Suspense fallback={null}>
           <SaveDialog

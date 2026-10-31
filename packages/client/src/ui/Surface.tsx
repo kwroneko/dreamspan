@@ -1,5 +1,5 @@
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
-// empty states.
+// empty states, and sections opened on demand.
 import type { ReactNode } from "react"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -103,5 +103,44 @@ export function EmptyState({ title, children }: { title: ReactNode; children?: R
       <p className="text-sm font-medium">{title}</p>
       {children && <div className="flex flex-col items-center gap-3 text-sm text-muted">{children}</div>}
     </div>
+  )
+}
+
+/**
+ * A section shown by its title and opened on demand (a native `<details>`): for what most people
+ * never need, kept out of the way but in plain sight.
+ */
+export function Disclosure({
+  title,
+  children,
+  defaultOpen = false,
+  className = ""
+}: {
+  title: ReactNode
+  children: ReactNode
+  defaultOpen?: boolean
+  className?: string
+}) {
+  return (
+    <details open={defaultOpen} className={`group ${className}`}>
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
+        <svg
+          width={14}
+          height={14}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+        {title}
+      </summary>
+      <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{children}</div>
+    </details>
   )
 }
