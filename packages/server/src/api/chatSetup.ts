@@ -8,7 +8,7 @@ import type { RevisionId } from "@rp/shared/library.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
+import { Cast, type CastChange, ChatNote, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { isAuthorNote, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
@@ -78,6 +78,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  // Background writes outlive the request, not the server.
+  const scope = yield* Effect.scope
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
 
@@ -152,8 +154,27 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    // The summaries the read computed are stored after the answer, never before it
+    // (db/forkSummaries.ts); a failure only leaves them for the next read to compute.
     GetShellLibrary: () =>
-      Effect.flatMap(userId, (id) => reader.ShellLibrary({ userId: id })).pipe(internal("GetShellLibrary")),
+      Effect.flatMap(userId, (id) =>
+        reader.ShellLibrary({ userId: id }).pipe(
+          Effect.tap(({ fresh }) =>
+            fresh.length === 0
+              ? Effect.void
+              : // In parts, so other writes go between them after a cold read of thousands of chats.
+                Effect.forEach(
+                  Array.from({ length: Math.ceil(fresh.length / 250) }, (_, n) => fresh.slice(n * 250, n * 250 + 250)),
+                  (chats) => writer.StoreForkSummaries({ userId: id, chats }),
+                  { discard: true }
+                ).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning("StoreForkSummaries failed", cause)),
+                  Effect.forkIn(scope)
+                )
+          ),
+          Effect.map(({ fresh: _, ...library }) => new ShellLibrary(library))
+        )
+      ).pipe(internal("GetShellLibrary")),
     SetChatPin: (input) =>
       Effect.flatMap(userId, (id) => writer.SetChatPin({ ...input, userId: id })).pipe(internal("SetChatPin")),
     SetHomePinsCollapsed: (input) =>

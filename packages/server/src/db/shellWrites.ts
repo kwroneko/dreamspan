@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { storeSummaries } from "./forkSummaries.ts"
 import { forkAt } from "./forkState.ts"
 import { onPath } from "./forks.ts"
 import { NotFound, type WriteOps } from "./ops.ts"
@@ -25,6 +26,9 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
       sql`INSERT INTO shell_preferences(user_id, pins_collapsed) VALUES (${userId}, ${collapsed ? 1 : 0}) ON CONFLICT(user_id) DO UPDATE SET pins_collapsed = excluded.pins_collapsed`.pipe(
         Effect.asVoid,
         transaction(sql, "SetHomePinsCollapsed")
-      )
+      ),
+    // What a ShellLibrary read computed (db/forkSummaries.ts), each chat's only if no write moved its stamps since.
+    StoreForkSummaries: ({ userId, chats }) =>
+      storeSummaries(sql, userId, chats).pipe(transaction(sql, "StoreForkSummaries"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>
 })

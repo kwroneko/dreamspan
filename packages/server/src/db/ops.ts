@@ -407,6 +407,21 @@ const StChatRecord = Schema.Struct({
   firstAdded: Schema.NullOr(SlotId)
 })
 
+/**
+ * A chat's fork summaries (db/forkSummaries.ts), computed by a read at the stamps it read, for
+ * `StoreForkSummaries`. `forks` is their JSON, as the writer stores it: decoding thousands of
+ * them on the main thread only to encode them again cost as much as the read.
+ */
+export const ChatSummariesAt = Schema.Struct({
+  chatId: Schema.String,
+  stamp: Schema.Int,
+  userStamp: Schema.Int,
+  forks: Schema.String
+})
+
+/** `ShellLibrary` and the summaries the read had to compute, which the caller stores (never sent to the client). */
+export const ShellLibraryRead = Schema.Struct({ ...ShellLibrary.fields, fresh: Schema.Array(ChatSummariesAt) })
+
 export class WriteOps extends RpcGroup.make(
   Rpc.make("ChangeBinLimit", {
     payload: { userId: UserId, ...BinLimitChange.fields },
@@ -457,6 +472,12 @@ export class WriteOps extends RpcGroup.make(
   }),
   Rpc.make("SetHomePinsCollapsed", {
     payload: { userId: UserId, collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /** Each chat's summaries, if the chat's and its owner's stamps are still the ones they were computed at. */
+  Rpc.make("StoreForkSummaries", {
+    payload: { userId: UserId, chats: Schema.Array(ChatSummariesAt) },
     success: Schema.Void,
     error: StorageError
   }),
@@ -2205,8 +2226,9 @@ export class ReadOps extends RpcGroup.make(
     .setPayload(Schema.Struct({ ...historyReadRpcs[2].payloadSchema.fields, userId: UserId }))
     .setError(Schema.Union([NotFound, HistoryRejected, StorageError])),
   Rpc.make("ShellLibrary", {
-    payload: { userId: UserId },
-    success: ShellLibrary,
+    /** `recompute`: ignore every stored summary (tests compare the two). */
+    payload: { userId: UserId, recompute: Schema.optionalKey(Schema.Boolean) },
+    success: ShellLibraryRead,
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("GetSummaryDetails", {
