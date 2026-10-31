@@ -605,6 +605,7 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+        <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CastContext value={speakerView}>

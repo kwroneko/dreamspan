@@ -38,11 +38,13 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
 
   // The form explains what's missing before anything is sent.
   await page.getByRole("link", { name: "New connection" }).click()
+  await page.getByLabel("Base URL").fill("localhost port 5001")
   await page.getByRole("button", { name: "Create connection" }).click()
-  await expect(page.getByText("Give the connection a name.")).toBeVisible()
+  await expect(page.getByText("Enter a full URL, such as http://localhost:8000/v1.")).toBeVisible()
   // Focus goes to the first invalid field, and its description carries the error.
-  await expect(page.getByLabel("Name")).toBeFocused()
-  await expect(page.getByLabel("Name")).toHaveAccessibleDescription(/Give the connection a name/)
+  await expect(page.getByLabel("Base URL")).toBeFocused()
+  await expect(page.getByLabel("Base URL")).toHaveAccessibleDescription(/Enter a full URL/)
+  await page.getByLabel("Base URL").fill("")
 
   await createConnection(page, "Local fake", provider.baseUrl, "sk-fake-key-123456")
   await expect(page.getByText("Key ending in 3456")).toBeVisible()

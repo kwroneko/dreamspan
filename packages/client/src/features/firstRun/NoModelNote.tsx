@@ -85,9 +85,9 @@ export function NoModelNote({ view }: { view: ChatView }) {
   )
 }
 
-/** Beside "Writing as" in a chat not started yet, which has only the account's model. */
+/** Above a chat not started yet's composer, which has only the account's model. */
 export function PendingNoModel() {
   const defaults = useAtomValue(generationDefaultsAtom)
   if (!AsyncResult.isSuccess(defaults) || defaults.value.model) return null
-  return <NoModel className="rounded-md border border-warning/50 px-2 py-1" />
+  return <NoModel className="rounded-md border border-warning/50 bg-surface px-3 py-2" />
 }

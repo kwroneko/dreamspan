@@ -20,6 +20,14 @@ function Home({ data }: { data: ShellLibrary }) {
   const [search, setSearch] = useState("")
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
+  // Then the filters and search, having nothing to work on, stay out of the way too.
+  if (intro && data.cards.length === 0)
+    return (
+      <div className="flex flex-col gap-5">
+        <SlotOutlet slot={homeIntro} props={{ data }} />
+        <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
+      </div>
+    )
   const needle = search.trim().toLowerCase()
   const cards = sortCards(
     data.cards.filter(
@@ -66,7 +74,7 @@ function Home({ data }: { data: ShellLibrary }) {
           {cards.map((c) => (
             <CharacterTile key={c.card.entityId} card={c} />
           ))}
-          {!cards.length && !(intro && data.cards.length === 0) && (
+          {!cards.length && (
             <EmptyState title="No characters here">
               <Link to="/import/st" className="text-accent">
                 Import from SillyTavern

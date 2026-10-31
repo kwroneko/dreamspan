@@ -147,8 +147,11 @@ function NewConnectionForm({
   const url = baseUrl.trim() || kind?.defaultBaseUrl || ""
   const origin = originOf(url)
   const concurrency = parseOptionalInt(maxConcurrent, 1)
+  // Left empty, the name is the provider's, or the server's address when one is typed.
+  const host = baseUrl.trim() !== "" && origin !== null ? new URL(origin).host : null
+  const defaultName = host ?? kind?.label ?? ""
   const problems = {
-    name: name.trim() === "" ? "Give the connection a name." : null,
+    name: name.trim() === "" && defaultName === "" ? "Give the connection a name." : null,
     baseUrl: baseUrl.trim() !== "" && origin === null ? "Enter a full URL, such as http://localhost:8000/v1." : null,
     apiKey:
       keyMode === "typed" && keyEmpty && !kind?.keyOptional
@@ -170,7 +173,7 @@ function NewConnectionForm({
           client("CreateConnection", {
             kind: kindId,
             settings: {
-              name: name.trim(),
+              name: name.trim() || defaultName,
               baseUrl: baseUrl.trim() || null,
               compat: {},
               cacheTtlS: null,
@@ -204,8 +207,8 @@ function NewConnectionForm({
             onValueChange={setKindId}
           />
         </Field>
-        <Field label="Name" error={shown(problems.name)}>
-          <Input value={name} onValueChange={setName} placeholder={kind?.label} autoComplete="off" />
+        <Field label="Name" description="Optional: left empty, it's named as shown." error={shown(problems.name)}>
+          <Input value={name} onValueChange={setName} placeholder={defaultName} autoComplete="off" />
         </Field>
         <Field
           label="Base URL"

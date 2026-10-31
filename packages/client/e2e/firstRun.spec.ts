@@ -33,6 +33,9 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   const steps = page.getByRole("region", { name: "Get started" })
   await expect(steps).toContainText("0 of 3 done")
   await expect(page.getByText("No characters here")).toHaveCount(0)
+  // With nothing to filter, the filters and search stay out of the way of the steps.
+  await expect(page.getByRole("searchbox", { name: "Search characters and groups" })).toHaveCount(0)
+  await expect(page.getByRole("group", { name: "Show", exact: true })).toHaveCount(0)
   await steps.getByRole("link", { name: "Connect a model" }).click()
   await expect(page).toHaveURL(/\/settings\/connections\/new$/)
 
@@ -58,12 +61,14 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   await expect(steps).toContainText(/Using Fake (Large|Small) for new chats/)
   await expect(steps.getByRole("link", { name: "Import" })).toBeVisible()
 
-  // A second connection leaves the chosen default alone.
+  // A second connection leaves the chosen default alone. Its name, left empty, is the server's.
   const before = await admin((api) => api.GetGenerationDefaults())
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Second")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
+  const host = new URL(provider.baseUrl).host
+  await expect(page.getByLabel("Name")).toHaveAttribute("placeholder", host)
   await page.getByRole("button", { name: "Create connection" }).click()
+  await expect(page.getByRole("heading", { name: host, exact: true })).toBeVisible()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "for new chats" })).toHaveCount(0)
   expect((await admin((api) => api.GetGenerationDefaults())).model).toEqual(before.model)
@@ -83,6 +88,11 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   // A chat not started yet.
   await page.goto(`${server().url}/cards/${ref.entityId}/chat`)
   await expect(page.getByText("No model chosen")).toBeVisible()
+  // In a row of its own above the composer, never squeezing the speaker or the message box.
+  const note = await page.getByRole("status").filter({ hasText: "No model chosen" }).boundingBox()
+  const box = await page.getByTestId("composer").boundingBox()
+  expect(note!.y + note!.height).toBeLessThanOrEqual(box!.y)
+  expect(note!.width).toBeGreaterThan(box!.width / 2)
   await page.getByRole("button", { name: "Choose a model" }).click()
   await page.getByRole("list", { name: "Models" }).getByRole("button").first().click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)

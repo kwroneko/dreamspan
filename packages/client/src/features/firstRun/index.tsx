@@ -10,11 +10,12 @@ import { NoModelNote, PendingNoModel } from "./NoModelNote.tsx"
 export const register = () => {
   homeIntro.register({ id: "first-run.steps", order: 10, component: FirstRunSteps })
   chatComposerNotes.register({ id: "first-run.no-model", order: 1, component: NoModelNote })
-  // A chat not started yet has no notes slot; its composer's controls carry the same note.
+  // A chat not started yet has no notes slot; its composer's controls carry the same note, in
+  // their row above the composer.
   pendingComposerControls.register({
     id: "first-run.no-model",
-    order: 50,
-    placement: "speaker",
+    order: 10,
+    placement: "notes",
     component: PendingNoModel
   })
 }

@@ -491,7 +491,13 @@ export function UserDraftUndo({ draft }: { draft: UserDraft }) {
         Undo field change
       </Button>
       {draft.history === null ? (
-        <p className="text-sm text-muted">Reading the history…</p>
+        draft.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {draft.error}
+          </p>
+        ) : (
+          <p className="text-sm text-muted">Reading the history…</p>
+        )
       ) : draft.history.length === 0 ? (
         <p className="text-sm text-muted">No earlier versions yet.</p>
       ) : (
