@@ -133,7 +133,8 @@ test("saved sound skips completions before interaction and touch activation neve
     await reply()
     await expect(page).toHaveTitle(/^\(1\)/)
     expect(await count()).toBe(0)
-    await page.getByRole("heading", { name: "Notifications", exact: true }).tap()
+    // The card's heading, not a control: a phone's settings page also titles itself "Notifications".
+    await page.getByRole("heading", { level: 2, name: "Notifications", exact: true }).tap()
     expect(await count()).toBe(0)
     await reply()
     await expect.poll(count).toBe(1)

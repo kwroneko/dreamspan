@@ -55,8 +55,10 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   await expect(field).toBeEnabled()
   await field.fill("A long unsaved instruction draft must remain reachable.")
   await expect(page.getByText("Not saved yet: kept as a server draft until you save it.")).toBeVisible()
-  await page.getByRole("link", { name: "Connections", exact: true }).click()
-  await page.getByRole("link", { name: "Chats", exact: true }).click()
+  // Through the Settings navigation: the Chats page links to Connections in its text too.
+  const nav = page.getByRole("navigation", { name: "Settings" })
+  await nav.getByRole("link", { name: "Connections", exact: true }).click()
+  await nav.getByRole("link", { name: "Chats", exact: true }).click()
   await expect(field).toBeEnabled()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
   await page.reload()
