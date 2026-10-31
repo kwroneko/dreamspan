@@ -20,7 +20,7 @@ import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
-export const PLACEMENTS = [
+const PLACEMENTS = [
   [1, "Your messages"],
   [2, "Replies"],
   [3, "Slash commands"],
@@ -28,12 +28,11 @@ export const PLACEMENTS = [
   [6, "Reasoning"]
 ] as const
 
-export const SUBSTITUTIONS: ReadonlyArray<{ readonly value: RegexScript["substitute_regex"]; readonly label: string }> =
-  [
-    { value: "none", label: "Not expanded" },
-    { value: "raw", label: "Expanded" },
-    { value: "escaped", label: "Expanded, with regex characters escaped" }
-  ]
+const SUBSTITUTIONS: ReadonlyArray<{ readonly value: RegexScript["substitute_regex"]; readonly label: string }> = [
+  { value: "none", label: "Not expanded" },
+  { value: "raw", label: "Expanded" },
+  { value: "escaped", label: "Expanded, with regex characters escaped" }
+]
 
 /** A new script: off until the user turns it on, applied to replies. */
 export const newScript = (): RegexScript => ({
@@ -249,7 +248,7 @@ function ScriptPlacement({ binding }: { binding: ScriptBinding }) {
 }
 
 /** A script's fields, in the same layout whatever holds it. */
-export function ScriptFields({ binding }: { binding: ScriptBinding }) {
+function ScriptFields({ binding }: { binding: ScriptBinding }) {
   return (
     <div className="flex flex-col gap-3">
       <ScriptText binding={binding} field="name" label="Name" />
