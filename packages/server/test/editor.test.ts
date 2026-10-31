@@ -143,6 +143,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       for (const [identifier, content] of [
         ["groupNudge", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
         ["impersonationPrompt", "[Write {{speaker}}'s next message. Write only for {{speaker}}.]"],
+        ["continueNudge", "[Continue your last message without repeating its original content.]"],
         ["directionPrompt", "[What happens next: {{direction}}]"]
       ]) {
         assert.strictEqual(prompts.find((p) => p.identifier === identifier)!.content, content)
@@ -647,6 +648,59 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
+  it.effect("a card's regex scripts run only once allowed; a draft or a restore never allows them", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Scripted", name: "Scripted" })
+      const script = {
+        id: "strip",
+        name: "Strip",
+        find_regex: "/x/g",
+        replace_string: "",
+        trim_strings: [],
+        placement: [2],
+        disabled: false,
+        markdown_only: false,
+        prompt_only: false,
+        run_on_edit: false,
+        substitute_regex: "none",
+        min_depth: null,
+        max_depth: null
+      }
+      yield* draft(api, card.id, valueField(["regex"]), JSON.stringify([script]))
+      const before = yield* commit(api, card.id)
+      assert.isUndefined((yield* doc(api, card.id)).regex_approved)
+      // A draft of the approval itself is refused, as the avatar's is.
+      yield* draft(api, card.id, valueField(["regex_approved"]), "true")
+      assert.strictEqual(yield* outcome(commit(api, card.id)), "InvalidDocument")
+      const opened = yield* api.OpenEditor({ refId: card.id })
+      const granting = opened.drafts.find(
+        (d) => d.key.field === valueField(["regex_approved"]) && d.status === "active"
+      )!
+      yield* api.DiscardEditorDraft({
+        refId: card.id,
+        field: valueField(["regex_approved"]),
+        draftId: granting.id,
+        expectedRowVersion: granting.rowVersion
+      })
+      const discarded = yield* api.OpenEditor({ refId: card.id })
+      yield* api.SetRegexApproval({ refId: card.id, approved: true, expectedRowVersion: discarded.ref.rowVersion })
+      assert.isTrue((yield* doc(api, card.id)).regex_approved)
+      // The user's own edit of a script keeps it.
+      yield* draft(api, card.id, textField(["regex", "id=strip", "replace_string"]), "-")
+      yield* commit(api, card.id)
+      assert.isTrue((yield* doc(api, card.id)).regex_approved)
+      // Restoring the revision from before brings other scripts back, never their approval.
+      const current = yield* api.OpenEditor({ refId: card.id })
+      yield* api.RestoreRevision({
+        refId: card.id,
+        revisionId: before.ref.headRevisionId,
+        expectedRowVersion: current.ref.rowVersion
+      })
+      assert.isFalse((yield* doc(api, card.id)).regex_approved ?? false)
+    })
+  )
+
   it.effect("an update with conflicts is resolved per field, against the schema", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -844,8 +898,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId,
         revisionId: library.ref.headRevisionId
       })) as unknown as PresetDoc
-      // ST's twelve and the newest-message marker, the group nudge, the impersonation and direction prompts.
-      assert.strictEqual(imported.prompts.length, 16)
+      // ST's twelve and the newest-message marker, the group nudge, the impersonation, continue and direction prompts.
+      assert.strictEqual(imported.prompts.length, 17)
     })
   )
 })

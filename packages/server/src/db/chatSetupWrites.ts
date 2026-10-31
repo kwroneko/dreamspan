@@ -24,13 +24,15 @@ import { selectedIn, slotDeletedIn } from "./forkState.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { LeafMoved, NotFound, StaleWrite, type WriteOps } from "./ops.ts"
 import { chatQueue, ownedQueued, type QueuedRow, toQueued } from "./queueRows.ts"
-import { toVersion } from "./rows.ts"
+import { rewriteColumns, toVersion } from "./rows.ts"
+import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
 import { transaction as runTransaction } from "./tx.ts"
 
 const userMessage = (
   content: string,
   speakerEntityId: EntityId | null,
-  images?: import("@rp/shared/chat.ts").MessageImages
+  images?: import("@rp/shared/chat.ts").MessageImages,
+  rewrite?: StoredRewrite
 ) =>
   new NewVersion({
     speakerEntityId,
@@ -39,8 +41,19 @@ const userMessage = (
     status: "complete",
     macroMode: "verbatim",
     origin: "user_written",
-    ...(images === undefined ? {} : { images })
+    ...(images === undefined ? {} : { images }),
+    ...(rewrite === undefined ? {} : { rewrite })
   })
+
+/** A queued message's rewrite, as SendOrQueue stored it, for the version it posts as. */
+const queuedRewrite = (row: QueuedRow): StoredRewrite | undefined =>
+  row.rewrite_json === null
+    ? undefined
+    : {
+        ...(JSON.parse(row.rewrite_json) as Pick<StoredRewrite, "applied" | "failed">),
+        raw: row.raw_content,
+        rawReasoning: null
+      }
 
 const reply = (speakerEntityId: EntityId | null, direction: string | null) =>
   new NewVersion({
@@ -196,7 +209,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 userMessage(
                   entry.content,
                   yield* liveSpeaker(owner, entry.speaker_entity_id),
-                  JSON.parse(entry.images_json)
+                  JSON.parse(entry.images_json),
+                  queuedRewrite(entry)
                 )
               )
               posted.push(message.slotId)
@@ -218,7 +232,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             userMessage(
               entry.content,
               yield* liveSpeaker(owner, entry.speaker_entity_id),
-              JSON.parse(entry.images_json)
+              JSON.parse(entry.images_json),
+              queuedRewrite(entry)
             )
           )
           posted.push(message.slotId)
@@ -236,7 +251,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         if (first!.kind === "message") {
           const message = yield* append(
             replyParent,
-            userMessage(first!.content, speaker, JSON.parse(first!.images_json))
+            userMessage(first!.content, speaker, JSON.parse(first!.images_json), queuedRewrite(first!))
           )
           posted.push(message.slotId)
           replyParent = message.slotId
@@ -363,7 +378,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         images,
         imageDraftIds,
         direction,
-        commitDraft
+        commitDraft,
+        rewrite
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
@@ -410,6 +426,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 seq: next!.n,
                 kind,
                 content: kind === "message" ? content : "",
+                ...(kind === "message"
+                  ? {
+                      raw_content: rewriteColumns(rewrite).raw_content,
+                      rewrite_json: rewriteColumns(rewrite).rewrite_json
+                    }
+                  : {}),
                 images_json: JSON.stringify(images ?? []),
                 speaker_entity_id: speakerEntityId,
                 reply_speaker_entity_id: kind === "message" ? replySpeakerEntityId : null,
@@ -426,7 +448,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 targetId: chatId,
                 matchesField: (kind, field) =>
                   field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
-                content: row!.kind === "generate" ? (row!.direction ?? "") : row!.content
+                content: row!.kind === "generate" ? (row!.direction ?? "") : (rewrite?.raw ?? row!.content)
               })
               return {
                 _tag: "Queued" as const,
@@ -444,13 +466,15 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             parentSlotId,
             branch,
             version:
-              kind === "message" ? userMessage(content, speakerEntityId, images) : reply(speakerEntityId, direction),
+              kind === "message"
+                ? userMessage(content, speakerEntityId, images, rewrite)
+                : reply(speakerEntityId, direction),
             commitDraft
           })
           return { _tag: "Posted" as const, result }
         }).pipe(transaction("SendOrQueue")),
 
-      EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft }) =>
+      EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft, rewrite }) =>
         Effect.gen(function* () {
           const row = yield* ownedQueued(sql, userId, queuedId)
           if (row === null) return yield* new NotFound({ entity: "queued message", id: queuedId })
@@ -463,15 +487,17 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             })
           }
           yield* graph.checkSpeaker(userId, speakerEntityId)
+          const columns = rewriteColumns(row.kind === "message" ? rewrite : undefined)
           const [updated] = yield* sql<QueuedRow>`
             UPDATE queued_messages SET content = ${row.kind === "message" ? content : ""},
+              raw_content = ${columns.raw_content}, rewrite_json = ${columns.rewrite_json},
               direction = ${row.kind === "message" ? row.direction : content},
               speaker_entity_id = ${speakerEntityId}, row_version = row_version + 1, updated_at = ${Date.now()}
             WHERE id = ${queuedId} RETURNING *`
           yield* bin.drafts.commit(userId, draft ?? null, {
             targetKind: "queue_edit",
             targetId: row.chat_id,
-            content: (field) => (field === queuedId ? content : null)
+            content: (field) => (field === queuedId ? (rewrite?.raw ?? content) : null)
           })
           return { queued: toQueued(updated!), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("EditQueued")),
@@ -501,7 +527,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           else yield* sql`DELETE FROM entity_tags WHERE entity_id = ${entityId} AND tag = 'persona'`
         }).pipe(transaction("SetPersona")),
 
-      FinishGeneration: ({ userId, versionId, content, reasoning, replySections, status, error }) =>
+      FinishGeneration: ({ userId, versionId, content, reasoning, replySections, status, error, rewrite }) =>
         Effect.gen(function* () {
           const row = yield* graph.ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -514,8 +540,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             return yield* new NotFound({ entity: "generating version", id: versionId })
           }
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
+          const columns = rewriteColumns(rewrite)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
             reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
+            raw_content = ${columns.raw_content}, raw_reasoning = ${columns.raw_reasoning},
+            raw_sections = ${columns.raw_sections},
+            rewrite_json = ${columns.rewrite_json},
             reply_sections = CASE WHEN ${replySections === undefined ? 1 : 0} THEN reply_sections
               ELSE ${replySections ? JSON.stringify(replySections) : null} END,
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}

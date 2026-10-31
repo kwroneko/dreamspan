@@ -43,8 +43,11 @@ it("continues through the registered action without composer guidance, and honor
   expect(runCommandShortcut(key, context)).toBe(false)
 })
 
-it("shares latest-reply availability and reports unavailable capability without continuing", async () => {
-  const { context, session, view } = setup({ prefill: "none" })
+it("continues a model without prefill (owner, 2026-10-31), and reports an unresolved capability without continuing", async () => {
+  const none = setup({ prefill: "none" })
+  expect(runCommandShortcut(key, none.context)).toBe(true)
+  expect(none.session.continueVersion).toHaveBeenCalledWith(entry, false)
+  const { context, session, view } = setup({})
   const report = vi.fn()
   const target = { entry, session, report } as unknown as Parameters<typeof invokeMessageAction>[1]
   await invokeMessageAction("message.continue", target, "keyboard")

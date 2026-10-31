@@ -5,7 +5,7 @@ import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
-import { Tabs } from "../../ui/Tabs.tsx"
+import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 import { chatPanels, isPanelTab, PanelContent, usePanelTabs } from "./panels.tsx"
@@ -162,26 +162,64 @@ export function ChatSidePanel({
     for (const descriptor of chatPanels.list()) descriptor.preload?.()
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
-  const tabs = usePanelTabs(content.view, tab).map((t) => ({
-    value: t.value,
-    label: t.label,
-    panel:
-      visited.has(t.value) || t.value === tab ? (
-        <PanelContent
-          key={t.descriptor.id}
-          descriptor={t.descriptor}
-          tab={t.value}
-          active={t.value === tab}
-          notesFocus={notesFocus}
-          onNotes={notes}
-          {...content}
-        />
-      ) : null
-  }))
+  const all = usePanelTabs(content.view, tab)
+  const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
+  const cast = all.filter((t) => t.descriptor.placement === "cast")
+  const nav = (
+    <div className="flex flex-col gap-1 border-b border-border px-2 pt-1.5">
+      <ToolTabs
+        tabs={tools.map((t) => ({ value: t.value, label: t.label, icon: t.descriptor.icon }))}
+        value={tab}
+        onValueChange={onTab}
+        label="Chat panel"
+        moreLabel="More tools"
+        end={wide && <IconButton label="Close the panel" icon="close" className="shrink-0" onClick={onClose} />}
+      />
+      <SubjectTabs
+        tabs={cast.map((t) => ({
+          value: t.value,
+          label: t.label,
+          avatar: t.avatar,
+          icon: t.descriptor.icon,
+          note: t.note
+        }))}
+        value={tab}
+        onValueChange={onTab}
+        label="Characters"
+      />
+      {cast.length === 0 && <div className="h-0.5" />}
+    </div>
+  )
+  // A tab mounts when first shown and stays mounted, hidden, while the panel is open.
+  const panels = all.map(
+    (t) =>
+      (visited.has(t.value) || t.value === tab) && (
+        <div
+          key={t.value}
+          role="tabpanel"
+          aria-label={t.label}
+          hidden={t.value !== tab}
+          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+        >
+          <PanelContent
+            key={t.descriptor.id}
+            descriptor={t.descriptor}
+            tab={t.value}
+            active={t.value === tab}
+            notesFocus={notesFocus}
+            onNotes={notes}
+            {...content}
+          />
+        </div>
+      )
+  )
   if (!wide)
     return (
       <Sheet open onOpenChange={(open) => !open && onClose()} title={title} closeLabel="Close">
-        <Tabs tabs={tabs} value={tab} onValueChange={onTab} label="Chat panel" fill keepMounted />
+        <div className="flex min-h-0 flex-1 flex-col">
+          {nav}
+          {panels}
+        </div>
       </Sheet>
     )
   return (
@@ -200,25 +238,8 @@ export function ChatSidePanel({
         onChange={change}
         onReset={reset}
       />
-      <Tabs
-        tabs={tabs}
-        value={tab}
-        onValueChange={onTab}
-        label="Chat panel"
-        fill
-        keepMounted
-        end={
-          <Button
-            variant="ghost"
-            aria-label="Close the panel"
-            title="Close the panel"
-            className="mb-1 h-8 w-8 shrink-0 px-0 text-lg leading-none"
-            onClick={onClose}
-          >
-            <span aria-hidden="true">×</span>
-          </Button>
-        }
-      />
+      {nav}
+      {panels}
     </aside>
   )
 }

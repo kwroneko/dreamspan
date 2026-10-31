@@ -24,7 +24,15 @@ import {
   writeInsert,
   writeSelect
 } from "./forkState.ts"
-import { versionExtras, type ChatRow, type ForkRow, toChat, toVersion, type VersionRow } from "./rows.ts"
+import {
+  rewriteColumns,
+  versionExtras,
+  type ChatRow,
+  type ForkRow,
+  toChat,
+  toVersion,
+  type VersionRow
+} from "./rows.ts"
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
@@ -109,6 +117,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         frozen_macros: version.frozenMacros ? JSON.stringify(version.frozenMacros) : null,
         direction: version.direction ?? null,
         reasoning: version.reasoning || null,
+        ...rewriteColumns(version.rewrite),
         reply_sections: version.replySections ? JSON.stringify(version.replySections) : null,
         error_json: version.error ? JSON.stringify(version.error) : null,
         created_at: at,
@@ -412,7 +421,8 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         targetId: chatId,
         matchesField: (kind, field) =>
           field === (kind === "insert" ? `${draftForkId}:${parentSlotId ?? ""}` : draftForkId),
-        content: row.writer === "model" ? (row.direction ?? "") : row.content
+        // The draft holds what was typed, before any script rewrote it.
+        content: row.writer === "model" ? (row.direction ?? "") : (version.rewrite?.raw ?? row.content)
       })
       return new AppendResult({
         slotId: slotId as SlotId,

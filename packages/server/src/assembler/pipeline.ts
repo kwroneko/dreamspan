@@ -10,6 +10,9 @@ import type { SqlError } from "effect/sql"
 import { makeRegistry, type Registry } from "../registry.ts"
 import type { MacroEnvironment } from "./macros.ts"
 import type { ScriptRunner } from "./regex.ts"
+import type { RewriteOptions, ScriptSource } from "./scriptSources.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import type { Composition, Stability, StMessage } from "./st.ts"
 import type {
   AssembledRequest,
@@ -83,6 +86,8 @@ export class AssemblySources extends Context.Service<
     readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
     /** The refs of the lorebooks the user marked global (DESIGN §5.0), in the order they were marked. */
     readonly globalLorebooks: Effect.Effect<ReadonlyArray<string>, SourceError>
+    /** The account's global regex scripts (ST's "Global scripts"); fixtures without it have none. */
+    readonly globalRegex?: Effect.Effect<ReadonlyArray<RegexScript>, SourceError>
     /** The notes these cards own, at the revision `bound` pins or their head. */
     readonly notes: (
       cards: ReadonlyArray<string>,
@@ -139,6 +144,13 @@ export interface AssemblyRequest {
   readonly projections: ProjectionRegistry
   /** The image token rules in effect (`image-tokens` stage); none: every image is unknown. */
   readonly imageTokens?: Registry<ImageTokenRule>
+  /** The regex script lists in effect (`scripts` stage), in order; absent: the built-ins. */
+  readonly scriptSources?: Registry<ScriptSource>
+  /**
+   * Not a context: text being written goes through the scripts (`RewriteText`). The `scripts`
+   * stage then compiles the scripts with neither flag instead of the prompt-only ones.
+   */
+  readonly rewrite?: RewriteOptions
 }
 
 /** Exact counts by content hash and detail, and the model's calibration samples, newest first. */
@@ -175,6 +187,8 @@ export interface Scripted {
   readonly text: string
   readonly volatile: boolean
   readonly depth: number
+  /** The scripts that changed it, in the order they ran; absent: none. */
+  readonly applied?: ReadonlyArray<ScriptRef>
 }
 
 /** A message of the path with its role and name in this context. */
@@ -274,6 +288,12 @@ export interface Assembly {
   postNames?: AssembledRequest["names"]
   /** The prefill to send, when the model takes one. */
   prefill?: string
+  /**
+   * Continue on a model that takes no prefill (owner, 2026-10-31): the reply so far, sent as the
+   * model's own message just before the end-of-request instruction, its piece, and what goes
+   * between it and the new text (the preset's `continue_postfix`, ST's, when it doesn't end in a space).
+   */
+  continuation?: { readonly text: string; readonly piece: number; readonly join: string }
   breakpoints?: AssembledRequest["breakpoints"]
   result?: AssembledRequest
   readonly pieces: Array<Piece>
@@ -333,6 +353,20 @@ export type ProjectionRegistry = Registry<RoleProjection>
 export const makeProjectionRegistry = (): ProjectionRegistry => makeRegistry<RoleProjection>()
 
 export const makeStageRegistry = (): StageRegistry => makeRegistry<AssemblerStage>()
+
+/**
+ * The stages in effect, in order, through the one named `last` (all of them when nothing has
+ * that id): what a rewrite needs of a context, without composing one.
+ */
+export const assembleThrough = (stages: StageRegistry, request: AssemblyRequest, last: string) =>
+  Effect.gen(function* () {
+    let assembly: Assembly = { request, pieces: [], frozen: {}, effects: [], templateWrites: [], issues: [] }
+    for (const stage of stages.list()) {
+      assembly = yield* stage.run(assembly)
+      if (stage.id === last) break
+    }
+    return assembly
+  })
 
 /** Runs every stage in effect, in order, and returns the context as built. */
 export const assemble = (stages: StageRegistry, request: AssemblyRequest, transforms: TransformRegistry) =>

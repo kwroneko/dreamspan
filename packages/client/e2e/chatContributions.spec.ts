@@ -112,12 +112,17 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Show Mira's card", exact: true }).click()
-  const notes = page.getByRole("button", { name: /^Notes \(/ })
-  await expect(notes).toBeVisible()
+  // The character tab's More menu has the card's notes while the Notes panel is there.
+  const notes = async (count: number) => {
+    await page.getByRole("button", { name: "More for Mira", exact: true }).click()
+    await expect(page.getByRole("menuitem", { name: "Mira's notes", exact: true })).toHaveCount(count)
+    await page.keyboard.press("Escape")
+  }
+  await notes(1)
   await contribution(page, "install", "notes")
-  await expect(notes).toHaveCount(0)
+  await notes(0)
   await contribution(page, "close", "notes")
-  await expect(notes).toBeVisible()
+  await notes(1)
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
   // The menu stays for the chat's commands, without the history ones; keys are listed apart.
@@ -132,7 +137,7 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(page.getByRole("heading", { name: "Search and replace", exact: true })).toBeVisible()
 })
 
-test("a dynamic family obeys individual disablement and rejects unlisted URLs", async ({ page }) => {
+test("a dynamic family obeys individual disablement and never opens an unlisted URL", async ({ page }) => {
   await setup(page)
   await contribution(page, "install", "plugin")
   await contribution(page, "install", "family-tab")
@@ -143,8 +148,11 @@ test("a dynamic family obeys individual disablement and rejects unlisted URLs", 
   await contribution(page, "close", "family-tab")
   await openPanel(page, "Plugin panel")
   await page.getByRole("button", { name: "Unlisted family URL", exact: true }).click()
-  await expect(page).toHaveURL(/panel=synthetic%3Aabsent/)
-  await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
+  // A family's tab this chat doesn't offer opens the panel's default tab instead (panelHere).
+  await expect(page).toHaveURL(/panel=chat(&|$)/)
+  const panel = page.getByRole("complementary", { name: "Chat panel", exact: true })
+  await expect(panel.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(panel.getByRole("tabpanel", { name: /absent/i })).toHaveCount(0)
 })
 
 test("card contributions update every mounted placement and restore built-ins", async ({ page }) => {

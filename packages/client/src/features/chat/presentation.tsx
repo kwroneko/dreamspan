@@ -83,7 +83,7 @@ export interface ChatSurfaceProps {
   readonly session: ChatSession
   readonly view: ChatView
   readonly cast: import("./cast.ts").CastView
-  readonly onOpenPanel: (tab: string | null, focus?: string) => void
+  readonly onOpenPanel: (tab: string | null) => void
   readonly wide: boolean
   readonly children: ReactNode
 }

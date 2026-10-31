@@ -13,6 +13,7 @@ import { registerHistoryCommands } from "../src/features/chat/historyContributio
 import {
   chatPanels,
   isPanelTab,
+  panelHere,
   panelTabs,
   PanelContent,
   resolvePanel,
@@ -111,6 +112,35 @@ describe("chat contributions", () => {
     expect(panelTabs(view, value).some((tab) => tab.value === value)).toBe(false)
     restore()
     expect(isPanelTab(value)).toBe(true)
+  })
+
+  it("offers a card tab only for the viewed chat's cards, in its join order, the persona last", () => {
+    const id = (n: number) => `00000000-0000-4000-8000-00000000000${n}`
+    const card = (n: number, name: string) => ({ entityId: id(n), name, label: name, avatarMediaId: null })
+    // 2 and 1 joined in that order, 4 is the persona, 3 left on this branch; 9 is another chat's.
+    const loaded = {
+      cast: {
+        participants: [id(2), id(1), id(4)],
+        playedByMe: [id(4)],
+        cards: [card(1, "Ada"), card(2, "Bo"), card(3, "Cy"), card(4, "Di")]
+      }
+    } as unknown as ChatView
+    const characters = (selected: string | null) =>
+      panelTabs(loaded, selected)
+        .filter((tab) => tab.descriptor.id === "character")
+        .map((tab) => tab.label)
+    expect(characters(null)).toEqual(["Bo", "Ada", "Di"])
+    expect(characters(`card:${id(3)}`)).toEqual(["Bo", "Ada", "Di", "Cy"])
+    expect(characters(`card:${id(9)}`)).toEqual(["Bo", "Ada", "Di"])
+    expect(panelHere(loaded, `card:${id(1)}`)).toBe(`card:${id(1)}`)
+    expect(panelHere(loaded, `card:${id(3)}`)).toBe(`card:${id(3)}`)
+    // Another chat's character opens the default tab, as a pick in the sidebar does.
+    expect(panelHere(loaded, `card:${id(9)}`)).toBe("chat")
+    expect(panelHere(loaded, "cast")).toBe("cast")
+    expect(panelHere(loaded, "synthetic.missing")).toBe(null)
+    expect(panelHere(loaded, null)).toBe(null)
+    // Until the cast loads, the URL's card tab stands.
+    expect(panelHere(view, `card:${id(9)}`)).toBe(`card:${id(9)}`)
   })
 
   it("resolves tab families through registered matchers and lets a plugin replace a single family tab", () => {

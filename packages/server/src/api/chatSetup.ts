@@ -458,6 +458,14 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         })
       ).pipe(internal("CreateChatNote")),
 
+    GetGlobalRegex: () =>
+      Effect.flatMap(userId, (id) => reader.GetGlobalRegex({ userId: id })).pipe(internal("GetGlobalRegex")),
+    SetGlobalRegex: ({ scripts, expectedRevision }) =>
+      Effect.flatMap(userId, (id) =>
+        // The next context's prompt scripts change with them.
+        writer.SetGlobalRegex({ userId: id, scripts, expectedRevision }).pipe(Effect.tap(() => warmth.refreshUser(id)))
+      ).pipe(internal("SetGlobalRegex")),
+
     ListQueued: ({ chatId }) =>
       Effect.flatMap(userId, (id) => reader.ListQueued({ userId: id, chatId })).pipe(internal("ListQueued")),
 
