@@ -11,6 +11,7 @@ import type { Generation } from "../assembler/types.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
+import { throughParse } from "./replySections.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -143,7 +144,7 @@ export const layer = Layer.effect(
           const strategy = execution.replyStrategies.get("reply")
           if (!strategy)
             return yield* new GenerationFailed({ class: "unavailable", message: "Reply strategy is unavailable." })
-          return strategy.run({
+          const reply = strategy.run({
             request,
             generation,
             rolloutId,
@@ -152,6 +153,11 @@ export const layer = Layer.effect(
             resolveImages: (input) =>
               hydrateMessageImages(input, model, (id) => reader.GetMediaFile({ userId, mediaId: id }), config.dataDir)
           })
+          // The registered reply parsers, in order: the leading tagged sections (replySections.ts).
+          return execution.replyParsers
+            .list()
+            .flatMap((parser) => parser.create({ request, generation }) ?? [])
+            .reduce(throughParse, reply)
         })
       )
 

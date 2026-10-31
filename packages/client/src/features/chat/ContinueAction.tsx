@@ -7,6 +7,7 @@
 // model that's only not set up for one gets a way to set it up here, or to try it once.
 import { RegistryContext } from "@effect/atom-react"
 import type { ConnectionId } from "@rp/shared/providers.ts"
+import { originalReply } from "@rp/shared/replySections.ts"
 import { Context, Effect } from "effect"
 import { AtomRegistry, Reactivity } from "effect/reactivity"
 import { useContext, useState, useSyncExternalStore } from "react"
@@ -39,7 +40,11 @@ const continueBlocked = (model: NextModel): string | null => {
 
 /** The latest finished version with text can continue, whoever wrote it. */
 export const canContinue = ({ entry, session }: MessageActionContext) => {
-  if (entry.version.status === "generating" || entry.version.content.trim() === "") return false
+  if (
+    entry.version.status === "generating" ||
+    originalReply(entry.version.content, entry.version.replySections).trim() === ""
+  )
+    return false
   const view = session.snapshot()
   return !view.loading && view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
 }

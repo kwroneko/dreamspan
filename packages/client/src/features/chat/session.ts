@@ -6,6 +6,7 @@ import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // Streamed text never goes through the list. Each generating version's text is an atom
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
+import { sectionsDisplay } from "@rp/shared/replySections.ts"
 import type { Connection, Model } from "@rp/shared/providers.ts"
 import {
   type Chat,
@@ -59,6 +60,8 @@ export const liveText = Atom.family((_id: VersionId) => Atom.make<string | null>
 
 /** The reasoning streamed so far by a version that's generating (DESIGN §7.4); null when it isn't. */
 export const liveReasoning = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
+/** A generating version's reply-section panel text so far (spec/REPLY-SECTIONS.md); null when not streaming. */
+export const liveSections = Atom.family((_id: VersionId) => Atom.make<string | null>(null))
 
 export interface ChatView {
   readonly chat: Chat | null
@@ -165,6 +168,8 @@ export class ChatSession {
   private readonly pending = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
   /** Reasoning received since the last frame, by version, applied as the text's deltas are. */
   private readonly pendingReasoning = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
+  /** Reply-section text received since the last frame, by version, as reasoning is. */
+  private readonly pendingSections = new Map<VersionId, Array<{ readonly offset: number; readonly text: string }>>()
   private frame: number | null = null
   private hellos = 0
   private subscription: Fiber.Fiber<void, unknown> | null = null
@@ -536,6 +541,7 @@ export class ChatSession {
       this.registry.set(waitingCache(id), false)
       this.registry.set(liveText(id), null)
       this.registry.set(liveReasoning(id), null)
+      this.registry.set(liveSections(id), null)
       unmount()
     }
     this.live.clear()
@@ -797,17 +803,21 @@ export class ChatSession {
         else this.pending.set(event.versionId, [event])
         continue
       }
-      if (event._tag === "Reasoning") {
-        const list = this.pendingReasoning.get(event.versionId)
+      if (event._tag === "Reasoning" || event._tag === "Section") {
+        const pending = event._tag === "Reasoning" ? this.pendingReasoning : this.pendingSections
+        const list = pending.get(event.versionId)
         if (list) list.push(event)
-        else this.pendingReasoning.set(event.versionId, [event])
+        else pending.set(event.versionId, [event])
         continue
       }
       // Anything else applies after the text that came before it.
       this.flush()
       this.apply(event, anchor)
     }
-    if ((this.pending.size > 0 || this.pendingReasoning.size > 0) && this.frame === null) {
+    if (
+      (this.pending.size > 0 || this.pendingReasoning.size > 0 || this.pendingSections.size > 0) &&
+      this.frame === null
+    ) {
       this.frame = requestAnimationFrame(() => {
         this.frame = null
         this.flush()
@@ -817,17 +827,21 @@ export class ChatSession {
 
   /** Applies the deltas received so far: one atom update per version. */
   private flush() {
-    if (this.pendingReasoning.size > 0) {
+    for (const [pending, atom, stored] of [
+      [this.pendingReasoning, liveReasoning, (id: VersionId) => this.storedReasoning(id)],
+      [this.pendingSections, liveSections, (id: VersionId) => this.storedSections(id)]
+    ] as const) {
+      if (pending.size === 0) continue
       Atom.batch(() => {
-        for (const [id, deltas] of this.pendingReasoning) {
-          let text = this.registry.get(liveReasoning(id)) ?? this.storedReasoning(id)
+        for (const [id, deltas] of pending) {
+          let text = this.registry.get(atom(id)) ?? stored(id)
           for (const { offset, text: added } of deltas) {
             if (offset <= text.length && offset + added.length > text.length) text = text.slice(0, offset) + added
           }
-          this.setLiveReasoning(id, text)
+          this.setLiveSide(atom, id, text)
         }
       })
-      this.pendingReasoning.clear()
+      pending.clear()
     }
     if (this.pending.size === 0) return
     Atom.batch(() => {
@@ -848,14 +862,19 @@ export class ChatSession {
     this.pending.clear()
   }
 
-  private apply(event: Exclude<ChatEvent, { readonly _tag: "Delta" | "Reasoning" }>, anchor: SlotId | null) {
+  private apply(
+    event: Exclude<ChatEvent, { readonly _tag: "Delta" | "Reasoning" | "Section" }>,
+    anchor: SlotId | null
+  ) {
     switch (event._tag) {
       case "Hello": {
-        for (const { versionId, text, waitingCache: waiting, reasoning } of event.live) {
+        for (const { versionId, text, waitingCache: waiting, reasoning, sections } of event.live) {
           this.registry.set(waitingCache(versionId), waiting ?? false)
           if (text.length >= (this.registry.get(liveText(versionId)) ?? "").length) this.setLive(versionId, text)
           if (reasoning && reasoning.length >= (this.registry.get(liveReasoning(versionId)) ?? "").length)
-            this.setLiveReasoning(versionId, reasoning)
+            this.setLiveSide(liveReasoning, versionId, reasoning)
+          if (sections && sections.length >= (this.registry.get(liveSections(versionId)) ?? "").length)
+            this.setLiveSide(liveSections, versionId, sections)
         }
         // The first Hello opens the chat. Another means the socket reconnected, and
         // anything may have changed meanwhile.
@@ -912,6 +931,7 @@ export class ChatSession {
         // The same estimate again (another tab subscribed) changes nothing on screen.
         const history = {
           assemblyError: event.assemblyError ?? null,
+          assemblyErrorReason: event.assemblyErrorReason ?? null,
           leafSlotId: event.leafSlotId,
           historyStart: event.historyStart,
           summarizedThrough: event.summarizedThrough,
@@ -1124,15 +1144,19 @@ export class ChatSession {
     if (known === null) this.registry.set(liveText(version.id), version.content)
     if (this.registry.get(liveReasoning(version.id)) === null)
       this.registry.set(liveReasoning(version.id), version.reasoning ?? "")
+    if (this.registry.get(liveSections(version.id)) === null)
+      this.registry.set(liveSections(version.id), sectionsDisplay(version.replySections))
   }
 
   private mountLive(id: VersionId) {
     const text = this.registry.mount(liveText(id))
     const reasoning = this.registry.mount(liveReasoning(id))
+    const sections = this.registry.mount(liveSections(id))
     const waiting = this.registry.mount(waitingCache(id))
     return () => {
       text()
       reasoning()
+      sections()
       waiting()
     }
   }
@@ -1147,17 +1171,24 @@ export class ChatSession {
     return this.view.entries.find((e) => e.version.id === id)?.version.reasoning ?? ""
   }
 
-  private setLiveReasoning(id: VersionId, text: string) {
+  /** A continuation's saved section text, where its streamed sections go on from. */
+  private storedSections(id: VersionId) {
+    return sectionsDisplay(this.view.entries.find((e) => e.version.id === id)?.version.replySections)
+  }
+
+  private setLiveSide(atom: typeof liveReasoning, id: VersionId, text: string) {
     if (!this.live.has(id)) this.live.set(id, this.mountLive(id))
-    this.registry.set(liveReasoning(id), text)
+    this.registry.set(atom(id), text)
   }
 
   private endLive(id: VersionId) {
     this.pending.delete(id)
     this.pendingReasoning.delete(id)
+    this.pendingSections.delete(id)
     this.registry.set(waitingCache(id), false)
     this.registry.set(liveText(id), null)
     this.registry.set(liveReasoning(id), null)
+    this.registry.set(liveSections(id), null)
     this.live.get(id)?.()
     this.live.delete(id)
   }
@@ -1360,6 +1391,17 @@ export class ChatSession {
         expectedRowVersion: entry.rowVersion,
         ...(direction ? { direction } : {}),
         ...(prefillOnce ? { prefillOnce } : {})
+      })
+    )
+  }
+
+  /** "Show as reply text": the reply's leading sections back in its text, as a new version (spec/REPLY-SECTIONS.md). */
+  async showSectionsAsText(entry: PathEntry): Promise<Outcome<unknown>> {
+    return this.slotWrite(entry.slotId, (client) =>
+      client("ShowSectionsAsText", {
+        versionId: entry.version.id,
+        forkId: this.view.forkId,
+        expectedRowVersion: entry.rowVersion
       })
     )
   }

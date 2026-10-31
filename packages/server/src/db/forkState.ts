@@ -407,7 +407,7 @@ export const insertFork = (
 export const shownVersionColumns = `v.id, v.slot_id, o.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, coalesce(pf.flag, v.hidden) AS hidden,
   coalesce(sf.flag, v.starred) AS starred, v.created_at, v.error_json, v.mark, v.frozen_macros, v.rollout_id,
-  v.reasoning, ${versionExtras("v")}`
+  v.reasoning, v.reply_sections, ${versionExtras("v")}`
 
 /** Joins version `o`, one of a message's own, to what fork `fork` shows for it (`v`) and the fork's flags on it. */
 export const shownJoin = (sql: SqlClient.SqlClient, fork: string | null) => sql`

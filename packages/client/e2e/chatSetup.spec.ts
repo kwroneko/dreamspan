@@ -8,6 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { markPersona } from "./support/library.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -71,11 +72,7 @@ const setUp = (page: Page) =>
     })
     await importCard(page, { name: "Bo", description: "A diver." })
     await page.goto(`${server().url}/library`)
-    for (const persona of ["Ana", "Bo"]) {
-      const box = page.getByRole("checkbox", { name: `${persona}: Persona` })
-      await box.click()
-      await expect(box).toBeChecked()
-    }
+    for (const persona of ["Ana", "Bo"]) await markPersona(page, persona)
   })())
 
 const login = async (page: Page) => {

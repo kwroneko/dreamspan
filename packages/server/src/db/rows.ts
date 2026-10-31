@@ -1,4 +1,5 @@
 // Row shapes and their mapping to domain types, shared by the writer and readers.
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import {
   Chat,
   type ChatId,
@@ -104,6 +105,8 @@ export interface VersionRow {
   readonly error_json: string | null
   /** Absent where a query doesn't select it. */
   readonly reasoning?: string | null
+  /** Its leading tagged sections as JSON (spec/REPLY-SECTIONS.md); absent where a query doesn't select it. */
+  readonly reply_sections?: string | null
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   readonly rollout_id: string | null
@@ -131,8 +134,19 @@ export const versionExtras = (alias: string) =>
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
-  const error = JSON.parse(json) as { class?: unknown; message?: unknown }
-  return { class: String(error.class ?? "unknown"), message: String(error.message ?? "") }
+  const error = JSON.parse(json) as {
+    class?: unknown
+    message?: unknown
+    contextLimit?: { tokens?: unknown; modelId?: unknown }
+  }
+  const limit = error.contextLimit
+  return {
+    class: String(error.class ?? "unknown"),
+    message: String(error.message ?? ""),
+    ...(limit && Number.isSafeInteger(limit.tokens) && typeof limit.modelId === "string"
+      ? { contextLimit: { tokens: limit.tokens as number, modelId: limit.modelId } }
+      : {})
+  }
 }
 
 /**
@@ -161,6 +175,7 @@ export const toVersion = (row: VersionRow) =>
     model: row.model_label ?? null,
     error: toVersionError(row.error_json),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+    ...(row.reply_sections ? { replySections: JSON.parse(row.reply_sections) as ReplySections } : {}),
     mark: row.mark ?? null,
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
     context: !row.has_context

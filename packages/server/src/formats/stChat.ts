@@ -4,6 +4,7 @@
 // summary). A chat file can be far larger than any card, so it arrives in parts cut at line
 // ends (ARCHITECTURE.md §13), and each part is read on its own: lines are separate JSON
 // documents, each under the shared JSON caps. Pure: no database, no files.
+import { originalReply, type ReplySections, sectionsDisplay } from "@rp/shared/replySections.ts"
 import { ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
 import { defaultLimits, fail, type Limits, parseJson } from "./safety.ts"
@@ -110,10 +111,64 @@ interface StChatHeader {
   readonly createdAt: number | null
 }
 
+/**
+ * ST's tags for reasoning it parsed out of a reply (power_user.reasoning's defaults): it keeps
+ * only the text between them, so these stand in for what the model wrote.
+ */
+const ST_PARSED = { open: "<think>", close: "</think>", gap: "\n" }
+
+/**
+ * A message's or swipe's `extra.reasoning`: ST parsed it out of the reply's text
+ * (`reasoning_type: "parsed"`), which is a reply section here (spec/REPLY-SECTIONS.md), or the
+ * provider sent it (any other type), which is the version's reasoning.
+ */
+const stReasoningOf = (source: unknown) => {
+  const text =
+    Predicate.isObject(source) && typeof source.reasoning === "string" && source.reasoning !== ""
+      ? source.reasoning
+      : null
+  if (text === null) return { text, reasoning: null, sections: undefined }
+  if (Predicate.isObject(source) && source.reasoning_type === "parsed")
+    return {
+      text,
+      reasoning: null,
+      sections: {
+        sections: [{ lead: "", open: ST_PARSED.open, text, close: ST_PARSED.close }],
+        gap: ST_PARSED.gap
+      } satisfies ReplySections
+    }
+  return { text, reasoning: text, sections: undefined }
+}
+
+/**
+ * The other way, for an ST chat file: a version's sections go to `extra.reasoning` as parsed
+ * reasoning when it has no provider reasoning; with both, the provider's goes there and the
+ * sections stay in `mes`, in their tags, so nothing is lost.
+ */
+export const stReasoningExtra = (version: {
+  readonly content: string
+  readonly reasoning?: string | undefined
+  readonly replySections?: ReplySections | undefined
+}): { readonly mes: string; readonly extra: { readonly reasoning?: string; readonly reasoning_type?: string } } => {
+  if (version.reasoning)
+    return {
+      mes: originalReply(version.content, version.replySections),
+      extra: { reasoning: version.reasoning, reasoning_type: "model" }
+    }
+  if (version.replySections?.sections.length)
+    return {
+      mes: version.content,
+      extra: { reasoning: sectionsDisplay(version.replySections), reasoning_type: "parsed" }
+    }
+  return { mes: version.content, extra: {} }
+}
+
 /** One version of a message, in the writer's terms (db/stImportWrites.ts). */
 interface StVersion {
   readonly content: string
   readonly reasoning: string | null
+  /** ST's reasoning it parsed out of the text (`reasoning_type: "parsed"`), as a reply section. */
+  readonly sections?: ReplySections
   readonly at: number
 }
 
@@ -313,15 +368,16 @@ export const parseStChatPart = (
     const sentAt = parseStDate(value.send_date) ?? lastAt ?? 0
     lastAt = sentAt
     const swipeInfo = Array.isArray(value.swipe_info) ? value.swipe_info : []
-    const reasoningOf = (source: unknown) =>
-      Predicate.isObject(source) && typeof source.reasoning === "string" && source.reasoning !== ""
-        ? source.reasoning
-        : null
+    const reasoningOf = (source: unknown) => stReasoningOf(source).reasoning
+    const sectionsOf = (source: unknown) => {
+      const { sections } = stReasoningOf(source)
+      return sections ? { sections } : {}
+    }
     let versions: Array<StVersion>
     let selected = 0
     const swipes = Array.isArray(value.swipes) ? value.swipes.filter((s): s is string => typeof s === "string") : []
     if (swipes.length === 0) {
-      versions = [{ content: mes, reasoning: reasoningOf(extra), at: sentAt }]
+      versions = [{ content: mes, reasoning: reasoningOf(extra), ...sectionsOf(extra), at: sentAt }]
     } else {
       if (swipes.length > stChatLimits.maxSwipes) {
         issues.add(
@@ -333,19 +389,26 @@ export const parseStChatPart = (
       const kept = swipes.slice(0, stChatLimits.maxSwipes)
       versions = kept.map((content, i) => {
         const info = Predicate.isObject(swipeInfo[i]) ? swipeInfo[i] : {}
-        return { content, reasoning: reasoningOf(info.extra), at: parseStDate(info.send_date) ?? sentAt }
+        return {
+          content,
+          reasoning: reasoningOf(info.extra),
+          ...sectionsOf(info.extra),
+          at: parseStDate(info.send_date) ?? sentAt
+        }
       })
       const swipeId = typeof value.swipe_id === "number" && Number.isSafeInteger(value.swipe_id) ? value.swipe_id : 0
       // `mes` is what ST shows and sends; the swipe it came from is normally swipe_id.
       selected = kept[swipeId] === mes ? swipeId : kept.indexOf(mes)
       if (selected < 0) {
-        versions.push({ content: mes, reasoning: reasoningOf(extra), at: sentAt })
+        versions.push({ content: mes, reasoning: reasoningOf(extra), ...sectionsOf(extra), at: sentAt })
         selected = versions.length - 1
       } else {
         // The shown swipe has the message's own time and reasoning.
+        const own = stReasoningOf(extra).text === null ? versions[selected]! : { reasoning: null, ...sectionsOf(extra) }
         versions[selected] = {
           content: mes,
-          reasoning: reasoningOf(extra) ?? versions[selected]!.reasoning,
+          reasoning: reasoningOf(extra) ?? own.reasoning,
+          ...(own.sections ? { sections: own.sections } : {}),
           at: sentAt
         }
       }

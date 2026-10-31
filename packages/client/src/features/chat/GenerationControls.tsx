@@ -80,7 +80,11 @@ export function GenerationControls({
             </Field>
           </div>
           {modelPanel && (
-            <Button aria-label="Model settings" onClick={() => onSettings("model")}>
+            <Button
+              aria-label="Model settings"
+              title={view.history?.model?.modelKey ? `Settings for ${view.history.model.modelKey}` : undefined}
+              onClick={() => onSettings("model")}
+            >
               ⚙
             </Button>
           )}
@@ -118,21 +122,44 @@ export function GenerationControls({
   )
 }
 
-export function GenerationSettingsPanel({ session, kind }: { session: ChatSession; kind: "model" | "preset" }) {
+/**
+ * The Model tab edits the model the chat's next reply actually uses (the next-context estimate's
+ * model, the same one the budget note and the refusal open), named at the top; before the
+ * estimate arrives, the account's current model.
+ */
+export function GenerationSettingsPanel({
+  session,
+  view,
+  kind
+}: {
+  session: ChatSession
+  view: ChatView
+  kind: "model" | "preset"
+}) {
   const { action, defaults } = useSelections(session)
+  const used = view.history?.model
+  const target = used
+    ? { connection: used.connection, model: used.model }
+    : defaults?.model
+      ? { connection: defaults.model.connection, model: defaults.model.model }
+      : null
   const [model, setModel] = useState<Model | null>(null)
+  // Bumped after a save, so the name above the form shows what was saved.
+  const [saves, setSaves] = useState(0)
   useEffect(() => {
     let live = true
-    if (kind === "model" && defaults?.model)
+    if (kind === "model" && target)
       void action
-        .run((client) => client("ListModels", { connectionId: defaults.model!.connection, includeHidden: true }))
+        .run((client) =>
+          client("ListModels", { connectionId: target.connection as Model["connectionId"], includeHidden: true })
+        )
         .then((result) => {
-          if (live && result.ok) setModel(result.value.find((entry) => entry.id === defaults?.model?.model) ?? null)
+          if (live && result.ok) setModel(result.value.find((entry) => entry.id === target.model) ?? null)
         })
     return () => {
       live = false
     }
-  }, [defaults?.model?.connection, defaults?.model?.model, kind]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [target?.connection, target?.model, kind, saves]) // eslint-disable-line react-hooks/exhaustive-deps
   if (kind === "preset")
     return defaults?.preset ? (
       <Editor key={defaults.preset} refId={defaults.preset} />
@@ -145,9 +172,24 @@ export function GenerationSettingsPanel({ session, kind }: { session: ChatSessio
         to edit your own.
       </p>
     )
-  return model && model.id === defaults?.model?.model ? (
-    <ModelSettingsEditor key={model.id} model={model} />
-  ) : (
-    <p className="text-sm text-muted">Choose a model in the composer to edit its settings.</p>
+  if (!model || model.id !== target?.model)
+    return <p className="text-sm text-muted">Choose a model in the composer to edit its settings.</p>
+  const connectionName = used?.connectionName ?? null
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <p className="font-medium [overflow-wrap:anywhere]" data-testid="model-panel-name">
+          {model.overrides.name ?? model.upstream.name ?? model.key}
+          {connectionName && <span className="font-normal text-muted"> on {connectionName}</span>}
+        </p>
+        <p className="text-xs text-muted">
+          {used?.scope === "chat"
+            ? "The model this chat is bound to. "
+            : "The model this chat's next reply uses: your current model, shared by every chat. "}
+          Its settings apply everywhere it is used.
+        </p>
+      </div>
+      <ModelSettingsEditor key={model.id} model={model} onSaved={() => setSaves((n) => n + 1)} />
+    </div>
   )
 }

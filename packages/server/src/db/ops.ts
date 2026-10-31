@@ -1,3 +1,4 @@
+import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import {
@@ -1143,7 +1144,14 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** A model added by hand, for endpoints without a list or models the list leaves out. */
   Rpc.make("AddUserModel", {
-    payload: { userId: UserId, connectionId: ConnectionId, key: Schema.String, overrides: ModelOverrides },
+    payload: {
+      userId: UserId,
+      connectionId: ConnectionId,
+      key: Schema.String,
+      overrides: ModelOverrides,
+      /** What a catalog knows of the id; a refresh rewrites it like any upstream. */
+      upstream: Schema.optionalKey(ModelUpstream)
+    },
     success: Model,
     error: Schema.Union([NotFound, ModelKeyTaken, StorageError])
   }),
@@ -1152,6 +1160,12 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, modelId: ModelId, overrides: ModelOverrides, expectedRowVersion: Schema.Int },
     success: Model,
     error: Schema.Union([NotFound, StaleWrite, StorageError])
+  }),
+  /** Sets or clears the context size learned from a provider's error, keeping the user's other edits. */
+  Rpc.make("SetLearnedContext", {
+    payload: { userId: UserId, modelId: ModelId, context: Schema.NullOr(Schema.Int), at: Schema.Number },
+    success: Model,
+    error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("SetModelHidden", {
     payload: { userId: UserId, modelId: ModelId, hidden: Schema.Boolean },
@@ -1450,6 +1464,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed so far; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections so far; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1628,6 +1644,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
