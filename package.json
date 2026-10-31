@@ -19,7 +19,7 @@
     "format:check": "prettier --check .",
     "knip": "knip --no-progress",
     "test": "vitest run --project shared --project client --project server --tags-filter=!slow",
-    "test:slow": "vitest run --project server-slow && vitest run --project shared --project client --project server --tags-filter=slow",
+    "test:slow": "vitest run --project server-slow; files=$?; vitest run --project shared --project client --project server --tags-filter=slow && exit $files",
     "size": "node scripts/size.ts",
     "check": "node scripts/check.ts",
     "test:browser": "npm run build && playwright test -c packages/client/playwright.config.ts --project=chromium",
