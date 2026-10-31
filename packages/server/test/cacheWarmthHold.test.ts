@@ -28,7 +28,8 @@ const fixture = () => {
           historyStart: { slotId: null, depth: state.calls },
           summarizedThrough: null
         }
-      })
+      }),
+    NextContextAccess: () => Effect.void
   } as unknown as Reader["Service"])
   const layer = CacheWarmth.layer.pipe(Layer.provideMerge(ChatHub.layerWith({ backlog: 16 })), Layer.provide(reader))
   return { state, layer }
