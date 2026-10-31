@@ -119,13 +119,17 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           ])
         )
         const stored = new Map<string, ForkSummary>()
+        // A chat an ST import is still writing changes with every batch, and can be tens of
+        // thousands of messages long: walking it on every read made reads cost that chat again.
+        // It shows its last stored summary, stale or not, or none, until StImportFinishChat
+        // stores its summary; the shell marks it "import unfinished" meanwhile.
+        const importing = (row: { title: string }) => importState(row.title).unfinished
         if (recompute !== true) {
           for (const row of joinedRows) {
             if (
               row.lists === null ||
               row.s_format !== FORK_SUMMARY_FORMAT ||
-              row.s_stamp !== row.shell_stamp ||
-              row.s_user_stamp !== userStamp
+              ((row.s_stamp !== row.shell_stamp || row.s_user_stamp !== userStamp) && !importing(row))
             )
               continue
             const [cast, joined, departed, activity] = JSON.parse(row.lists) as [
@@ -148,6 +152,20 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             })
           }
         }
+        for (const row of joinedRows)
+          if (recompute !== true && !stored.has(row.id) && importing(row))
+            stored.set(row.id, {
+              forkId: row.id,
+              chatId: row.chat_id,
+              preview: "",
+              messages: 0,
+              leaf: null,
+              endAt: null,
+              cast: [],
+              joined: [],
+              departed: [],
+              activity: []
+            })
         const stale = new Set(records.flatMap((r) => (stored.has(r.id) ? [] : [r.chat_id])))
         // A stale chat's walk needs its forks' full rows.
         const staleRecords =

@@ -10,7 +10,8 @@ import { client, serverLayer, testConfig } from "./support/config.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 
-const database = () => Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, workers: "source" })
+const database = () =>
+  Database.layer({ dataDir: tempDir("shell"), readers: 2, allowNetworkFs: false, workers: "source" })
 
 type Read = typeof ShellLibraryRead.Type
 
@@ -214,6 +215,25 @@ describe("shell fork summaries", () => {
       assert.notInclude([...shell.forks.find((f) => f.chat.id === harbor.id && f.current)!.cast], nell.entityId)
       yield* writer.PurgeBinItem({ userId, itemId: binned.id })
       yield* check("card purged", [harbor.id, other.id])
+    }).pipe(Effect.provide(database()))
+  )
+
+  it.live("a chat an ST import is still writing is never walked by a read", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const { userId, mira } = t
+      // The title the import gives a chat until it finishes (ARCHITECTURE.md §13).
+      const inbound = yield* t.newChat("Inbound (import unfinished)", [mira.entityId])
+      const root = yield* t.append(inbound.id, null, "Imported hello.", null)
+      yield* t.append(inbound.id, root.slotId, "Imported answer.")
+      const read = yield* t.reader.ShellLibrary({ userId })
+      assert.isFalse(read.fresh.some((c) => c.chatId === inbound.id))
+      const shown = read.forks.find((f) => f.chat.id === inbound.id)!
+      assert.strictEqual(shown.messages, 0)
+      assert.strictEqual(shown.preview, "")
+      // The walk itself still knows it, for the import's finish to store.
+      const scratch = yield* t.reader.ShellLibrary({ userId, recompute: true })
+      assert.strictEqual(scratch.forks.find((f) => f.chat.id === inbound.id)!.messages, 2)
     }).pipe(Effect.provide(database()))
   )
 
