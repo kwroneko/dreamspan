@@ -60,6 +60,20 @@ export function useAction() {
   return { run, pending, error, clearError: () => setError(null) }
 }
 
+/**
+ * Reloads the queries of these reactivity keys in this tab, as a write's `invalidates`
+ * does, for a change the server announced (a notice) rather than one this tab made.
+ */
+export const invalidateKeys = (registry: AtomRegistry.AtomRegistry, keys: ReadonlyArray<string>) =>
+  Effect.runFork(
+    Effect.map(AtomRegistry.getResult(registry, AppClient.runtime), (services) =>
+      Context.get(
+        services as unknown as Context.Context<Reactivity.Reactivity>,
+        Reactivity.Reactivity
+      ).invalidateUnsafe(keys)
+    )
+  )
+
 /** An error from the server, as an alert. */
 export function ErrorAlert({ error, title, actions }: { error: AppError | null; title?: string; actions?: ReactNode }) {
   if (error === null) return null

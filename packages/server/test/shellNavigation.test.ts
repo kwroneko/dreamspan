@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { importStPath } from "./support/stUpload.ts"
 
 // Exercise the production worker boundary; source-worker startup was also checked in the initial focused runs.
 const layer = () => serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)
@@ -207,23 +208,7 @@ describe("independent shell reads", () => {
         const source = { ...stCardV2(), create_date: "2024-7-12@01h31m37s" }
         const file = join(folder, "characters", "Wren.json")
         writeFileSync(file, json(source))
-        const importFolder = () =>
-          Effect.gen(function* () {
-            const scan = yield* api.ScanStFolder({ path: folder })
-            const { importId } = yield* api.StartStImport({ unsupported: [] })
-            const f = scan.files[0]!
-            return yield* api.ImportStFolderFile({
-              importId,
-              root: scan.root,
-              path: f.path,
-              size: f.size,
-              modifiedMs: f.modifiedMs,
-              start: 0,
-              part: 0,
-              card: null,
-              orphan: false
-            })
-          })
+        const importFolder = () => importStPath(api, folder)
         yield* importFolder()
         const first = (yield* api.GetShellLibrary()).cards[0]!
         assert.strictEqual(first.createdAt, stored)
@@ -242,20 +227,7 @@ describe("independent shell reads", () => {
           json({ ...source, create_date: "invalid", data: { ...source.data, name: "Fallback" } })
         )
         const fallbackCtime = statSync(join(folder, "characters", "Fallback.json")).ctimeMs
-        const scan = yield* api.ScanStFolder({ path: folder })
-        const { importId } = yield* api.StartStImport({ unsupported: [] })
-        const f = scan.files.find((f) => f.path.endsWith("Fallback.json"))!
-        yield* api.ImportStFolderFile({
-          importId,
-          root: scan.root,
-          path: f.path,
-          size: f.size,
-          modifiedMs: f.modifiedMs,
-          start: 0,
-          part: 0,
-          card: null,
-          orphan: false
-        })
+        yield* importFolder()
         assert.closeTo(
           (yield* api.GetShellLibrary()).cards.find((c) => c.card.name === "Fallback")!.createdAt,
           fallbackCtime,

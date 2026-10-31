@@ -548,6 +548,18 @@
     },
     {
       "type": "index",
+      "name": "st_import_jobs_owner",
+      "tbl_name": "st_import_jobs",
+      "sql": "CREATE INDEX st_import_jobs_owner ON st_import_jobs(owner_user_id, started_at)"
+    },
+    {
+      "type": "index",
+      "name": "st_import_jobs_running",
+      "tbl_name": "st_import_jobs",
+      "sql": "CREATE INDEX st_import_jobs_running ON st_import_jobs(status) WHERE status = 'running'"
+    },
+    {
+      "type": "index",
       "name": "state_events_chain",
       "tbl_name": "state_events",
       "sql": "CREATE INDEX state_events_chain ON state_events(chat_id, slot_chain_id, slot_depth)"
@@ -1079,6 +1091,12 @@
       "name": "slots",
       "tbl_name": "slots",
       "sql": "CREATE TABLE slots ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, lane_id TEXT NOT NULL REFERENCES lanes(id), parent_slot_id TEXT REFERENCES slots(id), depth INTEGER NOT NULL CHECK (depth >= 0), selected_version_id TEXT NOT NULL REFERENCES versions(id) DEFERRABLE INITIALLY DEFERRED, context_excluded INTEGER NOT NULL DEFAULT 0 CHECK (context_excluded IN (0, 1)), placement_group_id TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_visited_at INTEGER, deleted_at INTEGER, bin_item_id TEXT, purged_at INTEGER, branch_deleted INTEGER NOT NULL DEFAULT 0 CHECK (branch_deleted IN (0, 1)), hidden_by_user INTEGER NOT NULL DEFAULT 0 CHECK (hidden_by_user IN (0, 1)), branch_name TEXT, st_import_row_version INTEGER NOT NULL DEFAULT 1 CHECK (st_import_row_version > 0), branch_name_user INTEGER NOT NULL DEFAULT 0 CHECK (branch_name_user IN (0, 1)), chain_id TEXT, fork_id TEXT, -- Inserted between messages (spec/MESSAGE-INSERT.md §2.2): placed per fork by an insert override. inserted INTEGER NOT NULL DEFAULT 0 CHECK (inserted IN (0, 1)), CHECK ((parent_slot_id IS NULL) = (depth = 0)) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "st_import_jobs",
+      "tbl_name": "st_import_jobs",
+      "sql": "CREATE TABLE st_import_jobs ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), mode TEXT NOT NULL CHECK (mode IN ('path', 'upload')), source TEXT NOT NULL, root TEXT, prefix TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'cancelled', 'interrupted')), started_at INTEGER NOT NULL, finished_at INTEGER, updated_at INTEGER NOT NULL, seen_at INTEGER, files_total INTEGER NOT NULL DEFAULT 0, files_done INTEGER NOT NULL DEFAULT 0, bytes_total INTEGER NOT NULL DEFAULT 0, bytes_done INTEGER NOT NULL DEFAULT 0, current_file TEXT, counts_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(counts_json)), attention INTEGER NOT NULL DEFAULT 0, report_json TEXT CHECK (report_json IS NULL OR json_valid(report_json)), not_sent_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(not_sent_json)), error TEXT ) STRICT"
     },
     {
       "type": "table",

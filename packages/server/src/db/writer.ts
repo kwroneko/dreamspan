@@ -25,6 +25,7 @@ import { makeLibraryWriteHandlers } from "./libraryWrites.ts"
 import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
+import { makeStImportJobWriteHandlers } from "./stImportJobWrites.ts"
 
 const {
   dbPath,
@@ -68,6 +69,7 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
             ...accounts,
             ...chatSetup,
             ...stImport,
+            ...(yield* makeStImportJobWriteHandlers),
             ...generation,
             ...(yield* makeLcmWriteHandlers(bin)),
             ...(yield* makeLcmQueueHandlers),

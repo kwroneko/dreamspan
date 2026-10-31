@@ -1844,24 +1844,64 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
-  ImportStFolderFile: {
+  StartStPathImport: {
+    adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
+  },
+  LinkStImportChat: {
     adminOnly: (actor, owner) =>
       Effect.gen(function* () {
         const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
-        yield* refused(
-          actor.api.ImportStFolderFile({
-            importId,
-            root: "/",
-            path: "settings.json",
-            size: 0,
-            modifiedMs: 0,
-            start: 0,
-            part: 0,
-            card: null,
-            orphan: false
-          }),
-          "Forbidden"
-        )
+        yield* refused(actor.api.LinkStImportChat({ importId, path: "chats/A/A.jsonl", card: "none" }), "Forbidden")
+      })
+  },
+  FinishStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.FinishStImport({ importId, notSent: [] }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImport({ importId })).job.status, "running")
+      })
+  },
+  ListStImports: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        assert.isFalse((yield* actor.api.ListStImports()).some((job) => job.id === importId))
+        assert.isTrue((yield* owner.api.ListStImports()).some((job) => job.id === importId))
+      })
+  },
+  GetStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.GetStImport({ importId }), "NotFound")
+      })
+  },
+  SeenStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* owner.api.FinishStImport({ importId, notSent: [] })
+        yield* refused(actor.api.SeenStImport({ importId }), "NotFound")
+        assert.isFalse((yield* owner.api.GetStImport({ importId })).job.seen)
+      })
+  },
+  CancelStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.CancelStImport({ importId }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImport({ importId })).job.status, "running")
+      })
+  },
+  ClearStImports: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* owner.api.FinishStImport({ importId, notSent: [] })
+        assert.strictEqual((yield* actor.api.ClearStImports({ importId })).cleared, 0)
+        yield* actor.api.ClearStImports({ importId: null })
+        yield* owner.api.GetStImport({ importId })
       })
   },
   UnhideImportedRun: {

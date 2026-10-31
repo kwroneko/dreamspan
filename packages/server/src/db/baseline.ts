@@ -81,6 +81,33 @@ export const baseline: ReadonlyArray<string> = [
     updated_at INTEGER NOT NULL
   ) STRICT`,
   `CREATE INDEX jobs_queue ON jobs(status, request_class, run_after) WHERE status IN ('pending', 'processing')`,
+  // ST folder imports as the user sees them (ARCHITECTURE.md §13): one row per run, its
+  // progress written at most about once a second, its report when it ends.
+  `CREATE TABLE st_import_jobs (
+    id TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL REFERENCES users(id),
+    mode TEXT NOT NULL CHECK (mode IN ('path', 'upload')),
+    source TEXT NOT NULL,
+    root TEXT,
+    prefix TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('running', 'complete', 'failed', 'cancelled', 'interrupted')),
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    updated_at INTEGER NOT NULL,
+    seen_at INTEGER,
+    files_total INTEGER NOT NULL DEFAULT 0,
+    files_done INTEGER NOT NULL DEFAULT 0,
+    bytes_total INTEGER NOT NULL DEFAULT 0,
+    bytes_done INTEGER NOT NULL DEFAULT 0,
+    current_file TEXT,
+    counts_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(counts_json)),
+    attention INTEGER NOT NULL DEFAULT 0,
+    report_json TEXT CHECK (report_json IS NULL OR json_valid(report_json)),
+    not_sent_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(not_sent_json)),
+    error TEXT
+  ) STRICT`,
+  `CREATE INDEX st_import_jobs_owner ON st_import_jobs(owner_user_id, started_at)`,
+  `CREATE INDEX st_import_jobs_running ON st_import_jobs(status) WHERE status = 'running'`,
   `CREATE TABLE entities (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT NOT NULL REFERENCES users(id),

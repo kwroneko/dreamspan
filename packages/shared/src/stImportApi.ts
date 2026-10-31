@@ -8,7 +8,7 @@ import { ChatId, EntityId, SlotId } from "./chat.ts"
 import { Forbidden, NotFound, ServerError } from "./errors.ts"
 import { ImportIssueLevel } from "./importReport.ts"
 
-const StImportId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/))
+export const StImportId = Schema.String.check(Schema.isPattern(/^[0-9a-f-]{36}$/))
 
 /** What happened to the files of one kind. */
 export class StCount extends Schema.Class<StCount>("StCount")({
@@ -103,6 +103,60 @@ export class StFolderUnreadable extends Schema.TaggedError<StFolderUnreadable>()
 
 const FolderPath = Schema.String.check(Schema.isMaxLength(4096))
 
+/**
+ * Where an import job is (ARCHITECTURE.md §13): `interrupted` when the server stopped
+ * during it, or an upload's files stopped arriving; importing the folder again goes on.
+ */
+export const StImportStatus = Schema.Literals(["running", "complete", "failed", "cancelled", "interrupted"])
+export type StImportStatus = typeof StImportStatus.Type
+
+/** A file of the import that didn't go in: refused, unreadable, or not sent. */
+export class StNotSent extends Schema.Class<StNotSent>("StNotSent")({
+  path: Schema.String,
+  message: Schema.String
+}) {}
+
+/** One import of an ST folder, as the import page lists it. */
+export class StImportJob extends Schema.Class<StImportJob>("StImportJob")({
+  id: StImportId,
+  /** `path`: the server reads the folder; `upload`: a browser sends its files. */
+  mode: Schema.Literals(["path", "upload"]),
+  /** The folder: its path on the server, or the name of the folder the browser picked. */
+  source: Schema.String,
+  status: StImportStatus,
+  startedAt: Schema.Number,
+  finishedAt: Schema.NullOr(Schema.Number),
+  updatedAt: Schema.Number,
+  filesTotal: Schema.Int,
+  filesDone: Schema.Int,
+  bytesTotal: Schema.Number,
+  bytesDone: Schema.Number,
+  currentFile: Schema.NullOr(Schema.String),
+  /** What was imported, by kind, as the report counts it. */
+  counts: Schema.Record(Schema.String, StCount),
+  /** How many things it asks the user to act on: issues, chats to link, hidden runs, files not sent. */
+  attention: Schema.Int,
+  /** Why it failed or stopped. */
+  error: Schema.NullOr(Schema.String),
+  /** The user has opened it since it finished. */
+  seen: Schema.Boolean
+}) {}
+
+/** A job with its report (null until it has one) and the files that didn't go in. */
+export class StImportJobDetail extends Schema.Class<StImportJobDetail>("StImportJobDetail")({
+  job: StImportJob,
+  report: Schema.NullOr(StImportReport),
+  notSent: Schema.Array(StNotSent)
+}) {}
+
+/** Another import of the user's is running: one at a time, since a new one stops the old one writing. */
+export class StImportBusy extends Schema.TaggedError<StImportBusy>()("StImportBusy", {
+  message: Schema.String
+}) {}
+
+/** The user's answer to a link choice: one of their cards, or `none`. */
+const CardChoice = Schema.Union([EntityId, Schema.Literal("none")])
+
 /** A folder in the import page's folder browser. */
 export class FolderListing extends Schema.Class<FolderListing>("FolderListing")({
   path: Schema.String,
@@ -131,35 +185,72 @@ export class StImportApi extends RpcGroup.make(
     error: Schema.Union([Forbidden, StFolderUnreadable])
   }),
   /**
-   * Imports one file of a scanned folder, or the part of a chat file from byte `start`:
-   * `next` is where the next part starts, and `last` says the file is done.
-   */
-  Rpc.make("ImportStFolderFile", {
-    payload: {
-      importId: StImportId,
-      /** The ST user's folder: the scanned root joined with the chosen user's prefix. */
-      root: FolderPath,
-      path: FolderPath,
-      /** The file as the scan saw it: if it has changed since, it's refused. */
-      size: Schema.Number,
-      modifiedMs: Schema.Number,
-      start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      part: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      /** The user's answer to a link choice: one of their cards, or `none`. */
-      card: Schema.NullOr(Schema.Union([EntityId, Schema.Literal("none")])),
-      orphan: Schema.Boolean
-    },
-    success: Schema.Struct({ result: StFileResult, next: Schema.Number, last: Schema.Boolean }),
-    error: Schema.Union([Forbidden, NotFound, StFolderUnreadable, ServerError])
-  }),
-  /**
-   * Starts an import for the caller, ending any earlier one of theirs. `unsupported` lists
-   * the paths of files the client found and won't send, for the report.
+   * Starts an upload import for the caller, ending any earlier upload of theirs (a running
+   * path import refuses it). `unsupported` lists the paths of files the client found and
+   * won't send, for the report.
    */
   Rpc.make("StartStImport", {
-    payload: { unsupported: Schema.Array(Schema.String).check(Schema.isMaxLength(20_000)) },
+    payload: {
+      unsupported: Schema.Array(Schema.String).check(Schema.isMaxLength(20_000)),
+      /** For the job's row: the folder's name, and how many files and bytes the browser will send. */
+      source: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+      files: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      bytes: Schema.optionalKey(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)))
+    },
     success: Schema.Struct({ importId: StImportId }),
+    error: Schema.Union([StImportBusy, ServerError])
+  }),
+  /**
+   * Imports the ST user's folder `prefix` (one of `findStRoots`) of the folder at `path` on
+   * the server, as a job that runs there until it's done, whatever the browser does. Admin only.
+   */
+  Rpc.make("StartStPathImport", {
+    payload: { path: FolderPath, prefix: FolderPath },
+    success: Schema.Struct({ importId: StImportId }),
+    error: Schema.Union([Forbidden, StFolderUnreadable, StImportBusy, ServerError])
+  }),
+  /** The browser has sent every file of an upload: the job is complete, with the files it couldn't send. */
+  Rpc.make("FinishStImport", {
+    payload: { importId: StImportId, notSent: Schema.Array(StNotSent).check(Schema.isMaxLength(2_000)) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** The caller's imports, newest first. */
+  Rpc.make("ListStImports", {
+    success: Schema.Array(StImportJob),
     error: ServerError
+  }),
+  Rpc.make("GetStImport", {
+    payload: { importId: StImportId },
+    success: StImportJobDetail,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Marks a finished import opened, so the app shell stops saying it finished. */
+  Rpc.make("SeenStImport", {
+    payload: { importId: StImportId },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Stops a running import after the file it's on. */
+  Rpc.make("CancelStImport", {
+    payload: { importId: StImportId },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, ServerError])
+  }),
+  /** Forgets one finished import, or (null) every finished one. Nothing it imported changes. */
+  Rpc.make("ClearStImports", {
+    payload: { importId: Schema.NullOr(StImportId) },
+    success: Schema.Struct({ cleared: Schema.Int }),
+    error: ServerError
+  }),
+  /**
+   * Imports a chat of a path import's report with the card the user chose, read again from
+   * the folder. Admin only, as reading the folder is; refused while another import runs.
+   */
+  Rpc.make("LinkStImportChat", {
+    payload: { importId: StImportId, path: FolderPath, card: CardChoice },
+    success: StFileResult,
+    error: Schema.Union([Forbidden, NotFound, StFolderUnreadable, StImportBusy, ServerError])
   }),
   Rpc.make("GetStImportReport", {
     payload: { importId: StImportId },
@@ -168,7 +259,8 @@ export class StImportApi extends RpcGroup.make(
   }),
   /** Un-hides an imported chat's messages from its first to `throughSlotId`, on its path. */
   Rpc.make("UnhideImportedRun", {
-    payload: { chatId: ChatId, throughSlotId: SlotId },
+    /** `importId`: the import whose report offered it, which stops offering it. */
+    payload: { chatId: ChatId, throughSlotId: SlotId, importId: Schema.optionalKey(StImportId) },
     success: Schema.Struct({ unhidden: Schema.Int }),
     error: Schema.Union([NotFound, ServerError])
   })

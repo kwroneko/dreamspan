@@ -1,6 +1,11 @@
 import { TextActionHost } from "../textActions.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
+/**
+ * Lines across the top of every screen, above the page and below the phone bar: what the
+ * user should see wherever they are (a running import, say). Empty, it takes no room.
+ */
+export const appBanners = defineSlot<Record<string, never>>("app.banners")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -268,6 +273,7 @@ function AppShell() {
             <DesktopSidebar key={result.value.user.id} />
             <div className="flex min-w-0 flex-1 flex-col">
               <PhoneBar />
+              <SlotOutlet slot={appBanners} props={{}} />
               <Main />
             </div>
           </div>
