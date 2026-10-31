@@ -48,9 +48,10 @@ test("group member listing includes the card version", async ({ page }) => {
     .getByRole("button", { name: "Groups", exact: true })
     .click()
   const groups = page.getByRole("main").getByLabel("Groups", { exact: true })
-  await expect(groups.getByRole("button").filter({ hasText: "Review A, Review B" })).toHaveCount(0)
+  // A tile counts its members (UI audit, 2026-10-31); its tooltip names them with their versions.
+  await expect(groups.getByRole("button").filter({ hasText: "2 members" })).toBeVisible()
   await expect(
-    groups.getByRole("button").filter({ hasText: "Review A · distinctive-version-7, Review B · distinctive-version-9" })
+    groups.getByTitle("Review A · distinctive-version-7, Review B · distinctive-version-9", { exact: true })
   ).toBeVisible()
 })
 test("the sidebar refreshes card name and version after an ordinary editor Save", async ({ page }) => {

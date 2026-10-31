@@ -1,6 +1,14 @@
 // The route registry (spec/PLUGINS.md §8): every screen registers here by id, and the
 // router is built from what's registered. A layout's navigation lists its children.
-import { createRootRoute, createRoute, createRouter, Link, Outlet, type AnyRoute } from "@tanstack/react-router"
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Link,
+  Outlet,
+  retainSearchParams,
+  type AnyRoute
+} from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { makeRegistry } from "./registry.ts"
 
@@ -13,6 +21,11 @@ export interface RouteEntry {
   readonly component: () => ReactNode
   /** Listed in the parent's navigation. Admin-only entries are hidden from others; the server still decides. */
   readonly nav?: { readonly label: string; readonly order: number; readonly adminOnly?: boolean }
+  /**
+   * Search params a navigation to this screen keeps from the current URL unless it sets or
+   * removes them itself: state of the shell that outlives the screen's own links.
+   */
+  readonly retainSearch?: ReadonlyArray<string>
 }
 
 export const routes = makeRegistry<RouteEntry>()
@@ -52,10 +65,13 @@ export const buildRouter = () => {
       .list()
       .filter((entry) => entry.parent === parentId)
       .map((entry) => {
+        const search = entry.retainSearch
+          ? { search: { middlewares: [retainSearchParams([...entry.retainSearch])] } }
+          : {}
         const route =
           entry.path === undefined
-            ? createRoute({ getParentRoute: () => parent, id: entry.id, component: entry.component })
-            : createRoute({ getParentRoute: () => parent, path: entry.path, component: entry.component })
+            ? createRoute({ getParentRoute: () => parent, id: entry.id, component: entry.component, ...search })
+            : createRoute({ getParentRoute: () => parent, path: entry.path, component: entry.component, ...search })
         const nested = children(entry.id, route)
         return nested.length > 0 ? route.addChildren(nested) : route
       })
