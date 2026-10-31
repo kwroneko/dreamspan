@@ -20,7 +20,7 @@ export function Spinner({ className = "" }: { className?: string }) {
 export const reloadPage = () => window.location.reload()
 
 /** How long a region may load before it says so and offers to ask again. */
-export const SLOW_LOADING_MS = 15_000
+const SLOW_LOADING_MS = 15_000
 
 /**
  * A loading placeholder for a region, announced politely. With `onRetry`, a load that

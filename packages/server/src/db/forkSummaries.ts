@@ -264,30 +264,3 @@ export const refreshChatSummaries = (sql: SqlClient.SqlClient, userId: string, c
       { chatId, stamp: chat.shell_stamp, userStamp: yield* summaryStamps(sql, userId), forks: JSON.stringify(forks) }
     ])
   })
-
-/** A stored row, which `fromRow` reads as the summary it holds. */
-export interface SummaryRow {
-  readonly fork_id: string
-  readonly chat_id: string
-  readonly preview: string
-  readonly messages: number
-  readonly leaf: string | null
-  readonly end_at: number | null
-  readonly cast_json: string
-  readonly joined_json: string
-  readonly departed_json: string
-  readonly activity_json: string
-}
-
-export const fromRow = (row: SummaryRow): ForkSummary => ({
-  forkId: row.fork_id,
-  chatId: row.chat_id,
-  preview: row.preview,
-  messages: row.messages,
-  leaf: row.leaf,
-  endAt: row.end_at,
-  cast: JSON.parse(row.cast_json),
-  joined: JSON.parse(row.joined_json),
-  departed: JSON.parse(row.departed_json),
-  activity: JSON.parse(row.activity_json)
-})

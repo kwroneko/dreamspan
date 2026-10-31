@@ -37,7 +37,7 @@ const PROGRESS_MS = 1_000
 /** The report so far is written this often while a job runs, so an interrupted job keeps most of it. */
 const REPORT_MS = 15_000
 /** An upload whose files stop arriving for this long has ended: its tab was closed or lost. */
-export const UPLOAD_IDLE_MS = 10 * 60_000
+const UPLOAD_IDLE_MS = 10 * 60_000
 const SWEEP_MS = 60_000
 /** The "Not sent" list a job keeps. */
 const MAX_NOT_SENT = 2_000

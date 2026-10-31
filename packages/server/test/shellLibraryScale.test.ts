@@ -56,7 +56,10 @@ const build = (userId: string, now: number) => {
         SELECT printf('c-%05d', i), ?, 'rp', 'active', 'Chat ' || i, ?, ? + i FROM sizes`,
       params: [userId, now, now]
     },
-    { sql: `INSERT INTO lanes (id, chat_id, name, created_at) SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM sizes`, params: [now] },
+    {
+      sql: `INSERT INTO lanes (id, chat_id, name, created_at) SELECT 'l-' || i, printf('c-%05d', i), 'main', ? FROM sizes`,
+      params: [now]
+    },
     // Every fifth chat is a group of three; 20 cards are never used.
     {
       sql: `INSERT INTO state_events (id, chat_id, seq, key, value_json, origin, created_at, fork_id, fork_seq)
@@ -84,7 +87,9 @@ const build = (userId: string, now: number) => {
         FROM d JOIN sizes s ON d.i < s.n ORDER BY d.i, s.i`,
       params: [now - 10_000_000]
     },
-    { sql: `UPDATE chats SET active_leaf_slot_id = (SELECT 's-' || i || '-' || (n - 1) FROM sizes WHERE printf('c-%05d', i) = chats.id)` }
+    {
+      sql: `UPDATE chats SET active_leaf_slot_id = (SELECT 's-' || i || '-' || (n - 1) FROM sizes WHERE printf('c-%05d', i) = chats.id)`
+    }
   ])
 }
 
@@ -150,20 +155,21 @@ const measure = () =>
     )
     const library = yield* reader.ShellLibrary({ userId: me.id })
     const measured = JSON.stringify({
-        cards: CARDS,
-        chats: CHATS,
-        messages: BIG * BIG_MESSAGES + (CHATS - BIG) * MESSAGES,
-        buildSeconds: +buildSeconds.toFixed(1),
-        coldMs: Math.round(cold.ms),
-        warmMedianMs: Math.round(median(warm)),
-        warmMs: warm.map(Math.round),
-        dirtyBigChatMedianMs: Math.round(median(dirty)),
-        dirtyMs: dirty.map(Math.round),
-        usedCards: library.cards.filter((c) => c.card.chats > 0).length
-      })
+      cards: CARDS,
+      chats: CHATS,
+      messages: BIG * BIG_MESSAGES + (CHATS - BIG) * MESSAGES,
+      buildSeconds: +buildSeconds.toFixed(1),
+      coldMs: Math.round(cold.ms),
+      warmMedianMs: Math.round(median(warm)),
+      warmMs: warm.map(Math.round),
+      dirtyBigChatMedianMs: Math.round(median(dirty)),
+      dirtyMs: dirty.map(Math.round),
+      usedCards: library.cards.filter((c) => c.card.chats > 0).length
+    })
     const planText = plans.map((plan) => plan.map((row) => `${row.id}/${row.parent} ${row.detail}`).join("\n"))
     process.stdout.write(`${measured}\n${planText.join("\n\n")}\n`)
-    if (process.env.SHELL_SCALE_OUT) writeFileSync(process.env.SHELL_SCALE_OUT, `${measured}\n${planText.join("\n\n")}\n`)
+    if (process.env.SHELL_SCALE_OUT)
+      writeFileSync(process.env.SHELL_SCALE_OUT, `${measured}\n${planText.join("\n\n")}\n`)
     assert.strictEqual(library.cards.filter((c) => c.card.chats > 0).length, 400)
     assert.isBelow(median(warm), 100)
   })

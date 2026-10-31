@@ -85,7 +85,7 @@ export const STATUS_TONES = {
 } as const
 
 /** The job the shell speaks of: the newest running, else the newest finished one not opened since. */
-export const shownJob = (jobs: ReadonlyArray<StImportJob>) =>
+const shownJob = (jobs: ReadonlyArray<StImportJob>) =>
   jobs.find((job) => job.status === "running") ?? jobs.find((job) => !job.seen)
 
 const endedLine = (job: StImportJob) => {

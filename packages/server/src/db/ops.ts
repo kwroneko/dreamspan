@@ -412,7 +412,7 @@ const StChatRecord = Schema.Struct({
  * `StoreForkSummaries`. `forks` is their JSON, as the writer stores it: decoding thousands of
  * them on the main thread only to encode them again cost as much as the read.
  */
-export const ChatSummariesAt = Schema.Struct({
+const ChatSummariesAt = Schema.Struct({
   chatId: Schema.String,
   stamp: Schema.Int,
   userStamp: Schema.Int,

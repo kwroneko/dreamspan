@@ -4,7 +4,7 @@
 // browser plans a folder picked in it, so both send the same files in the same order.
 import { classifyStPath, orderStChats, ST_FILE_ORDER, type StFile } from "./stFolder.ts"
 
-export type StSentKind = Exclude<StFile["kind"], "unsupported">
+type StSentKind = Exclude<StFile["kind"], "unsupported">
 
 /** A file the import sends, by its path in the ST user's folder, and what it was found as. */
 export interface StPlanned<A> {
