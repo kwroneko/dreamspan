@@ -315,33 +315,34 @@ export function Editor({
                 </div>
               </Popover>
             )}
-            <p role="status" className="text-sm text-muted sm:ml-auto">
-              {state.saving
-                ? "Keeping your changes…"
-                : dirty === 0
-                  ? "Everything is saved."
-                  : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
-            </p>
+            {/* A preset's search toggle ends the state line: on a phone the buttons fill a row, and
+                the line under them holds both (unitGPreset keeps the sticky bar under 400 px). */}
+            <div className="flex min-w-0 items-center justify-between gap-2 max-sm:w-full sm:ml-auto">
+              <p role="status" className="text-sm text-muted">
+                {state.saving
+                  ? "Keeping your changes…"
+                  : dirty === 0
+                    ? "Everything is saved."
+                    : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
+              </p>
+              {ref.kind === "preset" && (
+                <Button
+                  variant="ghost"
+                  className="h-7! shrink-0 px-2!"
+                  aria-expanded={searching}
+                  aria-controls="preset-search"
+                  onClick={() => setSearching(!searching)}
+                >
+                  <Icon name="search" />
+                  Search
+                </Button>
+              )}
+            </div>
           </div>
           {clash && (
             <p role="status" className="text-sm text-muted">
               {clash}
             </p>
-          )}
-          {/* A preset's search toggle sits on its own line under the bar: on a phone the bar's buttons fill a row. */}
-          {ref.kind === "preset" && (
-            <div className="flex justify-end">
-              <Button
-                variant="ghost"
-                className="h-7! shrink-0 px-2!"
-                aria-expanded={searching}
-                aria-controls="preset-search"
-                onClick={() => setSearching(!searching)}
-              >
-                <Icon name="search" />
-                Search
-              </Button>
-            </div>
           )}
           {ref.kind === "preset" && searching && (
             <div id="preset-search">
