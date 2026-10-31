@@ -8,15 +8,21 @@ import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { lastChatAt } from "./cardRecency.ts"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
-export type ShellLibrary = Omit<ShellLibraryRows, "forks" | "people"> & { readonly forks: ReadonlyArray<ShellFork> }
+export type ShellLibrary = Omit<ShellLibraryRows, "forks" | "people"> & {
+  readonly forks: ReadonlyArray<ShellFork>
+  /** Each card's latest chat activity, the characters' Recent key (cardRecency.ts). */
+  readonly lastChatAt: ReadonlyMap<string, number>
+}
 const withCast = (data: ShellLibraryRows): ShellLibrary => {
   const people = new Map(data.people.map((c) => [c.entityId, c]))
   return {
     ...data,
-    forks: data.forks.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) }))
+    forks: data.forks.map((f) => ({ ...f, cast: f.cast.flatMap((id) => people.get(id) ?? []) })),
+    lastChatAt: lastChatAt(data.forks)
   }
 }
 export const shellAtom = Atom.mapResult(

@@ -5,29 +5,26 @@ import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
+import { sortCards } from "./cardRecency.ts"
 import { CharacterTile, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { GroupTile, PinnedChats, SortSwitch, sortForks, type ShellSort } from "./ShellBrowser.tsx"
 
-type Filter = "all" | "used" | "unused" | "groups" | "archive"
+type Filter = "all" | "used" | "unused" | "groups"
 function Home({ data }: { data: ShellLibrary }) {
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<ShellSort>("recent")
   const [search, setSearch] = useState("")
   const needle = search.trim().toLowerCase()
-  const cards = data.cards
-    .filter(
+  const cards = sortCards(
+    data.cards.filter(
       (c) =>
         (filter !== "used" || c.card.chats > 0) &&
         (filter !== "unused" || c.card.chats === 0) &&
         [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(needle))
-    )
-    .sort((a, b) =>
-      sort === "name"
-        ? a.card.label.localeCompare(b.card.label) || a.card.subtitle.localeCompare(b.card.subtitle)
-        : sort === "created"
-          ? b.createdAt - a.createdAt
-          : b.recentAt - a.recentAt
-    )
+    ),
+    data.lastChatAt,
+    sort
+  )
   const groups = sortForks(
     data.forks.filter(
       (f) =>
@@ -50,8 +47,7 @@ function Home({ data }: { data: ShellLibrary }) {
             { value: "all", label: "All" },
             { value: "used", label: "With chats" },
             { value: "unused", label: "Never used" },
-            { value: "groups", label: "Groups" },
-            { value: "archive", label: "Archive · later" }
+            { value: "groups", label: "Groups" }
           ]}
         />
       </div>
@@ -66,9 +62,7 @@ function Home({ data }: { data: ShellLibrary }) {
         />
         <SortSwitch value={sort} onChange={setSort} />
       </div>
-      {filter === "archive" ? (
-        <EmptyState title="Archive · later" />
-      ) : filter === "groups" ? (
+      {filter === "groups" ? (
         <div aria-label="Groups" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
           {groups.map((f) => (
             <GroupTile key={`${f.chat.id}/${f.forkId}`} fork={f} />

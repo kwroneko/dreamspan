@@ -11,6 +11,7 @@ import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { sortCards } from "./cardRecency.ts"
 import { GroupFaces } from "./GroupFaces.tsx"
 import {
   CharacterTile,
@@ -99,8 +100,12 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
           <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.name}</span>
-          <span className="text-xs text-muted [overflow-wrap:anywhere]">
-            {fork.cast.map((c) => `${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`).join(", ")}
+          {/* The faces show who; the names with their versions are in the tooltip. */}
+          <span
+            className="text-xs text-muted"
+            title={fork.cast.map((c) => `${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`).join(", ")}
+          >
+            {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
           </span>
           <span className="mt-auto text-xs text-muted">{fork.current ? "Current fork" : "Peer fork"}</span>
         </span>
@@ -114,19 +119,25 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
 export function ForkRow({
   fork,
   scopeChat = false,
-  details = false
+  details = false,
+  here = false
 }: {
   fork: ShellFork
   scopeChat?: boolean
   details?: boolean
+  /** The fork open in the middle: marked, so the list says where you are. */
+  here?: boolean
 }) {
   const open = useOpenFork(fork, scopeChat)
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md border border-border p-1 hover:bg-surface-raised">
+    <div
+      className={`flex min-w-0 items-center gap-1 rounded-md border p-1 hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+    >
       <button
         type="button"
         onClick={open}
         aria-label={`Open chat ${fork.name}`}
+        aria-current={here ? "page" : undefined}
         data-chat-id={fork.chat.id}
         className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left"
       >
@@ -264,7 +275,11 @@ function Browser({ data }: { data: ShellLibrary }) {
           {title}
         </h3>
         {forks.map((f) => (
-          <ForkRow key={`${f.chat.id}/${f.forkId}`} fork={f} />
+          <ForkRow
+            key={`${f.chat.id}/${f.forkId}`}
+            fork={f}
+            here={f.chat.id === params.chatId && (shown ? f.forkId === shown : f.current)}
+          />
         ))}
       </section>
     )
@@ -331,11 +346,13 @@ function Browser({ data }: { data: ShellLibrary }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {grid ? (
           <div className="grid grid-cols-2 gap-2">
-            {data.cards
-              .filter((c) => c.card.label.toLowerCase().includes(needle))
-              .map((c) => (
-                <CharacterTile key={c.card.entityId} card={c} />
-              ))}
+            {sortCards(
+              data.cards.filter((c) => c.card.label.toLowerCase().includes(needle)),
+              data.lastChatAt,
+              "recent"
+            ).map((c) => (
+              <CharacterTile key={c.card.entityId} card={c} />
+            ))}
           </div>
         ) : (
           <>

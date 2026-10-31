@@ -1,6 +1,8 @@
 import { TextActionHost } from "../textActions.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
+/** Actions in the sidebar's header row; `onNavigate` closes the phone sheet. */
+export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined }>("shell.sidebar.actions")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -107,7 +109,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           className="max-w-40 truncate text-muted hover:text-text"
           onClick={onNavigate}
         >
-          {session.user.displayName}
+          {/* Without accounts the one user is "local", which says nothing. */}
+          {session.via === "local" ? "Account" : session.user.displayName}
         </Link>
         <BrowserRecovery userId={session.user.id} />
         {session.via === "session" && <LogoutButton variant="ghost" />}
@@ -122,15 +125,13 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <Link to="/" className="font-semibold" onClick={onNavigate}>
+      <div className="flex items-center gap-1 px-1">
+        <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
           rp-harness
         </Link>
-        <Link to="/" className="rounded-md px-2 py-1 text-sm text-accent hover:bg-surface-raised" onClick={onNavigate}>
-          New chat
-        </Link>
+        <SlotOutlet slot={sidebarActions} props={{ onNavigate }} />
+        <ImageControls />
       </div>
-      <ImageControls />
       {onChats ? <div className="flex-1" /> : <ShellBrowser />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
     </div>

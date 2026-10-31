@@ -205,8 +205,7 @@ for (const width of [1440, 390]) {
         ["All", "home"],
         ["With chats", "with-chats"],
         ["Never used", "never-used"],
-        ["Groups", "groups"],
-        ["Archive · later", "archive"]
+        ["Groups", "groups"]
       ] as const) {
         await page
           .getByRole("group", { name: "Show", exact: true })

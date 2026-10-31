@@ -44,7 +44,7 @@ export function BrowserRecovery({
           setOpen(true)
         }}
       >
-        Browser recovery
+        Unsaved text
       </Button>
       <Dialog
         open={open}
