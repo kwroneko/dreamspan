@@ -18,6 +18,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { rewriteText } from "../chat/rewrites.ts"
 import { DraftTooLarge } from "../db/ops.ts"
 import { internal, toServerError } from "./internal.ts"
 
@@ -159,9 +160,23 @@ export const makeChatHandlers = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const { composer, ...send } = params
+      // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
+      const written =
+        params.kind === "message"
+          ? yield* rewriteText(reader, {
+              userId: user,
+              chatId: params.chatId,
+              forkId: params.forkId,
+              at: { leafSlotId: params.parentSlotId, speakerEntityId: params.speakerEntityId },
+              edit: false,
+              content: params.content
+            })
+          : { content: params.content }
       const outcome = yield* writer.SendOrQueue({
         userId: user,
         ...send,
+        content: written.content,
+        ...(written.rewrite ? { rewrite: written.rewrite } : {}),
         // The composer draft the text was taken from (DESIGN §6.2).
         commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
       })
@@ -190,6 +205,26 @@ export const makeChatHandlers = Effect.gen(function* () {
       const entry = yield* publishSlot(user, result.slotId)
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
       return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft, recovered: result.recovered }
+    })
+
+  /** An edit's text through the scripts that run on edits, at the version it edits. */
+  const editRewrite = (
+    user: UserId,
+    slotId: SlotId,
+    forkId: ForkId | null | undefined,
+    versionId: import("@rp/shared/chat.ts").VersionId,
+    content: string
+  ) =>
+    Effect.gen(function* () {
+      const { chatId } = yield* reader.GetSlot({ userId: user, slotId, forkId: forkId ?? null })
+      return yield* rewriteText(reader, {
+        userId: user,
+        chatId,
+        forkId,
+        at: { slotId, versionId },
+        edit: true,
+        content
+      })
     })
 
   const handlers = {
@@ -465,12 +500,18 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const source = yield* reader.GetVersion({ userId: id, versionId: sourceVersionId })
-        const version = userText(content, "edited", source.speakerEntityId, sourceVersionId)
+        // An edit goes through the scripts that run on edits (ST's updateMessage).
+        const written = yield* editRewrite(id, slotId, forkId, sourceVersionId, content)
+        const version = userText(written.content, "edited", source.speakerEntityId, sourceVersionId)
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
           forkId: forkId ?? null,
-          version: { ...version, ...(images === undefined ? {} : { images }) },
+          version: {
+            ...version,
+            ...(images === undefined ? {} : { images }),
+            ...(written.rewrite ? { rewrite: written.rewrite } : {})
+          },
           expectedRowVersion,
           commitDraft: draft ?? null
         })
@@ -508,20 +549,50 @@ export const makeChatHandlers = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = yield* userId
         const { entry } = yield* reader.GetSlot({ userId: id, slotId, forkId: forkId ?? null })
-        const version = userText(content, "user_written", entry.version.speakerEntityId)
+        const written = yield* editRewrite(id, slotId, forkId, entry.version.id, content)
+        const version = userText(written.content, "user_written", entry.version.speakerEntityId)
         const added = yield* writer.AddSelectedVersion({
           userId: id,
           slotId,
           forkId: forkId ?? null,
           version: {
             ...version,
-            images: images ?? entry.version.images ?? []
+            images: images ?? entry.version.images ?? [],
+            ...(written.rewrite ? { rewrite: written.rewrite } : {})
           },
           expectedRowVersion,
           commitDraft: draft ?? null
         })
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("WriteVersion")),
+
+    RawVersionText: ({ versionId }) =>
+      Effect.flatMap(userId, (id) => reader.RawVersionText({ userId: id, versionId })).pipe(internal("RawVersionText")),
+
+    // The text from before the scripts, back as a new version of the slot; no script rewrites it.
+    RestoreRawText: ({ slotId, forkId, versionId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const source = yield* reader.GetVersion({ userId: id, versionId })
+        if (source.slotId !== slotId) return yield* new NotFound({ entity: "version", id: versionId })
+        const raw = yield* reader.RawVersionText({ userId: id, versionId })
+        if (raw.content === null && raw.reasoning === null && raw.sections === null)
+          return yield* new NotFound({ entity: "original text", id: versionId })
+        const sections = raw.sections ?? source.replySections
+        const added = yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId,
+          forkId: forkId ?? null,
+          version: {
+            ...userText(raw.content ?? source.content, "edited", source.speakerEntityId, versionId),
+            ...((raw.reasoning ?? source.reasoning) ? { reasoning: raw.reasoning ?? source.reasoning } : {}),
+            ...(sections ? { replySections: sections } : {})
+          },
+          expectedRowVersion,
+          commitDraft: null
+        })
+        return yield* publishSlot(id, slotId, added.forkId)
+      }).pipe(internal("RestoreRawText")),
 
     VersionAmendments: ({ versionId }) =>
       Effect.flatMap(userId, (id) => reader.VersionAmendments({ userId: id, versionId })).pipe(
@@ -617,11 +688,14 @@ export const makeChatHandlers = Effect.gen(function* () {
     AmendVersion: ({ versionId, forkId, content, images, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId
+        const amended = yield* reader.GetVersion({ userId: id, versionId })
+        const written = yield* editRewrite(id, amended.slotId, forkId, versionId, content)
         const version = yield* writer.AmendVersion({
           userId: id,
           versionId,
           forkId: forkId ?? null,
-          content,
+          content: written.content,
+          ...(written.rewrite ? { rewrite: written.rewrite } : {}),
           ...(images === undefined ? {} : { images }),
           expectedRowVersion,
           commitDraft: draft ?? null

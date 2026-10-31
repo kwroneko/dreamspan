@@ -23,6 +23,8 @@ const CARD_LABELS: Record<string, string> = {
   modules: "Modules",
   avatar_media_id: "Avatar",
   character_book: "Lorebook",
+  regex: "Regex scripts",
+  regex_approved: "Regex scripts allowed",
   extensions: "Extensions"
 }
 
@@ -122,6 +124,13 @@ const identified = (doc: Doc, list: string, key: string, fields: ReadonlyArray<s
   )
 }
 
+/** A document's regex scripts' text fields (`regex`), for a section that shows them. */
+export const regexScriptFields = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> =>
+  identified(doc, "regex", "id", ["name", "find_regex", "replace_string"]).map((entry) => ({
+    ...entry,
+    label: fieldLabel(kind, doc, entry.path)
+  }))
+
 /** Every text field of the document, in the order the editor shows them. */
 const builtinSearchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> => {
   const label = (entry: { path: FieldPath; text: string }) => ({ ...entry, label: fieldLabel(kind, doc, entry.path) })
@@ -170,7 +179,7 @@ const builtinSearchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable
           key
         ])
       ).map(label),
-      ...identified(doc, "regex", "id", ["name", "find_regex", "replace_string"]).map(label)
+      ...regexScriptFields(kind, doc)
     ]
   }
   return strings(doc, [["title"], ["content"]]).map(label)

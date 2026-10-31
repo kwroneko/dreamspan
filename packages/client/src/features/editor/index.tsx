@@ -10,7 +10,8 @@ import { EndOfRequest } from "./EndOfRequest.tsx"
 import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
 import { presetEditorSections } from "./presetSections.ts"
 import { registerPresetWarnings } from "./PromptDocument.tsx"
-import { editorTextFields } from "./fields.ts"
+import { editorTextFields, regexScriptFields } from "./fields.ts"
+import { CardRegexScripts } from "./RegexScripts.tsx"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
 import { LorebookUse, StandaloneLorebook } from "./StandaloneLorebook.tsx"
 import { lazy, Suspense } from "react"
@@ -34,6 +35,8 @@ export const register = () => {
   libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: "card.embedded-lorebook", order: 100, component: EmbeddedLorebook })
+  cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
+  editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()

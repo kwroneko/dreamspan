@@ -8,6 +8,8 @@ import { cardFields } from "./macros.ts"
 import { AssemblySources, type AssemblerStage, need } from "./pipeline.ts"
 import { characterNoteText, historyLeafOf, type LorebookInput, type LoreRecord, noteCard } from "./types.ts"
 import { configurationOf, previousStart } from "./cutState.ts"
+import { applyScripts, PLACEMENT } from "./regex.ts"
+import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 
 /** A separate stream: probability never consumes the macros' random draws. */
 const randomFor = (input: string) => {
@@ -213,9 +215,29 @@ export const loreActivationStage: AssemblerStage = {
           text
         )
       }
+      // ST's prompt scripts for world info run on each entry's content as it goes in
+      // (world-info.js): with the entry's depth when it's placed at one, otherwise with none.
+      const scripted = (entry: LorebookEntry, content: string, piece: number) => {
+        const runner = assembly.scripts
+        if (!runner || runner.list.length === 0) return piece
+        const [ran] = applyScripts(assembly, runner, [
+          { text: content, placement: PLACEMENT.worldInfo, depth: entry.position === "at_depth" ? entry.depth : null }
+        ])
+        if (!ran || ran.text === content) return piece
+        assembly.pieces[piece] = {
+          ...assembly.pieces[piece]!,
+          text: ran.text,
+          ...(ran.applied ? { scripts: ran.applied } : {})
+        }
+        return piece
+      }
       const lore: Array<NonNullable<typeof assembly.lore>[number]> = result.activated.map((a) => ({
         entry: a.entry,
-        piece: record(a.book, a.entry.uid, { status: "activated", step: a.step, why: a.why }, a.entry.content),
+        piece: scripted(
+          a.entry,
+          a.entry.content,
+          record(a.book, a.entry.uid, { status: "activated", step: a.step, why: a.why }, a.entry.content)
+        ),
         book: a.book,
         revision: inputs.find((b) => b.id === a.book)!.revision
       }))
@@ -235,7 +257,11 @@ export const loreActivationStage: AssemblerStage = {
         const content = env.preview(`lore:${book.id}:${entry.uid}:content`, entry.content, optionsFor(book))
         lore.push({
           entry: { ...entry, content },
-          piece: record(book.id, entry.uid, { status: "activated", step: 0, why: { kind: "pinned" } }, content),
+          piece: scripted(
+            entry,
+            content,
+            record(book.id, entry.uid, { status: "activated", step: 0, why: { kind: "pinned" } }, content)
+          ),
           book: book.id,
           revision: book.revision,
           pinnedOnly: true

@@ -15,6 +15,9 @@ export interface QueuedRow {
   readonly kind: "message" | "generate"
   readonly images_json: string
   readonly content: string
+  /** The typed text before regex scripts rewrote it, and what they did (as on versions). */
+  readonly raw_content: string | null
+  readonly rewrite_json: string | null
   readonly speaker_entity_id: string | null
   readonly reply_speaker_entity_id: string | null
   readonly direction: string | null

@@ -11,13 +11,13 @@ import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import {
+  type ComponentProps,
   memo,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore
@@ -32,14 +32,11 @@ import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { castView, messageSide, modelNameOf, useCast } from "./cast.ts"
+import { messageSide, useCast } from "./cast.ts"
 import { MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
+import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
 import { formatWhen } from "./chatTitle.ts"
-import { displayText } from "./macros.ts"
-import { applyDisplayTransforms, displayTransforms } from "./displayPipeline.ts"
-import { useDisplayContext } from "./DisplaySettings.tsx"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
@@ -74,82 +71,35 @@ export interface ContextMark {
 }
 
 /**
- * Text whose macros resolve against the chat's state at its position (DESIGN §5.6): a
- * greeting's `{{user}}` is whoever the user played before it, so it follows a persona
- * change until a message is sent after it, and a later change doesn't rewrite it. Only
- * such text reads the cast there; other messages render as before.
+ * A message's text as it displays (useDisplayed.ts), live or finished: one component for both,
+ * so a reply that just finished goes on showing its streamed display until the final one is
+ * ready. Template text's macros resolve against the chat's state at its position (DESIGN
+ * §5.6): a greeting's `{{user}}` is whoever the user played before it, so it follows a persona
+ * change until a message is sent after it, and a later change doesn't rewrite it.
  */
-function TemplateText({
+function BodyText({
   version,
   session,
   parentSlotId,
   depth,
-  placement
-}: {
-  version: Version
-  session: ChatSession
-  parentSlotId: SlotId | null
-  depth: number
-  placement: 1 | 2
-}) {
-  const viewer = useViewPrefs()
-  const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
-  const cast = useCast()
-  const read = useCallback(
-    () => (needsContext ? session.castAfter(parentSlotId) : undefined),
-    [session, parentSlotId, needsContext]
-  )
-  const positionCast = useSyncExternalStore(session.subscribePositions, read)
-  // The speaker card's own fields, for `{{description}}` and the like, as the preview had them.
-  const readFields = useCallback(
-    () => (!needsContext || version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),
-    [session, version.speakerEntityId, needsContext]
-  )
-  const fields = useSyncExternalStore(session.subscribePositions, readFields)
-  const here = useMemo(
-    () => (positionCast ? castView(positionCast, [...cast.cards.values()]) : cast),
-    [positionCast, cast]
-  )
-  const display = useDisplayContext()
-  const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
-  const input = useMemo(
-    () => ({
-      text: version.content,
-      version,
-      names: { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
-      card: fields ?? {},
-      prefs: viewer.prefs,
-      scripts: display.scripts,
-      placement,
-      depth: display.leafDepth === null ? null : Math.max(0, display.leafDepth - depth)
-    }),
-    [version, here, fields, viewer.prefs, display, depth, placement]
-  )
-  const [result, setResult] = useState<{
-    input: typeof input
-    stages: typeof stages
-    text: string
-    issues: ReadonlyArray<string>
-  } | null>(null)
-  useEffect(() => {
-    let active = true
-    void applyDisplayTransforms(input, stages.entries).then((value) => {
-      if (active) setResult({ input, stages, ...value })
-    })
-    return () => {
-      active = false
-    }
-  }, [input, stages])
-  const current = result?.input === input && result.stages === stages ? result : null
-  const text =
-    current?.text ??
-    displayText(version.content, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
+  placement,
+  text,
+  streaming
+}: DisplayAt & { placement: 1 | 2; text: string; streaming: boolean }) {
+  const shown = useDisplayed({ version, session, parentSlotId, depth }, text, placement, streaming)
   return (
     <>
-      <MessageBody text={version.content}>
-        <Markdown text={text} sourceText={version.content} streaming={false} />
+      <MessageBody text={text}>
+        {shown.pending ? (
+          // Its place kept, not shown, until the display scripts answer.
+          <div className="invisible" aria-hidden>
+            <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+          </div>
+        ) : (
+          <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+        )}
       </MessageBody>
-      {current?.issues.map((issue, i) => (
+      {shown.issues.map((issue, i) => (
         <p key={i} role="note" className="text-xs text-muted">
           {issue}
         </p>
@@ -179,23 +129,21 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
-      <ReasoningPanels version={version} session={session} />
+      <ReasoningPanels version={version} session={session} parentSlotId={parentSlotId} depth={depth} />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
         </p>
-      ) : live === null && !generating ? (
-        <TemplateText
+      ) : (
+        <BodyText
           version={version}
           session={session}
           parentSlotId={parentSlotId}
           depth={depth}
           placement={placement}
+          text={text}
+          streaming={generating}
         />
-      ) : (
-        <MessageBody text={text}>
-          <Markdown text={text} streaming={generating} />
-        </MessageBody>
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
@@ -257,6 +205,10 @@ function Editor({
       : ""
 
   const commandSnapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
+  // The editor opens where the message is: when its text takes focus the first time, Save
+  // and Cancel under it come into view too, with the caret at the end just above them.
+  const actions = useRef<HTMLDivElement>(null)
+  const revealed = useRef(false)
   const commands: ChatCommandContext = {
     session,
     view: session.snapshot(),
@@ -267,6 +219,11 @@ function Editor({
   return (
     <form
       className="flex flex-col gap-2"
+      onFocus={() => {
+        if (revealed.current) return
+        revealed.current = true
+        actions.current?.scrollIntoView({ block: "nearest" })
+      }}
       onSubmit={(event) => {
         event.preventDefault()
         invokeChatCommand("message.save", commands)
@@ -299,7 +256,14 @@ function Editor({
       ) : (
         <SlotOutlet
           slot={messageTextEditor}
-          props={{ label, value: text, base, autoFocus: true, onChange: (value) => draft.setText(value) }}
+          props={{
+            label,
+            value: text,
+            base,
+            autoFocus: true,
+            quietMarkers: true,
+            onChange: (value) => draft.setText(value)
+          }}
         />
       )}
       {error && (
@@ -314,20 +278,7 @@ function Editor({
           switchText={() => draft.switchConflict()}
         />
       )}
-      {base !== undefined && (
-        <SlotOutlet
-          slot={messageEditorTools}
-          props={{
-            draft,
-            base,
-            images:
-              (draft.target._tag === "Edit"
-                ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
-                : entry.version.images) ?? []
-          }}
-        />
-      )}
-      <div className="flex gap-2">
+      <div ref={actions} className="flex flex-wrap items-center gap-2">
         <Tooltip label={`${saveLabel} (Ctrl+Enter)`}>
           <Button
             type="submit"
@@ -345,6 +296,20 @@ function Editor({
           <Icon name="close" />
           Cancel
         </Button>
+        <span className="flex-1" />
+        {base !== undefined && (
+          <SlotOutlet
+            slot={messageEditorTools}
+            props={{
+              draft,
+              base,
+              images:
+                (draft.target._tag === "Edit"
+                  ? (source ?? (original?.id === draft.target.versionId ? original : undefined))?.images
+                  : entry.version.images) ?? []
+            }}
+          />
+        )}
       </div>
     </form>
   )
@@ -463,6 +428,26 @@ function Mark({
         <span className="sr-only">: {reason}</span>
       </span>
     </Tooltip>
+  )
+}
+
+/**
+ * "connection · model" (Version.model) in a narrow header: the connection's name gives way
+ * first, down to nothing, so the model's own name is what stays readable. The model's part
+ * doesn't shrink (shrinking is shared out, so it would lose a pixel and its end to an ellipsis
+ * while the connection's name still showed); it's cut only when it alone is wider than the label.
+ */
+function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"span">) {
+  const at = model.indexOf(" · ")
+  return (
+    <span
+      {...props}
+      tabIndex={0}
+      className="flex min-w-0 text-xs whitespace-nowrap text-muted outline-none sm:max-w-64"
+    >
+      {at > 0 && <span className="mr-1 min-w-0 truncate">{model.slice(0, at)}&nbsp;· </span>}
+      <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
+    </span>
   )
 }
 
@@ -604,8 +589,23 @@ export const Message = memo(function Message({
     onReveal(revealed ? null : entry.slotId)
   }
 
-  // Every generated message has its arrows, to generate another; any with versions, to step through them.
+  const latest = useSyncExternalStore(
+    session.subscribe,
+    useCallback(() => {
+      const view = session.snapshot()
+      return view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
+    }, [session, entry.slotId])
+  )
+  // Every generated message has its arrows, to generate another; any with versions, to step
+  // through them. Before the latest message, the one that generates shows on hover or focus.
   const showVersions = generated || entry.versionCount > 1
+  /** After an edit saved as a new version, its number, so the counter's jump says why. */
+  const [savedAs, setSavedAs] = useState<number | null>(null)
+  useEffect(() => {
+    if (savedAs === null) return
+    const timer = setTimeout(() => setSavedAs(null), 6000)
+    return () => clearTimeout(timer)
+  }, [savedAs])
 
   const hidden = entry.contextExcluded
   // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
@@ -699,9 +699,7 @@ export const Message = memo(function Message({
           <span className="shrink-0 text-xs text-muted tabular-nums">#{positionOf(entry) + 1}</span>
           {version.writer === "model" && version.model !== null ? (
             <Tooltip label={`Generated with ${version.model}`}>
-              <span tabIndex={0} className="min-w-0 truncate text-xs text-muted outline-none sm:max-w-64">
-                {version.model}
-              </span>
+              <ModelLabel model={version.model} />
             </Tooltip>
           ) : (
             // A turn on the user's side the model wrote says so, as a reply the user wrote does.
@@ -795,6 +793,9 @@ export const Message = memo(function Message({
                   : await session.writeVersion(entry, text, draft, images)
               report(outcome)
               if (!outcome.ok) return
+              // An edit of a generated version, or of one being written, is saved as a new one.
+              if (editing === "edit" && (source!.writer !== "human" || source!.status === "generating"))
+                setSavedAs((outcome.value as PathEntry).versionCount)
               // Text typed while it was being saved stays in the editor, which stays open.
               if (!editor.committed(submitted)) return
               // Saved without naming its draft (it didn't hold exactly this text): it's ended unsaved.
@@ -846,12 +847,18 @@ export const Message = memo(function Message({
                 </div>
               )}
               <span className="flex-1" />
+              {savedAs !== null && (
+                <span role="status" className="mr-1 text-xs text-muted">
+                  Saved as version {savedAs}
+                </span>
+              )}
               {showVersions && (
                 <SlotOutlet
                   slot={messageVersions}
                   props={{
                     entry,
                     generated,
+                    latest,
                     versions,
                     position,
                     onStep: (step) => void swipe(step),

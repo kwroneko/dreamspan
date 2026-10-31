@@ -1,5 +1,5 @@
 import { sharedNote } from "./sharedNotes.ts"
-import { originalReply, type ReplySections, sectionsPrefix } from "@rp/shared/replySections.ts"
+import { originalReply, type ReplySections } from "@rp/shared/replySections.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -58,7 +58,7 @@ import {
   toModel
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
-import { globalLorebookRefs, readDefaults } from "./generationSettings.ts"
+import { globalLorebookRefs, readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { displayHistoryRevision, historyRevision } from "./historyChanges.ts"
 import { previousStartIn } from "./historyStart.ts"
 import {
@@ -123,9 +123,9 @@ const decoded = <A>(
   what: string
 ) => (exit._tag === "Success" ? Effect.succeed(exit.value as A) : Effect.fail(invalid(what)))
 
-/** A history message's leading tagged sections, in their tags, for the preset to send back. */
-const sectionsOf = (json: string | null): { sectionsPrefix?: string } =>
-  json === null ? {} : { sectionsPrefix: sectionsPrefix(JSON.parse(json) as ReplySections) }
+/** A history message's leading tagged sections, for the preset to send back. */
+const sectionsOf = (json: string | null): { replySections?: ReplySections } =>
+  json === null ? {} : { replySections: JSON.parse(json) as ReplySections }
 
 interface HistoryRow {
   readonly images_json: string
@@ -361,6 +361,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     cards: [] as Array<SourcePins["cards"][number]>,
     lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
     globalLorebooks: [] as Array<string>,
+    globalRegex: [] as NonNullable<SourcePins["globalRegex"]>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
     lcmDefaults: undefined as SourcePins["lcmDefaults"],
@@ -657,7 +658,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         pins.history.push({
           key: keyOf(leaf, limit, after ?? null),
           older,
-          entries: read.map(({ content: _, sectionsPrefix: _sections, ...pinned }) => pinned)
+          entries: read.map(({ content: _, replySections: _sections, ...pinned }) => pinned)
         })
         return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
@@ -678,6 +679,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     globalLorebooks: Effect.map(globalLorebookRefs(sql, userId), (refs) => {
       pins.globalLorebooks = [...refs]
       return refs
+    }),
+    globalRegex: Effect.map(readGlobalRegex(sql, userId), ({ scripts }) => {
+      pins.globalRegex = [...scripts]
+      return scripts
     }),
 
     lorebooks: (refs) =>
@@ -1031,6 +1036,7 @@ const replaySources = (
 
     // Absent in snapshots from before global books: there were none.
     globalLorebooks: Effect.succeed(pins.globalLorebooks ?? []),
+    globalRegex: Effect.succeed(pins.globalRegex ?? []),
 
     lorebooks: (refs) =>
       Effect.gen(function* () {

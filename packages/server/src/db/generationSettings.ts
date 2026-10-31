@@ -4,7 +4,8 @@ import { GenerationDefaults } from "@rp/shared/generation.ts"
 import { newChatLcm } from "@rp/shared/lcmSettings.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { ConnectionId, ModelId } from "@rp/shared/providers.ts"
-import { Effect } from "effect"
+import { GlobalRegex } from "@rp/shared/regexScripts.ts"
+import { Effect, Option, Schema } from "effect"
 import type { SqlClient } from "effect/sql"
 
 export const DEFAULT_MODEL = "generation.model"
@@ -13,6 +14,8 @@ export const DEFAULT_JUDGE = "generation.judge"
 export const DEFAULT_LCM = "generation.lcm"
 /** The user's global lorebooks (DESIGN §5.0): their ref ids, in the order they were marked. */
 export const GLOBAL_LOREBOOKS = "lorebooks.global"
+/** The account's global regex scripts and their revision (`GlobalRegex`). */
+export const GLOBAL_REGEX = "regex.global"
 
 /** A live connection of the user's and a model of it. */
 export const ownedModel = (sql: SqlClient.SqlClient, userId: UserId, connection: string, model: string) =>
@@ -91,3 +94,14 @@ export const newChatLcmSettings = (sql: SqlClient.SqlClient, userId: UserId, ena
   Effect.map(setting(sql, userId, DEFAULT_LCM), (stored) =>
     newChatLcm(stored as GenerationDefaults["lcm"] | null, enabled)
   )
+
+const decodeGlobalRegex = Schema.decodeUnknownOption(GlobalRegex)
+
+/** The global regex scripts as stored; a value that doesn't decode reads as none, at its revision. */
+export const readGlobalRegex = (sql: SqlClient.SqlClient, userId: UserId) =>
+  Effect.map(setting(sql, userId, GLOBAL_REGEX), (stored): GlobalRegex => {
+    const decoded = decodeGlobalRegex(stored)
+    if (Option.isSome(decoded)) return decoded.value
+    const revision = (stored as { revision?: unknown } | null)?.revision
+    return { scripts: [], revision: typeof revision === "number" && Number.isSafeInteger(revision) ? revision : 0 }
+  })

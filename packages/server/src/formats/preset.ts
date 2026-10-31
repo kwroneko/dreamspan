@@ -26,7 +26,7 @@ import {
   triggersWithCondition,
   withEndOfRequest
 } from "@rp/shared/presetConditions.ts"
-import { endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
+import { CONTINUE_NUDGE, endOfRequestText, GROUP_NUDGE, IMPERSONATION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { defaultLimits, FormatError, parseJson } from "./safety.ts"
 
 const ST_PRESET_FORMAT = "st-chat-completion-preset"
@@ -799,9 +799,14 @@ const regexDepth = (s: Json, key: "minDepth" | "maxDepth", path: Path, r: Report
   return key === "minDepth" ? Number.MAX_VALUE : null
 }
 
-const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
+/** ST's `regex_scripts` as data (a preset's or, with its own path, a card's); nothing is compiled. */
+export const readRegex = (
+  raw: unknown,
+  r: ReportBuilder,
+  base: ReadonlyArray<string | number> = ["extensions", "regex_scripts"],
+  owner: "preset" | "card" = "preset"
+): Array<RegexScript> => {
   if (raw === undefined || raw === null) return []
-  const base = ["extensions", "regex_scripts"]
   if (!Array.isArray(raw)) {
     r.add("warning", "preset.invalid_value", "`regex_scripts` isn't a list, so it was dropped.", base)
     return []
@@ -859,11 +864,30 @@ const readRegex = (raw: unknown, r: ReportBuilder): Array<RegexScript> => {
     r.add(
       "info",
       "preset.regex_imported",
-      `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this preset's scripts.`,
+      `${scripts.size} regex scripts were imported as data. As in ST, none runs until you allow this ${owner}'s scripts.`,
       base
     )
   return [...scripts.values()]
 }
+
+/** Scripts back to ST's `regex_scripts` shape, their unknown fields in place. */
+export const regexToSt = (scripts: ReadonlyArray<RegexScript>) =>
+  scripts.map((s) => ({
+    ...s.unsupported,
+    id: s.id,
+    scriptName: s.name,
+    findRegex: s.find_regex,
+    replaceString: s.replace_string,
+    trimStrings: [...s.trim_strings],
+    placement: [...s.placement],
+    disabled: s.disabled,
+    markdownOnly: s.markdown_only,
+    promptOnly: s.prompt_only,
+    runOnEdit: s.run_on_edit,
+    substituteRegex: SUBSTITUTE_REGEX.indexOf(s.substitute_regex),
+    minDepth: s.min_depth,
+    maxDepth: s.max_depth
+  }))
 
 /**
  * The document as an ST chat-completion preset that ST loads the same way, with the fields
@@ -878,12 +902,13 @@ export const exportStPreset = (stored: PresetDoc): Json => {
   // send every turn, off.
   const doc = withEndOfRequest(stored).doc
   const enabled = new Map(doc.order.map((e) => [e.identifier, e.enabled]))
-  const utility = (identifier: string, macro: "char" | "user") =>
-    fromSpeaker(doc.prompts.find((p) => p.identifier === identifier)?.content ?? "", macro)
+  const text = (identifier: string) => doc.prompts.find((p) => p.identifier === identifier)?.content ?? ""
+  const utility = (identifier: string, macro: "char" | "user") => fromSpeaker(text(identifier), macro)
   const utility_prompts = {
     ...doc.utility_prompts,
     group_nudge_prompt: utility(GROUP_NUDGE, "char"),
-    impersonation_prompt: utility(IMPERSONATION_PROMPT, "user")
+    impersonation_prompt: utility(IMPERSONATION_PROMPT, "user"),
+    continue_nudge_prompt: text(CONTINUE_NUDGE)
   }
   const prompts = doc.prompts
     .filter((p) => !endOfRequestText(p.identifier))
@@ -912,22 +937,7 @@ export const exportStPreset = (stored: PresetDoc): Json => {
     doc.prompts.filter((p) => conditionOf(p) === "with_direction" || gatesNeverMeet(p)).map((p) => p.identifier)
   )
   const order = doc.order.map((e) => (off.has(e.identifier) ? { ...e, enabled: false } : { ...e }))
-  const regex_scripts = doc.regex.map((s) => ({
-    ...s.unsupported,
-    id: s.id,
-    scriptName: s.name,
-    findRegex: s.find_regex,
-    replaceString: s.replace_string,
-    trimStrings: [...s.trim_strings],
-    placement: [...s.placement],
-    disabled: s.disabled,
-    markdownOnly: s.markdown_only,
-    promptOnly: s.prompt_only,
-    runOnEdit: s.run_on_edit,
-    substituteRegex: SUBSTITUTE_REGEX.indexOf(s.substitute_regex),
-    minDepth: s.min_depth,
-    maxDepth: s.max_depth
-  }))
+  const regex_scripts = regexToSt(doc.regex)
   return {
     ...doc.unsupported,
     ...doc.samplers,

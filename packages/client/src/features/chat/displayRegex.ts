@@ -20,8 +20,7 @@ export const runDisplayRegex = (job: RegexJob): DisplayResult => {
   if (original.length > 200_000)
     return { text: original, issues: ["Display regex skipped: message exceeds 200,000 characters."] }
   const usable = job.scripts.filter(
-    (s) =>
-      !s.disabled && s.find_regex !== "" && s.markdown_only && !s.prompt_only && s.placement.includes(job.placement)
+    (s) => !s.disabled && s.find_regex !== "" && s.markdown_only && s.placement.includes(job.placement)
   )
   if (usable.length > 100) issues.push("Only the first 100 display regex scripts run.")
   let text = original

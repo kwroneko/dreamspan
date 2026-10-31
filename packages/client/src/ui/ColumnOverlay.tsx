@@ -5,11 +5,14 @@ import { type ReactNode, useLayoutEffect, useState } from "react"
 export function ColumnOverlay({
   children,
   onClose,
-  page = false
+  page = false,
+  label = "Preset editor"
 }: {
   children: ReactNode
   onClose: () => void
   page?: boolean
+  /** Its accessible name: what it edits. */
+  label?: string
 }) {
   const [container, setContainer] = useState<HTMLDivElement | null>(null)
   useLayoutEffect(() => {
@@ -43,10 +46,10 @@ export function ColumnOverlay({
         >
           <Dialog.Portal container={container}>
             <Dialog.Popup
-              aria-label="Preset editor"
+              aria-label={label}
               className={`${page ? "fixed top-[var(--preset-overlay-top,0px)] right-0 bottom-0 left-[var(--preset-overlay-left,0px)]" : "absolute inset-0"} z-30 flex min-h-0 flex-col bg-canvas text-text shadow-xl outline-none`}
             >
-              <Dialog.Title className="sr-only">Preset editor</Dialog.Title>
+              <Dialog.Title className="sr-only">{label}</Dialog.Title>
               {children}
             </Dialog.Popup>
           </Dialog.Portal>
