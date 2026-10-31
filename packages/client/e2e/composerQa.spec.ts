@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cacheChip, choices, modelChip, nextChip, nextReply, presetChip, presetName } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -214,7 +215,7 @@ for (const width of [1440, 390])
       await box(page).fill(direction)
       await page.getByRole("button", { name: "Write for Sam", exact: true }).click()
       await expect.poll(async () => (await path(chatId)).entries.at(-1)?.version.status).toBe("complete")
-      await expect(page.getByRole("region", { name: "Cache estimate" })).toBeVisible()
+      await expect(cacheChip(page)).toHaveAccessibleName(/^Cache warm/)
       await expect(page.getByRole("button", { name: "Write for Sam", exact: true })).toBeEnabled()
       const height = await page.getByTestId("messages").evaluate((element) => element.clientHeight)
       await testInfo.attach("conversation-height", {
@@ -222,25 +223,28 @@ for (const width of [1440, 390])
         contentType: "application/json"
       })
       if (width === 390) {
-        expect(height).toBeGreaterThanOrEqual(422) // At least half the 844px phone, warm cache included.
-        await expect(page.getByRole("combobox", { name: "Model", exact: true })).toBeHidden()
-        await page.getByText("Cache details", { exact: true }).click()
-        await expect(page.getByRole("button", { name: "Hide countdown", exact: true })).toBeVisible()
-        await page.getByText("Cache details", { exact: true }).click()
-        await page.getByRole("button", { name: "Composer options", exact: true }).click()
+        expect(height).toBeGreaterThanOrEqual(422) // At least half the 844px phone, the strip included.
+        // The strip is one row of chips on a phone, scrolled sideways rather than wrapped.
+        expect((await nextReply(page).boundingBox())!.height).toBeLessThan(40)
       }
-      await expect(page.getByRole("combobox", { name: "Model", exact: true })).toBeVisible()
-      await expect(page.getByRole("combobox", { name: "Prompt preset", exact: true })).toBeVisible()
-      await expect(page.getByRole("group", { name: "Reply from", exact: true }).getByRole("button")).toHaveCount(5)
-      if (width === 390) {
-        await expect(page.getByText("A one-turn direction for Sam's", { exact: false })).toBeVisible()
-        if (process.env.RP_SCREENS) {
-          mkdirSync(process.env.RP_SCREENS, { recursive: true })
-          await page.screenshot({ path: `${process.env.RP_SCREENS}/group-options-${width}-${theme}.png` })
-        }
-        await page.keyboard.press("Escape")
-        await expect(page.getByRole("dialog", { name: "Next reply", exact: true })).toHaveCount(0)
+      // Every chip is shown at every width; the cache chip's popover has the countdown switch.
+      await cacheChip(page).click()
+      await expect(page.getByRole("button", { name: "Hide countdown", exact: true })).toBeVisible()
+      await page.keyboard.press("Escape")
+      await expect(page.getByRole("button", { name: "Hide countdown", exact: true })).toHaveCount(0)
+      await expect(modelChip(page)).toHaveAccessibleName(/^Model: Synthetic QA · .+\. Change the model$/)
+      await expect(presetChip(page)).toHaveAccessibleName(presetName("Default (built-in)"))
+      // Auto, then the five characters who can reply.
+      await nextChip(page).click()
+      await expect(choices(page, "Who replies next").getByRole("radio")).toHaveCount(6)
+      if (width === 390 && process.env.RP_SCREENS) {
+        mkdirSync(process.env.RP_SCREENS, { recursive: true })
+        await page.screenshot({ path: `${process.env.RP_SCREENS}/group-options-${width}-${theme}.png` })
       }
+      await page.keyboard.press("Escape")
+      await expect(choices(page, "Who replies next")).toHaveCount(0)
+      // What the box is for, read with it (and shown on the guidance switch's tooltip).
+      await expect(page.locator("#composer-hint")).toContainText("A one-turn direction for Sam's")
       await expect(page.getByRole("button", { name: /^Speaking as Sam/ })).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
       if (process.env.RP_SCREENS) {

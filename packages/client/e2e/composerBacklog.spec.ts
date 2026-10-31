@@ -210,6 +210,36 @@ test("a running swipe outside the selected version can still be selected and sto
   await expect(page.getByRole("button", { name: "Stop the reply", exact: true })).toHaveCount(0)
 })
 
+test("a reply longer than a phone's screen keeps its Stop in view while it's written", async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 390, height: 600 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const started = await rpc((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.CreateChat({ title: "Long reply Stop" })
+      const sent = yield* api.Generate({ chatId: chat.id, parentSlotId: null, branch: false })
+      if (sent._tag !== "Posted") throw new Error("expected the reply to post")
+      return { chat, entry: sent.entry }
+    })
+  )
+  await page.goto(`${server().url}/chats/${started.chat.id}`)
+  const reply = page.getByRole("article", { name: "Reply", exact: true }).last()
+  const stop = reply.getByRole("button", { name: "Stop", exact: true })
+  // Taller than the screen: its start, where Stop used to be, has scrolled away.
+  await expect.poll(async () => (await reply.boundingBox())?.height ?? 0, { timeout: 90_000 }).toBeGreaterThan(700)
+  await expect(reply.locator("header")).not.toBeInViewport()
+  await expect(stop).toBeInViewport()
+  // Read from further up, the reply's end is below the screen, and Stop stays at its bottom.
+  await page.mouse.move(195, 300)
+  await page.mouse.wheel(0, -250)
+  await expect(stop).toBeInViewport()
+  await stop.click()
+  await expect
+    .poll(() => rpc((api) => api.ListVersions({ slotId: started.entry.slotId })).then((v) => v[0]?.status))
+    .toBe("stopped")
+  await expect(stop).toHaveCount(0)
+})
+
 test("a pending guidance action fits a long speaker name on a phone and desktop", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   const name = "Keeper of the Northern Lighthouse and the Harbor of Many Returning Ships"

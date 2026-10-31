@@ -6,6 +6,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { messageMenu } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cacheChip } from "./support/strip.ts"
 import { startProvider, type FakeProvider, REPLY } from "./support/provider.ts"
 
 const server = serverPerFile(withAdmin)
@@ -118,11 +119,17 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
       expectedRowVersion: 1
     })
   )
-  const estimate = page.getByRole("region", { name: "Cache estimate" })
-  await expect(estimate).toContainText("Cache rewrite (estimate)")
-  await expect(estimate).toContainText(/Next send rewrites ~[\d,]+ tokens/)
-  await expect(estimate).not.toContainText(/\d:\d\d left/)
+  const chip = cacheChip(page)
+  await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ tokens uncached on the next reply/)
+  await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
+  await chip.click()
+  const estimate = page.getByRole("dialog", { name: "Not cached", exact: true })
+  await expect(estimate).toContainText(/Your next reply re-sends about [\d,]+ tokens at full price/)
+  await expect(estimate).toContainText("Why: ")
+  await expect(estimate).not.toContainText(/\d:\d\d/)
   await expect(estimate.getByRole("button", { name: /countdown/ })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(estimate).toHaveCount(0)
   await messageMenu(reply, "Context it was generated from")
   await expect(page.getByText(/older ones don't fit/)).toBeVisible()
 })
@@ -220,7 +227,8 @@ for (const width of [1440, 390])
       await messageMenu(dropped, "Insert message below")
       const editor = page.getByTestId("insert-editor")
       await expect(editor).toContainText("Before the model's history start: the next reply won't see it.")
-      await expect(editor).not.toContainText("The model will re-read")
+      // Nor does the strip's cache chip say what the next reply re-reads from it.
+      await expect(page.getByText(/re-reads? (the rest|\d)/)).toHaveCount(0)
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({
           path: `${process.env.SCREENSHOT_DIR}/insert-before-history-start-${width}-${theme}.png`
