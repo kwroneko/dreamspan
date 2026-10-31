@@ -169,12 +169,12 @@ function Limit({
   const open = editing || value !== ""
   // The pencil's click moves the cursor into the field it opens, once that's there.
   const input = useRef<HTMLInputElement>(null)
-  const [focusing, setFocusing] = useState(false)
+  const focusing = useRef(false)
   useEffect(() => {
-    if (!focusing) return
+    if (!open || !focusing.current) return
+    focusing.current = false
     input.current?.focus()
-    setFocusing(false)
-  }, [focusing])
+  }, [open])
   const unknown = resolved.source === "unknown"
   const source =
     unknown && assumed
@@ -199,8 +199,8 @@ function Limit({
             icon="edit"
             label={`Set the ${label.toLowerCase()} yourself`}
             onClick={() => {
+              focusing.current = true
               setEditing(true)
-              setFocusing(true)
             }}
           />
         )}
