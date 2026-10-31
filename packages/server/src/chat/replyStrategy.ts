@@ -59,7 +59,13 @@ export const defaultReplyStrategy: ReplyStrategy = {
               error._tag === "GenerationFailed"
                 ? error
                 : error._tag === "ProviderError"
-                  ? new GenerationFailed({ class: error.reason, message: error.message })
+                  ? new GenerationFailed({
+                      class: error.reason,
+                      message: error.message,
+                      ...(error.contextLimit === undefined
+                        ? {}
+                        : { contextLimit: { tokens: error.contextLimit, modelId: model.modelId } })
+                    })
                   : new GenerationFailed({ class: "server", message: error.message })
             )
           )

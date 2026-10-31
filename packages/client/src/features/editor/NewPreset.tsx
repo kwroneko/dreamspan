@@ -1,13 +1,13 @@
+import { useNavigate } from "@tanstack/react-router"
 import { type FormEvent, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 
 export function NewPresetButton() {
   const action = useAction()
-  const workspace = usePresetWorkspace()
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [label, setLabel] = useState("")
   const submit = async (event: FormEvent) => {
@@ -16,7 +16,7 @@ export function NewPresetButton() {
     if (result.ok) {
       setOpen(false)
       setLabel("")
-      workspace?.open(result.value.id)
+      void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
     }
   }
   return (

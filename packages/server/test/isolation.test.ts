@@ -794,6 +794,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.AddUserModel({ connectionId: owner.connectionId, key: "planted", overrides: {} }), "NotFound")
   },
+  SaveLearnedContext: {
+    probe: (actor, owner) =>
+      Effect.flatMap(ownModel(owner), () =>
+        refused(actor.api.SaveLearnedContext({ modelId: owner.modelId, context: 1 }), "NotFound")
+      )
+  },
   EditModel: {
     probe: (actor, owner) =>
       Effect.flatMap(ownModel(owner), (theirs) =>
@@ -1649,6 +1655,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual(own.leafSlotId, owner.chat.slotId)
         assert.deepStrictEqual(Object.keys(own).sort(), [
           "assemblyError",
+          "assemblyErrorReason",
           "budget",
           "forkId",
           "historyStart",

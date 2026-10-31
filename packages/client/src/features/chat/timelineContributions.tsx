@@ -4,6 +4,7 @@ import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmState } from "@rp/shared/lcm.ts"
 import { makeRegistry } from "../../registry.ts"
 import { SlotOutlet } from "../../slots.tsx"
+import { ChangeContextSize, contextOrigin, reserveOrigin, targetOrigin, withOrigin } from "./budgetSources.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { timelineBoundaries, timelineSummaries } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -63,7 +64,8 @@ export const registerTimelineTransforms = () => [
     order: 10,
     transform: (rows, { view, historyDivider }) => {
       const budget = view.history?.budget
-      if (historyDivider < 0 || !budget) return rows
+      // A refusal above the composer explains the budget instead: nothing is sent at all.
+      if (historyDivider < 0 || !budget || view.history?.assemblyError) return rows
       const result = [...rows]
       result.splice(boundaryRow(result, view.entries, historyDivider), 0, {
         key: "history-boundary",
@@ -71,11 +73,15 @@ export const registerTimelineTransforms = () => [
         from: Infinity,
         to: -1,
         render: () => (
-          <Alert>
+          <Alert
+            tone={budget.origins?.context === "assumed" ? "warning" : "neutral"}
+            actions={<ChangeContextSize origins={budget.origins} />}
+          >
             Messages above this aren&rsquo;t sent to the model: the model’s context budget allows{" "}
-            {budget.maximum.toLocaleString()} tokens, targets {budget.target.toLocaleString()}, reserves{" "}
-            {budget.responseReserve.toLocaleString()} for the reply, and the card, prompts and other fixed content take
-            ~{budget.nonHistoryTokens.toLocaleString()}.
+            {withOrigin(budget.maximum, contextOrigin(budget.origins), " tokens")}, targets{" "}
+            {withOrigin(budget.target, targetOrigin(budget.origins))}, reserves{" "}
+            {withOrigin(budget.responseReserve, reserveOrigin(budget.origins))} for the reply, and the card, prompts and
+            other fixed content take ~{budget.nonHistoryTokens.toLocaleString()}.
           </Alert>
         )
       })

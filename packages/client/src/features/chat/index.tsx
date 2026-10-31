@@ -17,6 +17,7 @@ import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
 import { ChatsPage } from "./ChatsPage.tsx"
+import { sidebarSearch } from "../characters/sidebarSearch.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
 const ChatPage = lazy(() => import("./ChatPage.tsx").then((module) => ({ default: module.ChatPage })))
@@ -80,13 +81,21 @@ export const register = () => {
     component: ChatsPage,
     nav: { label: "Chats", order: 5 }
   })
-  routes.register({ id: "chat", parent: "app", path: "/chats/$chatId", component: LazyChatPage })
+  // The left panel's place stays while moving around a chat (characters/sidebarSearch.ts).
+  routes.register({
+    id: "chat",
+    parent: "app",
+    path: "/chats/$chatId",
+    component: LazyChatPage,
+    retainSearch: sidebarSearch
+  })
   // The request inspector: the context a reply was generated from (DESIGN §7.4).
   routes.register({
     id: "chat.context",
     parent: "app",
     path: "/chats/$chatId/context/$versionId",
-    component: LazyContextPage
+    component: LazyContextPage,
+    retainSearch: sidebarSearch
   })
   // What applies to all of the user's chats.
   routes.register({
@@ -97,11 +106,18 @@ export const register = () => {
     nav: { label: "Chats", order: 15 }
   })
   // A chat with a card, before it exists (DESIGN §2.1).
-  routes.register({ id: "chat.start", parent: "app", path: "/cards/$entityId/chat", component: LazyStartChatPage })
+  routes.register({
+    id: "chat.start",
+    parent: "app",
+    path: "/cards/$entityId/chat",
+    component: LazyStartChatPage,
+    retainSearch: sidebarSearch
+  })
   routes.register({
     id: "chat.startGroup",
     parent: "app",
     path: "/groups/$chatId/new",
-    component: LazyStartGroupChatPage
+    component: LazyStartGroupChatPage,
+    retainSearch: sidebarSearch
   })
 }

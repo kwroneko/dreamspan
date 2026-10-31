@@ -8,7 +8,7 @@ import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Definition } from "./CardPage.tsx"
-import { shellAtom, useShellNavigation } from "./shellData.tsx"
+import { shellAtom, sidebarCleared } from "./shellData.tsx"
 
 const refsAtom = AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] })
 
@@ -36,7 +36,6 @@ export function CharacterPanel({
   onNotes?: () => void
   actions?: ReactNode
 }) {
-  const navigation = useShellNavigation()
   const data = useAtomValue(shellAtom)
   const refs = useAtomValue(refsAtom)
   const card = AsyncResult.isSuccess(data)
@@ -68,10 +67,9 @@ export function CharacterPanel({
         </header>
       )}
       <Link
-        onClick={() => navigation.setScope({ entity: entityId, chat: null })}
         to="/cards/$entityId/chat"
         params={{ entityId }}
-        search={{ panel: `card:${entityId}` }}
+        search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
         className={buttonClass("primary")}
       >
         New chat

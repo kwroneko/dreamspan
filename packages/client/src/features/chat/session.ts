@@ -934,6 +934,7 @@ export class ChatSession {
         // The same estimate again (another tab subscribed) changes nothing on screen.
         const history = {
           assemblyError: event.assemblyError ?? null,
+          assemblyErrorReason: event.assemblyErrorReason ?? null,
           leafSlotId: event.leafSlotId,
           historyStart: event.historyStart,
           summarizedThrough: event.summarizedThrough,

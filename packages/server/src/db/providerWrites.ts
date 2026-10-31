@@ -287,7 +287,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
         return { added, updated, missing }
       }).pipe(transaction(sql, "SyncFetchedModels")),
 
-    AddUserModel: ({ userId, connectionId, key, overrides }) =>
+    AddUserModel: ({ userId, connectionId, key, overrides, upstream }) =>
       Effect.gen(function* () {
         yield* ownedConnection(userId, connectionId)
         const [taken] = yield* sql`SELECT 1 FROM models WHERE connection_id = ${connectionId} AND model_key = ${key}`
@@ -299,6 +299,7 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
           model_key: key,
           source: "user",
           overrides_json: JSON.stringify(overrides),
+          ...(upstream ? { upstream_json: JSON.stringify(upstream) } : {}),
           created_at: Date.now()
         })}`
         return yield* reloadModel(id)
@@ -311,6 +312,17 @@ export const makeProviderWriteHandlers = Effect.gen(function* () {
                    WHERE id = ${modelId}`
         return yield* reloadModel(modelId)
       }).pipe(transaction(sql, "EditModel")),
+
+    SetLearnedContext: ({ userId, modelId, context, at }) =>
+      Effect.gen(function* () {
+        const row = yield* ownedModel(userId, modelId)
+        const { learned: _, ...overrides } = JSON.parse(row.overrides_json) as Record<string, unknown>
+        void _
+        const next = context === null ? overrides : { ...overrides, learned: { context, at } }
+        yield* sql`UPDATE models SET overrides_json = ${JSON.stringify(next)}, row_version = row_version + 1
+                   WHERE id = ${modelId}`
+        return yield* reloadModel(modelId)
+      }).pipe(transaction(sql, "SetLearnedContext")),
 
     SetModelHidden: ({ userId, modelId, hidden }) =>
       Effect.gen(function* () {

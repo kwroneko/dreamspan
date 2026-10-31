@@ -11,7 +11,7 @@ export { ProviderError, ProviderErrorReason } from "@rp/shared/errors.ts"
 export const providerError = (
   reason: ProviderErrorReason,
   message: string,
-  extra: Partial<Pick<ProviderError, "status" | "retryAfterMs" | "category" | "afterTokens">> = {}
+  extra: Partial<Pick<ProviderError, "status" | "retryAfterMs" | "category" | "afterTokens" | "contextLimit">> = {}
 ) =>
   new ProviderError({
     reason,
@@ -19,7 +19,8 @@ export const providerError = (
     status: extra.status ?? null,
     retryAfterMs: extra.retryAfterMs ?? null,
     category: extra.category ?? null,
-    afterTokens: extra.afterTokens ?? false
+    afterTokens: extra.afterTokens ?? false,
+    ...(extra.contextLimit === undefined ? {} : { contextLimit: extra.contextLimit })
   })
 
 /** Retrying these before any output is safe; anything else needs the user. */

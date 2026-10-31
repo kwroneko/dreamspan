@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { markPersona } from "./support/library.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "80" })
 test.setTimeout(120_000)
@@ -25,8 +26,7 @@ const prepare = async (page: Page) => {
       await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
     }
     await page.goto(`${server().url}/library`)
-    await page.getByRole("checkbox", { name: "Bo: Persona" }).click()
-    await expect(page.getByRole("checkbox", { name: "Bo: Persona" })).toBeChecked()
+    await markPersona(page, "Bo")
   })())
 }
 const chat = async (page: Page) => {
