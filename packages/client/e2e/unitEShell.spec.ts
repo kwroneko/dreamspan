@@ -139,12 +139,13 @@ for (const width of [1440, 390]) {
         content: "Synthetic navigation regression: the pinned fork continues."
       })
     )
-    await expect(
-      page
-        .getByRole("main")
-        .locator("header")
-        .getByRole("button", { name: `${group.pinned ? "Unpin" : "Pin"} ${group.name}`, exact: true })
-    ).toBeVisible()
+    // The chat header's ☆ (a phone's header leaves it to the chat lists' rows).
+    const headerPin = page
+      .getByRole("main")
+      .locator("header")
+      .getByRole("button", { name: `${group.pinned ? "Unpin" : "Pin"} ${group.name}`, exact: true })
+    if (width === 390) await expect(headerPin).toBeHidden()
+    else await expect(headerPin).toBeVisible()
     const newLeaf = await admin((api) =>
       Effect.gen(function* () {
         const forked = yield* api.SendMessage({
