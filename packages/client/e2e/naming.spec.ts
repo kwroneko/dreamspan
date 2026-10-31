@@ -15,7 +15,16 @@ type Api = Parameters<Parameters<typeof asUser>[3]>[0]
 const admin = <A>(use: (api: Api) => Effect.Effect<A, unknown>) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 const rename = async (page: Page, title: string, name: string) => {
   await page.getByRole("heading", { level: 1 }).getByRole("button").click()
+  // A chat on its own is renamed in place; one of a group's several chats asks in a dialog.
   const dialog = page.getByRole("dialog", { name: title })
+  const inPlace = page.getByRole("textbox", { name: "Chat name", exact: true })
+  await expect(dialog.or(inPlace)).toBeVisible()
+  if (await inPlace.isVisible()) {
+    await inPlace.fill(name)
+    await inPlace.press("Enter")
+    await expect(inPlace).toHaveCount(0)
+    return
+  }
   await dialog.getByLabel("Name", { exact: true }).fill(name)
   await dialog.getByRole("button", { name: "Rename", exact: true }).click()
   await expect(dialog).toHaveCount(0)
@@ -160,10 +169,11 @@ for (const width of [1440, 390]) {
     await list.getByRole("button", { name: /^Road trip/ }).click()
     await expect(page.getByTestId("messages").getByText("The road", { exact: true })).toBeVisible()
     await branches.click()
-    await page.getByRole("menuitem", { name: "Rename “Road trip”…" }).click()
-    await page.getByRole("dialog").getByLabel("Branch name").fill("")
-    await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
-    await expect(branches).toHaveAccessibleName(/Branch 2 of 2/)
+    await list.getByRole("button", { name: "Rename Road trip", exact: true }).click()
+    await list.getByRole("textbox", { name: "Name of branch Road trip" }).fill("")
+    await list.getByRole("button", { name: "Rename", exact: true }).click()
+    await page.keyboard.press("Escape")
+    await expect(branches).toHaveAccessibleName(/Branch: Branch 2, /)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     await expect(page.getByRole("alert")).toHaveCount(0)
   })
@@ -218,6 +228,7 @@ test("deleting a named branch from the middle of a long chat follows the survivi
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   await page.getByRole("button", { name: "Undo", exact: true }).click()
   await branches.click()
+  // A branch opens at its last message.
   await list.getByRole("button", { name: /^Long road/ }).click()
-  await expect(page.getByTestId("messages").getByText("Long path 0", { exact: true })).toBeVisible()
+  await expect(page.getByTestId("messages").getByText("Long path 89", { exact: true })).toBeVisible()
 })

@@ -7,6 +7,7 @@ import { createServer, type ViteDevServer } from "vite"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { showActions } from "./support/message.ts"
+import { openPanel } from "./support/panel.ts"
 import type { install, close } from "./support/chatContributions.ts"
 
 const server = serverPerFile(withAdmin)
@@ -87,7 +88,7 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await showActions(message)
   await message.getByRole("button", { name: "Plugin message action", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Plugin dialog", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Plugin panel", exact: true }).click()
+  await openPanel(page, "Plugin panel")
   await expect(page.getByText("Scoped plugin panel", { exact: true })).toBeVisible()
   await contribution(page, "close", "plugin")
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
@@ -135,9 +136,12 @@ test("a dynamic family obeys individual disablement and rejects unlisted URLs", 
   await setup(page)
   await contribution(page, "install", "plugin")
   await contribution(page, "install", "family-tab")
-  await expect(page.getByRole("button", { name: "Plugin panel", exact: true })).toHaveCount(0)
+  // The header has one panel toggle; the panel's tabs say what's there.
+  await page.getByRole("button", { name: "Chat panel", exact: true }).click()
+  await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Plugin panel", exact: true })).toHaveCount(0)
   await contribution(page, "close", "family-tab")
-  await page.getByRole("button", { name: "Plugin panel", exact: true }).click()
+  await openPanel(page, "Plugin panel")
   await page.getByRole("button", { name: "Unlisted family URL", exact: true }).click()
   await expect(page).toHaveURL(/panel=synthetic%3Aabsent/)
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)

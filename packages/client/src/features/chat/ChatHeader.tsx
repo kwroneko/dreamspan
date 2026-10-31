@@ -20,7 +20,7 @@ import { NameDialog } from "./NameDialog.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
-import { useTitle } from "../shell.tsx"
+import { openAppMenu, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
 import { castCharacters, chatName, formatDay } from "./chatTitle.ts"
 import type { PanelTab } from "./ChatPanels.tsx"
@@ -263,10 +263,21 @@ export function ChatHeader({
           <Link
             to="/chats"
             aria-label="Chats"
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus lg:hidden"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:hidden lg:hidden"
           >
             <Icon name="back" />
           </Link>
+        </Tooltip>
+        {/* A phone has no app bar in a chat: ← opens its menu, the chats first, where the chat is. */}
+        <Tooltip label="Chats and menu">
+          <button
+            type="button"
+            aria-label="Chats and menu"
+            onClick={openAppMenu}
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus sm:hidden"
+          >
+            <Icon name="back" />
+          </button>
         </Tooltip>
         {loading ? (
           <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none max-sm:hidden" />

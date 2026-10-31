@@ -243,10 +243,11 @@ for (const width of [1440, 390]) {
       await shoot("portrait")
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
       else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image settings.
+      if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
       await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
       await shoot("image-settings")
       await page.keyboard.press("Escape")
-      if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
       await shoot("left-chats")
       await page
         .getByRole("group", { name: "Left panel", exact: true })

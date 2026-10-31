@@ -143,6 +143,12 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+// The phone's menu opened from elsewhere: an open chat's header takes the bar's place there.
+const menuRequests = new Set<() => void>()
+export const openAppMenu = () => {
+  for (const request of menuRequests) request()
+}
+
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
   // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
@@ -155,12 +161,17 @@ function PhoneBar() {
     }
   })
   const { selection } = useShellNavigation()
-  // On a phone, an open chat's header takes this bar's place, with ← to the chats (ChatHeader.tsx).
+  // On a phone, an open chat's header takes this bar's place; its ← opens this menu (ChatHeader.tsx).
   const inChat = useLocation({ select: (location) => /^\/chats\/[^/]+$/.test(location.pathname) })
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
   const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
+  useEffect(() => {
+    const request = () => setOpenOn(pathname)
+    menuRequests.add(request)
+    return () => void menuRequests.delete(request)
+  }, [pathname])
   return (
     <>
       <div

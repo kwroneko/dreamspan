@@ -185,6 +185,8 @@ function BranchList({
     if (!result.ok) return showToast({ title: "Couldn't delete the branch", description: result.error.message })
     deleted(result.value, () => forksChanged(session.id))
     forksChanged(session.id)
+    // With one branch left the header has no control to anchor the list: it closes.
+    if (live <= 2) onDone()
     // The old URL names the branch that went: keep the panel, follow the latest branch.
     if (isShown) void navigate({ to: ".", search: keepPanel, replace: true })
   }
