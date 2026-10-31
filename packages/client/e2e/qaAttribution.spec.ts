@@ -132,6 +132,7 @@ for (const width of [1440, 390])
       await shoot(page, `historical-speakers-${width}-${theme}`)
       await impersonated.getByRole("button", { name: "View Sam's portrait", exact: true }).click()
       await expect(page.getByRole("img", { name: "Sam's full portrait", exact: true })).toBeVisible()
+      await page.keyboard.press("Escape")
       await admin((api) =>
         Effect.gen(function* () {
           const path = yield* api.ReadPath({

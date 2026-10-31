@@ -56,12 +56,9 @@ for (const width of [1440, 390]) {
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
       await page.getByRole("button", { name: /^Send as / }).click()
       await expect(page).toHaveURL(/\/chats\//)
-      // A message portrait opens the stock panel, including on phones.
+      // A message portrait opens the original in a lightbox, including on phones.
       await page.getByRole("button", { name: "View Synthetic 001's portrait" }).first().click()
-      const panelImage = page.getByRole("img", { name: "Synthetic 001's full portrait" })
-      await expect(panelImage).toHaveAttribute("src", /&w=(384|768)$/)
-      await page.getByRole("button", { name: "Open full size", exact: true }).click()
-      const full = page.getByRole("dialog", { name: "Synthetic 001 — full size" }).getByRole("img")
+      const full = page.getByRole("dialog", { name: "Synthetic 001" }).getByRole("img")
       await expect(full).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(1024)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(2048)

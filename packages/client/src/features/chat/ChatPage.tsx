@@ -12,7 +12,7 @@ import {
   messageStream
 } from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
-import { useIsPanelTab } from "./panels.tsx"
+import { useIsPanelTab, usePanelHere } from "./panels.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
@@ -437,21 +437,21 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
   const candidate = urlPanel ?? (wide ? rememberedTab : null)
-  const panel = useIsPanelTab(candidate, view) ? candidate : null
+  const panel = usePanelHere(candidate, view)
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
-    if (urlPanel === null && panel !== null)
+    if (panel !== null && panel !== urlPanel)
       void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
   }, [navigate, urlPanel, panel])
   const show = useCallback(
-    (next: PanelTab | null, portrait?: string) => {
+    (next: PanelTab | null) => {
       if (next !== null && !isPanelTab(next, view)) return
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
       void navigate({
         to: ".",
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
-          next === null ? prev : { ...prev, panel: next, ...(portrait === undefined ? {} : { portrait }) },
+          next === null ? prev : { ...prev, panel: next },
         // On a phone, opening the sheet is a step in the history, so Back closes it.
         replace: wide || next === null || urlPanel !== null
       })

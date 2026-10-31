@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test"
+import { openPanel } from "./support/panel.ts"
 import { portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -65,46 +66,43 @@ for (const width of [1440, 390]) {
     await expect(portrait).toHaveCSS("width", "60px")
     await expect(portrait).toHaveCSS("height", "90px")
     await expect(portrait).toHaveCSS("border-radius", "10px")
+    // Any portrait opens the whole image in a lightbox over the page, on phones too.
     await portrait.click()
-    const panel = width === 390 ? page.getByRole("dialog") : page.getByRole("complementary", { name: "Chat panel" })
-    const image = panel.getByRole("img", { name: "Mira's full portrait" })
+    const lightbox = page.getByRole("dialog", { name: "Mira", exact: true })
+    const image = lightbox.getByRole("img", { name: "Mira's full portrait" })
     await expect(image).toHaveCSS("object-fit", "contain")
-    await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeLessThanOrEqual(768)
-    await expect(image).toHaveAttribute("src", /&w=(384|768)$/)
+    await expect(image).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
     await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBeGreaterThan(0)
-    await page.reload()
-    await expect(image).toBeVisible()
-    await panel.getByRole("button", { name: "Open full size", exact: true }).click()
-    const full = page.getByRole("dialog", { name: "Mira — full size" })
-    await expect(full.getByRole("img")).toHaveCSS("width", "900px")
-    await expect(full.getByRole("img")).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
-    expect((await full.getByRole("img").boundingBox())!.x).toBeGreaterThanOrEqual(0)
+    const fitted = (await image.boundingBox())!
+    expect(fitted.x).toBeGreaterThanOrEqual(0)
+    expect(fitted.x + fitted.width).toBeLessThanOrEqual(width)
+    await lightbox.getByRole("button", { name: "Actual size", exact: true }).click()
+    await expect(image).toHaveCSS("width", "900px")
+    expect((await image.boundingBox())!.x).toBeGreaterThanOrEqual(0)
     await page.keyboard.press("Escape")
-    if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-    else await page.getByRole("button", { name: "Close the panel" }).click()
+    await expect(lightbox).toHaveCount(0)
     await page.locator("article[data-slot]").getByRole("button", { name: "View Bo's portrait" }).click()
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
-    if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-    else await page.getByRole("button", { name: "Close the panel" }).click()
+    await page.keyboard.press("Escape")
     await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
     // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
-    await expect(
-      page
-        .getByRole("tabpanel", { name: "Mira", exact: true })
-        .getByRole("button", { name: "Open Mira in the full editor", exact: true })
-    ).toBeVisible()
-    await page.getByRole("tab", { name: "Cast", exact: true }).click()
-    await page
-      .getByRole("list", { name: "Characters in this chat" })
-      .getByRole("button", { name: "View Mira's portrait", exact: true })
-      .click()
+    const card = page.getByRole("tabpanel", { name: "Mira", exact: true })
+    await expect(card.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
+    await card.getByRole("button", { name: "View Mira's portrait", exact: true }).click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    // The lightbox closes alone: the panel (a sheet on a phone) stays where it was.
+    await expect(card).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
-    await page
-      .getByRole("list", { name: "Characters in this chat" })
-      .getByRole("button", { name: "View Bo's portrait" })
-      .click()
-    await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
+    for (const name of ["Mira", "Bo"]) {
+      await page
+        .getByRole("list", { name: "Characters in this chat" })
+        .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
+        .click()
+      await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
+      await page.getByRole("dialog", { name, exact: true }).getByRole("button", { name: "Close", exact: true }).click()
+      await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toHaveCount(0)
+    }
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
     for (const [label, pixels] of [
@@ -175,8 +173,8 @@ test("every image follows concealment, reload's first frame and another tab", as
     "visibility",
     "hidden"
   )
-  await expect(page.getByRole("button", { name: "Open full size", exact: true })).toBeDisabled()
-  await page.getByRole("button", { name: "Close the panel" }).click()
+  await expect(page.getByRole("button", { name: "Actual size", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await page.getByLabel("Message", { exact: true }).focus()
   await page.keyboard.press("Alt+Shift+B")
   await expect(page.locator("article img").first()).toHaveCSS("visibility", "visible")
@@ -201,7 +199,7 @@ test("every image follows concealment, reload's first frame and another tab", as
 test("both sidebars resize by pointer and keyboard, keep widths per user, and reset", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await chat(page)
-  await page.locator("article .chat-portrait").first().click()
+  await openPanel(page, "This chat")
   for (const [name, delta] of [
     ["Resize sidebar", 60],
     ["Resize chat panel", -100]
@@ -222,7 +220,7 @@ test("both sidebars resize by pointer and keyboard, keep widths per user, and re
     .getByRole("separator")
     .evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-valuenow")))
   await page.reload()
-  await expect(page.getByRole("tab", { name: "Portrait" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tab", { name: "This chat" })).toHaveAttribute("aria-selected", "true")
   expect(
     await page.getByRole("separator").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("aria-valuenow")))
   ).toEqual(values)

@@ -1,3 +1,4 @@
+import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { chatPanels, lazyPanel, type PanelTabEntry } from "../chat/panels.tsx"
 
 /** The character feature contributes the card tab family: the cast strip, a portrait each. */
@@ -12,22 +13,31 @@ export const registerCharacterPanels = () =>
     matches: (value) => /^card:[0-9a-f-]{36}$/.test(value),
     tabs: (view, selected) => {
       const cast = view.cast
-      const tabs: Array<PanelTabEntry> = (cast?.cards ?? [])
+      const tab = (card: CastCard): PanelTabEntry => ({
+        value: `card:${card.entityId}`,
+        label: card.label,
+        avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId },
+        ...(cast!.playedByMe.includes(card.entityId) ? { note: "you" } : {})
+      })
+      // In the chat's own order (its header's, the composer's), the persona (you) last.
+      const place = (id: EntityId) =>
+        (cast!.playedByMe.includes(id) ? cast!.participants.length + 1 : 0) + cast!.participants.indexOf(id)
+      const tabs = (cast?.cards ?? [])
         .filter((card) => cast!.participants.includes(card.entityId) || cast!.playedByMe.includes(card.entityId))
-        .map((card) => ({
-          value: `card:${card.entityId}`,
-          label: card.label,
-          avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId },
-          ...(cast!.playedByMe.includes(card.entityId) ? { note: "you" } : {})
-        }))
-        // The characters spoken to first, the persona (you) last.
-        .sort((a, b) => Number(a.note !== undefined) - Number(b.note !== undefined))
-      if (selected?.startsWith("card:") && !tabs.some((tab) => tab.value === selected))
-        tabs.push({
-          value: selected,
-          label: "Character",
-          avatar: { id: selected.slice(5), name: "Character", mediaId: null }
-        })
+        .sort((a, b) => place(a.entityId) - place(b.entityId))
+        .map(tab)
+      if (selected?.startsWith("card:") && !tabs.some((entry) => entry.value === selected)) {
+        // One that left this chat on this branch keeps its tab; a card from another chat has
+        // none here (the panel opens this chat's own character instead). Unknown until the cast loads.
+        const departed = cast?.cards.find((card) => `card:${card.entityId}` === selected)
+        if (departed) tabs.push(tab(departed))
+        else if (!cast)
+          tabs.push({
+            value: selected,
+            label: "Character",
+            avatar: { id: selected.slice(5), name: "Character", mediaId: null }
+          })
+      }
       return tabs
     },
     component: lazyPanel(

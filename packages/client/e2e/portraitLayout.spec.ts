@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { panelTab } from "./support/panel.ts"
+import { openPanel, panelTab } from "./support/panel.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -108,16 +108,12 @@ test("permitted sidebar widths keep a group composer and Send inside the chat", 
 for (const width of [1440, 390]) {
   test(`the panel's tools fit one row at ${width}`, async ({ page }) => {
     await openChat(page, width)
-    await page
-      .locator("article")
-      .getByRole("button", { name: /^View .+'s portrait$/ })
-      .last()
-      .click()
+    await openPanel(page, "This chat")
     const list = page.getByRole("tablist", { name: "Chat panel", exact: true })
     const bounds = (await list.boundingBox())!
     // One row: what doesn't fit is under More tools, the tab open always shown.
     expect(bounds.height).toBeLessThan(44)
-    await expect(list.getByRole("tab", { name: "Portrait", exact: true })).toHaveAttribute("aria-selected", "true")
+    await expect(list.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
     for (const tab of await list.getByRole("tab").all()) {
       const box = (await tab.boundingBox())!
       expect(box.x).toBeGreaterThanOrEqual(bounds.x)

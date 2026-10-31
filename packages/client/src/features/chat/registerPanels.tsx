@@ -39,13 +39,6 @@ export const registerPanels = () => [
     )
   }),
   chatPanels.register({
-    id: "portrait",
-    label: "Portrait",
-    order: 70,
-    icon: "image",
-    component: lazyPanel(() => import("../../ui/Portrait.tsx").then((m) => ({ default: m.PortraitView })), "portrait")
-  }),
-  chatPanels.register({
     id: "cast",
     label: "Cast",
     order: 10,

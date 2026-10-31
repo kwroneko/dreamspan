@@ -76,11 +76,16 @@ function ChatCharacterPanel({
   )
   const result = useAtomValue(query)
   const info = AsyncResult.isSuccess(result) ? result.value[0] : undefined
-  if (!card) return <p className="text-sm text-muted">This character isn't in the chat on this branch.</p>
+  if (!card)
+    return (
+      <p className="text-sm text-muted">
+        {view.cast ? "This character isn't in the chat on this branch." : "Loading the card…"}
+      </p>
+    )
   return (
     <div className="flex flex-col gap-4">
       <header className="flex items-start gap-3">
-        <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" />
+        <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{card.label}</h2>
           {card.subtitle && <p className="text-sm text-muted [overflow-wrap:anywhere]">{card.subtitle}</p>}
@@ -180,27 +185,28 @@ function CardFields({
               ? `Saving changes ${card.name} for this chat; no other chat uses it.`
               : `Saving changes ${card.name} in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
         </p>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Button
-            variant="primary"
-            disabled={dirty === 0}
-            onClick={() => {
-              setSaved(false)
-              setSaving(true)
-            }}
-          >
-            Save{dirty > 0 ? ` (${dirty})` : ""}
-          </Button>
-          <p role="status" className="text-sm text-muted">
-            {state.saving
-              ? "Keeping your changes…"
-              : dirty === 0
-                ? saved
-                  ? "Saved."
-                  : "Everything is saved."
-                : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save.`}
-          </p>
-        </div>
+      </div>
+      {/* Save stays in sight while a field further down is edited: drafts reach the chat only once saved. */}
+      <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">
+        <Button
+          variant="primary"
+          disabled={dirty === 0}
+          onClick={() => {
+            setSaved(false)
+            setSaving(true)
+          }}
+        >
+          Save{dirty > 0 ? ` (${dirty})` : ""}
+        </Button>
+        <p role="status" className="text-sm text-muted">
+          {state.saving
+            ? "Keeping your changes…"
+            : dirty === 0
+              ? saved
+                ? "Saved."
+                : "Everything is saved."
+              : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save.`}
+        </p>
       </div>
       {state.saveError && (
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />

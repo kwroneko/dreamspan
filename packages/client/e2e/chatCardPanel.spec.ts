@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -67,9 +68,15 @@ test.beforeAll(async ({ browser }) => {
       system_prompt: "",
       post_history_instructions: ""
     })
-  await page.close()
   const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
   const id = (name: string) => refs.find((ref) => ref.label === name)!.entityId as EntityId
+  // One portrait with an image, for the lightbox and the strip.
+  await page.goto(`${server().url}/library/${refs.find((ref) => ref.label === "Wren")!.id}`)
+  await page
+    .getByLabel("Choose an avatar, or drop it here")
+    .setInputFiles({ name: "wren.png", mimeType: "image/png", buffer: portraitPng() })
+  await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
+  await page.close()
   await admin((api) => api.SetPersona({ entityId: id("Juniper Ashgrove"), persona: true }))
   const started = await admin((api) =>
     Effect.all([
@@ -127,9 +134,28 @@ for (const width of [1440, 390])
           const strip = (await cast.boundingBox())!
           expect(strip.height).toBeLessThan(52)
         }
-        await expect(cast.getByRole("tab", { name: "Juniper Ashgrove", exact: true })).toBeVisible()
+        await expect(cast.getByRole("tab", { name: "Juniper Ashgrove", exact: true })).toBeAttached()
+        // Eight characters with long names fit the strip at the panel's default width: the
+        // others as portraits, named on hover, without scrolling.
+        if (width === 1440)
+          expect(await cast.evaluate((strip) => strip.scrollWidth <= strip.clientWidth + 1)).toBeTruthy()
         await page.waitForTimeout(300)
         await shoot(page, `panel-${label}-${tag}`)
+        // A portrait opens the whole image over the page, the panel kept beneath.
+        await page
+          .getByRole("tabpanel", { name, exact: true })
+          .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
+          .click()
+        const lightbox = page.getByRole("dialog", { name, exact: true })
+        await expect(lightbox).toBeVisible()
+        if (label === "single") {
+          await expect(lightbox.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
+          await page.waitForTimeout(300)
+          await shoot(page, `lightbox-${tag}`)
+        }
+        await page.keyboard.press("Escape")
+        await expect(lightbox).toHaveCount(0)
+        await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
       }
       // A tool under More opens like any tab.
       const more = page.getByRole("button", { name: "More tools", exact: true })
