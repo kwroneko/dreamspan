@@ -7,7 +7,7 @@ import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import { Link, useNavigate } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
@@ -24,6 +24,7 @@ import { useCast } from "./cast.ts"
 import { chatDisplayName } from "./ChatHeader.tsx"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { type Write } from "./LcmFields.tsx"
+import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
 
@@ -142,16 +143,14 @@ function useLcmSettings(session: ChatSession) {
   return { view, settings, error, setError, reread, write }
 }
 
-/** Opens another of the panel's tabs, as a link would (the URL names the tab shown). */
-export function PanelLink({ panel, children }: { panel: string; children: ReactNode }) {
-  const navigate = useNavigate()
+/** Opens another of the panel's tabs, as a link would. */
+function PanelLink({ panel, children }: { panel: string; children: ReactNode }) {
+  const show = useShowPanel()
   return (
     <button
       type="button"
       className={`${link} outline-none focus-visible:ring-2 focus-visible:ring-focus`}
-      onClick={() =>
-        void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
-      }
+      onClick={() => show(panel)}
     >
       {children}
     </button>
@@ -174,9 +173,7 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
         {persona && <Avatar id={persona.entityId} name={persona.name} mediaId={persona.avatarMediaId} size="lg" />}
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-xs text-muted">You play</span>
-          <span className="font-medium [overflow-wrap:anywhere]">
-            {persona?.name ?? (cast ? "No persona" : "…")}
-          </span>
+          <span className="font-medium [overflow-wrap:anywhere]">{persona?.name ?? (cast ? "No persona" : "…")}</span>
         </div>
         <PersonaSwitch session={session} trigger="Switch persona" />
       </div>

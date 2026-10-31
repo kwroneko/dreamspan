@@ -1,6 +1,7 @@
 // Chat panel contributions use the client registry's reversible registration scope.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import { Component, lazy, Suspense, useSyncExternalStore, type ComponentType } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { Button } from "../../ui/Button.tsx"
 import type { IconName } from "../../ui/Icon.tsx"
@@ -104,6 +105,16 @@ export const useIsPanelTab = (value: unknown, view?: ChatView) =>
     () => isPanelTab(value, view),
     () => isPanelTab(value, view)
   )
+
+/** Shows another of the panel's tabs from inside one (a character's, from the Cast): the URL names the tab shown. */
+export const useShowPanel = () => {
+  const navigate = useNavigate()
+  return useCallback(
+    (panel: string) =>
+      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true }),
+    [navigate]
+  )
+}
 
 export function PanelContent({ descriptor, ...props }: PanelProps & { descriptor: PanelDescriptor }) {
   return <descriptor.component {...props} />

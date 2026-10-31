@@ -84,9 +84,9 @@ export function MacroBindings({ session }: { session: ChatSession }) {
     <Disclosure title="Advanced: names in prompts">
       <section aria-label="Names in prompts" className="flex flex-col gap-4">
         <p className="text-sm text-muted">
-          The prompt preset and notes call you and the character by these names. They follow who's in the chat; keep
-          one to stop it changing, say when you speak as someone else. A card's own text always uses its own name. A
-          change applies from the latest message on, on this branch, and the next reply re-reads the whole prompt.
+          The prompt preset and notes call you and the character by these names. They follow who's in the chat; keep one
+          to stop it changing, say when you speak as someone else. A card's own text always uses its own name. A change
+          applies from the latest message on, on this branch, and the next reply re-reads the whole prompt.
         </p>
         {(["user", "char"] as const).map((name) => (
           <Binding

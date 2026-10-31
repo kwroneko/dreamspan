@@ -280,20 +280,20 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       title={persona ? "Your persona" : "Speak as"}
       trigger={
         trigger ?? (
-        <>
-          {speaker !== null ? (
-            <Avatar
-              id={speaker}
-              name={name}
-              mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
-              size="chip"
-            />
-          ) : (
-            <span aria-hidden="true" className="size-1" />
-          )}
-          <span className="min-w-0 truncate">{name}</span>
-          <ChevronIcon up />
-        </>
+          <>
+            {speaker !== null ? (
+              <Avatar
+                id={speaker}
+                name={name}
+                mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
+                size="chip"
+              />
+            ) : (
+              <span aria-hidden="true" className="size-1" />
+            )}
+            <span className="min-w-0 truncate">{name}</span>
+            <ChevronIcon up />
+          </>
         )
       }
     >
