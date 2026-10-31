@@ -35,7 +35,6 @@ import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useSession } from "../../session.ts"
-import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
 import {
   ChatSidePanel,
@@ -633,7 +632,6 @@ function ChatSurface({
                 onOpenSummaries={openSummaries}
               />
             )}
-            <CacheIndicator warmth={view.cache} />
             <SlotOutlet slot={chatComposerNotes} props={{ view }} />
             <SlotOutlet slot={chatComposer} props={{ session, view, onSettings: show }} />
             <SlotOutlet slot={chatOverlays} props={{ session, view }} />

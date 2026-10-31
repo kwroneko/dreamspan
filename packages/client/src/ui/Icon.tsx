@@ -74,7 +74,13 @@ const paths = {
     "M11.52 2.3a.53.53 0 0 1 .95 0l2.31 4.68a2.12 2.12 0 0 0 1.6 1.16l5.16.76a.53.53 0 0 1 .3.9l-3.74 3.64a2.12 2.12 0 0 0-.61 1.88l.88 5.14a.53.53 0 0 1-.77.56l-4.62-2.43a2.12 2.12 0 0 0-1.97 0L6.4 21.01a.53.53 0 0 1-.77-.56l.88-5.14a2.12 2.12 0 0 0-.61-1.88L2.16 9.8a.53.53 0 0 1 .29-.9l5.17-.76a2.12 2.12 0 0 0 1.6-1.16z"
   ],
   compare: ["M12 3v18", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"],
-  note: ["M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z", "M15 3v6h6"]
+  note: ["M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z", "M15 3v6h6"],
+  guidance: [
+    "M12 13v8",
+    "M12 3v3",
+    "M18 6a2 2 0 0 1 1.39.56l2.3 2.22a1 1 0 0 1 0 1.44l-2.3 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.39-.56l-2.3-2.22a1 1 0 0 1 0-1.44l2.3-2.22A2 2 0 0 1 6 6z"
+  ],
+  play: ["M6 4v16a1 1 0 0 0 1.5.87l13-8a1 1 0 0 0 0-1.74l-13-8A1 1 0 0 0 6 4z"]
 } as const
 
 export type IconName = keyof typeof paths
@@ -96,7 +102,7 @@ export function Icon({
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={name === "stop" || filled ? "currentColor" : "none"}
+      fill={name === "stop" || name === "play" || filled ? "currentColor" : "none"}
       stroke="currentColor"
       strokeWidth={name === "more" ? 3 : 2}
       strokeLinecap="round"

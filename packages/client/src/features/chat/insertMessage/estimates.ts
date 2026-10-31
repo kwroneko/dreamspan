@@ -53,13 +53,20 @@ const beforeHistoryStart = ({ view, position }: InsertEstimateContext) => {
 
 const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
 
-/** "The model will re-read N messages on the next reply (cache: ~X tokens)": from the new message to the end. */
-export const cacheLine = (context: InsertEstimateContext): string | null => {
-  const { view, position, now } = context
-  if (beforeHistoryStart(context)) return null
+/** How many messages the next reply re-reads: the new message, then every message after its anchor; null: all from here, past what's loaded. */
+export const rereadCount = ({ view, position }: InsertEstimateContext): number | null => {
   const last = view.newer === null ? view.entries.at(-1) : undefined
-  // The new message, then every message after its anchor.
-  const reread = last === undefined ? null : Math.max(1, positionOf(last) - position + 2)
+  return last === undefined ? null : Math.max(1, positionOf(last) - position + 2)
+}
+
+/**
+ * "The model will re-read N messages on the next reply (cache: ~X tokens)": from the new message
+ * to the end. Shown in the cache chip's popover while the editor is open, not among its lines.
+ */
+export const cacheLine = (context: InsertEstimateContext): string | null => {
+  const { view, now } = context
+  if (beforeHistoryStart(context)) return null
+  const reread = rereadCount(context)
   const warmth = view.cache
   const warm =
     warmth !== null &&
@@ -88,7 +95,6 @@ export const summarizedLine = ({ view, anchor }: InsertEstimateContext): string 
 }
 
 export const registerInsertEstimates = () => [
-  insertEstimates.register({ id: "insert.cache", order: 10, line: cacheLine }),
   insertEstimates.register({ id: "insert.history-start", order: 20, line: historyStartLine }),
   insertEstimates.register({ id: "insert.summarized", order: 30, line: summarizedLine })
 ]

@@ -1,9 +1,10 @@
 // The insertion editor (spec/MESSAGE-INSERT.md §4.2): inline under the message it goes below, in
 // the stream, so the messages around it stay in view; a sheet on phones. Who speaks, the text (a
-// direction for Generate), what inserting there costs, and the actions, all visible.
+// direction for Generate), what inserting there changes, and the actions, all visible. What the
+// next reply re-reads shows in the strip's cache chip while it's open.
 import type { EntityId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { InsertBody } from "@rp/shared/messagesApi.ts"
-import { useId, useState, useSyncExternalStore } from "react"
+import { useEffect, useId, useState, useSyncExternalStore } from "react"
 import { AutoGrowTextarea } from "../../../ui/AutoGrowTextarea.tsx"
 import { Button } from "../../../ui/Button.tsx"
 import { Icon } from "../../../ui/Icon.tsx"
@@ -17,7 +18,9 @@ import { positionOf } from "../position.ts"
 import type { ChatSession, Outcome } from "../session.ts"
 import { useComposerChoice } from "../speaker.ts"
 import { SpeakerSwitcher } from "../SpeakerSwitcher.tsx"
-import { insertEstimates, insertPosition } from "./estimates.ts"
+import { cacheNotes } from "../CacheIndicator.tsx"
+import { editorKey } from "../messageDraft.ts"
+import { cacheLine, insertEstimates, insertPosition, rereadCount } from "./estimates.ts"
 import { openEditors, type InsertTarget } from "./openEditors.ts"
 import { pickInsertSpeaker } from "./speakerDefault.ts"
 
@@ -69,6 +72,22 @@ export function InsertEditor({
   const lines = [...estimates.entries]
     .sort((a, b) => a.order - b.order)
     .flatMap((estimate) => estimate.line({ view, anchor, position, now }) ?? [])
+  // What the next reply re-reads goes to the strip's cache chip, while this is open.
+  const reread = cacheLine({ view, anchor, position, now })
+  const rereads = rereadCount({ view, anchor, position, now })
+  const noteKey = editorKey(target)
+  useEffect(() => {
+    cacheNotes(session).set(
+      noteKey,
+      reread === null
+        ? null
+        : {
+            short: rereads === null ? "re-reads the rest" : `re-reads ${rereads} ${rereads === 1 ? "message" : "messages"}`,
+            text: reread
+          }
+    )
+  }, [session, noteKey, reread, rereads])
+  useEffect(() => () => cacheNotes(session).set(noteKey, null), [session, noteKey])
   // Below the last message, at the fork's tip: the composer's append, queued behind a reply
   // still being written as a send is (§4.2).
   const atEnd =
@@ -131,7 +150,9 @@ export function InsertEditor({
     }
   }
 
-  const discard = async () => {
+  /** Closes it; text typed goes to the bin's recovered texts, as every message editor's Cancel does. */
+  const cancel = async () => {
+    if (text === "") return close(true)
     const outcome = await editor.discard()
     if (!outcome.ok) return setError(outcome.error)
     close(false)
@@ -196,20 +217,16 @@ export function InsertEditor({
           <Icon name="check" />
           Insert
         </Button>
-        <Button type="button" disabled={busy} onClick={() => close(true)}>
+        <Button type="button" disabled={busy} onClick={() => void cancel()}>
           <Icon name="close" />
           Cancel
-        </Button>
-        <Button type="button" disabled={busy || text === ""} onClick={() => void discard()}>
-          <Icon name="trash" />
-          Discard
         </Button>
       </div>
     </form>
   )
   if (phone)
     return (
-      <Sheet open onOpenChange={(open) => !open && close(true)} title={title} closeLabel="Cancel">
+      <Sheet open onOpenChange={(open) => !open && void cancel()} title={title} closeLabel="Cancel">
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{body}</div>
       </Sheet>
     )
