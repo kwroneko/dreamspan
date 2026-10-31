@@ -116,7 +116,7 @@ export function CharacterTile({ card }: { card: ShellCard }) {
           <span className="text-xs text-muted">{c.chats ? `${c.chats} chats` : "Never used"}</span>
         </span>
       </button>
-      <CardSurface placement="badge" entityId={c.entityId} />
+      <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
     </div>
   )
 }

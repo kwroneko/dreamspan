@@ -2,7 +2,7 @@ import { chatName, formatDay } from "../chat/chatTitle.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { useState } from "react"
+import { type ReactNode, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { useSession } from "../../session.ts"
@@ -220,6 +220,32 @@ export function PinnedChats({
   )
 }
 
+/** Rows shown at first, and added by each "Show more". */
+const PAGE_ROWS = 100
+
+/**
+ * The first rows of a long list, and a button for the next: a heavy user's 2,000 chats made
+ * the sidebar 33,000 elements, laid out and styled on every visit before anything showed.
+ */
+function ProgressiveRows<A>({ items, children }: { items: ReadonlyArray<A>; children: (item: A) => ReactNode }) {
+  const [shown, setShown] = useState(PAGE_ROWS)
+  const rest = items.length - shown
+  return (
+    <>
+      {items.slice(0, shown).map(children)}
+      {rest > 0 && (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + PAGE_ROWS)}
+          className="mt-1 self-start px-2 py-1 text-xs text-accent"
+        >
+          Show {Math.min(rest, PAGE_ROWS)} more of {rest.toLocaleString()}
+        </button>
+      )}
+    </>
+  )
+}
+
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [search, setSearch] = useState("")
@@ -236,21 +262,23 @@ function Browser({ data }: { data: ShellLibrary }) {
     forks.length > 0 && (
       <section className="flex flex-col gap-1" aria-label={title}>
         <h3 className="mt-3 text-xs font-semibold text-muted">{title}</h3>
-        {forks.map((f) => (
-          <div key={`${f.chat.id}/${f.forkId}`}>
-            <ForkRow fork={f} />
-            <button
-              type="button"
-              onClick={() => {
-                setScope({ ...scope, chat: f.chat.id })
-                setGrid(false)
-              }}
-              className="px-2 text-xs text-accent"
-            >
-              Forks
-            </button>
-          </div>
-        ))}
+        <ProgressiveRows key={`${scope.entity}/${scope.chat}/${needle}`} items={forks}>
+          {(f) => (
+            <div key={`${f.chat.id}/${f.forkId}`}>
+              <ForkRow fork={f} />
+              <button
+                type="button"
+                onClick={() => {
+                  setScope({ ...scope, chat: f.chat.id })
+                  setGrid(false)
+                }}
+                className="px-2 text-xs text-accent"
+              >
+                Forks
+              </button>
+            </div>
+          )}
+        </ProgressiveRows>
       </section>
     )
   const peers = rows.filter((f) => f.current || f.pinned || f.named)

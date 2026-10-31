@@ -70,7 +70,7 @@ function LibraryRow({
           {entry.subtitle && (
             <span className="min-w-0 text-sm text-muted [overflow-wrap:anywhere]">{entry.subtitle}</span>
           )}
-          {entry.kind === "card" && <CardSurface placement="badge" entityId={entry.entityId} />}
+          {entry.kind === "card" && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}
           {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
           {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
         </div>

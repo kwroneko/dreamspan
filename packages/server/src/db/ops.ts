@@ -2773,6 +2773,12 @@ export class ReadOps extends RpcGroup.make(
     success: EditorSnapshot,
     error: Schema.Union([NotFound, StorageError])
   }),
+  /** The user's cards that are a fork or have one, with their own forks' count (every state, as CardFamily). */
+  Rpc.make("CardFamilyIndex", {
+    payload: { userId: UserId },
+    success: Schema.Array(Schema.Struct({ entityId: EntityId, forks: Schema.Int })),
+    error: StorageError
+  }),
   /** Every card connected to a live card of the user's by forking (`cardFamily` in library.ts). */
   Rpc.make("CardFamily", {
     payload: { userId: UserId, entityId: EntityId },

@@ -2144,6 +2144,22 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   CardFamily: {
     probe: (actor, owner) => refused(actor.api.CardFamily({ entityId: owner.editor.cardEntityId }), "NotFound")
   },
+  CardFamilyIndex: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // A family of the actor's own: listed for the actor, never for the owner, and the
+        // owner's cards never in the actor's list.
+        const fork = yield* actor.api.CreateCard({ label: "Index fork", name: "Index fork" })
+        yield* actor.api.SetCardParent({ entityId: fork.entityId, parentEntityId: actor.editor.cardEntityId })
+        const mine = yield* actor.api.CardFamilyIndex()
+        assert.strictEqual(mine.find((card) => card.entityId === actor.editor.cardEntityId)?.forks, 1)
+        assert.strictEqual(mine.find((card) => card.entityId === fork.entityId)?.forks, 0)
+        assert.isFalse(mine.some((card) => card.entityId === owner.editor.cardEntityId))
+        const theirs = new Set<string>([fork.entityId, actor.editor.cardEntityId])
+        assert.isFalse((yield* owner.api.CardFamilyIndex()).some((card) => theirs.has(card.entityId)))
+        yield* actor.api.SetCardParent({ entityId: fork.entityId, parentEntityId: null })
+      })
+  },
   SetCardParent: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

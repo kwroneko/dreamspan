@@ -150,18 +150,25 @@ function ChatLink({ chatId }: { chatId: NonNullable<FamilyMember["forkedInChatId
     </Link>
   )
 }
-export function ForkBadge({ entityId }: CardSurfaceContext) {
-  const result = useAtomValue(useMemo(() => familyQuery(entityId), [entityId]))
+/**
+ * Which cards have a fork family, for every badge at once: a grid of hundreds of cards made
+ * one CardFamily read per tile (1,257 on one home load at 420 cards). The tree is read when opened.
+ */
+const familyIndexAtom = AppClient.query("CardFamilyIndex", undefined, { reactivityKeys: ["library"] })
+
+export function ForkBadge({ entityId, label }: CardSurfaceContext) {
+  const index = useAtomValue(familyIndexAtom)
   const [open, setOpen] = useState(false)
-  if (!AsyncResult.isSuccess(result) || result.value.members.length < 2) return null
-  const children = result.value.members.filter((m) => m.parentEntityId === entityId).length
+  const entry = AsyncResult.isSuccess(index) ? index.value.find((card) => card.entityId === entityId) : undefined
+  if (entry === undefined) return null
+  const children = entry.forks
   return (
     <>
       <Button
         variant="ghost"
         className="h-auto! px-1! py-1! text-xs!"
         onClick={() => setOpen(true)}
-        aria-label={`Forks of ${result.value.members.find((m) => m.entityId === entityId)?.label}`}
+        aria-label={label === undefined ? "Forks of this card" : `Forks of ${label}`}
       >
         {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
       </Button>

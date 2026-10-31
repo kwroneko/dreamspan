@@ -208,7 +208,6 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
     return summaries
   })
 
-
 /** A chat's summaries as a read computed them, with the stamps it read (`ChatSummariesAt` in ops.ts). */
 export interface ChatSummaries {
   readonly chatId: string
