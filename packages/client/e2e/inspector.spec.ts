@@ -544,7 +544,7 @@ const denseContext = async (page: Page, explanations = false) => {
   })
   await page.goto(`${server().url}/chats/${chat.id}/context/${chat.reply}`)
   const messages = page.getByRole("region", { name: "Messages" })
-  await expect(page.getByText(/10000 messages, about 100,000 tokens/)).toBeVisible()
+  await expect(page.getByText(/10,000 messages, about 100,000 tokens/)).toBeVisible()
   expect(replaced).toBe(true)
   return messages
 }

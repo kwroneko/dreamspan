@@ -42,7 +42,12 @@ test.beforeAll(async () => {
         },
         apiKey: "sk-lcm-enable-key-0042"
       })
-      const model = yield* api.AddUserModel({ connectionId: connection.id, key: "fake-small", overrides: {} })
+      // Small, as its name says: the window these chats outgrow (no longer a silent 8,192 default).
+      const model = yield* api.AddUserModel({
+        connectionId: connection.id,
+        key: "fake-small",
+        overrides: { context: 8192 }
+      })
       yield* api.SetGenerationDefaults({
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
