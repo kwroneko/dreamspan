@@ -128,6 +128,8 @@ export function ChoiceChip<Value>({
               type="button"
               role="radio"
               aria-checked={checked}
+              aria-label={choice.label}
+              {...(choice.detail ? { "aria-description": choice.detail } : {})}
               onClick={() => {
                 close()
                 if (!checked) onChoose(choice.value)
