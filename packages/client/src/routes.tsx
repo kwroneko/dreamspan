@@ -19,8 +19,16 @@ export interface RouteEntry {
   /** Relative to the parent's path, with `$name` for parameters. None: a layout without a path. */
   readonly path?: string
   readonly component: () => ReactNode
-  /** Listed in the parent's navigation. Admin-only entries are hidden from others; the server still decides. */
-  readonly nav?: { readonly label: string; readonly order: number; readonly adminOnly?: boolean }
+  /**
+   * Listed in the parent's navigation. Admin-only entries are hidden from others; the server
+   * still decides. `group`: the heading it sits under, in a navigation that has them (settings).
+   */
+  readonly nav?: {
+    readonly label: string
+    readonly order: number
+    readonly adminOnly?: boolean
+    readonly group?: string
+  }
   /**
    * Search params a navigation to this screen keeps from the current URL unless it sets or
    * removes them itself: state of the shell that outlives the screen's own links.

@@ -16,6 +16,7 @@ import * as login from "./login.tsx"
 import * as network from "./network.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
+import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 
@@ -23,6 +24,7 @@ export const registerFeatures = () => {
   cardForks.register()
   cardRename.register()
   shell.register()
+  settings.register()
   login.register()
   characters.register()
   status.register()

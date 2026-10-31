@@ -92,7 +92,7 @@ test("the bin names a message's chat by its readable name", async ({ page }) => 
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/bin`)
   const main = page.getByRole("main")
-  await expect(main.getByText("Message in “Station Kepler, started Jun 2, 2026”")).toBeVisible()
+  await expect(main.getByText("Message 1 in “Station Kepler, started Jun 2, 2026”")).toBeVisible()
   await expect(main).not.toContainText("@09h30m")
 })
 

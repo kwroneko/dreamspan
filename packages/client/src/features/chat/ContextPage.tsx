@@ -348,7 +348,7 @@ function Message({
                   : "Forced tool schema prefill"}
               </Badge>
             )}
-            <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
+            <span className="text-muted tabular-nums">~{counted(message.tokens, "token")}</span>
           </span>
           {message.images && (
             <span className="flex flex-wrap gap-x-3 gap-y-1">
@@ -435,6 +435,9 @@ function NotSent({ run }: { run: RunContext }) {
     </section>
   )
 }
+
+/** "1 message", "2,416 tokens". */
+const counted = (n: number, one: string) => `${n.toLocaleString()} ${one}${n === 1 ? "" : "s"}`
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 /** A request's times from the ledger: how long it took, its first token and its speed. */
@@ -599,7 +602,7 @@ function Inspector({ run }: { run: RunContext }) {
       <Card>
         <CardHeader
           title="Request"
-          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${run.messages.length} messages, about ${tokens.toLocaleString()} tokens.`}
+          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}.`}
         />
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Model</dt>
