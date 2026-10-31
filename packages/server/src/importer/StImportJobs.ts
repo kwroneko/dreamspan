@@ -20,6 +20,7 @@ import {
   StImportBusy,
   StImportJob,
   StImportJobDetail,
+  StImportedChat,
   StImportReport,
   type StImportStatus,
   StNotSent
@@ -551,10 +552,13 @@ export class StImportJobs extends Context.Service<
       const get = (user: User, importId: string) =>
         Effect.gen(function* () {
           const detail = yield* reader.GetStImportJob({ userId: user.id, id: importId })
+          // Only a finished import's report offers it.
+          const latest = detail.job.status === "running" ? null : yield* reader.StImportLatestChat({ userId: user.id })
           return new StImportJobDetail({
             job: detail.job,
             report: detail.reportJson === null ? null : decodeReport(detail.reportJson),
-            notSent: decodeNotSent(detail.notSentJson)
+            notSent: decodeNotSent(detail.notSentJson),
+            latestChat: latest === null ? null : new StImportedChat(latest)
           })
         }).pipe(stored("Reading the import"))
 

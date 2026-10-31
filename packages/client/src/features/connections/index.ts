@@ -9,6 +9,7 @@ import {
   SettingsSection,
   TestSection
 } from "./detail.tsx"
+import { DefaultModelSection } from "./defaultModel.tsx"
 import { ConnectionsPage, NewConnectionPage } from "./list.tsx"
 import { ModelsSection } from "./models.tsx"
 
@@ -32,6 +33,8 @@ export const register = () => {
     path: "connections/$connectionId",
     component: ConnectionPage
   })
+  // Which model new chats use; a new connection fetches its models here at once.
+  connectionSections.register({ id: "default-model", order: 5, component: DefaultModelSection })
   connectionSections.register({ id: "settings", order: 10, component: SettingsSection })
   connectionSections.register({ id: "key", order: 20, component: KeySection })
   connectionSections.register({ id: "test", order: 30, component: TestSection })

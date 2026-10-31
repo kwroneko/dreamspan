@@ -1,11 +1,17 @@
 import { chatPanels, isPanelTab, useChatPanels } from "./panels.tsx"
-// Commands in the chat action menu. The host supplies the viewed fork and navigation;
-// contributions own the behavior, label, ordering and availability.
-import { useEffect, useSyncExternalStore } from "react"
+// Commands in the chat's ⋯ menu and on keys. The host supplies the viewed fork and navigation;
+// contributions own the behavior, label, ordering and availability. A command with a
+// shortcut is listed under Keyboard shortcuts rather than in the menu, unless it asks to be
+// in both (`menu: true`); one with a `dialog` opens it from the menu.
+import { type ComponentType, Fragment, useEffect, useState, useSyncExternalStore } from "react"
+import type { BinItem } from "@rp/shared/bin.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
+import type { useNavigate } from "@tanstack/react-router"
 import { makeRegistry } from "../../registry.ts"
 import type { IconName } from "../../ui/Icon.tsx"
-import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export interface ChatCommandContext {
@@ -14,6 +20,16 @@ export interface ChatCommandContext {
   readonly onHistory: () => void
   readonly onJump: (slot: SlotId) => void
   readonly saveMessageEdit?: () => void
+  /** Renames the chat where its name is shown (the header's title). */
+  readonly onRename?: () => void
+  readonly navigate?: ReturnType<typeof useNavigate>
+  /** Says something went to the bin, with Undo. */
+  readonly deleted?: (item: BinItem) => void
+}
+
+export interface ChatCommandDialogProps {
+  readonly context: ChatCommandContext
+  readonly onClose: () => void
 }
 
 interface ChatCommand {
@@ -26,8 +42,25 @@ interface ChatCommand {
   readonly available?: (context: ChatCommandContext) => boolean
   readonly shortcut?: { readonly key: string; readonly mod: boolean; readonly alt?: boolean }
   readonly acceptsKey?: (event: CommandKeyEvent, context: ChatCommandContext) => boolean
-  readonly run: (context: ChatCommandContext) => void
+  /** Listed in the ⋯ menu: by default, the commands without a shortcut. */
+  readonly menu?: boolean
+  /** Danger tone, after a separator (Delete chat). */
+  readonly tone?: "danger"
+  readonly run?: (context: ChatCommandContext) => void
+  /** What the menu opens instead of running it. */
+  readonly dialog?: ComponentType<ChatCommandDialogProps>
 }
+
+/** A command's keys as written in its label: "Ctrl+H", "Alt+Enter", "ArrowUp". */
+export const shortcutText = (shortcut: NonNullable<ChatCommand["shortcut"]>) =>
+  [
+    ...(shortcut.mod ? ["Ctrl"] : []),
+    ...(shortcut.alt ? ["Alt"] : []),
+    shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key
+  ].join("+")
+
+/** Whether the ⋯ menu lists the command. */
+const inMenu = (command: ChatCommand) => command.menu ?? command.shortcut === undefined
 
 export const chatCommands = makeRegistry<ChatCommand>()
 export const availableCommands = (
@@ -46,27 +79,37 @@ export const availableCommands = (
 export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
   const snapshot = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot, chatCommands.snapshot)
   const panels = useChatPanels()
-  const commands = availableCommands(context, snapshot, panels)
+  const [dialog, setDialog] = useState<ChatCommand | null>(null)
+  const commands = availableCommands(context, snapshot, panels).filter(inMenu)
   if (commands.length === 0) return null
+  const Open = dialog?.dialog
   return (
-    <Menu
-      label="Chat actions"
-      trigger={
-        <button
-          type="button"
-          aria-label="Chat actions"
-          className="rounded-md px-2 py-1 text-muted hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          •••
-        </button>
-      }
-    >
-      {commands.map((entry) => (
-        <MenuItem key={entry.id} icon={entry.icon} onClick={() => invokeChatCommand(entry.id, context)}>
-          {entry.label}
-        </MenuItem>
-      ))}
-    </Menu>
+    <>
+      <Menu
+        label="Chat actions"
+        trigger={
+          <Tooltip label="Chat actions">
+            <button type="button" aria-label="Chat actions" className={iconButtonClass()}>
+              <Icon name="more" />
+            </button>
+          </Tooltip>
+        }
+      >
+        {commands.map((entry, i) => (
+          <Fragment key={entry.id}>
+            {entry.tone === "danger" && i > 0 && commands[i - 1]!.tone !== "danger" && <MenuSeparator />}
+            <MenuItem
+              icon={entry.icon}
+              tone={entry.tone ?? "default"}
+              onClick={() => (entry.dialog ? setDialog(entry) : entry.run?.(context))}
+            >
+              {entry.label}
+            </MenuItem>
+          </Fragment>
+        ))}
+      </Menu>
+      {Open && <Open context={context} onClose={() => setDialog(null)} />}
+    </>
   )
 }
 
@@ -98,7 +141,7 @@ export const emptyComposerTarget = (event: CommandKeyEvent) => {
 
 export const invokeChatCommand = (id: string, context: ChatCommandContext) => {
   const command = availableCommands(context).find((entry) => entry.id === id)
-  command?.run(context)
+  command?.run?.(context)
 }
 
 /** Keyboard invocation resolves the same effective, available command as the menu. */
@@ -113,7 +156,7 @@ export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandC
       !!entry.shortcut.alt === !!event.altKey &&
       (entry.acceptsKey ? entry.acceptsKey(event, context) : !typingTarget(event))
   )
-  if (!command) return false
+  if (!command?.run) return false
   command.run(context)
   return true
 }

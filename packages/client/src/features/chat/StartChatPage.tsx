@@ -608,6 +608,7 @@ function Pending({
         )}
       </div>
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+        <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
         {/* One bar, as the chat's composer: who's speaking, then the box with its actions. */}
         <div className="flex min-w-0 items-end gap-1.5">

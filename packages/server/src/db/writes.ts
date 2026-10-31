@@ -634,7 +634,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return yield* forkOut(fork.id)
         }).pipe(transaction("SetForkPinned")),
 
-      CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes }) =>
+      CreateFork: ({ userId, chatId, fromForkId, atSlotId, notes, name }) =>
         Effect.gen(function* () {
           const from = yield* ownedFork(userId, chatId, fromForkId)
           if (atSlotId !== null)
@@ -655,7 +655,14 @@ export const makeWriteHandlers = (bin: Bin) =>
             return yield* new ForkNotesChanged({
               message: "Notes changed while this dialog was open. Close it and branch again to review them."
             })
-          const fork = yield* createFork(chatId, from, atSlotId, Date.now())
+          const at = Date.now()
+          const fork = yield* createFork(chatId, from, atSlotId, at)
+          // Making it is the user's activity in it: the shell's Recent counts it (db/shellReads.ts).
+          yield* sql`UPDATE forks SET last_chatted_at = ${at} WHERE id = ${fork.id}`
+          // An automatic name, not the user's (`name_user` stays 0): a label of the slot's own
+          // (an ST import's) still wins among the alternates, and a rename replaces it.
+          const automatic = cleanName(name ?? "")
+          if (automatic !== "") yield* sql`UPDATE forks SET name = ${automatic} WHERE id = ${fork.id}`
           for (const row of comparison) {
             const choice = notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then"
             // Positional inheritance already gives "then". Rewriting it would detach

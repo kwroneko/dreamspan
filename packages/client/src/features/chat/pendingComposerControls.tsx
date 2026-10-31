@@ -21,7 +21,8 @@ export interface PendingComposerContext {
 interface PendingControl {
   readonly id: string
   readonly order: number
-  readonly placement: "speaker" | "actions" | "guidance"
+  /** `notes`: a row of its own above the composer, for what the user should know before sending. */
+  readonly placement: "notes" | "speaker" | "actions" | "guidance"
   readonly component: ComponentType<PendingComposerContext>
   readonly run?: (context: PendingComposerContext) => Promise<void>
 }

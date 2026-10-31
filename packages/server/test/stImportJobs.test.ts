@@ -102,6 +102,60 @@ describe("ST import jobs", () => {
   )
 
   it.live(
+    "the preview tells what's already here, the report counts groups and names the latest imported chat",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const files = stFolder("data/default-user/")
+        const root = onDisk(files)
+        const api = yield* client()
+        const paths = [...files.keys()].map((path) => path.slice("data/default-user/".length))
+        const added = "chats/Nobody/Later.jsonl"
+        assert.deepStrictEqual((yield* api.StImportPreview({ paths })).known, [])
+        const { importId } = yield* api.StartStPathImport({ path: root, prefix: "data/default-user/" })
+        yield* until(() => row(config.dataDir, importId)?.status === "complete")
+        const known = new Set((yield* api.StImportPreview({ paths: [...paths, added] })).known)
+        // Cards, personas, lorebooks, presets and finished chats are here; a file never imported isn't.
+        for (const path of paths) {
+          const kind = classifyStPath(path)?.kind
+          if (kind === "card" || kind === "persona_avatar" || kind === "world" || kind === "preset")
+            assert.isTrue(known.has(path), path)
+          if (kind === "settings" || kind === "group") assert.isFalse(known.has(path), path)
+        }
+        assert.isTrue([...known].some((path) => path.startsWith("chats/")))
+        assert.isFalse(known.has(added))
+        // Read from the folder: a copy of an imported lorebook under another name is here, as
+        // the import finds it by its bytes, and a chat of only a greeting is one no import takes.
+        const user = join(root, "data/default-user")
+        writeFileSync(join(user, "worlds/Hollow copy.json"), files.get("data/default-user/worlds/Hollow.json")!)
+        mkdirSync(join(user, "chats/Nobody"), { recursive: true })
+        writeFileSync(
+          join(user, "chats/Nobody/Hi.jsonl"),
+          jsonl([header({}), message({ name: "Nobody", mes: "Hi.", minute: 0 })])
+        )
+        writeFileSync(
+          join(user, added),
+          jsonl([header({}), message({ name: "Sam", user: true, mes: "Hey.", minute: 0 })])
+        )
+        const read = yield* api.StImportPreview({
+          paths: ["worlds/Hollow copy.json", "chats/Nobody/Hi.jsonl", added],
+          folder: { root, prefix: "data/default-user/" }
+        })
+        assert.deepStrictEqual(read.known, ["worlds/Hollow copy.json"])
+        assert.deepStrictEqual(read.skipped, ["chats/Nobody/Hi.jsonl"])
+        const detail = yield* api.GetStImport({ importId })
+        assert.isAtLeast(detail.report!.counts.group?.unchanged ?? 0, 1)
+        assert.isAtLeast(detail.report!.counts.persona?.added ?? 0, 1)
+        assert.isNotNull(detail.latestChat)
+        // The chat list's newest, as every chat here came from the import.
+        const [newest] = yield* api.ListChats({ limit: 1, before: null })
+        assert.strictEqual(detail.latestChat!.chatId, newest!.id)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    180_000
+  )
+
+  it.live(
     "publishes progress and the end, cancels at a file boundary, and clears only finished jobs",
     () => {
       const config = testConfig()

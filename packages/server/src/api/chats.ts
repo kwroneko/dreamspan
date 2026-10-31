@@ -800,10 +800,17 @@ export const makeChatHandlers = Effect.gen(function* () {
         internal("PreviewForkNotes")
       ),
 
-    CreateFork: ({ chatId, fromForkId, atSlotId, notes }) =>
+    CreateFork: ({ chatId, fromForkId, atSlotId, notes, name }) =>
       Effect.gen(function* () {
         const id = yield* userId
-        const made = yield* writer.CreateFork({ userId: id, chatId, fromForkId, atSlotId, ...(notes ? { notes } : {}) })
+        const made = yield* writer.CreateFork({
+          userId: id,
+          chatId,
+          fromForkId,
+          atSlotId,
+          ...(notes ? { notes } : {}),
+          ...(name === undefined ? {} : { name })
+        })
         hub.publish(chatId, { _tag: "Chat", chat: made.chat })
         return made
       }).pipe(internal("CreateFork")),

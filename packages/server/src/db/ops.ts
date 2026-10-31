@@ -874,7 +874,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       fromForkId: Schema.NullOr(ForkId),
       atSlotId: Schema.NullOr(SlotId),
-      notes: Schema.optionalKey(ForkNoteSelection)
+      notes: Schema.optionalKey(ForkNoteSelection),
+      name: Schema.optionalKey(Schema.String)
     },
     success: Schema.Struct({ fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError, ForkNotesChanged])
@@ -2791,6 +2792,12 @@ export class ReadOps extends RpcGroup.make(
         })
       )
     }),
+    error: StorageError
+  }),
+  /** The user's chat an ST import made with the latest message, not in the bin; null for none. */
+  Rpc.make("StImportLatestChat", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(Schema.Struct({ chatId: ChatId, title: Schema.String })),
     error: StorageError
   }),
   /** The user's import jobs, newest first (at most 200). */

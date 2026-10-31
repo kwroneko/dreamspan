@@ -26,7 +26,8 @@ const subscribeNarrow = (listener: () => void) => {
   query.addEventListener("change", listener)
   return () => query.removeEventListener("change", listener)
 }
-const useNarrow = () => useSyncExternalStore(subscribeNarrow, () => matchMedia(NARROW).matches)
+/** A phone-sized screen: lists open as sheets there. */
+export const useNarrow = () => useSyncExternalStore(subscribeNarrow, () => matchMedia(NARROW).matches)
 
 const fullTime = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" })
 

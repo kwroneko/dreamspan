@@ -60,11 +60,12 @@ for (const width of [1440, 390]) {
     await expect(page.getByTestId("messages").getByText("A shared message")).toBeVisible()
     await page.goto(`${server().url}/chats/${chatId}?fork=${old}`)
     await expect(page.getByTestId("messages").getByText("Down the old road")).toBeVisible()
-    await page.getByRole("button", { name: /switch branch|branch actions/ }).click()
-    await expect(page.getByRole("menuitem", { name: /Delete this fork/ })).toBeVisible()
+    await page.getByRole("button", { name: /switch branch/ }).click()
+    const list = page.getByRole("list", { name: "Branches" })
+    await expect(list.getByRole("button", { name: "Delete Old road", exact: true })).toBeVisible()
     await shot(page, "fork-menu", width)
-    await page.getByRole("menuitem", { name: "Delete this fork: “Old road”" }).click()
-    await expect(page.getByText(`Deleted: Fork “Old road” in “${title}”`)).toBeVisible()
+    await list.getByRole("button", { name: "Delete Old road", exact: true }).click()
+    await expect(page.getByText(`Deleted: Branch “Old road” in “${title}”`)).toBeVisible()
     await shot(page, "fork-deleted-toast", width)
 
     // The fork went, and the other forks and their messages are as they were.
@@ -78,7 +79,7 @@ for (const width of [1440, 390]) {
     await expect(watching.getByTestId("messages").getByText("A shared message")).toBeVisible()
     // The bin names the fork and the message, and warns before deleting the message for good.
     await page.goto(`${server().url}/bin`)
-    await expect(page.getByRole("listitem", { name: `Fork “Old road” in “${title}”` })).toBeVisible()
+    await expect(page.getByRole("listitem", { name: `Branch “Old road” in “${title}”` })).toBeVisible()
     await shot(page, "bin", width)
     const message = page.getByRole("listitem", { name: `Message in “${title}”` })
     await message.getByRole("button", { name: "Delete for good" }).click()

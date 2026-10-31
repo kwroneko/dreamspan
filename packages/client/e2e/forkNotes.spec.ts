@@ -169,7 +169,7 @@ for (const width of [1440, 390])
         await shot("button-diff")
         await page.getByRole("button", { name: "Back to notes" }).click()
       }
-      await dialog.getByRole("button", { name: "Create fork", exact: true }).click()
+      await dialog.getByRole("button", { name: "Create branch", exact: true }).click()
       await expect(dialog).not.toBeVisible()
       const fork = await admin((api) => api.GetChat({ chatId: h.chat.id }))
       expect(fork.currentForkId).not.toBe(h.chat.currentForkId)
