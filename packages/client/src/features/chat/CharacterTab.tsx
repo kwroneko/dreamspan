@@ -23,6 +23,7 @@ import { RecoveredNotice } from "../editor/controls.tsx"
 import { TextField } from "../editor/controls.tsx"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
+import { ChatDefinition } from "./ChatDefinition.tsx"
 import { useIsPanelTab, type PanelProps } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
@@ -221,14 +222,15 @@ function CardFields({
         )}
         {/* The consequence, once, where it matters (DESIGN §6.2). */}
         <p className="text-sm">
-          {persona
-            ? `Saving changes ${card.name} in every chat where you play them.`
-            : info.binding === "revision"
-              ? `This chat uses an earlier version of ${card.name}: saving changes the card, not what this chat uses.`
+          {info.binding === "revision"
+            ? `This chat uses an earlier version of ${card.name}: saving changes the card, not what this chat uses.`
+            : persona
+              ? `Saving changes ${card.name} in every chat where you play them.`
               : others === 0
                 ? `Saving changes ${card.name} for this chat; no other chat uses it.`
                 : `Saving changes ${card.name} in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
         </p>
+        {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
       </div>
       {/* Save stays in sight while a field further down is edited: drafts reach the chat only once saved. */}
       <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">

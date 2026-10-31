@@ -84,8 +84,15 @@ const capabilityBadges = (model: ReturnType<typeof resolveModel>) =>
 
 type Tri = "auto" | "yes" | "no"
 const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto" : value ? "yes" : "no")
-const triItems = [
-  { value: "auto" as const, label: "As the provider says" },
+/** "Auto" names what the provider says, so the choice reads without opening it. */
+const triItems = (upstream: boolean | undefined) => [
+  {
+    value: "auto" as const,
+    label:
+      upstream === undefined
+        ? "Not known: the provider doesn't say"
+        : `As the provider says: ${upstream ? "yes" : "no"}`
+  },
   { value: "yes" as const, label: "Yes" },
   { value: "no" as const, label: "No" }
 ]
@@ -424,7 +431,7 @@ export function ModelSettingsEditor({
           value={maxOutput}
           onValueChange={setMaxOutput}
           problem={maxOutputValue.problem}
-          open={false}
+          open={focus === "maxOutput"}
         />
       </Section>
       {learned && (
@@ -452,16 +459,19 @@ export function ModelSettingsEditor({
         </Alert>
       )}
       <Section title="What it can do" description="As the provider says, unless you choose otherwise.">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Vision">
-            <Select items={triItems} value={vision} onValueChange={setVision} />
-          </Field>
-          <Field label="Reasoning">
-            <Select items={triItems} value={reasoning} onValueChange={setReasoning} />
-          </Field>
-          <Field label="Tools">
-            <Select items={triItems} value={tools} onValueChange={setTools} />
-          </Field>
+        {/* Two columns only where there's room for the choices (a dialog, not the chat's panel). */}
+        <div className="@container">
+          <div className="grid gap-4 @lg:grid-cols-2">
+            <Field label="Vision">
+              <Select items={triItems(model.upstream.vision)} value={vision} onValueChange={setVision} />
+            </Field>
+            <Field label="Reasoning">
+              <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
+            </Field>
+            <Field label="Tools">
+              <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
+            </Field>
+          </div>
         </div>
         <Field
           label="Prefill"

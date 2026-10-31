@@ -36,6 +36,8 @@ test.beforeAll(async ({ browser }) => {
   await importCard(page, { name: "Mira", description: "A harbor pilot who reads the tides.", first_mes: "Hello." })
   await importCard(page, { name: "Juniper Ashgrove", description: PERSONA })
   await importCard(page, { name: "Wren", description: "Another persona." })
+  // Enough cards that Add character's list scrolls.
+  for (let i = 1; i <= 12; i++) await importCard(page, { name: `Lantern keeper ${i}`, description: "Made up." })
   await page.close()
   const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
   const id = (name: string) => refs.find((ref) => ref.label === name)!.entityId as EntityId
@@ -121,4 +123,23 @@ test("History edits doesn't ask for a model before a search", async ({ page }) =
   await tab.getByLabel("Find", { exact: true }).fill("anyone")
   await expect(tab.getByRole("status")).toContainText("1 in messages")
   await expect(tab).toContainText(/re-read about \d+ messages/)
+})
+
+test("Add character at scale: the search keeps its height over a long list, characters before personas", async ({
+  page
+}) => {
+  await open(page)
+  const tab = await openPanel(page, "Cast")
+  await tab.getByRole("button", { name: "Add character" }).click()
+  const picker = page.getByRole("dialog", { name: "Add a character to this chat" })
+  const characters = picker.getByRole("list", { name: "Characters", exact: true })
+  await expect(characters.getByRole("button")).toHaveCount(12)
+  // The long list scrolls under the search; it never squeezes the box.
+  const box = await picker.getByRole("searchbox", { name: "Search your cards" }).boundingBox()
+  expect(box?.height).toBeGreaterThanOrEqual(34)
+  const personas = picker.getByRole("list", { name: "Personas", exact: true })
+  // One of Juniper and Wren is played here (the persona test switches them); the other is offered.
+  await expect(personas.getByRole("button")).toHaveCount(1)
+  const top = async (locator: typeof picker) => (await locator.boundingBox())!.y
+  expect(await top(characters)).toBeLessThan(await top(personas))
 })

@@ -101,8 +101,10 @@ function AddCharacter({
         </>
       }
     >
+      {/* Never squeezed by a long list under it. */}
       <Input
         type="search"
+        className="shrink-0"
         aria-label="Search your cards"
         placeholder="Search your cards"
         value={query}
