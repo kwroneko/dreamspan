@@ -337,6 +337,9 @@ export const baseline: ReadonlyArray<string> = [
     CHECK (status <> 'failed' OR error_json IS NOT NULL)
   ) STRICT`,
   `CREATE INDEX versions_rollout ON versions(rollout_id) WHERE rollout_id IS NOT NULL`,
+  // Startup's InterruptGenerations finds the few generating versions without scanning every
+  // message: 8.5 s at 500,000 messages before (fux1).
+  `CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'`,
   `CREATE TABLE version_history (
     id INTEGER PRIMARY KEY,
     version_id TEXT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,

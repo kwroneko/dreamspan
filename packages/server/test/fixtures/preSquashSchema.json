@@ -788,6 +788,12 @@
     },
     {
       "type": "index",
+      "name": "versions_generating",
+      "tbl_name": "versions",
+      "sql": "CREATE INDEX versions_generating ON versions(id) WHERE status = 'generating'"
+    },
+    {
+      "type": "index",
       "name": "versions_rollout",
       "tbl_name": "versions",
       "sql": "CREATE INDEX versions_rollout ON versions(rollout_id) WHERE rollout_id IS NOT NULL"
