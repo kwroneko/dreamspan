@@ -288,9 +288,11 @@ for (const width of [1440, 390])
 
       // The preset editor: conditions, the end-of-request texts, and the direction warning.
       await page.goto(`${server().url}/library`)
-      await page.getByRole("button", { name: "Edit Night RP 3.1", exact: true }).click()
-      const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
-      await expect(editor).toBeVisible()
+      await page.getByRole("tab", { name: /^Presets/ }).click()
+      await page.getByRole("link", { name: "Edit Night RP 3.1", exact: true }).click()
+      await expect(page).toHaveURL(/\/library\/[^/]+$/)
+      const editor = page.getByRole("main")
+      await expect(editor.getByRole("heading", { name: "Night RP 3.1", level: 1 })).toBeVisible()
       // The end-of-request texts are outside the order: no prompt blocks, a fixed section.
       await expect(editor.locator('[data-prompt="groupNudge"]')).toHaveCount(0)
       const end = editor.getByRole("heading", { name: "End of request" })
@@ -313,11 +315,11 @@ for (const width of [1440, 390])
       await directionText.fill("[What happens next.]")
       const warnings = editor.getByRole("group", { name: "Preset warnings" })
       await expect(warnings).toContainText("doesn't contain {{direction}}")
-      await editor.getByTestId("preset-scroll").evaluate((e) => (e.scrollTop = 0))
+      await page.evaluate(() => scrollTo(0, 0))
       await shot("12-editor-warnings")
       await warnings.getByRole("button", { name: "Go to the text" }).click()
       await expect(direct).toBeInViewport()
-      const toolbarBottom = await editor.getByRole("textbox", { name: "Find", exact: true }).evaluate((element) => {
+      const toolbarBottom = await editor.getByRole("button", { name: "History", exact: true }).evaluate((element) => {
         let at: HTMLElement | null = element as HTMLElement
         while (at && getComputedStyle(at).position !== "sticky") at = at.parentElement
         return at!.getBoundingClientRect().bottom
@@ -335,14 +337,13 @@ for (const width of [1440, 390])
       await page.getByRole("option", { name: "When writing as a character" }).click()
       const never = warnings.getByRole("alert").filter({ hasText: "is never sent" })
       await expect(never).toContainText("only for Impersonate")
-      await editor.getByTestId("preset-scroll").evaluate((e) => (e.scrollTop = 0))
+      await page.evaluate(() => scrollTo(0, 0))
       await shot("12b-editor-gates-never-meet")
       await never.getByRole("button", { name: "Go to the prompt" }).click()
       await expect(style).toBeInViewport()
       await condition.click()
       await page.getByRole("option", { name: "Always" }).click()
       await expect(warnings).toHaveCount(0)
-      await editor.getByRole("button", { name: "Close preset editor", exact: true }).click()
 
       // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
       if (theme === "light") {

@@ -1,7 +1,9 @@
 import { lazy, Suspense } from "react"
-import { cardContributions, type CardSurfaceContext } from "./surfaces.tsx"
+import { cardContributions, type CardMenuProps, type CardSurfaceContext } from "./surfaces.tsx"
 
 const Command = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkCommand })))
+const MenuEntry = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkMenuItem })))
+const MenuDialog = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkMenuDialog })))
 const Provenance = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.Provenance })))
 const ForkBadge = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.ForkBadge })))
 const FamilySection = lazy(() => import("./surfacesImpl.tsx").then((m) => ({ default: m.FamilySection })))
@@ -16,6 +18,16 @@ export const register = () => {
         component: (props: CardSurfaceContext) => (
           <Suspense fallback={null}>
             <Command {...props} command={command} />
+          </Suspense>
+        ),
+        menu: (props: CardMenuProps) => (
+          <Suspense fallback={null}>
+            <MenuEntry {...props} command={command} />
+          </Suspense>
+        ),
+        dialog: (props: CardMenuProps) => (
+          <Suspense fallback={null}>
+            <MenuDialog {...props} command={command} />
           </Suspense>
         )
       })

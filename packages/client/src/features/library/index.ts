@@ -1,9 +1,11 @@
 import { routes } from "../../routes.tsx"
 import { ImportPage } from "./import.tsx"
 import { LibraryPage } from "./list.tsx"
+import { registerItemActions } from "./registerItemActions.tsx"
 import { StImportPage } from "./stImport.tsx"
 
 export const register = () => {
+  registerItemActions()
   routes.register({
     id: "library",
     parent: "app",
