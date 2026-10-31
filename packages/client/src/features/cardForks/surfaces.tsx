@@ -7,6 +7,8 @@ import { makeRegistry } from "../../registry.ts"
 export interface CardSurfaceContext {
   readonly entityId: EntityId
   readonly store?: EditorStore
+  /** The family section only when the card has forks: the editor's, where a lone card's is noise. */
+  readonly whenForked?: boolean
 }
 export type CardPlacement = "actions" | "provenance" | "badge" | "family"
 interface CardContribution {

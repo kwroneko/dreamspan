@@ -333,7 +333,7 @@ export function Editor({
           </Alert>
         )}
 
-        {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} />}
+        {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
         {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
         {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
         {ref.kind === "note" && (

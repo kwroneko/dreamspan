@@ -154,7 +154,7 @@ for (const width of [1440, 390])
     const tab = page.getByRole("tabpanel", { name, exact: true })
     const description = textBox(tab, "Description")
     await expect(description).toBeVisible({ timeout: 30_000 })
-    await expect(tab.getByText(/Saving changes .* in 1 chat|no other chat uses it/)).toBeVisible()
+    await expect(tab.getByText(/Saving changes .* in \d+ chats, this one included|no other chat uses it/)).toBeVisible()
     // An imported text's line endings rewritten by the first key aren't a deletion: no bin notice.
     await description.click()
     await page.keyboard.press("Control+End")

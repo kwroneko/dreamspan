@@ -92,11 +92,11 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
     </ul>
   )
 }
-export function FamilySection({ entityId }: CardSurfaceContext) {
+export function FamilySection({ entityId, whenForked }: CardSurfaceContext) {
   const atom = useMemo(() => familyQuery(entityId), [entityId])
   const result = useAtomValue(atom)
   // A card alone in its family has nothing to show here; More → Forks still opens the family.
-  if (AsyncResult.isSuccess(result) && result.value.members.length < 2) return null
+  if (whenForked && AsyncResult.isSuccess(result) && result.value.members.length < 2) return null
   return (
     <Card>
       <CardHeader title="Forks" description="Independent cards in the same family." />
