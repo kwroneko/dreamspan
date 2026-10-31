@@ -76,6 +76,8 @@ interface Party {
   readonly importRecordId: string
   readonly summaryJob: { readonly jobId: string; readonly rolloutId: string }
   readonly chat: OwnChat
+  /** A chat with one message and nothing generating in it. */
+  readonly quiet: { readonly chatId: ChatId; readonly slotId: SlotId }
   /** A card, in the persona folder, with a greeting. */
   readonly cardId: EntityId
   /** A message queued behind the generating reply. */
@@ -1677,14 +1679,20 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           }),
           "NotFound"
         )
-        const own = yield* owner.api.GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
-        assert.strictEqual(own.leafSlotId, owner.chat.slotId)
+        // The owner's own read isn't refused: it waits while their reply is written.
+        const held = yield* owner.api
+          .GetNextContext({ chatId: owner.chat.chatId, leafSlotId: owner.chat.slotId })
+          .pipe(Effect.timeoutOption("1 second"))
+        assert.isTrue(Option.isNone(held))
+        const own = yield* owner.api.GetNextContext({ chatId: owner.quiet.chatId, leafSlotId: owner.quiet.slotId })
+        assert.strictEqual(own.leafSlotId, owner.quiet.slotId)
         assert.deepStrictEqual(Object.keys(own).sort(), [
           "assemblyError",
           "assemblyErrorReason",
           "budget",
           "forkId",
           "historyStart",
+          "images",
           "leafSlotId",
           "model",
           "preset",
@@ -1693,7 +1701,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "warmth"
         ])
         if (own.presetContext) {
-          assert.deepStrictEqual(Object.keys(own.presetContext).sort(), ["blocks", "cacheAfter", "notes"])
+          assert.deepStrictEqual(Object.keys(own.presetContext).sort(), [
+            "blocks",
+            "cacheAfter",
+            "notes",
+            "overrides",
+            "summary"
+          ])
           for (const block of own.presetContext.blocks)
             assert.deepStrictEqual(Object.keys(block).sort(), ["identifier", "labels", "tokens"])
           for (const boundary of own.presetContext.cacheAfter)
@@ -3034,6 +3048,10 @@ const seed = Effect.gen(function* () {
         api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "hello" })
       )
       const reply = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: sent.entry.slotId, branch: false }))
+      const quiet = yield* api.CreateChat({ title: `${user.handle}'s quiet chat` })
+      const quietSent = yield* posted(
+        api.SendMessage({ chatId: quiet.id, parentSlotId: null, branch: false, content: "hi", reply: false })
+      )
       // The reply's context, recorded as generating records it, for the request inspector.
       const { snapshot } = yield* (yield* Reader).AssembleContext({
         userId: user.id,
@@ -3257,6 +3275,7 @@ const seed = Effect.gen(function* () {
           noteEntityId: chatNote.entityId,
           rolloutId: inspectorRollout
         },
+        quiet: { chatId: quiet.id, slotId: quietSent.entry.slotId },
         connectionId: connection.id,
         credentialId: credential.id,
         modelId: model.id,
