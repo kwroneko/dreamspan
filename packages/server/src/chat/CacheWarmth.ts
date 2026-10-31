@@ -23,7 +23,9 @@ const SETTLE_MS = 250
 const REPLY_EXPECTED_MS = 2000
 
 type Estimate = Omit<Effect.Success<ReturnType<Reader["Service"]["CacheWarmth"]>>, "uncounted">
-type EstimateError = Effect.Error<ReturnType<Reader["Service"]["CacheWarmth"]>>
+type EstimateError =
+  | Effect.Error<ReturnType<Reader["Service"]["CacheWarmth"]>>
+  | Effect.Error<ReturnType<Reader["Service"]["NextContextAccess"]>>
 
 interface Watched {
   readonly userId: UserId
@@ -204,6 +206,9 @@ export class CacheWarmth extends Context.Service<
         },
         next: (userId, chatId, leafSlotId, forkId) =>
           Effect.gen(function* () {
+            // Refusals come at once: another user's chat, or a leaf or fork from one, never
+            // waits on (or shows the timing of) that chat's reply.
+            if (held(chatId)) yield* reader.NextContextAccess({ userId, chatId, leafSlotId, forkId })
             if (held(chatId))
               yield* Effect.callback<void>((resume) => {
                 const done = () => resume(Effect.void)

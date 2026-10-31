@@ -326,6 +326,23 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
         withAssemblyModules(assembler, effect)
       ),
 
+    NextContextAccess: ({ userId, chatId, leafSlotId, forkId }) =>
+      Effect.gen(function* () {
+        const [chat] = yield* sql<{ id: string }>`
+          SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
+        if (!chat) return yield* new NotFound({ entity: "chat", id: chatId })
+        if (leafSlotId != null) {
+          const [slot] = yield* sql<{
+            id: string
+          }>`SELECT id FROM slots WHERE id = ${leafSlotId} AND chat_id = ${chatId}`
+          if (!slot) return yield* new NotFound({ entity: "slot", id: leafSlotId })
+        }
+        if (forkId != null) {
+          const [fork] = yield* sql<{ id: string }>`SELECT id FROM forks WHERE id = ${forkId} AND chat_id = ${chatId}`
+          if (!fork) return yield* new NotFound({ entity: "fork", id: forkId })
+        }
+      }).pipe(query("NextContextAccess")),
+
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),
     GetGlobalRegex: ({ userId }) => readGlobalRegex(sql, userId).pipe(query("GetGlobalRegex")),

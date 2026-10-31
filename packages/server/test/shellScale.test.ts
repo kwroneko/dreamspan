@@ -115,7 +115,22 @@ describe("group read scale", () => {
         )
         assert.isBelow(groupsTook, 2000)
         // Cards are described once in people, not repeated in every fork (3.8 MB when they were).
-        assert.isBelow(bytes, 2_000_000)
+        // The whole read is for tools and tests now; with fheader's branch fields it's ~2.35 MB here.
+        assert.isBelow(bytes, 3_000_000)
+        // What the app sends a page load (fux1): the cards, and the first 100 rows of the chat list.
+        const cards = yield* api.GetShellCards()
+        const page = yield* api.GetShellForks({
+          entity: null,
+          chat: null,
+          search: "",
+          sort: "recent",
+          sections: [{ id: "chats", limit: 100 }]
+        })
+        assert.strictEqual(page.sections[0]!.total, 5000)
+        assert.lengthOf(page.sections[0]!.rows, 100)
+        const pageBytes = JSON.stringify(cards).length + JSON.stringify(page).length
+        console.log(`GetShellCards + first 100 chats: wire JSON ${pageBytes} bytes`)
+        assert.isBelow(pageBytes, 600_000)
         const people = new Set(groups.people.map((c) => c.entityId))
         assert.isTrue(groups.forks.every((f) => f.cast.every((id) => people.has(id))))
       }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))

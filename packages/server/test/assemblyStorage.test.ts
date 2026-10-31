@@ -699,7 +699,8 @@ describe("context assembly from the database", () => {
           .match(/The levee has seven gates./g)!,
         1
       )
-      assert.strictEqual(first.sources?.messageCount?.[0]?.count, 2)
+      // No entry has a delay, so the path's message count isn't read or pinned (it walks the path).
+      assert.isEmpty(first.sources?.messageCount ?? [])
       assert.strictEqual(first.sources?.lorebooks?.[0]?.found[0]?.revision, book.ref.headRevisionId)
       // A peer branch has the same attachment but did not say the key.
       const message = (parentSlotId: SlotId | null, content: string, human: boolean, branch = false) =>
@@ -788,6 +789,31 @@ describe("context assembly from the database", () => {
           loreBook([loreEntry({ constant: true, delay: 1100, content: "DELAY_LORE" })]).document
         )
         yield* state({ key: "lorebook.attach", value: { ref: book.ref.id } })
+        // A budget the 1,100 messages can't fit, so the text window is bounded (with no model
+        // chosen, the assumed 128,000-token window holds them all).
+        const connectionId = uuidv7() as ConnectionId
+        yield* writer.CreateConnection({
+          userId,
+          connectionId,
+          kind: "openai-chat",
+          api: "openai-completions",
+          settings: {
+            name: "Delay",
+            baseUrl: null,
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          },
+          credential: { existing: null }
+        })
+        const model = yield* writer.AddUserModel({
+          userId,
+          connectionId,
+          key: "synthetic-delay",
+          overrides: { context: 32768, settings: { samplers: { openai_max_tokens: 300 }, context_target: 32000 } }
+        })
+        yield* state({ key: "model.binding", value: { connection: connectionId, model: model.id } })
         let leaf = chat.activeLeafSlotId
         for (let i = 1; i < 1100; i++) {
           const sent = yield* writer.AppendMessage({

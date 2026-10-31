@@ -2984,6 +2984,20 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: Schema.Union([NotFound, StorageError])
   }),
+  /**
+   * NotFound when `CacheWarmth` would refuse the caller outright: the chat isn't theirs, or
+   * the leaf or fork isn't in it. A cheap check, so a refusal never waits on the chat's reply.
+   */
+  Rpc.make("NextContextAccess", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      leafSlotId: Schema.optionalKey(Schema.NullOr(SlotId))
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The user's generation defaults; one naming something gone reads as none. */
   Rpc.make("GetGenerationDefaults", {
     payload: { userId: UserId },
