@@ -793,6 +793,8 @@ function JobsSection({ opened }: StImportSectionProps) {
                       {job.finishedAt !== null && ` · took ${took(job.finishedAt - job.startedAt)}`} · {job.filesDone}{" "}
                       of {job.filesTotal} files · {countsLine(job)}
                     </span>
+                    {/* Why it stopped, without opening it; opened, it offers to import again. */}
+                    {job.error && <span className="text-danger [overflow-wrap:anywhere]">{job.error}</span>}
                   </Link>
                 </li>
               ))}
