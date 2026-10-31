@@ -4,32 +4,100 @@
 // (`user_prefs`, so it follows them to other devices). It's never sent back to the model.
 // Its header carries the `reasoningActions` slot: Copy reasoning (the raw text) and Collapse
 // all (every reasoning block shown closes; the streaming preference stays as it is).
+// The reply's own leading tagged sections (spec/REPLY-SECTIONS.md) show in a second panel of
+// the same kind, "Notes in the reply", below the provider's. Both are entries of the
+// `reasoningPanels` slot.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { Version } from "@rp/shared/chat.ts"
 import type { ReasoningDisplay } from "@rp/shared/chatApi.ts"
+import { sectionsDisplay, sectionUnclosed } from "@rp/shared/replySections.ts"
 import { useId, useState, useSyncExternalStore } from "react"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { MessageBody } from "../../ui/messageCopy.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { reasoningActions } from "./presentation.tsx"
+import { reasoningActions, reasoningPanels } from "./presentation.tsx"
 import { collapseCount, subscribeCollapses } from "./reasoningActions.tsx"
-import { liveReasoning } from "./session.ts"
+import { liveReasoning, liveSections, type ChatSession } from "./session.ts"
 
 const words = (text: string) => {
   const count = text.trim() === "" ? 0 : text.trim().split(/\s+/).length
   return count === 1 ? "1 word" : `${count.toLocaleString()} words`
 }
 
-export function Reasoning({ version }: { version: Version }) {
+interface PanelProps {
+  readonly version: Version
+  readonly session: ChatSession
+}
+
+/** The provider's reasoning field. */
+export function Reasoning({ version, session }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
   const text = live ?? version.reasoning ?? ""
   if (text === "") return null
-  return <ReasoningBlock key={version.id} version={version} text={text} streaming={version.status === "generating"} />
+  return (
+    <ReasoningBlock
+      key={version.id}
+      version={version}
+      session={session}
+      text={text}
+      streaming={version.status === "generating"}
+      kind="reasoning"
+      label="Reasoning"
+    />
+  )
 }
 
-function ReasoningBlock({ version, text, streaming }: { version: Version; text: string; streaming: boolean }) {
+/** The reply's own leading tagged sections, taken out of its text. */
+export function ReplySections({ version, session }: PanelProps) {
+  const live = useAtomValue(liveSections(version.id))
+  const text = live ?? sectionsDisplay(version.replySections)
+  const streaming = version.status === "generating"
+  if (text === "" && !version.replySections) return null
+  return (
+    <ReasoningBlock
+      key={version.id}
+      version={version}
+      session={session}
+      text={text}
+      streaming={streaming}
+      kind="sections"
+      label="Notes in the reply"
+      notice={
+        !streaming && sectionUnclosed(version.replySections)
+          ? "This section was never closed: the reply ended inside it."
+          : null
+      }
+    />
+  )
+}
+
+export const registerReasoningPanels = () => [
+  reasoningPanels.register({ id: "reasoning.provider", order: 10, component: Reasoning }),
+  reasoningPanels.register({ id: "reasoning.reply-sections", order: 20, component: ReplySections })
+]
+
+/** Every registered panel, in order. */
+export function ReasoningPanels(props: PanelProps) {
+  return <SlotOutlet slot={reasoningPanels} props={props} />
+}
+
+function ReasoningBlock({
+  version,
+  session,
+  text,
+  streaming,
+  kind,
+  label,
+  notice = null
+}: PanelProps & {
+  text: string
+  streaming: boolean
+  kind: "reasoning" | "sections"
+  label: string
+  notice?: string | null
+}) {
   const id = useId()
   const viewer = useViewPrefs()
   const preferred: ReasoningDisplay = viewer.prefs.reasoning
@@ -56,7 +124,7 @@ function ReasoningBlock({ version, text, streaming }: { version: Version; text: 
   }
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" data-reasoning-panel={kind}>
       <div className="flex flex-wrap items-center gap-x-1">
         <button
           type="button"
@@ -66,15 +134,16 @@ function ReasoningBlock({ version, text, streaming }: { version: Version; text: 
           className="-ml-1 flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         >
           <Icon name={open ? "down" : "right"} size={14} />
-          <Icon name="reasoning" size={14} />
-          <span className="font-medium">{streaming ? "Reasoning…" : "Reasoning"}</span>
+          <Icon name={kind === "reasoning" ? "reasoning" : "note"} size={14} />
+          <span className="font-medium">{streaming ? `${label}…` : label}</span>
           <span aria-hidden="true">·</span>
           <span>{words(text)}</span>
         </button>
-        <SlotOutlet slot={reasoningActions} props={{ version, text, streaming }} />
+        <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, session }} />
       </div>
+      {notice && <p className="text-xs text-muted">{notice}</p>}
       {open && (
-        <div id={id} role="region" aria-label="Reasoning" className="border-l-2 border-border pl-3 text-sm text-muted">
+        <div id={id} role="region" aria-label={label} className="border-l-2 border-border pl-3 text-sm text-muted">
           <MessageBody text={text}>
             <Markdown text={text} streaming={streaming} />
           </MessageBody>
