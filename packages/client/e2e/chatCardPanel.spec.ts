@@ -221,6 +221,8 @@ for (const width of [1440, 390])
     await page.waitForTimeout(1500)
     await page.keyboard.press("Control+A")
     await page.keyboard.type("Brisk.")
+    // Save stays in sight above a field further down the tab.
+    await expect(tab.getByRole("button", { name: "Save (1)", exact: true })).toBeInViewport()
     await tab.getByRole("button", { name: "Save (1)", exact: true }).click()
     await save.getByRole("button", { name: "Save revision", exact: true }).click()
     const notice = tab.getByText(

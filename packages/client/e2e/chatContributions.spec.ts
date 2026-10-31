@@ -111,12 +111,17 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Show Mira's card", exact: true }).click()
-  const notes = page.getByRole("button", { name: /^Notes \(/ })
-  await expect(notes).toBeVisible()
+  // The character tab's More menu has the card's notes while the Notes panel is there.
+  const notes = async (count: number) => {
+    await page.getByRole("button", { name: "More for Mira", exact: true }).click()
+    await expect(page.getByRole("menuitem", { name: "Mira's notes", exact: true })).toHaveCount(count)
+    await page.keyboard.press("Escape")
+  }
+  await notes(1)
   await contribution(page, "install", "notes")
-  await expect(notes).toHaveCount(0)
+  await notes(0)
   await contribution(page, "close", "notes")
-  await expect(notes).toBeVisible()
+  await notes(1)
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
   // The menu stays for the reply commands (ac8a5a1), without the history ones.
