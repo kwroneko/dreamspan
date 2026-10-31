@@ -9,7 +9,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { assert, it as plain, layer } from "@effect/vitest"
 import { Effect, Option } from "effect"
-import { readStFolderFile } from "../src/importer/stFolderDisk.ts"
+import { sha256 } from "../src/importer/importers.ts"
+import { previewStFiles, readStFolderFile } from "../src/importer/stFolderDisk.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { largeChat, stFolder } from "./support/stFolder.ts"
 import { importStPath } from "./support/stUpload.ts"
@@ -171,5 +172,27 @@ plain.effect("a chat that changed after the scan is refused instead of mixing it
     // A root relative to wherever the app was started.
     const relative = yield* Effect.flip(readStFolderFile("user", path, { size, modifiedMs: mtimeMs }, 0, true))
     assert.strictEqual(relative._tag, "StFolderUnreadable")
+  })
+)
+
+plain.effect("the preview finds a file by its bytes as the import hashes them, a large one read in parts", () =>
+  Effect.gen(function* () {
+    // Past the size hashed whole, and one small enough to be.
+    const large = new Uint8Array(9 * 1024 * 1024).map((_, i) => i % 251)
+    const small = new TextEncoder().encode("a card")
+    const files = new Map([
+      ["ST/data/default-user/characters/Large copy.png", large],
+      ["ST/data/default-user/characters/Small copy.png", small],
+      ["ST/data/default-user/characters/Other.png", new TextEncoder().encode("another card")],
+      // A persona's import hashes its settings too, so its avatar's bytes alone never match.
+      ["ST/data/default-user/User Avatars/Small.png", small]
+    ])
+    const root = onDisk(files)
+    const read = yield* previewStFiles(
+      { root, prefix: "ST/data/default-user/" },
+      ["characters/Large copy.png", "characters/Small copy.png", "characters/Other.png", "User Avatars/Small.png"],
+      new Set([`card:${sha256(large)}`, `card:${sha256(small)}`])
+    )
+    assert.sameMembers([...read.same], ["characters/Large copy.png", "characters/Small copy.png"])
   })
 )

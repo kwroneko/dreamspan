@@ -17,6 +17,9 @@ import { userNoticeReceivers } from "../noticeContributions.tsx"
 /** The reactivity key of the import jobs. */
 export const ST_IMPORTS = "st-imports"
 
+/** The reactivity key of a folder's preview (what's already here): read again when an import ends. */
+export const ST_PREVIEW = "st-import-preview"
+
 export const stImportsAtom = AppClient.query("ListStImports", undefined, { reactivityKeys: [ST_IMPORTS] })
 
 /** How often, at most, an import's progress makes the library and chats be read again. */
@@ -47,6 +50,7 @@ export function StImportWatcher() {
         }
         stoppedUploads.add(notice.importId)
         if (timer !== null) clearTimeout(timer)
+        invalidateKeys(registry, [ST_PREVIEW])
         reloadData()
       }
     })

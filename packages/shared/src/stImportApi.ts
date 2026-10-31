@@ -142,11 +142,19 @@ export class StImportJob extends Schema.Class<StImportJob>("StImportJob")({
   seen: Schema.Boolean
 }) {}
 
+/** A chat an ST import made, for the report's "Continue your latest chat". */
+export class StImportedChat extends Schema.Class<StImportedChat>("StImportedChat")({
+  chatId: ChatId,
+  title: Schema.String
+}) {}
+
 /** A job with its report (null until it has one) and the files that didn't go in. */
 export class StImportJobDetail extends Schema.Class<StImportJobDetail>("StImportJobDetail")({
   job: StImportJob,
   report: Schema.NullOr(StImportReport),
-  notSent: Schema.Array(StNotSent)
+  notSent: Schema.Array(StNotSent),
+  /** The user's imported chat with the latest message, not in the bin: any import's, so a re-run that added nothing has one. */
+  latestChat: Schema.NullOr(StImportedChat)
 }) {}
 
 /** Another import of the user's is running: one at a time, since a new one stops the old one writing. */
@@ -183,6 +191,24 @@ export class StImportApi extends RpcGroup.make(
     payload: { path: FolderPath },
     success: Schema.Struct({ root: Schema.String, files: Schema.Array(StFolderEntry) }),
     error: Schema.Union([Forbidden, StFolderUnreadable])
+  }),
+  /**
+   * Which of these paths of an ST user's folder (as `stPlan` gives them) the caller's earlier
+   * imports already hold, for the preview's "already here": library files recorded by their
+   * path, and chats whose import finished. A file is read again when it's imported, so one
+   * that changed since still goes in; an unfinished chat isn't here yet. With `folder` (one
+   * named by its path: ScanStFolder's root and the ST user's prefix; admin only, as reading
+   * it is), files are also read: a library file whose bytes an earlier import holds under
+   * another path is known, and `skipped` lists the chats holding only a greeting, which no
+   * import takes.
+   */
+  Rpc.make("StImportPreview", {
+    payload: {
+      paths: Schema.Array(FolderPath).check(Schema.isMaxLength(50_000)),
+      folder: Schema.optionalKey(Schema.Struct({ root: FolderPath, prefix: FolderPath }))
+    },
+    success: Schema.Struct({ known: Schema.Array(Schema.String), skipped: Schema.Array(Schema.String) }),
+    error: Schema.Union([Forbidden, StFolderUnreadable, ServerError])
   }),
   /**
    * Starts an upload import for the caller, ending any earlier upload of theirs (a running
