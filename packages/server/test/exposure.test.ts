@@ -6,40 +6,45 @@ import { networkInterfaces } from "node:os"
 import { join } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Logger } from "effect"
+import { TestClock } from "effect/testing"
 import { AppConfig } from "../src/config.ts"
+import { AddressResolver, makeAddressSet, type Resolve } from "../src/net/addressSet.ts"
 import { crossSiteProblem, type ExposureConfig, exposurePolicy, parsePublicOrigins } from "../src/net/exposure.ts"
 import { ServerLive } from "../src/server.ts"
 import { serverPort, testConfig, withServer } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
-const policy = (overrides: Partial<ExposureConfig>, passwords = false) => {
-  const result = exposurePolicy(
-    {
-      host: "127.0.0.1",
-      authMode: "single",
-      allowedIps: [],
-      trustedProxies: [],
-      allowInsecureExposure: false,
-      ...overrides
-    },
-    () => passwords
-  )
+interface PolicyConfig extends ExposureConfig {
+  readonly allowedIps: ReadonlyArray<string>
+  readonly trustedProxies: ReadonlyArray<string>
+}
+
+const policyConfig = (overrides: Partial<PolicyConfig>): PolicyConfig => ({
+  host: "127.0.0.1",
+  authMode: "single",
+  allowedIps: [],
+  trustedProxies: [],
+  allowInsecureExposure: false,
+  ...overrides
+})
+
+/** Both lists as live sets; the scope may end at once, since literals need no fiber. */
+const lists = (config: PolicyConfig) =>
+  Effect.all({
+    allowedIps: makeAddressSet("ALLOWED_IPS", config.allowedIps),
+    trustedProxies: makeAddressSet("TRUSTED_PROXIES", config.trustedProxies)
+  })
+
+const policy = (overrides: Partial<PolicyConfig>, passwords = false) => {
+  const config = policyConfig(overrides)
+  const result = exposurePolicy(config, Effect.runSync(Effect.scoped(lists(config))), () => passwords)
   if (typeof result === "string") throw new Error(result)
   return result
 }
 
-const refusal = (overrides: Partial<ExposureConfig>) => {
-  const result = exposurePolicy(
-    {
-      host: "0.0.0.0",
-      authMode: "single",
-      allowedIps: [],
-      trustedProxies: [],
-      allowInsecureExposure: false,
-      ...overrides
-    },
-    () => false
-  )
+const refusal = (overrides: Partial<PolicyConfig>) => {
+  const config = policyConfig({ host: "0.0.0.0", ...overrides })
+  const result = exposurePolicy(config, Effect.runSync(Effect.scoped(lists(config))), () => false)
   assert.isString(result)
   return result as string
 }
@@ -83,7 +88,8 @@ describe("exposure policy", () => {
 
   it("rejects ALLOWED_IPS in proxy mode and entries that aren't addresses", () => {
     assert.include(refusal({ authMode: "proxy", allowedIps: ["10.0.0.1"], trustedProxies: ["10.0.0.2"] }), "proxy mode")
-    assert.include(refusal({ allowedIps: ["proxy.lan"] }), "proxy.lan")
+    assert.include(refusal({ allowedIps: ["300.1.1.1"] }), "300.1.1.1")
+    assert.include(refusal({ allowedIps: ["proxy lan"] }), "proxy lan")
     assert.include(refusal({ allowedIps: ["10.0.0.0/33"] }), "10.0.0.0/33")
     assert.include(refusal({ authMode: "proxy", trustedProxies: ["*.lan"] }), "TRUSTED_PROXIES")
     // Number("") is 0, so a sloppy parser would read these as /0 and allow everyone.
@@ -102,10 +108,8 @@ describe("exposure policy", () => {
 
   it("single mode serves everyone beyond loopback while an account has a password, and only then", () => {
     let passwords = true
-    const result = exposurePolicy(
-      { host: "0.0.0.0", authMode: "single", allowedIps: [], trustedProxies: [], allowInsecureExposure: false },
-      () => passwords
-    )
+    const config = policyConfig({ host: "0.0.0.0" })
+    const result = exposurePolicy(config, Effect.runSync(Effect.scoped(lists(config))), () => passwords)
     if (typeof result === "string") throw new Error(result)
     assert.isTrue(result.allows("203.0.113.9"))
     passwords = false // the last password went: back to loopback
@@ -118,6 +122,130 @@ describe("exposure policy", () => {
 
   it("ALLOW_INSECURE_EXPOSURE serves everyone", () => {
     assert.isTrue(policy({ host: "0.0.0.0", allowInsecureExposure: true }).allows("203.0.113.9"))
+  })
+})
+
+/** A resolver answering from `table`, which a test may change; "fail" is a resolver that can't answer. */
+const fakeDns = (table: Record<string, ReadonlyArray<string> | "fail">) => {
+  const calls: Array<string> = []
+  const resolve: Resolve = async (name) => {
+    calls.push(name)
+    const answer = table[name]
+    if (answer === "fail") throw new Error("SERVFAIL")
+    return answer ?? []
+  }
+  return { table, calls, resolve }
+}
+
+/** Lets the fake resolver's promises settle after the clock moves. */
+const settle = Effect.promise(() => new Promise((resolve) => setImmediate(resolve)))
+const advance = (duration: Parameters<typeof TestClock.adjust>[0]) =>
+  Effect.andThen(TestClock.adjust(duration), Effect.andThen(settle, settle))
+
+const proxyPolicy = (trustedProxies: ReadonlyArray<string>, dns: ReturnType<typeof fakeDns>) =>
+  Effect.gen(function* () {
+    const config = policyConfig({ host: "0.0.0.0", authMode: "proxy", trustedProxies })
+    const result = exposurePolicy(config, yield* lists(config), () => false)
+    if (typeof result === "string") throw new Error(result)
+    return result
+  }).pipe(Effect.provideService(AddressResolver, dns.resolve))
+
+describe("trusted host names", () => {
+  it.effect("a name trusts every address it resolves to, in both families", () => {
+    const dns = fakeDns({ traefik: ["172.31.7.9", "fd00::9"] })
+    return Effect.gen(function* () {
+      const { allows, summary } = yield* proxyPolicy(["traefik", "127.0.0.1"], dns)
+      for (const ip of ["172.31.7.9", "::ffff:172.31.7.9", "fd00::9", "127.0.0.1"]) assert.isTrue(allows(ip), ip)
+      assert.isFalse(allows("172.20.0.10"))
+      assert.include(summary(), "traefik (172.31.7.9, fd00::9), 127.0.0.1")
+    }).pipe(Effect.scoped)
+  })
+
+  it.effect("a proxy that moved is accepted seconds after it first connects, and its old address refused", () => {
+    const dns = fakeDns({ traefik: ["172.31.7.19"] })
+    return Effect.gen(function* () {
+      const { allows, refused } = yield* proxyPolicy(["traefik"], dns)
+      assert.isTrue(allows("172.31.7.19"))
+      dns.table.traefik = ["172.31.7.9"]
+      assert.isFalse(allows("172.31.7.9"))
+      refused("172.31.7.9") // asks for a resolution, at most once every 5 s
+      refused("172.31.7.9")
+      yield* advance("4 seconds")
+      assert.isFalse(allows("172.31.7.9"))
+      assert.deepStrictEqual(dns.calls, ["traefik"])
+      yield* advance("1 second")
+      assert.isTrue(allows("172.31.7.9"))
+      assert.isFalse(allows("172.31.7.19"))
+      assert.lengthOf(dns.calls, 2)
+      // Without a refused connection, the background resolution catches a move within 30 s.
+      dns.table.traefik = ["172.20.0.30"]
+      yield* advance("30 seconds")
+      assert.isTrue(allows("172.20.0.30"))
+      assert.isFalse(allows("172.31.7.9"))
+    }).pipe(Effect.scoped)
+  })
+
+  it.effect("a name that doesn't resolve trusts nothing, and the server still starts", () => {
+    const dns = fakeDns({ broken: "fail" })
+    return Effect.gen(function* () {
+      const { allows, summary } = yield* proxyPolicy(["missing", "broken", "10.0.0.1"], dns)
+      assert.isTrue(allows("10.0.0.1"))
+      assert.isFalse(allows("127.0.0.1"))
+      assert.include(summary(), "missing (unresolved), broken (unresolved), 10.0.0.1")
+      // Names alone, none resolving: nothing gets in, loopback included.
+      const only = yield* proxyPolicy(["missing"], dns)
+      assert.isFalse(only.allows("127.0.0.1"))
+    }).pipe(Effect.scoped)
+  })
+
+  it.effect("when the resolver can't answer, the last addresses stand for 5 minutes, then nothing", () => {
+    const dns = fakeDns({ traefik: ["172.31.7.9"] })
+    return Effect.gen(function* () {
+      const { allows } = yield* proxyPolicy(["traefik"], dns)
+      dns.table.traefik = "fail"
+      yield* advance("4 minutes")
+      yield* advance("30 seconds")
+      assert.isTrue(allows("172.31.7.9"))
+      yield* advance("30 seconds")
+      assert.isFalse(allows("172.31.7.9"))
+      // A name that's gone (no records) is dropped at once, not after 5 minutes.
+      dns.table.traefik = ["172.31.7.9"]
+      yield* advance("30 seconds")
+      assert.isTrue(allows("172.31.7.9"))
+      dns.table.traefik = []
+      yield* advance("30 seconds")
+      assert.isFalse(allows("172.31.7.9"))
+    }).pipe(Effect.scoped)
+  })
+
+  it.effect("host names are entries; malformed ones aren't", () => {
+    const dns = fakeDns({})
+    return Effect.gen(function* () {
+      const set = yield* makeAddressSet("TRUSTED_PROXIES", [
+        "traefik",
+        "proxy.lan.",
+        "rp_proxy",
+        "*.lan",
+        "a..b",
+        "1.2.3"
+      ])
+      assert.deepStrictEqual(set.invalid, ["*.lan", "a..b", "1.2.3"])
+    }).pipe(Effect.scoped, Effect.provideService(AddressResolver, dns.resolve))
+  })
+
+  it.effect("a refused connection is worth a warning once a minute per address, naming the trusted set", () => {
+    const dns = fakeDns({ traefik: ["172.31.7.19"] })
+    return Effect.gen(function* () {
+      const { refused, refusal } = yield* proxyPolicy(["traefik", "127.0.0.1"], dns)
+      const warning = refused("172.31.7.9", 0)
+      assert.include(warning, "172.31.7.9")
+      assert.include(warning, "AUTH_MODE=proxy")
+      assert.include(warning, "traefik (172.31.7.19), 127.0.0.1")
+      assert.isUndefined(refused("172.31.7.9", 59_000))
+      assert.isString(refused("172.20.0.10", 59_000))
+      assert.isString(refused("172.31.7.9", 60_000))
+      assert.strictEqual(refusal("172.31.7.9"), "172.31.7.9 isn't a trusted proxy of this instance.\n")
+    }).pipe(Effect.scoped)
   })
 })
 
@@ -222,12 +350,17 @@ describe.skipIf(lanIp === undefined)("exposure gate", () => {
   it.live("a refused peer's requests never reach a handler", () => {
     const config = testConfig({ host: "0.0.0.0", allowedIps: ["192.0.2.1"] })
     const handled: Array<unknown> = []
+    const warnings: Array<string> = []
     const collector = Logger.make((options) => {
       if (String(options.message).includes("Sent HTTP response")) handled.push(options.message)
+      if (String(options.message).includes("Refused a connection")) warnings.push(String(options.message))
     })
     return Effect.gen(function* () {
       const received = yield* pipelined(lanIp!)
       assert.match(received, /^HTTP\/1\.1 403/)
+      assert.include(received, `${lanIp} isn't allowed to connect to this instance.`)
+      assert.lengthOf(warnings, 1)
+      assert.include(warnings[0], `from ${lanIp}: AUTH_MODE=single accepts loopback, 192.0.2.1 only`)
       yield* Effect.sleep("200 millis")
       assert.deepStrictEqual(handled, [])
       assert.strictEqual(yield* healthz("127.0.0.1", "127.0.0.1"), 200)
