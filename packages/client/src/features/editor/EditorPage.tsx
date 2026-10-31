@@ -237,6 +237,9 @@ export function Editor({
             </Button>
             {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
             <Button onClick={() => setOpen("history")}>History</Button>
+            {ref.kind === "card" && (
+              <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
+            )}
             {ref.kind === "preset" ? (
               <>
                 {ref.refKind !== "chat_override" && <Button onClick={() => setOpen("fork")}>Make a variant</Button>}
@@ -266,7 +269,9 @@ export function Editor({
                   className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
                   onClickCapture={() => setMore(false)}
                 >
-                  {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
+                  {ref.kind === "card" && (
+                    <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
+                  )}
                   {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
                     <Button onClick={() => setOpen("fork")}>Make a variant</Button>
                   )}

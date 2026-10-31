@@ -12,11 +12,18 @@ export type CardPlacement = "actions" | "provenance" | "badge" | "family"
 interface CardContribution {
   readonly id: string
   readonly placement: CardPlacement
+  /** An action used less: a surface with a More menu (the editor's) puts it there. */
+  readonly overflow?: boolean
   readonly order: number
   readonly component: ComponentType<CardSurfaceContext>
 }
 export const cardContributions = makeRegistry<CardContribution>()
-export function CardSurface({ placement, ...context }: CardSurfaceContext & { placement: CardPlacement }) {
+/** `overflow`: only the actions that go under More (true) or only the others (false); absent, all. */
+export function CardSurface({
+  placement,
+  overflow,
+  ...context
+}: CardSurfaceContext & { placement: CardPlacement; overflow?: boolean }) {
   const snapshot = useSyncExternalStore(
     cardContributions.subscribe,
     cardContributions.snapshot,
@@ -24,6 +31,7 @@ export function CardSurface({ placement, ...context }: CardSurfaceContext & { pl
   )
   return [...snapshot.entries]
     .filter((entry) => entry.placement === placement)
+    .filter((entry) => overflow === undefined || (entry.overflow ?? false) === overflow)
     .sort((a, b) => a.order - b.order)
     .map((entry) => <entry.component key={entry.id} {...context} />)
 }

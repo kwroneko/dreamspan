@@ -12,6 +12,7 @@ export const register = () => {
       cardContributions.register({
         id: `card-forks.${command}`,
         placement: "actions",
+        overflow: command !== "fork",
         order: 100 + order,
         component: (props: CardSurfaceContext) => (
           <Suspense fallback={null}>
