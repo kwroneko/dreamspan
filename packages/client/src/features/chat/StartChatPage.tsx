@@ -668,6 +668,14 @@ function Pending({
   )
 }
 
+function RetryButton({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Button variant="ghost" onClick={onRetry}>
+      Try again
+    </Button>
+  )
+}
+
 /** /cards/$entityId/chat: a new chat with a card, made on its first send. */
 export function StartChatPage() {
   const { entityId } = useParams({ strict: false }) as { entityId: EntityId }
@@ -678,6 +686,12 @@ export function StartChatPage() {
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
+  // Asking again after a failure or a load that takes too long.
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => {
+    action.clearError()
+    setAttempt((n) => n + 1)
+  }
   useEffect(() => {
     void action
       .run((client) =>
@@ -692,17 +706,17 @@ export function StartChatPage() {
           setLoaded({ card: result.value.card, personas: cards.filter((c) => c.persona), cards })
         }
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card
-  }, [entityId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
+  }, [entityId, attempt])
   return (
     <PendingLayout entityId={entityId}>
       <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
         {loaded ? (
           <Pending key={entityId} card={loaded.card} personas={loaded.personas} cards={loaded.cards} />
         ) : action.error ? (
-          <ErrorAlert error={action.error} />
+          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
         ) : (
-          <Loading label="Loading the card…" />
+          <Loading label="Loading the card…" onRetry={retry} />
         )}
       </div>
     </PendingLayout>
@@ -720,6 +734,11 @@ export function StartGroupChatPage() {
     all: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
+  const [attempt, setAttempt] = useState(0)
+  const retry = () => {
+    action.clearError()
+    setAttempt((n) => n + 1)
+  }
   useEffect(() => {
     void action
       .run((client) =>
@@ -747,8 +766,8 @@ export function StartGroupChatPage() {
         const all = cards.filter((c) => !inGroup.has(c.entityId))
         setLoaded({ group, cards: greeters, personas: all.filter((c) => c.persona), all })
       })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group
-  }, [chatId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group and attempt
+  }, [chatId, attempt])
   return (
     <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
       {loaded ? (
@@ -760,9 +779,9 @@ export function StartGroupChatPage() {
           group={{ group: loaded.group, chatId, cards: loaded.cards }}
         />
       ) : action.error ? (
-        <ErrorAlert error={action.error} />
+        <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
       ) : (
-        <Loading label="Loading the group…" />
+        <Loading label="Loading the group…" onRetry={retry} />
       )}
     </div>
   )

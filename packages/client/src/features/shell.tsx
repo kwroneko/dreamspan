@@ -232,7 +232,7 @@ function AppShell() {
   if (AsyncResult.isInitial(result)) {
     return (
       <CenteredPage>
-        <Loading label="Connecting to the server…" />
+        <Loading label="Connecting to the server…" onRetry={retry} />
       </CenteredPage>
     )
   }

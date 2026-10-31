@@ -128,7 +128,7 @@ export function AsyncView<A, E>({
   const result = useAtomValue(atom)
   const refresh = useAtomRefresh(atom)
   return AsyncResult.match(result, {
-    onInitial: () => <Loading label={loading} />,
+    onInitial: () => <Loading label={loading} onRetry={refresh} />,
     onFailure: (failure) => <FailureView cause={failure.cause} onRetry={refresh} />,
     onSuccess: (success) => children(success.value, success.waiting)
   })

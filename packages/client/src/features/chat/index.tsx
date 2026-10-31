@@ -12,7 +12,7 @@ import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
+import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
 import { ChatsPage } from "./ChatsPage.tsx"
 
@@ -26,7 +26,7 @@ const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ d
 
 function LazyChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the chat…" />}>
+    <Suspense fallback={<Loading label="Loading the chat…" onRetry={reloadPage} />}>
       <ChatPage />
     </Suspense>
   )
@@ -34,7 +34,7 @@ function LazyChatPage() {
 
 function LazyContextPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the context…" />}>
+    <Suspense fallback={<Loading label="Loading the context…" onRetry={reloadPage} />}>
       <ContextPage />
     </Suspense>
   )
@@ -42,7 +42,7 @@ function LazyContextPage() {
 
 function LazyStartGroupChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the group…" />}>
+    <Suspense fallback={<Loading label="Loading the group…" onRetry={reloadPage} />}>
       <StartGroupChatPage />
     </Suspense>
   )
@@ -50,7 +50,7 @@ function LazyStartGroupChatPage() {
 
 function LazyStartChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the card…" />}>
+    <Suspense fallback={<Loading label="Loading the card…" onRetry={reloadPage} />}>
       <StartChatPage />
     </Suspense>
   )

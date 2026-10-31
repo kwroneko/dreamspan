@@ -616,7 +616,7 @@ function ChatSurface({
               </div>
             )}
             {view.loading ? (
-              <Loading label="Loading the chat…" />
+              <Loading label="Loading the chat…" onRetry={() => void session.open(slot ?? null)} />
             ) : (
               <MessageList
                 // A replacement layer has different row coordinates. Give it fresh
