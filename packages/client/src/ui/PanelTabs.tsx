@@ -176,7 +176,9 @@ export function SubjectTabs({
     const read = () => {
       setRoom(strip.clientWidth)
       const [full, short] = [...measure.children].map((row) =>
-        [...row.children].map((child) => (child as HTMLElement).offsetWidth + GAP_SUBJECT)
+        [...row.children].map(
+          (child) => (child as HTMLElement).offsetWidth + parseFloat(getComputedStyle(child).marginLeft) + GAP_SUBJECT
+        )
       )
       setWidths((full ?? []).map((width, index) => ({ full: width, short: short?.[index] ?? width })))
     }
@@ -222,8 +224,11 @@ export function SubjectTabs({
       )}
     </>
   )
+  // Short, the persona is set apart by a rule instead of its word ("you").
   const chipClass = (tab: SubjectTab, short: boolean) =>
-    `flex max-w-44 shrink-0 items-center gap-1.5 rounded-md border py-0.5 text-sm ${
+    `relative flex max-w-44 shrink-0 items-center gap-1.5 rounded-md border py-0.5 text-sm ${
+      short && tab.note ? "ml-2 before:absolute before:inset-y-1 before:-left-1.5 before:w-px before:bg-border" : ""
+    } ${
       tab.avatar ? `border-border text-text ${short ? "px-0.5" : "pr-2 pl-0.5"}` : "border-transparent px-2 text-muted"
     }`
   return (

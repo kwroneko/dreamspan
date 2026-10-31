@@ -40,11 +40,7 @@ test("phone sheets close immediately and after changing image privacy", async ({
   await page.getByRole("button", { name: "Close", exact: true }).click({ timeout: 3000 })
   await expect(page.getByRole("dialog")).toHaveCount(0)
   for (const mode of ["Blur", "Hide"]) {
-    await page
-      .locator("article")
-      .getByRole("button", { name: /^View .+'s portrait$/ })
-      .last()
-      .click()
+    await openPanel(page, "This chat")
     const sheet = page.getByRole("dialog").first()
     await sheet.getByRole("button", { name: "Image settings", exact: true }).click()
     await page.getByRole("dialog", { name: "Images in this browser" }).getByLabel("Every image").click()
@@ -67,11 +63,7 @@ test("permitted sidebar widths keep a group composer and Send inside the chat", 
   const message = page.getByLabel("Message", { exact: true })
   const draft = "Review draft: every action remains reachable."
   await message.fill(draft)
-  await page
-    .locator("article")
-    .getByRole("button", { name: /^View .+'s portrait$/ })
-    .last()
-    .click()
+  await openPanel(page, "This chat")
   for (const [label, key] of [
     ["Resize sidebar", "ArrowRight"],
     ["Resize chat panel", "ArrowLeft"]
