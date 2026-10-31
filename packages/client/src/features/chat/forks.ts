@@ -19,7 +19,10 @@ export const automaticBranchName = (entry: Pick<PathEntry, "position" | "depth">
 export const branchLabel = (fork: Fork, forks: ReadonlyArray<Fork>) => {
   if (fork.name !== null && fork.name !== "") return fork.name
   if (fork.parentForkId === null) return "Original"
-  const made = [...forks].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  // Numbered among the branches made from another, as ST numbers "Branch #1": the first is 1.
+  const made = forks
+    .filter((f) => f.parentForkId !== null)
+    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   return `Branch ${made.findIndex((f) => f.id === fork.id) + 1}`
 }
 

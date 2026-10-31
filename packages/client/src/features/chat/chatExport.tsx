@@ -10,10 +10,11 @@ import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import type { ChatCommandDialogProps } from "./commands.tsx"
-import { castCharacters, chatDisplayName } from "./chatTitle.ts"
+import { chatDisplayName } from "./chatTitle.ts"
+import { type ExportFormat, exportText } from "./chatExportText.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
-type Format = "txt" | "jsonl"
+type Format = ExportFormat
 const PAGE = 500
 
 /** Every message of the fork shown, first to last. */
@@ -31,42 +32,6 @@ async function readAll(session: ChatSession, view: ChatView, onProgress: (n: num
     if (page.value.older === null) return { ok: true as const, value: all }
     range = { _tag: "Older", from: page.value.older }
   }
-}
-
-/** The file's text: who said what, as the chat shows it. */
-export const exportText = (view: ChatView, entries: ReadonlyArray<PathEntry>, format: Format) => {
-  const cards = view.cast?.cards ?? []
-  const mine = new Set<string>(view.cast?.playedByMe ?? [])
-  const persona = cards.find((c) => mine.has(c.entityId))?.name ?? "You"
-  const speakerOf = (entry: PathEntry) => {
-    const id = entry.version.speakerEntityId ?? entry.firstSpeakerEntityId
-    const card = cards.find((c) => c.entityId === id)
-    const user = id !== null && id !== undefined ? mine.has(id) : entry.version.writer === "human"
-    return { name: card?.name ?? (user ? persona : "Model"), user }
-  }
-  if (format === "txt")
-    return entries
-      .map((entry) => `${speakerOf(entry).name}: ${entry.version.content}`)
-      .join("\n\n")
-      .concat("\n")
-  const header = {
-    user_name: persona,
-    character_name: castCharacters(view)[0]?.name ?? chatDisplayName(view),
-    create_date: new Date(view.chat?.createdAt ?? Date.now()).toISOString(),
-    chat_metadata: {}
-  }
-  const lines = entries.map((entry) => {
-    const { name, user } = speakerOf(entry)
-    return {
-      name,
-      is_user: user,
-      is_system: false,
-      send_date: new Date(entry.version.createdAt).toISOString(),
-      mes: entry.version.content,
-      extra: {}
-    }
-  })
-  return [header, ...lines].map((line) => JSON.stringify(line)).join("\n") + "\n"
 }
 
 const download = (text: string, name: string, type: string) => {

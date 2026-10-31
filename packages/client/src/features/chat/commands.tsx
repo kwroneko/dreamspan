@@ -51,6 +51,14 @@ interface ChatCommand {
   readonly dialog?: ComponentType<ChatCommandDialogProps>
 }
 
+/** A command's keys as written in its label: "Ctrl+H", "Alt+Enter", "ArrowUp". */
+export const shortcutText = (shortcut: NonNullable<ChatCommand["shortcut"]>) =>
+  [
+    ...(shortcut.mod ? ["Ctrl"] : []),
+    ...(shortcut.alt ? ["Alt"] : []),
+    shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key
+  ].join("+")
+
 /** Whether the ⋯ menu lists the command. */
 const inMenu = (command: ChatCommand) => command.menu ?? command.shortcut === undefined
 

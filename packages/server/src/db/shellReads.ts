@@ -49,11 +49,13 @@ const peopleOf = (forks: ReadonlyArray<Fork>) => {
   return [...people.values()]
 }
 
-/** By `sort`; Recent is the chat's (`chatRecentAt`) for rows that stand for their chat, else the fork's own. */
+/** By `sort`; Recent and Name are the chat's (`chatRecentAt`, `chatName`) for rows that stand for their chat, else the fork's own. */
 const sortBy = (forks: ReadonlyArray<Fork>, sort: ShellForksView["sort"], recent: "fork" | "chat" = "fork") =>
   [...forks].sort((a, b) =>
     sort === "name"
-      ? a.name.localeCompare(b.name)
+      ? recent === "chat"
+        ? a.chatName.localeCompare(b.chatName)
+        : a.name.localeCompare(b.name)
       : (sort === "created"
           ? b.createdAt - a.createdAt
           : recent === "chat"
@@ -209,7 +211,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         id: string
         chat_id: string
         tip_slot_id: string | null
-        parent_fork_id: string | null
+        last_chatted_at: number | null
         name: string | null
         pinned_at: number | null
         created_at: number
@@ -226,7 +228,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         end_at: number | null
         lists: string | null
       }>`
-          SELECT f.id, f.chat_id, f.tip_slot_id, f.parent_fork_id, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
+          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
             c.created_at AS chat_created_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at,
@@ -318,10 +320,11 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         const s = stored.get(record.id)!
         const cast = s.cast.flatMap((id) => byCard.get(id) ?? [])
         // Its last shown message; without one, its chat's start (an imported chat's ST date,
-        // never the import's time). Branching counts as activity: a fork made from another
-        // (never an import's first) is as recent as its making, so the chat the user just
-        // branched stays on top rather than dropping to the branch point's date.
-        const recentAt = Math.max(s.endAt ?? row.created_at, record.parent_fork_id === null ? 0 : record.created_at)
+        // never the import's time). The user's activity in it counts too (`last_chatted_at`: a
+        // send, a swipe, an edit, and making it by Branch from here), so the chat the user just
+        // branched stays on top rather than dropping to the branch point's date. An import never
+        // chats in a fork: an ST branch file merged into its chat keeps its ST dates.
+        const recentAt = Math.max(s.endAt ?? row.created_at, record.last_chatted_at ?? 0)
         chatRecent.set(row.id, Math.max(chatRecent.get(row.id) ?? 0, recentAt))
         branchCount.set(row.id, (branchCount.get(row.id) ?? 0) + 1)
         return {

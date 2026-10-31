@@ -192,6 +192,8 @@ function BranchList({
   }
   const start = shown?.baseSlotId ?? null
   const latest = forks.find((f) => f.current)
+  // ST's "Back to parent chat": the branch this one was made from, while it's live.
+  const parent = shown?.parentForkId ? forks.find((f) => f.id === shown.parentForkId) : undefined
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <ol aria-label="Branches" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
@@ -212,6 +214,11 @@ function BranchList({
         {latest !== undefined && shown !== undefined && latest.id !== shown.id && (
           <button type="button" className="text-accent hover:underline" onClick={() => open(latest)}>
             Back to the latest branch
+          </button>
+        )}
+        {parent !== undefined && parent.id !== latest?.id && (
+          <button type="button" className="text-accent hover:underline" onClick={() => open(parent)}>
+            Back to “{branchLabel(parent, forks)}”, where it came from
           </button>
         )}
         {start !== null && (

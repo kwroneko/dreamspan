@@ -73,7 +73,7 @@ for (const scheme of ["light", "dark"] as const)
         await shot(page, "live-off-window-name", width)
         // Clearing a name also propagates, without opening the observer's list.
         await rename("New road", "")
-        await expect(branch).toHaveAccessibleName(/Branch: Branch 2, 1 of 2/)
+        await expect(branch).toHaveAccessibleName(/Branch: Branch 1, 1 of 2/)
         await shot(page, "live-cleared-name", width)
       }
     )

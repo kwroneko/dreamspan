@@ -7,6 +7,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
+import { ALICE_MAIN, stFolder } from "./support/stFolder.ts"
+import { importStFolder } from "./support/stUpload.ts"
 
 const layer = () => serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)
 
@@ -101,13 +103,13 @@ describe("a chat's recency across its branches", () => {
       // Aria spoke only before the branch point: "Just Aria" has the chat by the fork she spoke in.
       assert.deepStrictEqual(
         card.sections[1]!.rows.map((f) => f.forkId),
-        [older.chat.currentForkId]
+        [older.chat.currentForkId!]
       )
       const own = yield* api.GetShellForks({ ...view, chat: older.chat.id, sections: [{ id: "all", limit: 10 }] })
       assert.strictEqual(own.sections[0]!.total, 2)
 
       // Its card's Recent counts the branching too.
-      const cards = yield* api.GetShellCards({})
+      const cards = yield* api.GetShellCards()
       const ariaCard = cards.cards.find((c) => c.card.entityId === aria.entityId)!
       assert.strictEqual(ariaCard.recentAt, made.fork.createdAt)
 
@@ -117,6 +119,35 @@ describe("a chat's recency across its branches", () => {
         found.sections[0]!.rows.map((f) => f.chat.id),
         older.chat.id
       )
+    }).pipe(Effect.scoped, Effect.provide(layer()))
+  )
+  it.live("an ST branch file merged into its chat keeps the chat's ST dates", () =>
+    Effect.gen(function* () {
+      const started = Date.now()
+      const { api } = yield* importStFolder(stFolder("ST/data/default-user/"))
+      const all = yield* api.GetShellForks({
+        entity: null,
+        chat: null,
+        search: "",
+        sort: "recent",
+        sections: [{ id: "chats", limit: 50 }]
+      })
+      // Alice's chat has her main file and its "Branch #1": two forks, the second made by the
+      // import now, which is not the user's activity in it.
+      const alice = all.sections[0]!.rows.find((f) => f.chatName.startsWith("Alice") && f.branches === 2)
+      assert.isDefined(alice, ALICE_MAIN)
+      assert.isBelow(alice!.chatRecentAt, started)
+      const own = yield* api.GetShellForks({
+        entity: null,
+        chat: alice!.chat.id,
+        search: "",
+        sort: "recent",
+        sections: [{ id: "all", limit: 10 }]
+      })
+      assert.strictEqual(own.sections[0]!.total, 2)
+      for (const fork of own.sections[0]!.rows) assert.isBelow(fork.recentAt, started)
+      const cards = yield* api.GetShellCards()
+      for (const card of cards.cards) if (card.recentAt !== null) assert.isBelow(card.recentAt, started)
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })

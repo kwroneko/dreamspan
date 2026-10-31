@@ -9,7 +9,7 @@ import type { ChatHeaderActionProps } from "./ChatHeader.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
 import { useShellForks } from "../characters/shellData.tsx"
 import { PanelToggles } from "./ChatPanels.tsx"
-import { ChatCommandMenu, type ChatCommandDialogProps, chatCommands } from "./commands.tsx"
+import { ChatCommandMenu, type ChatCommandDialogProps, chatCommands, shortcutText } from "./commands.tsx"
 
 /** ☆: pins the fork shown, from its shell row (this chat's forks only). */
 export function HeaderPin({ view }: ChatHeaderActionProps) {
@@ -22,7 +22,8 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
     sections: [{ id: "all", limit: 1000 }]
   })
     .section("all")
-    .rows.find((f) => f.chat.id === view.chat?.id && f.leaf === view.leafSlotId)
+    // By id: a branch made at another's last message ends where that one does.
+    .rows.find((f) => f.chat.id === view.chat?.id && f.forkId === (view.forkId ?? view.chat?.currentForkId))
   // A phone's header keeps its room for the name; the chat lists' rows have ☆ too.
   return fork ? (
     <span className="contents max-sm:hidden">
@@ -59,9 +60,20 @@ export function ShortcutsDialog({ onClose }: ChatCommandDialogProps) {
         {[...snapshot.entries]
           .filter((command) => command.shortcut)
           .sort((a, b) => a.order - b.order)
-          .map((command) => (
-            <li key={command.id}>{command.label}</li>
-          ))}
+          .map((command) => {
+            // Most labels name their keys already; the others get them beside.
+            const keys = shortcutText(command.shortcut!)
+            return (
+              <li key={command.id} className="flex items-baseline justify-between gap-3">
+                <span>{command.label}</span>
+                {!command.label.includes(keys) && (
+                  <kbd className="shrink-0 rounded border border-border px-1.5 font-mono text-xs text-muted">
+                    {keys}
+                  </kbd>
+                )}
+              </li>
+            )
+          })}
       </ul>
       <DialogActions>
         <Button onClick={onClose}>Close</Button>

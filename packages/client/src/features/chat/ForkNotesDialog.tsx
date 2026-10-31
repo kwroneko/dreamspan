@@ -110,7 +110,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
         wide
         onOpenChange={(open) => !open && !pending && closeDialog()}
         title="Branch from here"
-        description="Choose which notes this fork starts with. Each choice includes the note’s text and on/off state."
+        description="Choose which notes this branch starts with. Each choice includes the note’s text and on/off state."
       >
         <ErrorAlert error={error ?? action.error} />
         {notes === null ? (
@@ -184,7 +184,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
             pending={pending}
             onClick={() => void branch()}
           >
-            Create fork
+            Create branch
           </Button>
         </DialogActions>
       </Dialog>
@@ -194,7 +194,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
           wide
           onOpenChange={(open) => !open && setDiff(null)}
           title={diff.title}
-          description="Compare the two versions before choosing what this fork inherits."
+          description="Compare the two versions before choosing what this branch inherits."
         >
           <NoteDiff note={diff} />
           <Segmented
