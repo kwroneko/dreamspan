@@ -66,7 +66,11 @@ const reply = (speakerEntityId: EntityId | null, direction: string | null) =>
     ...(direction !== null && direction.trim() !== "" ? { direction } : {})
   })
 
-/** A chat's default title: its cast, never just the first character's name (DESIGN §2.1). */
+/**
+ * A chat's default title: its characters, never just the first character's name (DESIGN §2.1).
+ * The persona the user plays is left out, as the client's automatic name leaves it out
+ * (`chatTitle.ts` `castCharacters`), so a 1:1 reads "Mira, Oct 31" much as an imported one does.
+ */
 const titleFor = (names: ReadonlyArray<string>, at: number) =>
   names.length > 1
     ? names.join(" & ")
@@ -287,7 +291,7 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const at = Date.now()
           const chatId = uuidv7() as ChatId
           const laneId = uuidv7()
-          const names = ids.map((id) => byId.get(id)!.card.name)
+          const names = ids.filter((id) => cards.includes(id)).map((id) => byId.get(id)!.card.name)
           yield* sql`INSERT INTO chats ${sql.insert({
             id: chatId,
             owner_user_id: userId,

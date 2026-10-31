@@ -70,9 +70,9 @@ describe("chat groups", () => {
       assert.deepStrictEqual(
         groups.map((group) => [group.name, group.chats]),
         [
-          // A chat made here is titled by everyone in it, the persona too.
-          ["Ana & Mira & Tobin & Sam", 1],
-          ["Ana & Mira & Sam", 2]
+          // A chat made here is titled by its characters, the persona left out.
+          ["Ana & Mira & Tobin", 1],
+          ["Ana & Mira", 2]
         ]
       )
       const pair = groups[1]!
@@ -89,7 +89,7 @@ describe("chat groups", () => {
         listed.chats.map((chat) => chat.id),
         [second.chat.id, first.chat.id]
       )
-      assert.strictEqual(listed.group.name, "Ana & Mira & Sam")
+      assert.strictEqual(listed.group.name, "Ana & Mira")
       assert.strictEqual((yield* api.ListGroupChats({ chatId: trio.chat.id })).chats.length, 1)
       const single = (yield* api.ListChats({ limit: 50, before: null, entityId: mira })).find(
         (chat) => ![first, second, trio].some((made) => made.chat.id === chat.id)
