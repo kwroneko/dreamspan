@@ -51,17 +51,21 @@ const readers = (
     script = () => poolWorker,
     gate,
     heldStart = () => false,
-    background
+    background,
+    first
   }: {
     script?: (spawn: number) => URL
     gate?: Gate
     heldStart?: (spawn: number) => boolean
     background?: { readonly tags: ReadonlySet<string>; readonly max: number }
+    first?: ReadonlySet<string>
   } = {}
 ) => {
   let spawns = 0
   return Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
-    Layer.provide(ReaderPool.layer(size, { retryCrashed: true, ...(background ? { background } : {}) })),
+    Layer.provide(
+      ReaderPool.layer(size, { retryCrashed: true, ...(background ? { background } : {}), ...(first ? { first } : {}) })
+    ),
     Layer.provide(
       NodeWorker.layer(() => {
         const spawn = spawns++
@@ -132,6 +136,38 @@ describe("reader pool", () => {
     },
     30_000
   )
+
+  for (const ahead of [false, true])
+    it.live(
+      ahead ? "a reply's reads go ahead of what was queued before them" : "reads otherwise go in order",
+      () => {
+        const gate = makeGate()
+        return Effect.gen(function* () {
+          const { Hold, Count } = yield* Readers
+          const done: Array<string> = []
+          // The one reader is busy; a browsing read, then a reply's, queue behind it.
+          const busy = yield* Effect.forkChild(Hold())
+          yield* gate.holding.pipe(stalls("the reader never started its Hold"))
+          const browsing = yield* Effect.forkChild(
+            Hold().pipe(Effect.tap(() => Effect.sync(() => done.push("browsing"))))
+          )
+          yield* Effect.sleep("100 millis")
+          const reply = yield* Effect.forkChild(
+            Count({ n: 1 }).pipe(Effect.tap(() => Effect.sync(() => done.push("reply"))))
+          )
+          yield* Effect.sleep("100 millis")
+          yield* gate.release
+          yield* Fiber.join(busy)
+          yield* Fiber.join(browsing)
+          yield* Fiber.join(reply)
+          assert.deepStrictEqual(done, ahead ? ["reply", "browsing"] : ["browsing", "reply"])
+        }).pipe(
+          Effect.ensuring(gate.release),
+          Effect.provide(readers(1, { gate, ...(ahead ? { first: new Set(["Count"]) } : {}) }))
+        )
+      },
+      30_000
+    )
 
   it.live(
     "an interrupted read keeps its reader busy until the reader answers",

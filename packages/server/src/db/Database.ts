@@ -71,6 +71,12 @@ export const bundleEntry = (dir: string, name: string) =>
 /** Reads that browse, and can be slow at scale: they never hold the last free reader (readerPool.ts). */
 const BACKGROUND_READS: ReadonlySet<string> = new Set(["ShellLibrary", "ShellCards", "ShellForks", "CacheWarmth"])
 
+/**
+ * Reads a reply waits on before its request goes out (chat/ContextGenerator.ts, the provider's
+ * cache gate): they go ahead of whatever else is queued, as browsing reads the history in pages.
+ */
+const REPLY_READS: ReadonlySet<string> = new Set(["GetSlot", "AssembleContext", "CachePrefixWarm"])
+
 /** The writer's and readers' entry points. */
 const workerEntries = (options: DatabaseOptions) =>
   Effect.gen(function* () {
@@ -200,7 +206,8 @@ export const layer = (options: DatabaseOptions) => {
             Layer.provide(
               ReaderPool.layer(options.readers, {
                 retryCrashed: true,
-                background: { tags: BACKGROUND_READS, max: Math.max(1, options.readers - 1) }
+                background: { tags: BACKGROUND_READS, max: Math.max(1, options.readers - 1) },
+                first: REPLY_READS
               })
             ),
             Layer.provide(

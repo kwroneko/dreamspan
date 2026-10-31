@@ -57,7 +57,10 @@ export const lorebooksStage: AssemblerStage = {
           : []
       )
       assembly.lorebooks = [...attached, ...embedded]
-      assembly.loreMessageCount = assembly.lorebooks.length
+      // Counting walks the whole path: only an entry delayed by a message count needs it.
+      assembly.loreMessageCount = assembly.lorebooks.some((book) =>
+        book.doc.entries.some((entry) => entry.delay !== null)
+      )
         ? yield* sources.messageCount(historyLeafOf(need(assembly, "target")))
         : 0
       assembly.loreScanDepth = assembly.lorebooks.reduce(

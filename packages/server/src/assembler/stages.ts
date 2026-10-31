@@ -28,7 +28,7 @@ import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
-import { DEFAULT_MAX_IMAGES, imagesStage, messageImages } from "./images.ts"
+import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
 import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
@@ -2435,6 +2435,7 @@ const requestStage = sync("request", (assembly) => {
   const messages = need(assembly, "messages")
   const s = doc.samplers
   const firstSummary = messages.findIndex((m) => m.pieces.some((p) => hasSummary(assembly, p)))
+  const imagesOf = messageImagesOf(assembly)
   if ((assembly.lcm?.summaries.some((s) => s.content !== "") || assembly.lcmFailures?.length) && firstSummary < 0)
     throw new AssemblyFailed({
       reason: "invalid_document",
@@ -2445,7 +2446,7 @@ const requestStage = sync("request", (assembly) => {
     messages: limitImageEstimates(
       messages.map(({ role, content, name, pieces }) => {
         // Images the fork took out are left out here, so every limit counts only what's sent.
-        const images = messageImages(assembly, pieces).map(({ image }) => image)
+        const images = imagesOf(pieces).map(({ image }) => image)
         return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
       }),
       assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES

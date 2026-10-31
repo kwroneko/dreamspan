@@ -12,6 +12,7 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effe
 import { Reader, Writer } from "../db/Database.ts"
 import type { QueueOutcome } from "../db/ops.ts"
 import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
+import { CacheWarmth } from "./CacheWarmth.ts"
 import { ChatHub } from "./ChatHub.ts"
 import { settleHeld } from "./replySections.ts"
 import { Notices } from "./Notices.ts"
@@ -72,6 +73,7 @@ export class Generations extends Context.Service<
       const hub = yield* ChatHub
       const notices = yield* Notices
       const generator = yield* Generator
+      const warmth = yield* Effect.serviceOption(CacheWarmth)
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
 
@@ -307,7 +309,12 @@ export class Generations extends Context.Service<
             final: undefined
           }
           running.set(request.versionId, entry)
-          entry.fiber = yield* Effect.forkIn(run(generator.value, entry), scope)
+          // The chat's cache estimate waits until the reply ends: it would assemble beside it.
+          const release = Option.match(warmth, { onNone: () => () => {}, onSome: (w) => w.hold(request.chatId) })
+          entry.fiber = yield* Effect.forkIn(
+            run(generator.value, entry).pipe(Effect.ensuring(Effect.sync(release))),
+            scope
+          )
         })
 
       return Generations.of({

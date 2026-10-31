@@ -176,6 +176,8 @@ export const makeChatHandlers = Effect.gen(function* () {
         }
       }
       const { result } = outcome
+      // Its sender asks for the reply next: the estimate waits for it, off its path.
+      if (params.kind === "message" && !params.noReply) warmth.expectReply(params.chatId)
       if (params.kind === "generate") {
         yield* generations.start({
           userId: user,
@@ -745,12 +747,10 @@ export const makeChatHandlers = Effect.gen(function* () {
     PinFork: ({ forkId, pinned }) =>
       Effect.flatMap(userId, (id) => writer.SetForkPinned({ userId: id, forkId, pinned })).pipe(internal("PinFork")),
 
+    // The pushed estimate when it's current for this leaf (CacheWarmth), so a read right
+    // after a change doesn't assemble the request a second time.
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>
-      Effect.flatMap(userId, (id) =>
-        reader.CacheWarmth({ userId: id, chatId, leafSlotId, forkId: forkId ?? null })
-      ).pipe(
-        // What to count is the server's own business (ImageTokenCounts).
-        Effect.map(({ uncounted: _, ...next }) => next),
+      Effect.flatMap(userId, (id) => warmth.next(id, chatId, leafSlotId ?? null, forkId ?? null)).pipe(
         internal("GetNextContext")
       ),
 
