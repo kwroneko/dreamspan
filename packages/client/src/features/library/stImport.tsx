@@ -87,14 +87,10 @@ const FOLDER_KINDS: ReadonlyArray<readonly [StSentKind, string]> = [
 const OUTCOMES = ["added", "updated", "failed"] as const
 
 /** How the report words each outcome; `unchanged` for a group is a group read for its chats. */
-const OUTCOME_WORDS = {
-  added: "added",
-  updated: "updated",
-  unchanged: "already here",
-  skipped: "skipped",
-  failed: "failed"
-}
-const SHOWN_OUTCOMES = ["added", "updated", "unchanged", "skipped", "failed"] as const
+const OUTCOME_WORDS = { added: "added", updated: "updated", unchanged: "already here", failed: "failed" }
+// Not `skipped`: the report holds only what the user must act on (DESIGN §1.4), and skipped
+// chats hold only a greeting.
+const SHOWN_OUTCOMES = ["added", "updated", "unchanged", "failed"] as const
 
 /** Where the folder browser starts: the folder last looked in on this device, else the newest path import's. */
 const LAST_FOLDER = "rp.st-import.folder"
@@ -586,12 +582,6 @@ function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionPro
             <Card>
               <CardHeader title="Report" />
               <Counts report={detail.report} />
-              {detail.report.greetingOnly > 0 && (
-                <p className="mt-2 text-sm text-muted">
-                  {detail.report.greetingOnly} skipped {detail.report.greetingOnly === 1 ? "chat holds" : "chats hold"}{" "}
-                  only a greeting, as ST makes one when a card is opened.
-                </p>
-              )}
               <NextSteps latestChat={detail.latestChat} />
             </Card>
           )}
