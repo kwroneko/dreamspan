@@ -1,3 +1,4 @@
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { stateEventsThrough } from "./stateRead.ts"
 import { displayEndOf } from "./displayPath.ts"
 import { forkAt } from "./forkState.ts"
@@ -74,7 +75,11 @@ const parse = (row: CardRow): CardText => {
     greetingIndexes,
     description: text(doc.description),
     personality: text(doc.personality),
-    scenario: text(doc.scenario)
+    scenario: text(doc.scenario),
+    // Only scripts the user allowed are offered to run (the schema checked their shape).
+    ...(doc.regex_approved === true && Array.isArray(doc.regex) && doc.regex.length > 0
+      ? { regex: doc.regex as ReadonlyArray<RegexScript> }
+      : {})
   }
 }
 

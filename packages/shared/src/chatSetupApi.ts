@@ -32,7 +32,9 @@ export class CardForChat extends Schema.Class<CardForChat>("CardForChat")({
   groupGreetings: Schema.Array(Schema.String),
   description: Schema.String,
   personality: Schema.String,
-  scenario: Schema.String
+  scenario: Schema.String,
+  /** Its regex scripts when the user allowed them (`regex_approved`); absent otherwise or without any. */
+  regex: Schema.optionalKey(Schema.Array(RegexScript))
 }) {}
 
 /**
