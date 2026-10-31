@@ -4,7 +4,7 @@ import { oversizedPortraitPng, writeLargeImageStFolder } from "../../server/test
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
-test.setTimeout(240_000)
+test.setTimeout(600_000)
 let imported = false
 
 for (const width of [1440, 390]) {
@@ -22,7 +22,8 @@ for (const width of [1440, 390]) {
         await page.getByLabel("Folder path").fill(folder)
         await page.getByRole("button", { name: "Look in this folder" }).click()
         await page.getByRole("button", { name: "Import", exact: true }).click()
-        await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 180_000 })
+        // The import makes each avatar's thumbnails as it stores it (ARCHITECTURE.md §14.5b).
+        await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 480_000 })
         imported = true
       }
       const requests: string[] = []

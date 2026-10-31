@@ -50,16 +50,18 @@ const readers = (
   {
     script = () => poolWorker,
     gate,
-    heldStart = () => false
+    heldStart = () => false,
+    background
   }: {
     script?: (spawn: number) => URL
     gate?: Gate
     heldStart?: (spawn: number) => boolean
+    background?: { readonly tags: ReadonlySet<string>; readonly max: number }
   } = {}
 ) => {
   let spawns = 0
   return Layer.effect(Readers, ReaderPool.client(PoolOps)).pipe(
-    Layer.provide(ReaderPool.layer(size, { retryCrashed: true })),
+    Layer.provide(ReaderPool.layer(size, { retryCrashed: true, ...(background ? { background } : {}) })),
     Layer.provide(
       NodeWorker.layer(() => {
         const spawn = spawns++
@@ -101,6 +103,36 @@ const stopLog = () => {
 }
 
 describe("reader pool", () => {
+  it.live(
+    "background reads leave a reader free: others behind them go first",
+    () => {
+      const gate = makeGate()
+      return Effect.gen(function* () {
+        const { Hold } = yield* Readers
+        const before = yield* bothUp
+        // Two slow background reads: the first takes a reader, the second waits for it.
+        const first = yield* Effect.forkChild(Hold())
+        const heldThread = yield* gate.holding.pipe(stalls("the reader never started its Hold"))
+        const second = yield* Effect.forkChild(Hold())
+        // Reads queued after the second still run, on the reader it may not take.
+        const served = yield* lightReads
+        assert.deepStrictEqual(
+          [...served],
+          [...before].filter((id) => id !== heldThread)
+        )
+        assert.strictEqual(Atomics.load(gate.cells, 1), 1, "the second background read waited")
+        yield* gate.release
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+        assert.strictEqual(Atomics.load(gate.cells, 1), 2)
+      }).pipe(
+        Effect.ensuring(gate.release),
+        Effect.provide(readers(2, { gate, background: { tags: new Set(["Hold"]), max: 1 } }))
+      )
+    },
+    30_000
+  )
+
   it.live(
     "an interrupted read keeps its reader busy until the reader answers",
     () => {

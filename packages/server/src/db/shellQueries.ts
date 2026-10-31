@@ -1,14 +1,15 @@
 import { effectiveOverrideSql, eventAppliesSql, eventOrder, shownInSql, slotDeletedInSql } from "./forkState.ts"
 
-// Shared with query-plan regressions. Every projection names the actual live fork;
+// Shared with query-plan regressions. Both take the chats to summarize as a JSON array of ids
+// (db/forkSummaries.ts), the user's own: only chats whose summaries are stale are read. Every projection names the actual live fork;
 // neither a physical leaf nor a tip shared by several forks identifies a view.
 // Check for overrides once per view; untouched chats use the base selection and
 // deletion columns without per-message lineage lookups.
 export const shellSlotsQuery = `WITH RECURSIVE views AS MATERIALIZED (
   SELECT f.id AS fork_id, c.id AS chat_id, f.tip_slot_id,
     EXISTS(SELECT 1 FROM fork_overrides o WHERE o.chat_id = c.id) AS has_overrides
-  FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
-  WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+  FROM json_each(?) j CROSS JOIN chats c ON c.id = j.value CROSS JOIN forks f ON f.chat_id = c.id
+  WHERE c.deleted_at IS NULL AND f.deleted_at IS NULL
 ), segments(fork_id, chat_id, chain_id, lo, hi, has_overrides) AS (
   SELECT f.fork_id, f.chat_id, t.chain_id, h.depth, t.depth, f.has_overrides
   FROM views f JOIN slots t ON t.id = f.tip_slot_id JOIN slots h ON h.id = t.chain_id
@@ -27,9 +28,10 @@ SELECT g.fork_id, s.id, s.depth, s.chat_id, s.parent_slot_id,
     ELSE s.selected_version_id END ORDER BY s.depth, s.id`
 
 export const shellEventsQuery = `SELECT f.id AS fork_id, e.chat_id, e.slot_id, e.scope, e.key, e.value_json
-  FROM chats c CROSS JOIN forks f ON f.chat_id = c.id CROSS JOIN state_events e ON e.chat_id = c.id
+  FROM json_each(?) j CROSS JOIN chats c ON c.id = j.value CROSS JOIN forks f ON f.chat_id = c.id
+  CROSS JOIN state_events e ON e.chat_id = c.id
   LEFT JOIN slots s ON s.id = e.slot_id
-  WHERE c.owner_user_id = ? AND c.deleted_at IS NULL AND f.deleted_at IS NULL
+  WHERE c.deleted_at IS NULL AND f.deleted_at IS NULL
     AND ${eventAppliesSql("f.id", "e")}
     AND (e.slot_id IS NULL OR NOT ${slotDeletedInSql("f.id", "s")})
     AND (e.version_id IS NULL OR e.version_id = ${shownInSql("f.id", "s")}

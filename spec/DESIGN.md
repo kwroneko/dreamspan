@@ -44,7 +44,8 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** The import report holds only what a user must act on; nobody reads it, so nothing the user needs may live only there (owner, 2026-10-28).
 - **[P]** Fidelity is tested by **differential testing against real ST**: a stock ST in a throwaway container, pointed at a mock endpoint that records its requests. Synthetic card, chat, preset and persona fixtures are fed to both, and the request bodies are diffed. This applies to the non-agentic assembler. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §7, §15).
 - **[D]** Prefill must work where the provider supports it. Most frontier models don't. reference-harness's tool-schema prefill for GPT (`spec/OPENAI-PREFILL.md`) is worth porting as a separate capability.
-- **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Continue instead refuses a model without the required prefill capability.
+- **[P]** Where the provider doesn't support prefill, it's dropped and the request preview says so. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §15). Continue on such a model: see the next item.
+- **[D]** **Continue without prefill** (owner, 2026-10-31): on a model that doesn't take prefill, Continue doesn't refuse. It sends the reply so far as the model's own last message, and the final instruction (the end-of-request instruction) tells the model to write only the continuation of it, without repeating it. ST does the same with its continue nudge. The new text is appended to the reply.
 
 ### 1.3 Lorebooks / World Info
 - **[D]** Imported lorebooks must work. Matching ST's activation and placement exactly is **not** a goal; ST's implementation is considered poor.

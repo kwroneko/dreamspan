@@ -1,12 +1,12 @@
 // Setting up state for a browser test without clicking through it: the same RPCs the
 // client uses, over a WebSocket carrying a session cookie.
-import { AppApi } from "@rp/shared/api.ts"
+import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
 import { RpcClient, type RpcClientError, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import type { TestServer } from "./server.ts"
 
-export type Client = RpcClient.FromGroup<typeof AppApi, RpcClientError.RpcClientError>
+export type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
 
 /** Logs in over HTTP, and resolves to the session cookie. */
 export const loginCookie = async (server: TestServer, handle: string, password: string) => {

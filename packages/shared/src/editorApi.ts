@@ -262,6 +262,14 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),
+  /**
+   * The caller's cards that have a fork family, each with its own forks' count: what a card's
+   * fork badge shows, in one read for a whole grid (CardFamily is the tree, read when opened).
+   */
+  Rpc.make("CardFamilyIndex", {
+    success: Schema.Array(Schema.Struct({ entityId: EntityId, forks: Schema.Int })),
+    error: Schema.Union([...Errors])
+  }),
   /** Every card connected to this one by forking: the same tree from any member. */
   Rpc.make("CardFamily", {
     payload: { entityId: EntityId },

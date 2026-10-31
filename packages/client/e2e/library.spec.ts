@@ -234,3 +234,12 @@ test("an upload refused for an ended session says so", async ({ page }) => {
     .setInputFiles({ name: "late.json", mimeType: "application/json", buffer: preset("Late.") })
   await expect(page.getByRole("list", { name: "Imported files" })).toContainText("Your session has ended.")
 })
+
+test("the import page's back link returns where the user came from", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/settings`)
+  await page.getByRole("link", { name: "Import", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/import$/)
+  await page.getByRole("button", { name: "Back", exact: true }).click()
+  await expect(page).toHaveURL(/\/settings/)
+})

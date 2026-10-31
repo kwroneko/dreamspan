@@ -6,6 +6,8 @@ import { makeRegistry } from "../../registry.ts"
 
 export interface CardSurfaceContext {
   readonly entityId: EntityId
+  /** The card's display name, where the place showing it knows it (a badge's accessible name). */
+  readonly label?: string
   readonly store?: EditorStore
 }
 /** What a card's menu entry and its dialog receive: the dialog is mounted outside the menu. */

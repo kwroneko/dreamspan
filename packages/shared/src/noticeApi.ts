@@ -6,6 +6,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, SlotId, VersionId } from "./chat.ts"
 import { Draft } from "./drafts.ts"
 import { ServerError } from "./errors.ts"
+import { StImportId, StImportStatus } from "./stImportApi.ts"
 
 export const Notice = Schema.Union([
   /** A generation ended on its own: complete, or failed with its cause on the version. */
@@ -17,7 +18,9 @@ export const Notice = Schema.Union([
   }),
   Schema.TaggedStruct("UserDraftChanged", { draft: Draft }),
   /** Initial subscription and backlog overflow: re-read open private draft workspaces. */
-  Schema.TaggedStruct("UserDraftSync", {})
+  Schema.TaggedStruct("UserDraftSync", {}),
+  /** An ST folder import made progress or ended (ARCHITECTURE.md §13): at most about once a second per import. */
+  Schema.TaggedStruct("StImportChanged", { importId: StImportId, status: StImportStatus })
 ])
 export type Notice = typeof Notice.Type
 
