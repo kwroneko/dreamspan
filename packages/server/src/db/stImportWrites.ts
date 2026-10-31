@@ -1,4 +1,5 @@
 import { contextExcludedIn } from "./lcmVisibility.ts"
+import { ReplySections } from "@rp/shared/replySections.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
 import { refreshChatSummaries } from "./forkSummaries.ts"
 import {
@@ -44,7 +45,12 @@ const Message = Schema.Struct({
   speaker: Schema.NullOr(Schema.String),
   selected: Schema.Int,
   versions: Schema.NonEmptyArray(
-    Schema.Struct({ content: Schema.String, reasoning: Schema.NullOr(Schema.String), at: Schema.Number })
+    Schema.Struct({
+      content: Schema.String,
+      reasoning: Schema.NullOr(Schema.String),
+      sections: Schema.optionalKey(ReplySections),
+      at: Schema.Number
+    })
   )
 })
 const Messages = Schema.fromJsonString(Schema.Array(Message))
@@ -497,6 +503,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 macro_mode: "verbatim",
                 origin: "imported",
                 reasoning: version.reasoning,
+                reply_sections: version.sections ? JSON.stringify(version.sections) : null,
                 created_at: version.at,
                 updated_at: version.at
               })} RETURNING id`.pipe(Effect.map(([row]) => row!.id))

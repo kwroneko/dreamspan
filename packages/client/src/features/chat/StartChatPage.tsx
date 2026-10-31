@@ -275,7 +275,7 @@ function Pending({
     return keepCopy(copy.current, previous)
   }
   // The text left here before, if nothing's been typed since; the newest of them, when
-  // several tabs left one (the others stay in Browser recovery).
+  // several tabs left one (the others stay in the sidebar's Unsaved text).
   useEffect(() => {
     let current = true
     void copiesOf(userId, copyKey).then((copies) => {

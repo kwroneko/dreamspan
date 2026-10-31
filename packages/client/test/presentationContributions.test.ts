@@ -24,7 +24,8 @@ import {
   timelineBoundaries,
   timelineRails,
   timelineSummaries,
-  useVersionNavigation
+  useVersionNavigation,
+  versionFailureActions
 } from "../src/features/chat/presentation.tsx"
 import { messageRows, timelineTransforms, type TimelineContext } from "../src/features/chat/timelineContributions.tsx"
 import type { ChatView } from "../src/features/chat/session.ts"
@@ -85,6 +86,7 @@ acceptsAlternative(messageVersions)
 acceptsAlternative(timelineBoundaries)
 acceptsAlternative(timelineSummaries)
 acceptsAlternative(timelineRails)
+acceptsAlternative(versionFailureActions)
 
 it("surface providers compose scoped alternatives around the actual children and restore", async () => {
   const original = chatSurfaceProviders.list()

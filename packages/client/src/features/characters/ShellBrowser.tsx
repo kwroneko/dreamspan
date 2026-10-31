@@ -1,7 +1,7 @@
 import { chatName, formatDay } from "../chat/chatTitle.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { useNavigate, useSearch } from "@tanstack/react-router"
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -11,8 +11,17 @@ import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { sortCards } from "./cardRecency.ts"
 import { GroupFaces } from "./GroupFaces.tsx"
-import { CharacterTile, shellAtom, useShellNavigation, type ShellFork, type ShellLibrary } from "./shellData.tsx"
+import {
+  CharacterTile,
+  scopeSearch,
+  shellAtom,
+  sidebarCleared,
+  useShellNavigation,
+  type ShellFork,
+  type ShellLibrary
+} from "./shellData.tsx"
 
 export function PinButton({ fork }: { fork: ShellFork }) {
   const action = useAction()
@@ -44,6 +53,10 @@ export function PinButton({ fork }: { fork: ShellFork }) {
   )
 }
 
+/**
+ * Opens a fork in the middle. A pick in the left panel keeps the panel where it is (its scope
+ * travels in the URL); `scopeChat` scopes it to the fork's chat, as a group tile does.
+ */
 function useOpenFork(fork: ShellFork, scopeChat: boolean) {
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { panel?: string }
@@ -51,10 +64,7 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
   const userId = useSession().user.id
   const wide = useWide()
   const open = () => {
-    if (scopeChat) {
-      navigation.setScope({ entity: null, chat: fork.chat.id })
-      navigation.setGrid(false)
-    }
+    navigation.picked()
     // A list changes only the middle. Keep a character tab while that character is in the
     // chat, played by the model or by the user; else This chat.
     const previous = search.panel ?? (wide ? rememberedPanel(userId) : null)
@@ -64,10 +74,12 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
       to: "/chats/$chatId",
       params: { chatId: fork.chat.id },
       search: {
+        ...sidebarCleared,
+        ...scopeSearch(scopeChat ? { entity: null, chat: fork.chat.id } : navigation.scope),
+        ...(navigation.grid && !scopeChat ? { side: "characters" } : {}),
         fork: fork.forkId,
         ...(fork.leaf ? { leaf: fork.leaf } : {}),
-        ...(panel ? { panel } : {}),
-        ...(scopeChat ? { forks: fork.chat.id } : {})
+        ...(panel ? { panel } : {})
       }
     })
   }
@@ -76,22 +88,26 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
 export function GroupTile({ fork }: { fork: ShellFork }) {
   const open = useOpenFork(fork, true)
   return (
-    <div className="relative overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
       <button
         type="button"
         onClick={open}
         aria-label={`Open chat ${fork.name}`}
-        className="flex w-full flex-col text-left"
+        className="flex w-full flex-1 flex-col text-left"
       >
         <span className="aspect-[2/3] w-full">
           <GroupFaces members={fork.cast} />
         </span>
-        <span className="flex w-full min-w-0 flex-col gap-1 p-2.5">
+        <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
           <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.name}</span>
-          <span className="text-xs text-muted [overflow-wrap:anywhere]">
-            {fork.cast.map((c) => `${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`).join(", ")}
+          {/* The faces show who; the names with their versions are in the tooltip. */}
+          <span
+            className="text-xs text-muted"
+            title={fork.cast.map((c) => `${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`).join(", ")}
+          >
+            {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
           </span>
-          <span className="text-xs text-muted">{fork.current ? "Current fork" : "Peer fork"}</span>
+          <span className="mt-auto text-xs text-muted">{fork.current ? "Current fork" : "Peer fork"}</span>
         </span>
       </button>
       <span className="absolute right-1 top-1 rounded bg-surface">
@@ -103,19 +119,25 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
 export function ForkRow({
   fork,
   scopeChat = false,
-  details = false
+  details = false,
+  here = false
 }: {
   fork: ShellFork
   scopeChat?: boolean
   details?: boolean
+  /** The fork open in the middle: marked, so the list says where you are. */
+  here?: boolean
 }) {
   const open = useOpenFork(fork, scopeChat)
   return (
-    <div className="flex min-w-0 items-center gap-1 rounded-md border border-border p-1 hover:bg-surface-raised">
+    <div
+      className={`flex min-w-0 items-center gap-1 rounded-md border p-1 hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+    >
       <button
         type="button"
         onClick={open}
         aria-label={`Open chat ${fork.name}`}
+        aria-current={here ? "page" : undefined}
         data-chat-id={fork.chat.id}
         className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left"
       >
@@ -125,7 +147,8 @@ export function ForkRow({
           ))}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm font-medium" title={fork.name}>
+          {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
+          <span className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]" title={fork.name}>
             {fork.name}
           </span>
           {details && fork.cast.length > 1 && (
@@ -249,8 +272,21 @@ function ProgressiveRows<A>({ items, children }: { items: ReadonlyArray<A>; chil
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [search, setSearch] = useState("")
+  const params = useParams({ strict: false }) as { chatId?: string }
+  const shown = (useSearch({ strict: false }) as { fork?: string }).fork
   const card = data.cards.find((c) => c.card.entityId === scope.entity)
-  const chat = data.forks.find((f) => f.chat.id === scope.chat)
+  const cardLabel = card
+    ? `${card.card.label}${card.card.subtitle ? ` · ${card.card.subtitle}` : ""}`
+    : "Character not found"
+  // A chat by its current fork's name; inside it, the fork shown in the middle when that's another.
+  const chatForks = data.forks.filter((f) => f.chat.id === scope.chat)
+  const chat = chatForks.find((f) => f.current) ?? chatForks[0]
+  const open = params.chatId === scope.chat ? chatForks.find((f) => f.forkId === shown) : undefined
+  const chatLabel = !chat
+    ? "Chat not found"
+    : open && open.forkId !== chat.forkId && open.name !== chat.name
+      ? `${chat.name} › ${open.name}`
+      : chat.name
   const scoped = data.forks.filter(
     (f) => (!scope.entity || f.joined.includes(scope.entity)) && (!scope.chat || f.chat.id === scope.chat)
   )
@@ -261,22 +297,16 @@ function Browser({ data }: { data: ShellLibrary }) {
   const section = (title: string, forks: ReadonlyArray<ShellFork>) =>
     forks.length > 0 && (
       <section className="flex flex-col gap-1" aria-label={title}>
-        <h3 className="mt-3 text-xs font-semibold text-muted">{title}</h3>
+        <h3 className="mt-3 truncate text-xs font-semibold text-muted" title={title}>
+          {title}
+        </h3>
         <ProgressiveRows key={`${scope.entity}/${scope.chat}/${needle}`} items={forks}>
           {(f) => (
-            <div key={`${f.chat.id}/${f.forkId}`}>
-              <ForkRow fork={f} />
-              <button
-                type="button"
-                onClick={() => {
-                  setScope({ ...scope, chat: f.chat.id })
-                  setGrid(false)
-                }}
-                className="px-2 text-xs text-accent"
-              >
-                Forks
-              </button>
-            </div>
+            <ForkRow
+              key={`${f.chat.id}/${f.forkId}`}
+              fork={f}
+              here={f.chat.id === params.chatId && (shown ? f.forkId === shown : f.current)}
+            />
           )}
         </ProgressiveRows>
       </section>
@@ -293,40 +323,48 @@ function Browser({ data }: { data: ShellLibrary }) {
           { value: "characters", label: "Characters" }
         ]}
       />
-      <nav aria-label="Chat breadcrumbs" className="flex flex-wrap items-center gap-1 text-sm">
-        <button
-          type="button"
-          className="text-accent"
-          onClick={() => {
-            setScope({ entity: null, chat: null })
-            setGrid(false)
-          }}
-        >
-          All chats
-        </button>
-        {card && (
-          <>
-            <span>›</span>
-            <button
-              type="button"
-              className="text-accent"
-              onClick={() => {
-                setScope({ entity: scope.entity, chat: null })
-                setGrid(false)
-              }}
-            >
-              {card.card.label}
-              {card.card.subtitle ? ` · ${card.card.subtitle}` : ""}
-            </button>
-          </>
-        )}
-        {chat && (
-          <>
-            <span>›</span>
-            <span>{chat.name}</span>
-          </>
-        )}
-      </nav>
+      {!grid && (scope.entity || scope.chat) && (
+        <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
+          <button
+            type="button"
+            className="shrink-0 text-accent hover:underline"
+            onClick={() => setScope({ entity: null, chat: null })}
+          >
+            All chats
+          </button>
+          {scope.entity && (
+            <>
+              <span aria-hidden className="shrink-0 text-muted">
+                ›
+              </span>
+              {scope.chat ? (
+                <button
+                  type="button"
+                  title={cardLabel}
+                  className="min-w-0 truncate text-accent hover:underline"
+                  onClick={() => setScope({ entity: scope.entity, chat: null })}
+                >
+                  {cardLabel}
+                </button>
+              ) : (
+                <span aria-current="location" className="min-w-0 truncate font-medium" title={cardLabel}>
+                  {cardLabel}
+                </span>
+              )}
+            </>
+          )}
+          {scope.chat && (
+            <>
+              <span aria-hidden className="shrink-0 text-muted">
+                ›
+              </span>
+              <span aria-current="location" className="min-w-0 truncate font-medium" title={chatLabel}>
+                {chatLabel}
+              </span>
+            </>
+          )}
+        </nav>
+      )}
       <Input
         aria-label={grid ? "Find a character" : "Find a chat"}
         placeholder="Find by name"
@@ -336,11 +374,13 @@ function Browser({ data }: { data: ShellLibrary }) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {grid ? (
           <div className="grid grid-cols-2 gap-2">
-            {data.cards
-              .filter((c) => c.card.label.toLowerCase().includes(needle))
-              .map((c) => (
-                <CharacterTile key={c.card.entityId} card={c} />
-              ))}
+            {sortCards(
+              data.cards.filter((c) => c.card.label.toLowerCase().includes(needle)),
+              data.lastChatAt,
+              "recent"
+            ).map((c) => (
+              <CharacterTile key={c.card.entityId} card={c} />
+            ))}
           </div>
         ) : (
           <>
@@ -400,9 +440,12 @@ function Browser({ data }: { data: ShellLibrary }) {
   )
 }
 export function ShellBrowser() {
+  // Holds the panel's height while loading too, so the navigation below doesn't jump.
   return (
-    <AsyncView atom={shellAtom} loading="Loading chats…">
-      {(data) => <Browser data={data} />}
-    </AsyncView>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <AsyncView atom={shellAtom} loading="Loading chats…">
+        {(data) => <Browser data={data} />}
+      </AsyncView>
+    </div>
   )
 }

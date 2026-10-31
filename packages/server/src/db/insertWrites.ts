@@ -29,6 +29,7 @@ const copied = [
   "context_form",
   "display_form",
   "reasoning",
+  "reply_sections",
   "macro_mode",
   "frozen_macros",
   "connection_id",

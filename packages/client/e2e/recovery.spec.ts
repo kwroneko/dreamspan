@@ -75,7 +75,7 @@ test("refused live typing: logout retains it; explicit deletion permits logout; 
   await expect(page).toHaveURL(/\/login/)
   await apiLogin(page.request, server(), "final-reader", "reader-password-2")
   await page.goto(server().url)
-  await page.getByRole("button", { name: "Browser recovery", exact: true }).click()
+  await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
   await expect(page.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
   expect(await copies(page)).toEqual([])
 })
@@ -117,7 +117,7 @@ test("expired A session retains its unsaved copy through B login and B logout", 
   await page.request.post(`${server().url}/auth/logout`)
   await apiLogin(page.request, server(), "expiry-reader", "reader-password-2")
   await page.goto(server().url)
-  await page.getByRole("button", { name: "Browser recovery", exact: true }).click()
+  await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
   await expect(page.getByText("No unsaved browser copies.", { exact: true })).toBeVisible()
   expect((await copies(page)).map((x) => x.content)).toEqual([text])
   await page.getByRole("button", { name: "Keep copies", exact: true }).click()
@@ -237,7 +237,7 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       await page.reload()
       await expect(page.locator('a[href="/bin?section=recovered"]')).toBeVisible()
     } else {
-      await page.getByRole("button", { name: "Browser recovery", exact: true }).click()
+      await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
       const recovery = page.getByRole("dialog", { name: "Text kept in this browser", exact: true })
       await expect(recovery.getByRole("textbox", { name: "Recovery text" })).toHaveValue(text)
       await recovery.getByRole("button", { name: "Retry saving", exact: true }).click()
@@ -246,7 +246,7 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
       await recovery.getByRole("button", { name: "Retry saving", exact: true }).click()
       await expect(recovery.locator('a[href="/bin?section=recovered"]')).toHaveCount(1)
       await recovery.getByRole("button", { name: "Keep copies", exact: true }).click()
-      await page.getByRole("button", { name: "Browser recovery", exact: true }).click()
+      await page.getByRole("button", { name: "Unsaved text", exact: true }).click()
       await expect(recovery.locator('a[href="/bin?section=recovered"]')).toHaveCount(1)
     }
     expect(

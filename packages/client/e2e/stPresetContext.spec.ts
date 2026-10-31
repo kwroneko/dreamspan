@@ -86,17 +86,20 @@ for (const chars of [14_000, 20_000]) {
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}`)
     const explanation = page.getByRole("status").filter({ hasText: "aren’t sent to the model: the model’s context" })
-    const refusal = page.getByRole("alert").filter({ hasText: "Can't prepare the next reply" })
-    await expect(refusal).toContainText(next.assemblyError!)
+    // A budget refusal is a calm notice naming each number's source; the history note doesn't repeat it.
+    const refusal = page.getByRole("status").filter({ hasText: "The next reply doesn't fit the context size" })
     if (chars === 20_000) {
-      await expect(explanation).toBeVisible()
-      await expect(explanation).toContainText("budget allows 4,095 tokens")
-      await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")
-      await expect(explanation).toContainText(`take ~${next.budget!.nonHistoryTokens.toLocaleString()}`)
-    } else await expect(explanation).toHaveCount(0)
+      await expect(refusal).toContainText(
+        `take ~${next.budget!.nonHistoryTokens.toLocaleString()} tokens and the reply reserves 300 (the model's response length): more than the context size of 4,095 tokens (the model's context size setting)`
+      )
+    } else {
+      await expect(refusal).toContainText(next.assemblyError!)
+      await expect(refusal).toContainText("The context size is 4,095 tokens (the model's context size setting)")
+      await expect(refusal).not.toContainText("more than the")
+    }
+    await expect(explanation).toHaveCount(0)
     const last = page.locator(`article[data-slot="${entries.at(-1)!.slotId}"]`)
     await expect(last).toBeVisible()
-    if (chars === 20_000) expect((await explanation.boundingBox())!.y).toBeGreaterThan((await last.boundingBox())!.y)
     await expect(last).not.toHaveAttribute("data-out-of-context")
     for (const width of [1440, 390])
       for (const theme of ["light", "dark"] as const) {
@@ -104,7 +107,7 @@ for (const chars of [14_000, 20_000]) {
         await page.emulateMedia({ colorScheme: theme })
         await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
         await page.reload()
-        await expect(refusal).toContainText(next.assemblyError!)
+        await expect(refusal).toBeVisible()
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
         if (process.env.SCREENSHOT_DIR) {
           mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
@@ -122,11 +125,8 @@ for (const chars of [14_000, 20_000]) {
     await page.reload()
     await expect(preset).toHaveText("Roomy")
     await expect(last).toBeVisible()
-    await expect(refusal).toContainText(next.assemblyError!)
-    if (chars === 20_000) {
-      await expect(explanation).toBeVisible()
-      await expect(explanation).toContainText("budget allows 4,095 tokens")
-    }
+    await expect(refusal).toContainText("4,095 tokens")
+    await expect(explanation).toHaveCount(0)
     // The model's own context size brings the whole history back.
     await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
       api.EditModel({

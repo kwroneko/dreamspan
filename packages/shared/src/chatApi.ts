@@ -157,7 +157,9 @@ export const ChatEvent = Schema.Union([
         text: Schema.String,
         waitingCache: Schema.optionalKey(Schema.Boolean),
         /** The reasoning streamed so far, when there is any. */
-        reasoning: Schema.optionalKey(Schema.String)
+        reasoning: Schema.optionalKey(Schema.String),
+        /** The reply sections' panel text streamed so far, when there is any (spec/REPLY-SECTIONS.md). */
+        sections: Schema.optionalKey(Schema.String)
       })
     )
   }),
@@ -165,6 +167,8 @@ export const ChatEvent = Schema.Union([
   Schema.TaggedStruct("Delta", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
   /** Reasoning appended to a generating version at `offset`, as `Delta` is for its text. */
   Schema.TaggedStruct("Reasoning", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
+  /** Reply-section text appended at `offset` of the panel's text (`sectionsDisplay`), as `Delta` is. */
+  Schema.TaggedStruct("Section", { versionId: VersionId, offset: Schema.Int, text: Schema.String }),
   Schema.TaggedStruct("WaitingCache", { versionId: VersionId, waiting: Schema.Boolean }),
   /** A slot was added, or its selection or versions changed. */
   Schema.TaggedStruct("Slot", { entry: PathEntry }),
@@ -541,6 +545,22 @@ export class ChatApi extends RpcGroup.make(
       images: Schema.optionalKey(MessageImages),
       expectedRowVersion: Schema.Int,
       draft: DraftCommit
+    },
+    success: PathEntry,
+    error: Schema.Union([...WriteErrors])
+  }),
+  /**
+   * "Show as reply text" (spec/REPLY-SECTIONS.md): a wrong parse undone. A new edited version,
+   * selected, whose text is the reply as it came, its leading tagged sections back in it in
+   * their tags; it keeps the provider's reasoning. The parsed version stays as it was.
+   * NotFound for a version without sections.
+   */
+  Rpc.make("ShowSectionsAsText", {
+    payload: {
+      versionId: VersionId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedRowVersion: Schema.Int
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors])

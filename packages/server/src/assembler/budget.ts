@@ -1,4 +1,6 @@
+import type { BudgetOrigins } from "@rp/shared/inspectorApi.ts"
 import { need, type Assembly } from "./pipeline.ts"
+import type { ModelInput } from "./types.ts"
 
 /** What the preset's budget allows: its context size, within the model's, less its response length. */
 export const contextBudget = (assembly: Assembly) => {
@@ -31,4 +33,27 @@ export const loreAllowance = (assembly: Assembly) => {
   }
   // Joined nonempty contents plus one system message. Expansion overflow is cut, never borrowed.
   return Math.min(loreBudget(assembly), entries ? Math.ceil((characters + entries - 1) / 4) + 3 : 0)
+}
+
+/**
+ * Where the budget's context size, reply reserve and target come from (`withModelSettings`): the
+ * model's own setting, or for the context size its window, from whichever source gave it.
+ */
+export const budgetOrigins = (model: ModelInput | null): BudgetOrigins => {
+  const samplers = model?.settings?.samplers
+  const window = model?.context ?? null
+  const setting = samplers?.openai_max_context
+  const source = model?.contextSource ?? "unknown"
+  return {
+    context:
+      setting !== undefined && (window === null || setting <= window)
+        ? "setting"
+        : source === "unknown" || window === null
+          ? "assumed"
+          : source,
+    ...(model?.contextCatalog && source === "catalog" ? { catalog: model.contextCatalog } : {}),
+    reserve: samplers?.openai_max_tokens === undefined ? "default" : "setting",
+    target: model?.settings?.context_target === undefined ? "default" : "setting",
+    model: model ? { connectionId: model.connectionId, modelId: model.modelId } : null
+  }
 }

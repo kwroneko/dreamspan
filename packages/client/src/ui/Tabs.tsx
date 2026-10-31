@@ -37,7 +37,9 @@ export function Tabs<Value extends string>({
           onClick={(event) => {
             if (event.detail > 0) onPointerActivate?.(tab.value)
           }}
-          className={`${fill ? "shrink-0 px-1.5" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
+          title={tab.label}
+          // A long label (a card's full name) is cut short rather than running out of the panel.
+          className={`${fill ? "max-w-56 min-w-0 shrink-0 truncate px-1.5" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
         >
           {tab.label}
         </BaseTabs.Tab>

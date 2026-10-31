@@ -24,6 +24,8 @@ export interface FixtureMessage {
   readonly images?: HistoryEntry["images"]
   readonly inContext?: boolean
   readonly frozen?: Readonly<Record<string, string>>
+  /** A reply's leading tagged sections in their tags (spec/REPLY-SECTIONS.md). */
+  readonly sectionsPrefix?: string
   /** A template whose variable writes are recorded already. */
   readonly written?: boolean
 }
@@ -74,6 +76,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     written: m.written ?? false,
     inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
     ...(m.images === undefined ? {} : { images: m.images }),
+    ...(m.sectionsPrefix === undefined ? {} : { sectionsPrefix: m.sectionsPrefix }),
     sentAt: 0,
     versions: 1,
     selectedOrdinal: 0

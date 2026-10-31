@@ -4,6 +4,7 @@
 // The old version stays. It needs a model
 // that takes the start of its reply (a prefill); with another, the button says why it isn't
 // available, and a click (or a tap, where there's no tooltip) shows the reason in full.
+import { originalReply } from "@rp/shared/replySections.ts"
 import { useSyncExternalStore } from "react"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession } from "./session.ts"
@@ -27,7 +28,11 @@ const continueBlocked = (model: NextModel): string | null => {
 
 /** The latest finished version with text can continue, whoever wrote it. */
 export const canContinue = ({ entry, session }: MessageActionContext) => {
-  if (entry.version.status === "generating" || entry.version.content.trim() === "") return false
+  if (
+    entry.version.status === "generating" ||
+    originalReply(entry.version.content, entry.version.replySections).trim() === ""
+  )
+    return false
   const view = session.snapshot()
   return !view.loading && view.newer === null && view.entries.at(-1)?.slotId === entry.slotId
 }

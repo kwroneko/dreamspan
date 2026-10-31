@@ -6,6 +6,8 @@ export const appTools = defineSlot<Record<string, never>>("app.tools")
  * user should see wherever they are (a running import, say). Empty, it takes no room.
  */
 export const appBanners = defineSlot<Record<string, never>>("app.banners")
+/** Actions in the sidebar's header row; `onNavigate` closes the phone sheet. */
+export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined }>("shell.sidebar.actions")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
@@ -24,6 +26,7 @@ import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
 import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
+import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
 
 /** Sets the tab's title while a screen is shown. */
@@ -111,7 +114,8 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           className="max-w-40 truncate text-muted hover:text-text"
           onClick={onNavigate}
         >
-          {session.user.displayName}
+          {/* Without accounts the one user is "local", which says nothing. */}
+          {session.via === "local" ? "Account" : session.user.displayName}
         </Link>
         <BrowserRecovery userId={session.user.id} />
         {session.via === "session" && <LogoutButton variant="ghost" />}
@@ -126,15 +130,13 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const onChats = useLocation({ select: (location) => location.pathname === "/chats" })
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <Link to="/" className="font-semibold" onClick={onNavigate}>
+      <div className="flex items-center gap-1 px-1">
+        <Link to="/" className="mr-auto truncate font-semibold" onClick={onNavigate}>
           rp-harness
         </Link>
-        <Link to="/" className="rounded-md px-2 py-1 text-sm text-accent hover:bg-surface-raised" onClick={onNavigate}>
-          New chat
-        </Link>
+        <SlotOutlet slot={sidebarActions} props={{ onNavigate }} />
+        <ImageControls />
       </div>
-      <ImageControls />
       {onChats ? <div className="flex-1" /> : <ShellBrowser />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
     </div>
@@ -143,8 +145,15 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
-  // Open on the page it was opened on: going anywhere closes it.
-  const href = useLocation({ select: (location) => location.href })
+  // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
+  // (its crumbs and tabs, in the URL's sidebar params) doesn't; picking in it does.
+  const href = useLocation({
+    select: (location) => {
+      const params = new URLSearchParams(location.searchStr)
+      for (const key of sidebarSearch) params.delete(key)
+      return `${location.pathname}?${params}`
+    }
+  })
   const { selection } = useShellNavigation()
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)

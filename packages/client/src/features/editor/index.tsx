@@ -7,6 +7,7 @@ import { CardSavedHost } from "./CardSavedHost.tsx"
 import { cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
 import { EmbeddedLorebook } from "./EmbeddedLorebook.tsx"
 import { EndOfRequest } from "./EndOfRequest.tsx"
+import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
 import { presetEditorSections } from "./presetSections.ts"
 import { registerPresetWarnings } from "./PromptDocument.tsx"
 import { editorTextFields } from "./fields.ts"
@@ -34,6 +35,7 @@ export const register = () => {
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: "card.embedded-lorebook", order: 100, component: EmbeddedLorebook })
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
+  presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()
   editorTextFields.register({ id: "card.embedded-lorebook", kind: "card", fields: lorebookFields })
   lorebookEditorSections.register({ id: "lorebook.use", order: 10, component: LorebookUse })

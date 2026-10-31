@@ -2253,6 +2253,32 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
             expect(wire.messages.at(-1)).toEqual({ role: "user", content: "Summarize the material." })
           })
 
+    it("sends a reply's tagged sections back as the preset says, never in a summary request", async () => {
+      const fixture = chat({
+        messages: [
+          { side: "assistant", content: "You're late.", sectionsPrefix: "<think>Plan: be curt.</think>\n" },
+          { side: "user", content: "The road flooded." }
+        ],
+        preset: { ...preset(), reply_sections: { enabled: true, pairs: [], send_back: 1 } }
+      })
+      const sent = await assembled(fixture)
+      expect(contents(sent).join("\n")).toContain("<think>Plan: be curt.</think>\nYou're late.")
+      for (const withPreset of [true, false]) {
+        const summary = await assembled(fixture, {
+          summarizing: true,
+          summaryJob: {
+            id: "synthetic-summary",
+            clipTokens: 1000,
+            inputs: [],
+            tail: "Summarize the material.",
+            style: "direct",
+            withPreset
+          }
+        })
+        expect(contents(summary).join("\n")).not.toContain("Plan: be curt.")
+      }
+    })
+
     it("sends either nonempty part alone and falls back only when expansion leaves both empty", async () => {
       const withTexts = (turn: string, direction: string) => {
         const doc = emptied(preset())
