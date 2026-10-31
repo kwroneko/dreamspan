@@ -1,27 +1,43 @@
-import { Card, CardHeader } from "../../ui/Surface.tsx"
+import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { Card } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { GlobalLorebook } from "./GlobalLorebook.tsx"
 import { LorebookForm } from "./LorebookForm.tsx"
-import type { EditorStore } from "./store.ts"
+import { type EditorStore, useEditorState, useValue } from "./store.ts"
 
-/** Registered standalone lorebook section: whether every chat reads it. */
+const BOOK: ReadonlyArray<string> = []
+
+const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`
+
+/**
+ * Registered standalone lorebook section: how many entries it has and what uses it, every
+ * chat (global) and the chats it was added to, with the switch for every chat.
+ */
 export function LorebookUse({ store, call }: { store: EditorStore; call: Caller }) {
+  const entries = useValue<LorebookDoc | undefined>(store, BOOK)?.entries.length ?? 0
+  const chats = useEditorState(store).snapshot?.usedByChats ?? 0
   return (
-    <Card>
+    <section
+      aria-label="Where it's used"
+      className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p className="text-sm">
+        <strong>{count(entries, "entry", "entries")}</strong>
+        <span className="text-muted">
+          {" · "}
+          {chats === 0 ? "not added to any chat" : `added to ${count(chats, "chat", "chats")}`}
+        </span>
+      </p>
       <GlobalLorebook refId={store.refId} call={call} />
-    </Card>
+    </section>
   )
 }
 
-/** Registered standalone lorebook section: the book's settings and entries, as field drafts. */
+/** Registered standalone lorebook section: the book's settings and its entries, as field drafts. */
 export function StandaloneLorebook({ store }: { store: EditorStore }) {
   return (
     <Card>
-      <CardHeader
-        title="Entries"
-        description="Each change is kept as a draft until you save a revision; History shows and restores earlier revisions."
-      />
-      <LorebookForm store={store} root={[]} absent="This lorebook is empty." />
+      <LorebookForm store={store} root={BOOK} absent="This lorebook is empty." />
     </Card>
   )
 }

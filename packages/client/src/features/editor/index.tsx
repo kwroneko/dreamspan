@@ -13,6 +13,7 @@ import { registerPresetWarnings } from "./PromptDocument.tsx"
 import { editorTextFields } from "./fields.ts"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
 import { LorebookUse, StandaloneLorebook } from "./StandaloneLorebook.tsx"
+import { registerLorebookTable } from "./lorebookColumns.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -34,6 +35,7 @@ export const register = () => {
   libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
   cardEditorSections.register({ id: "card.embedded-lorebook", order: 100, component: EmbeddedLorebook })
+  registerLorebookTable()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()

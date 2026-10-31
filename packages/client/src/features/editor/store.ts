@@ -526,14 +526,15 @@ export class EditorStore {
   /**
    * Commits every draft as one revision: each named by its id and the row version this tab
    * saved it at, so the revision holds exactly the text shown here. Nothing is committed while
-   * a change isn't on the server.
+   * a change isn't on the server. `only` commits those fields' drafts and leaves the others
+   * as they are: an entry copied into another lorebook, without that book's own drafts.
    */
-  async commit(message: string | null) {
+  async commit(message: string | null, only?: ReadonlyArray<string>) {
     await this.flush()
     if (this.unsavedFields().length > 0) return this.notSaved()
     const snapshot = this.snapshot!
     const fields = [...this.fields].flatMap(([field, draft]) =>
-      draft.saved === null || draft.rowVersion === null || draft.draftId === null
+      (only && !only.includes(field)) || draft.saved === null || draft.rowVersion === null || draft.draftId === null
         ? []
         : [{ field, draftId: draft.draftId, expectedRowVersion: draft.rowVersion }]
     )
