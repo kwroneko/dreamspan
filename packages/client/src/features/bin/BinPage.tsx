@@ -52,11 +52,11 @@ const purgeEffect = (item: BinItem) => {
     case "message":
     case "version":
       return typeof item.origin.forkId === "string"
-        ? "Its text is erased for good in every fork, the ones that still show it included. An empty placeholder keeps its place in the chat."
+        ? "Its text is erased for good in every branch, the ones that still show it included. An empty placeholder keeps its place in the chat."
         : "Its text goes for good. An empty placeholder keeps its place in the chat."
     case "branch":
       return typeof item.origin.forkId === "string"
-        ? "The fork goes for good, with the messages no other fork shows. Forks made from it keep their history."
+        ? "The branch goes for good, with the messages no other branch shows. Branches made from it keep their history."
         : "Its text goes for good. An empty placeholder keeps its place in the chat."
     case "chat":
       return "The chat goes for good, with everything in it."
@@ -117,7 +117,7 @@ function ForksShowing({
       <ul className="mt-1 list-disc pl-5">
         {forks.map((fork) => (
           <li key={fork.forkId} className="[overflow-wrap:anywhere]">
-            {fork.name !== null && fork.name !== "" ? `“${fork.name}”` : "Unnamed fork"}
+            {fork.name !== null && fork.name !== "" ? `“${fork.name}”` : "Unnamed branch"}
             {fork.tipExcerpt !== "" ? <span className="text-muted"> ending “{fork.tipExcerpt}”</span> : null}
             {fork.deleted ? <span className="text-muted"> (in the bin)</span> : null}
             <span className="text-muted"> in “{readableChatTitle(fork.chatTitle)}”</span>

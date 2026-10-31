@@ -97,14 +97,14 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
       <button
         type="button"
         onClick={open}
-        aria-label={`Open chat ${fork.name}`}
+        aria-label={`Open chat ${fork.chatName}`}
         className="flex w-full flex-1 flex-col text-left"
       >
         <span className="aspect-[2/3] w-full">
           <GroupFaces members={fork.cast} />
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-1 p-2.5">
-          <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.name}</span>
+          <span className="text-sm font-medium [overflow-wrap:anywhere]">{fork.chatName}</span>
           {/* The faces show who; the names with their versions are in the tooltip. */}
           <span
             className="text-xs text-muted"
@@ -112,7 +112,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           >
             {fork.cast.length} {fork.cast.length === 1 ? "member" : "members"}
           </span>
-          <span className="mt-auto text-xs text-muted">{fork.current ? "Current fork" : "Peer fork"}</span>
+          {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
         </span>
       </button>
       <span className="absolute right-1 top-1 rounded bg-surface">
@@ -125,15 +125,20 @@ export function ForkRow({
   fork,
   scopeChat = false,
   details = false,
-  here = false
+  here = false,
+  perFork = false
 }: {
   fork: ShellFork
   scopeChat?: boolean
   details?: boolean
+  /** The row is this fork (a chat's branches, pins), not its chat (a list of chats). */
+  perFork?: boolean
   /** The fork open in the middle: marked, so the list says where you are. */
   here?: boolean
 }) {
   const open = useOpenFork(fork, scopeChat)
+  // A row for a chat shows its name; one for a fork, the branch's name after it.
+  const title = perFork && fork.named ? `${fork.chatName} › ${fork.name}` : fork.chatName
   return (
     <div
       className={`flex min-w-0 items-center gap-1 rounded-md border p-1 hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
@@ -141,7 +146,7 @@ export function ForkRow({
       <button
         type="button"
         onClick={open}
-        aria-label={`Open chat ${fork.name}`}
+        aria-label={`Open chat ${title}`}
         aria-current={here ? "page" : undefined}
         data-chat-id={fork.chat.id}
         className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left"
@@ -153,8 +158,8 @@ export function ForkRow({
         </span>
         <span className="flex min-w-0 flex-col">
           {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-          <span className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]" title={fork.name}>
-            {fork.name}
+          <span className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]" title={title}>
+            {title}
           </span>
           {details && fork.cast.length > 1 && (
             <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
@@ -172,8 +177,14 @@ export function ForkRow({
             <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
           )}
           <span className="text-xs text-muted">
-            {fork.current ? "Current fork · " : ""}
-            {new Date(fork.recentAt).toLocaleDateString()}
+            {perFork
+              ? fork.current && fork.branches > 1
+                ? "Latest branch · "
+                : ""
+              : fork.branches > 1
+                ? `${fork.branches} branches · `
+                : ""}
+            {new Date(perFork ? fork.recentAt : fork.chatRecentAt).toLocaleDateString()}
           </span>
         </span>
       </button>
@@ -259,7 +270,7 @@ export function PinnedChats({
       {open && (
         <>
           {pins.rows.map((fork) => (
-            <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} />
+            <ForkRow key={`${fork.chat.id}/${fork.forkId}`} fork={fork} perFork />
           ))}
           <ShowMore shown={pins.rows.length} total={pins.total} onMore={() => setLimit((n) => n + PAGE_ROWS)} />
         </>
@@ -278,9 +289,9 @@ const SECTIONS = {
     ["was", "Was in"]
   ],
   chat: [
-    ["current", "Current fork"],
-    ["peers", "Named and pinned peers"],
-    ["other", "Other forks"]
+    ["current", "Latest branch"],
+    ["peers", "Named and pinned branches"],
+    ["other", "Other branches"]
   ]
 } as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>
 
@@ -323,9 +334,9 @@ function Browser({ data }: { data: ShellLibrary }) {
     ? forks.loading
       ? "…"
       : "Chat not found"
-    : open && open.forkId !== chat.forkId && open.name !== chat.name
-      ? `${chat.name} › ${open.name}`
-      : chat.name
+    : open && open.forkId !== chat.forkId && open.name !== chat.chatName
+      ? `${chat.chatName} › ${open.name}`
+      : chat.chatName
   const section = (id: ShellSection, title: string) => {
     const { rows, total } = forks.section(id)
     return (
@@ -338,7 +349,8 @@ function Browser({ data }: { data: ShellLibrary }) {
             <ForkRow
               key={`${f.chat.id}/${f.forkId}`}
               fork={f}
-              here={f.chat.id === params.chatId && (shown ? f.forkId === shown : f.current)}
+              perFork={kind === "chat"}
+              here={f.chat.id === params.chatId && (kind !== "chat" || (shown ? f.forkId === shown : f.current))}
             />
           ))}
           <ShowMore shown={rows.length} total={total} onMore={() => more(id)} />

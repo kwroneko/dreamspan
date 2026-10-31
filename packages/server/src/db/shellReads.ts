@@ -49,17 +49,39 @@ const peopleOf = (forks: ReadonlyArray<Fork>) => {
   return [...people.values()]
 }
 
-const sortBy = (forks: ReadonlyArray<Fork>, sort: ShellForksView["sort"]) =>
+/** By `sort`; Recent and Name are the chat's (`chatRecentAt`, `chatName`) for rows that stand for their chat, else the fork's own. */
+const sortBy = (forks: ReadonlyArray<Fork>, sort: ShellForksView["sort"], recent: "fork" | "chat" = "fork") =>
   [...forks].sort((a, b) =>
     sort === "name"
-      ? a.name.localeCompare(b.name)
-      : (sort === "created" ? b.createdAt - a.createdAt : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
+      ? recent === "chat"
+        ? a.chatName.localeCompare(b.chatName)
+        : a.name.localeCompare(b.name)
+      : (sort === "created"
+          ? b.createdAt - a.createdAt
+          : recent === "chat"
+            ? b.chatRecentAt - a.chatRecentAt
+            : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
   )
+
+/**
+ * One row per chat, where a list stands for chats rather than forks: its current fork when
+ * that's among `forks`, else its first there. In `forks`' order; each row says how many
+ * branches its chat has (`branches`), so a chat's forks don't repeat its name down a list.
+ */
+const perChat = (forks: ReadonlyArray<Fork>): ReadonlyArray<Fork> => {
+  const withCurrent = new Set(forks.flatMap((f) => (f.current ? [f.chat.id] : [])))
+  const seen = new Set<string>()
+  return forks.filter((f) => {
+    if (seen.has(f.chat.id) || (withCurrent.has(f.chat.id) && !f.current)) return false
+    seen.add(f.chat.id)
+    return true
+  })
+}
 
 /** Forks by card `entity`'s latest turn in them, then newest. */
 const byTurn = (forks: ReadonlyArray<Fork>, entity: string) => {
   const at = (f: Fork) => f.activity.find((a) => a.entityId === entity)?.at ?? -1
-  return [...forks].sort((a, b) => at(b) - at(a) || b.recentAt - a.recentAt)
+  return [...forks].sort((a, b) => at(b) - at(a) || b.chatRecentAt - a.chatRecentAt || b.recentAt - a.recentAt)
 }
 
 /** How card `entity` is in fork `f`: alone with the user, with others, or gone. */
@@ -76,7 +98,7 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
       (view.chat === null || f.chat.id === view.chat) &&
       (chats === null || chats.has(f.chat.id)) &&
       (needle === "" ||
-        [f.name, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
+        [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
   )
   const peer = (f: Fork) => f.current || f.pinned || f.named
   switch (id) {
@@ -86,15 +108,17 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
         view.sort
       )
     case "chats":
-      return scoped.filter(peer)
+      return perChat(scoped)
     case "just":
     case "with":
     case "was":
       return view.entity === null
         ? []
-        : byTurn(
-            scoped.filter((f) => categoryOf(f, view.entity!) === id),
-            view.entity
+        : perChat(
+            byTurn(
+              scoped.filter((f) => categoryOf(f, view.entity!) === id),
+              view.entity
+            )
           )
     case "current":
       return scoped.filter((f) => f.current)
@@ -103,12 +127,9 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
     case "other":
       return scoped.filter((f) => !peer(f))
     case "groups":
-      return sortBy(
-        scoped.filter((f) => f.cast.length > 1 && peer(f)),
-        view.sort
-      )
+      return sortBy(perChat(scoped.filter((f) => f.cast.length > 1)), view.sort, "chat")
     case "card":
-      return view.entity === null ? scoped : byTurn(scoped, view.entity)
+      return perChat(view.entity === null ? scoped : byTurn(scoped, view.entity))
     case "all":
       return scoped
   }
@@ -190,6 +211,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         id: string
         chat_id: string
         tip_slot_id: string | null
+        last_chatted_at: number | null
         name: string | null
         pinned_at: number | null
         created_at: number
@@ -206,7 +228,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         end_at: number | null
         lists: string | null
       }>`
-          SELECT f.id, f.chat_id, f.tip_slot_id, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
+          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
             c.created_at AS chat_created_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at,
@@ -290,10 +312,21 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         list.push(summary)
         fresh.set(summary.chatId, list)
       }
-      const forks: Array<Fork> = records.map((record) => {
+      // A chat's Recent is the latest of its forks' (below), and how many forks it has.
+      const chatRecent = new Map<string, number>()
+      const branchCount = new Map<string, number>()
+      const forks: Array<Fork> = joinedRows.map((record) => {
         const row = chatById.get(record.chat_id)!
         const s = stored.get(record.id)!
         const cast = s.cast.flatMap((id) => byCard.get(id) ?? [])
+        // Its last shown message; without one, its chat's start (an imported chat's ST date,
+        // never the import's time). The user's activity in it counts too (`last_chatted_at`: a
+        // send, a swipe, an edit, and making it by Branch from here), so the chat the user just
+        // branched stays on top rather than dropping to the branch point's date. An import never
+        // chats in a fork: an ST branch file merged into its chat keeps its ST dates.
+        const recentAt = Math.max(s.endAt ?? row.created_at, record.last_chatted_at ?? 0)
+        chatRecent.set(row.id, Math.max(chatRecent.get(row.id) ?? 0, recentAt))
+        branchCount.set(row.id, (branchCount.get(row.id) ?? 0) + 1)
         return {
           forkId: record.id,
           preview: s.preview,
@@ -301,20 +334,32 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           chat: { id: row.id as ChatId, title: row.title },
           leaf: s.leaf as SlotId | null,
           name: record.name ?? chatName(importState(row.title).title, cast).name,
+          chatName: chatName(importState(row.title).title, cast).name,
           named: record.name !== null,
           current: record.id === row.current_fork_id,
           pinned: record.pinned_at !== null,
           createdAt: record.created_at,
-          // Its last shown message; without one, its chat's start (an imported chat's ST date,
-          // never the import's time).
-          recentAt: s.endAt ?? row.created_at,
+          recentAt,
+          chatRecentAt: 0,
+          branches: 0,
           cast,
           joined: s.joined as Array<EntityId>,
           departed: s.departed as Array<EntityId>,
           activity: s.activity as Array<Activity>
         }
       })
-      forks.sort((a, b) => b.recentAt - a.recentAt || a.chat.id.localeCompare(b.chat.id))
+      for (const f of forks) {
+        f.chatRecentAt = chatRecent.get(f.chat.id)!
+        f.branches = branchCount.get(f.chat.id)!
+      }
+      // Newest chat first, each chat's forks together, its current one first.
+      forks.sort(
+        (a, b) =>
+          b.chatRecentAt - a.chatRecentAt ||
+          a.chat.id.localeCompare(b.chat.id) ||
+          Number(b.current) - Number(a.current) ||
+          b.recentAt - a.recentAt
+      )
       // Each card's forks and turns, in one pass over the forks, in their order.
       // A card's Recent, the one key home, the left panel's grid and Start a chat sort by: the
       // latest activity in any chat it joined (each fork's `recentAt`), imported dates included,
