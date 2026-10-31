@@ -21,7 +21,10 @@ export const REPLY = "The bridge holds."
 const chunk = (body: Record<string, unknown>) =>
   `data: ${JSON.stringify({ id: "fake", object: "chat.completion.chunk", model: "fake-small", ...body })}\n\n`
 
-export const startProvider = async (options: { holdAfterText?: boolean } = {}): Promise<FakeProvider> => {
+export const startProvider = async (
+  options: { holdAfterText?: boolean; /** Streamed instead of REPLY. */ reply?: string } = {}
+): Promise<FakeProvider> => {
+  const reply = options.reply ?? REPLY
   const keys: Array<string> = []
   const completions: Array<FakeProvider["completions"][number]> = []
   let holding = false
@@ -30,7 +33,7 @@ export const startProvider = async (options: { holdAfterText?: boolean } = {}): 
   const respond = (response: ServerResponse) => {
     response.writeHead(200, { "content-type": "text/event-stream" })
     response.write(
-      chunk({ choices: [{ index: 0, delta: { role: "assistant", content: REPLY }, finish_reason: null }] })
+      chunk({ choices: [{ index: 0, delta: { role: "assistant", content: reply }, finish_reason: null }] })
     )
     const finish = () => {
       if (response.destroyed) return
