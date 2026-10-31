@@ -305,14 +305,19 @@ function Rows({
     return () => cancelAnimationFrame(frame)
   }, [focus, uids, virtualizer, searching, onFocused])
   return (
-    <div role="list" aria-label="Entries" className="relative" style={{ height: virtualizer.getTotalSize() }}>
+    <div
+      role="list"
+      aria-label="Entries"
+      className="relative [contain:strict]"
+      style={{ height: virtualizer.getTotalSize() }}
+    >
       {virtualizer.getVirtualItems().map((item) => (
         <div
           key={item.key}
           role="listitem"
           data-index={item.index}
           ref={virtualizer.measureElement}
-          className="absolute top-0 left-0 w-full"
+          className="absolute top-0 left-0 w-full [contain:layout_style]"
           style={{ transform: `translateY(${item.start - margin}px)` }}
         >
           <EntryRow {...row} uid={uids[item.index]!} open={opened.has(uids[item.index]!)} />

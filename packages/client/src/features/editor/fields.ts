@@ -63,8 +63,9 @@ const words = (key: string) => {
 
 /** What an element of a list is called: its name or title, else its id. */
 const elementName = (doc: Doc, path: FieldPath) => {
-  const element = getAt(doc, path) as { name?: unknown; title?: unknown } | undefined
-  const name = element?.name ?? element?.title
+  const element = getAt(doc, path) as { name?: unknown; title?: unknown; comment?: unknown } | undefined
+  // A lorebook entry's title is its `comment`, as in ST.
+  const name = element?.name || element?.title || element?.comment
   const segment = String(path.at(-1))
   return typeof name === "string" && name !== "" ? `“${name}”` : segment.slice(segment.indexOf("=") + 1)
 }
@@ -74,9 +75,14 @@ export const fieldLabel = (kind: EntityKind, doc: Doc, path: FieldPath): string 
   const [top, second, ...rest] = path
   const first = LABELS[kind]?.[String(top)] ?? words(String(top))
   if (second === undefined) return first
-  if (typeof second === "number") return `${first} ${second + 1}${rest.length > 0 ? `: ${rest.join(" ")}` : ""}`
+  const singular =
+    { prompts: "Prompt", modules: "Module", regex: "Regex script", entries: "Entry" }[String(top)] ?? first
+  if (typeof second === "number") {
+    const named = elementName(doc, [top!, second])
+    const head = named.startsWith("“") ? `${singular} ${named}` : `${first} ${second + 1}`
+    return `${head}${rest.length > 0 ? `: ${rest.map((part) => words(String(part))).join(" ")}` : ""}`
+  }
   const element = /^(id|identifier|uid)=/.test(second)
-  const singular = { prompts: "Prompt", modules: "Module", regex: "Regex script" }[String(top)] ?? first
   const head = element ? `${singular} ${elementName(doc, [top!, second])}` : `${first}: ${words(second)}`
   return rest.length > 0 ? `${head}: ${rest.map((part) => words(String(part))).join(" ")}` : head
 }
