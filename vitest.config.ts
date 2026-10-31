@@ -29,7 +29,7 @@ const tags = [{ name: "slow", description: "Timing, scale or soak: run by npm ru
  * it (Vitest reads it after this config).
  */
 const cores = availableParallelism()
-const free = Math.floor(cores - loadavg()[0]) - 2
+const free = Math.floor(cores - (loadavg()[0] ?? 0)) - 2
 const maxWorkers = Math.max(2, Math.floor(cores / 4), Math.min(cores - 2, free))
 
 /**

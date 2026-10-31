@@ -13,7 +13,7 @@ import { defineConfig, devices } from "@playwright/test"
  * PLAYWRIGHT_WORKERS overrides it.
  */
 const cores = availableParallelism()
-const free = cores - loadavg()[0]
+const free = cores - (loadavg()[0] ?? 0)
 const workers =
   Number(process.env.PLAYWRIGHT_WORKERS) || Math.max(3, Math.floor(cores / 6), Math.min(12, Math.floor(free / 3)))
 
