@@ -35,7 +35,8 @@ test("import an ST folder by browsing to it or typing its path", async ({ page }
   const st = writeStFolder(root, ["Bob - bridge", "Bob - river"])
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/import`)
-  await page.getByRole("link", { name: "Import a SillyTavern folder" }).click()
+  // The ST folder is the import page's first card.
+  await page.getByRole("link", { name: "Choose the folder" }).click()
 
   await page.getByLabel("Folder path").fill(join(root, "missing"))
   await page.getByRole("button", { name: "Look in this folder" }).click()
@@ -45,24 +46,42 @@ test("import an ST folder by browsing to it or typing its path", async ({ page }
   await page.getByLabel("Folder path").fill(root)
   await page.getByRole("button", { name: "Look in this folder" }).click()
   // ST's folder is found inside the one looked in.
-  await expect(page.getByText("3 files to import")).toBeVisible()
+  await expect(page.getByText("3 files (")).toBeVisible()
   const folders = page.getByRole("navigation", { name: "Folders" })
   await folders.getByRole("button", { name: "ST", exact: true }).click()
   await expect(page.getByLabel("Folder path")).toHaveValue(st)
   // What was found in the other folder is gone.
-  await expect(page.getByText("3 files to import")).toHaveCount(0)
+  await expect(page.getByText("3 files (")).toHaveCount(0)
   // ST's data folder is marked.
   await folders.getByRole("button", { name: "data SillyTavern" }).click()
   await expect(page.getByLabel("Folder path")).toHaveValue(join(st, "data"))
   await shoot(page, "browsing")
   await page.getByRole("button", { name: "Look in this folder" }).click()
-  await expect(page.getByText("3 files to import")).toBeVisible()
+  await expect(page.getByText("3 files (")).toBeVisible()
   await page.getByRole("button", { name: "Import", exact: true }).click()
 
   const imported = page.getByRole("list", { name: "Imported" })
   await expect(imported).toContainText("Cards: 1 added")
   await expect(imported).toContainText("Chats: 2 added")
   await expect(page.getByRole("list", { name: "Hidden runs" })).toContainText("12 messages hidden")
+
+  // The report ends with where to go next.
+  await expect(page.getByRole("link", { name: "Open your characters" })).toBeVisible()
+  await expect(page.getByRole("link", { name: /^Continue your latest chat/ })).toBeVisible()
+
+  // Coming back starts at the folder last looked in, and a re-scan says it's all here.
+  await page.goto(`${server().url}/`)
+  await page.goto(`${server().url}/import/st`)
+  await expect(page.getByLabel("Folder path")).toHaveValue(join(st, "data"))
+  await expect(
+    page.getByRole("navigation", { name: "Folders" }).getByRole("button", { name: "default-user SillyTavern" })
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Look in this folder" }).click()
+  const preview = page.getByRole("table", { name: "What's in the folder" })
+  await expect(preview.getByRole("row", { name: /^Cards/ })).toHaveText(/Cards\s*1\s*0\s*1/)
+  await expect(preview.getByRole("row", { name: /^Chats/ })).toHaveText(/Chats\s*2\s*0\s*2/)
+  await expect(page.getByText("Everything here is already imported.", { exact: false })).toBeVisible()
+  await shoot(page, "rescan")
 
   await page.goto(`${server().url}/chats`)
   await expect(page.getByRole("link", { name: "Bob - bridge" })).toBeVisible()

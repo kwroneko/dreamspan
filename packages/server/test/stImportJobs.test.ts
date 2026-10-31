@@ -102,6 +102,41 @@ describe("ST import jobs", () => {
   )
 
   it.live(
+    "the preview tells what's already here, the report counts groups and names the latest imported chat",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const files = stFolder("data/default-user/")
+        const root = onDisk(files)
+        const api = yield* client()
+        const paths = [...files.keys()].map((path) => path.slice("data/default-user/".length))
+        const added = "chats/Nobody/Later.jsonl"
+        assert.deepStrictEqual((yield* api.StImportPreview({ paths })).known, [])
+        const { importId } = yield* api.StartStPathImport({ path: root, prefix: "data/default-user/" })
+        yield* until(() => row(config.dataDir, importId)?.status === "complete")
+        const known = new Set((yield* api.StImportPreview({ paths: [...paths, added] })).known)
+        // Cards, personas, lorebooks, presets and finished chats are here; a file never imported isn't.
+        for (const path of paths) {
+          const kind = classifyStPath(path)?.kind
+          if (kind === "card" || kind === "persona_avatar" || kind === "world" || kind === "preset")
+            assert.isTrue(known.has(path), path)
+          if (kind === "settings" || kind === "group") assert.isFalse(known.has(path), path)
+        }
+        assert.isTrue([...known].some((path) => path.startsWith("chats/")))
+        assert.isFalse(known.has(added))
+        const detail = yield* api.GetStImport({ importId })
+        assert.isAtLeast(detail.report!.counts.group?.unchanged ?? 0, 1)
+        assert.isAtLeast(detail.report!.counts.persona?.added ?? 0, 1)
+        assert.isNotNull(detail.latestChat)
+        // The chat list's newest, as every chat here came from the import.
+        const [newest] = yield* api.ListChats({ limit: 1, before: null })
+        assert.strictEqual(detail.latestChat!.chatId, newest!.id)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    180_000
+  )
+
+  it.live(
     "publishes progress and the end, cancels at a file boundary, and clears only finished jobs",
     () => {
       const config = testConfig()

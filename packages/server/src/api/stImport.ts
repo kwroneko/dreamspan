@@ -8,7 +8,7 @@ import { homedir } from "node:os"
 import { Effect, Option } from "effect"
 import { AppConfig } from "../config.ts"
 import { ChatHub } from "../chat/ChatHub.ts"
-import { Writer } from "../db/Database.ts"
+import { Reader, Writer } from "../db/Database.ts"
 import { StImportJobs } from "../importer/StImportJobs.ts"
 import { StImports } from "../importer/StImports.ts"
 import { listFolder, scanStFolder } from "../importer/stFolderDisk.ts"
@@ -24,6 +24,7 @@ export const makeStImportHandlers = Effect.gen(function* () {
   const imports = yield* StImports
   const jobs = yield* StImportJobs
   const writer = yield* Writer
+  const reader = yield* Reader
   const hub = yield* ChatHub
   const config = yield* AppConfig
   const start = Option.getOrElse(config.importStartDir, homedir)
@@ -53,6 +54,23 @@ export const makeStImportHandlers = Effect.gen(function* () {
       Effect.flatMap(adminOnly, (user) => jobs.link(user, importId, path, card)),
     ListFolder: ({ path }) => Effect.andThen(adminOnly, listFolder(path, start)),
     ScanStFolder: ({ path }) => Effect.andThen(adminOnly, scanStFolder(path)),
+    // The user's own records only: no file is read, so it isn't for admins alone.
+    StImportPreview: ({ paths }) =>
+      Effect.gen(function* () {
+        const user = yield* CurrentUser
+        const sources = yield* reader.StImportSources({ userId: user.id })
+        const known = new Set([
+          ...sources.library.map((entry) => entry.sourcePath),
+          ...sources.chats.filter((record) => record.complete).map((record) => record.source)
+        ])
+        return { known: paths.filter((path) => known.has(path)) }
+      }).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], (error) =>
+          Effect.logError("StImportPreview failed", error).pipe(
+            Effect.andThen(Effect.fail(new ServerError({ message: "The folder's preview couldn't be read." })))
+          )
+        )
+      ),
     GetStImportReport: ({ importId }) => Effect.flatMap(CurrentUser, (user) => imports.report(user, importId)),
     UnhideImportedRun: ({ chatId, throughSlotId, importId }) =>
       Effect.gen(function* () {

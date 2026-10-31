@@ -4,7 +4,7 @@
 // browser plans a folder picked in it, so both send the same files in the same order.
 import { classifyStPath, orderStChats, ST_FILE_ORDER, type StFile } from "./stFolder.ts"
 
-type StSentKind = Exclude<StFile["kind"], "unsupported">
+export type StSentKind = Exclude<StFile["kind"], "unsupported">
 
 /** A file the import sends, by its path in the ST user's folder, and what it was found as. */
 export interface StPlanned<A> {
@@ -67,4 +67,23 @@ export const stMainChat = (head: string): string | null => {
   } catch {
     return null
   }
+}
+
+/**
+ * The plan by kind: how many files, and how many of them earlier imports hold (`known`,
+ * from StImportPreview). `settings` and `group` files aren't kept as entries, so they're
+ * read again on every import and never counted as known.
+ */
+export const stPlanKinds = (
+  send: ReadonlyArray<{ readonly path: string; readonly kind: StSentKind }>,
+  known: ReadonlySet<string>
+): ReadonlyMap<StSentKind, { readonly files: number; readonly known: number }> => {
+  const counts = new Map<StSentKind, { files: number; known: number }>()
+  for (const entry of send) {
+    const count = counts.get(entry.kind) ?? { files: 0, known: 0 }
+    count.files++
+    if (known.has(entry.path) && entry.kind !== "settings" && entry.kind !== "group") count.known++
+    counts.set(entry.kind, count)
+  }
+  return counts
 }

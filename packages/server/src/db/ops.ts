@@ -2777,6 +2777,12 @@ export class ReadOps extends RpcGroup.make(
     }),
     error: StorageError
   }),
+  /** The user's chat an ST import made with the latest message, not in the bin; null for none. */
+  Rpc.make("StImportLatestChat", {
+    payload: { userId: UserId },
+    success: Schema.NullOr(Schema.Struct({ chatId: ChatId, title: Schema.String })),
+    error: StorageError
+  }),
   /** The user's import jobs, newest first (at most 200). */
   Rpc.make("ListStImportJobs", {
     payload: { userId: UserId },

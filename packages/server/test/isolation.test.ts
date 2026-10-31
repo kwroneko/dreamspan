@@ -1896,6 +1896,23 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
+  StImportPreview: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        const card = JSON.stringify({ spec: "chara_card_v2", spec_version: "2.0", data: { name: "Preview" } })
+        const sent = yield* http(
+          owner,
+          `/st-import/file?${new URLSearchParams({ import: importId, path: "characters/Preview.json" })}`,
+          card,
+          "application/octet-stream"
+        )
+        assert.strictEqual(sent.status, 200)
+        const paths = ["characters/Preview.json"]
+        assert.deepStrictEqual((yield* owner.api.StImportPreview({ paths })).known, paths)
+        assert.deepStrictEqual((yield* actor.api.StImportPreview({ paths })).known, [])
+      })
+  },
   StartStPathImport: {
     adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
   },

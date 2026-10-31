@@ -1,5 +1,5 @@
 // The import page's folder browser (ARCHITECTURE.md §13): the folders where the app runs,
-// from the home folder or a folder the page names, opened by clicking. Opening one fills
+// from the home folder or a folder the page names (the last one used), opened by clicking. Opening one fills
 // the path field; folders that look like ST's are marked.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Forbidden } from "@rp/shared/errors.ts"
@@ -8,6 +8,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useMemo, useState } from "react"
 import { FailureView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
+import { Button } from "../../ui/Button.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 
@@ -45,7 +46,17 @@ export function FolderBrowser({
     onInitial: () => <Spinner />,
     // Not an admin: browsing isn't theirs, and the path field says so when used.
     onFailure: (failure) =>
-      Cause.squash(failure.cause) instanceof Forbidden ? null : <FailureView cause={failure.cause} onRetry={refresh} />,
+      Cause.squash(failure.cause) instanceof Forbidden ? null : (
+        <div className="flex flex-col gap-2">
+          <FailureView cause={failure.cause} onRetry={refresh} />
+          {/* The folder it started at may be gone since: the home folder still is. */}
+          {shown !== null && (
+            <Button variant="ghost" className="self-start" onClick={() => setShown(null)}>
+              Go to the home folder
+            </Button>
+          )}
+        </div>
+      ),
     onSuccess: ({ value: listing, waiting }) => (
       <nav
         aria-label="Folders"
