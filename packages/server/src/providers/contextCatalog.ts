@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import type { ListedModel } from "./modelLists.ts"
 
 /** What a catalog knows of a model: the id of the entry it matched, and its limits. */
-export interface CatalogFacts {
+interface CatalogFacts {
   readonly match: string
   readonly context?: number
   readonly maxOutput?: number
@@ -115,7 +115,7 @@ export const piModelCatalog: ModelCatalog = {
  * Current model families by id prefix (as of 2026-10), for ids no catalog lists: the smallest
  * window each family's current models have, so a guess never overfills. Most specific first.
  */
-export const MODEL_FAMILIES: ReadonlyArray<{
+const MODEL_FAMILIES: ReadonlyArray<{
   readonly family: string
   readonly pattern: RegExp
   readonly context: number

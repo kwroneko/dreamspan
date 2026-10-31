@@ -156,7 +156,7 @@ const capabilityFields = {
  * A context size the provider stated in a context-length error, saved by the user from that
  * error (never applied without them). Its own source: below the user's setting, above the list.
  */
-export const LearnedContext = Schema.Struct({
+const LearnedContext = Schema.Struct({
   context: Schema.Int.check(Schema.isGreaterThan(0)),
   at: Schema.Number
 })

@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { card, encode, header, jsonl, message } from "../../server/test/support/stFolder.ts"
+import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
