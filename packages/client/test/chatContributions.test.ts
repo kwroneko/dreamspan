@@ -7,6 +7,7 @@ import {
   availableCommands,
   chatCommands,
   runCommandShortcut,
+  shortcutText,
   type ChatCommandContext
 } from "../src/features/chat/commands.tsx"
 import { registerHistoryCommands } from "../src/features/chat/historyContributions.ts"
@@ -267,4 +268,11 @@ describe("chat contributions", () => {
     chatCommands.get(original.id)!.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(2)
   })
+})
+
+// ⋯ Keyboard shortcuts lists each command's keys as its label would write them.
+it("writes a command's keys as the labels do", () => {
+  expect(shortcutText({ key: "h", mod: true })).toBe("Ctrl+H")
+  expect(shortcutText({ key: "Enter", mod: false, alt: true })).toBe("Alt+Enter")
+  expect(shortcutText({ key: "ArrowUp", mod: false })).toBe("ArrowUp")
 })
