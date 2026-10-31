@@ -5,6 +5,8 @@
 import { Layer } from "effect"
 import { inject } from "vitest"
 import { WorkerBundleDir } from "../../src/db/Database.ts"
+// Declares the provided `bundleDir`, for projects that include this file and not the setup.
+import type {} from "./globalSetup.ts"
 
 /** Options for `Database.layer` and `Formats.layer`. */
 export const testWorkers = { workers: "bundle", bundleDir: inject("bundleDir") } as const
