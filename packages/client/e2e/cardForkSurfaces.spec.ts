@@ -117,6 +117,8 @@ for (const width of [1440, 390])
         .filter({ hasText: version })
         .filter({ has: page.getByText(version, { exact: true }) })
         .first()
+      // An item reads its family once it comes near the viewport.
+      await row.scrollIntoViewIfNeeded()
       await expect(row.getByRole("button", { name: /^Forks of / })).toBeVisible()
       const more = row.getByRole("button", { name: /^More actions for / })
       await more.click()

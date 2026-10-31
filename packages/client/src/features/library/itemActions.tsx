@@ -60,6 +60,8 @@ export function LibraryItemActions({ context }: { context: LibraryItemContext })
   // A dialog whose action was removed or disabled goes with it.
   const libraryDialog = open?.from === "library" ? actions.find((action) => action.id === open.id) : undefined
   const cardDialog = open?.from === "card" ? cardEntries.find((entry) => entry.id === open.id) : undefined
+  // Closed for good: restoring the action later doesn't bring its dialog back.
+  if (open !== null && !libraryDialog?.dialog && !cardDialog?.dialog) setOpen(null)
   const label = `More actions for ${itemName(context.entry)}`
   return (
     <div className="flex shrink-0 items-center gap-1">

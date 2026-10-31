@@ -6,6 +6,7 @@ import { expectTextBox } from "./support/textbox.ts"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { markPersona } from "./support/library.ts"
 
 // About four seconds a reply.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -54,9 +55,7 @@ const setUp = (page: Page) =>
     await importCard(page, { name: "Tobin", description: "A ferryman.", first_mes: "Tobin nods." })
     await importCard(page, { name: "Bo", description: "A diver." })
     await page.goto(`${server().url}/library`)
-    const box = page.getByRole("checkbox", { name: "Bo: Persona" })
-    await box.click()
-    await expect(box).toBeChecked()
+    await markPersona(page, "Bo")
   })())
 
 /** A chat with Mira, played as Bo, with Mira's reply to the first message finished; its URL. */

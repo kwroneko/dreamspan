@@ -162,6 +162,7 @@ for (const width of [1440, 390])
       await page.keyboard.press("Escape")
       // Reopening from the library is an overlay too and has no chat-specific fills.
       await page.goto(`${server().url}/library`)
+      await page.getByRole("tab", { name: /^Presets/ }).click()
       await page.getByRole("button", { name: "Edit Celia 4.2", exact: true }).click()
       await expect(overlay).toContainText("no chat open")
       await shoot("library-document")

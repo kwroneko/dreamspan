@@ -102,8 +102,15 @@ const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
 
 /** What an item says under its name: its version, then how it's used. */
 function Meta({ item }: { item: Item }) {
-  const usage = persona(item) ? "Persona" : item.usage ? usageLine(item.usage) : null
-  return [item.entry.subtitle, usage].filter(Boolean).join(" · ")
+  // A persona's badge says what it is; the shell doesn't count the chats it plays in.
+  const usage = !persona(item) && item.usage ? usageLine(item.usage) : null
+  return (
+    <>
+      {item.entry.subtitle && <span>{item.entry.subtitle}</span>}
+      {item.entry.subtitle && usage && " · "}
+      {usage}
+    </>
+  )
 }
 
 function Badges({ item, seen }: { item: Item; seen: boolean }) {
@@ -150,25 +157,33 @@ function Picture({ item, size }: { item: Item; size: "md" | "fill" }) {
 
 function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportFormatInfo> }) {
   const [ref, seen] = useSeen<HTMLLIElement>()
-  const meta = <Meta item={item} />
+  // The name beside the actions, and the line under it running beneath them: one row, never wrapped.
   return (
     <li
       ref={ref}
-      className="flex min-w-0 items-center gap-3 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]"
+      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]"
     >
-      <OpenLink item={item} className="shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
+      <OpenLink
+        item={item}
+        className="row-span-2 shrink-0 self-start rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
         <Picture item={item} size="md" />
       </OpenLink>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span title={itemName(item.entry)} className="line-clamp-2 font-medium [overflow-wrap:anywhere]">
-          {item.entry.label}
+      <span
+        title={itemName(item.entry)}
+        className="col-start-2 row-start-1 line-clamp-2 font-medium [overflow-wrap:anywhere]"
+      >
+        {item.entry.label}
+      </span>
+      <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 self-start text-xs text-muted">
+        <Badges item={item} seen={seen} />
+        <span className="min-w-0 truncate">
+          <Meta item={item} />
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
-          <Badges item={item} seen={seen} />
-          <span className="min-w-0 truncate">{meta}</span>
-        </span>
+      </span>
+      <div className="col-start-3 row-start-1">
+        <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
       </div>
-      <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
     </li>
   )
 }

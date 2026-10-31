@@ -274,6 +274,7 @@ for (const width of [1440, 390])
 
       // The preset editor: conditions, the end-of-request texts, and the direction warning.
       await page.goto(`${server().url}/library`)
+      await page.getByRole("tab", { name: /^Presets/ }).click()
       await page.getByRole("button", { name: "Edit Night RP 3.1", exact: true }).click()
       const editor = page.getByRole("dialog", { name: "Preset editor", exact: true })
       await expect(editor).toBeVisible()
