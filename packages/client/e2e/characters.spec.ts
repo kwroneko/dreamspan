@@ -56,14 +56,11 @@ test("a card opens all three panels, with its definition and actions beside the 
   await page.getByRole("main").getByRole("button", { name: "Open Mira", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${group}`))
   await expect(page.getByRole("navigation", { name: "Chat breadcrumbs" })).toContainText("Mira")
-  // In a chat, the card's tab has the Cast row's actions, Edit among them (f55e4e7).
-  await expect(
-    page.getByRole("tabpanel", { name: "Mira", exact: true }).getByRole("button", { name: "Edit Mira", exact: true })
-  ).toBeVisible()
-  await page
-    .getByRole("tabpanel", { name: "Mira", exact: true })
-    .getByRole("link", { name: "New chat", exact: true })
-    .click()
+  // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
+  const tab = page.getByRole("tabpanel", { name: "Mira", exact: true })
+  await expect(tab.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
+  await tab.getByRole("button", { name: "More for Mira", exact: true }).click()
+  await page.getByRole("menuitem", { name: "New chat with Mira", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/cards/${mira}/chat`))
   expect(await chatCount()).toBe(2)
 })

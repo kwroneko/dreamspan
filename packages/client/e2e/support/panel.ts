@@ -12,8 +12,24 @@ export const openPanel = async (page: Page, tab: string) => {
     if (await toggles.isVisible()) await toggles.getByRole("button", { name: tab, exact: true }).click()
     else await sheet.click()
   }
-  await tabs.getByRole("tab", { name: tab, exact: true }).click()
+  await panelTab(page, tab)
   return page.getByRole("tabpanel", { name: tab })
+}
+
+/**
+ * Opens a tab of the open panel: a tool in the row or under More tools, or a character (or
+ * Cast) in the cast strip.
+ */
+export const panelTab = async (page: Page, tab: string) => {
+  // The tools row stays invisible until it has measured which tools fit.
+  await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
+  const shown = page
+    .getByRole("tablist", { name: "Chat panel" })
+    .or(page.getByRole("tablist", { name: "Characters", exact: true }))
+    .getByRole("tab", { name: tab, exact: true })
+  if ((await shown.count()) > 0) return shown.click()
+  await page.getByRole("button", { name: "More tools", exact: true }).click()
+  await page.getByRole("menuitem", { name: tab, exact: true }).click()
 }
 
 /** Closes the chat's side panel, or a phone's sheet. */

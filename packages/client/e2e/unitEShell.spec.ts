@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
+import { panelTab } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -216,17 +217,17 @@ for (const width of [1440, 390]) {
       const fork = data.forks.find((f) => f.current && f.cast.length > 1)!
       const card = fork.cast[0]!
       await page.goto(`${server().url}/chats/${fork.chat.id}?panel=card:${card}&forks=${fork.chat.id}`)
-      // In a chat, the card's tab has the Cast row's actions, Edit among them (f55e4e7).
+      // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
       await expect(
         page
           .getByRole("tabpanel")
-          .getByRole("button", { name: /^Edit / })
+          .getByRole("button", { name: /^Open .+ in the full editor$/ })
           .first()
       ).toBeVisible()
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
       await shoot("chat-card")
       for (const tab of ["Cast", "This chat", "Lorebooks", "Notes", "Summaries"]) {
-        await page.getByRole("tab", { name: tab, exact: true }).click()
+        await panelTab(page, tab)
         if (tab === "Notes")
           await expect(page.getByRole("region", { name: "This chat's notes", exact: true })).toBeVisible()
         await shoot(`panel-${tab.toLowerCase().replaceAll(" ", "-")}`)
@@ -239,10 +240,9 @@ for (const width of [1440, 390]) {
         .getByRole("button", { name: /^View .+'s portrait$/ })
         .last()
         .click()
-      await expect(page.getByRole("tab", { name: "Portrait", exact: true })).toHaveAttribute("aria-selected", "true")
+      await expect(page.getByRole("img", { name: /full portrait$/ })).toBeVisible()
       await shoot("portrait")
-      if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
-      else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
+      await page.keyboard.press("Escape")
       await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
       await shoot("image-settings")
       await page.keyboard.press("Escape")
