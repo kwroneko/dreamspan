@@ -145,7 +145,7 @@ for (const width of [1440, 390])
       await expect(page.getByText("Saved. Your chats use these scripts from now on.")).toBeVisible()
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
       await page.reload()
-      await expect(list.getByText(name, { exact: true })).toBeVisible()
+      await expect(list.getByRole("button", { name: `Edit ${name}`, exact: true })).toBeVisible()
       const saved = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetGlobalRegex())
       expect(saved.scripts.find((script) => script.name === name)).toMatchObject({
         find_regex: "/secret/g",
