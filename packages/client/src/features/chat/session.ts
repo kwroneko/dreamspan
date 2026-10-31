@@ -1657,21 +1657,23 @@ export class ChatSession {
 
   /**
    * "Branch from here": a fork of the one shown, at `at`, which becomes the chat's current
-   * fork. Its composer starts as a copy of this one's (DESIGN §6.2).
+   * fork, named `name` ("From #14"). Its composer starts as a copy of this one's (DESIGN §6.2).
    */
-  async branchFrom(at: SlotId, notes?: ForkNoteSelection, fromForkId = this.view.forkId) {
+  async branchFrom(at: SlotId, notes?: ForkNoteSelection, fromForkId = this.view.forkId, name?: string) {
     const result = await this.call((client) =>
       client("CreateFork", {
         chatId: this.chatId,
         fromForkId,
         atSlotId: at,
-        ...(notes ? { notes } : {})
+        ...(notes ? { notes } : {}),
+        ...(name === undefined ? {} : { name })
       })
     )
     if (result.ok) {
       this.branchStart = result.value.fork.id
       this.update({ chat: result.value.chat })
-      this.showFork(null, null)
+      // Opened at the message it was made at, which the URL keeps (ForkNotesDialog.tsx).
+      this.showFork(null, at)
     }
     return result
   }

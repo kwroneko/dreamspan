@@ -1,85 +1,103 @@
-// Where the path shown branches (DESIGN §3.2): the messages on it that have alternates, so
-// the header can say which branch this is from anywhere in the chat, not only when the
-// message where it branched is loaded. The path is read once per branch shown, from its
-// leaf up, a page at a time; what's loaded since (a reply, a new branch) is merged in.
+// A chat's branches as the header lists them (DESIGN §3.2; the forks of
+// spec/FORK-INDEPENDENCE-DELTA.md, which the UI calls branches): every live fork, most
+// recently current first, with its name, its last message's first words and when it was last
+// chatted in. Read with `ListForks` when the chat opens and again whenever what it lists may
+// have changed: the fork shown, the chat's record (its current fork), a branch's name, or a
+// branch made, renamed or deleted here (`forksChanged`).
+import type { ChatId, Fork, PathEntry } from "@rp/shared/chat.ts"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { positionOf } from "./position.ts"
-import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { useEffect, useState } from "react"
-import { useAction } from "../../actions.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
-/** How far up the path the header looks for where it branched. */
-export const FORK_SCAN_LIMIT = 2000
-const PAGE = 500
+/** The name a branch made at `entry` starts with, which the user can change: "From #14". */
+export const automaticBranchName = (entry: Pick<PathEntry, "position" | "depth">) => `From #${positionOf(entry) + 1}`
 
-interface Scan {
-  readonly forkId: ChatView["forkId"]
-  readonly revision: number
-  readonly leaf: SlotId
-  readonly forks: ReadonlyArray<PathEntry>
-  /** It reached the first message. */
-  readonly complete: boolean
+/**
+ * A branch as people read it: its name, else "Original" for the chat's first fork, else
+ * "Branch k" by when it was made among `forks`.
+ */
+export const branchLabel = (fork: Fork, forks: ReadonlyArray<Fork>) => {
+  if (fork.name !== null && fork.name !== "") return fork.name
+  if (fork.parentForkId === null) return "Original"
+  const made = [...forks].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
+  return `Branch ${made.findIndex((f) => f.id === fork.id) + 1}`
 }
 
-export interface Forks {
-  /** The messages on the path with alternates, first to last. */
-  readonly forks: ReadonlyArray<PathEntry>
-  /** The whole path was looked at (else only its last FORK_SCAN_LIMIT messages). */
-  readonly complete: boolean
+/** When a branch was last chatted in, else made. */
+export const branchActivity = (fork: Fork) => Math.max(fork.createdAt, fork.lastChattedAt ?? 0)
+
+// Writes made here bump a chat's count, so every list of its branches reads again at once. A
+// branch made here is listed from the write's answer until a read made after it has it.
+const bumps = new Map<ChatId, number>()
+const made = new Map<ChatId, Array<{ readonly fork: Fork; readonly bump: number }>>()
+const listeners = new Set<() => void>()
+const subscribe = (listener: () => void) => {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+export const forksChanged = (chatId: ChatId, created?: Fork) => {
+  const bump = (bumps.get(chatId) ?? 0) + 1
+  bumps.set(chatId, bump)
+  if (created) made.set(chatId, [...(made.get(chatId) ?? []), { fork: created, bump }])
+  for (const listener of listeners) listener()
 }
 
-/** A named branch stays manageable after its last sibling is deleted. */
-const manageable = (entry: PathEntry) => entry.branchCount > 1 || entry.branchName !== undefined
+export interface ChatForks {
+  /** Null until the first read answers. */
+  readonly forks: ReadonlyArray<Fork> | null
+  /** The fork shown: the URL's, else the chat's current one. */
+  readonly shown: Fork | undefined
+  readonly reload: () => void
+}
 
-export function useForks(session: ChatSession, view: ChatView): Forks {
-  const action = useAction()
-  const [scan, setScan] = useState<Scan | null>(null)
-  const leaf = view.leafSlotId
-  // Edits, deletions and insertions can change off-window branch points without moving the tip.
-  const current =
-    scan !== null &&
-    scan.forkId === view.forkId &&
-    scan.revision === view.pathRevision &&
-    (scan.leaf === leaf || view.entries.some((e) => e.slotId === scan.leaf))
+export function useChatForks(session: ChatSession, view: ChatView): ChatForks {
+  const bump = useSyncExternalStore(subscribe, () => bumps.get(session.id) ?? 0)
+  const [read, setRead] = useState<{ key: string; bump: number; forks: ReadonlyArray<Fork> } | null>(null)
+  const [again, setAgain] = useState(0)
+  const chat = view.chat
+  const ready = chat !== null
+  // What moves when the list may have changed; a reply only moves the shown fork's preview.
+  const key = `${chat?.id}/${chat?.currentForkId}/${chat?.rowVersion}/${view.forkId}/${bump}/${again}`
   useEffect(() => {
-    if (leaf === null || current) return
+    if (!ready) return
     let live = true
-    void (async () => {
-      const found: Array<PathEntry> = []
-      let range: { _tag: "Bottom" } | { _tag: "Older"; from: SlotId } = { _tag: "Bottom" }
-      for (let read = 0; read < FORK_SCAN_LIMIT; read += PAGE) {
-        const result = await action.run((client) =>
-          client("ReadPath", { chatId: session.id, forkId: view.forkId, leafSlotId: leaf, range, limit: PAGE })
-        )
-        if (!live || !result.ok) return
-        found.unshift(...result.value.entries.filter(manageable))
-        const older = result.value.older
-        if (older === null)
-          return setScan({ leaf, forkId: view.forkId, revision: view.pathRevision, forks: found, complete: true })
-        range = { _tag: "Older", from: older }
-      }
-      setScan({ leaf, forkId: view.forkId, revision: view.pathRevision, forks: found, complete: false })
-    })()
+    void session
+      .call((client) => client("ListForks", { chatId: session.id }))
+      .then((result) => {
+        if (live && result.ok) setRead({ key, bump, forks: result.value })
+      })
     return () => {
       live = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `action` is a new object each render
-  }, [leaf, current, session, view.forkId, view.pathRevision])
-  if (scan === null || !current) {
-    return { forks: view.entries.filter(manageable), complete: false }
-  }
-  // What's loaded is newer than the scan: it replaces the scan's entry for its slot. (An
-  // inserted message has the depth of the message after it, so depths don't key them.)
-  const bySlot = new Map(scan.forks.map((e) => [e.slotId, e]))
-  for (const entry of view.entries) bySlot.set(entry.slotId, entry)
-  const forks = [...bySlot.values()]
-    .map((entry) => {
-      const live = view.branchNames.get(entry.slotId)
-      return live !== undefined && live.rowVersion >= entry.rowVersion
-        ? ({ ...entry, branchName: live.name, rowVersion: live.rowVersion } as PathEntry)
-        : entry
-    })
-    .filter(manageable)
-    .sort((a, b) => positionOf(a) - positionOf(b))
-  return { forks, complete: scan.complete }
+    // `view.branchNames` changes as a branch is named in another tab, `key` the rest.
+  }, [session, key, bump, ready, view.branchNames])
+  const pending = (made.get(session.id) ?? []).filter(
+    (m) => read !== null && m.bump > read.bump && !read.forks.some((f) => f.id === m.fork.id)
+  )
+  const forks =
+    read === null
+      ? null
+      : pending.length === 0
+        ? read.forks
+        : [
+            ...pending.map((m) => m.fork).reverse(),
+            ...read.forks.map((f) => (f.current && pending.some((m) => m.fork.current) ? { ...f, current: false } : f))
+          ]
+  const shownId = view.forkId ?? chat?.currentForkId ?? null
+  return { forks, shown: forks?.find((f) => f.id === shownId), reload: () => setAgain((n) => n + 1) }
 }
+
+// The ⋯ menu's "Branches…": a request the open chat's branch control answers.
+let requested: { readonly chatId: ChatId } | null = null
+const requestListeners = new Set<() => void>()
+const subscribeRequests = (listener: () => void) => {
+  requestListeners.add(listener)
+  return () => requestListeners.delete(listener)
+}
+/** Opens the list of the chat's branches. */
+export const requestBranches = (chatId: ChatId) => {
+  requested = { chatId }
+  for (const listener of requestListeners) listener()
+}
+/** The latest request, a new object each time. */
+export const useBranchesRequest = () => useSyncExternalStore(subscribeRequests, () => requested)

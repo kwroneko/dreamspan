@@ -119,9 +119,9 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expect(notes).toBeVisible()
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
-  // The menu stays for the reply commands (ac8a5a1), without the history ones.
+  // The menu stays for the chat's commands, without the history ones; keys are listed apart.
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()
-  await expect(page.getByRole("menuitem", { name: "Edit your last message (Ctrl+ArrowUp)" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: /^(Search and replace|History edits)$/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await page.keyboard.press("Control+h")

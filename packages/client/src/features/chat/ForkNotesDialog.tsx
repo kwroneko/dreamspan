@@ -1,6 +1,6 @@
 import { canonicalJson } from "@rp/shared/editing.ts"
 import type { ForkNote, ForkNoteSelection } from "@rp/shared/chatApi.ts"
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -9,6 +9,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { automaticBranchName, forksChanged } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 
 const options = [
@@ -39,6 +40,7 @@ function NoteDiff({ note }: { note: ForkNote }) {
 export function ForkNotesDialog({ session, entry, report, closeDialog }: MessageActionProps) {
   const action = useAction()
   const navigate = useNavigate()
+  const search = useSearch({ strict: false }) as { panel?: string }
   const [source] = useState(() => session.snapshot().forkId)
   const [notes, setNotes] = useState<ReadonlyArray<ForkNote> | null>(null)
   const [choices, setChoices] = useState<Record<string, Choice>>({})
@@ -59,7 +61,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
       comparison: canonicalJson(reviewed),
       choices: reviewed.map((note) => ({ note: note.note, choice: choices[note.note] ?? "then" }))
     }
-    const made = await session.branchFrom(entry.slotId, selection, source)
+    const made = await session.branchFrom(entry.slotId, selection, source, automaticBranchName(entry))
     report(made)
     setPending(false)
     if (!made.ok) {
@@ -67,8 +69,18 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
       return
     }
     closeDialog()
-    if (source !== null) await navigate({ to: ".", search: { fork: source }, replace: true })
-    void navigate({ to: ".", search: {} })
+    // Back returns to the fork it came from, which is no longer the current one: the entry
+    // left behind names it. (Rewritten in place: a navigation there would open it first.)
+    // `source` is the fork the server resolved, so this holds when the URL named none too.
+    if (source !== null) {
+      const back = new URL(window.location.href)
+      back.searchParams.set("fork", source)
+      window.history.replaceState(window.history.state, "", back)
+    }
+    // The new one, now current, opens at the message it was made at, with the panel as it was.
+    const panel = (search.panel === undefined ? {} : { panel: search.panel }) as { panel?: string }
+    forksChanged(session.id, made.value.fork)
+    void navigate({ to: ".", search: { ...panel, slot: entry.slotId } })
   }
   useEffect(() => {
     let live = true

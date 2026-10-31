@@ -65,7 +65,8 @@ export function PanelToggles({
   open,
   wide,
   view,
-  onToggle
+  onToggle,
+  compact = false
 }: {
   userId: string
   open: PanelTab | null
@@ -73,10 +74,34 @@ export function PanelToggles({
   view: ChatView
   /** Opens the panel at a tab, or closes it when that tab is the one open. */
   onToggle: (tab: PanelTab) => void
+  /** One icon that opens the panel at its last tab and hides it (the chat header's). */
+  compact?: boolean
 }) {
   const available = usePanelTabs(view, open)
   const tabs = available.filter((tab) => tab.descriptor.header !== false)
   if (available.length === 0) return null
+  const toggle = () => {
+    const remembered = read(tabKey(userId))
+    onToggle(
+      open ??
+        available.find((tab) => tab.value === remembered)?.value ??
+        tabs.find((tab) => tab.descriptor.default)?.value ??
+        (tabs[0] ?? available[0])!.value
+    )
+  }
+  if (compact)
+    return (
+      <IconButton
+        label={open === null ? "Chat panel" : "Hide panel"}
+        hint={
+          open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
+        }
+        icon="panel"
+        aria-expanded={open !== null}
+        className={open === null ? "" : "bg-surface-raised text-text"}
+        onClick={toggle}
+      />
+    )
   if (!wide || open !== null)
     return (
       <Button
@@ -86,15 +111,7 @@ export function PanelToggles({
           open === null ? "Open the chat panel: cast, settings, lorebooks, notes and summaries" : "Hide the chat panel"
         }
         className="h-8 px-2.5"
-        onClick={() => {
-          const remembered = read(tabKey(userId))
-          onToggle(
-            open ??
-              available.find((tab) => tab.value === remembered)?.value ??
-              tabs.find((tab) => tab.descriptor.default)?.value ??
-              (tabs[0] ?? available[0])!.value
-          )
-        }}
+        onClick={toggle}
       >
         {open === null ? "Chat panel" : "Hide panel"}
       </Button>

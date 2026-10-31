@@ -155,13 +155,17 @@ function PhoneBar() {
     }
   })
   const { selection } = useShellNavigation()
+  // On a phone, an open chat's header takes this bar's place, with ← to the chats (ChatHeader.tsx).
+  const inChat = useLocation({ select: (location) => /^\/chats\/[^/]+$/.test(location.pathname) })
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
   const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden">
+      <div
+        className={`flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden ${inChat ? "max-sm:hidden" : ""}`}
+      >
         <button
           type="button"
           aria-label="Chats and menu"

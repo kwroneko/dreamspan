@@ -128,38 +128,6 @@ export function MenuGroup({ label, children }: { label: ReactNode; children: Rea
   )
 }
 
-/** A choice of one among `children` (`MenuRadioItem`s). */
-export function MenuRadioGroup<Value>({
-  value,
-  onValueChange,
-  children
-}: {
-  value: Value
-  onValueChange: (value: Value) => void
-  children: ReactNode
-}) {
-  return (
-    <BaseMenu.RadioGroup value={value} onValueChange={(next) => onValueChange(next as Value)}>
-      {children}
-    </BaseMenu.RadioGroup>
-  )
-}
-
-export function MenuRadioItem({ value, children }: { value: unknown; children: ReactNode }) {
-  return (
-    <BaseMenu.RadioItem
-      value={value}
-      closeOnClick
-      className="grid min-h-9 cursor-default grid-cols-[1rem_1fr] items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-highlighted:bg-surface-raised"
-    >
-      <BaseMenu.RadioItemIndicator className="col-start-1 text-accent">
-        <Icon name="check" />
-      </BaseMenu.RadioItemIndicator>
-      <span className="col-start-2 min-w-0">{children}</span>
-    </BaseMenu.RadioItem>
-  )
-}
-
 export type ActionMenuItem =
   | { readonly label: string; readonly onSelect: () => void; readonly tone?: "danger" }
   | { readonly label: string; readonly checked: boolean; readonly onCheckedChange: (checked: boolean) => void }

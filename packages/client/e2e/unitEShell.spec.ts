@@ -114,8 +114,8 @@ for (const width of [1440, 390]) {
     await page
       .getByRole("main")
       .getByLabel("Groups", { exact: true })
-      .getByRole("button", { name: `Open chat ${group.name}`, exact: true })
-      .filter({ hasText: "Current fork" })
+      .getByRole("button", { name: `Open chat ${group.chatName}`, exact: true })
+      .first()
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
     // Current-fork URLs are canonicalized after the path loads. Wait before
@@ -128,7 +128,7 @@ for (const width of [1440, 390]) {
     await openLeft()
     await expect(crumbs).toContainText(group.name)
     await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
-    await expect(page.getByRole("region", { name: "Current fork", exact: true })).toContainText(group.name)
+    await expect(page.getByRole("region", { name: "Latest branch", exact: true })).toContainText(group.name)
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
@@ -172,7 +172,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
     await page.goto(`${server().url}/chats/${group.chat.id}?fork=${await forkEndingAt(appended.entry.slotId)}`)
     await page.getByRole("button", { name: /not the latest/ }).click()
-    await page.getByRole("menuitem", { name: "Back to the latest branch", exact: true }).click()
+    await page.getByRole("button", { name: "Back to the latest branch", exact: true }).click()
     // The link names no fork: the chat's current one, which is where the newest branch went.
     await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
     await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)

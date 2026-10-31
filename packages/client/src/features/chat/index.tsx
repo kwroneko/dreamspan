@@ -1,3 +1,4 @@
+import { registerChatHeader } from "./headerContributions.tsx"
 import { registerSummaryDetails } from "./SummaryDetails.tsx"
 import { registerEditorHistory } from "./editorHistory.tsx"
 import { registerDisplay } from "./registerDisplay.tsx"
@@ -71,6 +72,7 @@ export const register = () => {
   registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()
+  registerChatHeader()
   registerReplyCommands()
   routes.register({
     id: "chats",

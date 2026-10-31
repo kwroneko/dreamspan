@@ -207,7 +207,7 @@ describe("chat contributions", () => {
     const onHistory = vi.fn()
     const alternative = vi.fn()
     const context = { view, onHistory } as unknown as ChatCommandContext
-    original.run(context)
+    original.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(1)
     await Effect.runPromise(
       Effect.scoped(
@@ -234,7 +234,7 @@ describe("chat contributions", () => {
     )
     expect(chatCommands.get(original.id)).toBe(original)
     expect(availableCommands(context).map((entry) => entry.label)).toEqual(["Search and replace", "History edits"])
-    chatCommands.get(original.id)!.run(context)
+    chatCommands.get(original.id)!.run!(context)
     expect(onHistory).toHaveBeenCalledTimes(2)
   })
 })

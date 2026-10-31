@@ -30,23 +30,16 @@ import {
   useSyncExternalStore
 } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
+import { SkeletonMessages } from "./SkeletonMessages.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useSession } from "../../session.ts"
 import { CacheIndicator } from "./CacheIndicator.tsx"
 import { CastContext, castView } from "./cast.ts"
-import {
-  ChatSidePanel,
-  isPanelTab,
-  PanelToggles,
-  type PanelTab,
-  rememberedPanel,
-  rememberPanel,
-  useWide
-} from "./ChatPanels.tsx"
-import { ChatHeader, chatDisplayName } from "./ChatHeader.tsx"
+import { ChatSidePanel, isPanelTab, type PanelTab, rememberedPanel, rememberPanel, useWide } from "./ChatPanels.tsx"
+import { ChatHeader } from "./ChatHeader.tsx"
+import { chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
 import { LANE_PX, useCoverage } from "./CoverageRail.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -571,18 +564,9 @@ function ChatSurface({
             <ChatHeader
               session={session}
               view={view}
-              onBranch={switchBranch}
               onJump={jump}
               onHistory={() => show("history")}
-              actions={
-                <PanelToggles
-                  view={view}
-                  userId={userId}
-                  open={panel}
-                  wide={wide}
-                  onToggle={(tab) => show(panel === tab ? null : tab)}
-                />
-              }
+              panel={{ userId, open: panel, wide, onToggle: (tab) => show(panel === tab ? null : tab) }}
             />
             {/* A chat that has outgrown its context with summaries off (spec/LCM.md §2.13): easy to turn on. */}
             {view.lcm !== null &&
@@ -617,9 +601,7 @@ function ChatSurface({
             )}
             {view.loading ? (
               // Takes the messages' place, so the composer is where it will stay.
-              <div className="mx-auto min-h-0 w-full max-w-3xl flex-1 px-4">
-                <Loading label="Loading the chat…" onRetry={() => void session.open(slot ?? null)} />
-              </div>
+              <SkeletonMessages onRetry={() => void session.open(slot ?? null)} />
             ) : (
               <MessageList
                 // A replacement layer has different row coordinates. Give it fresh

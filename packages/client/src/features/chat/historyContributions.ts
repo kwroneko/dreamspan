@@ -5,9 +5,11 @@ export const registerHistoryCommands = () => [
   chatCommands.register({
     id: "history.search-replace",
     shortcut: { key: "h", mod: true },
+    // In the menu too: it's also an action, not only a key.
+    menu: true,
     label: "Search and replace",
     order: 10,
-    icon: "edit",
+    icon: "search",
     panel: "history",
     run: ({ onHistory }) => onHistory()
   }),

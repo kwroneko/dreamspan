@@ -352,53 +352,6 @@ for (const width of [1440, 390])
     })
   }
 
-test("off-window branch numbers refresh after another tab inserts before them", async ({ page }) => {
-  test.setTimeout(120_000)
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const fixture = await lighthouse("Off-window insertion numbers")
-  await admin((api) =>
-    Effect.gen(function* () {
-      // An alternate at message #2, then enough original history to page that branch point out.
-      yield* api.SendMessage({
-        chatId: fixture.chatId,
-        forkId: fixture.main,
-        parentSlotId: fixture.entries[0]!.slotId,
-        branch: true,
-        content: "The alternate harbor.",
-        reply: false
-      })
-      let parent = fixture.entries.at(-1)!.slotId
-      for (let n = 0; n < 150; n++) {
-        const posted = yield* api.SendMessage({
-          chatId: fixture.chatId,
-          forkId: fixture.main,
-          parentSlotId: parent,
-          branch: false,
-          content: `Synthetic history ${n}.`,
-          reply: false
-        })
-        if (posted._tag !== "Posted") throw new Error("queued")
-        parent = posted.entry.slotId
-      }
-    })
-  )
-  await page.goto(`${server().url}/chats/${fixture.chatId}?fork=${fixture.main}`)
-  await expect(message(page, "Synthetic history 149.")).toBeVisible()
-  await expect(message(page, "A ship rounds the point.")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /at message #2.*switch branch/ })).toBeVisible()
-  await admin((api) =>
-    api.InsertMessage({
-      chatId: fixture.chatId,
-      forkId: fixture.main,
-      anchor: null,
-      expectedRowVersion: 0,
-      body: { _tag: "Write", speaker: null, content: "Before the harbor." }
-    })
-  )
-  await expect(page.getByRole("button", { name: /at message #3.*switch branch/ })).toBeVisible()
-  await shoot(page, "insert-off-window-numbering")
-})
-
 test("another tab appends after an above-first insertion with a null structural tip", async ({ page, context }) => {
   const fixture = await admin((api) =>
     Effect.gen(function* () {

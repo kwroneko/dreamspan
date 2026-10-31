@@ -65,8 +65,8 @@ const PresetWorkspace = deferred<Parameters<typeof import("../editor/PresetWorks
 const PresetOverlayHost = deferred<Parameters<typeof import("../editor/PresetWorkspace.tsx").PresetOverlayHost>[0]>(
   () => import("../editor/PresetWorkspace.tsx").then((m) => ({ default: m.PresetOverlayHost }))
 )
-const BranchMenu = deferred<Parameters<typeof import("./ChatHeader.tsx").BranchMenu>[0]>(() =>
-  import("./ChatHeader.tsx").then((m) => ({ default: m.BranchMenu }))
+const BranchControl = deferred<Parameters<typeof import("./BranchControl.tsx").BranchControl>[0]>(() =>
+  import("./BranchControl.tsx").then((m) => ({ default: m.BranchControl }))
 )
 const Composer = lazy(() => import("./Composer.tsx").then((m) => ({ default: m.Composer })))
 const Summary = lazy(() => import("./TimelineSummary.tsx").then((m) => ({ default: m.TimelineSummary })))
@@ -75,7 +75,7 @@ const SummariesSetting = lazy(() => import("./ThisChatTab.tsx").then((m) => ({ d
 
 export const registerPresentation = () => [
   ...registerTimelineTransforms(),
-  chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchMenu }),
+  chatBranchControls.register({ id: "chat.branches", order: 10, component: BranchControl }),
   messagePreviews.register({ id: "history.message-preview", order: 10, component: HistoryMessagePreview }),
   summaryPreviews.register({ id: "history.summary-preview", order: 10, component: HistorySummaryPreview }),
   accountSettingSections.register({ id: "settings.summary-defaults", order: 10, component: SummaryDefaults }),

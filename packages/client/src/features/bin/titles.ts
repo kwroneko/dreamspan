@@ -17,10 +17,10 @@ export const binTitle = (item: BinItem) => {
         const name =
           typeof item.origin.forkName === "string" && item.origin.forkName !== "" ? item.origin.forkName : null
         const only = item.origin.messages
-        if (name !== null) return `Fork “${name}” in “${chat}”`
+        if (name !== null) return `Branch “${name}” in “${chat}”`
         return typeof only === "number" && only > 0
-          ? `Fork of ${only} message${only === 1 ? "" : "s"} in “${chat}”`
-          : `Fork in “${chat}”`
+          ? `Branch of ${only} message${only === 1 ? "" : "s"} in “${chat}”`
+          : `Branch in “${chat}”`
       }
       const count = item.origin.messages
       return typeof count === "number"

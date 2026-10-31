@@ -51,13 +51,14 @@ test("the header names the chat as people do and switches branches from anywhere
   await expect(page).toHaveTitle(/Harbor/)
   // The newest branch is shown; the header says so and offers the other.
   const branches = page.getByRole("button", { name: /switch branch/ })
-  await expect(branches).toContainText("Branch 2 of 2")
+  await expect(branches).toHaveAccessibleName(/Branch: Branch 2, 1 of 2/)
   await branches.click()
-  await expect(page.getByRole("group", { name: "Branches at message #2 (You)" })).toBeVisible()
-  await page.getByRole("menuitemradio", { name: "Branch 1" }).click()
+  const list = page.getByRole("list", { name: "Branches" })
+  await expect(list.getByRole("listitem")).toHaveCount(2)
+  await list.getByRole("button", { name: /^Original/ }).click()
   await expect(message(page, "The fog rolls in.")).toBeVisible()
   await expect(message(page, "We wait for the tide.")).toHaveCount(0)
-  await expect(branches).toContainText("Branch 1 of 2")
+  await expect(branches).toHaveAccessibleName(/Branch: Original, 2 of 2, not the latest/)
 })
 
 test("a message shows its number and versions; one is picked from the list, and one's own written", async ({
