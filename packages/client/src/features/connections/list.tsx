@@ -224,9 +224,9 @@ function NewConnectionForm({
         <div className="flex flex-col gap-2">
           {keyMode === "typed" ? (
             <Field
-              label={kind?.keyOptional ? "API key (optional)" : "API key"}
+              label="API key"
               description={
-                kind?.keyOptional ? `${sentTo} Leave it empty for a local server that takes no key.` : sentTo
+                kind?.keyOptional ? `Optional: leave it empty for a local server that takes none. ${sentTo}` : sentTo
               }
               error={shown(problems.apiKey)}
             >
