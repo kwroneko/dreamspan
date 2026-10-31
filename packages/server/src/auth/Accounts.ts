@@ -14,7 +14,7 @@ import type { RpcClientError } from "effect/rpc"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import type { StorageError } from "../db/ops.ts"
-import { inAddresses, LOOPBACK, parseAddresses } from "../net/addresses.ts"
+import { isLoopback, TrustedAddresses } from "../net/exposure.ts"
 import {
   dummyHash,
   hashPassword,
@@ -32,7 +32,6 @@ export const PEER_HEADER = "x-rp-peer"
 const LOCAL_HANDLE = "local"
 const HANDLE_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/
 const THROTTLE_WINDOW_MS = 15 * 60 * 1000
-const loopback = parseAddresses(LOOPBACK).list
 
 /** Too many login attempts, or too many password checks running at once. */
 export class LoginThrottled extends Data.TaggedError("LoginThrottled")<{ readonly retryAfterMs: number }> {}
@@ -151,12 +150,9 @@ export class Accounts extends Context.Service<
       // Passwordless use is checked per call, not just when a connection opens: a socket
       // opened while everyone had to log in mustn't become the local admin if the last
       // password goes.
-      const passwordless = parseAddresses([
-        ...LOOPBACK,
-        ...config.allowedIps.map((ip) => ip.trim()).filter((ip) => ip !== "")
-      ]).list
+      const { allowedIps } = yield* TrustedAddresses
       const passwordlessPeer = (peer: string | undefined) =>
-        config.allowInsecureExposure || (peer !== undefined && inAddresses(passwordless, peer))
+        config.allowInsecureExposure || (peer !== undefined && (isLoopback(peer) || allowedIps.has(peer)))
 
       // Users are cached per process; sessions aren't, so a revoked one stops at once.
       // A lookup that started before a change doesn't write its stale answer back.
@@ -211,7 +207,7 @@ export class Accounts extends Context.Service<
           const peer = headers[PEER_HEADER]
           if (!configured) {
             if (passwordlessPeer(peer)) return { user: yield* userByHandle(LOCAL_HANDLE), via: "local" as const }
-          } else if (!config.loopbackRequiresLogin && peer !== undefined && inAddresses(loopback, peer)) {
+          } else if (!config.loopbackRequiresLogin && peer !== undefined && isLoopback(peer)) {
             const first = yield* firstAdmin
             if (first) return { user: first, via: "loopback" as const }
           }

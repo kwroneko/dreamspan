@@ -14,7 +14,7 @@ import { completionChunks, type Recorded, sse, startMockProvider } from "./suppo
 const script = (id: string, fields: Partial<RegexScript> = {}): RegexScript => ({
   id,
   name: id,
-  find_regex: "/<think>[\\s\\S]*?<\\/think>\\s*/g",
+  find_regex: "/<cot>[\\s\\S]*?<\\/cot>\\s*/g",
   replace_string: "",
   trim_strings: [],
   placement: [2],
@@ -56,7 +56,7 @@ const presetWith = (scripts: ReadonlyArray<RegexScript>) => ({ extensions: { reg
 it.live("a reply's chain of thought is stripped as it finishes; its raw text shows and restores", () =>
   run(
     Effect.gen(function* () {
-      const model = yield* mockModel(["<think>secret plan</think>Hello there", "Fine."])
+      const model = yield* mockModel(["<cot>secret plan</cot>Hello there", "Fine."])
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: model.mock.url + "/v1" },
@@ -69,11 +69,13 @@ it.live("a reply's chain of thought is stripped as it finishes; its raw text sho
         applied: [{ scope: "preset", id: "strip", name: "strip" }],
         failed: [],
         raw: true,
-        rawReasoning: false
+        rawReasoning: false,
+        rawSections: false
       })
       assert.deepStrictEqual(yield* api.RawVersionText({ versionId: reply.version.id }), {
-        content: "<think>secret plan</think>Hello there",
-        reasoning: null
+        content: "<cot>secret plan</cot>Hello there",
+        reasoning: null,
+        sections: null
       })
       // Later requests see the stored text, never the raw.
       const next = yield* posted(
@@ -104,7 +106,7 @@ it.live("a reply's chain of thought is stripped as it finishes; its raw text sho
         versionId: reply.version.id,
         expectedRowVersion: at.rowVersion
       })
-      assert.equal(restored.version.content, "<think>secret plan</think>Hello there")
+      assert.equal(restored.version.content, "<cot>secret plan</cot>Hello there")
       assert.isUndefined(restored.version.rewrite)
       assert.equal(restored.version.sourceVersionId, reply.version.id)
     })
@@ -114,18 +116,19 @@ it.live("a reply's chain of thought is stripped as it finishes; its raw text sho
 it.live("nothing is rewritten until the preset's scripts are allowed; global scripts need no approval", () =>
   run(
     Effect.gen(function* () {
-      const model = yield* mockModel(["<think>a</think>Hi"])
+      const model = yield* mockModel(["<cot>a</cot>Hi"])
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: model.mock.url + "/v1" },
         model: {},
         preset: presetWith([script("strip")])
       })
-      assert.equal(reply.version.content, "<think>a</think>Hi")
+      assert.equal(reply.version.content, "<cot>a</cot>Hi")
       assert.isUndefined(reply.version.rewrite)
       assert.deepStrictEqual(yield* api.RawVersionText({ versionId: reply.version.id }), {
         content: null,
-        reasoning: null
+        reasoning: null,
+        sections: null
       })
       // The account's own list runs without approval, on the next text written.
       const read = yield* api.GetGlobalRegex()
@@ -168,7 +171,8 @@ it.live("the user's message is rewritten as it's sent, an edit only by run-on-ed
       assert.equal(reply.sent.version.content, "The path flooded.")
       assert.deepStrictEqual(yield* api.RawVersionText({ versionId: reply.sent.version.id }), {
         content: "The road flooded.",
-        reasoning: null
+        reasoning: null,
+        sections: null
       })
       const amended = yield* api.AmendVersion({
         versionId: reply.sent.version.id,
@@ -180,7 +184,8 @@ it.live("the user's message is rewritten as it's sent, an edit only by run-on-ed
       assert.deepStrictEqual(amended.rewrite?.applied, [{ scope: "preset", id: "edit", name: "edit" }])
       assert.deepStrictEqual(yield* api.RawVersionText({ versionId: amended.id }), {
         content: "The road and the river.",
-        reasoning: null
+        reasoning: null,
+        sections: null
       })
     })
   )
@@ -189,7 +194,7 @@ it.live("the user's message is rewritten as it's sent, an edit only by run-on-ed
 it.live("a continuation is rewritten with the text it continues; a card's scripts run once allowed", () =>
   run(
     Effect.gen(function* () {
-      const model = yield* mockModel(["Start.", "<think>more</think> And more."])
+      const model = yield* mockModel(["Start.", "<cot>more</cot> And more."])
       const api = yield* client()
       const reply = yield* generateReply(api, {
         connection: { kind: "openai-chat", baseUrl: model.mock.url + "/v1" },
@@ -223,8 +228,9 @@ it.live("a continuation is rewritten with the text it continues; a card's script
       assert.equal(done.content, "Start.And more.")
       assert.deepStrictEqual(done.rewrite?.applied, [{ scope: "character", id: "card-strip", name: "card-strip" }])
       assert.deepStrictEqual(yield* api.RawVersionText({ versionId: done.id }), {
-        content: "Start.<think>more</think> And more.",
-        reasoning: null
+        content: "Start.<cot>more</cot> And more.",
+        reasoning: null,
+        sections: null
       })
     })
   )

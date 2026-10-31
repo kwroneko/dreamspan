@@ -29,7 +29,7 @@ const deliver = (subscriber: Subscriber, batch: Batch, instead?: ChatEvent) => {
 }
 
 /**
- * Merges consecutive deltas of a version into one, its text and its reasoning apart. Any
+ * Merges consecutive deltas of a version into one, its text, reasoning and sections apart. Any
  * other event is a barrier, so every event keeps its place relative to the version's text.
  */
 const coalesce = (events: ReadonlyArray<ChatEvent>): Array<ChatEvent> => {
@@ -37,7 +37,7 @@ const coalesce = (events: ReadonlyArray<ChatEvent>): Array<ChatEvent> => {
   // By kind and version: a version's text and reasoning streams merge apart.
   const lastDelta = new Map<string, number>()
   for (const event of events) {
-    if (event._tag !== "Delta" && event._tag !== "Reasoning") {
+    if (event._tag !== "Delta" && event._tag !== "Reasoning" && event._tag !== "Section") {
       lastDelta.clear()
       out.push(event)
       continue
@@ -105,7 +105,12 @@ export class ChatHub extends Context.Service<
         return ChatHub.of({
           publish: (chatId, event) => {
             if (!subscribers.has(chatId)) return
-            if (event._tag !== "Delta" && event._tag !== "Reasoning" && event._tag !== "Cache")
+            if (
+              event._tag !== "Delta" &&
+              event._tag !== "Reasoning" &&
+              event._tag !== "Section" &&
+              event._tag !== "Cache"
+            )
               for (const listener of listeners) listener(chatId)
             const events = pending.get(chatId)
             if (events) events.push(event)

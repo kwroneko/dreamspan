@@ -12,7 +12,7 @@ import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { messageMenu } from "./support/message.ts"
 
 const server = serverPerFile(withAdmin)
-const REPLY = "<think>secret plan</think>Hello there"
+const REPLY = "<cot>secret plan</cot>Hello there"
 let provider: FakeProvider
 
 test.beforeAll(async () => {
@@ -56,7 +56,7 @@ for (const width of [1440, 390])
             {
               id: "strip",
               scriptName: "Strip thinking",
-              findRegex: "/<think>[\\s\\S]*?<\\/think>\\s*/g",
+              findRegex: "/<cot>[\\s\\S]*?<\\/cot>\\s*/g",
               replaceString: "",
               placement: [2]
             }
@@ -134,7 +134,8 @@ for (const width of [1440, 390])
       const list = page.getByRole("list", { name: "Global regex scripts" })
       const item = list.getByRole("listitem").last()
       await item.getByRole("textbox", { name: "Name", exact: true }).fill(name)
-      await item.getByRole("textbox", { name: "Find (a regular expression)" }).fill("/secret/g")
+      // Words no other test shows: the account's global scripts stay for this file's later tests.
+      await item.getByRole("textbox", { name: "Find (a regular expression)" }).fill("/masked word/g")
       await item.getByRole("textbox", { name: "Replace with" }).fill("[hidden]")
       await item.getByRole("textbox", { name: /^Remove from each match/ }).fill("x\ny")
       await item.getByRole("checkbox", { name: "Off", exact: true }).click()
@@ -148,7 +149,7 @@ for (const width of [1440, 390])
       await expect(list.getByRole("button", { name: `Edit ${name}`, exact: true })).toBeVisible()
       const saved = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetGlobalRegex())
       expect(saved.scripts.find((script) => script.name === name)).toMatchObject({
-        find_regex: "/secret/g",
+        find_regex: "/masked word/g",
         replace_string: "[hidden]",
         trim_strings: ["x", "y"],
         disabled: false,

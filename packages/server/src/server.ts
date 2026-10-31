@@ -54,7 +54,8 @@ import {
   crossSiteProblem,
   exposurePolicy,
   parsePublicOrigins,
-  REFUSED_RESPONSE,
+  refusedResponse,
+  TrustedAddresses,
   UnsafeExposure
 } from "./net/exposure.ts"
 import * as Network from "./net/Network.ts"
@@ -352,9 +353,10 @@ const HttpServerLive = Layer.unwrap(
     const config = yield* AppConfig
     const accounts = yield* Accounts
     const inFlight = yield* InFlightRpcs
-    const policy = exposurePolicy(config, accounts.configured)
+    const policy = exposurePolicy(config, yield* TrustedAddresses, accounts.configured)
     if (typeof policy === "string") return yield* new UnsafeExposure({ message: policy })
-    yield* Effect.logInfo(`Exposure: ${policy.summary}`)
+    yield* Effect.logInfo(`Exposure: ${policy.summary()}`)
+    const run = Effect.runForkWith(yield* Effect.context<never>())
     const make = () => {
       const sockets = new Set<Socket>()
       const upgraded = new WeakSet<Duplex>()
@@ -367,7 +369,10 @@ const HttpServerLive = Layer.unwrap(
           }
           // Destroyed, not just ended: the HTTP parser is already attached, and on a
           // half-open socket it would still dispatch the peer's requests.
-          socket.write(REFUSED_RESPONSE)
+          // Logged, so a proxy that moved shows up in the logs instead of as silent 403s.
+          const warning = policy.refused(socket.remoteAddress)
+          if (warning !== undefined) run(Effect.logWarning(warning))
+          socket.write(refusedResponse(policy.refusal(socket.remoteAddress)))
           socket.destroy()
         })
         .on("upgrade", (_request, socket) => upgraded.add(socket))
@@ -448,6 +453,7 @@ export const serverWith = <E>(
     Layer.provide(ProvidersLive),
     Layer.provideMerge(HttpServerLive),
     Layer.provideMerge(Accounts.layer),
+    Layer.provideMerge(TrustedAddresses.layer),
     Layer.provideMerge(Layer.mergeAll(DatabaseLive, EventLoopMonitor.layer, formats)),
     Layer.provide(InFlightRpcs.layer)
   )

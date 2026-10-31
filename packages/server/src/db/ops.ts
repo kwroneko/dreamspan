@@ -1,3 +1,4 @@
+import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import {
@@ -116,7 +117,7 @@ import {
 } from "@rp/shared/providers.ts"
 import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
-import { GlobalRegex, GlobalScripts, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
+import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
 import {
   Cost,
@@ -1453,6 +1454,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed so far; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections so far; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1634,6 +1637,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError),
       /** What regex scripts did to `content` and `reasoning` as it finished, and the text before. */
@@ -2836,11 +2841,33 @@ export class ReadOps extends RpcGroup.make(
   /** The user's global lorebooks: live library lorebooks of theirs, in the order marked. */
   Rpc.make("GetGlobalLorebooks", { payload: { userId: UserId }, success: Schema.Array(RefId), error: StorageError }),
   Rpc.make("GetGlobalRegex", { payload: { userId: UserId }, success: GlobalRegex, error: StorageError }),
-  /** A version's text and reasoning from before regex scripts rewrote them (null: unchanged). */
+  /** A version's text, reasoning and reply sections from before regex scripts rewrote them (null: unchanged). */
   Rpc.make("RawVersionText", {
     payload: { userId: UserId, versionId: VersionId },
-    success: Schema.Struct({ content: Schema.NullOr(Schema.String), reasoning: Schema.NullOr(Schema.String) }),
+    success: RawText,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A generating reply's text so far through the scripts its finish runs (`RewriteText` at
+   * the version, not an edit), for what's shown while it streams (ARCHITECTURE §12, "Live
+   * rewrites"). Each worker prepares the scripts once per reply; every call has the time and
+   * output of one rewrite.
+   */
+  Rpc.make("RewriteLive", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotId: SlotId,
+      versionId: VersionId,
+      items: Schema.Array(Schema.Struct({ text: Schema.String, kind: Schema.Literals(["message", "reasoning"]) }))
+    },
+    /**
+     * `active`: whether any script or rewrite can change the text; without one, `texts` is
+     * empty. `ms`: how long the rewrites took, in the worker.
+     */
+    success: Schema.Struct({ active: Schema.Boolean, texts: Schema.Array(TextRewrite), ms: Schema.Number }),
+    error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /**
    * Regex scripts rewriting text before it's written (ARCHITECTURE §12, "Rewrites"): the

@@ -143,8 +143,8 @@ for (const width of [1440, 390])
       await page.getByRole("switch", { name: /^Expand macros in model output/ }).click()
       await expect(reply.locator(".markdown")).toHaveText("Hi User")
       await expect(page.locator(`article[data-slot="${fixture.human.slotId}"] .markdown`)).toHaveText("Human {{user}}")
-      await page.getByRole("switch", { name: /^Use display regex scripts/ }).click()
-      // Import cannot approve itself, and the extra viewer switch does not grant approval.
+      // On by default; an import cannot approve itself, and the viewer switch does not grant approval.
+      await expect(page.getByRole("switch", { name: /^Use display regex scripts/ })).toBeChecked()
       await expect(reply.locator(".markdown")).toHaveText("Hi User")
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         Effect.gen(function* () {

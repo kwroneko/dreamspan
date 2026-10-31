@@ -46,6 +46,8 @@ export const generateReply = (
     readonly modelKey?: string
     readonly model: ModelOverrides
     readonly preset?: Record<string, unknown>
+    /** Fields of our preset document, over the imported ST preset's (ones ST has no field for). */
+    readonly presetFields?: Record<string, unknown>
     readonly content?: string
     readonly images?: import("@rp/shared/chat.ts").MessageImages
     readonly example?: string
@@ -105,6 +107,7 @@ export const generateReply = (
     const tobin = yield* entity("card", "Tobin", cardDoc("Tobin", "{{user}} draws maps."))
     const preset = yield* entity("preset", "Preset", {
       ...presetDoc(options.preset ?? {}),
+      ...options.presetFields,
       ...(options.approveRegex ? { regex_approved: true } : {})
     })
     yield* api.SetGenerationDefaults({

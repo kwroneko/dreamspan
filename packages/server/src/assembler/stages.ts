@@ -1,4 +1,5 @@
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
+import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
@@ -36,6 +37,7 @@ import {
   makeScriptRunner,
   PLACEMENT,
   REGEX_MS,
+  REGEX_OUTPUT,
   type PromptScript,
   type ScriptRunner
 } from "./regex.ts"
@@ -533,6 +535,51 @@ const historyStage: AssemblerStage = {
     })
 }
 
+/**
+ * Tagged sections at the start of replies (spec/REPLY-SECTIONS.md) go back to the model only
+ * as the preset says: the last `send_back` replies of the card being written that have them,
+ * in their original tags before the text, as ST's `add_to_prompts` / `max_additions` (only
+ * the speaker's own, as ST does in a group). They're volatile: they leave as the chat grows.
+ * Never in a summary request.
+ */
+const replySectionsStage = sync("reply-sections", (assembly) => {
+  const { send_back: sendBack } = replySectionsOf(need(assembly, "preset").doc)
+  // A summary sees the replies' text only.
+  if (sendBack === 0 || assembly.request.summaryJob) return
+  const speaker = need(assembly, "cast").speaker?.entity ?? null
+  const scripted = new Map(need(assembly, "scripted"))
+  let left = sendBack
+  for (const entry of [...need(assembly, "history")].reverse()) {
+    if (left === 0) break
+    // Another card's (both known and different) are skipped without counting.
+    if (!entry.inContext || !entry.replySections?.sections.length) continue
+    if (speaker !== null && entry.speaker !== null && entry.speaker !== speaker) continue
+    const read = scripted.get(entry.versionId)
+    if (!read) continue
+    // Each section's text through the prompt-only reasoning scripts at the message's depth,
+    // as ST runs them on the reasoning it adds to a prompt, then back in its tags.
+    const sections = entry.replySections
+    const texts = applyScripts(
+      assembly,
+      need(assembly, "scripts"),
+      sections.sections.map((section) => ({ text: section.text, placement: PLACEMENT.reasoning, depth: read.depth }))
+    )
+    const prefix = sectionsPrefix({
+      ...sections,
+      sections: sections.sections.map((section, i) => ({ ...section, text: texts[i]!.text }))
+    })
+    const applied = [...(read.applied ?? []), ...texts.flatMap((text) => text.applied ?? [])]
+    scripted.set(entry.versionId, {
+      ...read,
+      text: prefix + read.text,
+      volatile: true,
+      ...(applied.length ? { applied } : {})
+    })
+    left--
+  }
+  assembly.scripted = scripted
+})
+
 /** Lore scanning sees the prompt-side templates too; composition reuses these results. */
 const loreScanStage = sync("lore-scan", (assembly) => {
   if (!need(assembly, "lorebooks").length) return
@@ -994,8 +1041,6 @@ const chatLine = (
   }
 }
 
-/** Characters of text the scripts may make for one context, copied or replaced. */
-const REGEX_OUTPUT = 8_000_000
 /** Patterns longer than this, after the case rewrite, are left out. */
 const MAX_PATTERN = 2_000
 /** Scripts after this many are left out. */
@@ -2508,6 +2553,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   macrosStage,
   scriptsStage,
   historyStage,
+  replySectionsStage,
   resolveStage,
   imageTokensStage,
   rolesStage,

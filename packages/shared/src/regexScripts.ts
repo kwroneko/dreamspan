@@ -3,6 +3,7 @@
 // character's ("scoped") scripts (extensions/regex/engine.js, SCRIPT_TYPES).
 import { Schema } from "effect"
 import { RegexScript } from "./docs/regexScript.ts"
+import { ReplySections } from "./replySections.ts"
 
 export const ScriptScope = Schema.Literals(["global", "preset", "character"])
 export type ScriptScope = typeof ScriptScope.Type
@@ -24,7 +25,9 @@ export const VersionRewrite = Schema.Struct({
   applied: Schema.Array(ScriptRef),
   failed: Schema.Array(ScriptFailure),
   raw: Schema.Boolean,
-  rawReasoning: Schema.Boolean
+  rawReasoning: Schema.Boolean,
+  /** Whether the reply sections from before the reasoning scripts are kept. */
+  rawSections: Schema.optionalKey(Schema.Boolean)
 })
 export type VersionRewrite = typeof VersionRewrite.Type
 
@@ -41,8 +44,17 @@ export const StoredRewrite = Schema.Struct({
   applied: Schema.Array(ScriptRef),
   failed: Schema.Array(ScriptFailure),
   raw: Schema.NullOr(Schema.String),
-  rawReasoning: Schema.NullOr(Schema.String)
+  rawReasoning: Schema.NullOr(Schema.String),
+  rawSections: Schema.optionalKey(Schema.NullOr(ReplySections))
 })
+
+/** A version's texts from before the scripts changed them; null where they didn't. */
+export const RawText = Schema.Struct({
+  content: Schema.NullOr(Schema.String),
+  reasoning: Schema.NullOr(Schema.String),
+  sections: Schema.NullOr(ReplySections)
+})
+export type RawText = typeof RawText.Type
 export type StoredRewrite = typeof StoredRewrite.Type
 
 /** At most this many global scripts. */

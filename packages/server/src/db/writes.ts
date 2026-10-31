@@ -56,6 +56,7 @@ const copiedFresh = new Set([
   // An amended copy's text is the user's: what scripts did to the copied text doesn't apply.
   "raw_content",
   "raw_reasoning",
+  "raw_sections",
   "rewrite_json"
 ])
 
@@ -464,7 +465,8 @@ export const makeWriteHandlers = (bin: Bin) =>
             if (content !== row.content) {
               const rewritten = rewriteColumns(rewrite)
               yield* sql`UPDATE versions SET content = ${content}, raw_content = ${rewritten.raw_content},
-                raw_reasoning = ${rewritten.raw_reasoning}, rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
+                raw_reasoning = ${rewritten.raw_reasoning}, raw_sections = ${rewritten.raw_sections},
+                rewrite_json = ${rewritten.rewrite_json}, updated_at = ${at}
                 WHERE id = ${versionId}`
             }
             if (before !== null) {
@@ -499,7 +501,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           )
           const rewritten = rewriteColumns(rewrite)
           yield* sql`UPDATE versions SET raw_content = ${rewritten.raw_content}, raw_reasoning = ${rewritten.raw_reasoning},
-            rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
+            raw_sections = ${rewritten.raw_sections}, rewrite_json = ${rewritten.rewrite_json} WHERE id = ${copy}`
           yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
             SELECT ${copy}, content, replaced_at, images_json FROM version_history WHERE version_id = ${versionId} ORDER BY id`
           yield* sql`INSERT INTO version_history (version_id, content, replaced_at, images_json)
@@ -518,7 +520,7 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toVersion((yield* versionAsShown(sql, fork.id, copy))!)
         }).pipe(transaction("AmendVersion")),
 
-      SaveGeneration: ({ userId, versionId, content, reasoning, status, error }) =>
+      SaveGeneration: ({ userId, versionId, content, reasoning, replySections, status, error }) =>
         Effect.gen(function* () {
           const row = yield* ownedVersion(userId, versionId, false)
           // A version deleted for good stays empty, whatever was still generating into it.
@@ -528,6 +530,8 @@ export const makeWriteHandlers = (bin: Bin) =>
           yield* recordHistoryReduction(sql, row.slot_id, content, versionId)
           yield* sql`UPDATE versions SET content = ${content}, status = ${status},
             reasoning = CASE WHEN ${reasoning === undefined ? 1 : 0} THEN reasoning ELSE ${reasoning || null} END,
+            reply_sections = CASE WHEN ${replySections === undefined ? 1 : 0} THEN reply_sections
+              ELSE ${replySections ? JSON.stringify(replySections) : null} END,
             error_json = ${error === null ? null : JSON.stringify(error)}, updated_at = ${Date.now()}
             WHERE id = ${versionId}`
           return toVersion(yield* ownedVersion(userId, versionId, false))

@@ -2,6 +2,7 @@
 // pipeline the reader worker runs, without a database.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import type { RewriteOptions } from "../../src/assembler/scriptSources.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
@@ -26,6 +27,8 @@ export interface FixtureMessage {
   readonly images?: HistoryEntry["images"]
   readonly inContext?: boolean
   readonly frozen?: Readonly<Record<string, string>>
+  /** A reply's leading tagged sections in their tags (spec/REPLY-SECTIONS.md). */
+  readonly replySections?: ReplySections
   /** A template whose variable writes are recorded already. */
   readonly written?: boolean
 }
@@ -78,6 +81,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     written: m.written ?? false,
     inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
     ...(m.images === undefined ? {} : { images: m.images }),
+    ...(m.replySections === undefined ? {} : { replySections: m.replySections }),
     sentAt: 0,
     versions: 1,
     selectedOrdinal: 0
@@ -193,6 +197,15 @@ export const assembleFixture = (
     .pipe(Effect.provide(fixtureSources(fixture)))
 
 /** A fixture's text as it's written at its target (`RewriteText`), through the scripts with neither flag. */
+/** A rewrite prepared once for a fixture, as a streaming reply's is (`RewriteLive`). */
+export const prepareFixture = (fixture: AssemblyFixture, options: RewriteOptions, using?: Assembler) =>
+  (using ?? assembler())
+    .prepareRewrite(
+      { now: fixture.now ?? Date.UTC(2026, 0, 1), timeZone: "UTC", frozen: {}, random: () => 0.5 },
+      options
+    )
+    .pipe(Effect.provide(fixtureSources(fixture)))
+
 export const rewriteFixture = (
   fixture: AssemblyFixture,
   options: RewriteOptions,

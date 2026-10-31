@@ -41,7 +41,7 @@ import {
   type ScriptSource,
   unchanged
 } from "./scriptSources.ts"
-import { PLACEMENT } from "./regex.ts"
+import { makeScriptRunner, PLACEMENT, REGEX_MS, REGEX_OUTPUT } from "./regex.ts"
 import type { TextRewrite } from "@rp/shared/regexScripts.ts"
 
 export interface Assembler {
@@ -74,8 +74,28 @@ export interface Assembler {
   readonly rewrite: (
     request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens" | "rewrite">,
     options: RewriteOptions,
-    items: ReadonlyArray<{ readonly text: string; readonly kind: "message" | "reasoning" }>
+    items: ReadonlyArray<RewriteItem>
   ) => Effect.Effect<Array<TextRewrite>, SourceError, AssemblySources>
+  /**
+   * The same, prepared once for texts that keep changing (a reply as it streams): the stages
+   * run once, and each `run` takes the registered rewrites with time and output of its own.
+   */
+  readonly prepareRewrite: (
+    request: Omit<AssemblyRequest, "macros" | "projections" | "imageTokens" | "rewrite">,
+    options: RewriteOptions
+  ) => Effect.Effect<PreparedRewrite, SourceError, AssemblySources>
+}
+
+/** A text to rewrite: a message's own, or reasoning (the provider's, or a reply section's). */
+export interface RewriteItem {
+  readonly text: string
+  readonly kind: "message" | "reasoning"
+}
+
+export interface PreparedRewrite {
+  /** Whether a run can change anything: scripts compiled for it, or a rewrite of a plugin's. */
+  readonly active: boolean
+  readonly run: (items: ReadonlyArray<RewriteItem>) => Array<TextRewrite>
 }
 
 export class WorkerAssembler extends Context.Service<WorkerAssembler, Assembler>()("rp/assembler/WorkerAssembler") {}
@@ -136,6 +156,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
         assemble(stages, { ...request, macros, projections, imageTokens, scriptSources }, transforms)
       ),
     rewrite: (request, options, items) =>
+      Effect.map(assembler.prepareRewrite(request, options), (prepared) => prepared.run(items)),
+    prepareRewrite: (request, options) =>
       withAssemblyModules(
         assembler,
         Effect.gen(function* () {
@@ -145,29 +167,38 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
             "scripts"
           )
           const side = rewriteSide(assembly, options)
-          const placed = items.map((item) => ({
-            text: item.text,
-            placement:
-              item.kind === "reasoning"
-                ? PLACEMENT.reasoning
-                : side === "user"
-                  ? PLACEMENT.userInput
-                  : PLACEMENT.aiOutput
-          }))
-          let results: Array<TextRewrite> = placed.map(unchanged)
-          for (const step of rewrites.list()) {
-            const next = step.run(
-              assembly,
-              results.map((result, i) => ({ text: result.text, placement: placed[i]!.placement })),
-              options
-            )
-            results = results.map((result, i) => ({
-              text: next[i]?.text ?? result.text,
-              applied: [...result.applied, ...(next[i]?.applied ?? [])],
-              failed: [...result.failed, ...(next[i]?.failed ?? [])]
-            }))
-          }
-          return results
+          const compiled = assembly.scripts
+          const steps = rewrites.list()
+          return {
+            active: (compiled?.list.length ?? 0) > 0 || steps.some((step) => step !== regexRewrite),
+            run: (items) => {
+              // Each run gets the time and output one rewrite has, whatever the runs before spent.
+              if (compiled) assembly.scripts = makeScriptRunner(compiled.list, { ms: REGEX_MS, output: REGEX_OUTPUT })
+              const placed = items.map((item) => ({
+                text: item.text,
+                placement:
+                  item.kind === "reasoning"
+                    ? PLACEMENT.reasoning
+                    : side === "user"
+                      ? PLACEMENT.userInput
+                      : PLACEMENT.aiOutput
+              }))
+              let results: Array<TextRewrite> = placed.map(unchanged)
+              for (const step of steps) {
+                const next = step.run(
+                  assembly,
+                  results.map((result, i) => ({ text: result.text, placement: placed[i]!.placement })),
+                  options
+                )
+                results = results.map((result, i) => ({
+                  text: next[i]?.text ?? result.text,
+                  applied: [...result.applied, ...(next[i]?.applied ?? [])],
+                  failed: [...result.failed, ...(next[i]?.failed ?? [])]
+                }))
+              }
+              return results
+            }
+          } satisfies PreparedRewrite
         })
       )
   }

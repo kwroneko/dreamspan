@@ -34,6 +34,7 @@ import type {
   SummaryLayer,
   Target
 } from "./types.ts"
+import { replySectionsOf } from "@rp/shared/replySections.ts"
 import { ASSEMBLER_VERSION, AssemblyFailed, historyLeafOf } from "./types.ts"
 import type { LcmDefaults, ResolvedLcm } from "@rp/shared/lcmSettings.ts"
 import type { CalibrationSample, ImageTokenRule } from "@rp/shared/imageTokens.ts"
@@ -380,6 +381,8 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       historyMove: need(assembly, "historyMove"),
       ...(assembly.lcm ? { historyBudget: need(assembly, "composition").historyBudget } : {}),
       assemblerVersion: ASSEMBLER_VERSION,
+      // How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md).
+      ...(request.summaryJob ? {} : { replySections: replySectionsOf(preset.doc) }),
       inputs: {
         chatId: target.chatId,
         slotId: target.slotId,

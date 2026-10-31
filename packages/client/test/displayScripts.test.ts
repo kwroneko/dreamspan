@@ -3,7 +3,15 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { runDisplayRegex } from "../src/features/chat/displayRegex.ts"
-import { approvedScripts, CardScripts, displayScripts, messageCharacter } from "../src/features/chat/displayScripts.ts"
+import {
+  approvedScripts,
+  builtinDisplayScriptLists,
+  CardScripts,
+  type DisplayScriptList,
+  displayScripts,
+  messageCharacter
+} from "../src/features/chat/displayScripts.ts"
+import { makeRegistry } from "../src/registry.ts"
 import { regexDisplay } from "../src/features/chat/displayWorker.ts"
 
 const script = (id: string, find: string, replace: string, fields: Partial<RegexScript> = {}): RegexScript => ({
@@ -60,19 +68,41 @@ it("a preset's or card's scripts count only once approved", () => {
   expect(approvedScripts({ regex: scripts, regex_approved: true })).toEqual(scripts)
 })
 
+const lists = (
+  global: ReadonlyArray<RegexScript>,
+  preset: ReadonlyArray<RegexScript>,
+  character: ReadonlyArray<RegexScript>,
+  registered: ReadonlyArray<DisplayScriptList> = builtinDisplayScriptLists
+) => displayScripts(registered, { global, preset, character, characterId: null, placement: 2 })
+
 it("scripts run global, then preset, then character", () => {
   const global = [script("g", "/a/", "b")]
   const preset = [script("p", "/b/", "c")]
   const character = [script("c", "/c/", "d")]
-  const ordered = displayScripts(global, preset, character)
+  const ordered = lists(global, preset, character)
   expect(ordered.map((s) => s.id)).toEqual(["g", "p", "c"])
   // Each sees the one before it: a → b → c → d. Another order stops early.
   expect(run(ordered, "a")).toBe("d")
-  expect(run(displayScripts(character, preset, global), "a")).toBe("b")
-  expect(displayScripts([], [], [])).toBe(displayScripts([], [], []))
+  expect(run(lists(character, preset, global), "a")).toBe("b")
+  expect(lists([], [], [])).toBe(lists([], [], []))
   // Only display-only scripts for the placement, whichever list holds them.
-  expect(run(displayScripts([script("g", "/a/", "b", { markdown_only: false })], preset, []), "a")).toBe("a")
-  expect(run(displayScripts(global, [script("p", "/b/", "c", { placement: [1] })], []), "a")).toBe("b")
+  expect(run(lists([script("g", "/a/", "b", { markdown_only: false })], preset, []), "a")).toBe("a")
+  expect(run(lists(global, [script("p", "/b/", "c", { placement: [1] })], []), "a")).toBe("b")
+})
+
+it("the lists are registered parts: one can be replaced, disabled or added, by order", () => {
+  const global = [script("g", "/a/", "b")]
+  const preset = [script("p", "/b/", "c")]
+  const registry = makeRegistry<DisplayScriptList>()
+  const undo = builtinDisplayScriptLists.map((list) => registry.register(list))
+  const off = registry.disable("display-regex.preset")
+  expect(lists(global, preset, [], registry.list()).map((s) => s.id)).toEqual(["g"])
+  off()
+  registry.register({ id: "plugin.first", order: 0, scripts: () => [script("x", "/z/", "a")] })
+  expect(lists(global, preset, [], registry.list()).map((s) => s.id)).toEqual(["x", "g", "p"])
+  registry.register({ id: "display-regex.global", order: 10, scripts: () => [] })
+  expect(lists(global, preset, [], registry.list()).map((s) => s.id)).toEqual(["x", "p"])
+  for (const done of undo) done()
 })
 
 it("a model-side message takes its speaker's scripts; a user-side one the only other character's", () => {

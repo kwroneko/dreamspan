@@ -3,6 +3,7 @@
 // value means what it means in ST. Arrays of prompts, order entries and regex scripts are
 // keyed by `identifier` or `id`, so the library merge combines them per element.
 import { Schema } from "effect"
+import { ReplySectionSettings } from "../replySections.ts"
 import { RegexScript } from "./regexScript.ts"
 
 export { RegexScript } from "./regexScript.ts"
@@ -184,6 +185,11 @@ export const LegacyPresetDoc = Schema.Struct({
     /** Appended to the continued message: ST offers "", " ", "\n" and "\n\n". */
     continue_postfix: Schema.String
   }),
+  /**
+   * Tagged sections at the start of a reply (spec/REPLY-SECTIONS.md): which tags, on or off,
+   * and how many recent replies send theirs back. Absent: `DEFAULT_REPLY_SECTIONS`.
+   */
+  reply_sections: Schema.optionalKey(ReplySectionSettings),
   regex: Schema.Array(RegexScript).check(Schema.makeFilter(uniqueBy((r: RegexScript) => r.id, "id"))),
   /**
    * The user allowed this preset's regex scripts to run, as ST asks once per preset. No script

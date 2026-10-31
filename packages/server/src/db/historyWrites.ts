@@ -114,6 +114,7 @@ export const makeHistoryWriteHandlers = Effect.gen(function* () {
                   // A history edit's text isn't what any script made.
                   "raw_content",
                   "raw_reasoning",
+                  "raw_sections",
                   "rewrite_json",
                   "seq",
                   "id",

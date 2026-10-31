@@ -270,6 +270,9 @@ export type ScriptRunner = ReturnType<typeof makeScriptRunner>
 /** One context's time for the regex scripts: V8 stops them once it's spent. */
 export const REGEX_MS = 200
 
+/** Characters of text the scripts may make for one context, copied or replaced. */
+export const REGEX_OUTPUT = 8_000_000
+
 /** The scripts' text for these messages, as one batch; what stopped them is reported once. */
 export const applyScripts = (
   assembly: Assembly,

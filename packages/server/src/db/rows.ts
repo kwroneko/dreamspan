@@ -1,5 +1,6 @@
 // Row shapes and their mapping to domain types, shared by the writer and readers.
 import type { StoredRewrite, VersionRewrite } from "@rp/shared/regexScripts.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import {
   Chat,
   type ChatId,
@@ -105,15 +106,19 @@ export interface VersionRow {
   readonly error_json: string | null
   /** Absent where a query doesn't select it. */
   readonly reasoning?: string | null
+  /** Its leading tagged sections as JSON (spec/REPLY-SECTIONS.md); absent where a query doesn't select it. */
+  readonly reply_sections?: string | null
   readonly mark?: "refused" | null
   readonly frozen_macros: string | null
   /** Absent where a query doesn't select them. */
   readonly raw_content?: string | null
   readonly raw_reasoning?: string | null
+  readonly raw_sections?: string | null
   readonly rewrite_json?: string | null
   /** Whether the raw texts are kept, where a query reads that instead of the texts (`shownVersionColumns`). */
   readonly raw_kept?: number
   readonly raw_reasoning_kept?: number
+  readonly raw_sections_kept?: number
   readonly rollout_id: string | null
   /** Ordered image references (`versionExtras`); absent on a row just inserted without images. */
   readonly images_json?: string
@@ -156,7 +161,8 @@ const toRewrite = (row: VersionRow) => {
     applied,
     failed,
     raw: row.raw_kept === 1 || row.raw_content != null,
-    rawReasoning: row.raw_reasoning_kept === 1 || row.raw_reasoning != null
+    rawReasoning: row.raw_reasoning_kept === 1 || row.raw_reasoning != null,
+    rawSections: row.raw_sections_kept === 1 || row.raw_sections != null
   }
 }
 
@@ -164,6 +170,7 @@ const toRewrite = (row: VersionRow) => {
 export const rewriteColumns = (rewrite: StoredRewrite | undefined) => ({
   raw_content: rewrite?.raw ?? null,
   raw_reasoning: rewrite?.rawReasoning ?? null,
+  raw_sections: rewrite?.rawSections ? JSON.stringify(rewrite.rawSections) : null,
   rewrite_json:
     rewrite && (rewrite.applied.length > 0 || rewrite.failed.length > 0)
       ? JSON.stringify({ applied: rewrite.applied, failed: rewrite.failed })
@@ -190,6 +197,7 @@ export const toVersion = (row: VersionRow) =>
     model: row.model_label ?? null,
     error: toVersionError(row.error_json),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
+    ...(row.reply_sections ? { replySections: JSON.parse(row.reply_sections) as ReplySections } : {}),
     mark: row.mark ?? null,
     ...(row.rewrite_json ? { rewrite: toRewrite(row) } : {}),
     frozenMacros: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),

@@ -217,7 +217,10 @@ export const baseline: ReadonlyArray<string> = [
     -- null when unchanged; never sent anywhere. What the scripts did: rewrite_json.
     raw_content TEXT,
     raw_reasoning TEXT,
+    -- The reply sections before the reasoning scripts rewrote their text, as JSON.
+    raw_sections TEXT CHECK (raw_sections IS NULL OR json_valid(raw_sections)),
     rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)),
+    reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
       ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')),

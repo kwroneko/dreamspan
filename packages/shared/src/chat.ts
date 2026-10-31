@@ -2,6 +2,7 @@
 import { Schema } from "effect"
 import { idSchema } from "./id.ts"
 import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
+import { ReplySections } from "./replySections.ts"
 
 export const ChatId = idSchema("ChatId", "chat")
 export type ChatId = typeof ChatId.Type
@@ -161,6 +162,11 @@ export class Version extends Schema.Class<Version>("Version")({
    */
   reasoning: Schema.optionalKey(Schema.String),
   /**
+   * Tagged sections the reply began with, taken out of `content` (spec/REPLY-SECTIONS.md):
+   * shown in a panel of their own, sent back only as the preset says. Absent without any.
+   */
+  replySections: Schema.optionalKey(ReplySections),
+  /**
    * A judge model read this version's text and found a refusal (spec/LCM.md §2.4). The text
    * stays; a provider's own refusal makes a failed version instead.
    */
@@ -272,6 +278,8 @@ export class NewVersion extends Schema.Class<NewVersion>("NewVersion")({
   reasoning: Schema.optional(Schema.String),
   /** What regex scripts did to `content` before it was written, and the text before (server only). */
   rewrite: Schema.optional(StoredRewrite),
+  /** And with its reply sections. */
+  replySections: Schema.optional(ReplySections),
   /** Required for failed versions: what went wrong (DESIGN §3.1). */
   error: Schema.optional(
     Schema.Struct({ class: Schema.String, message: Schema.String, detail: Schema.optional(Schema.Unknown) })

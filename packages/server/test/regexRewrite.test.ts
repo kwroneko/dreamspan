@@ -5,10 +5,10 @@ import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import { Effect, Scope } from "effect"
 import { describe, expect, it } from "vitest"
 import { makeAssembler } from "../src/assembler/assembler.ts"
-import { compile, makeScriptRunner } from "../src/assembler/regex.ts"
+import { compile, makeScriptRunner, REGEX_MS } from "../src/assembler/regex.ts"
 import type { RewriteOptions } from "../src/assembler/scriptSources.ts"
 import { importStPreset } from "../src/formats/preset.ts"
-import { type AssemblyFixture, assembleFixture, rewriteFixture } from "./support/assemblySources.ts"
+import { type AssemblyFixture, assembleFixture, prepareFixture, rewriteFixture } from "./support/assemblySources.ts"
 import { cardDoc } from "./support/docs.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 
@@ -303,5 +303,58 @@ describe("prompt scripts from every list", () => {
     )
     const [upper] = await Effect.runPromise(rewriteFixture(f, reply, [{ text: "b", kind: "message" }], assembler))
     expect(upper!.text).toBe("B")
+  })
+})
+
+describe("a rewrite prepared for a streaming reply", () => {
+  const reply: RewriteOptions = { edit: false, speaker: "mira", writer: "model" }
+
+  it("runs the scripts on each text it's given, each run with the time of one rewrite", async () => {
+    const f = fixture({
+      preset: [script("strip"), script("hide", { find_regex: "/PRIVATE/g", replace_string: "[x]", placement: [6] })]
+    })
+    const prepared = await Effect.runPromise(prepareFixture(f, reply))
+    expect(prepared.active).toBe(true)
+    expect(prepared.run([{ text: "<think>a", kind: "message" }])[0]!.text).toBe("<think>a")
+    const [body, thought] = prepared.run([
+      { text: "<think>a</think>b", kind: "message" },
+      { text: "a PRIVATE plan", kind: "reasoning" }
+    ])
+    expect(body!.text).toBe("b")
+    expect(thought!.text).toBe("a [x] plan")
+    // Many runs never spend one deadline between them.
+    for (let i = 0; i < 300; i++) prepared.run([{ text: "<think>a</think>b", kind: "message" }])
+    expect(prepared.run([{ text: "<think>a</think>c", kind: "message" }])[0]).toMatchObject({ text: "c", failed: [] })
+  })
+
+  it("says it can't change anything without scripts", async () => {
+    const prepared = await Effect.runPromise(prepareFixture(fixture(), reply))
+    expect(prepared.active).toBe(false)
+  })
+
+  // What one live rewrite costs on a long reply (ARCHITECTURE §12, "Live rewrites"). Set
+  // MEASURE to print it; the bound only catches a gross regression on a loaded host.
+  it.each([
+    ["few matches", (i: number) => `/<cot${i}>[\\s\\S]*?(?:<\\/cot${i}>\\s*|$)/g`],
+    ["a match every 8 words", (i: number) => `/\\bword${i}\\b/g`]
+  ])("takes a 20,000-character reply through 10 scripts (%s)", async (label, find) => {
+    const scripts = Array.from({ length: 10 }, (_, i) => script(`s${i}`, { find_regex: find(i), replace_string: "w" }))
+    const prepared = await Effect.runPromise(prepareFixture(fixture({ preset: scripts }), reply))
+    const text = (Array.from({ length: 3400 }, (_, i) => `word${i % 13}`).join(" ") + " <cot3>a thought").slice(-20_000)
+    expect(text.length).toBe(20_000)
+    const times: Array<number> = []
+    for (let i = 0; i < 30; i++) {
+      const start = performance.now()
+      const [out] = prepared.run([{ text: text.slice(0, 19_000 + i * 30), kind: "message" }])
+      times.push(performance.now() - start)
+      // Rewritten, or (out of time on a loaded host) the text as it came, never half done.
+      if (out!.failed.length > 0) expect(out!.text).toBe(text.slice(0, 19_000 + i * 30))
+    }
+    times.sort((a, b) => a - b)
+    if (process.env.MEASURE)
+      console.log(
+        `20k characters, 10 scripts, ${label}: median ${times[15]!.toFixed(1)} ms, max ${times.at(-1)!.toFixed(1)} ms`
+      )
+    expect(times[15]).toBeLessThan(REGEX_MS * 2)
   })
 })

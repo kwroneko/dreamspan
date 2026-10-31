@@ -2,7 +2,8 @@
 // header, the scripts that changed it or were skipped under it, and "Show the original text",
 // which reads the text from before them (RawVersionText) and can restore it (RestoreRawText).
 import type { PathEntry } from "@rp/shared/chat.ts"
-import type { ScriptRef } from "@rp/shared/regexScripts.ts"
+import type { RawText, ScriptRef } from "@rp/shared/regexScripts.ts"
+import { sectionsDisplay } from "@rp/shared/replySections.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -42,10 +43,8 @@ function RewriteNotes({ entry }: { entry: PathEntry; session: ChatSession }) {
   )
 }
 
-type Raw = { readonly content: string | null; readonly reasoning: string | null }
-
 function OriginalText({ session, entry, report, closeDialog }: MessageActionProps) {
-  const [raw, setRaw] = useState<Raw | null>(null)
+  const [raw, setRaw] = useState<RawText | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [pending, setPending] = useState(false)
   const versionId = entry.version.id
@@ -96,7 +95,13 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
               <pre className={block}>{raw.reasoning}</pre>
             </section>
           )}
-          {raw.content === null && raw.reasoning === null && (
+          {raw.sections !== null && (
+            <section aria-label="Original thinking in the reply" className="flex flex-col gap-1">
+              <h3 className="text-sm font-medium">Thinking in the reply</h3>
+              <pre className={block}>{sectionsDisplay(raw.sections)}</pre>
+            </section>
+          )}
+          {raw.content === null && raw.reasoning === null && raw.sections === null && (
             <p className="text-sm text-muted">The scripts didn't change this version's text.</p>
           )}
         </div>
@@ -106,7 +111,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
         <Button
           variant="primary"
           pending={pending}
-          disabled={raw === null || (raw.content === null && raw.reasoning === null)}
+          disabled={raw === null || (raw.content === null && raw.reasoning === null && raw.sections === null)}
           onClick={() => void restore()}
         >
           Restore it
@@ -123,7 +128,10 @@ export const registerRewrites = () => [
     id: "message.original-text",
     order: 38,
     available: ({ entry, generating }) =>
-      !generating && (entry.version.rewrite?.raw === true || entry.version.rewrite?.rawReasoning === true),
+      !generating &&
+      (entry.version.rewrite?.raw === true ||
+        entry.version.rewrite?.rawReasoning === true ||
+        entry.version.rewrite?.rawSections === true),
     menu: ({ openDialog }) => (
       <MenuItem icon="eye" onClick={() => openDialog("message.original-text")}>
         Show the original text

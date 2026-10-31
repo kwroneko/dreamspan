@@ -6,14 +6,53 @@
 import type { ChatId, EntityId, ForkId, SlotId, VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { StoredRewrite } from "@rp/shared/regexScripts.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import { type Context, Effect } from "effect"
 import type { Reader } from "../db/Database.ts"
 
 export interface Rewritten {
   readonly content: string
   readonly reasoning?: string
+  readonly sections?: ReplySections
   /** Absent when no script changed or failed on anything. */
   readonly rewrite?: StoredRewrite
+}
+
+type Item = { readonly text: string; readonly kind: "message" | "reasoning" }
+
+/**
+ * The texts of a reply the scripts run on, in order: its body, the provider's reasoning, then
+ * each reply section's text, which ST's placement 6 (reasoning) covers as it does parsed
+ * reasoning (spec/REPLY-SECTIONS.md).
+ */
+export const rewriteItems = (
+  content: string,
+  reasoning: string | undefined,
+  sections: ReplySections | null | undefined
+): Array<Item> => [
+  { text: content, kind: "message" },
+  ...(reasoning ? [{ text: reasoning, kind: "reasoning" as const }] : []),
+  ...(sections?.sections ?? []).map((section) => ({ text: section.text, kind: "reasoning" as const }))
+]
+
+/** The rewritten texts back in place: the reasoning, if there was any, then the sections. */
+export const fromItems = <T extends { readonly text: string }>(
+  results: ReadonlyArray<T | undefined>,
+  content: string,
+  reasoning: string | undefined,
+  sections: ReplySections | null | undefined
+) => {
+  const at = reasoning ? 2 : 1
+  return {
+    content: results[0]?.text ?? content,
+    reasoning: reasoning ? (results[1]?.text ?? reasoning) : reasoning,
+    sections: sections
+      ? {
+          ...sections,
+          sections: sections.sections.map((section, i) => ({ ...section, text: results[at + i]?.text ?? section.text }))
+        }
+      : sections
+  }
 }
 
 export const rewriteText = (
@@ -28,11 +67,16 @@ export const rewriteText = (
     readonly edit: boolean
     readonly content: string
     readonly reasoning?: string | undefined
+    readonly sections?: ReplySections | null | undefined
   }
 ): Effect.Effect<Rewritten> => {
-  const { content, reasoning } = params
-  const unchanged: Rewritten = { content, ...(reasoning === undefined ? {} : { reasoning }) }
-  if (content === "" && !reasoning) return Effect.succeed(unchanged)
+  const { content, reasoning, sections } = params
+  const unchanged: Rewritten = {
+    content,
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(sections ? { sections } : {})
+  }
+  if (content === "" && !reasoning && !sections?.sections.length) return Effect.succeed(unchanged)
   // Suspended, so even a reader that can't take the call leaves the text as it is.
   return Effect.suspend(() =>
     reader.RewriteText({
@@ -41,26 +85,26 @@ export const rewriteText = (
       ...(params.forkId === undefined ? {} : { forkId: params.forkId }),
       at: params.at,
       edit: params.edit,
-      items: [
-        { text: content, kind: "message" as const },
-        ...(reasoning ? [{ text: reasoning, kind: "reasoning" as const }] : [])
-      ]
+      items: rewriteItems(content, reasoning, sections)
     })
   ).pipe(
-    Effect.map(([text, thought]): Rewritten => {
-      const applied = [...(text?.applied ?? []), ...(thought?.applied ?? [])]
-      const failed = [...(text?.failed ?? []), ...(thought?.failed ?? [])]
-      const nextContent = text?.text ?? content
-      const nextReasoning = thought?.text ?? reasoning
+    Effect.map((results): Rewritten => {
+      const applied = results.flatMap((result) => result.applied)
+      const failed = results.flatMap((result) => result.failed)
       if (applied.length === 0 && failed.length === 0) return unchanged
+      const next = fromItems(results, content, reasoning, sections)
+      const sectionsChanged =
+        !!sections && sections.sections.some((section, i) => next.sections!.sections[i]!.text !== section.text)
       return {
-        content: nextContent,
-        ...(nextReasoning === undefined ? {} : { reasoning: nextReasoning }),
+        content: next.content,
+        ...(next.reasoning === undefined ? {} : { reasoning: next.reasoning }),
+        ...(next.sections ? { sections: next.sections } : {}),
         rewrite: {
           applied,
           failed,
-          raw: nextContent === content ? null : content,
-          rawReasoning: reasoning === undefined || nextReasoning === reasoning ? null : reasoning
+          raw: next.content === content ? null : content,
+          rawReasoning: reasoning === undefined || next.reasoning === reasoning ? null : reasoning,
+          ...(sectionsChanged ? { rawSections: sections } : {})
         }
       }
     }),

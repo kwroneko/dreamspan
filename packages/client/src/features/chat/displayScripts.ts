@@ -1,12 +1,13 @@
 // Which regex scripts a message's display runs (ARCHITECTURE §10, "Opt-in display
-// transformations"): the account's global scripts, then the preset's, then the message's
-// character's, as ST 1.19 orders them. Global scripts are the user's own and always run; the
+// transformations"): the registered lists, by default the account's global scripts, then the
+// preset's, then the message's character's, as ST 1.19 orders them. Global scripts are the user's own and always run; the
 // preset's and a card's only once the user allowed them (`regex_approved`). The display
 // runner then keeps only enabled `markdown_only && !prompt_only` ones for the placement.
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import { makeRegistry } from "../../registry.ts"
 
 const NONE: ReadonlyArray<RegexScript> = []
 
@@ -29,13 +30,48 @@ export const messageCharacter = (
   return others.length === 1 ? others[0]! : null
 }
 
-/** The ordered list: global, preset, then the character's (each already approved where it must be). */
+/** What a display script list reads for one text: the chat's lists and the message's character's. */
+export interface DisplayListContext {
+  readonly global: ReadonlyArray<RegexScript>
+  /** The preset's, once it allows them. */
+  readonly preset: ReadonlyArray<RegexScript>
+  /** The message's character's (`messageCharacter`), once its card allows them. */
+  readonly character: ReadonlyArray<RegexScript>
+  readonly characterId: EntityId | null
+  /** ST's placement of the text: 1 user input, 2 AI output, 6 reasoning. */
+  readonly placement: number
+}
+
+/** A list of scripts a message's display runs (the `displayScriptLists` registry), by order. */
+export interface DisplayScriptList {
+  readonly id: string
+  readonly order: number
+  readonly scripts: (context: DisplayListContext) => ReadonlyArray<RegexScript>
+}
+
+export const displayScriptLists = makeRegistry<DisplayScriptList>()
+
+/** ST 1.19's three lists, in its order. */
+export const builtinDisplayScriptLists: ReadonlyArray<DisplayScriptList> = [
+  { id: "display-regex.global", order: 10, scripts: (context) => context.global },
+  { id: "display-regex.preset", order: 20, scripts: (context) => context.preset },
+  { id: "display-regex.character", order: 30, scripts: (context) => context.character }
+]
+
+/** The scripts of every list in effect, in order. */
 export const displayScripts = (
-  global: ReadonlyArray<RegexScript>,
-  preset: ReadonlyArray<RegexScript>,
-  character: ReadonlyArray<RegexScript>
-): ReadonlyArray<RegexScript> =>
-  global.length === 0 && preset.length === 0 && character.length === 0 ? NONE : [...global, ...preset, ...character]
+  lists: ReadonlyArray<DisplayScriptList>,
+  context: DisplayListContext
+): ReadonlyArray<RegexScript> => {
+  const scripts = [...lists].sort((a, b) => a.order - b.order).flatMap((list) => list.scripts(context))
+  return scripts.length === 0 ? NONE : scripts
+}
+
+/** Whether a display transform would run any of these scripts on a text at this placement. */
+export const displayRegexApplies = (scripts: ReadonlyArray<RegexScript>, placement: number) =>
+  scripts.some(
+    (s) => !s.disabled && s.find_regex !== "" && s.markdown_only && !s.prompt_only && s.placement.includes(placement)
+  )
 
 /**
  * Cards' approved scripts by chat member, read with GetCardForChat (its `regex` is present
