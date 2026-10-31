@@ -72,10 +72,18 @@ export const bundleEntry = (dir: string, name: string) =>
 const BACKGROUND_READS: ReadonlySet<string> = new Set(["ShellLibrary", "ShellCards", "ShellForks", "CacheWarmth"])
 
 /**
- * Reads a reply waits on before its request goes out (chat/ContextGenerator.ts, the provider's
- * cache gate): they go ahead of whatever else is queued, as browsing reads the history in pages.
+ * Reads a reply waits on before its request goes out (chat/ContextGenerator.ts; the provider
+ * layer's connection, model and pricing, and its cache gate): they go ahead of whatever else is
+ * queued, as browsing reads the history in pages. All are small but the assembly.
  */
-const REPLY_READS: ReadonlySet<string> = new Set(["GetSlot", "AssembleContext", "CachePrefixWarm"])
+const REPLY_READS: ReadonlySet<string> = new Set([
+  "GetSlot",
+  "AssembleContext",
+  "ResolveConnection",
+  "GetModel",
+  "GetCostSettings",
+  "CachePrefixWarm"
+])
 
 /** The writer's and readers' entry points. */
 const workerEntries = (options: DatabaseOptions) =>

@@ -5,7 +5,7 @@
 // shows when what would be re-sent rounds to 0. Other parts of the chat add notes about what a
 // pending change will cost (`cacheNotes`: the insertion editor's re-read), shown in its popover.
 import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
@@ -107,14 +107,48 @@ export const cacheState = (warmth: CacheWarmth | null, now: number): Shown => {
       }
 }
 
+/** How long the chip waits after a reply for the estimate that follows it (one that fails never comes). */
+const AFTER_REPLY_MS = 30_000
+
+/**
+ * Whether the estimate shown predates a reply in the chat: from the reply's start until the first
+ * estimate after it ends. The server works none out while a reply is written (CacheWarmth.hold),
+ * so the last one would otherwise read as current.
+ */
+const useBeforeReply = (session: ChatSession, replying: boolean) => {
+  const [waiting, setWaiting] = useState(replying)
+  if (replying && !waiting) setWaiting(true)
+  const replyingNow = useRef(replying)
+  useEffect(() => {
+    replyingNow.current = replying
+  }, [replying])
+  useEffect(
+    () =>
+      session.subscribeContext(() => {
+        if (!replyingNow.current) setWaiting(false)
+      }),
+    [session]
+  )
+  useEffect(() => {
+    if (replying || !waiting) return
+    const timer = setTimeout(() => setWaiting(false), AFTER_REPLY_MS)
+    return () => clearTimeout(timer)
+  }, [replying, waiting])
+  return waiting
+}
+
 export function CacheChip({ session, view }: { session: ChatSession; view: ChatView }) {
   const warmth = view.cache
+  const waiting = useBeforeReply(
+    session,
+    view.entries.some((entry) => entry.version.status === "generating")
+  )
   const notes = useSyncExternalStore(cacheNotes(session).subscribe, cacheNotes(session).snapshot)
   const [now, setNow] = useState(() => Date.now())
   const [countdown, setCountdown] = useState(countdownOn)
   const [open, setOpen] = useState(false)
   const shown = cacheState(warmth, now)
-  const warm = shown?.kind === "warm"
+  const warm = !waiting && shown?.kind === "warm"
   const expiresAt = warmth?.expiresAt ?? 0
   // Ticks every second while counting down, otherwise once, when the cache expires.
   useEffect(() => {
@@ -127,6 +161,25 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
   if (view.loading || (shown === null && notes.length === 0)) return null
+  if (waiting)
+    return (
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={<span>Cache after reply</span>}
+        triggerLabel="Cache: worked out again when this reply ends. Details"
+        triggerClassName={chipClass("neutral")}
+        title="Cache"
+      >
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
+          <p>
+            The request being sent now changes what your next reply can read from the provider's cache, so the estimate
+            is worked out again when this reply ends.
+          </p>
+          <p className="text-xs text-muted">An estimate.</p>
+        </div>
+      </Popover>
+    )
 
   const toggle = () => {
     setCountdown(!countdown)

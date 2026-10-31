@@ -821,8 +821,7 @@ export const makeChatHandlers = Effect.gen(function* () {
     PinFork: ({ forkId, pinned }) =>
       Effect.flatMap(userId, (id) => writer.SetForkPinned({ userId: id, forkId, pinned })).pipe(internal("PinFork")),
 
-    // The pushed estimate when it's current for this leaf (CacheWarmth), so a read right
-    // after a change doesn't assemble the request a second time.
+    // Through CacheWarmth, which waits while a reply runs in the chat, then works it out afresh.
     GetNextContext: ({ chatId, leafSlotId, forkId }) =>
       Effect.flatMap(userId, (id) => warmth.next(id, chatId, leafSlotId ?? null, forkId ?? null)).pipe(
         internal("GetNextContext")

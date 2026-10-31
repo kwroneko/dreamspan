@@ -1061,6 +1061,8 @@ export const layer = (options: ProvidersOptions = {}) =>
           const message = yield* Effect.tryPromise({
             try: async (signal) => {
               let recordSent: (() => Promise<void>) | undefined
+              // The sent context's write, under way beside the request (awaited before it ends).
+              let recording: Promise<void> | undefined
               const observed: typeof fetch = async (input, init) => {
                 if (state.pendingIdentity) {
                   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
@@ -1100,7 +1102,9 @@ export const layer = (options: ProvidersOptions = {}) =>
                     }
                   }
                 }
-                await recordSent?.()
+                // Queued before any HTTP is sent, so it commits ahead of the rollout's later
+                // writes, but not awaited: the request needn't wait on the writer.
+                recording = recordSent?.()
                 recordSent = undefined
                 // SDK-created affinity headers are now available, before any HTTP is sent.
                 // Preserve refused redirects instead of retrying the SDK's generic network error.
@@ -1220,38 +1224,53 @@ export const layer = (options: ProvidersOptions = {}) =>
                                 : wire
                             )
                           })
-                        ),
-                        { signal }
+                        )
+                        // Not stopped with the request: what was sent stays on record.
+                      ).catch((error: unknown) =>
+                        Effect.runPromise(
+                          Effect.logWarning(`recording the context sent for ${rolloutId} failed`, error)
+                        )
                       )
-                    if (!prepared.kind.acceptsFetch) await recordSent()
+                    if (!prepared.kind.acceptsFetch) {
+                      recording = recordSent()
+                      recordSent = undefined
+                    }
                   }
                   return final
                 }
               })
-              for await (const event of events) {
-                if ("partial" in event) state.partial = event.partial
-                // Plugins may expose only normalized events, without a raw-event callback.
-                if (
-                  event.type !== "start" &&
-                  event.type !== "error" &&
-                  (prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk"
-                ) {
-                  state.gate?.release("first-chunk")
-                }
-                if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
-                  state.firstTokenAt ??= Date.now()
-                  if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
-                  if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
-                  if (event.type === "toolcall_delta") {
-                    const call = event.partial.content[event.contentIndex]
-                    if (call?.type === "toolCall")
-                      offer({ type: "toolcall", name: call.name, arguments: structuredClone(call.arguments) })
+              try {
+                for await (const event of events) {
+                  if ("partial" in event) state.partial = event.partial
+                  // Plugins may expose only normalized events, without a raw-event callback.
+                  if (
+                    event.type !== "start" &&
+                    event.type !== "error" &&
+                    (prepared.kind.cacheRelease ?? defaultCacheRelease).after === "first-chunk"
+                  ) {
+                    state.gate?.release("first-chunk")
+                  }
+                  if (
+                    event.type === "text_delta" ||
+                    event.type === "thinking_delta" ||
+                    event.type === "toolcall_delta"
+                  ) {
+                    state.firstTokenAt ??= Date.now()
+                    if (event.type === "text_delta") offer({ type: "text", delta: event.delta })
+                    if (event.type === "thinking_delta") offer({ type: "thinking", delta: event.delta })
+                    if (event.type === "toolcall_delta") {
+                      const call = event.partial.content[event.contentIndex]
+                      if (call?.type === "toolCall")
+                        offer({ type: "toolcall", name: call.name, arguments: structuredClone(call.arguments) })
+                    }
                   }
                 }
+                const result = await events.result()
+                if (result.stopReason !== "error" && result.stopReason !== "aborted") state.gate?.release("complete")
+                return result
+              } finally {
+                await recording
               }
-              const result = await events.result()
-              if (result.stopReason !== "error" && result.stopReason !== "aborted") state.gate?.release("complete")
-              return result
             },
             catch: (error) => error
           }).pipe(
