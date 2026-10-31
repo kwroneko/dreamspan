@@ -832,7 +832,7 @@
       "type": "table",
       "name": "chats",
       "tbl_name": "chats",
-      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0) STRICT"
+      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",
@@ -941,6 +941,12 @@
       "name": "fork_overrides",
       "tbl_name": "fork_overrides",
       "sql": "CREATE TABLE fork_overrides ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, fork_id TEXT NOT NULL REFERENCES forks(id) ON DELETE CASCADE, -- The chat's state_seq when written; a row updated in place takes the newer one. seq INTEGER NOT NULL CHECK (seq > 0), kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star', 'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event', 'insert', 'image_exclude')), -- image_exclude: the message's own version and an image of it, \"<version id>:<media id>\". target_id TEXT NOT NULL, -- The slot the row is about, and its depth, for reading a window of a path. slot_id TEXT, slot_depth INTEGER, value_id TEXT, flag INTEGER CHECK (flag IS NULL OR flag IN (0, 1)), bin_item_id TEXT REFERENCES bin_items(id) ON DELETE SET NULL, changeset_id TEXT REFERENCES changesets(id) ON DELETE SET NULL, summaries_done INTEGER NOT NULL DEFAULT 0 CHECK (summaries_done IN (0, 1)), -- Who chose it: the user, or an ST re-import following the file (which the user's choice -- then overrules: stImportWrites.ts). origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import')) ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "fork_summaries",
+      "tbl_name": "fork_summaries",
+      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)) ) STRICT"
     },
     {
       "type": "table",
@@ -1067,6 +1073,12 @@
       "name": "shell_preferences",
       "tbl_name": "shell_preferences",
       "sql": "CREATE TABLE shell_preferences (user_id TEXT PRIMARY KEY REFERENCES users(id), pins_collapsed INTEGER NOT NULL DEFAULT 0)"
+    },
+    {
+      "type": "table",
+      "name": "shell_user_stamps",
+      "tbl_name": "shell_user_stamps",
+      "sql": "CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT"
     },
     {
       "type": "table",
@@ -1967,6 +1979,132 @@
       "name": "sessions_owner_fixed",
       "tbl_name": "sessions",
       "sql": "CREATE TRIGGER sessions_owner_fixed BEFORE UPDATE OF user_id ON sessions WHEN NEW.user_id IS NOT OLD.user_id BEGIN SELECT RAISE(ABORT, 'sessions never change owner'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_entities_delete",
+      "tbl_name": "entities",
+      "sql": "CREATE TRIGGER shell_entities_delete AFTER DELETE ON entities BEGIN INSERT INTO shell_user_stamps (user_id, stamp) VALUES (OLD.owner_user_id, 1) ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_entities_purge",
+      "tbl_name": "entities",
+      "sql": "CREATE TRIGGER shell_entities_purge AFTER UPDATE OF purged_at ON entities WHEN NEW.purged_at IS NOT OLD.purged_at BEGIN INSERT INTO shell_user_stamps (user_id, stamp) VALUES (NEW.owner_user_id, 1) ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_entity_refs_delete",
+      "tbl_name": "entity_refs",
+      "sql": "CREATE TRIGGER shell_entity_refs_delete AFTER DELETE ON entity_refs BEGIN INSERT INTO shell_user_stamps (user_id, stamp) SELECT owner_user_id, 1 FROM entities WHERE id = OLD.entity_id ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_entity_revisions_delete",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER shell_entity_revisions_delete AFTER DELETE ON entity_revisions BEGIN INSERT INTO shell_user_stamps (user_id, stamp) SELECT owner_user_id, 1 FROM entities WHERE id = OLD.entity_id ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_fork_event_snapshots_delete",
+      "tbl_name": "fork_event_snapshots",
+      "sql": "CREATE TRIGGER shell_fork_event_snapshots_delete AFTER DELETE ON fork_event_snapshots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM forks WHERE id = OLD.fork_id); END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_fork_event_snapshots_insert",
+      "tbl_name": "fork_event_snapshots",
+      "sql": "CREATE TRIGGER shell_fork_event_snapshots_insert AFTER INSERT ON fork_event_snapshots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM forks WHERE id = NEW.fork_id); END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_fork_overrides_delete",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER shell_fork_overrides_delete AFTER DELETE ON fork_overrides WHEN OLD.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_fork_overrides_insert",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER shell_fork_overrides_insert AFTER INSERT ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_fork_overrides_update",
+      "tbl_name": "fork_overrides",
+      "sql": "CREATE TRIGGER shell_fork_overrides_update AFTER UPDATE ON fork_overrides WHEN NEW.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event') BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_forks_delete",
+      "tbl_name": "forks",
+      "sql": "CREATE TRIGGER shell_forks_delete AFTER DELETE ON forks BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_forks_insert",
+      "tbl_name": "forks",
+      "sql": "CREATE TRIGGER shell_forks_insert AFTER INSERT ON forks BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_forks_update",
+      "tbl_name": "forks",
+      "sql": "CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at, lineage_json ON forks BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_slots_delete",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER shell_slots_delete AFTER DELETE ON slots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_slots_insert",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_slots_update",
+      "tbl_name": "slots",
+      "sql": "CREATE TRIGGER shell_slots_update AFTER UPDATE OF chat_id, parent_slot_id, depth, selected_version_id, created_at, deleted_at, purged_at, inserted ON slots BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_state_events_delete",
+      "tbl_name": "state_events",
+      "sql": "CREATE TRIGGER shell_state_events_delete AFTER DELETE ON state_events BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = OLD.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_state_events_insert",
+      "tbl_name": "state_events",
+      "sql": "CREATE TRIGGER shell_state_events_insert AFTER INSERT ON state_events BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_state_events_update",
+      "tbl_name": "state_events",
+      "sql": "CREATE TRIGGER shell_state_events_update AFTER UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json, fork_id, fork_seq, superseded_by_changeset ON state_events BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = NEW.chat_id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_versions_delete",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER shell_versions_delete AFTER DELETE ON versions BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM slots WHERE id = OLD.slot_id); END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_versions_insert",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER shell_versions_insert AFTER INSERT ON versions BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM slots WHERE id = NEW.slot_id); END"
+    },
+    {
+      "type": "trigger",
+      "name": "shell_versions_update",
+      "tbl_name": "versions",
+      "sql": "CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id, created_at, deleted_at, purged_at, fork_id ON versions BEGIN UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = (SELECT chat_id FROM slots WHERE id = NEW.slot_id); END"
     },
     {
       "type": "trigger",

@@ -80,12 +80,12 @@ describe("group read scale", () => {
         // The groups (two or three characters a chat, each chat titled apart): one read too.
         const plans = yield* fixtureSql(
           config.dataDir,
-          [shellSlotsQuery, shellEventsQuery].map((query) => ({ sql: `EXPLAIN QUERY PLAN ${query}`, params: [me.id] })),
+          [shellSlotsQuery, shellEventsQuery].map((query) => ({ sql: `EXPLAIN QUERY PLAN ${query}`, params: [JSON.stringify(["c-00000", "c-00001"])] })),
           { readOnly: true }
         )
         for (const plan of plans) {
           const details = plan.map((row) => String(row.detail))
-          assert.isTrue(details.some((detail) => /SEARCH c .*owner_user_id/.test(detail)))
+          assert.isTrue(details.some((detail) => /SEARCH c USING .*\(id=\?\)/.test(detail)))
           assert.isFalse(details.some((detail) => /^SCAN [se] /.test(detail)))
         }
         yield* api.GetShellLibrary()

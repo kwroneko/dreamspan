@@ -1,232 +1,131 @@
-// Graph metadata and bounded excerpts at visible endpoints. Runs in a reader worker.
-import { type CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
+// The shell's library: cards, forks and who is in each. Runs in a reader worker. Each fork's
+// walk is kept in `fork_summaries` (db/forkSummaries.ts); a read computes only the chats whose
+// summaries are stale and returns them for the caller to store, so its cost is the cards and
+// forks, plus the messages of what changed since.
+import type { CastCard, ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
-import { CardUsage, ShellCard, ShellFork, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
+import { CardUsage, ShellCard, ShellFork } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
-import { branchOwned, foldState, type FoldableEvent } from "@rp/shared/state.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { shellSlotsQuery, shellEventsQuery } from "./shellQueries.ts"
 import { loadCards } from "./cards.ts"
+import {
+  computeForkSummaries,
+  FORK_SUMMARY_FORMAT,
+  type ForkSummary,
+  fromRow,
+  summaryStamps,
+  type SummaryRow
+} from "./forkSummaries.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ChatRow, ForkRow } from "./rows.ts"
-import { withoutPurged } from "./stateRefs.ts"
 import { query } from "./tx.ts"
-import { pathPieces } from "./displayPath.ts"
-import { shownIn, slotDeletedIn } from "./forkState.ts"
 
-type Slot = {
-  fork_id: string
-  id: string
-  chat_id: string
-  parent_slot_id: string | null
-  created_at: number
-  deleted_at: number | null
-  speaker: string | null
-  at: number
-  depth: number
-  preview: string
-}
-type Event = FoldableEvent & { fork_id: string; chat_id: string; slot_id: string | null }
-// Built plainly during the walk; each becomes a ShellFork once, with its excerpt.
 type Fork = { -readonly [K in keyof Omit<ShellFork, "cast">]: Omit<ShellFork, "cast">[K] } & { cast: Array<CastCard> }
+type Activity = ShellFork["activity"][number]
 
 export const makeShellReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
-    ShellLibrary: ({ userId }) =>
+    ShellLibrary: ({ userId, recompute }) =>
       Effect.gen(function* () {
         const cards = (yield* loadCards(sql, userId, null)).map(({ card }) => card).filter((c) => !c.inBin)
         const byCard = new Map(cards.map((c) => [c.entityId as string, c]))
+        // A card's own recency is its addition or a later edit of the user's (an import's
+        // revisions aren't: an imported card dates from ST's create_date, §13).
         const metadata = yield* sql<{
           id: string
           created_at: number
-          recent: number
+          edited: number
           ref: string
           revision: string
           subtitle: string
           persona: number
         }>`
-        SELECT e.id, e.created_at, max(e.created_at, rev.created_at) AS recent, r.id AS ref,
+        SELECT e.id, e.created_at, max(e.created_at, coalesce((SELECT max(x.created_at) FROM entity_revisions x
+            WHERE x.entity_id = e.id AND x.origin <> 'import'), 0)) AS edited, r.id AS ref,
           rev.id AS revision, CASE WHEN json_type(rev.doc_json, '$.character_version') = 'text' THEN json_extract(rev.doc_json, '$.character_version') ELSE '' END AS subtitle, EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
-        const chats = yield* sql<ChatRow>`SELECT * FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
+        // The stamps first: what follows is read in the same transaction.
+        const userStamp = yield* summaryStamps(sql, userId)
+        const chats = yield* sql<ChatRow & { shell_stamp: number }>`SELECT * FROM chats
+          WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
         const records = yield* sql<ForkRow>`SELECT f.* FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
-        const slots = yield* sql.unsafe<Slot>(shellSlotsQuery, [userId])
-        const insertionChats = new Set(
-          (yield* sql<{ chat_id: string }>`SELECT DISTINCT chat_id FROM fork_overrides
-          WHERE kind = 'insert' AND chat_id IN (SELECT id FROM chats WHERE owner_user_id = ${userId} AND deleted_at IS NULL)`).map(
-            (row) => row.chat_id
-          )
-        )
-        const raw = yield* sql.unsafe<{
-          fork_id: string
-          chat_id: string
-          slot_id: string | null
-          scope: string
-          key: string
-          value_json: string
-        }>(shellEventsQuery, [userId])
-        const events = (yield* withoutPurged(
-          sql,
-          raw.map((e) => ({ ...e, data: { key: e.key, value: JSON.parse(e.value_json) } })) as Array<Event>,
-          (event) => event.fork_id
-        )) as ReadonlyArray<Event>
-        const eventsByFork = new Map<string, Array<Event>>()
-        for (const event of events) {
-          const list = eventsByFork.get(event.fork_id) ?? []
-          list.push(event)
-          eventsByFork.set(event.fork_id, list)
-        }
-        const slotsByFork = new Map<string, Map<string, Slot>>()
-        for (const slot of slots) {
-          const map = slotsByFork.get(slot.fork_id) ?? new Map<string, Slot>()
-          map.set(slot.id, slot)
-          slotsByFork.set(slot.fork_id, map)
-        }
         const chatById = new Map(chats.map((c) => [c.id, c]))
-        const forks: Array<Fork> = []
-        for (const record of records) {
+        const stored = new Map<string, ForkSummary>()
+        if (recompute !== true) {
+          const rows = yield* sql<SummaryRow & { format: number; stamp: number; user_stamp: number; current: number }>`
+            SELECT s.*, c.shell_stamp AS current FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
+            CROSS JOIN fork_summaries s ON s.fork_id = f.id
+            WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
+          for (const row of rows)
+            if (row.format === FORK_SUMMARY_FORMAT && row.stamp === row.current && row.user_stamp === userStamp)
+              stored.set(row.fork_id, fromRow(row))
+        }
+        const stale = new Set(records.flatMap((r) => (stored.has(r.id) ? [] : [r.chat_id])))
+        const computed = yield* computeForkSummaries(
+          sql,
+          records.filter((r) => stale.has(r.chat_id))
+        )
+        const fresh = new Map<string, Array<ForkSummary>>()
+        for (const summary of computed) {
+          stored.set(summary.forkId, summary)
+          const list = fresh.get(summary.chatId) ?? []
+          list.push(summary)
+          fresh.set(summary.chatId, list)
+        }
+        const forks: Array<Fork> = records.map((record) => {
           const row = chatById.get(record.chat_id)!
-          const map = slotsByFork.get(record.id)
-          // Iterative, including an interior checkpoint and every same-tip peer.
-          let path: Array<Slot> = []
-          let slot = map?.get(record.tip_slot_id ?? "")
-          while (slot) {
-            path.push(slot)
-            const parent = map?.get(slot.parent_slot_id ?? "")
-            slot = parent && parent.depth < slot.depth ? parent : undefined
-          }
-          path.reverse()
-          if (insertionChats.has(record.chat_id)) {
-            const pieces = yield* pathPieces(sql, record.chat_id, record.id, record.tip_slot_id)
-            const ids = pieces.flatMap((piece) => (piece.kind === "inserted" ? [piece.slotId] : []))
-            const inserted =
-              ids.length === 0
-                ? []
-                : yield* sql<Slot>`
-              SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
-                CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
-                v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
-                CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
-              FROM slots s JOIN versions v ON v.id = ${shownIn(sql, record.id, "s")}
-              WHERE ${sql.in("s.id", ids)}`
-            const byId = new Map(inserted.map((slot) => [slot.id, slot]))
-            const shown: Array<Slot> = []
-            let structural = 0
-            // `path` is already this fork's structural path, with one slot per depth.
-            // Consume its runs once and splice the single inserted pieces between them.
-            for (const piece of pieces) {
-              if (piece.kind === "inserted") {
-                const slot = byId.get(piece.slotId)
-                if (slot) shown.push(slot)
-              } else {
-                while (structural < path.length && path[structural]!.depth <= piece.hi) shown.push(path[structural++]!)
-              }
-            }
-            path = shown
-          }
-          const onPath = new Set(path.map((s) => s.id))
-          const applicable = (eventsByFork.get(record.id) ?? []).filter(
-            (e) => e.slot_id === null || onPath.has(e.slot_id)
-          )
-          const branch = applicable.filter((e) => branchOwned.has(e.data.key))
-          const positional = new Map<string, Array<Event>>()
-          for (const e of applicable) {
-            if (branchOwned.has(e.data.key)) continue
-            const key = e.slot_id ?? ""
-            const list = positional.get(key) ?? []
-            list.push(e)
-            positional.set(key, list)
-          }
-          let state = foldState(positional.get("") ?? [])
-          const joined = new Set([
-            ...state.participants,
-            ...foldState(branch, state).participants,
-            ...applicable.flatMap(({ data }) =>
-              data.key === "participant.join" || data.key === "card.swap" ? [data.value.entity] : []
-            )
-          ])
-          const activity = new Map<
-            string,
-            { entityId: EntityId; at: number; slot: SlotId; category: "just" | "with" | "was" }
-          >()
-          let endpoint: Slot | undefined
-          let messages = 0
-          for (const s of path) {
-            if (s.deleted_at !== null) continue
-            messages++
-            endpoint = s
-            state = foldState(positional.get(s.id) ?? [], state)
-            let here = state
-            // Existing turns retain their authors across card swaps. Keep the played
-            // identities at each step, including intermediate cards in a swap chain.
-            let playedByMe = s.speaker !== null && here.playedByMe.includes(s.speaker)
-            for (const event of branch) {
-              here = foldState([event], here)
-              playedByMe ||= s.speaker !== null && here.playedByMe.includes(s.speaker)
-            }
-            for (const id of here.participants) joined.add(id)
-            if (s.speaker !== null && !playedByMe)
-              activity.set(s.speaker, {
-                entityId: s.speaker as EntityId,
-                at: s.at,
-                slot: s.id as SlotId,
-                category: "just"
-              })
-          }
-          state = foldState(branch, state)
-          const cast = state.participants
-            .filter((id) => !state.playedByMe.includes(id))
-            .flatMap((id) => byCard.get(id) ?? [])
-          const present = state.participants.filter(
-            (id) => !state.playedByMe.includes(id) && !state.absent.includes(id)
-          )
-          forks.push({
+          const s = stored.get(record.id)!
+          const cast = s.cast.flatMap((id) => byCard.get(id) ?? [])
+          return {
             forkId: record.id,
-            preview: endpoint?.preview ?? "",
-            messages,
+            preview: s.preview,
+            messages: s.messages,
             chat: { id: row.id as ChatId, title: row.title },
-            leaf: (endpoint?.id as SlotId) ?? null,
+            leaf: s.leaf as SlotId | null,
             name: record.name ?? chatName(importState(row.title).title, cast).name,
             named: record.name !== null,
             current: record.id === row.current_fork_id,
             pinned: record.pinned_at !== null,
             createdAt: record.created_at,
-            recentAt: endpoint?.at ?? record.created_at,
+            recentAt: s.endAt ?? record.created_at,
             cast,
-            joined: [...joined] as Array<EntityId>,
-            departed: [...joined].filter((id) => !state.participants.includes(id)) as Array<EntityId>,
-            activity: [...activity.values()].map((a) => ({
-              ...a,
-              category: !state.participants.includes(a.entityId)
-                ? "was"
-                : present.some((id) => id !== a.entityId)
-                  ? "with"
-                  : "just"
-            }))
-          })
-        }
+            joined: s.joined as Array<EntityId>,
+            departed: s.departed as Array<EntityId>,
+            activity: s.activity as Array<Activity>
+          }
+        })
         const people = new Map<string, CastCard>()
         for (const f of forks) for (const c of f.cast) people.set(c.entityId, c)
+        // Each card's forks and turns, in one pass over the forks, in their order.
+        const usage = new Map<string, { used: Array<Fork>; spoke: Array<{ f: Fork; a: Activity }> }>()
+        const usageOf = (id: string) => {
+          let entry = usage.get(id)
+          if (entry === undefined) usage.set(id, (entry = { used: [], spoke: [] }))
+          return entry
+        }
+        for (const f of forks) {
+          const joined = new Set<string>(f.joined)
+          for (const id of joined) usageOf(id).used.push(f)
+          for (const a of f.activity) if (joined.has(a.entityId)) usageOf(a.entityId).spoke.push({ f, a })
+        }
         const shellCards = metadata
           .filter((m) => !m.persona && byCard.has(m.id))
           .map((m) => {
             const c = byCard.get(m.id)!
-            const used = forks.filter((f) => f.joined.includes(c.entityId))
-            const spoke = used
-              .flatMap((f) => f.activity.filter((a) => a.entityId === c.entityId).map((a) => ({ f, a })))
-              .sort(
-                (a, b) =>
-                  b.a.at - a.a.at ||
-                  Number(a.a.category === "was") - Number(b.a.category === "was") ||
-                  Number(b.f.current) - Number(a.f.current) ||
-                  b.f.createdAt - a.f.createdAt
-              )
+            const { used, spoke } = usage.get(c.entityId) ?? { used: [], spoke: [] }
+            spoke.sort(
+              (a, b) =>
+                b.a.at - a.a.at ||
+                Number(a.a.category === "was") - Number(b.a.category === "was") ||
+                Number(b.f.current) - Number(a.f.current) ||
+                b.f.createdAt - a.f.createdAt
+            )
             const latest =
               spoke[0]?.f ??
               [...used].sort((a, b) => Number(b.leaf !== null) - Number(a.leaf !== null) || b.recentAt - a.recentAt)[0]
@@ -244,26 +143,26 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 latestChatId: (latest?.chat.id as ChatId) ?? null
               }),
               createdAt: m.created_at,
-              recentAt: Math.max(m.recent, spoke[0]?.a.at ?? 0)
+              recentAt: Math.max(m.edited, spoke[0]?.a.at ?? 0)
             })
           })
         const [prefs] = yield* sql<{
           pins_collapsed: number
         }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
-        return new ShellLibrary({
+        return {
           cards: shellCards,
           forks: forks
             .sort((a, b) => b.recentAt - a.recentAt || a.chat.id.localeCompare(b.chat.id))
-            .map(
-              (f) =>
-                new ShellFork({
-                  ...f,
-                  cast: f.cast.map((c) => c.entityId)
-                })
-            ),
+            .map((f) => new ShellFork({ ...f, cast: f.cast.map((c) => c.entityId) })),
           people: [...people.values()],
-          pinsCollapsed: prefs?.pins_collapsed === 1
-        })
+          pinsCollapsed: prefs?.pins_collapsed === 1,
+          fresh: [...fresh].map(([chatId, list]) => ({
+            chatId,
+            stamp: chatById.get(chatId)!.shell_stamp,
+            userStamp,
+            forks: JSON.stringify(list)
+          }))
+        }
       }).pipe(query("ShellLibrary"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })

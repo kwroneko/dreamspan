@@ -11,6 +11,81 @@ const raise = (message: string) => `SELECT RAISE(ABORT, '${message.replaceAll("'
 const namesFork = (item: string) =>
   `EXISTS (SELECT 1 FROM bin_items b WHERE b.id = ${item} AND b.origin_json ->> '$.forkId' IS NOT NULL)`
 
+/** Moves chat `chat`'s shell stamp (an SQL expression), so its forks' summaries are stale. */
+const bumpChat = (chat: string) => `UPDATE chats SET shell_stamp = shell_stamp + 1 WHERE id = ${chat};`
+
+/** Moves the shell stamp of the owner of entity `entity`, so every summary of theirs is stale. */
+const bumpOwnerOf = (entity: string) => `INSERT INTO shell_user_stamps (user_id, stamp)
+  SELECT owner_user_id, 1 FROM entities WHERE id = ${entity} ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1;`
+
+/** Moves user `user`'s shell stamp (an SQL expression). */
+const bumpUser = (user: string) => `INSERT INTO shell_user_stamps (user_id, stamp) VALUES (${user}, 1)
+  ON CONFLICT (user_id) DO UPDATE SET stamp = stamp + 1;`
+
+/**
+ * The shell's fork summaries (db/forkSummaries.ts) and the triggers that make them stale: every
+ * insert, delete and update of what the walk reads moves the chat's stamp, and a purge (what
+ * `withoutPurged` drops) the owner's. One indexed update a row, so an import's batch of 100
+ * messages costs a few hundred.
+ */
+const shellSummaries: ReadonlyArray<string> = [
+  `CREATE TABLE fork_summaries (
+    fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE,
+    chat_id TEXT NOT NULL,
+    -- The computation's format, and the chat's and owner's stamps it was computed at.
+    format INTEGER NOT NULL,
+    stamp INTEGER NOT NULL,
+    user_stamp INTEGER NOT NULL,
+    preview TEXT NOT NULL,
+    messages INTEGER NOT NULL,
+    leaf TEXT,
+    end_at INTEGER,
+    -- Entity ids only: names and avatars are read with the summary.
+    cast_json TEXT NOT NULL CHECK (json_valid(cast_json)),
+    joined_json TEXT NOT NULL CHECK (json_valid(joined_json)),
+    departed_json TEXT NOT NULL CHECK (json_valid(departed_json)),
+    activity_json TEXT NOT NULL CHECK (json_valid(activity_json))
+  ) STRICT`,
+  `CREATE TABLE shell_user_stamps (user_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL) STRICT`,
+  `CREATE TRIGGER shell_slots_insert AFTER INSERT ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
+  // Not chain_id: the database assigns it once, in the inserting statement.
+  `CREATE TRIGGER shell_slots_update AFTER UPDATE OF chat_id, parent_slot_id, depth, selected_version_id, created_at,
+    deleted_at, purged_at, inserted ON slots BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_slots_delete AFTER DELETE ON slots BEGIN ${bumpChat("OLD.chat_id")} END`,
+  // A message's first version is inserted before its slot, whose insert moves the stamp.
+  `CREATE TRIGGER shell_versions_insert AFTER INSERT ON versions
+    BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
+  `CREATE TRIGGER shell_versions_update AFTER UPDATE OF slot_id, speaker_entity_id, content, origin, source_version_id,
+    created_at, deleted_at, purged_at, fork_id ON versions
+    BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = NEW.slot_id)")} END`,
+  `CREATE TRIGGER shell_versions_delete AFTER DELETE ON versions
+    BEGIN ${bumpChat("(SELECT chat_id FROM slots WHERE id = OLD.slot_id)")} END`,
+  // The kinds the walk reads; the others (stars, summaries, hides) leave it alone.
+  ...(["insert", "update", "delete"] as const).map((op) => {
+    const row = op === "delete" ? "OLD" : "NEW"
+    return `CREATE TRIGGER shell_fork_overrides_${op} AFTER ${op.toUpperCase()} ON fork_overrides
+    WHEN ${row}.kind IN ('select', 'replace', 'delete_slot', 'insert', 'suppress_event')
+    BEGIN ${bumpChat(`${row}.chat_id`)} END`
+  }),
+  `CREATE TRIGGER shell_state_events_insert AFTER INSERT ON state_events BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_state_events_update AFTER UPDATE OF chat_id, slot_id, version_id, seq, key, scope, value_json,
+    fork_id, fork_seq, superseded_by_changeset ON state_events BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_state_events_delete AFTER DELETE ON state_events BEGIN ${bumpChat("OLD.chat_id")} END`,
+  `CREATE TRIGGER shell_forks_insert AFTER INSERT ON forks BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_forks_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id, deleted_at, purged_at,
+    lineage_json ON forks BEGIN ${bumpChat("NEW.chat_id")} END`,
+  `CREATE TRIGGER shell_forks_delete AFTER DELETE ON forks BEGIN ${bumpChat("OLD.chat_id")} END`,
+  `CREATE TRIGGER shell_fork_event_snapshots_insert AFTER INSERT ON fork_event_snapshots
+    BEGIN ${bumpChat("(SELECT chat_id FROM forks WHERE id = NEW.fork_id)")} END`,
+  `CREATE TRIGGER shell_fork_event_snapshots_delete AFTER DELETE ON fork_event_snapshots
+    BEGIN ${bumpChat("(SELECT chat_id FROM forks WHERE id = OLD.fork_id)")} END`,
+  `CREATE TRIGGER shell_entities_purge AFTER UPDATE OF purged_at ON entities WHEN NEW.purged_at IS NOT OLD.purged_at
+    BEGIN ${bumpUser("NEW.owner_user_id")} END`,
+  `CREATE TRIGGER shell_entities_delete AFTER DELETE ON entities BEGIN ${bumpUser("OLD.owner_user_id")} END`,
+  `CREATE TRIGGER shell_entity_refs_delete AFTER DELETE ON entity_refs BEGIN ${bumpOwnerOf("OLD.entity_id")} END`,
+  `CREATE TRIGGER shell_entity_revisions_delete AFTER DELETE ON entity_revisions BEGIN ${bumpOwnerOf("OLD.entity_id")} END`
+]
+
 export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -164,7 +239,9 @@ export const baseline: ReadonlyArray<string> = [
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
     last_message_at INTEGER
-  , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0) STRICT`,
+  , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
+    -- Moved by triggers on every write the shell's fork summaries read (fork_summaries).
+    shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
   `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
   `CREATE TABLE lanes (
     id TEXT PRIMARY KEY,
@@ -1660,5 +1737,6 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TRIGGER lcm_reply_maintenance_fork BEFORE INSERT ON lcm_reply_maintenance
     WHEN (SELECT chat_id FROM forks WHERE id=NEW.fork_id) IS NOT NEW.chat_id
     BEGIN SELECT RAISE(ABORT, 'maintenance belongs to a fork of its chat'); END`,
-  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))`
+  `CREATE TABLE cost_settings (user_id TEXT PRIMARY KEY REFERENCES users(id), revision INTEGER NOT NULL, rules_json TEXT NOT NULL CHECK(json_valid(rules_json)))`,
+  ...shellSummaries
 ]
