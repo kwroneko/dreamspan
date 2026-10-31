@@ -2378,7 +2378,10 @@ const composeStage = sync("compose", (assembly) => {
     for (const failure of assembly.lcmFailures)
       assembly.issues.push({
         kind: "summary_failed",
-        message: `Messages ${failure.from}–${failure.to} could not be summarized; a failure marker replaces their originals.`
+        message:
+          failure.from === failure.to
+            ? `Message ${failure.from} could not be summarized; a failure marker replaces its original.`
+            : `Messages ${failure.from}–${failure.to} could not be summarized; a failure marker replaces their originals.`
       })
     const sentPieces = new Set(composition.messages.flatMap((m) => m.pieces))
     const retained = projected.filter((p) => sentPieces.has(p.piece))
@@ -2396,14 +2399,24 @@ const composeStage = sync("compose", (assembly) => {
     assembly.issues.push({
       kind: "history_truncated",
       message: assembly.lcmOmitted?.length
-        ? assembly.lcmOmitted.map((r) => `Messages ${r.from}–${r.to} left out: not summarized yet.`).join(" ")
-        : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
+        ? assembly.lcmOmitted
+            .map(
+              (r) =>
+                `${r.from === r.to ? `Message ${r.from}` : `Messages ${r.from}–${r.to}`} left out: not summarized yet.`
+            )
+            .join(" ")
+        : composition.historySent === 1
+          ? "The context holds only the last message: older ones don't fit the preset's context size."
+          : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
     })
   }
   if (composition.examplesSent < composition.examplesTotal) {
     assembly.issues.push({
       kind: "examples_truncated",
-      message: `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit the preset's context size.`
+      message:
+        composition.examplesTotal - composition.examplesSent === 1
+          ? "1 example dialogue didn't fit the preset's context size."
+          : `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit the preset's context size.`
     })
   }
 })
@@ -2555,7 +2568,10 @@ const requestStage = sync("request", (assembly) => {
   if (imageCount > (assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES))
     assembly.issues.push({
       kind: "images_limited",
-      message: `Only the last ${assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES} images will be sent.`
+      message:
+        (assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES) === 1
+          ? "Only the last image will be sent."
+          : `Only the last ${assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES} images will be sent.`
     })
   const mark = (piece: number, i: number) => {
     const record = assembly.pieces[piece]!
@@ -2584,7 +2600,7 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)
     assembly.issues.push({
       kind: "cache_breakpoints",
-      message: `The provider takes ${EXPLICIT_MARKERS} cache markers here; ${dropped.map((b) => `"${b.reason}"`).join(", ")} isn't marked.`
+      message: `The provider takes ${EXPLICIT_MARKERS} cache markers here; ${dropped.map((b) => `"${b.reason}"`).join(", ")} ${dropped.length === 1 ? "isn't" : "aren't"} marked.`
     })
 })
 

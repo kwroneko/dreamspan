@@ -2,11 +2,15 @@
 // client uses, over a WebSocket carrying a session cookie.
 import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcGroup, type RpcClientError, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcClientError, type RpcGroup, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 import type { TestServer } from "./server.ts"
 
 export type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
+
+// Inferring the RPC union from the group is too deep for TypeScript at this many RPCs (TS2589),
+// as in the app's client (`src/rpc.ts`).
+const group: RpcGroup.RpcGroup<AppRpcs> = AppApi
 
 /** Logs in over HTTP, and resolves to the session cookie. */
 export const loginCookie = async (server: TestServer, handle: string, password: string) => {
@@ -46,7 +50,7 @@ export const withCookie = async <A>(
         Layer.provide(RpcSerialization.layerJson)
       )
     )
-    const client = yield* RpcClient.make(AppApi as RpcGroup.RpcGroup<AppRpcs>).pipe(Effect.provide(protocol))
+    const client = yield* RpcClient.make(group).pipe(Effect.provide(protocol))
     return yield* use(client)
   })
   const exit = await Effect.runPromiseExit(Effect.scoped(program))

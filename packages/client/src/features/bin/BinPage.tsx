@@ -444,7 +444,6 @@ export function BinPage() {
   return (
     <Card>
       <CardHeader title="Bin" description="Deleted things wait here, newest first: restore them where they were." />
-      <SlotOutlet slot={binSettings} props={{}} />
       <Tabs
         label="Bin sections"
         value={tab}
@@ -470,6 +469,10 @@ export function BinPage() {
           }
         ]}
       />
+      {/* Its settings (capacity) after what's in it: rarely needed. */}
+      <div className="mt-6 flex flex-col gap-3 border-t border-border pt-4 empty:hidden">
+        <SlotOutlet slot={binSettings} props={{}} />
+      </div>
     </Card>
   )
 }

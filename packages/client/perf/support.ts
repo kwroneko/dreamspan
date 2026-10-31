@@ -5,7 +5,7 @@ import { type ChildProcess, spawn } from "node:child_process"
 import { resolve } from "node:path"
 import { AppApi, type AppRpcs } from "@rp/shared/api.ts"
 import { Effect, Exit, Layer } from "effect"
-import { RpcClient, type RpcGroup, type RpcClientError, RpcSerialization } from "effect/rpc"
+import { RpcClient, type RpcClientError, type RpcGroup, RpcSerialization } from "effect/rpc"
 import { Socket } from "effect/socket"
 
 const root = resolve(import.meta.dirname, "../../..")
@@ -67,6 +67,9 @@ export const startServer = async (dataDir: string, env: Record<string, string> =
 }
 
 type Client = RpcClient.RpcClient<AppRpcs, RpcClientError.RpcClientError>
+// Inferring the RPC union from the group is too deep for TypeScript at this many RPCs (TS2589),
+// as in the app's client (`src/rpc.ts`).
+const group: RpcGroup.RpcGroup<AppRpcs> = AppApi
 
 /** Runs `use` with an RPC client acting as the local user, as another tab would. */
 export const withClient = async <A>(server: PerfServer, use: (client: Client) => Effect.Effect<A, unknown>) => {
@@ -78,7 +81,7 @@ export const withClient = async <A>(server: PerfServer, use: (client: Client) =>
         Layer.provide(RpcSerialization.layerJson)
       )
     )
-    return yield* use(yield* RpcClient.make(AppApi as RpcGroup.RpcGroup<AppRpcs>).pipe(Effect.provide(protocol)))
+    return yield* use(yield* RpcClient.make(group).pipe(Effect.provide(protocol)))
   })
   const exit = await Effect.runPromiseExit(Effect.scoped(program))
   if (Exit.isFailure(exit)) throw new Error(`RPC failed: ${String(exit.cause)}`)

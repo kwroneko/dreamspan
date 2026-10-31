@@ -11,7 +11,7 @@ import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkRecency, forksShowing, lastShown, onForkPath, sharedDepth } from "./forks.ts"
-import { onDisplayPath, pathPieces, placedInsertions, type SlotPlace } from "./displayPath.ts"
+import { displayThrough, onDisplayPath, pathPieces, placedInsertions, type SlotPlace } from "./displayPath.ts"
 import {
   effectiveOverride,
   forkAt,
@@ -291,7 +291,9 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
         FROM slots s JOIN chats c ON c.id = s.chat_id JOIN versions v ON v.id = ${shownIn(sql, fork.id, "s")}
         WHERE s.id = ${slotId} AND NOT ${slotDeletedIn(sql, fork.id, "s")}`
       if (!row) return yield* new NotFound({ entity: "slot", id: slotId })
-      return { ...row, fork }
+      // Where the fork shows it, as the chat numbers it: its depth unless insertions move it.
+      const position = (yield* displayThrough(sql, row.chat_id, fork.id, slotId))?.end ?? row.depth
+      return { ...row, position, fork }
     })
 
   /** How many slots of `ids` aren't marked yet, and the bytes their versions hold (as `deleteFork` counts them). */
@@ -370,6 +372,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           chatTitle: slot.title,
           slotId,
           depth: slot.depth,
+          position: slot.position,
           parentSlotId: slot.parent_slot_id,
           ...forkOrigin(slot.fork)
         },
@@ -524,6 +527,7 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           chatTitle: slot.title,
           slotId: slot.id,
           depth: slot.depth,
+          position: slot.position,
           ordinal: version.ordinal,
           ...forkOrigin(fork)
         },

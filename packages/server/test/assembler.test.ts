@@ -1050,6 +1050,22 @@ describe("the context assembler", () => {
     })
   })
 
+  it("counts the example dialogues that didn't fit in a sentence that reads right for one", async () => {
+    const examples = "<START>\n{{user}}: Hi\n{{char}}: Short.\n<START>\n{{user}}: Hi\n{{char}}: " + "long ".repeat(2000)
+    const snapshot = await assembled(
+      chat({
+        cards: [
+          ...chat().cards.filter((c) => c.entity !== "mira"),
+          { entity: "mira", doc: { ...mira, mes_example: examples } }
+        ],
+        preset: preset({ openai_max_context: 1000, openai_max_tokens: 200 })
+      })
+    )
+    expect(snapshot.issues.find((issue) => issue.kind === "examples_truncated")?.message).toBe(
+      "1 example dialogue didn't fit the preset's context size."
+    )
+  })
+
   it("keeps the newest messages the preset's budget allows, and says so", async () => {
     const messages: Array<FixtureMessage> = Array.from({ length: 40 }, (_, i) => ({
       side: i % 2 === 0 ? "assistant" : "user",
