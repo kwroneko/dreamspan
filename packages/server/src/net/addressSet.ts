@@ -35,11 +35,11 @@ export const AddressResolver = Context.Reference<Resolve>("rp/AddressResolver", 
 })
 
 /** How often names are resolved again. */
-export const REFRESH_EVERY = Duration.seconds(30)
+const REFRESH_EVERY = Duration.seconds(30)
 /** The least time between two resolutions, when connections from unknown addresses ask for one. */
-export const REFRESH_SOON = Duration.seconds(5)
+const REFRESH_SOON = Duration.seconds(5)
 /** How long a name's last addresses stand while the resolver can't answer. */
-export const STALE_AFTER = Duration.minutes(5)
+const STALE_AFTER = Duration.minutes(5)
 const LOOKUP_TIMEOUT = Duration.seconds(5)
 
 const HOST_NAME = /^(?=.{1,253}\.?$)([a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.)*[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?\.?$/
