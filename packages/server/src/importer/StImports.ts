@@ -30,6 +30,7 @@ import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
 import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
+import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { storeMedia } from "./mediaFiles.ts"
 import type { ParsedFile, StChatHeader, StPersona, StSettings, StSpeaker } from "./ops.ts"
 import { Report } from "./stReport.ts"
@@ -439,6 +440,8 @@ export class StImports extends Context.Service<
             report.count(countAs, "failed")
             return { outcome: result("failed", "it couldn't be stored"), entity: null, created: false, note: null }
           }
+          // The grid's thumbnails, on this import's lane, so its cards show from disk.
+          yield* prepareAvatarThumbnails(formats, config.dataDir, parsed.media)
           const entry: LibraryEntry = {
             refId: imported.ref.id,
             entityId: imported.ref.entityId,

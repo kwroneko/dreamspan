@@ -36,49 +36,59 @@ const onDisk = (files: ReadonlyMap<string, Uint8Array>) => {
 }
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })("ST folder import by path", (it) => {
-  it.effect("imports a folder read from its path, a large chat in parts, as the upload does", () =>
-    Effect.gen(function* () {
-      const api = yield* client()
-      const root = onDisk(folder)
-      const { job, report, notSent } = yield* importStPath(api, root, "ST/data/default-user/")
-      assert.strictEqual(job.status, "complete")
-      assert.strictEqual(job.mode, "path")
-      assert.strictEqual(job.source, `${realpathSync(root)}/ST/data/default-user`)
-      assert.deepStrictEqual(notSent, [])
-      // The same counts as the upload of this folder (stImport.test.ts), plus the large chat.
-      assert.deepStrictEqual({ ...report!.counts.card }, { added: 6, updated: 0, unchanged: 0, skipped: 0, failed: 0 })
-      assert.strictEqual(report!.counts.persona?.added, 2)
-      assert.strictEqual(report!.counts.lorebook?.added, 1)
-      assert.strictEqual(report!.counts.preset?.added, 1)
-      assert.deepStrictEqual({ ...report!.counts.chat }, { added: 5, updated: 1, unchanged: 0, skipped: 1, failed: 0 })
-      assert.strictEqual(report!.counts.group_chat?.added, 1)
-      assert.strictEqual(report!.greetingOnly, 1)
-      assert.deepStrictEqual(
-        report!.links.map((choice) => choice.path),
-        ["chats/Twin/Twin - who.jsonl"]
-      )
-      assert.strictEqual(job.filesDone, job.filesTotal)
-      assert.strictEqual(job.bytesDone, job.bytesTotal)
-      // The large chat went in whole: every message of it.
-      assert.isAtLeast(report!.messages, 9_000)
+  it.effect(
+    "imports a folder read from its path, a large chat in parts, as the upload does",
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const root = onDisk(folder)
+        const { job, report, notSent } = yield* importStPath(api, root, "ST/data/default-user/")
+        assert.strictEqual(job.status, "complete")
+        assert.strictEqual(job.mode, "path")
+        assert.strictEqual(job.source, `${realpathSync(root)}/ST/data/default-user`)
+        assert.deepStrictEqual(notSent, [])
+        // The same counts as the upload of this folder (stImport.test.ts), plus the large chat.
+        assert.deepStrictEqual(
+          { ...report!.counts.card },
+          { added: 6, updated: 0, unchanged: 0, skipped: 0, failed: 0 }
+        )
+        assert.strictEqual(report!.counts.persona?.added, 2)
+        assert.strictEqual(report!.counts.lorebook?.added, 1)
+        assert.strictEqual(report!.counts.preset?.added, 1)
+        assert.deepStrictEqual(
+          { ...report!.counts.chat },
+          { added: 5, updated: 1, unchanged: 0, skipped: 1, failed: 0 }
+        )
+        assert.strictEqual(report!.counts.group_chat?.added, 1)
+        assert.strictEqual(report!.greetingOnly, 1)
+        assert.deepStrictEqual(
+          report!.links.map((choice) => choice.path),
+          ["chats/Twin/Twin - who.jsonl"]
+        )
+        assert.strictEqual(job.filesDone, job.filesTotal)
+        assert.strictEqual(job.bytesDone, job.bytesTotal)
+        // The large chat went in whole: every message of it.
+        assert.isAtLeast(report!.messages, 9_000)
 
-      // Choosing the card for the chat the import couldn't link reads it from disk again.
-      const [choice] = report!.links
-      const linked = yield* api.LinkStImportChat({
-        importId: job.id,
-        path: choice!.path,
-        card: choice!.candidates[0]!.entityId
-      })
-      assert.strictEqual(linked.outcome, "added")
-      const after = yield* api.GetStImport({ importId: job.id })
-      assert.lengthOf(after.report!.links, 0)
-      assert.strictEqual(after.report!.counts.chat?.added, 6)
-      // A chat that isn't waiting for a card, and a path outside the folder, are refused.
-      for (const path of [choice!.path, "../secret.key", "chats/Twin/../../secret.key"]) {
-        const error = yield* Effect.flip(api.LinkStImportChat({ importId: job.id, path, card: "none" }))
-        assert.strictEqual(error._tag, "StFolderUnreadable")
-      }
-    })
+        // Choosing the card for the chat the import couldn't link reads it from disk again.
+        const [choice] = report!.links
+        const linked = yield* api.LinkStImportChat({
+          importId: job.id,
+          path: choice!.path,
+          card: choice!.candidates[0]!.entityId
+        })
+        assert.strictEqual(linked.outcome, "added")
+        const after = yield* api.GetStImport({ importId: job.id })
+        assert.lengthOf(after.report!.links, 0)
+        assert.strictEqual(after.report!.counts.chat?.added, 6)
+        // A chat that isn't waiting for a card, and a path outside the folder, are refused.
+        for (const path of [choice!.path, "../secret.key", "chats/Twin/../../secret.key"]) {
+          const error = yield* Effect.flip(api.LinkStImportChat({ importId: job.id, path, card: "none" }))
+          assert.strictEqual(error._tag, "StFolderUnreadable")
+        }
+      }),
+    // Over 9,000 messages through the server and its workers: well past 30 s on a loaded host.
+    180_000
   )
 
   it.effect("links a chat after the import's run is gone, knowing the folder again", () =>

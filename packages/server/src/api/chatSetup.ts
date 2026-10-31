@@ -172,7 +172,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
                   Effect.forkIn(scope)
                 )
           ),
-          Effect.map(({ fresh: _, ...library }) => new ShellLibrary(library))
+          // Decoded from the reader already: no second validation of thousands of rows.
+          Effect.map(({ fresh: _, ...library }) => new ShellLibrary(library, { disableChecks: true }))
         )
       ).pipe(internal("GetShellLibrary")),
     SetChatPin: (input) =>

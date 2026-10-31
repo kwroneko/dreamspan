@@ -2,24 +2,17 @@
 // walk is kept in `fork_summaries` (db/forkSummaries.ts); a read computes only the chats whose
 // summaries are stale and returns them for the caller to store, so its cost is the cards and
 // forks, plus the messages of what changed since.
-import type { CastCard, ChatId, EntityId, SlotId } from "@rp/shared/chat.ts"
+import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
+import { modelName } from "@rp/shared/cardNames.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
-import { loadCards } from "./cards.ts"
-import {
-  computeForkSummaries,
-  FORK_SUMMARY_FORMAT,
-  type ForkSummary,
-  fromRow,
-  summaryStamps,
-  type SummaryRow
-} from "./forkSummaries.ts"
+import { computeForkSummaries, FORK_SUMMARY_FORMAT, type ForkSummary, summaryStamps } from "./forkSummaries.ts"
 import type { ReadOps } from "./ops.ts"
-import type { ChatRow, ForkRow } from "./rows.ts"
+import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
 
 type Fork = { -readonly [K in keyof Omit<ShellFork, "cast">]: Omit<ShellFork, "cast">[K] } & { cast: Array<CastCard> }
@@ -30,47 +23,139 @@ export const makeShellReadHandlers = Effect.gen(function* () {
   return {
     ShellLibrary: ({ userId, recompute }) =>
       Effect.gen(function* () {
-        const cards = (yield* loadCards(sql, userId, null)).map(({ card }) => card).filter((c) => !c.inBin)
-        const byCard = new Map(cards.map((c) => [c.entityId as string, c]))
+        // Each live card's names, avatar and lorebook flags, read by SQLite from its head
+        // revision: the shell never needs the rest of the document, which can be megabytes.
         // A card's own recency is its addition or a later edit of the user's (an import's
         // revisions aren't: an imported card dates from ST's create_date, §13).
-        const metadata = yield* sql<{
+        const rows = yield* sql<{
           id: string
           created_at: number
           edited: number
           ref: string
           revision: string
+          name: string
+          nickname: string
           subtitle: string
+          avatar: string | null
+          book: number
+          book_name: string
+          book_entries: number | null
           persona: number
         }>`
         SELECT e.id, e.created_at, max(e.created_at, coalesce((SELECT max(x.created_at) FROM entity_revisions x
-            WHERE x.entity_id = e.id AND x.origin <> 'import'), 0)) AS edited, r.id AS ref,
-          rev.id AS revision, CASE WHEN json_type(rev.doc_json, '$.character_version') = 'text' THEN json_extract(rev.doc_json, '$.character_version') ELSE '' END AS subtitle, EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
+            WHERE x.entity_id = e.id AND x.origin <> 'import'), 0)) AS edited, r.id AS ref, rev.id AS revision,
+          CASE WHEN json_type(rev.doc_json, '$.name') = 'text' THEN rev.doc_json ->> '$.name' ELSE '' END AS name,
+          CASE WHEN json_type(rev.doc_json, '$.nickname') = 'text' THEN rev.doc_json ->> '$.nickname' ELSE '' END AS nickname,
+          CASE WHEN json_type(rev.doc_json, '$.character_version') = 'text' THEN rev.doc_json ->> '$.character_version' ELSE '' END AS subtitle,
+          CASE WHEN json_type(rev.doc_json, '$.avatar_media_id') = 'text' THEN rev.doc_json ->> '$.avatar_media_id' END AS avatar,
+          json_type(rev.doc_json, '$.character_book') = 'object' AS book,
+          CASE WHEN json_type(rev.doc_json, '$.character_book.name') = 'text'
+            THEN trim(rev.doc_json ->> '$.character_book.name') ELSE '' END AS book_name,
+          CASE WHEN json_type(rev.doc_json, '$.character_book.entries') = 'array'
+            THEN json_array_length(rev.doc_json, '$.character_book.entries') ELSE 0 END AS book_entries,
+          EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
         JOIN entity_revisions rev ON rev.id = r.head_revision_id
-        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL`
+        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
+        ORDER BY r.label COLLATE NOCASE, e.id`
+        // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
+        const trusted = { disableChecks: true } as const
+        const byCard = new Map(
+          rows.map((m) => [
+            m.id,
+            new CastCard(
+              {
+                entityId: m.id as EntityId,
+                name: m.name,
+                label: m.name,
+                modelName: modelName({ name: m.name, nickname: m.nickname }),
+                subtitle: m.subtitle,
+                persona: m.persona === 1,
+                inBin: false,
+                lorebook: m.book === 1,
+                ...(m.book === 1 && m.book_name !== "" ? { lorebookName: m.book_name } : {}),
+                ...(m.book === 1 ? { lorebookEntries: m.book_entries ?? 0 } : {}),
+                avatarMediaId: m.avatar
+              },
+              trusted
+            )
+          ])
+        )
+        const metadata = rows
         // The stamps first: what follows is read in the same transaction.
         const userStamp = yield* summaryStamps(sql, userId)
-        const chats = yield* sql<ChatRow & { shell_stamp: number }>`SELECT * FROM chats
-          WHERE owner_user_id = ${userId} AND deleted_at IS NULL`
-        const records = yield* sql<ForkRow>`SELECT f.* FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
+        // Each live fork with its chat and its stored summary, when there is one: only what the shell shows.
+        const joinedRows = yield* sql<{
+          id: string
+          chat_id: string
+          tip_slot_id: string | null
+          name: string | null
+          pinned_at: number | null
+          created_at: number
+          title: string
+          current_fork_id: string | null
+          shell_stamp: number
+          s_format: number | null
+          s_stamp: number | null
+          s_user_stamp: number | null
+          preview: string | null
+          messages: number | null
+          leaf: string | null
+          end_at: number | null
+          lists: string | null
+        }>`
+          SELECT f.id, f.chat_id, f.tip_slot_id, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
+            c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
+            s.messages, s.leaf, s.end_at,
+            CASE WHEN s.fork_id IS NOT NULL
+              THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ']' END AS lists
+          FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
           WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
-        const chatById = new Map(chats.map((c) => [c.id, c]))
+        const records = joinedRows as unknown as ReadonlyArray<ForkRow>
+        const chatById = new Map(
+          joinedRows.map((r) => [
+            r.chat_id,
+            { id: r.chat_id, title: r.title, current_fork_id: r.current_fork_id, shell_stamp: r.shell_stamp }
+          ])
+        )
         const stored = new Map<string, ForkSummary>()
         if (recompute !== true) {
-          const rows = yield* sql<SummaryRow & { format: number; stamp: number; user_stamp: number; current: number }>`
-            SELECT s.*, c.shell_stamp AS current FROM chats c CROSS JOIN forks f ON f.chat_id = c.id
-            CROSS JOIN fork_summaries s ON s.fork_id = f.id
-            WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND f.deleted_at IS NULL`
-          for (const row of rows)
-            if (row.format === FORK_SUMMARY_FORMAT && row.stamp === row.current && row.user_stamp === userStamp)
-              stored.set(row.fork_id, fromRow(row))
+          for (const row of joinedRows) {
+            if (
+              row.lists === null ||
+              row.s_format !== FORK_SUMMARY_FORMAT ||
+              row.s_stamp !== row.shell_stamp ||
+              row.s_user_stamp !== userStamp
+            )
+              continue
+            const [cast, joined, departed, activity] = JSON.parse(row.lists) as [
+              Array<string>,
+              Array<string>,
+              Array<string>,
+              ForkSummary["activity"]
+            ]
+            stored.set(row.id, {
+              forkId: row.id,
+              chatId: row.chat_id,
+              preview: row.preview ?? "",
+              messages: row.messages ?? 0,
+              leaf: row.leaf,
+              endAt: row.end_at,
+              cast,
+              joined,
+              departed,
+              activity
+            })
+          }
         }
         const stale = new Set(records.flatMap((r) => (stored.has(r.id) ? [] : [r.chat_id])))
-        const computed = yield* computeForkSummaries(
-          sql,
-          records.filter((r) => stale.has(r.chat_id))
-        )
+        // A stale chat's walk needs its forks' full rows.
+        const staleRecords =
+          stale.size === 0
+            ? []
+            : yield* sql<ForkRow>`SELECT f.* FROM json_each(${JSON.stringify([...stale])}) j
+                CROSS JOIN forks f ON f.chat_id = j.value WHERE f.deleted_at IS NULL`
+        const computed = yield* computeForkSummaries(sql, staleRecords)
         const fresh = new Map<string, Array<ForkSummary>>()
         for (const summary of computed) {
           stored.set(summary.forkId, summary)
@@ -129,22 +214,28 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             const latest =
               spoke[0]?.f ??
               [...used].sort((a, b) => Number(b.leaf !== null) - Number(a.leaf !== null) || b.recentAt - a.recentAt)[0]
-            return new ShellCard({
-              card: new CardUsage({
-                entityId: c.entityId,
-                refId: m.ref as RefId,
-                headRevisionId: m.revision as RevisionId,
-                label: c.label,
-                subtitle: m.subtitle,
-                name: c.name,
-                avatarMediaId: c.avatarMediaId,
-                chats: used.length,
-                lastMessageAt: spoke[0]?.a.at ?? null,
-                latestChatId: (latest?.chat.id as ChatId) ?? null
-              }),
-              createdAt: m.created_at,
-              recentAt: Math.max(m.edited, spoke[0]?.a.at ?? 0)
-            })
+            return new ShellCard(
+              {
+                card: new CardUsage(
+                  {
+                    entityId: c.entityId,
+                    refId: m.ref as RefId,
+                    headRevisionId: m.revision as RevisionId,
+                    label: c.label,
+                    subtitle: m.subtitle,
+                    name: c.name,
+                    avatarMediaId: c.avatarMediaId,
+                    chats: used.length,
+                    lastMessageAt: spoke[0]?.a.at ?? null,
+                    latestChatId: (latest?.chat.id as ChatId) ?? null
+                  },
+                  trusted
+                ),
+                createdAt: m.created_at,
+                recentAt: Math.max(m.edited, spoke[0]?.a.at ?? 0)
+              },
+              trusted
+            )
           })
         const [prefs] = yield* sql<{
           pins_collapsed: number
@@ -153,7 +244,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           cards: shellCards,
           forks: forks
             .sort((a, b) => b.recentAt - a.recentAt || a.chat.id.localeCompare(b.chat.id))
-            .map((f) => new ShellFork({ ...f, cast: f.cast.map((c) => c.entityId) })),
+            .map((f) => new ShellFork({ ...f, cast: f.cast.map((c) => c.entityId) }, trusted)),
           people: [...people.values()],
           pinsCollapsed: prefs?.pins_collapsed === 1,
           fresh: [...fresh].map(([chatId, list]) => ({
