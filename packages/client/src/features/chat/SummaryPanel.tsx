@@ -18,7 +18,7 @@ import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { SummaryDraft } from "./summaryDraft.ts"
-import { summaryPreviews } from "./presentation.tsx"
+import { summaryPanelSections, summaryPreviews } from "./presentation.tsx"
 
 function Problem({ error }: { error: AppError | null }) {
   return error ? (
@@ -710,6 +710,7 @@ export function SummaryPanel({
           </ul>
         </section>
       )}
+      <SlotOutlet slot={summaryPanelSections} props={{ session }} />
     </div>
   )
 }

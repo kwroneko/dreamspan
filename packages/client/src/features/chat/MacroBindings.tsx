@@ -1,9 +1,16 @@
-// Stable prompt names are independent of the turn's speaker (DESIGN §5.3).
+// The names the prompt uses for you and the character, `{{user}}` and `{{char}}` (DESIGN §5.3):
+// they follow the cast, and can be kept fixed so choosing a speaker never changes them.
 import { useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { Disclosure } from "../../ui/Surface.tsx"
 import { useCast } from "./cast.ts"
 import type { ChatSession } from "./session.ts"
+
+const LABELS = {
+  user: { label: "Your name in prompts", follows: "Follows the persona you play" },
+  char: { label: "The character's name in prompts", follows: "Follows who's in the chat" }
+} as const
 
 function Binding({
   session,
@@ -31,6 +38,7 @@ function Binding({
     setPending(false)
     setError(result.ok ? null : result.error.message)
   }
+  const { label, follows } = LABELS[name]
   return (
     <form
       className="flex flex-col gap-2"
@@ -40,19 +48,27 @@ function Binding({
       }}
     >
       <Field
-        label={`{{${name}}}`}
-        description={`${pinned ? "Pinned" : name === "user" ? "Follows the personas you play" : "Follows the cast"}: ${resolved || "(empty)"}`}
+        label={
+          <>
+            {label} <code className="font-mono text-xs font-normal text-muted">{`{{${name}}}`}</code>
+          </>
+        }
+        description={
+          <span className="line-clamp-3 [overflow-wrap:anywhere]">
+            {pinned ? "Kept as you set it." : `${follows}: ${resolved || "(empty)"}.`}
+          </span>
+        }
         error={error}
       >
         <Input value={text} onValueChange={setText} disabled={pending} />
       </Field>
       <div className="flex flex-wrap gap-2">
         <Button type="submit" pending={pending} disabled={pending || (pinned && text === resolved)}>
-          {pinned ? `Update {{${name}}} pin` : `Pin {{${name}}}`}
+          {pinned ? "Keep this name instead" : "Keep this name"}
         </Button>
         {pinned && (
           <Button type="button" variant="ghost" disabled={pending} onClick={() => void write(null)}>
-            Unpin {`{{${name}}}`}
+            {name === "user" ? "Follow the persona again" : "Follow the cast again"}
           </Button>
         )}
       </div>
@@ -65,22 +81,23 @@ export function MacroBindings({ session }: { session: ChatSession }) {
   const forkId = useSyncExternalStore(session.subscribe, () => session.snapshot().forkId)
   if (!cast) return null
   return (
-    <section aria-label="Prompt names" className="flex flex-col gap-4">
-      <h3 className="text-xs font-medium tracking-wide text-muted uppercase">Prompt names</h3>
-      <p className="text-sm text-muted">
-        These names fill preset and chat macros. Choosing a speaker keeps them stable. Card text uses its own character
-        name. Pin the current value or type an override; unpin to follow the cast again. Changes apply from here on in
-        this fork and rebuild the prompt cache.
-      </p>
-      {(["user", "char"] as const).map((name) => (
-        <Binding
-          key={`${session.id}:${forkId}:${name}`}
-          session={session}
-          name={name}
-          resolved={cast.macroNames[name]}
-          pinned={cast.macroBindings[name] !== undefined}
-        />
-      ))}
-    </section>
+    <Disclosure title="Advanced: names in prompts">
+      <section aria-label="Names in prompts" className="flex flex-col gap-4">
+        <p className="text-sm text-muted">
+          The prompt preset and notes call you and the character by these names. They follow who's in the chat; keep
+          one to stop it changing, say when you speak as someone else. A card's own text always uses its own name. A
+          change applies from the latest message on, on this branch, and the next reply re-reads the whole prompt.
+        </p>
+        {(["user", "char"] as const).map((name) => (
+          <Binding
+            key={`${session.id}:${forkId}:${name}`}
+            session={session}
+            name={name}
+            resolved={cast.macroNames[name]}
+            pinned={cast.macroBindings[name] !== undefined}
+          />
+        ))}
+      </section>
+    </Disclosure>
   )
 }

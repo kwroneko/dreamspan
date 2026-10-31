@@ -100,6 +100,18 @@ const paths = {
   type: ["M4 7V4h16v3", "M9 20h6", "M12 4v16"],
   snippet: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
   /** Opens something large: a field over the page. */
+  /** Speak now: the model writes this character's turn. */
+  play: ["M6 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 6 4.5z"],
+  volume: [
+    "M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6a1.4 1.4 0 0 1-1 .4H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z",
+    "M16 9a5 5 0 0 1 0 6",
+    "M19.4 18.4a9 9 0 0 0 0-12.8"
+  ],
+  muted: [
+    "M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6a1.4 1.4 0 0 1-1 .4H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z",
+    "m22 9-6 6",
+    "m16 9 6 6"
+  ],
   expand: ["M15 3h6v6", "M9 21H3v-6", "m21 3-7 7", "m3 21 7-7"]
 } as const
 
@@ -122,7 +134,7 @@ export function Icon({
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={name === "stop" || filled ? "currentColor" : "none"}
+      fill={name === "stop" || name === "play" || filled ? "currentColor" : "none"}
       stroke="currentColor"
       strokeWidth={name === "more" ? 3 : 2}
       strokeLinecap="round"

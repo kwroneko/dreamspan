@@ -21,6 +21,8 @@ export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.se
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
   "chat.note-actions"
 )
+/** Sections of the Summaries tab after the summaries themselves: their settings, say. */
+export const summaryPanelSections = defineSlot<{ session: ChatSession }>("chat.summary-panel-sections")
 export const summarySettingFields = defineSlot<ComponentProps<typeof LcmFields>>("chat.summary-setting-fields")
 export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>("chat.timeline-boundaries")
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")

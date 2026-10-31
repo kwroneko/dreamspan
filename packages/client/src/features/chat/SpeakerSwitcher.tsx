@@ -7,8 +7,9 @@
 // filtered in memory and only the first rows are drawn.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
-import { type KeyboardEvent, memo, useEffect, useId, useMemo, useRef, useState } from "react"
+import { type KeyboardEvent, memo, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { buttonClass } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
@@ -143,7 +144,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   onPick,
   persona = false,
   pending = false,
-  onNone
+  onNone,
+  trigger
 }: {
   /** The library's cards, which the persona is picked from. */
   listCards?: () => Promise<Outcome<ReadonlyArray<CastCard>>>
@@ -161,6 +163,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   pending?: boolean
   /** Offered as "No persona". */
   onNone?: () => void
+  /** Its button's text in place of the chip ("Switch persona" where the name is already shown). */
+  trigger?: ReactNode
 }) {
   const view = useCast()
   const [open, setOpen] = useState(false)
@@ -268,9 +272,14 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       initialFocus={search}
       triggerLabel={persona ? `Playing as ${name}. Change your persona` : `Speaking as ${name}. Change the speaker`}
       hint={persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`}
-      triggerClassName="inline-flex h-9 max-w-44 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 pr-2.5 pl-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus"
+      triggerClassName={
+        trigger
+          ? buttonClass("secondary")
+          : "inline-flex h-9 max-w-44 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 pr-2.5 pl-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus"
+      }
       title={persona ? "Your persona" : "Speak as"}
       trigger={
+        trigger ?? (
         <>
           {speaker !== null ? (
             <Avatar
@@ -285,6 +294,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
           <span className="min-w-0 truncate">{name}</span>
           <ChevronIcon up />
         </>
+        )
       }
     >
       <Input
