@@ -6,6 +6,8 @@ import { makeRegistry } from "../../registry.ts"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 
 export interface PendingComposerContext {
+  /** A phone: the speaker chip is its portrait, Generate an icon, as at the chat's composer. */
+  readonly compact: boolean
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
   readonly submitHint: string
   readonly speakerName: string

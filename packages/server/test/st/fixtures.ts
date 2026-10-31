@@ -204,7 +204,7 @@ const lorebook = () => {
 
 /** The parser tests' preset fixtures, each with its round trip (ARCHITECTURE §9). */
 const presetRoundTrips = () =>
-  ["default", "full", "legacy"].map((name) => {
+  ["default", "full", "legacy", "rewrite"].map((name) => {
     const text = readFileSync(new URL(`../fixtures/presets/${name}.json`, import.meta.url), "utf8")
     const { document, report } = importStPreset(text)
     if (document === null) throw new Error(`fixture preset ${name} doesn't import`)

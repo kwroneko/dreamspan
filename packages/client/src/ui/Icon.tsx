@@ -100,7 +100,13 @@ const paths = {
   type: ["M4 7V4h16v3", "M9 20h6", "M12 4v16"],
   snippet: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
   /** Opens something large: a field over the page. */
-  expand: ["M15 3h6v6", "M9 21H3v-6", "m21 3-7 7", "m3 21 7-7"]
+  expand: ["M15 3h6v6", "M9 21H3v-6", "m21 3-7 7", "m3 21 7-7"],
+  guidance: [
+    "M12 13v8",
+    "M12 3v3",
+    "M18 6a2 2 0 0 1 1.39.56l2.3 2.22a1 1 0 0 1 0 1.44l-2.3 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.39-.56l-2.3-2.22a1 1 0 0 1 0-1.44l2.3-2.22A2 2 0 0 1 6 6z"
+  ],
+  play: ["M6 4v16a1 1 0 0 0 1.5.87l13-8a1 1 0 0 0 0-1.74l-13-8A1 1 0 0 0 6 4z"]
 } as const
 
 export type IconName = keyof typeof paths
@@ -122,7 +128,7 @@ export function Icon({
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill={name === "stop" || filled ? "currentColor" : "none"}
+      fill={name === "stop" || name === "play" || filled ? "currentColor" : "none"}
       stroke="currentColor"
       strokeWidth={name === "more" ? 3 : 2}
       strokeLinecap="round"

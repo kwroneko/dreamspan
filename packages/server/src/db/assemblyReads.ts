@@ -6,8 +6,9 @@ import { inFork, viewAt } from "./forkState.ts"
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { withAssemblyModules } from "../assembler/modules.ts"
-import { WorkerAssembler } from "../assembler/assembler.ts"
+import { type PreparedRewrite, WorkerAssembler } from "../assembler/assembler.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type { EffectivePreset } from "@rp/shared/inspectorApi.ts"
 import { wireContext } from "../assembler/wire.ts"
@@ -28,15 +29,21 @@ import type { RequestImage } from "../assembler/types.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousStartIn } from "./historyStart.ts"
 import { displayThrough } from "./displayPath.ts"
-import { readDefaults, readGlobalLorebooks } from "./generationSettings.ts"
+import { readDefaults, readGlobalLorebooks, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
 import { query } from "./tx.ts"
 
+/** How many generating replies' prepared rewrites a worker keeps, and for how long unused. */
+const LIVE_MAX = 32
+const LIVE_IDLE_MS = 10 * 60_000
+
 export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const assembler = yield* WorkerAssembler
+  /** Prepared rewrites of replies generating now (`RewriteLive`), least recently used first. */
+  const live = new Map<string, { readonly prepared: PreparedRewrite; used: number }>()
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
@@ -321,6 +328,83 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
     GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),
+    GetGlobalRegex: ({ userId }) => readGlobalRegex(sql, userId).pipe(query("GetGlobalRegex")),
+
+    RawVersionText: ({ userId, versionId }) =>
+      sql<{ raw_content: string | null; raw_reasoning: string | null; raw_sections: string | null }>`
+        SELECT v.raw_content, v.raw_reasoning, v.raw_sections FROM versions v
+        JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+        WHERE v.id = ${versionId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL
+          AND v.deleted_at IS NULL AND v.purged_at IS NULL`.pipe(
+        Effect.flatMap(([row]) =>
+          row
+            ? Effect.succeed({
+                content: row.raw_content,
+                reasoning: row.raw_reasoning,
+                sections: row.raw_sections === null ? null : (JSON.parse(row.raw_sections) as ReplySections)
+              })
+            : Effect.fail(new NotFound({ entity: "version", id: versionId }))
+        ),
+        query("RawVersionText")
+      ),
+
+    // A generating reply's text so far, through the scripts its finish runs (ARCHITECTURE §12,
+    // "Live rewrites"). The stages run once per reply in each worker; later calls only run them.
+    RewriteLive: ({ userId, chatId, forkId, slotId, versionId, items }) =>
+      Effect.gen(function* () {
+        const key = `${userId}:${versionId}`
+        const now = Date.now()
+        for (const [k, entry] of live) if (now - entry.used > LIVE_IDLE_MS) live.delete(k)
+        let entry = live.get(key)
+        if (entry === undefined) {
+          const [version] = yield* sql<{ speaker_entity_id: string | null; writer: "human" | "model" }>`
+            SELECT v.speaker_entity_id, v.writer FROM versions v
+            JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+            WHERE v.id = ${versionId} AND s.id = ${slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+          if (!version) return yield* new NotFound({ entity: "version", id: versionId })
+          const sources = sqlSources(sql, { userId, chatId, slotId, versionId })
+          const prepared = yield* assembler
+            .prepareRewrite(
+              { now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random },
+              { edit: false, speaker: version.speaker_entity_id, writer: version.writer }
+            )
+            .pipe(Effect.provide(sources.layer), inFork(sql, chatId, forkId, slotId))
+          entry = { prepared, used: now }
+          if (live.size >= LIVE_MAX) live.delete(live.keys().next().value!)
+          live.set(key, entry)
+        } else {
+          // Most recently used last, so the oldest goes first.
+          live.delete(key)
+          live.set(key, entry)
+          entry.used = now
+        }
+        if (!entry.prepared.active) return { active: false, texts: [], ms: 0 }
+        const start = performance.now()
+        const texts = entry.prepared.run(items)
+        return { active: true, texts, ms: performance.now() - start }
+      }).pipe(query("RewriteLive")),
+
+    // Text being written, through the scripts at its position (ARCHITECTURE §12, "Rewrites").
+    RewriteText: ({ userId, chatId, forkId, at, edit, items }) =>
+      Effect.gen(function* () {
+        const existing = "versionId" in at
+        const [version] = existing
+          ? yield* sql<{ speaker_entity_id: string | null; writer: "human" | "model" }>`
+              SELECT v.speaker_entity_id, v.writer FROM versions v
+              JOIN slots s ON s.id = v.slot_id JOIN chats c ON c.id = s.chat_id
+              WHERE v.id = ${at.versionId} AND s.id = ${at.slotId} AND c.id = ${chatId} AND c.owner_user_id = ${userId}`
+          : []
+        if (existing && !version) return yield* new NotFound({ entity: "version", id: at.versionId })
+        const sources = existing
+          ? sqlSources(sql, { userId, chatId, slotId: at.slotId, versionId: at.versionId })
+          : sqlSources(sql, { userId, chatId, next: true, leafSlotId: at.leafSlotId })
+        const options = existing
+          ? { edit, speaker: version!.speaker_entity_id, writer: version!.writer }
+          : { edit, speaker: at.speakerEntityId, writer: "human" as const }
+        return yield* assembler
+          .rewrite({ now: Date.now(), timeZone: "UTC", frozen: {}, random: Math.random }, options, items)
+          .pipe(Effect.provide(sources.layer))
+      }).pipe(inFork(sql, chatId, forkId, "versionId" in at ? at.slotId : at.leafSlotId), query("RewriteText")),
     GetCardPromptUse: ({ userId }) => readCardPromptUse(sql, userId).pipe(query("GetCardPromptUse"))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
   return handlers

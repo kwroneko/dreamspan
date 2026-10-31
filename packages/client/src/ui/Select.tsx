@@ -11,13 +11,19 @@ export function Select<Value>({
   value,
   onValueChange,
   placeholder,
-  className = ""
+  className = "",
+  ariaLabel,
+  shown
 }: {
   items: ReadonlyArray<SelectItem<Value>>
   value: Value | null
   onValueChange: (value: Value) => void
   placeholder?: string
   className?: string
+  /** Its name when no `Field` labels it: a table cell's, say. */
+  ariaLabel?: string
+  /** What the closed picker shows for a value, when its label is too long for the space. */
+  shown?: (value: Value) => string
 }) {
   return (
     <BaseSelect.Root
@@ -28,9 +34,12 @@ export function Select<Value>({
       }}
     >
       <BaseSelect.Trigger
+        aria-label={ariaLabel}
         className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-base text-text shadow-xs outline-none select-none focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-disabled:opacity-50 sm:text-sm ${className}`}
       >
-        <BaseSelect.Value className="truncate data-placeholder:text-muted" placeholder={placeholder} />
+        <BaseSelect.Value className="truncate data-placeholder:text-muted" placeholder={placeholder}>
+          {shown ? (current: Value | null) => (current === null ? placeholder : shown(current)) : undefined}
+        </BaseSelect.Value>
         <BaseSelect.Icon className="text-muted">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M11 10H5l3 3.5zm0-4H5l3-3.5z" />
@@ -67,5 +76,64 @@ export function Select<Value>({
         </BaseSelect.Positioner>
       </BaseSelect.Portal>
     </BaseSelect.Root>
+  )
+}
+
+/**
+ * The browser's own picker, for a dense table where hundreds of rows each have one: far
+ * lighter than `Select`, and the phone's native list. `shown` is the closed picker's text,
+ * when the labels are too long for the space; the open list shows the labels.
+ */
+export function NativeSelect<Value extends string>({
+  items,
+  value,
+  onValueChange,
+  ariaLabel,
+  shown,
+  className = ""
+}: {
+  items: ReadonlyArray<SelectItem<Value>>
+  value: Value
+  onValueChange: (value: Value) => void
+  ariaLabel: string
+  shown?: (value: Value) => string
+  className?: string
+}) {
+  return (
+    <span
+      className={`relative flex h-9 min-w-0 items-center rounded-md border border-border bg-surface text-text shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40 ${className}`}
+    >
+      {/* The closed picker's text: the select itself is transparent over it. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 flex items-center justify-between gap-1 px-2 text-sm"
+      >
+        <span className="truncate">
+          {shown ? shown(value) : (items.find((item) => item.value === value)?.label ?? value)}
+        </span>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="currentColor"
+          aria-hidden="true"
+          className="shrink-0 text-muted"
+        >
+          <path d="M11 10H5l3 3.5zm0-4H5l3-3.5z" />
+        </svg>
+      </span>
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onValueChange(event.currentTarget.value as Value)}
+        className="absolute inset-0 w-full cursor-pointer appearance-none rounded-md bg-transparent text-transparent outline-none [&>option]:bg-surface [&>option]:text-text"
+      >
+        {items.map((item) => (
+          <option key={item.value} value={item.value}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+    </span>
   )
 }

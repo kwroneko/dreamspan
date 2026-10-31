@@ -25,7 +25,7 @@ export function GlobalLorebook({ refId, call }: { refId: RefId; call: Caller }) 
           (result) => result.ok && setGlobal(result.value.includes(refId))
         )
       }
-      description="Its entries are read in every chat, unless a chat turns it off in its Lorebooks tab."
+      description="Unless a chat turns it off in its Lorebooks tab."
     >
       Use in every chat
     </Switch>

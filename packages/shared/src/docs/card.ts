@@ -4,6 +4,7 @@
 import { Schema } from "effect"
 import { LorebookDoc } from "./lorebook.ts"
 import { Placement } from "./note.ts"
+import { RegexScript } from "./regexScript.ts"
 
 export const CARD_SCHEMA_VERSION = 1
 
@@ -62,6 +63,17 @@ export const CardDoc = Schema.Struct({
   character_book: Schema.optionalKey(LorebookDoc),
   /** Deprecated: read only by the migration that made them card notes (DESIGN §5.0). */
   modules: Schema.optionalKey(Schema.Array(CardModule)),
+  /**
+   * ST's scoped regex scripts (`extensions.regex_scripts`), as data: the importer moves them
+   * here and the exporter writes them back. Absent: none.
+   */
+  regex: Schema.optionalKey(Schema.Array(RegexScript)),
+  /**
+   * The user allowed this card's regex scripts to run, as ST asks once per character. None of
+   * `regex` runs until this is true. Import never sets it and export never writes it (DESIGN
+   * §11: a file never grants itself capabilities); only SetRegexApproval changes it.
+   */
+  regex_approved: Schema.optionalKey(Schema.Boolean),
   /** The card's `data.extensions`, verbatim, with plugin namespaces (PLUGINS §3.3). */
   extensions: Extensions,
   /** Keys in `data` the specs don't define, kept so an export writes them back. */

@@ -66,6 +66,8 @@ describe("composer contributions", () => {
             })
           )
           yield* scoped(() => composerControls.disable("composer.generate"))
+          // The guidance switch shares the box's last buttons; this checks Send alone.
+          yield* scoped(() => composerControls.disable("composer.guidance"))
           expect(markup(createElement(ComposerControls, { placement: "actions", context }))).toBe(
             "<p>Synthetic send</p>"
           )

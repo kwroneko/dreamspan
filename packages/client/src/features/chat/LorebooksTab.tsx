@@ -1,16 +1,21 @@
-// The side panel's Lorebooks tab (DESIGN §1.3, §5.0): the lorebooks this chat reads, by kind:
-// each member card's own, those added to this chat, and the user's global ones, each with its
-// switch, and the "only below the history" setting. Every switch is a state event at the leaf
-// shown, so from there on, on this branch; marking a book global is the user's, for every chat.
+// The side panel's Lorebooks tab (DESIGN §1.3, §5.0): the books this chat reads, first (each
+// member card's own, those added to this chat, the user's global ones), each with its switch,
+// Open (its editor over the chat) and ⋯; then where entries go.
+// Every switch is a state event at the leaf shown, so from there on, on this branch; marking a
+// book global is the user's, for every chat.
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { useEffect, useId, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
+import { Segmented } from "../../ui/Segmented.tsx"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { useCast } from "./cast.ts"
@@ -22,8 +27,6 @@ interface Library {
   /** Cards' refs by entity, to open a card's own lorebook in the editor. */
   readonly cards: ReadonlyMap<string, LibraryRef>
 }
-
-const open = `${buttonClass("ghost")} h-8 px-2`
 
 /** The library's lorebooks not attached yet, filtered as typed. */
 function Picker({
@@ -94,58 +97,94 @@ const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "e
 
 const heading = "text-xs font-medium tracking-wide text-muted uppercase"
 
-/** The setting, with what it does and why, right where the books are chosen (DESIGN §1.3). */
-function BelowHistory({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/**
+ * Where this chat's entries go (DESIGN §1.3): below the history, or where each entry's position
+ * says. One setting for every book in the chat, so it follows the books, in plain words.
+ */
+function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
   const [open, setOpen] = useState(false)
   return (
-    <section aria-label="Placement" className="flex items-start gap-2 rounded-md border border-border p-3">
-      <div className="min-w-0 flex-1">
-        <Switch
-          checked={on}
-          onCheckedChange={onChange}
-          description={
-            on
-              ? "Every entry goes after the history, whatever its position, and is looked at again every turn."
-              : "Entries go where their positions say. Entries placed above the history stay until the history's start next moves."
-          }
+    <section aria-labelledby="lore-placement" className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <h3 id="lore-placement" className={heading}>
+          Where entries go
+        </h3>
+        <Popover
+          open={open}
+          onOpenChange={setOpen}
+          trigger="?"
+          triggerLabel="Why below the history"
+          hint="Why?"
+          triggerClassName={`${buttonClass("ghost")} h-7 w-7 px-0`}
+          title="Below the history"
+          side="bottom"
+          align="end"
         >
-          Only below the history
-        </Switch>
+          <p className="text-sm">
+            The model's provider keeps what it has already read (its cache) only up to the first thing that changed. An
+            entry that comes and goes above the history changes everything after it, so the whole history is read again,
+            slowly and at full price.
+          </p>
+          <p className="text-sm">
+            Below the history, every entry that matches goes in one block just after the history, and is looked at again
+            every turn. Where each entry says, as in SillyTavern, entries above the history stay until the history's
+            start next moves.
+          </p>
+        </Popover>
       </div>
-      <Popover
-        open={open}
-        onOpenChange={setOpen}
-        trigger="?"
-        triggerLabel="Why only below the history"
-        hint="Why?"
-        triggerClassName={`${buttonClass("ghost")} h-8 w-8 px-0`}
-        title="Only below the history"
-        side="bottom"
-        align="end"
-      >
-        <p className="text-sm">
-          <strong>Why:</strong> the model's provider keeps what it has already read (its cache) only up to the first
-          thing that changed. An entry that comes and goes above the history changes everything after it, so the whole
-          history is read again, slowly and at full price.
-        </p>
-        <p className="text-sm">
-          <strong>How:</strong> with this on, each entry's position is overridden: every activated entry goes in one
-          block just after the history, at the start of the tail, and is looked at again every turn.
-        </p>
-        <p className="text-sm text-muted">
-          Off, entries go where their positions say. Those above the history are kept until the history's start next
-          moves, then looked at again; those after it are looked at every turn, as in SillyTavern.
-        </p>
-      </Popover>
+      <Segmented
+        label="Where entries go"
+        wrap
+        value={on ? "below" : "positions"}
+        onValueChange={(next) => onChange(next === "below")}
+        options={[
+          { value: "below", label: "Below the history" },
+          { value: "positions", label: "Where each entry says" }
+        ]}
+      />
+      <p className="text-sm text-muted">For every book in this chat.</p>
     </section>
   )
 }
 
-function Row({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
+interface BookRow {
+  readonly key: string
+  readonly name: string
+  /** Where it comes from: a character's, added to this chat, global. */
+  readonly from: string
+  readonly on: boolean
+  readonly onChange: (on: boolean) => void
+  /** The library entry its Open button edits: the book, or the card holding it. */
+  readonly ref: LibraryRef | undefined
+  readonly openLabel: string
+  readonly menu: ReadonlyArray<ActionMenuItem>
+}
+
+/** A book: its switch in this chat, Open (its editor over the chat) and its ⋯. */
+function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void }) {
   return (
-    <li className="flex items-start gap-2 py-3 first:pt-0">
-      <div className="min-w-0 flex-1">{children}</div>
-      {actions}
+    <li className="flex items-start gap-1 py-2.5">
+      <div className="min-w-0 flex-1">
+        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from}>
+          {row.name}
+        </Switch>
+      </div>
+      {row.ref && (
+        <Button
+          variant="ghost"
+          className="h-8 shrink-0 px-2"
+          aria-label={row.openLabel}
+          onClick={() => onOpen(row.ref!)}
+        >
+          Open
+        </Button>
+      )}
+      {row.menu.length > 0 ? (
+        <ActionMenu label={`More for ${row.name}`} trigger={<Icon name="more" />} items={row.menu} />
+      ) : (
+        // The ⋯'s room, so every row's Open lines up.
+        <span aria-hidden="true" className="w-8 shrink-0" />
+      )}
     </li>
   )
 }
@@ -205,118 +244,94 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
   const byId = new Map((library?.lorebooks ?? []).map((ref) => [ref.id as string, ref]))
   const addable = (library?.lorebooks ?? []).filter((ref) => !attached.includes(ref.id))
   const nameOf = (id: string) => byId.get(id)?.label ?? (library === null ? "…" : "A lorebook no longer in the library")
-  const openLink = (id: string, name: string) => {
-    const ref = byId.get(id)
-    return (
-      ref && (
-        <Link to="/library/$refId" params={{ refId: ref.id }} className={open} aria-label={`Open ${name}`}>
-          Open
-        </Link>
-      )
-    )
+  const navigate = useNavigate()
+  const workspace = usePresetWorkspace()
+  // Over the chat, as the preset and card editors open from the panel; a page without one.
+  const openEditor = (ref: LibraryRef) =>
+    workspace ? workspace.open(ref.id) : void navigate({ to: "/library/$refId", params: { refId: ref.id } })
+  const detach = (id: string, next: boolean) => {
+    setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
+    void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
   }
+  const globalItem = (id: string, global: boolean): ActionMenuItem => ({
+    label: "Use in every chat",
+    checked: global,
+    onCheckedChange: (next) => void setGlobal(id as LibraryRef["id"], next)
+  })
+  const rows: ReadonlyArray<BookRow> = [
+    ...own.map((card): BookRow => {
+      const on = !cast?.cardLorebooksOff.includes(card.entityId)
+      return {
+        key: `card:${card.entityId}`,
+        name: card.lorebookName ?? `${card.name}'s lorebook`,
+        from: [
+          on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
+          ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
+        ].join(" · "),
+        on,
+        onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
+        ref: library?.cards.get(card.entityId),
+        openLabel: `Open ${card.name}'s card, where its book is edited`,
+        menu: []
+      }
+    }),
+    ...sections.added.map(({ id, on }): BookRow => {
+      const name = nameOf(id)
+      return {
+        key: `added:${id}`,
+        name,
+        from: [
+          on ? "Added to this chat" : "Taken off this chat",
+          ...(byId.get(id)?.subtitle ? [byId.get(id)!.subtitle] : [])
+        ].join(" · "),
+        on,
+        onChange: (next) => detach(id, next),
+        ref: byId.get(id),
+        openLabel: `Open ${name}`,
+        menu: byId.has(id) ? [globalItem(id, false)] : []
+      }
+    }),
+    ...sections.global.map(({ id, on, attached: alsoAdded }): BookRow => {
+      const name = nameOf(id)
+      return {
+        key: `global:${id}`,
+        name,
+        from: on ? "Global: used in every chat" : "Global, but off in this chat",
+        on,
+        onChange: (next) => void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next }),
+        ref: byId.get(id),
+        openLabel: `Open ${name}`,
+        menu: [
+          globalItem(id, true),
+          // A separate attachment from before it was global: either use sends its entries.
+          ...(alsoAdded
+            ? [
+                {
+                  label: "Also added to this chat",
+                  checked: attached.includes(id as LibraryRef["id"]),
+                  onCheckedChange: (next: boolean) => detach(id, next)
+                }
+              ]
+            : [])
+        ]
+      }
+    })
+  ]
   return (
     <div className="flex flex-col gap-5">
-      <BelowHistory
-        on={cast?.loreBelowHistory ?? true}
-        onChange={(on) => void change({ _tag: "LoreBelowHistory", on })}
-      />
-      <p className="text-sm text-muted">Changes apply from the latest message on, on this branch.</p>
-
-      <section aria-labelledby="lore-own" className="flex flex-col gap-2">
-        <h3 id="lore-own" className={heading}>
-          Characters' books
+      <section aria-labelledby="lore-in-chat" className="flex flex-col gap-1">
+        <h3 id="lore-in-chat" className={heading}>
+          Lorebooks in this chat
         </h3>
-        {own.length === 0 ? (
-          <p className="text-sm text-muted">No character in this chat has a lorebook of its own.</p>
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted">
+            {cast === null || library === null ? "Loading…" : "No lorebook is in this chat. Add one below."}
+          </p>
         ) : (
-          <ul aria-label="Characters' books" className="flex flex-col divide-y divide-border">
-            {own.map((card) => {
-              const ref = library?.cards.get(card.entityId)
-              const on = !cast?.cardLorebooksOff.includes(card.entityId)
-              const from = [
-                `${card.name}'s own lorebook`,
-                ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
-              ].join(" · ")
-              return (
-                <Row
-                  key={card.entityId}
-                  actions={
-                    ref && (
-                      <Link
-                        to="/library/$refId"
-                        params={{ refId: ref.id }}
-                        className={open}
-                        aria-label={`Open ${card.name}'s card`}
-                      >
-                        Open card
-                      </Link>
-                    )
-                  }
-                >
-                  <Switch
-                    checked={on}
-                    onCheckedChange={(next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next })}
-                    description={
-                      on
-                        ? from
-                        : `${from}. Off in this chat, so its entries aren't sent. An import from SillyTavern turns it off where ST hadn't imported the card's book either.`
-                    }
-                  >
-                    {card.lorebookName ?? `${card.name}'s lorebook`}
-                  </Switch>
-                </Row>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="lore-added" className="flex flex-col gap-2">
-        <h3 id="lore-added" className={heading}>
-          Added to this chat
-        </h3>
-        {sections.added.length === 0 ? (
-          <p className="text-sm text-muted">None yet.</p>
-        ) : (
-          <ul aria-label="Added to this chat" className="flex flex-col divide-y divide-border">
-            {sections.added.map(({ id, on }) => {
-              const name = nameOf(id)
-              return (
-                <Row
-                  key={id}
-                  actions={
-                    <>
-                      {openLink(id, name)}
-                      {byId.has(id) && (
-                        <Button
-                          variant="ghost"
-                          className="h-8 px-2"
-                          aria-label={`Use ${name} in every chat`}
-                          onClick={() => void setGlobal(id as LibraryRef["id"], true)}
-                        >
-                          Use in every chat
-                        </Button>
-                      )}
-                    </>
-                  }
-                >
-                  <Switch
-                    checked={on}
-                    onCheckedChange={(next) => {
-                      setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
-                      void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
-                    }}
-                    description={[
-                      on ? "Added to this chat" : "Taken off this chat",
-                      ...(byId.get(id)?.subtitle ? [byId.get(id)!.subtitle] : [])
-                    ].join(" · ")}
-                  >
-                    {name}
-                  </Switch>
-                </Row>
-              )
-            })}
+          <ul aria-label="Lorebooks in this chat" className="flex flex-col divide-y divide-border">
+            {rows.map((row) => (
+              <Book key={row.key} row={row} onOpen={openEditor} />
+            ))}
           </ul>
         )}
         {adding ? (
@@ -330,78 +345,16 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             onClose={() => setAdding(false)}
           />
         ) : (
-          <div>
+          <div className="pt-1">
             <Button onClick={() => setAdding(true)} disabled={library === null}>
-              Add lorebook
+              Add a lorebook
             </Button>
           </div>
         )}
       </section>
 
-      <section aria-labelledby="lore-global" className="flex flex-col gap-2">
-        <h3 id="lore-global" className={heading}>
-          Global
-        </h3>
-        {sections.global.length === 0 ? (
-          <p className="text-sm text-muted">
-            No global lorebook. A book marked “Use in every chat”, here or in the library, is listed here.
-          </p>
-        ) : (
-          <ul aria-label="Global lorebooks" className="flex flex-col divide-y divide-border">
-            {sections.global.map(({ id, on, attached: alsoAdded }) => {
-              const name = nameOf(id)
-              return (
-                <Row
-                  key={id}
-                  actions={
-                    <>
-                      {openLink(id, name)}
-                      <Button
-                        variant="ghost"
-                        className="h-8 px-2"
-                        aria-label={`Stop using ${name} in every chat`}
-                        onClick={() => void setGlobal(id as LibraryRef["id"], false)}
-                      >
-                        Not global
-                      </Button>
-                    </>
-                  }
-                >
-                  <Switch
-                    checked={on}
-                    onCheckedChange={(next) =>
-                      void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next })
-                    }
-                    description={
-                      on
-                        ? alsoAdded
-                          ? "Global use · also has a separate chat attachment"
-                          : "Used in every chat"
-                        : "Used in every chat, but off in this one"
-                    }
-                  >
-                    {name}
-                  </Switch>
-                  {alsoAdded && (
-                    <div className="mt-3">
-                      <Switch
-                        checked={attached.includes(id as LibraryRef["id"])}
-                        onCheckedChange={(next) => {
-                          setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
-                          void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
-                        }}
-                        description="Independent of global use. Either use can send this book's entries."
-                      >
-                        Added to this chat: {name}
-                      </Switch>
-                    </div>
-                  )}
-                </Row>
-              )
-            })}
-          </ul>
-        )}
-      </section>
+      <Placement on={cast?.loreBelowHistory ?? true} onChange={(on) => void change({ _tag: "LoreBelowHistory", on })} />
+      <p className="text-sm text-muted">Switches apply from the latest message on, on this branch.</p>
       {(error ?? action.error) && (
         <p role="alert" className="text-sm text-danger">
           {(error ?? action.error)!.message}

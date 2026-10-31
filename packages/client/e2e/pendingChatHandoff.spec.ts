@@ -171,17 +171,15 @@ for (const target of ["card", "group"] as const) {
       const generate = page.getByRole("button", { name: /^Generate / })
       await expect(composer).toBeEditable()
       await expect(send).toBeDisabled()
-      await expect(generate).toHaveText("Generate")
+      // One bar at every width, as the chat's composer: on a phone, Generate is an icon.
+      await expect(generate).toHaveText(width === 390 ? "" : "Generate")
       await expect(send.locator("svg")).toBeVisible()
       const empty = (await composer.boundingBox())!
       expect(empty.height).toBeLessThan(45)
-      for (const control of [send, generate]) {
+      for (const control of [send, generate, page.getByRole("switch", { name: "Guidance", exact: true })]) {
         const box = (await control.boundingBox())!
-        if (width === 390) expect(box.y).toBeGreaterThanOrEqual(empty.y + empty.height)
-        else {
-          expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
-          expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
-        }
+        expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
+        expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
         expect(box.x + box.width).toBeLessThanOrEqual(width)
       }
       const pendingUrl = page.url()

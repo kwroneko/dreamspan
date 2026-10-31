@@ -1,6 +1,9 @@
 // The assembler's sources over an in-memory chat, for tests and the ST harness: the same
 // pipeline the reader worker runs, without a database.
 import type { CardDoc } from "@rp/shared/docs/card.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ReplySections } from "@rp/shared/replySections.ts"
+import type { RewriteOptions } from "../../src/assembler/scriptSources.ts"
 import type { NoteDoc } from "@rp/shared/docs/note.ts"
 import type { LegacyPresetDoc as PresetDoc } from "@rp/shared/docs/preset.ts"
 import type { FoldableEvent } from "@rp/shared/state.ts"
@@ -25,7 +28,7 @@ export interface FixtureMessage {
   readonly inContext?: boolean
   readonly frozen?: Readonly<Record<string, string>>
   /** A reply's leading tagged sections in their tags (spec/REPLY-SECTIONS.md). */
-  readonly sectionsPrefix?: string
+  readonly replySections?: ReplySections
   /** A template whose variable writes are recorded already. */
   readonly written?: boolean
 }
@@ -52,6 +55,8 @@ export interface AssemblyFixture {
   readonly lorebooks?: ReadonlyArray<LorebookInput>
   /** The ids of `lorebooks` the user marked global. */
   readonly globalLorebooks?: ReadonlyArray<string>
+  /** The account's global regex scripts. */
+  readonly globalRegex?: ReadonlyArray<RegexScript>
   readonly notes?: ReadonlyArray<NoteInput>
   /** A note's earlier revisions, newest first, by note: its history before the revision it's at. */
   readonly noteRevisions?: Readonly<Record<string, ReadonlyArray<{ readonly revision: string; readonly doc: NoteDoc }>>>
@@ -76,7 +81,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
     written: m.written ?? false,
     inContext: m.inContext ?? (m.content.length > 0 || (m.images?.length ?? 0) > 0),
     ...(m.images === undefined ? {} : { images: m.images }),
-    ...(m.sectionsPrefix === undefined ? {} : { sectionsPrefix: m.sectionsPrefix }),
+    ...(m.replySections === undefined ? {} : { replySections: m.replySections }),
     sentAt: 0,
     versions: 1,
     selectedOrdinal: 0
@@ -123,6 +128,7 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           .map((c) => ({ entity: c.entity, ref: `ref-${c.entity}`, revision: `rev-${c.entity}`, doc: c.doc }))
       ),
     globalLorebooks: Effect.succeed(fixture.globalLorebooks ?? []),
+    globalRegex: Effect.succeed(fixture.globalRegex ?? []),
     lorebooks: (refs) => Effect.succeed((fixture.lorebooks ?? []).filter((b) => refs.includes(b.id))),
     notes: (cards) =>
       Effect.succeed(
@@ -188,4 +194,28 @@ export const assembleFixture = (
       ...(options.summaryJob ? { summaryJob: options.summaryJob } : {}),
       random: options.random ?? (() => 0.5)
     })
+    .pipe(Effect.provide(fixtureSources(fixture)))
+
+/** A fixture's text as it's written at its target (`RewriteText`), through the scripts with neither flag. */
+/** A rewrite prepared once for a fixture, as a streaming reply's is (`RewriteLive`). */
+export const prepareFixture = (fixture: AssemblyFixture, options: RewriteOptions, using?: Assembler) =>
+  (using ?? assembler())
+    .prepareRewrite(
+      { now: fixture.now ?? Date.UTC(2026, 0, 1), timeZone: "UTC", frozen: {}, random: () => 0.5 },
+      options
+    )
+    .pipe(Effect.provide(fixtureSources(fixture)))
+
+export const rewriteFixture = (
+  fixture: AssemblyFixture,
+  options: RewriteOptions,
+  items: ReadonlyArray<{ readonly text: string; readonly kind: "message" | "reasoning" }>,
+  using?: Assembler
+) =>
+  (using ?? assembler())
+    .rewrite(
+      { now: fixture.now ?? Date.UTC(2026, 0, 1), timeZone: "UTC", frozen: {}, random: () => 0.5 },
+      options,
+      items
+    )
     .pipe(Effect.provide(fixtureSources(fixture)))

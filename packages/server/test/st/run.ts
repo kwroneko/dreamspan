@@ -16,6 +16,7 @@ import { join } from "node:path"
 import { chromium } from "@playwright/test"
 import { checkPreviewOverlap } from "./previewOverlap.ts"
 import { compareAssembly } from "./assembly.ts"
+import { compareRewrites } from "./rewrites.ts"
 import { checkFixtures, compareMacros, comparePresetRoundTrips } from "./comparisons.ts"
 import { removeOrphans, ST_IMAGE, ST_VERSION, startSt } from "./container.ts"
 import { fixtureSet } from "./fixtures.ts"
@@ -64,6 +65,7 @@ const main = async () => {
     ["fixtures", async () => [await checkFixtures(browser, st.url, mock, fixtures)]],
     ["macros", () => compareMacros(browser, st.url, fixtures)],
     ["presets", async () => [await comparePresetRoundTrips(browser, st.url, mock, fixtures)]],
+    ["rewrites", async () => [await compareRewrites(browser, st.url, fixtures)]],
     [
       "assembly",
       async () => [
