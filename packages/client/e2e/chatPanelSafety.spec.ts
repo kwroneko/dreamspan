@@ -3,6 +3,7 @@
 // composer's model follows changes made elsewhere, hidden or not; one setting's change leaves
 // the others;
 // the own lorebook is named; the panel's remembered tab is each user's own.
+import { panelTab } from "./support/panel.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -92,7 +93,7 @@ test("switching tabs saves text typed while a summary draft save was in flight",
   await box.fill("First edit held in flight.")
   await expect.poll(() => release !== null).toBe(true)
   await box.fill("The latest text typed before switching tabs.")
-  await page.getByRole("tab", { name: "Notes", exact: true }).click()
+  await panelTab(page, "Notes")
   release!()
   await expect
     .poll(
@@ -104,7 +105,7 @@ test("switching tabs saves text typed while a summary draft save was in flight",
         )?.content
     )
     .toBe("The latest text typed before switching tabs.")
-  await page.getByRole("tab", { name: "Summaries", exact: true }).click()
+  await panelTab(page, "Summaries")
   await expectTextBox(box, "The latest text typed before switching tabs.")
 })
 
@@ -117,11 +118,11 @@ test("summary text survives a failed save and switching to another tab", async (
   await expect(box).toBeEnabled()
   await server().pause()
   await box.fill("Offline text must survive switching tabs.")
-  await page.getByRole("tab", { name: "Notes", exact: true }).click()
+  await panelTab(page, "Notes")
   // The edit is still there behind the other tab.
-  await page.getByRole("tab", { name: "Summaries", exact: true }).click()
+  await panelTab(page, "Summaries")
   await expectTextBox(box, "Offline text must survive switching tabs.")
-  await page.getByRole("tab", { name: "Notes", exact: true }).click()
+  await panelTab(page, "Notes")
   await server().restart()
   // A reload too: the copy in this browser goes to the server when the edit opens again.
   await page.goto(`${server().url}/chats/${chat.id}?panel=summaries`)
@@ -231,7 +232,7 @@ test("the panel's remembered tab is the signed-in user's own", async ({ page }) 
   await expect(page.getByRole("tabpanel", { name: "Notes" })).toBeVisible()
   // A click records it, as a user opening the tab does.
   await page.getByRole("tab", { name: "Cast", exact: true }).click()
-  await page.getByRole("tab", { name: "Notes", exact: true }).click()
+  await panelTab(page, "Notes")
   await admin((api) =>
     api.CreateUser({ handle: "panel-other", displayName: "Other", role: "user", password: "other-password-123" })
   )

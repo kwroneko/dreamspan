@@ -8,13 +8,16 @@ const loadNotes = () =>
     )
   }))
 
-/** Built-ins use exactly the descriptor API available to a plugin. */
+/**
+ * Built-ins use exactly the descriptor API available to a plugin. Tools go in the order they're
+ * used most: this chat's settings, model and preset, notes, lorebooks, summaries; then the rest.
+ */
 export const registerPanels = () => [
   chatPanels.register({
     id: "model",
     label: "Model",
-    order: 10,
-    icon: "sliders",
+    order: 20,
+    icon: "model",
     component: lazyPanel(
       () =>
         import("./GenerationControls.tsx").then((m) => ({
@@ -28,25 +31,19 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "preset",
     label: "Prompt preset",
-    order: 20,
-    icon: "sliders",
+    order: 30,
+    icon: "preset",
     component: lazyPanel(
       () => import("./PresetTab.tsx").then((m) => ({ default: ({ view }: PanelProps) => <m.PresetTab view={view} /> })),
       "preset"
     )
   }),
   chatPanels.register({
-    id: "portrait",
-    label: "Portrait",
-    order: 30,
-    icon: "people",
-    component: lazyPanel(() => import("../../ui/Portrait.tsx").then((m) => ({ default: m.PortraitView })), "portrait")
-  }),
-  chatPanels.register({
     id: "cast",
     label: "Cast",
-    order: 40,
+    order: 10,
     icon: "people",
+    placement: "cast",
     component: lazyPanel(
       () =>
         import("./CastTab.tsx").then((m) => ({
@@ -59,8 +56,8 @@ export const registerPanels = () => [
     id: "chat",
     default: true,
     label: "This chat",
-    order: 50,
-    icon: "sliders",
+    order: 10,
+    icon: "chat",
     component: lazyPanel(
       () =>
         import("./ThisChatTab.tsx").then((m) => ({
@@ -72,7 +69,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "lorebooks",
     label: "Lorebooks",
-    order: 60,
+    order: 50,
     icon: "book",
     component: lazyPanel(
       () =>
@@ -85,7 +82,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "notes",
     label: "Notes",
-    order: 70,
+    order: 40,
     icon: "note",
     component: lazyPanel(loadNotes, "notes"),
     preload: () => {
@@ -95,7 +92,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "summaries",
     label: "Summaries",
-    order: 80,
+    order: 60,
     icon: "summary",
     component: lazyPanel(
       () =>
@@ -114,7 +111,7 @@ export const registerPanels = () => [
     id: "history",
     label: "History edits",
     order: 90,
-    icon: "edit",
+    icon: "history",
     component: lazyPanel(
       () =>
         import("./HistoryPanel.tsx").then((m) => ({

@@ -353,6 +353,32 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
       })
   },
+  GetShellCards: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.GetShellCards(), (data) =>
+        assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
+      )
+  },
+  GetShellForks: {
+    probe: (actor, owner) =>
+      Effect.map(
+        actor.api.GetShellForks({
+          entity: null,
+          chat: owner.chat.chatId,
+          chats: [owner.chat.chatId],
+          search: "",
+          sort: "recent",
+          sections: [
+            { id: "all", limit: 100 },
+            { id: "chats", limit: 100 }
+          ]
+        }),
+        (data) => {
+          for (const section of data.sections) assert.strictEqual(section.total, 0)
+          assert.deepStrictEqual(data.people, [])
+        }
+      )
+  },
   SetChatPin: {
     probe: (actor, owner) =>
       refused(actor.api.SetChatPin({ chatId: owner.chat.chatId, leaf: owner.chat.slotId, pinned: true }), "NotFound")
@@ -1870,24 +1896,64 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   ListFolder: { adminOnly: (actor) => refused(actor.api.ListFolder({ path: null }), "Forbidden") },
   ScanStFolder: { adminOnly: (actor) => refused(actor.api.ScanStFolder({ path: "/" }), "Forbidden") },
-  ImportStFolderFile: {
+  StartStPathImport: {
+    adminOnly: (actor) => refused(actor.api.StartStPathImport({ path: "/", prefix: "" }), "Forbidden")
+  },
+  LinkStImportChat: {
     adminOnly: (actor, owner) =>
       Effect.gen(function* () {
         const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
-        yield* refused(
-          actor.api.ImportStFolderFile({
-            importId,
-            root: "/",
-            path: "settings.json",
-            size: 0,
-            modifiedMs: 0,
-            start: 0,
-            part: 0,
-            card: null,
-            orphan: false
-          }),
-          "Forbidden"
-        )
+        yield* refused(actor.api.LinkStImportChat({ importId, path: "chats/A/A.jsonl", card: "none" }), "Forbidden")
+      })
+  },
+  FinishStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.FinishStImport({ importId, notSent: [] }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImport({ importId })).job.status, "running")
+      })
+  },
+  ListStImports: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        assert.isFalse((yield* actor.api.ListStImports()).some((job) => job.id === importId))
+        assert.isTrue((yield* owner.api.ListStImports()).some((job) => job.id === importId))
+      })
+  },
+  GetStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.GetStImport({ importId }), "NotFound")
+      })
+  },
+  SeenStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* owner.api.FinishStImport({ importId, notSent: [] })
+        yield* refused(actor.api.SeenStImport({ importId }), "NotFound")
+        assert.isFalse((yield* owner.api.GetStImport({ importId })).job.seen)
+      })
+  },
+  CancelStImport: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* refused(actor.api.CancelStImport({ importId }), "NotFound")
+        assert.strictEqual((yield* owner.api.GetStImport({ importId })).job.status, "running")
+      })
+  },
+  ClearStImports: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const { importId } = yield* owner.api.StartStImport({ unsupported: [] })
+        yield* owner.api.FinishStImport({ importId, notSent: [] })
+        assert.strictEqual((yield* actor.api.ClearStImports({ importId })).cleared, 0)
+        yield* actor.api.ClearStImports({ importId: null })
+        yield* owner.api.GetStImport({ importId })
       })
   },
   UnhideImportedRun: {
@@ -2129,6 +2195,22 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   },
   CardFamily: {
     probe: (actor, owner) => refused(actor.api.CardFamily({ entityId: owner.editor.cardEntityId }), "NotFound")
+  },
+  CardFamilyIndex: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // A family of the actor's own: listed for the actor, never for the owner, and the
+        // owner's cards never in the actor's list.
+        const fork = yield* actor.api.CreateCard({ label: "Index fork", name: "Index fork" })
+        yield* actor.api.SetCardParent({ entityId: fork.entityId, parentEntityId: actor.editor.cardEntityId })
+        const mine = yield* actor.api.CardFamilyIndex()
+        assert.strictEqual(mine.find((card) => card.entityId === actor.editor.cardEntityId)?.forks, 1)
+        assert.strictEqual(mine.find((card) => card.entityId === fork.entityId)?.forks, 0)
+        assert.isFalse(mine.some((card) => card.entityId === owner.editor.cardEntityId))
+        const theirs = new Set<string>([fork.entityId, actor.editor.cardEntityId])
+        assert.isFalse((yield* owner.api.CardFamilyIndex()).some((card) => theirs.has(card.entityId)))
+        yield* actor.api.SetCardParent({ entityId: fork.entityId, parentEntityId: null })
+      })
   },
   SetCardParent: {
     probe: (actor, owner) =>

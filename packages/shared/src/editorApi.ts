@@ -48,7 +48,9 @@ export class SavedRef extends Schema.Class<SavedRef>("SavedRef")({
    * How many earlier texts of the saved drafts went to the bin's recovered texts: from
    * before a destructive change, or another tab's text a save went over.
    */
-  recovered: Schema.Int
+  recovered: Schema.Int,
+  /** The fields those texts came from. */
+  recoveredFields: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** Everything the editor opens with, read in one snapshot. */
@@ -261,6 +263,14 @@ export class EditorApi extends RpcGroup.make(
     },
     success: LibraryRef,
     error: Schema.Union([...Writes])
+  }),
+  /**
+   * The caller's cards that have a fork family, each with its own forks' count: what a card's
+   * fork badge shows, in one read for a whole grid (CardFamily is the tree, read when opened).
+   */
+  Rpc.make("CardFamilyIndex", {
+    success: Schema.Array(Schema.Struct({ entityId: EntityId, forks: Schema.Int })),
+    error: Schema.Union([...Errors])
   }),
   /** Every card connected to this one by forking: the same tree from any member. */
   Rpc.make("CardFamily", {

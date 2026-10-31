@@ -27,6 +27,7 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   dataDir: tempDir("server"),
   dbReaders: 1,
   formatWorkers: 1,
+  thumbnailWorkers: 1,
   dbAllowNetworkFs: false,
   dbWorkers: "source",
   authMode: "single",

@@ -1,4 +1,4 @@
-// The end-of-request instruction (DESIGN §2.2, owner 2026-10-29): three texts of the preset,
+// The end-of-request instruction (DESIGN §2.2, owner 2026-10-29): four texts of the preset,
 // outside the prompt order, sent as the request's last message. Fixed: not draggable, not
 // deletable, with no condition or generation types.
 import { DIRECTION_PROMPT, END_OF_REQUEST } from "@rp/shared/endOfRequest.ts"

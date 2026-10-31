@@ -8,12 +8,13 @@ import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, posted, serverLayer, serverPort, testConfig } from "./support/config.ts"
+import { importStPath } from "./support/stUpload.ts"
 
 // Exercise the production worker boundary; source-worker startup was also checked in the initial focused runs.
 const layer = () => serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)
 describe("independent shell reads", () => {
   it.live(
-    "orders character activity independently of unrelated chat activity; preserves Created and advances Recent on revisions",
+    "orders character activity independently of unrelated chat activity; preserves Created; Recent is the latest activity in any chat the card joined, never a revision",
     () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -85,7 +86,11 @@ describe("independent shell reads", () => {
           aria.createdAt,
           (yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === a.entityId)!.createdAt
         )
-        assert.isAtLeast(aria.recentAt, aria.createdAt)
+        // Aria's latest chat activity is Bryn's turn in the first chat, after her own in the second.
+        const latest = Math.max(...data.forks.filter((f) => f.joined.includes(a.entityId)).map((f) => f.recentAt))
+        assert.strictEqual(latest, data.forks.find((f) => f.chat.id === first.chat.id)!.recentAt)
+        assert.strictEqual(aria.recentAt, latest)
+        assert.isNull(data.cards.find((c) => c.card.entityId === versioned.entityId)!.recentAt)
         yield* Effect.sleep("5 millis")
         const me = yield* api.Whoami()
         yield* (yield* Writer).EditRef({
@@ -98,7 +103,7 @@ describe("independent shell reads", () => {
         })
         const changed = (yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === a.entityId)!
         assert.strictEqual(changed.createdAt, aria.createdAt)
-        assert.isAbove(changed.recentAt, aria.recentAt)
+        assert.strictEqual(changed.recentAt, aria.recentAt)
       }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 
@@ -207,23 +212,7 @@ describe("independent shell reads", () => {
         const source = { ...stCardV2(), create_date: "2024-7-12@01h31m37s" }
         const file = join(folder, "characters", "Wren.json")
         writeFileSync(file, json(source))
-        const importFolder = () =>
-          Effect.gen(function* () {
-            const scan = yield* api.ScanStFolder({ path: folder })
-            const { importId } = yield* api.StartStImport({ unsupported: [] })
-            const f = scan.files[0]!
-            return yield* api.ImportStFolderFile({
-              importId,
-              root: scan.root,
-              path: f.path,
-              size: f.size,
-              modifiedMs: f.modifiedMs,
-              start: 0,
-              part: 0,
-              card: null,
-              orphan: false
-            })
-          })
+        const importFolder = () => importStPath(api, folder)
         yield* importFolder()
         const first = (yield* api.GetShellLibrary()).cards[0]!
         assert.strictEqual(first.createdAt, stored)
@@ -242,20 +231,7 @@ describe("independent shell reads", () => {
           json({ ...source, create_date: "invalid", data: { ...source.data, name: "Fallback" } })
         )
         const fallbackCtime = statSync(join(folder, "characters", "Fallback.json")).ctimeMs
-        const scan = yield* api.ScanStFolder({ path: folder })
-        const { importId } = yield* api.StartStImport({ unsupported: [] })
-        const f = scan.files.find((f) => f.path.endsWith("Fallback.json"))!
-        yield* api.ImportStFolderFile({
-          importId,
-          root: scan.root,
-          path: f.path,
-          size: f.size,
-          modifiedMs: f.modifiedMs,
-          start: 0,
-          part: 0,
-          card: null,
-          orphan: false
-        })
+        yield* importFolder()
         assert.closeTo(
           (yield* api.GetShellLibrary()).cards.find((c) => c.card.name === "Fallback")!.createdAt,
           fallbackCtime,

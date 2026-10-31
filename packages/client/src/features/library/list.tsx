@@ -119,7 +119,7 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
       {persona(item) && <Badge tone="accent">Persona</Badge>}
       {entry.kind !== "card" && entry.refKind === "variant" && <Badge>variant</Badge>}
       {entry.updateAvailable && <Badge tone="warning">update available</Badge>}
-      {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} />}
+      {entry.kind === "card" && seen && <CardSurface placement="badge" entityId={entry.entityId} label={entry.label} />}
     </>
   )
 }

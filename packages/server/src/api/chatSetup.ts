@@ -8,7 +8,7 @@ import type { RevisionId } from "@rp/shared/library.ts"
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
-import { Cast, type CastChange, ChatNote } from "@rp/shared/chatSetupApi.ts"
+import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { isAuthorNote, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
@@ -17,6 +17,7 @@ import { ChatHub } from "../chat/ChatHub.ts"
 import { Generations } from "../chat/Generations.ts"
 import { Generator } from "../chat/Generator.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import type { ChatSummaries } from "../db/forkSummaries.ts"
 import { freezeTemplate } from "../chat/macros.ts"
 import { internal } from "./internal.ts"
 
@@ -78,8 +79,24 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
   const hub = yield* ChatHub
   const generations = yield* Generations
   const generator = yield* Generator
+  // Background writes outlive the request, not the server.
+  const scope = yield* Effect.scope
 
   const userId = Effect.map(CurrentUser, (user) => user.id)
+
+  /** Stores the summaries a shell read computed, after answering, in parts so other writes go between them. */
+  const storeFresh = (id: UserId, fresh: ReadonlyArray<ChatSummaries>) =>
+    fresh.length === 0
+      ? Effect.void
+      : Effect.forEach(
+          Array.from({ length: Math.ceil(fresh.length / 250) }, (_, n) => fresh.slice(n * 250, n * 250 + 250)),
+          (chats) => writer.StoreForkSummaries({ userId: id, chats }),
+          { discard: true }
+        ).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("StoreForkSummaries failed", cause)),
+          Effect.forkIn(scope),
+          Effect.asVoid
+        )
 
   /**
    * The fold of the chat's state after `slotId`, with every card it names, by the name and
@@ -152,8 +169,30 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
     })
 
   const handlers = {
+    // The summaries the read computed are stored after the answer, never before it
+    // (db/forkSummaries.ts); a failure only leaves them for the next read to compute.
     GetShellLibrary: () =>
-      Effect.flatMap(userId, (id) => reader.ShellLibrary({ userId: id })).pipe(internal("GetShellLibrary")),
+      Effect.flatMap(userId, (id) =>
+        reader.ShellLibrary({ userId: id }).pipe(
+          Effect.tap(({ fresh }) => storeFresh(id, fresh)),
+          // Decoded from the reader already: no second validation of thousands of rows.
+          Effect.map(({ fresh: _, ...library }) => new ShellLibrary(library, { disableChecks: true }))
+        )
+      ).pipe(internal("GetShellLibrary")),
+    GetShellCards: () =>
+      Effect.flatMap(userId, (id) =>
+        reader.ShellCards({ userId: id }).pipe(
+          Effect.tap(({ fresh }) => storeFresh(id, fresh)),
+          Effect.map(({ fresh: _, ...cards }) => new ShellCards(cards, { disableChecks: true }))
+        )
+      ).pipe(internal("GetShellCards")),
+    GetShellForks: (view) =>
+      Effect.flatMap(userId, (id) =>
+        reader.ShellForks({ userId: id, view }).pipe(
+          Effect.tap(({ fresh }) => storeFresh(id, fresh)),
+          Effect.map(({ fresh: _, ...forks }) => new ShellForks(forks, { disableChecks: true }))
+        )
+      ).pipe(internal("GetShellForks")),
     SetChatPin: (input) =>
       Effect.flatMap(userId, (id) => writer.SetChatPin({ ...input, userId: id })).pipe(internal("SetChatPin")),
     SetHomePinsCollapsed: (input) =>

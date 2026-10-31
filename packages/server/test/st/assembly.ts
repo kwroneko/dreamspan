@@ -92,7 +92,13 @@ const END_OF_REQUEST =
   "the end-of-request instruction is one user message, the request's last, with the speaker's turn text (the group nudge whenever the model writes as a character, the impersonation prompt when it writes as the persona) and the direction; ST sends the nudge only in groups, at its prompt position, and the impersonation prompt at its marker"
 
 /** Our pieces that make the end-of-request message, in the order they end it. */
-const END_PIECES = ["preset:groupNudge", "preset:impersonationPrompt", "preset:directionPrompt", "assembler:last-turn"]
+const END_PIECES = [
+  "preset:groupNudge",
+  "preset:impersonationPrompt",
+  "preset:continueNudge",
+  "preset:directionPrompt",
+  "assembler:last-turn"
+]
 
 /** The message with each text taken off its end, or null when nothing else is left. */
 const withoutTexts = (message: Message, texts: ReadonlyArray<string>): Message | null => {

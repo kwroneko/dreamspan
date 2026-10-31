@@ -46,9 +46,9 @@ function MemberLink({ member }: { member: FamilyMember }) {
 }
 function FamilyTree({ family, entityId }: { family: CardFamily; entityId: EntityId }) {
   const usage = useAtomValue(shellAtom)
-  // The shell counts visible fork views as chats and dates each card by its own speech.
-  // Family metadata alone counts containers, so it disagrees as soon as a chat branches.
-  const forks = AsyncResult.isSuccess(usage) ? usage.value.forks : null
+  // The shell counts visible fork views as chats and dates each card by its Recent, as its
+  // tile does. Family metadata alone counts containers, so it disagrees as soon as a chat branches.
+  const cards = AsyncResult.isSuccess(usage) ? new Map(usage.value.cards.map((c) => [c.card.entityId, c])) : null
   const walk = (parent: EntityId | null, depth = 0): Array<{ member: FamilyMember; depth: number }> =>
     family.members
       .filter((m) => m.parentEntityId === parent)
@@ -56,10 +56,9 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
   return (
     <ul aria-label="Forks tree" className="flex flex-col gap-3">
       {walk(null).map(({ member, depth }) => {
-        const used = forks?.filter((fork) => fork.joined.includes(member.entityId))
-        const spoken = used?.flatMap((fork) => fork.activity.filter((a) => a.entityId === member.entityId))
-        const last =
-          spoken?.reduce<number | null>((latest, a) => (latest === null ? a.at : Math.max(latest, a.at)), null) ?? null
+        const shown = cards?.get(member.entityId)
+        const chats = shown?.card.chats
+        const last = shown?.recentAt ?? null
         return (
           <li
             key={member.entityId}
@@ -78,12 +77,12 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
               </div>
             </div>
             <p className="text-xs text-muted">
-              {used ? (
+              {chats !== undefined ? (
                 <>
-                  {used.length} {used.length === 1 ? "chat" : "chats"} ·{" "}
+                  {chats} {chats === 1 ? "chat" : "chats"} ·{" "}
                   {last === null ? "Never used" : `Last used ${new Date(last).toLocaleDateString()}`}
                 </>
-              ) : AsyncResult.isFailure(usage) ? (
+              ) : AsyncResult.isFailure(usage) || cards !== null ? (
                 "Usage unavailable"
               ) : (
                 "Loading usage…"
@@ -95,8 +94,11 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
     </ul>
   )
 }
-export function FamilySection({ entityId }: CardSurfaceContext) {
+export function FamilySection({ entityId, whenForked }: CardSurfaceContext) {
   const atom = useMemo(() => familyQuery(entityId), [entityId])
+  const result = useAtomValue(atom)
+  // A card alone in its family has nothing to show here; More → Forks still opens the family.
+  if (whenForked && AsyncResult.isSuccess(result) && result.value.members.length < 2) return null
   return (
     <Card>
       <CardHeader title="Forks" description="Independent cards in the same family." />
@@ -153,11 +155,18 @@ function ChatLink({ chatId }: { chatId: NonNullable<FamilyMember["forkedInChatId
     </Link>
   )
 }
-export function ForkBadge({ entityId }: CardSurfaceContext) {
-  const result = useAtomValue(useMemo(() => familyQuery(entityId), [entityId]))
+/**
+ * Which cards have a fork family, for every badge at once: a grid of hundreds of cards made
+ * one CardFamily read per tile (1,257 on one home load at 420 cards). The tree is read when opened.
+ */
+const familyIndexAtom = AppClient.query("CardFamilyIndex", undefined, { reactivityKeys: ["library"] })
+
+export function ForkBadge({ entityId, label }: CardSurfaceContext) {
+  const index = useAtomValue(familyIndexAtom)
   const [open, setOpen] = useState(false)
-  if (!AsyncResult.isSuccess(result) || result.value.members.length < 2) return null
-  const children = result.value.members.filter((m) => m.parentEntityId === entityId).length
+  const entry = AsyncResult.isSuccess(index) ? index.value.find((card) => card.entityId === entityId) : undefined
+  if (entry === undefined) return null
+  const children = entry.forks
   return (
     <>
       {/* A badge that opens the family tree: shaped like the other badges beside it. */}
@@ -165,7 +174,7 @@ export function ForkBadge({ entityId }: CardSurfaceContext) {
         type="button"
         className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         onClick={() => setOpen(true)}
-        aria-label={`Forks of ${result.value.members.find((m) => m.entityId === entityId)?.label}`}
+        aria-label={label === undefined ? "Forks of this card" : `Forks of ${label}`}
       >
         <Icon name="branch" size={12} />
         {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
