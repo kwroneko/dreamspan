@@ -77,7 +77,7 @@ export const registerTimelineTransforms = () => [
             actions={<ChangeContextSize origins={budget.origins} />}
           >
             Messages above this aren&rsquo;t sent to the model: the model’s context budget allows{" "}
-            {withOrigin(budget.maximum, contextOrigin(budget.origins))} tokens, targets{" "}
+            {withOrigin(budget.maximum, contextOrigin(budget.origins), " tokens")}, targets{" "}
             {withOrigin(budget.target, targetOrigin(budget.origins))}, reserves{" "}
             {withOrigin(budget.responseReserve, reserveOrigin(budget.origins))} for the reply, and the card, prompts and
             other fixed content take ~{budget.nonHistoryTokens.toLocaleString()}.

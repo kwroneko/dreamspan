@@ -64,6 +64,6 @@ export function ChangeContextSize({ origins }: { origins: BudgetOrigins | undefi
   )
 }
 
-/** "8,192 (assumed: …)" */
-export const withOrigin = (tokens: number, origin: string | null) =>
-  `${tokens.toLocaleString()}${origin ? ` (${origin})` : ""}`
+/** "128,000 tokens (assumed: …)" */
+export const withOrigin = (tokens: number, origin: string | null, unit = "") =>
+  `${tokens.toLocaleString()}${unit}${origin ? ` (${origin})` : ""}`

@@ -18,7 +18,7 @@ export function AssemblyRefusal({ history }: { history: Omit<NextContext, "warmt
           <p className="mt-1 text-muted">
             The card, prompts and other fixed content take ~{budget.nonHistoryTokens.toLocaleString()} tokens and the
             reply reserves {withOrigin(budget.responseReserve, reserveOrigin(budget.origins))}, more than the context
-            size of {withOrigin(budget.maximum, contextOrigin(budget.origins))}.
+            size of {withOrigin(budget.maximum, contextOrigin(budget.origins), " tokens")}.
           </p>
         )}
       </Alert>

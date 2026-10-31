@@ -502,6 +502,9 @@ function EditModelDialog({
       onOpenChange={onOpenChange}
       title={`Edit ${model.key}`}
       description="Model settings apply everywhere this connection and model are used."
+      initialFocus={
+        focus ? () => document.querySelector<HTMLElement>(`[role="dialog"] [data-model-field="${focus}"]`) : undefined
+      }
     >
       <ModelSettingsEditor model={model} focus={focus} onSaved={() => onOpenChange(false)} />
     </Dialog>
@@ -522,6 +525,7 @@ export function ModelSettingsDialog({
 }) {
   const load = useAction()
   const [model, setModel] = useState<Model | null>(null)
+  const [missing, setMissing] = useState(false)
   useEffect(() => {
     let live = true
     void load
@@ -529,16 +533,32 @@ export function ModelSettingsDialog({
         client("ListModels", { connectionId: connectionId as Model["connectionId"], includeHidden: true })
       )
       .then((result) => {
-        if (live && result.ok) setModel(result.value.find((entry) => entry.id === modelId) ?? null)
+        if (!live || !result.ok) return
+        const found = result.value.find((entry) => entry.id === modelId) ?? null
+        setModel(found)
+        setMissing(found === null)
       })
     return () => {
       live = false
     }
   }, [connectionId, modelId]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (model) return <EditModelDialog model={model} focus={focus} onOpenChange={onOpenChange} />
+  // One dialog throughout: the form replaces the loading line, and focuses its field when it mounts.
   return (
-    <Dialog open onOpenChange={onOpenChange} title="Model settings">
-      {load.error ? <ErrorAlert error={load.error} /> : <p className="text-sm text-muted">Loading the model…</p>}
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title={model ? `Edit ${model.key}` : "Model settings"}
+      description="Model settings apply everywhere this connection and model are used."
+    >
+      {model ? (
+        <ModelSettingsEditor model={model} focus={focus} onSaved={() => onOpenChange(false)} />
+      ) : load.error ? (
+        <ErrorAlert error={load.error} />
+      ) : missing ? (
+        <p className="text-sm text-muted">This model is gone: its connection or the model was deleted.</p>
+      ) : (
+        <p className="text-sm text-muted">Loading the model…</p>
+      )}
     </Dialog>
   )
 }

@@ -56,7 +56,7 @@ const note = (o: BudgetOrigins) => {
 
 it("the history note marks an assumed size and offers to set it", () => {
   const html = note(origins({}))
-  expect(html).toContain("allows 128,000 (assumed: nothing reports this model&#x27;s size) tokens")
+  expect(html).toContain("allows 128,000 tokens (assumed: nothing reports this model&#x27;s size)")
   expect(html).toContain("reserves 4,096 (default) for the reply")
   expect(html).toContain("Set the context size")
   expect(html).toContain("border-warning")
@@ -91,7 +91,7 @@ it("a budget refusal sits in the composer's column, names its sources and offers
   expect(html).toContain("mx-auto w-full max-w-3xl")
   expect(html).toContain("Can&#x27;t prepare the next reply")
   expect(html).toContain("take ~130,000 tokens and the reply reserves 4,096 (default)")
-  expect(html).toContain("context size of 128,000 (assumed: nothing reports this model&#x27;s size)")
+  expect(html).toContain("context size of 128,000 tokens (assumed: nothing reports this model&#x27;s size)")
   expect(html).toContain("Set the context size")
   // Another refusal has no budget action.
   const other = { history: { ...view.history, assemblyErrorReason: "no_model" } } as unknown as ChatView

@@ -90,8 +90,10 @@ for (const chars of [14_000, 20_000]) {
     await expect(refusal).toContainText(next.assemblyError!)
     if (chars === 20_000) {
       await expect(explanation).toBeVisible()
-      await expect(explanation).toContainText("budget allows 4,095 tokens")
-      await expect(explanation).toContainText("targets 3,276, reserves 300 for the reply")
+      await expect(explanation).toContainText("budget allows 4,095 tokens (the model's context size setting)")
+      await expect(explanation).toContainText(
+        "targets 3,276 (default, 80%), reserves 300 (the model's response length) for the reply"
+      )
       await expect(explanation).toContainText(`take ~${next.budget!.nonHistoryTokens.toLocaleString()}`)
     } else await expect(explanation).toHaveCount(0)
     const last = page.locator(`article[data-slot="${entries.at(-1)!.slotId}"]`)
