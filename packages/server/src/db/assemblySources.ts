@@ -836,6 +836,10 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
           vision: effective.vision.value,
           maxImages: effective.maxImages.value,
           context: effective.context.source === "unknown" ? null : effective.context.value,
+          contextSource: effective.context.source,
+          ...(effective.context.source === "catalog" && effective.catalog
+            ? { contextCatalog: `${effective.catalog.label} (${effective.catalog.match})` }
+            : {}),
           maxOutput: effective.maxOutput.source === "unknown" ? null : effective.maxOutput.value,
           presetOverride: c.presetOverrideRefId
         }

@@ -57,7 +57,8 @@ import {
   messageRetries,
   messageVersions,
   messagePreviews,
-  useVersionNavigation
+  useVersionNavigation,
+  versionFailureActions
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 
@@ -202,9 +203,12 @@ function VersionBody({
         </p>
       )}
       {version.status === "failed" && version.error && (
-        <p role="note" className="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
-          Failed ({version.error.class}): {version.error.message}
-        </p>
+        <div role="note" className="rounded-md border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+          <p>
+            Failed ({version.error.class}): {version.error.message}
+          </p>
+          <SlotOutlet slot={versionFailureActions} props={{ version }} />
+        </div>
       )}
     </div>
   )

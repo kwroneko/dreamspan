@@ -306,6 +306,23 @@ export const ContextBudget = Schema.Struct({
 export type ContextBudget = typeof ContextBudget.Type
 
 /**
+ * Where the budget's numbers come from, so the note and the refusal name each and the setting
+ * that changes it. `context`: the model's own context size setting, or its window from the
+ * window's source (`assumed`: no source reports it). `reserve` and `target`: the model's setting
+ * or the default.
+ */
+export const BudgetOrigins = Schema.Struct({
+  context: Schema.Literals(["setting", "user", "learned", "upstream", "catalog", "assumed"]),
+  /** The catalog and entry, when a catalog gave the window. */
+  catalog: Schema.optionalKey(Schema.String),
+  reserve: Schema.Literals(["setting", "default"]),
+  target: Schema.Literals(["setting", "default"]),
+  /** The model whose settings change them; null without one. */
+  model: Schema.NullOr(Schema.Struct({ connectionId: Schema.String, modelId: Schema.String }))
+})
+export type BudgetOrigins = typeof BudgetOrigins.Type
+
+/**
  * The preset the next request uses and the level of the scope chain it comes from
  * (DATA-MODEL §5.4): the chat's role binding, the chat's own, the connection's override, the
  * user's default, or ST's built-in default.
@@ -420,6 +437,8 @@ export type ImagesLeftOut = typeof ImagesLeftOut.Type
 export const NextContext = Schema.Struct({
   /** Why the next request cannot be assembled; cleared after a successful estimate. */
   assemblyError: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** The kind of that failure (`budget`: the fixed part and the reply don't fit), for its actions. */
+  assemblyErrorReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** The next request's images, when it has any. */
   imageTokens: Schema.optionalKey(NextImages),
   /** Which fork the estimate describes, including when two forks share a tip. */
@@ -433,7 +452,8 @@ export const NextContext = Schema.Struct({
       Schema.Struct({
         ...ContextBudget.fields,
         presetName: Schema.String,
-        builtinPreset: Schema.Boolean
+        builtinPreset: Schema.Boolean,
+        origins: Schema.optionalKey(BudgetOrigins)
       })
     )
   ),

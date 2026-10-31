@@ -74,7 +74,20 @@ export const withCatalog = (kind: ProviderKindEntry, listed: ReadonlyArray<Liste
     Effect.promise(() => catalogEntry(kind, model.key)).pipe(
       Effect.map((found): ListedModel => {
         if (!found) return model
-        return { key: model.key, upstream: { ...upstreamFromCatalog(found.entry, found.sameApi), ...model.upstream } }
+        const fromCatalog = upstreamFromCatalog(found.entry, found.sameApi)
+        const fields = Object.keys(fromCatalog).filter(
+          (field) => field !== "price" && model.upstream[field as keyof ModelUpstream] === undefined
+        )
+        return {
+          key: model.key,
+          upstream: {
+            ...fromCatalog,
+            ...model.upstream,
+            ...(fields.length
+              ? { catalog: { catalog: "pi-ai", label: "pi-ai's catalog", match: found.entry.id, fields } }
+              : {})
+          }
+        }
       })
     )
   )

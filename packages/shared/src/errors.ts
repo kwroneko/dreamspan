@@ -88,5 +88,7 @@ export class ProviderError extends Schema.TaggedError<ProviderError>()("Provider
   /** A refusal's category, where the provider gives one (Anthropic's stop_details). */
   category: Schema.NullOr(Schema.String),
   /** Whether the model had already produced output; such failures are never retried. */
-  afterTokens: Schema.Boolean
+  afterTokens: Schema.Boolean,
+  /** For a context-length error, the limit the provider stated in it, when it states one. */
+  contextLimit: Schema.optionalKey(Schema.Int)
 }) {}

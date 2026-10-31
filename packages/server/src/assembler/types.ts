@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 39
+export const ASSEMBLER_VERSION = 40
 
 export type Role = "system" | "user" | "assistant"
 
@@ -624,6 +624,9 @@ export interface ModelInput {
   readonly cacheBreakpoints: "auto" | "explicit" | "none"
   /** The context window when some source reported it. */
   readonly context: number | null
+  /** Where `context` came from, and the catalog entry when a catalog gave it; absent on older snapshots. */
+  readonly contextSource?: import("@rp/shared/providers.ts").FieldSource
+  readonly contextCatalog?: string
   /** A reported output ceiling; absent on older snapshots. */
   readonly vision?: boolean
   readonly maxImages?: number
