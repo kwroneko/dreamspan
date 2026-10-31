@@ -401,3 +401,103 @@ describe("the limit a context-length error states", () => {
     }).pipe(Effect.scoped, Effect.provide(layer()))
   )
 })
+
+describe("each provider kind's context-length error, through the request", () => {
+  const cases: ReadonlyArray<{
+    readonly kind: ProviderKind
+    readonly base: (url: string) => string
+    readonly list: unknown
+    readonly key: string
+    readonly body: unknown
+    readonly limit: number
+  }> = [
+    {
+      kind: "anthropic",
+      base: (url) => url,
+      list: { data: [{ id: "claude-sonnet-4-5" }], has_more: false },
+      key: "claude-sonnet-4-5",
+      body: {
+        type: "error",
+        error: { type: "invalid_request_error", message: "prompt is too long: 208310 tokens > 200000 maximum" }
+      },
+      limit: 200_000
+    },
+    {
+      kind: "google",
+      base: (url) => url,
+      list: { models: [{ name: "models/gemini-2.5-pro" }] },
+      key: "gemini-2.5-pro",
+      body: {
+        error: {
+          code: 400,
+          message: "The input token count (1196265) exceeds the maximum number of tokens allowed (1048576).",
+          status: "INVALID_ARGUMENT"
+        }
+      },
+      limit: 1_048_576
+    },
+    {
+      kind: "openrouter",
+      base: (url) => `${url}/api/v1`,
+      list: { data: [{ id: "vendor/storyteller" }] },
+      key: "vendor/storyteller",
+      body: {
+        error: {
+          code: 400,
+          message:
+            "This endpoint's maximum context length is 131072 tokens. However, you requested about 140000 tokens (139000 of text input, 1000 in the output). Please reduce the length of either one."
+        }
+      },
+      limit: 131_072
+    },
+    {
+      kind: "deepseek",
+      base: (url) => url,
+      list: { data: [{ id: "deepseek-chat" }] },
+      key: "deepseek-chat",
+      body: {
+        error: {
+          message:
+            "This model's maximum context length is 65536 tokens. However, you requested 70000 tokens (69000 in the messages, 1000 in the completion). Please reduce the length of the messages or completion.",
+          type: "invalid_request_error"
+        }
+      },
+      limit: 65_536
+    }
+  ]
+  for (const each of cases)
+    it.live(`${each.kind}: the error becomes context_overflow carrying the stated limit`, () =>
+      Effect.gen(function* () {
+        const server = yield* mock((request, res) =>
+          request.method === "GET" ? json(res, 200, each.list) : json(res, 400, each.body)
+        )
+        const writer = yield* Database.Writer
+        const reader = yield* Database.Reader
+        const providers = yield* Providers.Providers
+        const userId = (yield* writer.EnsureUser({ handle: "ana", displayName: "Ana" })).id as UserId
+        const connection = yield* providers.createConnection({
+          userId,
+          kind: each.kind,
+          settings: settings(each.base(server.url)),
+          apiKey: "sk-test"
+        })
+        yield* providers.refreshModels(userId, connection.id)
+        const models = yield* reader.ListModels({ userId, connectionId: connection.id, includeHidden: true })
+        const model = models.find((m) => m.key === each.key)
+        assert.isDefined(model, `${each.key} listed`)
+        const error = yield* Stream.runCollect(
+          providers.stream({
+            userId,
+            connectionId: connection.id,
+            modelId: model!.id as ModelId,
+            context: { messages: [{ role: "user", content: "Hello", timestamp: 1 }] },
+            attribution: { purpose: "generation" }
+          })
+        ).pipe(Effect.flip)
+        assert.instanceOf(error, ProviderError)
+        if (!(error instanceof ProviderError)) return
+        assert.strictEqual(error.reason, "context_overflow")
+        assert.strictEqual(error.contextLimit, each.limit)
+      }).pipe(Effect.scoped, Effect.provide(layer()))
+    )
+})

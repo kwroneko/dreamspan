@@ -18,7 +18,9 @@ export const registerPanels = () => [
     component: lazyPanel(
       () =>
         import("./GenerationControls.tsx").then((m) => ({
-          default: ({ session }: PanelProps) => <m.GenerationSettingsPanel session={session} kind="model" />
+          default: ({ session, view }: PanelProps) => (
+            <m.GenerationSettingsPanel session={session} view={view} kind="model" />
+          )
         })),
       "model"
     )

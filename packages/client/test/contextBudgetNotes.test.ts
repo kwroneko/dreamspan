@@ -89,8 +89,11 @@ it("a budget refusal sits in the composer's column, names its sources and offers
     createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view } })
   )
   expect(html).toContain("mx-auto w-full max-w-3xl")
-  expect(html).toContain("Can&#x27;t prepare the next reply")
-  expect(html).toContain("take ~130,000 tokens and the reply reserves 4,096 (default)")
+  // A calm notice in the warning tone, not an error.
+  expect(html).toContain("The next reply doesn&#x27;t fit the context size")
+  expect(html).toContain("border-warning")
+  expect(html).not.toContain("Can&#x27;t prepare")
+  expect(html).toContain("take ~130,000 tokens and the reply reserves 4,096 (default): more than the context size")
   expect(html).toContain("context size of 128,000 tokens (assumed: nothing reports this model&#x27;s size)")
   expect(html).toContain("Set the context size")
   // Another refusal has no budget action.
@@ -100,6 +103,46 @@ it("a budget refusal sits in the composer's column, names its sources and offers
       createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view: other } })
     )
   ).not.toContain("Set the context size")
+})
+
+it("a refusal for the newest message never claims the fixed part overflows", () => {
+  const view = {
+    history: {
+      assemblyError:
+        "The newest message needs about 31 tokens; the history limit is 0 tokens. Shorten it or increase the context target.",
+      assemblyErrorReason: "budget",
+      budget: {
+        ...budget(origins({ context: "setting", reserve: "setting" })),
+        maximum: 4095,
+        nonHistoryTokens: 3538,
+        responseReserve: 300
+      }
+    }
+  } as unknown as ChatView
+  const html = renderToStaticMarkup(
+    createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view } })
+  )
+  expect(html).toContain("The newest message needs about 31 tokens")
+  expect(html).not.toContain("more than the")
+  expect(html).toContain(
+    "The context size is 4,095 tokens (the model&#x27;s context size setting); the card, prompts and other fixed content take ~3,538 tokens and the reply reserves 300 (the model&#x27;s response length)."
+  )
+  expect(html).toContain("Change the context size")
+})
+
+it("while a refusal shows, the history note doesn't repeat it", () => {
+  const entries = [0, 1].map((depth) => ({ depth, slotId: `slot-${depth}` })) as unknown as ChatView["entries"]
+  const view = {
+    entries,
+    history: { budget: budget(origins({})), assemblyError: "x", assemblyErrorReason: "budget" }
+  } as unknown as ChatView
+  const rows = timelineTransforms
+    .list()
+    .reduce(
+      (rows, entry) => entry.transform(rows, { view, lcm: null, summaries: false, divider: -1, historyDivider: 1 }),
+      messageRows(entries)
+    )
+  expect(rows.find((r) => r.key === "history-boundary")).toBeUndefined()
 })
 
 it("a context-length error that states a limit offers to save it", () => {

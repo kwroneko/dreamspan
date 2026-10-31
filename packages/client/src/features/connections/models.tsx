@@ -237,6 +237,8 @@ export function ModelSettingsEditor({
     const overrides: ModelOverrides = Object.fromEntries(
       Object.entries({
         ...extra,
+        // A learned size is saved and forgotten by its own buttons, never by a draft's stale copy.
+        learned: savedModel.overrides.learned,
         settings: parsed,
         name: name.trim() || undefined,
         context: contextValue.value ?? undefined,

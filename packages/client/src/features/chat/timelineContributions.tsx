@@ -64,7 +64,8 @@ export const registerTimelineTransforms = () => [
     order: 10,
     transform: (rows, { view, historyDivider }) => {
       const budget = view.history?.budget
-      if (historyDivider < 0 || !budget) return rows
+      // A refusal above the composer explains the budget instead: nothing is sent at all.
+      if (historyDivider < 0 || !budget || view.history?.assemblyError) return rows
       const result = [...rows]
       result.splice(boundaryRow(result, view.entries, historyDivider), 0, {
         key: "history-boundary",

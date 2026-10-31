@@ -41,13 +41,23 @@ const fieldOf = (origins: BudgetOrigins): ModelField =>
   origins.context === "setting" ? "openai_max_context" : "context"
 
 /** Opens the model's settings at the context size; nothing without a model. */
-export function ChangeContextSize({ origins }: { origins: BudgetOrigins | undefined }) {
+export function ChangeContextSize({
+  origins,
+  primary = false
+}: {
+  origins: BudgetOrigins | undefined
+  /** The way out of a refusal, or an assumed size: the main action, not a secondary one. */
+  primary?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const model = origins?.model
   if (!origins || !model) return null
   return (
     <>
-      <Button variant={origins.context === "assumed" ? "primary" : "ghost"} onClick={() => setOpen(true)}>
+      <Button
+        variant={primary || origins.context === "assumed" ? "primary" : "secondary"}
+        onClick={() => setOpen(true)}
+      >
         {origins.context === "assumed" ? "Set the context size" : "Change the context size"}
       </Button>
       {open && (
