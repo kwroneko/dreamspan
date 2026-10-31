@@ -14,6 +14,7 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
         FormatOps.of({
           PreviewStSettings: () => Effect.die("not used by this test"),
           Thumbnail: () => Effect.die("not used by this test"),
+          PrepareThumbnails: () => Effect.die("not used by this test"),
           Parse: ({ bytes, fileName }) =>
             fileName === "crash"
               ? Effect.sync(() => process.exit(1))

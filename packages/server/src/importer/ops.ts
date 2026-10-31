@@ -196,6 +196,10 @@ export class FormatOps extends RpcGroup.make(
     success: ThumbnailResult,
     error: ThumbnailFailed
   }),
+  Rpc.make("PrepareThumbnails", {
+    payload: { dataDir: Schema.String, path: Schema.String },
+    error: ThumbnailFailed
+  }),
   Rpc.make("Parse", {
     payload: { bytes: Transferable.Uint8Array, fileName: Schema.String },
     success: ParsedFile

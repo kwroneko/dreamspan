@@ -402,7 +402,13 @@ const HttpServerLive = Layer.unwrap(
 
 /** The format workers (ARCHITECTURE.md §11.3), started alongside the database's. */
 const FormatsLive = Layer.unwrap(
-  Effect.map(AppConfig, (config) => Formats.layer({ workers: config.dbWorkers, size: config.formatWorkers }))
+  Effect.map(AppConfig, (config) =>
+    Formats.layer({
+      workers: config.dbWorkers,
+      size: config.formatWorkers,
+      thumbnailSize: config.thumbnailWorkers
+    })
+  )
 )
 
 /**

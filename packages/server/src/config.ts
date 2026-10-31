@@ -20,6 +20,11 @@ const AppConfigFromEnv = Config.all({
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
     serverEnvironment.FORMAT_WORKERS
   ).pipe(Config.withDefault(1)),
+  /** Thumbnail workers (importer/Formats.ts): how many thumbnails are made at once, apart from the format workers. */
+  thumbnailWorkers: Config.schema(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+    serverEnvironment.THUMBNAIL_WORKERS
+  ).pipe(Config.withDefault(1)),
   /** Bundled workers in production (see Database.ts), source everywhere else. */
   dbWorkers: Config.Literals(["source", "bundle"], serverEnvironment.DB_WORKERS).pipe(
     Config.withDefault(

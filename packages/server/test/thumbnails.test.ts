@@ -29,6 +29,11 @@ const upload = (bytes: Uint8Array, name = "Avatar") =>
   })
 const get = (id: string, suffix = "", headers: Record<string, string> = alice) =>
   Effect.flatMap(base, (url) => Effect.promise(() => fetch(`${url}/library/media?id=${id}${suffix}`, { headers })))
+/** Removes the thumbnails an upload made ahead, to test making them on request. */
+const unprepare = (path: string) => {
+  for (const width of [96, 192, 384, 768])
+    rmSync(join(config.dataDir, `${path}.thumb-v1-${width}.webp`), { force: true })
+}
 const bytesOf = (response: Response) => Effect.promise(async () => Buffer.from(await response.arrayBuffer()))
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("image thumbnails", (it) => {
@@ -64,6 +69,28 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         304
       )
       assert.strictEqual((yield* get(id, "&w=96", { "Remote-User": "thumb-bob" })).status, 404)
+    })
+  )
+
+  it.effect("an uploaded avatar has its thumbnails at every width before the browser asks", () =>
+    Effect.gen(function* () {
+      const { id } = yield* upload(largeImagePng(7, 900, 1350), "Prepared")
+      const reader = yield* Reader
+      const api = yield* client(alice)
+      const user = yield* api.Whoami()
+      const source = yield* reader.GetMediaFile({ userId: user.id, mediaId: id })
+      for (const width of [96, 192, 384, 768]) {
+        const file = join(config.dataDir, `${source.path}.thumb-v1-${width}.webp`)
+        const made = statSync(file).mtimeMs
+        const meta = yield* Effect.promise(() => sharp(file).metadata())
+        assert.strictEqual(meta.width, width)
+        assert.strictEqual(meta.height, Math.round((width * 1350) / 900))
+        // Served from disk: the request doesn't make it again.
+        const response = yield* get(id, `&w=${width}`)
+        assert.strictEqual(response.status, 200)
+        assert.strictEqual(response.headers.get("content-type"), "image/webp")
+        assert.strictEqual(statSync(file).mtimeMs, made)
+      }
     })
   )
 
@@ -124,6 +151,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const api = yield* client(alice)
       const user = yield* api.Whoami()
       const source = yield* reader.GetMediaFile({ userId: user.id, mediaId: id })
+      unprepare(source.path)
       const target = join(config.dataDir, `${source.path}.thumb-v1-384.webp`)
       let installs = 0
       const watcher = yield* Effect.acquireRelease(
@@ -166,6 +194,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const api = broken.api
       const user = yield* api.Whoami()
       const file = yield* reader.GetMediaFile({ userId: user.id, mediaId: broken.id })
+      unprepare(file.path)
       writeFileSync(join(config.dataDir, file.path), "broken")
       assert.strictEqual((yield* get(broken.id, "&w=96")).status, 404)
       rmSync(join(config.dataDir, file.path))

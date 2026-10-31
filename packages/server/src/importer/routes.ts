@@ -32,6 +32,7 @@ import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
 import { StFileResult } from "@rp/shared/stImportApi.ts"
 import { describeImage } from "./images.ts"
 import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
+import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
 import { mediaWidth } from "@rp/shared/media.ts"
@@ -246,6 +247,7 @@ export const layer = Layer.unwrap(
                   })
                 })
               )
+              yield* prepareAvatarThumbnails(formats, config.dataDir, parsed.media)
               const kept = [
                 ...(library.keptAvatar
                   ? [
@@ -506,6 +508,7 @@ export const layer = Layer.unwrap(
                   })
                 )
               )
+              yield* prepareAvatarThumbnails(formats, config.dataDir, [{ role: "avatar", sha256 }])
               return yield* HttpServerResponse.schemaJson(SavedRef)(
                 new SavedRef({
                   ref: change.ref,
