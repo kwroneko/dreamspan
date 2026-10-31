@@ -602,3 +602,34 @@ export const evaluateMacros = async (
     await page.context().close()
   }
 }
+
+/**
+ * ST's own regex engine on text as it's written (extensions/regex/engine.js
+ * `getRegexedString`, as cleanUpMessage, sendMessageAsUser, updateMessage and reasoning.js
+ * call it): the preset selected, the character's chat open, each text at its placement,
+ * an edit when `edit`. Nothing is saved.
+ */
+export const evaluateRegex = async (
+  browser: Browser,
+  url: string,
+  input: {
+    readonly character: string
+    readonly preset: string
+    readonly cases: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly edit: boolean }>
+  }
+) => {
+  const page = await openPage(browser, url, { readOnly: true })
+  try {
+    await selectPreset(page, input.preset)
+    await openChat(page, input.character)
+    return await page.evaluate(async (cases) => {
+      const engine = "/scripts/extensions/regex/engine.js"
+      const { getRegexedString } = (await import(engine)) as {
+        getRegexedString: (text: string, placement: number, options?: { isEdit?: boolean }) => string
+      }
+      return cases.map((c) => getRegexedString(c.text, c.placement, c.edit ? { isEdit: true } : {}))
+    }, input.cases)
+  } finally {
+    await page.context().close()
+  }
+}
