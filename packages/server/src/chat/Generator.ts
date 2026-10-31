@@ -26,6 +26,8 @@ export interface GenerationRequest {
    * version (its source), as the context assembler does.
    */
   readonly initial?: { readonly text: string; readonly reasoning: string }
+  /** Continue's "Try it once": a model said to take no prefill is sent one this time (ContinueVersion). */
+  readonly prefillOnce?: boolean
 }
 
 /**

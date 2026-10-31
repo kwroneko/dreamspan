@@ -204,46 +204,44 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
     [add]
   )
   return (
-    <div ref={ref} className="flex flex-col gap-2" aria-label="Images of this version">
-      <div className="flex items-center gap-2">
-        <AttachButton
-          disabled={busy}
-          onFiles={(files) => void add(files)}
-          pickerLabel="Choose images for this version"
-          hint="Attach images to this version. You can also paste an image or drop it on the editor."
-        />
+    // It sits in the editor's row of Save and Cancel: the attach button there, and its
+    // images on a line of their own above the row, where they read as part of the message.
+    <div ref={ref} className="contents">
+      <AttachButton
+        disabled={busy}
+        onFiles={(files) => void add(files)}
+        pickerLabel="Choose images for this version"
+        hint="Attach images to this version. You can also paste an image or drop it on the editor."
+      />
+      {busy && (
         <span className="text-xs text-muted" role="status">
-          {busy
-            ? "Uploading…"
-            : current.length === 0
-              ? "No images"
-              : current.length === 1
-                ? "1 image"
-                : `${current.length} images`}
+          Uploading…
         </span>
-      </div>
+      )}
       {current.length > 0 && (
-        <AttachmentList
-          label="Images of this version"
-          items={current.map((image, index) => ({
-            id: `${index}:${image.mediaId}`,
-            name: image.altText || `image ${index + 1}`,
-            thumbnail: (
-              <ContentImage
-                src={mediaUrl(image.mediaId, 160)}
-                alt={image.altText || `Image ${index + 1}`}
-                className="h-20 w-20 rounded-md object-contain"
-              />
-            )
-          }))}
-          onRemove={(id) => {
-            const at = Number(id.slice(0, id.indexOf(":")))
-            draft.setImages(current.filter((_, index) => index !== at))
-          }}
-        />
+        <div className="order-first basis-full">
+          <AttachmentList
+            label="Images of this version"
+            items={current.map((image, index) => ({
+              id: `${index}:${image.mediaId}`,
+              name: image.altText || `image ${index + 1}`,
+              thumbnail: (
+                <ContentImage
+                  src={mediaUrl(image.mediaId, 160)}
+                  alt={image.altText || `Image ${index + 1}`}
+                  className="h-20 w-20 rounded-md object-contain"
+                />
+              )
+            }))}
+            onRemove={(id) => {
+              const at = Number(id.slice(0, id.indexOf(":")))
+              draft.setImages(current.filter((_, index) => index !== at))
+            }}
+          />
+        </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="basis-full text-sm text-danger">
           {error}
         </p>
       )}

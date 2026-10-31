@@ -3,11 +3,13 @@ import type { MessageImages } from "@rp/shared/chat.ts"
 import type { DraftState } from "@rp/shared/drafts.ts"
 import type { VersionAmendment } from "@rp/shared/chatApi.ts"
 import { CodeEditor, type CodeEditorProps } from "../../ui/CodeEditor.tsx"
-import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
+import { RevisionComparison, RevisionDiff } from "../../ui/RevisionDiff.tsx"
 import { defineSlot } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
-import { MenuItem } from "../../ui/Menu.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
+import { HistoryIcon } from "./icons.tsx"
 import type { MessageDraft } from "./messageDraft.ts"
 import type { SummaryDraft } from "./summaryDraft.ts"
 import { messageActions, type MessageActionProps } from "./messageActions.tsx"
@@ -30,68 +32,115 @@ function CurrentChanges({ draft, base }: { draft: MessageDraft | SummaryDraft; b
 
 function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
   const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>Earlier draft text</Button>
+      {open && <DraftHistoryDialog draft={draft} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
+/** The draft's earlier states, read as it opens (it's mounted only while open); any can be restored. */
+function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryDraft; onClose: () => void }) {
   const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    void draft.history().then((result) => {
+      if (!live) return
+      if (result.ok) setStates(result.value)
+      else setError(result.error.message)
+    })
+    return () => {
+      live = false
+    }
+  }, [draft])
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => !next && onClose()}
+      title="Earlier draft text"
+      description="Restore any earlier text and images of this edit. Restoring keeps the current draft in this history."
+    >
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+      {states === null ? (
+        <p>{error ? "History unavailable." : "Loading…"}</p>
+      ) : states.length < 2 ? (
+        <p>No earlier text yet.</p>
+      ) : (
+        <ol className="flex flex-col gap-3 overflow-auto">
+          {states.slice(1).map((state) => (
+            <li key={state.seq} className="rounded-md border border-border p-3">
+              <p className="text-sm text-muted">
+                {new Date(state.at).toLocaleString()} · {state.length} characters
+              </p>
+              <p className="whitespace-pre-wrap break-words text-sm">
+                {state.kind === "initial" ? "Initial text" : `Changed “${state.removed}” to “${state.inserted}”`}
+              </p>
+              <Button
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true)
+                  const restored = await draft.restoreState(state.seq)
+                  setBusy(false)
+                  if (restored) onClose()
+                  else
+                    setError(
+                      "Couldn't restore this text. Keep any pending text on the server and reopen History to try again."
+                    )
+                }}
+              >
+                Restore draft text
+              </Button>
+            </li>
+          ))}
+        </ol>
+      )}
+      <Button onClick={onClose}>Close history</Button>
+    </Dialog>
+  )
+}
+
+/**
+ * A message editor's history, out of the way in one small menu beside Save: the draft's
+ * earlier text, and the text as it is against the saved text, once it differs.
+ */
+function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string }) {
+  const [open, setOpen] = useState<"drafts" | "changes" | null>(null)
+  const text = useSyncExternalStore(draft.subscribe, () => draft.snapshot().text)
   return (
     <>
-      <Button
-        onClick={async () => {
-          setOpen(true)
-          setStates(null)
-          setError(null)
-          const result = await draft.history()
-          if (result.ok) setStates(result.value)
-          else setError(result.error.message)
-        }}
+      <Menu
+        side="top"
+        label="History of this edit"
+        trigger={
+          <Tooltip label="History of this edit">
+            <button type="button" aria-label="History of this edit" className={iconButtonClass()}>
+              <HistoryIcon />
+            </button>
+          </Tooltip>
+        }
       >
-        Earlier draft text
-      </Button>
+        <MenuItem onClick={() => setOpen("drafts")}>Earlier draft text…</MenuItem>
+        <MenuItem disabled={text === base} onClick={() => setOpen("changes")}>
+          {text === base ? "Compare with saved text (no changes yet)" : "Compare with saved text…"}
+        </MenuItem>
+      </Menu>
+      {open === "drafts" && <DraftHistoryDialog draft={draft} onClose={() => setOpen(null)} />}
       <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title="Earlier draft text"
-        description="Restore any earlier text and images of this edit. Restoring keeps the current draft in this history."
+        open={open === "changes"}
+        onOpenChange={(next) => setOpen(next ? "changes" : null)}
+        wide
+        title="Compare with saved text"
+        description="The saved text, and this edit as it is now."
       >
-        {error && (
-          <p role="alert" className="text-sm text-danger">
-            {error}
-          </p>
-        )}
-        {states === null ? (
-          <p>{error ? "History unavailable." : "Loading…"}</p>
-        ) : states.length < 2 ? (
-          <p>No earlier text yet.</p>
-        ) : (
-          <ol className="flex flex-col gap-3 overflow-auto">
-            {states.slice(1).map((state) => (
-              <li key={state.seq} className="rounded-md border border-border p-3">
-                <p className="text-sm text-muted">
-                  {new Date(state.at).toLocaleString()} · {state.length} characters
-                </p>
-                <p className="whitespace-pre-wrap break-words text-sm">
-                  {state.kind === "initial" ? "Initial text" : `Changed “${state.removed}” to “${state.inserted}”`}
-                </p>
-                <Button
-                  disabled={busy}
-                  onClick={async () => {
-                    setBusy(true)
-                    const restored = await draft.restoreState(state.seq)
-                    setBusy(false)
-                    if (restored) setOpen(false)
-                    else
-                      setError(
-                        "Couldn't restore this text. Keep any pending text on the server and reopen History to try again."
-                      )
-                  }}
-                >
-                  Restore draft text
-                </Button>
-              </li>
-            ))}
-          </ol>
-        )}
-        <Button onClick={() => setOpen(false)}>Close history</Button>
+        {open === "changes" && <RevisionDiff before={base} after={text} beforeLabel="Saved" afterLabel="This edit" />}
+        <Button onClick={() => setOpen(null)}>Close</Button>
       </Dialog>
     </>
   )
@@ -175,9 +224,8 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
 export const registerEditorHistory = () => [
   messageTextEditor.register({ id: "message.code-editor", order: 10, component: CodeEditor }),
   summaryTextEditor.register({ id: "summary.code-editor", order: 10, component: CodeEditor }),
-  messageEditorTools.register({ id: "message.current-changes", order: 20, component: CurrentChanges }),
   summaryEditorTools.register({ id: "summary.current-changes", order: 20, component: CurrentChanges }),
-  messageEditorTools.register({ id: "message.draft-history", order: 10, component: DraftHistory }),
+  messageEditorTools.register({ id: "message.edit-history", order: 10, component: EditHistoryMenu }),
   summaryEditorTools.register({ id: "summary.draft-history", order: 10, component: DraftHistory }),
   messageActions.register({
     id: "message.amendments",

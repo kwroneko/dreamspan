@@ -359,6 +359,38 @@ describe("continue and reasoning", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("tries a prefill once with a model that takes none, without changing the model", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(provider)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { version, chat, events } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const window = yield* api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
+      const reply = window.entries.at(-1)!
+      const continued = yield* api.ContinueVersion({
+        versionId: version.id,
+        expectedRowVersion: reply.rowVersion,
+        prefillOnce: true
+      })
+      yield* eventually(() => finished(events, continued.version.id) !== undefined)
+      assert.notStrictEqual(finished(events, continued.version.id)!.status, "failed")
+      const sent = mock.requests().filter((r) => r.path === "/v1/chat/completions")
+      assert.strictEqual(sent.length, 2)
+      const last = (sent[1]!.body as { messages: Array<{ role: string; content: unknown }> }).messages.at(-1)!
+      assert.strictEqual(last.role, "assistant")
+      assert.include(JSON.stringify(last.content), version.content.trimEnd())
+      // The model still takes none: the next Continue without it is refused as before.
+      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+      assert.strictEqual(next.model?.prefill, "none")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("fails a continuation with a model that takes no prefill, and says so", () => {
     const config = testConfig()
     return Effect.gen(function* () {

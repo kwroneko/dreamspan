@@ -469,7 +469,12 @@ export class ChatApi extends RpcGroup.make(
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
       /** A one-turn direction for the continued version; the continued one's isn't reused. */
-      direction: Schema.optionalKey(Schema.String)
+      direction: Schema.optionalKey(Schema.String),
+      /**
+       * "Try it once": send the prefill this once to a model whose capabilities say it takes
+       * none, without changing them. A model that can't continue for another reason still can't.
+       */
+      prefillOnce: Schema.optionalKey(Schema.Boolean)
     },
     success: PathEntry,
     error: Schema.Union([...WriteErrors, GenerationUnavailable, NotContinuable])

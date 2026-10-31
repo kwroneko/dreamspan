@@ -1,6 +1,7 @@
 import { EditorState, Transaction } from "@codemirror/state"
+import { EditorView } from "@codemirror/view"
 import { describe, expect, it } from "vitest"
-import { comparisonBase, lineChanges, lineKind } from "../src/ui/codeChanges.ts"
+import { comparisonBase, lineChanges, lineKind, quietMarkers } from "../src/ui/codeChanges.ts"
 
 const compared = (base: string, value: string) =>
   EditorState.create({ doc: value, extensions: [lineChanges] }).update({ effects: comparisonBase.of(base) }).state
@@ -62,5 +63,18 @@ describe("code editor line comparisons", () => {
     }).state
     expect(state.field(lineChanges).base.toString()).toBe("First.\nLast.")
     expect(markers(state)).toEqual(["modified"])
+  })
+  it("keeps quiet markers hidden until the text differs from the saved text, and again once it matches", () => {
+    const quiet = (state: EditorState) =>
+      state.facet(EditorView.editorAttributes).map((attrs) => (typeof attrs === "function" ? null : attrs?.class))
+    let state = EditorState.create({ doc: "First.", extensions: [lineChanges, quietMarkers] }).update({
+      effects: comparisonBase.of("First.")
+    }).state
+    expect(quiet(state)).toContain("rp-quiet rp-unchanged")
+    state = state.update({ changes: { from: 6, insert: " More." } }).state
+    expect(quiet(state)).toContain("rp-quiet")
+    expect(quiet(state)).not.toContain("rp-quiet rp-unchanged")
+    state = state.update({ changes: { from: 6, to: 12, insert: "" } }).state
+    expect(quiet(state)).toContain("rp-quiet rp-unchanged")
   })
 })

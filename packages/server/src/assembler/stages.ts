@@ -938,7 +938,7 @@ const continuePrefill = (assembly: Assembly, text: string) => {
   if (model.prefill === "none" || model.continueUnavailable) {
     throw new AssemblyFailed({
       reason: "no_prefill",
-      message: `Continue isn't available with ${model.key}: ${model.continueUnavailable ?? "no prefill support is declared. Set its Prefill capability in Connections if supported."}`
+      message: `Continue isn't available with ${model.key}: ${model.continueUnavailable ?? "it isn't set up to take the start of its reply (a prefill)."}`
     })
   }
   assembly.prefill = model.prefill === "tool_schema" ? text : text.trimEnd()

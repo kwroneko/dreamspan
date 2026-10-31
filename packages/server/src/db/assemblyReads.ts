@@ -39,7 +39,19 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
-    AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
+    AssembleContext: ({
+      userId,
+      chatId,
+      slotId,
+      versionId,
+      forkId,
+      now,
+      timeZone,
+      frozen,
+      partialBatch,
+      model,
+      prefillOnce
+    }) =>
       Effect.suspend(() => {
         const sources = sqlSources(sql, {
           userId,
@@ -47,7 +59,8 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
           slotId,
           versionId,
           ...(partialBatch === undefined ? {} : { partialBatch }),
-          ...(model === undefined ? {} : { modelOverride: model })
+          ...(model === undefined ? {} : { modelOverride: model }),
+          ...(prefillOnce ? { prefillOnce: true } : {})
         })
         return assembler.assemble({ now, timeZone, frozen: frozen ?? {}, random: Math.random }).pipe(
           Effect.provide(sources.layer),
