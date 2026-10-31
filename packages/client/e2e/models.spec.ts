@@ -96,10 +96,9 @@ test("the model's form keeps the provider's limits apart from your settings for 
   await page.goto(`${server().url}/settings/connections/new`)
   await page.getByLabel("Name").fill("Limits test")
   await page.getByLabel("Base URL").fill(provider.baseUrl)
-  await page.getByRole("radio", { name: "No key" }).click()
+  // Creating it fetches the models.
   await page.getByRole("button", { name: "Create connection" }).click()
-  await page.getByRole("button", { name: "Refresh from provider" }).click()
-  await expect(page.getByText("2 added, 0 updated")).toBeVisible()
+  await expect(page.getByText("Found 2 models.")).toBeVisible()
   await page.getByRole("button", { name: "Edit fake-large" }).click()
   const dialog = page.getByRole("dialog")
   const limits = dialog.getByRole("group", { name: "Model limits (from the provider)" })
@@ -117,6 +116,10 @@ test("the model's form keeps the provider's limits apart from your settings for 
   const can = dialog.getByRole("group", { name: "What it can do" })
   await expect(can.getByText("Prefill", { exact: true })).toBeVisible()
   await expect(dialog).not.toContainText("no provider information")
+  // Each capability's automatic choice names what the provider says.
+  await expect(can.getByRole("combobox").first()).toHaveText(
+    /^(As the provider says: (yes|no)|Not known: the provider doesn't say)/
+  )
   const settings = dialog.getByRole("group", { name: "Your settings for this model" })
   await expect(settings.getByLabel("Context to send (tokens)")).toHaveAttribute("placeholder", "All of its window")
   await expect(settings.getByLabel("Reply length (tokens)")).toBeVisible()

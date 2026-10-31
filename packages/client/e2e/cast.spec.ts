@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
+import { openPanel } from "./support/panel.ts"
 
 // About four seconds a reply.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -74,12 +75,9 @@ const chatWithMira = async (page: Page) => {
   return page.url()
 }
 
-/** The side panel at its Cast tab: the panel's own tab when it's open, else the header's button. */
+/** The side panel at its Cast tab, opened however the chat's header offers it. */
 const openCast = async (page: Page) => {
-  const tab = page.getByRole("tab", { name: "Cast", exact: true })
-  const toggle = page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true })
-  await expect(tab.or(toggle)).toBeVisible()
-  await ((await tab.isVisible()) ? tab : toggle).click()
+  await openPanel(page, "Cast")
   await expect(members(page)).toBeVisible()
 }
 

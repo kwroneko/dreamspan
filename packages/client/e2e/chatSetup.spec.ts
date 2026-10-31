@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
+import { openPanel } from "./support/panel.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -126,7 +127,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
   await expect(replies(page).last().locator("header")).toContainText("Mira")
 
   // Later, playing Ana from here on doesn't rewrite what was said before.
-  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+  await openPanel(page, "Cast")
   const cast = page.getByRole("tabpanel", { name: "Cast" })
   await cast.getByRole("button", { name: "Add character" }).click()
   await page.getByRole("dialog", { name: "Add a character to this chat" }).getByRole("button", { name: /^Ana/ }).click()
@@ -170,7 +171,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await shoot(page, "speaker-switcher")
   await page.keyboard.press("Escape")
   // To speak as another card, add it to the chat first.
-  await page.getByRole("group", { name: "Chat panel" }).getByRole("button", { name: "Cast", exact: true }).click()
+  await openPanel(page, "Cast")
   await page.getByRole("button", { name: "Add character" }).click()
   await page.getByRole("searchbox", { name: "Search your cards" }).fill("tob")
   await page
