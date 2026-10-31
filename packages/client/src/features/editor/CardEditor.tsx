@@ -278,7 +278,7 @@ export function CardEditor({
         />
         <Notes store={store} call={call} />
       </Card>
-      <SlotOutlet slot={cardEditorSections} props={{ store }} />
+      <SlotOutlet slot={cardEditorSections} props={{ store, call }} />
       <Card>
         <CardHeader title="About" />
         <div className="flex flex-col gap-4">
