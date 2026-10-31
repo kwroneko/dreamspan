@@ -20,6 +20,7 @@ import { cardDoc } from "./support/docs.ts"
 import { writeRealisticStFolder } from "./support/stRealistic.ts"
 import { importStFolder } from "./support/stUpload.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { slowIt } from "./support/slow.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -225,7 +226,7 @@ describe("card usage", () => {
     120_000
   )
 
-  it.live("reads 1,000 cards and 5,000 chats in one query", () => {
+  slowIt.live("reads 1,000 cards and 5,000 chats in one query", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()

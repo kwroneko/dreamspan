@@ -2,7 +2,20 @@
 // real database workers. Each test file starts its own servers on random ports with fresh
 // data directories (e2e/support/server.ts). `npm run test:browser` selects Chromium;
 // `npm run test:browser:all` runs every project.
+import { availableParallelism, loadavg } from "node:os"
 import { defineConfig, devices } from "@playwright/test"
+
+/**
+ * Each worker runs a browser and a server with its database workers, about three cores when
+ * busy. So: a third of the host's free cores, at most 12, but at least a sixth of the cores
+ * (and 3), so a saturated host still gets a run that finishes: on the 48-core host at a load
+ * average of 140, 8 workers ran 2.1 times as many tests in the same time as 3, none failing.
+ * PLAYWRIGHT_WORKERS overrides it.
+ */
+const cores = availableParallelism()
+const free = cores - (loadavg()[0] ?? 0)
+const workers =
+  Number(process.env.PLAYWRIGHT_WORKERS) || Math.max(3, Math.floor(cores / 6), Math.min(12, Math.floor(free / 3)))
 
 export default defineConfig({
   testDir: "e2e",
@@ -11,8 +24,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   forbidOnly: !!process.env.CI,
   retries: 0,
-  // Each worker runs servers and a browser; the host is shared.
-  workers: 3,
+  workers,
   reporter: process.env.CI ? "github" : "list",
   use: { trace: "retain-on-failure" },
   projects: [

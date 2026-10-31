@@ -7,8 +7,9 @@ import { SqlClient } from "effect/sql"
 import { classifyFilesystem, databaseFile, toStorageError } from "../src/db/connection.ts"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
-const database = (dataDir: string) => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })
+const database = (dataDir: string) => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })
 
 describe("storage errors", () => {
   it.effect("carry SQLite's own message and classify constraint failures", () =>

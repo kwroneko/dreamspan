@@ -18,6 +18,7 @@ import { writeRealisticStFolder } from "./support/stRealistic.ts"
 import { importStFolder } from "./support/stUpload.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
+import { slowIt } from "./support/slow.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -98,7 +99,7 @@ describe("chat groups", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
-  it.live(
+  slowIt.live(
     "finds a realistic ST folder's groups by their names, among its one-character chats",
     () =>
       Effect.gen(function* () {
@@ -353,7 +354,7 @@ describe("group event validity", () => {
 })
 
 describe("group read scale", () => {
-  it.live("groups and searches 5,000 active ten-message paths within the read budget", () => {
+  slowIt.live("groups and searches 5,000 active ten-message paths within the read budget", () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const api = yield* client()

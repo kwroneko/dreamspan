@@ -17,9 +17,10 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = () =>
-  Database.layer({ dataDir: tempDir("lore-pins"), readers: 1, allowNetworkFs: false, workers: "source" })
+  Database.layer({ dataDir: tempDir("lore-pins"), readers: 1, allowNetworkFs: false, ...testWorkers })
 
 const cardDoc = (name: string, description: string): CardDoc =>
   run(importCard(json({ spec: "chara_card_v2", spec_version: "2.0", data: { name, description } }))).card

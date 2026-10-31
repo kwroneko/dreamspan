@@ -104,7 +104,7 @@ describe("database workers", () => {
         const again = yield* writer.EnsureUser({ handle: "u7", displayName: "ignored" })
         assert.strictEqual(again.id, users[7]!.id)
       }).pipe(Effect.provide(database(freshDir()))),
-    30_000
+    { timeout: 30_000, tags: ["slow"] }
   )
 
   it.live(
@@ -142,7 +142,7 @@ describe("database workers", () => {
         yield* release
         yield* Fiber.join(held).pipe(stalls("the released reader never answered"))
       }).pipe(Effect.scoped),
-    30_000
+    { timeout: 30_000, tags: ["slow"] }
   )
 
   it.live(

@@ -10,6 +10,7 @@ import * as Database from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { tempDir } from "./support/tempDir.ts"
 import type { HistoryWorkSample } from "./support/historyPerfWorker.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const worker = <A = Array<string>>(
   file: string,
@@ -36,7 +37,7 @@ it.live(
   "finds the prior history start through an index in a 100,000-message chat",
   () => {
     const dataDir = tempDir("history-perf")
-    const layer = () => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })
+    const layer = () => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })
     return Effect.gen(function* () {
       const setup = yield* Effect.gen(function* () {
         const writer = yield* Database.Writer
@@ -185,7 +186,7 @@ for (const workload of ["siblings", "swipes"] as const) {
             greeting: null
           })
           return { userId: user.id, chatId: chat.id }
-        }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })))
+        }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })))
         const samples = yield* worker<Array<HistoryWorkSample>>(
           databaseFile(dataDir),
           setup.userId,

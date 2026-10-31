@@ -5,6 +5,7 @@ import { Generator } from "../src/chat/Generator.ts"
 import { Writer } from "../src/db/Database.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import { completeFixture } from "./support/lcmFixtures.ts"
+import { slowIt } from "./support/slow.ts"
 
 it.live("saved amendments restore optimistically in one fork and retain both histories", () =>
   Effect.gen(function* () {
@@ -158,7 +159,7 @@ it.live("message edit and scratchpad history survive reopening, restore and end 
 
 for (const kind of ["edit", "write", "summary"] as const) {
   const config = testConfig()
-  it.live(`${kind} history exposes the oldest retained text at the patch limit`, () =>
+  slowIt.live(`${kind} history exposes the oldest retained text at the patch limit`, () =>
     Effect.gen(function* () {
       const api = yield* client()
       const writer = yield* Writer

@@ -1252,7 +1252,7 @@ describe("the context assembler", () => {
     expect(contents(snapshot).filter((m) => m.includes("old ")).length).toBe(30)
   })
 
-  it("reads the path as far as the text the regex scripts leave fills the budget", async () => {
+  it("reads the path as far as the text the regex scripts leave fills the budget", { tags: ["slow"] }, async () => {
     const messages = Array.from({ length: 400 }, (_, i): FixtureMessage => ({
       side: "assistant",
       content: `<thinking>${"x".repeat(400)}</thinking>reply ${i}`

@@ -26,13 +26,14 @@ import { ProviderRegistry } from "../src/providers/registry.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { json, startMockProvider } from "./support/mockProvider.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const layer = () =>
   Providers.layer({ retry: { maxRetries: 0, baseDelayMs: 5, maxDelayMs: 1_000 } }).pipe(
     Layer.provideMerge(Network.layer),
     Layer.provideMerge(ProviderBuiltins.layer),
     Layer.provideMerge(
-      Database.layer({ dataDir: tempDir("context-window"), readers: 1, allowNetworkFs: false, workers: "source" })
+      Database.layer({ dataDir: tempDir("context-window"), readers: 1, allowNetworkFs: false, ...testWorkers })
     ),
     Layer.provideMerge(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
   )

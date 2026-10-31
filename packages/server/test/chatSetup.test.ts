@@ -16,6 +16,7 @@ import * as FakeGenerator from "../src/dev/fakeGenerator.ts"
 import { client, outcome, posted, serverLayer, testConfig } from "./support/config.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { cardDoc } from "./support/docs.ts"
+import { slowIt } from "./support/slow.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -660,7 +661,7 @@ describe("chat setup", () => {
 // chat so posting/withdrawing the queue entry cannot invalidate an in-flight draft save.
 describe("queued edits", () => {
   for (const changes of [105, DraftHistoryPolicy.maxEntries + 5])
-    it.live(`exposes and restores queue edit history after ${changes} changes`, () =>
+    (changes > 1000 ? slowIt : it).live(`exposes and restores queue edit history after ${changes} changes`, () =>
       Effect.gen(function* () {
         const api = yield* client()
         const chat = yield* api.CreateChat({ title: "Long queue edit history" })

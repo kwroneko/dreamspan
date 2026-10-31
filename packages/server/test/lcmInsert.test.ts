@@ -25,6 +25,7 @@ import { readSummary } from "../src/db/lcmReads.ts"
 import { defaultMaintenancePlanner } from "../src/lcm/planning.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const said = (content: string) =>
   new NewVersion({
@@ -244,7 +245,7 @@ const run = <A, E>(body: (h: Harness) => Effect.Effect<A, E, never>) =>
   Effect.gen(function* () {
     const dataDir = tempDir("lcm-insert")
     return yield* Effect.flatMap(setup(dataDir), body).pipe(
-      Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" }))
+      Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers }))
     )
   })
 
@@ -955,7 +956,7 @@ describe("the LCM graph oracle, with insertions", () => {
             assert.isAbove(seen.staleByInsertion + seen.seams, 0)
           })
         ),
-      600_000
+      { timeout: 600_000, tags: seed !== 23 ? ["slow"] : [] }
     )
 })
 

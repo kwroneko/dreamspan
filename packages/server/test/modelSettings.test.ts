@@ -11,6 +11,7 @@ import { importPromptPreset, importStSettings, exportPromptPreset } from "../src
 import type { ContextSnapshot } from "../src/assembler/types.ts"
 import { providerRequest } from "../src/assembler/wire.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const file = JSON.stringify({
   temperature: 0.37,
@@ -205,7 +206,7 @@ it.live(
           dataDir: tempDir("global-model-settings"),
           readers: 1,
           allowNetworkFs: false,
-          workers: "source"
+          ...testWorkers
         })
       )
     )

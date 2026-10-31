@@ -25,9 +25,10 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { json, run } from "./formats/support.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = () =>
-  Database.layer({ dataDir: tempDir("assembly"), readers: 1, allowNetworkFs: false, workers: "source" })
+  Database.layer({ dataDir: tempDir("assembly"), readers: 1, allowNetworkFs: false, ...testWorkers })
 
 const cardDoc = (name: string, description: string): CardDoc =>
   run(importCard(json({ spec: "chara_card_v2", spec_version: "2.0", data: { name, description } }))).card
@@ -943,7 +944,7 @@ describe("context assembly from the database", () => {
         )
         assert.isBelow(Math.min(...times), 5000)
       }).pipe(Effect.provide(database())),
-    120000
+    { timeout: 120000, tags: ["slow"] }
   )
 
   it.live("returns stored legacy snapshots without replaying changed assembler semantics", () =>

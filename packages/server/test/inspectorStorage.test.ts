@@ -11,6 +11,7 @@ import { rolloutUsage } from "../src/db/inspectorReads.ts"
 import { layer, Reader } from "../src/db/Database.ts"
 import { databaseFile } from "../src/db/connection.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 it.effect("the inspector query searches the rollout index before ordering its attempts", () =>
   Effect.gen(function* () {
@@ -47,6 +48,6 @@ it.effect("a legacy version with a rollout but no snapshot has no Context link",
       const reader = yield* Reader
       const version = yield* reader.GetVersion({ userId: "u" as UserId, versionId: "v" as VersionId })
       assert.isNull(version.context)
-    }).pipe(Effect.provide(layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })))
+    }).pipe(Effect.provide(layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })))
   })
 })

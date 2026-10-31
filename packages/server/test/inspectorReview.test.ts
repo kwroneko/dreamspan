@@ -407,6 +407,8 @@ it.live("malformed legacy snapshot issues remain inspectable over RPC", () => {
       const {DatabaseSync} = require('node:sqlite');
       const {workerData} = require('node:worker_threads');
       const db = new DatabaseSync(workerData);
+      // The server's writer may be in a transaction: wait for it rather than fail.
+      db.exec('PRAGMA busy_timeout = 5000');
       try {
         const row = db.prepare('SELECT rollout_id, context_snapshot_json FROM rollout_payloads LIMIT 1').get();
         const snapshot = JSON.parse(row.context_snapshot_json);

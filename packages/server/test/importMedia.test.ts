@@ -91,7 +91,8 @@ describe("media files", () => {
 
       // The next start sweeps.
       yield* Effect.sync(() => existsSync(orphan)).pipe(
-        Effect.repeat({ until: (exists) => !exists, schedule: Schedule.spaced("200 millis"), times: 50 }),
+        // Up to 30 s: a busy host can take over 10 s to start the server and sweep.
+        Effect.repeat({ until: (exists) => !exists, schedule: Schedule.spaced("200 millis"), times: 150 }),
         withServer(config)
       )
       assert.isFalse(existsSync(orphan))

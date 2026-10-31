@@ -16,6 +16,7 @@ import { Context, Effect, Layer } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { docFor } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 interface Item {
   readonly entity: EntityId
@@ -167,7 +168,7 @@ const fixture = Layer.effect(
       dataDir: tempDir("state-keys"),
       readers: 1,
       allowNetworkFs: false,
-      workers: "source"
+      ...testWorkers
     })
   )
 )

@@ -8,13 +8,14 @@ import { Effect, Exit } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = () =>
   Database.layer({
     dataDir: tempDir("providers"),
     readers: 1,
     allowNetworkFs: false,
-    workers: "source"
+    ...testWorkers
   })
 
 const settings = (name = "Local"): ConnectionSettings => ({

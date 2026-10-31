@@ -4,6 +4,7 @@ import { Effect, Schema } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 it.live("reading and changing a limit preserve the configured capacities used by eviction", () =>
   Effect.gen(function* () {
@@ -35,7 +36,7 @@ it.live("reading and changing a limit preserve the configured capacities used by
       Database.layer({
         dataDir: tempDir("bin-configured-limits"),
         readers: 1,
-        workers: "source",
+        ...testWorkers,
         allowNetworkFs: false,
         binLimits: { deletedItems: 2, deletedBytes: 1_000_000, recoveredTexts: 3, recoveredBytes: 100 }
       })
@@ -46,7 +47,7 @@ it.live("reading and changing a limit preserve the configured capacities used by
 
 it.live("persists independent capacities across worker restart, with no purge when a limit is saved", () => {
   const dataDir = tempDir("bin-limits")
-  const database = Database.layer({ dataDir, readers: 1, workers: "source", allowNetworkFs: false })
+  const database = Database.layer({ dataDir, readers: 1, ...testWorkers, allowNetworkFs: false })
   const first = Effect.gen(function* () {
     const writer = yield* Database.Writer
     const reader = yield* Database.Reader

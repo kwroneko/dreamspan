@@ -8,7 +8,7 @@ import type { StSettingsImport } from "@rp/shared/modelSettings.ts"
 import { Context, Effect, Layer, Schema } from "effect"
 import type { Worker } from "node:worker_threads"
 import { RpcClientError } from "effect/rpc"
-import { bundleEntry, defaultBundleDir, workerThreads } from "../db/Database.ts"
+import { bundleEntry, WorkerBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
 import type { ImportReport } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
@@ -144,7 +144,7 @@ export const layer = (options: FormatsOptions) =>
     Effect.gen(function* () {
       const parsers = yield* StParsers.StParserRegistry
       const parser = (id: Parameters<typeof parsers.get>[0]) => parsers.get(id) ?? null
-      const bundleDir = options.workers === "bundle" ? (options.bundleDir ?? defaultBundleDir) : undefined
+      const bundleDir = options.workers === "bundle" ? (options.bundleDir ?? (yield* WorkerBundleDir)) : undefined
       const entry =
         options.entry ??
         (bundleDir === undefined ? new URL("./worker.ts", import.meta.url) : yield* bundleEntry(bundleDir, "formats"))

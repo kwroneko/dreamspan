@@ -16,6 +16,7 @@ import { LINEAGE_CAP, shownIn, slotDeletedIn } from "../src/db/forkState.ts"
 import type { InsertBody } from "@rp/shared/messagesApi.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const said = (
   speaker: EntityId | null,
@@ -151,7 +152,7 @@ const failure = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 const run = <A, E>(body: (dataDir: string) => Effect.Effect<A, E, Database.Writer | Database.Reader>) => {
   const dataDir = tempDir("fork-insert")
   return body(dataDir).pipe(
-    Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" }))
+    Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers }))
   )
 }
 
@@ -596,7 +597,7 @@ describe("inserting messages in forks", () => {
           assert.deepStrictEqual(yield* t.shows(t.main), ["m0", "x0", "m1"])
         })
       ),
-    120_000
+    { timeout: 120_000, tags: ["slow"] }
   )
 
   it.live(

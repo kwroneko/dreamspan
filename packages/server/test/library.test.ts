@@ -11,13 +11,14 @@ import { docHash, searchText } from "../src/db/documents.ts"
 import { promptPreset } from "@rp/shared/docs/preset.ts"
 import { cardDoc, docFor, presetDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = () =>
   Database.layer({
     dataDir: tempDir("lib"),
     readers: 2,
     allowNetworkFs: false,
-    workers: "source"
+    ...testWorkers
   })
 
 /**

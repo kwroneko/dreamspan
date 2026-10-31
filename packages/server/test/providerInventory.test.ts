@@ -14,6 +14,7 @@ import { client, serverLayer, testConfig, posted } from "./support/config.ts"
 import { generateReply, eventually, finished } from "./support/generation.ts"
 import { startMockProvider, sse, completionChunks, json } from "./support/mockProvider.ts"
 import { startHttpProxy } from "./support/proxies.ts"
+import { slowIt } from "./support/slow.ts"
 // Audited in pinned pi-ai, OpenAI, Anthropic and Google sources; see ARCHITECTURE §6.
 const SDK_ENV = [
   "OPENAI_API_KEY",
@@ -176,7 +177,7 @@ const savedContexts = (dataDir: string) =>
   )
 
 for (const kind of ["openai-chat", "openai-responses", "anthropic", "google"]) {
-  it.live(`${kind} ignores ambient SDK authentication, headers and routing`, () => {
+  slowIt.live(`${kind} ignores ambient SDK authentication, headers and routing`, () => {
     const config = testConfig()
     return Effect.gen(function* () {
       const mock = yield* resource(() =>
@@ -379,7 +380,7 @@ it.live("Google ignores Node's ambient proxy and uses the configured transport",
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
-it.live("Google uses the pinned transport in a fresh Node process with environment proxies enabled", () =>
+slowIt.live("Google uses the pinned transport in a fresh Node process with environment proxies enabled", () =>
   Effect.gen(function* () {
     const mock = yield* resource(() => startMockProvider(googleResponse))
     const ambient = yield* resource(startHttpProxy)

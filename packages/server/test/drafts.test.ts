@@ -6,13 +6,14 @@ import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = () =>
   Database.layer({
     dataDir: tempDir("drafts"),
     readers: 2,
     allowNetworkFs: false,
-    workers: "source"
+    ...testWorkers
   })
 
 const setup = (handle = "ana") =>

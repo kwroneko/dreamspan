@@ -11,10 +11,11 @@ import * as Database from "../src/db/Database.ts"
 import { cardDoc } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { docHash, searchText } from "../src/db/documents.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const fresh = () => {
   const dataDir = tempDir("import")
-  return { dataDir, layer: Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" }) }
+  return { dataDir, layer: Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers }) }
 }
 
 const sha = (char: string) => char.repeat(64)
