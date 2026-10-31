@@ -720,16 +720,6 @@ export const Message = memo(function Message({
           {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
           {marks}
           <span className="flex-1" />
-          {generating && (
-            <Button
-              variant="secondary"
-              className="h-7 shrink-0 px-2"
-              onClick={async () => report(await session.stop(version.id))}
-            >
-              <Icon name="stop" size={12} />
-              Stop
-            </Button>
-          )}
           {!editing && (
             <div
               className={`hidden items-center transition-opacity duration-100 sm:flex ${
@@ -832,6 +822,21 @@ export const Message = memo(function Message({
               props={{ onPick: async (choice) => report(await session.regenerate(entry, choice)) }}
             />
           )}
+        {generating && (
+          // The version's Stop (DESIGN §3.1: it belongs to the version), at the end of what's
+          // being written and held at the bottom of the view while any of the reply shows, so a
+          // reply longer than the screen never takes it out of reach.
+          <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end">
+            <Button
+              variant="secondary"
+              className="pointer-events-auto h-8 shrink-0 px-3 shadow-sm max-sm:h-10"
+              onClick={async () => report(await session.stop(version.id))}
+            >
+              <Icon name="stop" size={12} />
+              Stop
+            </Button>
+          </div>
+        )}
         {(showVersions || (revealed && !editing)) && (
           // At the end of the message, as in ST: where reading it ends, and where a swipe
           // that changes its length leaves the arrows. A tap on a phone shows why it isn't

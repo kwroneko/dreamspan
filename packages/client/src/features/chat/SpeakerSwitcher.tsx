@@ -425,6 +425,8 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
       open={open}
       onOpenChange={openChange}
       initialFocus={search}
+      // Two sections at the composer: room for the cast and the personas under it.
+      wide={personas !== undefined}
       triggerLabel={persona ? `Playing as ${name}. Change your persona` : `Speaking as ${name}. Change the speaker`}
       hint={persona ? `You play ${name} ({{user}}). Change who you play` : `Speaking as ${name}. Change who's speaking`}
       triggerClassName={`inline-flex h-9 min-w-0 shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface-raised py-1 text-sm font-medium outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-focus ${compact ? "pr-1.5 pl-1" : "max-w-44 pr-2.5 pl-1"}`}

@@ -8,7 +8,7 @@ import { useEffect, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { ModelSettingsEditor } from "../connections/models.tsx"
 import { Editor } from "../editor/EditorPage.tsx"
-import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
+import { modelValue, parseModelValue, useModelChoiceList } from "./modelChoices.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 import { useIsPanelTab } from "./panels.tsx"
 import { ChipText, ChoiceChip, LoadingChip, PopoverRow } from "./nextReplyStrip.tsx"
@@ -61,16 +61,26 @@ export function ModelChip({
   const modelPanel = useIsPanelTab("model", view)
   const { action, defaults } = useSelections(session)
   const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
-  const models = useModelChoices(true, current)
+  const { choices: models, loaded } = useModelChoiceList(true, current)
   const chosen = models.find((model) => model.value === current)
-  if (view.loading || defaults === null || (current !== null && chosen === undefined))
-    return <LoadingChip label="Model" />
-  const short = chosen ? chosen.label.slice(chosen.label.indexOf(" · ") + 3) : "Choose a model"
+  if (view.loading || defaults === null || !loaded) return <LoadingChip label="Model" />
+  // A model no list has (its connection gone, say) says so, and the chip still opens to choose one.
+  const short = chosen
+    ? chosen.label.slice(chosen.label.indexOf(" · ") + 3)
+    : current !== null
+      ? "Model not found"
+      : "Choose a model"
   return (
     <>
       <ChoiceChip
         label={chosen ? `Model: ${chosen.label}. Change the model` : "Choose a model"}
-        hint={chosen ? `Model for the next reply: ${chosen.label}` : "No model chosen yet"}
+        hint={
+          chosen
+            ? `Model for the next reply: ${chosen.label}`
+            : current !== null
+              ? "Your model isn't in any connection's list now: choose another"
+              : "No model chosen yet"
+        }
         title="Model"
         chip={<ChipText>{short}</ChipText>}
         choices={models}

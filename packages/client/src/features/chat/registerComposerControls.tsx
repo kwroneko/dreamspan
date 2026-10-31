@@ -4,7 +4,6 @@ import { QueuedMessages } from "./QueuedMessages.tsx"
 import { pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -54,6 +53,35 @@ function Help({ hint }: ComposerControlContext) {
   )
 }
 
+/** Guidance as an icon toggle in the box (DESIGN §2.2: a visible control), its name and use in the tooltip. */
+function GuidanceToggle({
+  guidance,
+  prefsReady,
+  changeGuidance,
+  hint
+}: {
+  guidance: boolean
+  prefsReady: boolean
+  changeGuidance: (next: boolean) => void
+  hint: string
+}) {
+  return (
+    <Tooltip label={`Guidance ${guidance ? "on" : "off"}: ${hint}`}>
+      <Button
+        role="switch"
+        aria-checked={guidance}
+        aria-label="Guidance"
+        variant="ghost"
+        disabled={!prefsReady}
+        onClick={() => changeGuidance(!guidance)}
+        className={`w-9 px-0! ${guidance ? "bg-guidance-surface text-guidance! ring-1 ring-guidance/60" : ""}`}
+      >
+        <Icon name="guidance" size={18} />
+      </Button>
+    </Tooltip>
+  )
+}
+
 /** ▶ beside "Next": who's next replies at once, with nothing sent from you (ST's force talk). */
 function ReplyNow({ replier, busy, ready, invoke }: ComposerControlContext & { readonly invoke: () => void }) {
   const view = useCast()
@@ -87,21 +115,20 @@ export const registerComposerControls = () => [
     id: "pending.speaker",
     order: 10,
     placement: "speaker",
-    component: ({ speaker }) => (
-      <div className="flex min-w-0 items-center gap-2 text-sm">
-        <span>Writing as</span>
-        <SpeakerSwitcher {...speaker} />
-      </div>
-    )
+    // Left of the box, as at the chat's composer: the chip names who's speaking.
+    component: ({ speaker, compact }) => <SpeakerSwitcher {...speaker} compact={compact} />
   }),
   pendingComposerControls.register({
     id: "pending.guidance",
     order: 10,
     placement: "guidance",
-    component: ({ guidance, prefsReady, changeGuidance }) => (
-      <Switch checked={guidance} disabled={!prefsReady} onCheckedChange={changeGuidance}>
-        Guidance
-      </Switch>
+    component: ({ guidance, prefsReady, changeGuidance, speakerName }) => (
+      <GuidanceToggle
+        guidance={guidance}
+        prefsReady={prefsReady}
+        changeGuidance={changeGuidance}
+        hint={`A one-turn direction for ${speakerName}'s first reply`}
+      />
     )
   }),
   pendingComposerControls.register({
@@ -109,19 +136,31 @@ export const registerComposerControls = () => [
     order: 10,
     placement: "actions",
     run: ({ start }) => start("generate"),
-    component: (context) => (
-      <Button
-        variant={context.guidance ? "primary" : "secondary"}
-        aria-label={`Generate ${context.speakerName}`}
-        pending={context.busy}
-        disabled={context.busy || !context.prefsReady}
-        className="min-w-0 max-w-52 sm:max-w-56"
-        onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
-      >
-        {context.guidance && <GenerateIcon />}
-        <span className="truncate">{context.guidance ? `Generate ${context.speakerName}` : "Generate"}</span>
-      </Button>
-    )
+    component: (context) =>
+      context.compact ? (
+        <SquareIconButton
+          label={`Generate ${context.speakerName}`}
+          hint={`The model writes ${context.speakerName}'s turn`}
+          variant={context.guidance ? "primary" : "ghost"}
+          pending={context.guidance && context.busy}
+          disabled={context.busy || !context.prefsReady}
+          onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
+        >
+          {!(context.guidance && context.busy) && <GenerateIcon />}
+        </SquareIconButton>
+      ) : (
+        <Button
+          variant={context.guidance ? "primary" : "secondary"}
+          aria-label={`Generate ${context.speakerName}`}
+          pending={context.busy}
+          disabled={context.busy || !context.prefsReady}
+          className="min-w-0 max-w-52 sm:max-w-56"
+          onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
+        >
+          {context.guidance && <GenerateIcon />}
+          <span className="truncate">{context.guidance ? `Generate ${context.speakerName}` : "Generate"}</span>
+        </Button>
+      )
   }),
   pendingComposerControls.register({
     id: "pending.send",
@@ -217,19 +256,7 @@ export const registerComposerControls = () => [
     order: 5,
     placement: "actions",
     component: ({ guidance, prefsReady, changeGuidance, hint }) => (
-      <Tooltip label={`Guidance ${guidance ? "on" : "off"}: ${hint}`}>
-        <Button
-          role="switch"
-          aria-checked={guidance}
-          aria-label="Guidance"
-          variant="ghost"
-          disabled={!prefsReady}
-          onClick={() => changeGuidance(!guidance)}
-          className={`w-9 px-0! ${guidance ? "bg-guidance-surface text-guidance! ring-1 ring-guidance/60" : ""}`}
-        >
-          <Icon name="guidance" size={18} />
-        </Button>
-      </Tooltip>
+      <GuidanceToggle guidance={guidance} prefsReady={prefsReady} changeGuidance={changeGuidance} hint={hint} />
     )
   }),
   composerControls.register({

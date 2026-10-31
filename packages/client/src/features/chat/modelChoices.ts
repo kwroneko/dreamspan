@@ -20,8 +20,23 @@ export const parseModelValue = (value: string) => {
  * which is still in use and named as hidden.
  */
 export function useModelChoices(enabled: boolean, current: string | null = null): ReadonlyArray<ModelChoice> {
+  return useModelChoiceList(enabled, current).choices
+}
+
+/**
+ * The choices, and whether they've been read: read once `enabled` turns true, and again when
+ * `current` turns out not to be among them (a model added since, in another tab, say).
+ */
+export function useModelChoiceList(
+  enabled: boolean,
+  current: string | null = null
+): { readonly choices: ReadonlyArray<ModelChoice>; readonly loaded: boolean } {
   const action = useAction()
-  const [models, setModels] = useState<ReadonlyArray<ModelChoice & { readonly hidden: boolean }>>([])
+  const [models, setModels] = useState<ReadonlyArray<ModelChoice & { readonly hidden: boolean }> | null>(null)
+  const missing = models !== null && current !== null && !models.some((model) => model.value === current)
+  // A model missing from the list is looked for once more, not on every render.
+  const [lookedFor, setLookedFor] = useState<string | null>(null)
+  if (missing && lookedFor !== current) setLookedFor(current)
   useEffect(() => {
     if (!enabled) return
     void action
@@ -42,10 +57,14 @@ export function useModelChoices(enabled: boolean, current: string | null = null)
           return lists.flat()
         })
       )
-      .then((result) => result.ok && setModels(result.value))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when enabled
-  }, [enabled])
-  return models.flatMap(({ hidden, ...choice }) =>
-    !hidden ? [choice] : choice.value === current ? [{ ...choice, label: `${choice.label} (hidden)` }] : []
-  )
+      // A list that can't be read is an empty one, so nothing waits on it for good.
+      .then((result) => setModels(result.ok ? result.value : []))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once when enabled, and once per missing model
+  }, [enabled, lookedFor])
+  return {
+    loaded: models !== null,
+    choices: (models ?? []).flatMap(({ hidden, ...choice }) =>
+      !hidden ? [choice] : choice.value === current ? [{ ...choice, label: `${choice.label} (hidden)` }] : []
+    )
+  }
 }

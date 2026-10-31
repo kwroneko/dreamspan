@@ -301,6 +301,29 @@ test("a phone names the Write for action in full on its icon and keeps an empty 
   expect((await composer(page).boundingBox())!.height).toBeLessThan(45)
 })
 
+test("a phone's strip keeps each chip's whole text and fades where more chips are past the edge", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const long = "Bartholomew Featherstonehaugh-Underwood"
+  const chatId = await chatWith(["Mira", long])
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await pickReply(page, long)
+  await expect(nextChip(page)).toHaveAccessibleName(nextName(long))
+  const strip = nextReply(page)
+  // No chip's text is cut to an ellipsis: the row scrolls instead, and says so at its edges.
+  for (const chip of await strip.getByRole("button").all())
+    expect(
+      await chip.evaluate((node) => [...node.querySelectorAll("span")].every((s) => s.scrollWidth <= s.clientWidth))
+    ).toBe(true)
+  // Picking scrolled the row to the chip; from its start, more chips are past the end only.
+  await strip.evaluate((node) => node.scrollTo({ left: 0 }))
+  await expect(strip).toHaveAttribute("data-more-after", "true")
+  await expect(strip).not.toHaveAttribute("data-more-before")
+  const now = strip.getByRole("button", { name: `${long} replies now`, exact: true })
+  await now.scrollIntoViewIfNeeded()
+  await expect(now).toBeInViewport({ ratio: 1 })
+  await expect(strip).toHaveAttribute("data-more-before", "true")
+})
+
 test("reply order follows the branch tip, including a character turn beyond the loaded window", async ({ page }) => {
   const chatId = await chatWith(["Mira", "Tobin", "Wren"])
   const firstSlot = await admin((api) =>

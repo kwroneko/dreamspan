@@ -1,7 +1,7 @@
 // The next-reply strip above the composer's box: small chips for what the next reply uses (the
 // model, the prompt preset, the cache, who replies), each opening a popover of full-width rows,
 // the same popover at every width, so a long name is never cut to "Local …".
-import { type ReactNode, useId, useRef, useState } from "react"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -14,9 +14,56 @@ const chipTones: Record<ChipTone, string> = {
   success: "border-success/40 text-success"
 }
 
-/** A strip chip's look: a pill, one line, its text cut with an ellipsis when it's long. */
+/**
+ * A strip chip's look: a pill, one line. On a phone the row scrolls sideways, so a chip keeps its
+ * whole text; wider, a very long name is cut with an ellipsis, its whole text in the tooltip.
+ */
 export const chipClass = (tone: ChipTone = "neutral") =>
-  `inline-flex h-7 max-w-56 min-w-0 shrink-0 max-sm:max-w-36 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
+  `inline-flex h-7 min-w-0 shrink-0 sm:max-w-80 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
+
+/**
+ * The strip's row: it wraps where there's room; on a phone (`scroll`) it's one row that scrolls
+ * sideways, faded at an edge that has more chips past it, so none is hidden without a sign.
+ */
+export function StripRow({ scroll, children }: { scroll: boolean; children: ReactNode }) {
+  const row = useRef<HTMLDivElement>(null)
+  const [more, setMore] = useState({ before: false, after: false })
+  useEffect(() => {
+    const node = row.current
+    if (!scroll || node === null) return
+    const update = () => {
+      const before = node.scrollLeft > 1
+      const after = node.scrollLeft + node.clientWidth < node.scrollWidth - 1
+      setMore((was) => (was.before === before && was.after === after ? was : { before, after }))
+    }
+    update()
+    node.addEventListener("scroll", update, { passive: true })
+    const resized = new ResizeObserver(update)
+    resized.observe(node)
+    // A chip's text arrives after the row is drawn ("…", then the model's name).
+    const changed = new MutationObserver(update)
+    changed.observe(node, { childList: true, subtree: true, characterData: true })
+    return () => {
+      node.removeEventListener("scroll", update)
+      resized.disconnect()
+      changed.disconnect()
+    }
+  }, [scroll])
+  const fade = `linear-gradient(to right, ${more.before ? "transparent, black 1.5rem" : "black"}, ${more.after ? "black calc(100% - 1.5rem), transparent" : "black"})`
+  return (
+    <div
+      ref={row}
+      role="group"
+      aria-label="Next reply"
+      data-more-before={(scroll && more.before) || undefined}
+      data-more-after={(scroll && more.after) || undefined}
+      className={`flex min-w-0 items-center gap-1.5 ${scroll ? "overflow-x-auto [scrollbar-width:none]" : "flex-wrap"}`}
+      style={scroll && (more.before || more.after) ? { maskImage: fade } : undefined}
+    >
+      {children}
+    </div>
+  )
+}
 
 /** A chip whose value isn't known yet: "…", disabled, never a placeholder that flashes first. */
 export function LoadingChip({ label }: { label: string }) {

@@ -384,9 +384,11 @@ function MessageList({
                 key={item.key}
                 data-index={item.index}
                 ref={virtualizer.measureElement}
-                className="chat-row absolute top-0 left-0 w-full"
+                className="chat-row absolute left-0 w-full"
+                // Placed by `top`, not a transform: a transformed row would keep a reply's sticky
+                // Stop (Message.tsx) from holding to the bottom of the view.
                 style={{
-                  transform: `translateY(${item.start}px)`,
+                  top: item.start,
                   ...(railPx > 0 ? { left: railPx, width: `calc(100% - ${railPx}px)` } : {})
                 }}
               >

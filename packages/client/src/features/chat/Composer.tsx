@@ -27,6 +27,7 @@ import { planReply } from "./replyPolicy.ts"
 import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
 import { useComposerTurn } from "./composerTurn.ts"
+import { StripRow } from "./nextReplyStrip.tsx"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
@@ -37,6 +38,10 @@ const subscribePhone = (notify: () => void) => {
   media.addEventListener("change", notify)
   return () => media.removeEventListener("change", notify)
 }
+
+/** A phone's width: the composers' compact layout. */
+export const useCompactComposer = () =>
+  useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
 
 /** A send whose text was typed on a branch the chat view has left since. */
 const BRANCH_CHANGED: AppError = {
@@ -145,7 +150,7 @@ export function Composer({
   onSettings: (tab: "model" | "preset" | "cast") => void
   attachmentInput?: AttachmentInput
 }) {
-  const phone = useSyncExternalStore(subscribePhone, () => matchMedia("(max-width: 639px)").matches)
+  const phone = useCompactComposer()
   const castView = useCast()
   const { cast } = castView
   const userId = useSession().user.id
@@ -517,13 +522,9 @@ export function Composer({
         </p>
       )}
       {/* The next reply: what it uses and who writes it, as chips; one row, scrolled sideways on a phone. */}
-      <div
-        role="group"
-        aria-label="Next reply"
-        className={`flex min-w-0 items-center gap-1.5 ${phone ? "overflow-x-auto [scrollbar-width:none]" : "flex-wrap"}`}
-      >
+      <StripRow scroll={phone}>
         <ComposerControls placement="strip" context={controls} />
-      </div>
+      </StripRow>
       <div className="flex min-w-0 items-end gap-1.5">
         {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
         <div className="flex h-[46px] shrink-0 items-center gap-1">
