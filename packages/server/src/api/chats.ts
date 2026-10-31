@@ -475,6 +475,33 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* publishSlot(id, slotId, added.forkId)
       }).pipe(internal("EditVersion")),
 
+    // A wrong parse undone: the reply's text as it came, as an edit of it (model output stays frozen).
+    ShowSectionsAsText: ({ versionId, forkId, expectedRowVersion }) =>
+      Effect.gen(function* () {
+        const id = yield* userId
+        const source = yield* reader.GetVersion({ userId: id, versionId })
+        if (!source.replySections || source.status === "generating")
+          return yield* new NotFound({ entity: "reply sections", id: versionId })
+        const added = yield* writer.AddSelectedVersion({
+          userId: id,
+          slotId: source.slotId,
+          forkId: forkId ?? null,
+          version: {
+            ...userText(
+              originalReply(source.content, source.replySections),
+              "edited",
+              source.speakerEntityId,
+              source.id
+            ),
+            ...(source.images ? { images: source.images } : {}),
+            ...(source.reasoning ? { reasoning: source.reasoning } : {})
+          },
+          expectedRowVersion,
+          commitDraft: null
+        })
+        return yield* publishSlot(id, source.slotId, added.forkId)
+      }).pipe(internal("ShowSectionsAsText")),
+
     WriteVersion: ({ images, slotId, forkId, content, expectedRowVersion, draft }) =>
       Effect.gen(function* () {
         const id = yield* userId

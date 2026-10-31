@@ -549,6 +549,22 @@ export class ChatApi extends RpcGroup.make(
     success: PathEntry,
     error: Schema.Union([...WriteErrors])
   }),
+  /**
+   * "Show as reply text" (spec/REPLY-SECTIONS.md): a wrong parse undone. A new edited version,
+   * selected, whose text is the reply as it came, its leading tagged sections back in it in
+   * their tags; it keeps the provider's reasoning. The parsed version stays as it was.
+   * NotFound for a version without sections.
+   */
+  Rpc.make("ShowSectionsAsText", {
+    payload: {
+      versionId: VersionId,
+      /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      expectedRowVersion: Schema.Int
+    },
+    success: PathEntry,
+    error: Schema.Union([...WriteErrors])
+  }),
   /** "Write your own version" of any message, selected. */
   Rpc.make("WriteVersion", {
     payload: {

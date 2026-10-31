@@ -1,5 +1,5 @@
 import { sharedNote } from "./sharedNotes.ts"
-import { originalReply, type ReplySections } from "@rp/shared/replySections.ts"
+import { originalReply, type ReplySections, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { eventApplies, eventOrder } from "./forkState.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
@@ -123,6 +123,10 @@ const decoded = <A>(
   what: string
 ) => (exit._tag === "Success" ? Effect.succeed(exit.value as A) : Effect.fail(invalid(what)))
 
+/** A history message's leading tagged sections, in their tags, for the preset to send back. */
+const sectionsOf = (json: string | null): { sectionsPrefix?: string } =>
+  json === null ? {} : { sectionsPrefix: sectionsPrefix(JSON.parse(json) as ReplySections) }
+
 interface HistoryRow {
   readonly images_json: string
   readonly slot_id: string
@@ -136,6 +140,7 @@ interface HistoryRow {
   readonly status: string
   readonly speaker_entity_id: string | null
   readonly content: string
+  readonly reply_sections: string | null
   readonly macro_mode: "template" | "verbatim"
   readonly frozen_macros: string | null
   readonly created_at: number
@@ -581,7 +586,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             ${slotDeletedIn(sql, fork, "s")} AS slot_deleted, v.id AS version_id, o.ordinal, v.status,
             (SELECT count(*) FROM versions c WHERE c.slot_id=s.id AND c.fork_id IS NULL
               AND c.ordinal <= o.ordinal AND NOT ${versionDeletedIn(sql, fork, "c")}) AS version_number,
-            v.speaker_entity_id, v.content, v.macro_mode, v.frozen_macros, v.created_at,
+            v.speaker_entity_id, v.content, v.reply_sections, v.macro_mode, v.frozen_macros, v.created_at,
             (SELECT json_group_array(CASE WHEN ${imageExcludedIn(sql, fork, "o.id", "a.media_id")}
                 THEN json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height, 'excluded', json('true'))
                 ELSE json_object('mediaId', a.media_id, 'sha256', a.sha256, 'width', a.width, 'height', a.height) END) FROM
@@ -626,6 +631,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
             speaker: row.speaker_entity_id,
             side: row.first_writer === "human" && row.first_origin !== "greeting" ? "user" : "assistant",
             content: row.content,
+            ...sectionsOf(row.reply_sections),
             ...(row.images_json !== "[]" ? { images: JSON.parse(row.images_json) } : {}),
             macroMode: row.macro_mode,
             frozen: row.frozen_macros === null ? null : (JSON.parse(row.frozen_macros) as Record<string, string>),
@@ -651,7 +657,7 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         pins.history.push({
           key: keyOf(leaf, limit, after ?? null),
           older,
-          entries: read.map(({ content: _, ...pinned }) => pinned)
+          entries: read.map(({ content: _, sectionsPrefix: _sections, ...pinned }) => pinned)
         })
         return { entries: read.map(({ amends: _, ...entry }) => entry), older }
       }),
@@ -982,8 +988,9 @@ const replaySources = (
         const rows =
           ids.length === 0
             ? []
-            : yield* sql<{ id: string; content: string; amends: number }>`
-                SELECT v.id, v.content, (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
+            : yield* sql<{ id: string; content: string; reply_sections: string | null; amends: number }>`
+                SELECT v.id, v.content, v.reply_sections,
+                  (SELECT count(*) FROM version_history h WHERE h.version_id = v.id) AS amends
                 FROM versions v JOIN slots s ON s.id = v.slot_id
                 WHERE s.chat_id = ${chatId} AND ${owned} AND v.id IN ${sql.in(ids)}`
         const byId = new Map(rows.map((row) => [row.id, row]))
@@ -991,13 +998,15 @@ const replaySources = (
           Effect.gen(function* () {
             const row = byId.get(entry.versionId)
             if (!row) return yield* unpinned("a message")
-            if (row.amends === amends) return { ...entry, content: row.content } satisfies HistoryEntry
+            // A reply's sections are the model's, frozen with it; an amend changes only the text.
+            const sections = sectionsOf(row.reply_sections)
+            if (row.amends === amends) return { ...entry, content: row.content, ...sections } satisfies HistoryEntry
             // Amended since: its text then is what the next amend replaced.
             const [earlier] = yield* sql<{ content: string }>`
               SELECT content FROM version_history WHERE version_id = ${entry.versionId}
               ORDER BY id LIMIT 1 OFFSET ${amends}`
             if (!earlier) return yield* unpinned("a message's earlier text")
-            return { ...entry, content: earlier.content } satisfies HistoryEntry
+            return { ...entry, content: earlier.content, ...sections } satisfies HistoryEntry
           })
         )
         return { entries, older: window.older }

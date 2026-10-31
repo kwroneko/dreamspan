@@ -58,7 +58,7 @@ export const replySectionsOf = (doc: { readonly reply_sections?: ReplySectionSet
   doc.reply_sections ?? DEFAULT_REPLY_SECTIONS
 
 /** A literal tag (SillyTavern's prefix or suffix) as a pattern matching just it. */
-export const literalPattern = (text: string) => text.replace(/[\\^$.*+?()[\]{}|/]/g, "\\$&")
+export const literalPattern = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
 
 const sectionText = (section: ReplySection) => section.lead + section.open + section.text + (section.close ?? "")
 
@@ -74,5 +74,4 @@ export const sectionsDisplay = (sections: ReplySections | null | undefined) =>
   (sections?.sections ?? []).map((section) => section.text).join("\n\n")
 
 /** Whether the reply ended inside its last section. */
-export const sectionUnclosed = (sections: ReplySections | null | undefined) =>
-  sections?.sections.at(-1)?.close === null
+export const sectionUnclosed = (sections: ReplySections | null | undefined) => sections?.sections.at(-1)?.close === null

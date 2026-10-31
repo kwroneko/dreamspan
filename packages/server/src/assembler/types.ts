@@ -527,6 +527,11 @@ export interface HistoryEntry {
    */
   readonly side: "user" | "assistant"
   readonly content: string
+  /**
+   * The reply's leading tagged sections in their tags, as they came (spec/REPLY-SECTIONS.md):
+   * not part of `content`; sent before it only where the preset sends sections back.
+   */
+  readonly sectionsPrefix?: string
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
   /** Whether a template's variable writes are recorded already, as state events of its version. */

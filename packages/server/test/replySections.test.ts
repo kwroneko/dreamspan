@@ -154,11 +154,16 @@ describe("reply sections", () => {
     }
     const result = run([" tide.</thi", "nk>\n\nMira looks up."], { initial })
     expect(result.body).toBe("Mira looks up.")
-    expect(result.sections!.sections).toEqual([{ lead: "", open: "<thinking>", text: "Plan: the tide.", close: "</think>" }])
+    expect(result.sections!.sections).toEqual([
+      { lead: "", open: "<thinking>", text: "Plan: the tide.", close: "</think>" }
+    ])
     expect(result.panel).toBe("Plan: the tide.")
     // A finished version continues its body.
     const body = run([" <think>x</think>"], {
-      initial: { text: "Mira", sections: { ...initial.sections, sections: [{ ...initial.sections.sections[0]!, close: "</thinking>" }] } }
+      initial: {
+        text: "Mira",
+        sections: { ...initial.sections, sections: [{ ...initial.sections.sections[0]!, close: "</thinking>" }] }
+      }
     })
     expect(body.body).toBe("Mira <think>x</think>")
   })

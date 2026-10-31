@@ -1,4 +1,5 @@
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
+import { replySectionsOf } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
@@ -513,6 +514,31 @@ const historyStage: AssemblerStage = {
       return assembly
     })
 }
+
+/**
+ * Tagged sections at the start of replies (spec/REPLY-SECTIONS.md) go back to the model only
+ * as the preset says: the last `send_back` replies of the card being written that have them,
+ * in their original tags before the text, as ST's `add_to_prompts` / `max_additions` (only
+ * the speaker's own, as ST does in a group). They're volatile: they leave as the chat grows.
+ */
+const replySectionsStage = sync("reply-sections", (assembly) => {
+  const { send_back: sendBack } = replySectionsOf(need(assembly, "preset").doc)
+  if (sendBack === 0) return
+  const speaker = need(assembly, "cast").speaker?.entity ?? null
+  const scripted = new Map(need(assembly, "scripted"))
+  let left = sendBack
+  for (const entry of [...need(assembly, "history")].reverse()) {
+    if (left === 0) break
+    // Another card's (both known and different) are skipped without counting.
+    if (!entry.inContext || !entry.sectionsPrefix) continue
+    if (speaker !== null && entry.speaker !== null && entry.speaker !== speaker) continue
+    const read = scripted.get(entry.versionId)
+    if (!read) continue
+    scripted.set(entry.versionId, { ...read, text: entry.sectionsPrefix + read.text, volatile: true })
+    left--
+  }
+  assembly.scripted = scripted
+})
 
 /** Lore scanning sees the prompt-side templates too; composition reuses these results. */
 const loreScanStage = sync("lore-scan", (assembly) => {
@@ -2494,6 +2520,7 @@ const builtinStages: ReadonlyArray<AssemblerStage> = [
   macrosStage,
   scriptsStage,
   historyStage,
+  replySectionsStage,
   resolveStage,
   imageTokensStage,
   rolesStage,

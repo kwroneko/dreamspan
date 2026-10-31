@@ -1238,6 +1238,25 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       })
   },
+  ShowSectionsAsText: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        const theirs = yield* ownSlot(owner)
+        yield* refused(
+          actor.api.ShowSectionsAsText({ versionId: owner.chat.versionId, expectedRowVersion: theirs.rowVersion }),
+          "NotFound"
+        )
+        const mine = yield* ownSlot(actor)
+        yield* refused(
+          actor.api.ShowSectionsAsText({
+            versionId: actor.chat.versionId,
+            forkId: owner.chat.forkId,
+            expectedRowVersion: mine.rowVersion
+          }),
+          "NotFound"
+        )
+      })
+  },
   WriteVersion: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
