@@ -18,7 +18,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore
@@ -33,14 +32,11 @@ import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
-import { castView, messageSide, modelNameOf, useCast } from "./cast.ts"
+import { messageSide, useCast } from "./cast.ts"
 import { MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
+import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
 import { formatWhen } from "./chatTitle.ts"
-import { displayText } from "./macros.ts"
-import { applyDisplayTransforms, displayTransforms } from "./displayPipeline.ts"
-import { useDisplayContext } from "./DisplaySettings.tsx"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
@@ -75,82 +71,35 @@ export interface ContextMark {
 }
 
 /**
- * Text whose macros resolve against the chat's state at its position (DESIGN §5.6): a
- * greeting's `{{user}}` is whoever the user played before it, so it follows a persona
- * change until a message is sent after it, and a later change doesn't rewrite it. Only
- * such text reads the cast there; other messages render as before.
+ * A message's text as it displays (useDisplayed.ts), live or finished: one component for both,
+ * so a reply that just finished goes on showing its streamed display until the final one is
+ * ready. Template text's macros resolve against the chat's state at its position (DESIGN
+ * §5.6): a greeting's `{{user}}` is whoever the user played before it, so it follows a persona
+ * change until a message is sent after it, and a later change doesn't rewrite it.
  */
-function TemplateText({
+function BodyText({
   version,
   session,
   parentSlotId,
   depth,
-  placement
-}: {
-  version: Version
-  session: ChatSession
-  parentSlotId: SlotId | null
-  depth: number
-  placement: 1 | 2
-}) {
-  const viewer = useViewPrefs()
-  const needsContext = version.macroMode === "template" || viewer.prefs.outputMacros || viewer.prefs.displayRegex
-  const cast = useCast()
-  const read = useCallback(
-    () => (needsContext ? session.castAfter(parentSlotId) : undefined),
-    [session, parentSlotId, needsContext]
-  )
-  const positionCast = useSyncExternalStore(session.subscribePositions, read)
-  // The speaker card's own fields, for `{{description}}` and the like, as the preview had them.
-  const readFields = useCallback(
-    () => (!needsContext || version.speakerEntityId === null ? undefined : session.cardFields(version.speakerEntityId)),
-    [session, version.speakerEntityId, needsContext]
-  )
-  const fields = useSyncExternalStore(session.subscribePositions, readFields)
-  const here = useMemo(
-    () => (positionCast ? castView(positionCast, [...cast.cards.values()]) : cast),
-    [positionCast, cast]
-  )
-  const display = useDisplayContext()
-  const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
-  const input = useMemo(
-    () => ({
-      text: version.content,
-      version,
-      names: { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
-      card: fields ?? {},
-      prefs: viewer.prefs,
-      scripts: display.scripts,
-      placement,
-      depth: display.leafDepth === null ? null : Math.max(0, display.leafDepth - depth)
-    }),
-    [version, here, fields, viewer.prefs, display, depth, placement]
-  )
-  const [result, setResult] = useState<{
-    input: typeof input
-    stages: typeof stages
-    text: string
-    issues: ReadonlyArray<string>
-  } | null>(null)
-  useEffect(() => {
-    let active = true
-    void applyDisplayTransforms(input, stages.entries).then((value) => {
-      if (active) setResult({ input, stages, ...value })
-    })
-    return () => {
-      active = false
-    }
-  }, [input, stages])
-  const current = result?.input === input && result.stages === stages ? result : null
-  const text =
-    current?.text ??
-    displayText(version.content, version.macroMode, input.names, input.card, version.frozenMacros ?? {})
+  placement,
+  text,
+  streaming
+}: DisplayAt & { placement: 1 | 2; text: string; streaming: boolean }) {
+  const shown = useDisplayed({ version, session, parentSlotId, depth }, text, placement, streaming)
   return (
     <>
-      <MessageBody text={version.content}>
-        <Markdown text={text} sourceText={version.content} streaming={false} />
+      <MessageBody text={text}>
+        {shown.pending ? (
+          // Its place kept, not shown, until the display scripts answer.
+          <div className="invisible" aria-hidden>
+            <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+          </div>
+        ) : (
+          <Markdown text={shown.text ?? ""} sourceText={text} streaming={streaming} />
+        )}
       </MessageBody>
-      {current?.issues.map((issue, i) => (
+      {shown.issues.map((issue, i) => (
         <p key={i} role="note" className="text-xs text-muted">
           {issue}
         </p>
@@ -180,23 +129,21 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
-      <ReasoningPanels version={version} session={session} />
+      <ReasoningPanels version={version} session={session} parentSlotId={parentSlotId} depth={depth} />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
         </p>
-      ) : live === null && !generating ? (
-        <TemplateText
+      ) : (
+        <BodyText
           version={version}
           session={session}
           parentSlotId={parentSlotId}
           depth={depth}
           placement={placement}
+          text={text}
+          streaming={generating}
         />
-      ) : (
-        <MessageBody text={text}>
-          <Markdown text={text} streaming={generating} />
-        </MessageBody>
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
@@ -771,16 +718,6 @@ export const Message = memo(function Message({
           {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
           {marks}
           <span className="flex-1" />
-          {generating && (
-            <Button
-              variant="secondary"
-              className="h-7 shrink-0 px-2"
-              onClick={async () => report(await session.stop(version.id))}
-            >
-              <Icon name="stop" size={12} />
-              Stop
-            </Button>
-          )}
           {!editing && (
             <div
               className={`hidden items-center transition-opacity duration-100 sm:flex ${
@@ -886,6 +823,21 @@ export const Message = memo(function Message({
               props={{ onPick: async (choice) => report(await session.regenerate(entry, choice)) }}
             />
           )}
+        {generating && (
+          // The version's Stop (DESIGN §3.1: it belongs to the version), at the end of what's
+          // being written and held at the bottom of the view while any of the reply shows, so a
+          // reply longer than the screen never takes it out of reach.
+          <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end">
+            <Button
+              variant="secondary"
+              className="pointer-events-auto h-8 shrink-0 px-3 shadow-sm max-sm:h-10"
+              onClick={async () => report(await session.stop(version.id))}
+            >
+              <Icon name="stop" size={12} />
+              Stop
+            </Button>
+          </div>
+        )}
         {(showVersions || (revealed && !editing)) && (
           // At the end of the message, as in ST: where reading it ends, and where a swipe
           // that changes its length leaves the arrows. A tap on a phone shows why it isn't

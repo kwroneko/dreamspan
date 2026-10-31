@@ -7,6 +7,8 @@ import { createServer, type ViteDevServer } from "vite"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { showActions } from "./support/message.ts"
+import { openPanel } from "./support/panel.ts"
+import { modelChip, presetChip } from "./support/strip.ts"
 import type { install, close } from "./support/chatContributions.ts"
 
 const server = serverPerFile(withAdmin)
@@ -87,7 +89,7 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await showActions(message)
   await message.getByRole("button", { name: "Plugin message action", exact: true }).click()
   await expect(page.getByRole("dialog", { name: "Plugin dialog", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Plugin panel", exact: true }).click()
+  await openPanel(page, "Plugin panel")
   await expect(page.getByText("Scoped plugin panel", { exact: true })).toBeVisible()
   await contribution(page, "close", "plugin")
   await expect(page.getByRole("complementary", { name: "Chat panel", exact: true })).toHaveCount(0)
@@ -100,16 +102,29 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await expect(page.locator("body")).toHaveAttribute("data-plugin-commands", "2")
 })
 
+/** Whether the chip's popover offers its side panel tab in its footer, then closes it. */
+const expectFooter = async (page: Page, chip: "model" | "preset", shown: boolean) => {
+  await (chip === "model" ? modelChip(page) : presetChip(page)).click()
+  await expect(page.getByRole("radiogroup", { name: chip === "model" ? "Model" : "Prompt preset" })).toBeVisible()
+  const row = page.getByRole("button", { name: chip === "model" ? "Model settings…" : "Edit preset…", exact: true })
+  if (shown) await expect(row).toBeVisible()
+  else await expect(row).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("radiogroup")).toHaveCount(0)
+}
+
 test("panel disablement removes dependent settings buttons, notes links and history shortcuts", async ({ page }) => {
+  // Each settings check opens and closes a chip's popover: twelve round trips on a shared host.
+  test.setTimeout(120_000)
   await setup(page)
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
+  await expectFooter(page, "model", true)
+  await expectFooter(page, "preset", true)
   await contribution(page, "install", "settings")
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toHaveCount(0)
+  await expectFooter(page, "model", false)
+  await expectFooter(page, "preset", false)
   await contribution(page, "close", "settings")
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
+  await expectFooter(page, "model", true)
+  await expectFooter(page, "preset", true)
   await page.getByRole("button", { name: "Show Mira's card", exact: true }).click()
   // The character tab's More menu has the card's notes while the Notes panel is there.
   const notes = async (count: number) => {
@@ -124,9 +139,9 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await notes(1)
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
-  // The menu stays for the reply commands (ac8a5a1), without the history ones.
+  // The menu stays for the chat's commands, without the history ones; keys are listed apart.
   await page.getByRole("button", { name: "Chat actions", exact: true }).click()
-  await expect(page.getByRole("menuitem", { name: "Edit your last message (Ctrl+ArrowUp)" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: /^(Search and replace|History edits)$/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await page.keyboard.press("Control+h")
@@ -140,9 +155,12 @@ test("a dynamic family obeys individual disablement and never opens an unlisted 
   await setup(page)
   await contribution(page, "install", "plugin")
   await contribution(page, "install", "family-tab")
-  await expect(page.getByRole("button", { name: "Plugin panel", exact: true })).toHaveCount(0)
+  // The header has one panel toggle; the panel's tabs say what's there.
+  await page.getByRole("button", { name: "Chat panel", exact: true }).click()
+  await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
+  await expect(page.getByRole("tab", { name: "Plugin panel", exact: true })).toHaveCount(0)
   await contribution(page, "close", "family-tab")
-  await page.getByRole("button", { name: "Plugin panel", exact: true }).click()
+  await openPanel(page, "Plugin panel")
   await page.getByRole("button", { name: "Unlisted family URL", exact: true }).click()
   // A family's tab this chat doesn't offer opens the panel's default tab instead (panelHere).
   await expect(page).toHaveURL(/panel=chat(&|$)/)

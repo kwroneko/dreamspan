@@ -12,7 +12,7 @@ test("an admin sets the proxy, which shows without its password; bad settings ar
   // Requiring the proxy without one, and a bypass entry the server can't read.
   await page.getByRole("switch", { name: "Require the proxy for everyone else" }).click()
   await page.getByLabel("Bypass list", { exact: true }).fill("intranet.example\nnot a host!")
-  await page.getByRole("button", { name: "Save" }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
   const alert = page.getByRole("alert")
   await expect(alert).toContainText("These settings can't be used")
   await expect(alert).toContainText("Bypass entry not understood: not a host!")
@@ -21,7 +21,7 @@ test("an admin sets the proxy, which shows without its password; bad settings ar
   await page.getByRole("radio", { name: "Set a proxy" }).click()
   await page.getByLabel("Proxy URL").fill("socks5://vpnuser:proxy-secret@vpn.example:1080")
   await page.getByLabel("Bypass list", { exact: true }).fill("intranet.example")
-  await page.getByRole("button", { name: "Save" }).click()
+  await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByText("Saved.")).toBeVisible()
   await expect(page.getByText("socks5://vpn.example:1080")).toBeVisible()
   await expect(page.locator("body")).not.toContainText("proxy-secret")

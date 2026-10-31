@@ -351,12 +351,12 @@ for (const [name, viewport] of [
         await page.getByRole("listbox").getByRole("option", { name: option }).click()
         await expect(page.getByRole("listbox")).toHaveCount(0)
       }
-      await pick(dialog.getByLabel("Refusal judge"), /fake-small/)
+      await pick(page.getByLabel("Refusal judge"), /fake-small/)
       await pick(dialog.getByLabel("Fallback summarizer"), /fake-small/)
       await expect
         .poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => [!!d.judge, !!d.lcm?.fallback]))
         .toEqual([true, true])
-      await pick(dialog.getByLabel("Refusal judge"), "None")
+      await pick(page.getByLabel("Refusal judge"), "None")
       await expect.poll(async () => admin((api) => api.GetGenerationDefaults()).then((d) => !!d.judge)).toBe(false)
       // Clearing one leaves the other.
       expect(await admin((api) => api.GetGenerationDefaults()).then((d) => !!d.lcm?.fallback)).toBe(true)

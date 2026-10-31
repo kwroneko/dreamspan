@@ -1,4 +1,4 @@
-// Account selections and their small panel integration. Unit E can move the panel shell.
+// Account selections: the strip's model and preset chips, and their side panel tabs.
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Model } from "@rp/shared/providers.ts"
@@ -6,14 +6,12 @@ import { Link } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { useEffect, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { Field } from "../../ui/Field.tsx"
-import { Select } from "../../ui/Select.tsx"
 import { ModelSettingsEditor } from "../connections/models.tsx"
 import { Editor } from "../editor/EditorPage.tsx"
-import { modelValue, parseModelValue, useModelChoices } from "./modelChoices.ts"
+import { modelValue, parseModelValue, useModelChoiceList } from "./modelChoices.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 import { useIsPanelTab } from "./panels.tsx"
+import { ChipText, ChoiceChip, LoadingChip, PopoverRow } from "./nextReplyStrip.tsx"
 
 function useSelections(session: ChatSession) {
   const action = useAction()
@@ -46,79 +44,127 @@ function useSelections(session: ChatSession) {
   return { action, defaults, presets }
 }
 
-export function GenerationControls({
+/**
+ * The next-reply strip's model chip: the account's model, which every chat's next reply uses
+ * (DESIGN §2.2: switched here, its settings in the side panel). "…" until both it and the
+ * model list are read, so "Choose a model" never flashes before the real one.
+ */
+export function ModelChip({
   session,
   view,
   onSettings
 }: {
   session: ChatSession
   view: ChatView
-  onSettings: (tab: "model" | "preset") => void
+  onSettings: (tab: "model") => void
 }) {
   const modelPanel = useIsPanelTab("model", view)
+  const { action, defaults } = useSelections(session)
+  const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
+  const { choices: models, loaded } = useModelChoiceList(true, current)
+  const chosen = models.find((model) => model.value === current)
+  if (view.loading || defaults === null || !loaded) return <LoadingChip label="Model" />
+  // A model no list has (its connection gone, say) says so, and the chip still opens to choose one.
+  const short = chosen
+    ? chosen.label.slice(chosen.label.indexOf(" · ") + 3)
+    : current !== null
+      ? "Model not found"
+      : "Choose a model"
+  return (
+    <>
+      <ChoiceChip
+        label={chosen ? `Model: ${chosen.label}. Change the model` : "Choose a model"}
+        hint={
+          chosen
+            ? `Model for the next reply: ${chosen.label}`
+            : current !== null
+              ? "Your model isn't in any connection's list now: choose another"
+              : "No model chosen yet"
+        }
+        title="Model"
+        chip={<ChipText>{short}</ChipText>}
+        choices={models}
+        value={current ?? ""}
+        onChoose={(value) =>
+          void action.run(
+            (client) => client("ChangeGenerationDefaults", { change: { model: parseModelValue(value) } }),
+            ["settings"]
+          )
+        }
+        {...(modelPanel
+          ? {
+              footer: (close: () => void) => (
+                <PopoverRow
+                  onClick={() => {
+                    close()
+                    onSettings("model")
+                  }}
+                >
+                  Model settings…
+                </PopoverRow>
+              )
+            }
+          : {})}
+      />
+      <ErrorAlert error={action.error} />
+    </>
+  )
+}
+
+/** The next-reply strip's prompt preset chip, with "Edit preset…" opening it in the side panel. */
+export function PresetChip({
+  session,
+  view,
+  onSettings
+}: {
+  session: ChatSession
+  view: ChatView
+  onSettings: (tab: "preset") => void
+}) {
   const presetPanel = useIsPanelTab("preset", view)
   const { action, defaults, presets } = useSelections(session)
-  const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
-  const models = useModelChoices(true, current)
+  const value = defaults?.preset ?? "builtin"
+  const choices = [
+    { value: "builtin", label: BUILTIN_PRESET_LABEL },
+    ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
+  ]
+  const chosen = choices.find((choice) => choice.value === value)
+  if (view.loading || defaults === null || chosen === undefined) return <LoadingChip label="Prompt preset" />
   return (
-    <div className="flex flex-col gap-1">
-      <div className="grid grid-cols-2 gap-2" aria-label="Current generation settings">
-        <div className="flex min-w-0 items-end gap-1">
-          <div className="min-w-0 flex-1">
-            <Field label="Model">
-              <Select
-                items={models}
-                value={current}
-                placeholder="Choose a model"
-                onValueChange={(value) =>
-                  void action.run(
-                    (client) => client("ChangeGenerationDefaults", { change: { model: parseModelValue(value) } }),
-                    ["settings"]
-                  )
-                }
-              />
-            </Field>
-          </div>
-          {modelPanel && (
-            <Button
-              aria-label="Model settings"
-              title={view.history?.model?.modelKey ? `Settings for ${view.history.model.modelKey}` : undefined}
-              onClick={() => onSettings("model")}
-            >
-              ⚙
-            </Button>
-          )}
-        </div>
-        <div className="flex min-w-0 items-end gap-1">
-          <div className="min-w-0 flex-1">
-            <Field label="Prompt preset">
-              <Select
-                items={[
-                  { value: "builtin", label: BUILTIN_PRESET_LABEL },
-                  ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
-                ]}
-                value={defaults?.preset ?? "builtin"}
-                onValueChange={(value) =>
-                  void action.run(
-                    (client) =>
-                      client("ChangeGenerationDefaults", {
-                        change: { preset: value === "builtin" ? null : (value as LibraryRef["id"]) }
-                      }),
-                    ["settings"]
-                  )
-                }
-              />
-            </Field>
-          </div>
-          {presetPanel && (
-            <Button aria-label="Prompt preset settings" onClick={() => onSettings("preset")}>
-              ⚙
-            </Button>
-          )}
-        </div>
-      </div>
+    <>
+      <ChoiceChip
+        label={`Prompt preset: ${chosen.label}. Change the preset`}
+        hint={`Prompt preset for the next reply: ${chosen.label}`}
+        title="Prompt preset"
+        chip={<ChipText>{chosen.label}</ChipText>}
+        choices={choices}
+        value={value}
+        onChoose={(next) =>
+          void action.run(
+            (client) =>
+              client("ChangeGenerationDefaults", {
+                change: { preset: next === "builtin" ? null : (next as LibraryRef["id"]) }
+              }),
+            ["settings"]
+          )
+        }
+        {...(presetPanel
+          ? {
+              footer: (close: () => void) => (
+                <PopoverRow
+                  onClick={() => {
+                    close()
+                    onSettings("preset")
+                  }}
+                >
+                  Edit preset…
+                </PopoverRow>
+              )
+            }
+          : {})}
+      />
       <ErrorAlert error={action.error} />
-    </div>
+    </>
   )
 }
 

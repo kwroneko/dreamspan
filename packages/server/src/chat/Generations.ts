@@ -12,13 +12,23 @@ import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effe
 import { Reader, Writer } from "../db/Database.ts"
 import type { QueueOutcome } from "../db/ops.ts"
 import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
+import { CacheWarmth } from "./CacheWarmth.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { fromItems, type Rewritten, rewriteItems, rewriteText } from "./rewrites.ts"
 import { settleHeld } from "./replySections.ts"
+import { executionRegistry } from "../execution.ts"
+import { OUT_OF_TIME } from "@rp/shared/regexScripts.ts"
+import type { LiveRewrite } from "./liveRewrites.ts"
 import { Notices } from "./Notices.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
 /** How often a generating version's text so far is saved. */
 const SAVE_EVERY_MS = 2000
+
+/** The longest pause between two live rewrites of one reply (see `pump`). */
+const LIVE_PAUSE_MS = 100
+/** How many times in a row a failed live rewrite is tried again before waiting for more text. */
+const LIVE_RETRIES = 5
 
 interface Running {
   readonly request: GenerationRequest
@@ -32,6 +42,22 @@ interface Running {
   sectionsText: string
   /** What a reply parser holds back for now, kept if the reply ends here. */
   held: { readonly held: string; readonly into: "body" | "section" } | null
+  /**
+   * What subscribers were last sent of the text, reasoning and section panel: the texts above
+   * through the live rewrites (liveRewrites.ts), or as they are (`direct`). `pending` until
+   * the first rewrite says whether any script applies; nothing is sent until then.
+   */
+  shown: { text: string; reasoning: string; sections: string }
+  mode: "pending" | "direct" | "rewrite"
+  /** Texts changed since the last rewrite started, and whether one is running. */
+  dirty: boolean
+  pumping: boolean
+  /** Scripts already reported as failing while this reply streamed. */
+  reported: Set<string>
+  /** Live rewrites that failed in a row (`pump`). */
+  failures: number
+  /** Ended: nothing more is sent as it streams. */
+  closed: boolean
   waitingCache: boolean
   savedAt: number
   /** Stopped by the user (`stopped`), as opposed to the server going down (`interrupted`). */
@@ -72,6 +98,8 @@ export class Generations extends Context.Service<
       const hub = yield* ChatHub
       const notices = yield* Notices
       const generator = yield* Generator
+      const warmth = yield* Effect.serviceOption(CacheWarmth)
+      const { liveRewrites } = yield* executionRegistry
       const scope = yield* Effect.scope
       const running = new Map<VersionId, Running>()
 
@@ -145,15 +173,42 @@ export class Generations extends Context.Service<
               }
             }
           }
+          entry.closed = true
+          // A reply that ended with text goes through the scripts with neither flag, as ST's
+          // cleanUpMessage runs them on what it received (ARCHITECTURE §12, "Rewrites"): its
+          // body once the sections are out, its reasoning and each section's text (placement
+          // 6); a continuation with the text it continues, which they rewrote already.
+          const { content, replySections } = settled(entry)
+          const written: Rewritten =
+            status === "complete" || status === "stopped"
+              ? yield* rewriteText(reader, {
+                  userId: request.userId,
+                  chatId: request.chatId,
+                  forkId: request.forkId,
+                  at: { slotId: request.slotId, versionId: request.versionId },
+                  edit: false,
+                  content,
+                  reasoning: entry.reasoning || undefined,
+                  sections: replySections
+                })
+              : {
+                  content,
+                  ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
+                  ...(replySections ? { sections: replySections } : {})
+                }
+          entry.text = written.content
+          if (written.reasoning !== undefined) entry.reasoning = written.reasoning
           // The final save posts what was queued behind this reply, in the same transaction.
           const saved = yield* Effect.exit(
             writer.FinishGeneration({
               userId: request.userId,
               versionId: request.versionId,
-              ...settled(entry),
+              content: written.content,
+              ...(written.sections ? { replySections: written.sections } : {}),
               ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
               status,
-              error
+              error,
+              ...(written.rewrite ? { rewrite: written.rewrite } : {})
             })
           )
           running.delete(request.versionId)
@@ -217,6 +272,138 @@ export class Generations extends Context.Service<
           hub.publish(chatId, { _tag: "Chat", chat: yield* reader.GetChat({ userId, chatId }) })
         }).pipe(Effect.catchCause((cause) => Effect.logWarning("publishing posted messages failed", cause)))
 
+      /** Sends what changed of one shown text: added at its end, or replaced from where it differs. */
+      const send = (entry: Running, field: keyof Running["shown"], next: string) => {
+        const previous = entry.shown[field]
+        if (next === previous) return
+        let offset = 0
+        if (next.startsWith(previous)) offset = previous.length
+        else {
+          const end = Math.min(previous.length, next.length)
+          while (offset < end && previous.charCodeAt(offset) === next.charCodeAt(offset)) offset++
+        }
+        entry.shown[field] = next
+        const { chatId, versionId } = entry.request
+        const _tag = field === "text" ? "Delta" : field === "reasoning" ? "Reasoning" : "Section"
+        hub.publish(chatId, {
+          _tag,
+          versionId,
+          offset,
+          text: next.slice(offset),
+          ...(offset < previous.length ? { replace: true } : {})
+        })
+      }
+
+      /** The texts as they are, sent as they stream (no rewrite applies). */
+      const sendRaw = (entry: Running) => {
+        send(entry, "text", entry.text)
+        send(entry, "reasoning", entry.reasoning)
+        send(entry, "sections", entry.sectionsText)
+      }
+
+      /**
+       * Rewrites the texts so far and sends them, again while they changed meanwhile: one
+       * rewrite at a time per reply, each on the newest text, so chunks that arrive during one
+       * are taken together by the next. A rewrite that fails sends nothing: the texts shown
+       * stay as they were and the next rewrite tries again, since what failed may be a script
+       * that would take something out (a worker that's busy or restarting, say).
+       */
+      const pump = (entry: Running, steps: ReadonlyArray<LiveRewrite>): Effect.Effect<void> =>
+        Effect.gen(function* () {
+          while (entry.dirty && !entry.closed) {
+            entry.dirty = false
+            const { text, reasoning, sections } = entry
+            const started = Date.now()
+            const items = rewriteItems(text, reasoning || undefined, sections)
+            let current: ReadonlyArray<{ readonly text: string }> = items
+            let active = false
+            let failed = false
+            for (const step of steps) {
+              // Each rewrite takes what the one before made.
+              const given = current.map((item, i) => ({ text: item.text, kind: items[i]!.kind }))
+              const result = yield* Effect.suspend(() => step.rewrite({ reader }, entry.request, given)).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.interrupt
+                    : Effect.as(
+                        entry.failures++ === 0
+                          ? Effect.logWarning(
+                              `live rewrite ${step.id} failed; the shown text waits for the next`,
+                              cause
+                            )
+                          : Effect.void,
+                        "failed" as const
+                      )
+                )
+              )
+              if (result === "failed") {
+                failed = true
+                break
+              }
+              if (result === null) continue
+              // A script that ran out of time (a busy host) left a text as it came, which may
+              // hold what it takes out: as a failure, what's shown waits for the next rewrite.
+              if (result.texts.some((text) => text.failed.some((failure) => failure.reason === OUT_OF_TIME))) {
+                if (entry.failures++ === 0)
+                  yield* Effect.logWarning(`live rewrite ${step.id} ran out of time; tried again`)
+                failed = true
+                break
+              }
+              active = true
+              current = result.texts
+              for (const failure of result.texts.flatMap((r) => r.failed)) {
+                const key = `${failure.script.scope}:${failure.script.id}`
+                if (entry.reported.has(key)) continue
+                entry.reported.add(key)
+                yield* Effect.logWarning(
+                  `regex script "${failure.script.name}" was skipped while a reply streamed: ${failure.reason}`
+                )
+              }
+            }
+            if (entry.closed) return
+            if (failed) {
+              // Tried again soon even if nothing more arrives, a few times; then with the next chunk.
+              if (entry.failures <= LIVE_RETRIES) {
+                entry.dirty = true
+                yield* Effect.sleep(LIVE_PAUSE_MS)
+              }
+              continue
+            }
+            entry.failures = 0
+            if (!active) {
+              // Nothing changes this reply's text: it streams as it is from now on.
+              entry.mode = "direct"
+              return sendRaw(entry)
+            }
+            entry.mode = "rewrite"
+            // Only text that went through the scripts is ever shown: what came meanwhile waits
+            // for the next rewrite, so nothing a script takes out shows for a moment.
+            const next = fromItems(current, text, reasoning || undefined, sections)
+            send(entry, "text", next.content)
+            send(entry, "reasoning", next.reasoning ?? "")
+            send(entry, "sections", sectionsDisplay(next.sections))
+            // As long again before the next one (at most 100 ms), so a long reply under heavy
+            // scripts takes about half a reader worker, not all of one, while it streams.
+            const spent = Date.now() - started
+            if (entry.dirty && spent >= 5) yield* Effect.sleep(Math.min(spent, LIVE_PAUSE_MS))
+          }
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              entry.pumping = false
+            })
+          )
+        )
+
+      /** After a chunk: sends it, or has the texts so far rewritten (`pump`). */
+      const changed = (entry: Running) => {
+        if (entry.mode === "direct") return Effect.sync(() => sendRaw(entry))
+        entry.dirty = true
+        if (entry.pumping) return Effect.void
+        entry.pumping = true
+        return Effect.asVoid(Effect.forkIn(pump(entry, liveRewrites.list()), scope))
+      }
+
       const run = (gen: GeneratorShape, entry: Running) =>
         gen
           .generate({
@@ -230,63 +417,49 @@ export class Generations extends Context.Service<
             Stream.runForEach((chunk) =>
               Effect.suspend(() => {
                 if (typeof chunk === "string") {
-                  const offset = entry.text.length
                   entry.text += chunk
-                  hub.publish(entry.request.chatId, {
-                    _tag: "Delta",
-                    versionId: entry.request.versionId,
-                    offset,
-                    text: chunk
-                  })
                 } else if ("sections" in chunk) {
                   entry.sections = chunk.sections
-                  if (chunk.text !== "") {
-                    const offset = entry.sectionsText.length
-                    entry.sectionsText += chunk.text
-                    hub.publish(entry.request.chatId, {
-                      _tag: "Section",
-                      versionId: entry.request.versionId,
-                      offset,
-                      text: chunk.text
-                    })
-                  }
+                  entry.sectionsText += chunk.text
                 } else if ("held" in chunk) {
                   entry.held = chunk
                   return Effect.void
                 } else {
-                  const offset = entry.reasoning.length
                   // A continuation's own reasoning goes after its source's, a paragraph apart.
-                  const text = !entry.reasoned && offset > 0 ? `\n\n${chunk.reasoning}` : chunk.reasoning
+                  const text =
+                    !entry.reasoned && entry.reasoning.length > 0 ? `\n\n${chunk.reasoning}` : chunk.reasoning
                   entry.reasoned = true
                   entry.reasoning += text
-                  hub.publish(entry.request.chatId, {
-                    _tag: "Reasoning",
-                    versionId: entry.request.versionId,
-                    offset,
-                    text
-                  })
                 }
-                if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
-                entry.savedAt = Date.now()
-                return save(entry, "generating", null).pipe(
-                  // Gone for good (purged from the bin): nothing it writes would be kept.
-                  Effect.catchTag("NotFound", () =>
-                    Effect.suspend(() => {
-                      entry.stopped = true
-                      return Effect.interrupt
-                    })
-                  ),
-                  Effect.tapCause((cause) =>
-                    Cause.hasInterruptsOnly(cause)
-                      ? Effect.void
-                      : Effect.logWarning("saving a generation's text so far failed", cause)
-                  ),
-                  Effect.catchTag(["StorageError", "RpcClientError"], () => Effect.void)
+                return Effect.andThen(
+                  changed(entry),
+                  Effect.suspend(() => saveSoFar(entry))
                 )
               })
             ),
             Effect.onExit((exit) => finish(entry, exit))
           )
+
+      /** Saves the text so far now and then, so a crash keeps most of it. */
+      const saveSoFar = (entry: Running) => {
+        if (Date.now() - entry.savedAt < SAVE_EVERY_MS) return Effect.void
+        entry.savedAt = Date.now()
+        return save(entry, "generating", null).pipe(
+          // Gone for good (purged from the bin): nothing it writes would be kept.
+          Effect.catchTag("NotFound", () =>
+            Effect.suspend(() => {
+              entry.stopped = true
+              return Effect.interrupt
+            })
+          ),
+          Effect.tapCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logWarning("saving a generation's text so far failed", cause)
+          ),
+          Effect.catchTag(["StorageError", "RpcClientError"], () => Effect.void)
+        )
+      }
 
       const startGeneration = (request: GenerationRequest): Effect.Effect<void> =>
         Effect.gen(function* () {
@@ -300,6 +473,17 @@ export class Generations extends Context.Service<
             sections: request.initial?.sections ?? null,
             sectionsText: sectionsDisplay(request.initial?.sections),
             held: null,
+            shown: {
+              text: request.initial?.text ?? "",
+              reasoning: request.initial?.reasoning ?? "",
+              sections: sectionsDisplay(request.initial?.sections)
+            },
+            mode: liveRewrites.list().length > 0 ? "pending" : "direct",
+            dirty: false,
+            pumping: false,
+            reported: new Set(),
+            failures: 0,
+            closed: false,
             waitingCache: false,
             savedAt: Date.now(),
             stopped: false,
@@ -307,7 +491,14 @@ export class Generations extends Context.Service<
             final: undefined
           }
           running.set(request.versionId, entry)
-          entry.fiber = yield* Effect.forkIn(run(generator.value, entry), scope)
+          // The scripts are prepared while the provider is still on its first token.
+          if (entry.mode === "pending") yield* changed(entry)
+          // The chat's cache estimate waits until the reply ends: it would assemble beside it.
+          const release = Option.match(warmth, { onNone: () => () => {}, onSome: (w) => w.hold(request.chatId) })
+          entry.fiber = yield* Effect.forkIn(
+            run(generator.value, entry).pipe(Effect.ensuring(Effect.sync(release))),
+            scope
+          )
         })
 
       return Generations.of({
@@ -329,10 +520,11 @@ export class Generations extends Context.Service<
             .filter((entry) => entry.request.chatId === chatId)
             .map((entry) => ({
               versionId: entry.request.versionId,
-              text: entry.text,
+              // What subscribers were sent: a new one goes on from there.
+              text: entry.shown.text,
               waitingCache: entry.waitingCache,
-              ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
-              ...(entry.sectionsText ? { sections: entry.sectionsText } : {})
+              ...(entry.shown.reasoning ? { reasoning: entry.shown.reasoning } : {}),
+              ...(entry.shown.sections ? { sections: entry.shown.sections } : {})
             })),
         runningIn: (chatId) =>
           [...running.values()]

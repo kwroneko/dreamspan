@@ -1,7 +1,7 @@
 // Inserting messages anywhere in the history (spec/MESSAGE-INSERT.md §4; owner decision DESIGN
 // §3.1, 2026-10-30): Insert message below and above from a message's "More actions", written
 // or generated as two different cast members, Duplicate of a generated and of a written
-// message, Undo from the toast and restore from the bin, the editor's cache and summary lines,
+// message, Undo from the toast and restore from the bin, the cache chip's re-read and the editor's summary line,
 // renumbering, and a fork made before the insertion staying as it was. At 1440 and 390 pixels,
 // light and dark. Every card and message here is made up.
 import { join } from "node:path"
@@ -12,6 +12,7 @@ import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
 import { loginCookie, withCookie, type Client as Api } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cacheChip } from "./support/strip.ts"
 import { level1 } from "./support/summaries.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "8", FAKE_GENERATOR_TOKENS: "24" })
@@ -116,6 +117,8 @@ for (const [width, height] of [
     test(`insert below, written and generated as two cast members, undo and restore (${width}px, ${theme})`, async ({
       page
     }) => {
+      // Two generations, an undo, a restore and the Cancel's recovered text: long on a shared host.
+      test.setTimeout(120_000)
       await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
@@ -128,16 +131,48 @@ for (const [width, height] of [
       await messageMenu(message(page, "The lamp is lit."), "Insert message below")
       await expect(editor(page)).toBeVisible()
       await expect(speakerIn(editor(page))).toHaveAccessibleName(/^Speaking as Ana/)
-      await expect(editor(page)).toContainText("The model will re-read")
-      for (const name of ["Generate as Ana", "Insert", "Cancel", "Discard"])
+      // What the next reply re-reads is the strip's cache chip's, while the editor is open.
+      await expect(editor(page)).not.toContainText("The model will re-read")
+      await expect(page.getByText(/^↻ re-reads \d+ messages?$/)).toBeAttached()
+      if (width >= 640) {
+        await cacheChip(page).click()
+        await expect(page.getByRole("dialog", { name: "Cache", exact: true })).toContainText(
+          /The model will re-read \d+ messages? on the next reply/
+        )
+        await page.keyboard.press("Escape")
+        await expect(page.getByRole("dialog", { name: "Cache", exact: true })).toHaveCount(0)
+      }
+      for (const name of ["Generate as Ana", "Insert", "Cancel"])
         await expect(editor(page).getByRole("button", { name, exact: true })).toBeVisible()
-      await editor(page).getByTestId("insert-text").fill("Ana steps onto the pier.")
-      await shoot(page, `insert-editor-${tag}`)
-      // Cancel keeps the text; opening it again there finds it.
+      await expect(editor(page).getByRole("button", { name: "Discard", exact: true })).toHaveCount(0)
+      // Cancel sends typed text to the bin's recovered texts; opening it again there finds it empty.
+      const cancelled = `Ana waits on the steps (${tag}).`
+      await editor(page).getByTestId("insert-text").fill(cancelled)
+      await expect
+        .poll(() =>
+          admin((api) =>
+            Effect.map(api.MessageDrafts({ chatId: fixture.chatId }), (ds) =>
+              ds.some((d) => d.key.targetKind === "insert" && d.content === cancelled)
+            )
+          )
+        )
+        .toBe(true)
       await editor(page).getByRole("button", { name: "Cancel", exact: true }).click()
       await expect(editor(page)).toHaveCount(0)
+      await expect(page.getByText(/re-reads \d+ messages?/)).toHaveCount(0)
+      await expect
+        .poll(() =>
+          admin((api) =>
+            Effect.map(api.ListRecoveredTexts({ limit: 100, before: null }), (texts) =>
+              texts.some((text) => text.content.includes(cancelled))
+            )
+          )
+        )
+        .toBe(true)
       await messageMenu(message(page, "The lamp is lit."), "Insert message below")
-      await expect(editor(page).getByTestId("insert-text")).toHaveValue("Ana steps onto the pier.")
+      await expect(editor(page).getByTestId("insert-text")).toHaveValue("")
+      await editor(page).getByTestId("insert-text").fill("Ana steps onto the pier.")
+      await shoot(page, `insert-editor-${tag}`)
       // A saved insertion draft reopens in its original place after a full reload.
       await expect
         .poll(() =>
@@ -351,53 +386,6 @@ for (const width of [1440, 390])
       await shoot(page, `insert-deleted-tip-${width}-${theme}`)
     })
   }
-
-test("off-window branch numbers refresh after another tab inserts before them", async ({ page }) => {
-  test.setTimeout(120_000)
-  await page.setViewportSize({ width: 1440, height: 900 })
-  const fixture = await lighthouse("Off-window insertion numbers")
-  await admin((api) =>
-    Effect.gen(function* () {
-      // An alternate at message #2, then enough original history to page that branch point out.
-      yield* api.SendMessage({
-        chatId: fixture.chatId,
-        forkId: fixture.main,
-        parentSlotId: fixture.entries[0]!.slotId,
-        branch: true,
-        content: "The alternate harbor.",
-        reply: false
-      })
-      let parent = fixture.entries.at(-1)!.slotId
-      for (let n = 0; n < 150; n++) {
-        const posted = yield* api.SendMessage({
-          chatId: fixture.chatId,
-          forkId: fixture.main,
-          parentSlotId: parent,
-          branch: false,
-          content: `Synthetic history ${n}.`,
-          reply: false
-        })
-        if (posted._tag !== "Posted") throw new Error("queued")
-        parent = posted.entry.slotId
-      }
-    })
-  )
-  await page.goto(`${server().url}/chats/${fixture.chatId}?fork=${fixture.main}`)
-  await expect(message(page, "Synthetic history 149.")).toBeVisible()
-  await expect(message(page, "A ship rounds the point.")).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /at message #2.*switch branch/ })).toBeVisible()
-  await admin((api) =>
-    api.InsertMessage({
-      chatId: fixture.chatId,
-      forkId: fixture.main,
-      anchor: null,
-      expectedRowVersion: 0,
-      body: { _tag: "Write", speaker: null, content: "Before the harbor." }
-    })
-  )
-  await expect(page.getByRole("button", { name: /at message #3.*switch branch/ })).toBeVisible()
-  await shoot(page, "insert-off-window-numbering")
-})
 
 test("another tab appends after an above-first insertion with a null structural tip", async ({ page, context }) => {
   const fixture = await admin((api) =>

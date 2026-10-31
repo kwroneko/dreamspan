@@ -1,5 +1,6 @@
 // The reply order follows the branch's tip, even when the message list is scrolled to
-// older history. Read backwards in windows only until a character's last turn is found.
+// older history. Read backwards in windows only until a character's last turn is found, unless
+// the messages shown already reach the tip with one in them.
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import { useEffect, useState } from "react"
@@ -14,8 +15,20 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
   } | null>(null)
   const leaf = view.leafSlotId
   const revision = view.pathRevision
+  // The messages shown reach the tip and hold a character's turn: they answer it without a read,
+  // so the composer doesn't wait on the server after every reply.
+  const characters = cast?.participants.filter((id) => !cast.playedByMe.includes(id)) ?? []
+  const shown =
+    cast !== null &&
+    !view.loading &&
+    view.newer === null &&
+    view.entries.at(-1)?.slotId === leaf &&
+    (characters.length === 0 ||
+      view.entries.some(
+        (entry) => entry.version.speakerEntityId !== null && characters.includes(entry.version.speakerEntityId)
+      ))
   useEffect(() => {
-    if (cast === null) return
+    if (cast === null || shown) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const read = async () => {
@@ -49,6 +62,7 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
       cancelled = true
       clearTimeout(timer)
     }
-  }, [session, leaf, cast, revision])
+  }, [session, leaf, cast, revision, shown])
+  if (shown) return view.entries
   return tail?.leaf === leaf && tail.cast === cast && tail.revision === revision ? tail.entries : null
 }

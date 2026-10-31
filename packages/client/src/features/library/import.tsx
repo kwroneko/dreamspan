@@ -1,5 +1,6 @@
-// The import screen: pick or drop files, each uploaded in turn, with its report. With
-// `?into=<ref>` it updates that library entry from a new version of its file.
+// The import screen: the way to a SillyTavern folder's import, first as the main path, and
+// files picked or dropped, each uploaded in turn, with its report. With `?into=<ref>` it
+// updates that library entry from a new version of its file, and offers only that.
 import { RegistryContext, useAtomValue } from "@effect/atom-react"
 import type { RefId } from "@rp/shared/library.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
@@ -130,11 +131,6 @@ export function ImportPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">{into ? "Update from a file" : "Import"}</h1>
         <div className="flex flex-wrap gap-2">
-          {!into && (
-            <Link to="/import/st" className={buttonClass("secondary")}>
-              Import a SillyTavern folder
-            </Link>
-          )}
           {canGoBack ? (
             // Wherever the user came from: the shell's Import link is on every screen.
             <Button variant="ghost" onClick={() => router.history.back()}>
@@ -147,27 +143,40 @@ export function ImportPage() {
           )}
         </div>
       </header>
-      <Card>
-        <CardHeader
-          title={into ? `Update “${intoLabel ?? "this entry"}”` : "Files"}
-          description={
-            into
-              ? "Pick its new version. Your own edits are merged with it; anything that conflicts is left as it was."
-              : "Character cards (PNG, JSON or CHARX), SillyTavern World Info files and prompt presets. Preset imports take prompt text, order, prefill and regex scripts. Import model settings on a model’s settings screen; import connection settings in Connections."
-          }
-        />
-        <FileDrop
-          label={into ? "Choose the new version, or drop it here" : "Choose files, or drop them here"}
-          description={
-            left > 0 ? "Wait until these files are done to add more." : `Up to ${size(MAX_IMPORT_BYTES)} each`
-          }
-          multiple={!into}
-          accept=".png,.json,.charx,image/png,application/json"
-          // One batch at a time: files dropped meanwhile would interleave with it.
-          disabled={left > 0}
-          onFiles={(files) => void importFiles(files)}
-        />
-      </Card>
+      <div className={into ? "flex flex-col" : "grid gap-6 md:grid-cols-2"}>
+        {!into && (
+          <Card className="flex flex-col">
+            <CardHeader
+              title="Import a SillyTavern folder"
+              description="Everything from ST at once: characters, personas, chats and group chats, groups, lorebooks and chat-completion presets. Importing the same folder again adds only what's new."
+            />
+            <Link to="/import/st" className={`${buttonClass("primary")} mt-auto self-start`}>
+              Choose the folder
+            </Link>
+          </Card>
+        )}
+        <Card className="flex flex-col">
+          <CardHeader
+            title={into ? `Update “${intoLabel ?? "this entry"}”` : "Import files"}
+            description={
+              into
+                ? "Pick its new version. Your own edits are merged with it; anything that conflicts is left as it was."
+                : "Character cards (PNG, JSON or CHARX), World Info files and prompt presets (their prompts, order, prefill and regex scripts). Model and connection settings are imported on their own screens."
+            }
+          />
+          <FileDrop
+            label={into ? "Choose the new version, or drop it here" : "Choose files, or drop them here"}
+            description={
+              left > 0 ? "Wait until these files are done to add more." : `Up to ${size(MAX_IMPORT_BYTES)} each`
+            }
+            multiple={!into}
+            accept=".png,.json,.charx,image/png,application/json"
+            // One batch at a time: files dropped meanwhile would interleave with it.
+            disabled={left > 0}
+            onFiles={(files) => void importFiles(files)}
+          />
+        </Card>
+      </div>
       {uploads.length > 0 && (
         <Card>
           <CardHeader

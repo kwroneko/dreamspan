@@ -6,21 +6,25 @@ export const binTitle = (item: BinItem) => {
   if (item.kind === "chat") return item.title === "" ? "Untitled chat" : readableChatTitle(item.title)
   const chat = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
   if (chat === null) return item.title
+  // Numbered as the chat numbered it where it was deleted (its position from 1, which inserted
+  // messages above it move off its depth); older items have only the depth, or neither.
+  const place = typeof item.origin.position === "number" ? item.origin.position : item.origin.depth
+  const number = typeof place === "number" ? place + 1 : null
   switch (item.kind) {
     case "message":
-      return `Message in “${chat}”`
+      return number === null ? `Message in “${chat}”` : `Message ${number} in “${chat}”`
     case "version":
-      return `Version of a message in “${chat}”`
+      return number === null ? `Version of a message in “${chat}”` : `Version of message ${number} in “${chat}”`
     case "branch": {
       // A fork deleted on its own (owner, 2026-10-27): named by its name, else by what only it had.
       if (typeof item.origin.forkId === "string") {
         const name =
           typeof item.origin.forkName === "string" && item.origin.forkName !== "" ? item.origin.forkName : null
         const only = item.origin.messages
-        if (name !== null) return `Fork “${name}” in “${chat}”`
+        if (name !== null) return `Branch “${name}” in “${chat}”`
         return typeof only === "number" && only > 0
-          ? `Fork of ${only} message${only === 1 ? "" : "s"} in “${chat}”`
-          : `Fork in “${chat}”`
+          ? `Branch of ${only} message${only === 1 ? "" : "s"} in “${chat}”`
+          : `Branch in “${chat}”`
       }
       const count = item.origin.messages
       return typeof count === "number"

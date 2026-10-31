@@ -13,6 +13,7 @@ import { type FakeProvider, REPLY, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { messageMenu, showActions } from "./support/message.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cacheChip } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -275,23 +276,34 @@ test("an earlier reply and a swipe each open their own request from the message'
 test("the cache indicator is warm after a reply, and cold once an earlier message is edited", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chat.id}`)
-  const estimate = page.getByRole("region", { name: "Cache estimate" })
-  await expect(estimate).toContainText("Cache warm (estimate)")
-  await expect(estimate).toContainText("The provider reported using its cache")
-  await expect(estimate).toContainText(/\d:\d\d left/)
-  await estimate.getByRole("button", { name: "Hide countdown" }).click()
-  await expect(estimate).not.toContainText("left")
-  await estimate.getByRole("button", { name: "Show countdown" }).click()
+  const chip = cacheChip(page)
+  await expect(chip).toHaveAccessibleName(/^Cache warm, \d+:\d\d left\. Details$/)
+  await expect(chip).toHaveText(/^Cache warm \d+:\d\d$/)
+  await chip.click()
+  const details = page.getByRole("dialog", { name: "Cache warm", exact: true })
+  await expect(details).toContainText("The provider reported using its cache")
+  await expect(details).toContainText(/if it's sent in the next \d+:\d\d/)
+  await details.getByRole("button", { name: "Hide countdown" }).click()
+  await expect(chip).toHaveText("Cache warm")
+  await expect(chip).toHaveAccessibleName("Cache warm. Details")
+  await expect(details).not.toContainText("in the next")
+  await details.getByRole("button", { name: "Show countdown" }).click()
+  await expect(chip).toHaveText(/^Cache warm \d+:\d\d$/)
   await shoot(page, "cache-warm")
+  await page.keyboard.press("Escape")
+  await expect(details).toHaveCount(0)
 
   const mine = page.getByRole("article", { name: "Your message" })
   await showActions(mine)
   await mine.getByRole("button", { name: "Edit" }).click()
   await mine.getByLabel("Message text").fill("The road washed out.")
   await mine.getByRole("button", { name: "Save" }).click()
-  await expect(estimate).toContainText("Cache cold (estimate)")
-  await expect(estimate).toContainText("Message 2 was")
-  await expect(estimate).toContainText(/Next send rewrites ~[\d,]+ tokens/)
+  await expect(chip).toHaveAccessibleName(/^Cache: [\d,]+ tokens uncached on the next reply/)
+  await expect(chip).toHaveText(/^↻ [\d.]+k? uncached$/)
+  await chip.click()
+  const cold = page.getByRole("dialog", { name: "Not cached", exact: true })
+  await expect(cold).toContainText(/Your next reply re-sends about [\d,]+ tokens at full price/)
+  await expect(cold).toContainText("Why: Message 2 was")
   await shoot(page, "cache-cold")
 })
 

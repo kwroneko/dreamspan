@@ -114,10 +114,10 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
 
   // The chat's forks are listed from the branch menu, the chat in the crumbs.
   await page.getByRole("button", { name: /switch branch/ }).click()
-  await page.getByRole("menuitem", { name: "List this chat’s forks" }).click()
+  await page.getByRole("link", { name: "Show in the left panel" }).click()
   await expect(crumbs(page)).toContainText("Lamp story")
   await expect(crumbs(page)).not.toContainText("Wren")
-  await expect(sidebar(page).getByRole("region", { name: "Current fork", exact: true })).toBeVisible()
+  await expect(sidebar(page).getByRole("region", { name: "Latest branch", exact: true })).toBeVisible()
   expect(path(page)).toBe(chatPath)
   // Moving around the chat keeps the panel on it.
   await page.reload()

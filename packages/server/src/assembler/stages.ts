@@ -1,5 +1,5 @@
 import { budgetTokens } from "@rp/shared/imageTokens.ts"
-import { replySectionsOf } from "@rp/shared/replySections.ts"
+import { replySectionsOf, sectionsPrefix } from "@rp/shared/replySections.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { withModelSettings } from "@rp/shared/modelSettings.ts"
 import { fitPair, resolveLcm, summaryMacroPrompts } from "@rp/shared/lcmSettings.ts"
@@ -30,10 +30,22 @@ import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
 import { placeBreakpoints } from "./breakpoints.ts"
-import { DEFAULT_MAX_IMAGES, imagesStage, messageImages } from "./images.ts"
+import { DEFAULT_MAX_IMAGES, imagesStage, messageImagesOf } from "./images.ts"
 import { cardBlock, personaBlock } from "./layouts.ts"
 import { cardFields, makeMacroEnvironment, type MessagePosition, type Names } from "./macros.ts"
-import { compile, makeScriptRunner, PLACEMENT, type PromptScript, type ScriptRunner } from "./regex.ts"
+import {
+  applyScripts,
+  compile,
+  makeScriptRunner,
+  PLACEMENT,
+  REGEX_MS,
+  REGEX_OUTPUT,
+  type PromptScript,
+  type ScriptRunner
+} from "./regex.ts"
+import { builtinScriptSources, type ScriptSource } from "./scriptSources.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
+import type { ScriptRef } from "@rp/shared/regexScripts.ts"
 import {
   type Assembly,
   type AssemblerStage,
@@ -448,9 +460,17 @@ const macrosStage = sync("macros", (assembly) => {
   })
 })
 
-const scriptsStage = sync("scripts", (assembly) => {
-  assembly.scripts = promptScripts(assembly)
-})
+const scriptsStage: AssemblerStage = {
+  id: "scripts",
+  run: (assembly) =>
+    Effect.gen(function* () {
+      const lists: Array<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }> = []
+      for (const source of assembly.request.scriptSources?.list() ?? builtinScriptSources)
+        lists.push({ source, scripts: yield* source.scripts(assembly) })
+      assembly.scripts = compileScripts(assembly, lists)
+      return assembly
+    })
+}
 
 const placementOf = (entry: HistoryEntry, cast: Cast) =>
   sideOf(entry, cast) === "user" ? PLACEMENT.userInput : PLACEMENT.aiOutput
@@ -534,11 +554,29 @@ const replySectionsStage = sync("reply-sections", (assembly) => {
   for (const entry of [...need(assembly, "history")].reverse()) {
     if (left === 0) break
     // Another card's (both known and different) are skipped without counting.
-    if (!entry.inContext || !entry.sectionsPrefix) continue
+    if (!entry.inContext || !entry.replySections?.sections.length) continue
     if (speaker !== null && entry.speaker !== null && entry.speaker !== speaker) continue
     const read = scripted.get(entry.versionId)
     if (!read) continue
-    scripted.set(entry.versionId, { ...read, text: entry.sectionsPrefix + read.text, volatile: true })
+    // Each section's text through the prompt-only reasoning scripts at the message's depth,
+    // as ST runs them on the reasoning it adds to a prompt, then back in its tags.
+    const sections = entry.replySections
+    const texts = applyScripts(
+      assembly,
+      need(assembly, "scripts"),
+      sections.sections.map((section) => ({ text: section.text, placement: PLACEMENT.reasoning, depth: read.depth }))
+    )
+    const prefix = sectionsPrefix({
+      ...sections,
+      sections: sections.sections.map((section, i) => ({ ...section, text: texts[i]!.text }))
+    })
+    const applied = [...(read.applied ?? []), ...texts.flatMap((text) => text.applied ?? [])]
+    scripted.set(entry.versionId, {
+      ...read,
+      text: prefix + read.text,
+      volatile: true,
+      ...(applied.length ? { applied } : {})
+    })
     left--
   }
   assembly.scripted = scripted
@@ -1025,43 +1063,53 @@ const chatLine = (
   }
 }
 
-/** One context's time for the preset's regex scripts: V8 stops them once it's spent. */
-const REGEX_MS = 200
-/** Characters of text the scripts may make for one context, copied or replaced. */
-const REGEX_OUTPUT = 8_000_000
 /** Patterns longer than this, after the case rewrite, are left out. */
 const MAX_PATTERN = 2_000
 /** Scripts after this many are left out. */
 const MAX_SCRIPTS = 100
 
+const SCOPE_NAMES = { global: "global", preset: "preset's", character: "character's" } as const
+
 /**
- * The preset's prompt-only regex scripts, once the user approved them (ARCHITECTURE §9):
- * the pattern compiled, with its macros expanded when the script asks for that, and the
- * replacement and trim strings expanded. A script that can't run safely is left out and reported.
+ * The scripts of every registered list, in order (ARCHITECTURE §15): the prompt-only ones for
+ * a context, or for a rewrite the ones with neither flag; the pattern compiled, with its macros
+ * expanded when the script asks for that, and the replacement and trim strings expanded. Each
+ * list decides whether its scripts may run (approval). A script that can't run safely is left
+ * out and reported.
  */
-const promptScripts = (assembly: Assembly): ScriptRunner => {
-  const doc = need(assembly, "preset").doc
+const compileScripts = (
+  assembly: Assembly,
+  lists: ReadonlyArray<{ readonly source: ScriptSource; readonly scripts: ReadonlyArray<RegexScript> }>
+): ScriptRunner => {
   const limits = { ms: REGEX_MS, output: REGEX_OUTPUT }
-  if (!doc.regex_approved) return makeScriptRunner([], limits)
-  const usable = doc.regex.filter((script) => !script.disabled && script.prompt_only && script.find_regex)
+  const wanted = (script: RegexScript) =>
+    assembly.request.rewrite ? !script.prompt_only && !script.markdown_only : script.prompt_only
+  const usable = lists.flatMap(({ source, scripts }) =>
+    scripts
+      .filter((script) => !script.disabled && wanted(script) && script.find_regex)
+      .map((script) => ({ source, script }))
+  )
   if (usable.length > MAX_SCRIPTS) {
     assembly.issues.push({
       kind: "regex_skipped",
-      message: `Only the first ${MAX_SCRIPTS} of the preset's ${usable.length} prompt regex scripts run.`
+      message: `Only the first ${MAX_SCRIPTS} of the ${usable.length} ${assembly.request.rewrite ? "" : "prompt "}regex scripts run.`
     })
   }
-  const list = usable.slice(0, MAX_SCRIPTS).flatMap((script): Array<PromptScript> => {
+  const list = usable.slice(0, MAX_SCRIPTS).flatMap(({ source, script }): Array<PromptScript> => {
+    const what = source.scope === "preset" ? "The" : `The ${SCOPE_NAMES[source.scope]}`
     const skip = (why: string) => {
       assembly.issues.push({
         kind: "regex_skipped",
-        message: `The regex script "${script.name}" was left out: ${why}.`
+        message: `${what} regex script "${script.name}" was left out: ${why}.`
       })
       return []
     }
+    // The preset's pieces keep their ids; other lists' are namespaced by scope.
+    const key = source.scope === "preset" ? `regex:${script.id}` : `regex:${source.scope}:${script.id}`
     if (script.substitute_regex === "escaped") return skip("macros escaped into its pattern aren't supported")
     const find =
       script.substitute_regex === "raw"
-        ? presetText(assembly, `regex:${script.id}:find`, script.find_regex).text
+        ? presetText(assembly, `${key}:find`, script.find_regex).text
         : script.find_regex
     const regex = compile(find)
     if (regex === "unsafe") {
@@ -1071,34 +1119,11 @@ const promptScripts = (assembly: Assembly): ScriptRunner => {
     }
     if (regex === null) return skip("its pattern isn't a valid regular expression")
     if (regex.source.length > MAX_PATTERN) return skip("its pattern is too long")
-    const replacement = script.replace_string
-      ? presetText(assembly, `regex:${script.id}:replace`, script.replace_string).text
-      : ""
-    const trim = script.trim_strings.map((t, i) => presetText(assembly, `regex:${script.id}:trim:${i}`, t).text)
-    return [{ script, regex, replacement, trim }]
+    const replacement = script.replace_string ? presetText(assembly, `${key}:replace`, script.replace_string).text : ""
+    const trim = script.trim_strings.map((t, i) => presetText(assembly, `${key}:trim:${i}`, t).text)
+    return [{ ref: { scope: source.scope, id: script.id, name: script.name }, script, regex, replacement, trim }]
   })
   return makeScriptRunner(list, limits)
-}
-
-/** The scripts' text for these messages, as one batch; what stopped them is reported once. */
-const applyScripts = (
-  assembly: Assembly,
-  runner: ScriptRunner,
-  items: ReadonlyArray<{ readonly text: string; readonly placement: number; readonly depth: number }>
-) => {
-  const expired = runner.expired
-  const { results, failed } = runner.apply(items)
-  const report = (message: string) => {
-    if (!assembly.issues.some((i) => i.message === message)) assembly.issues.push({ kind: "regex_skipped", message })
-  }
-  for (const [{ script }, why] of failed)
-    report(`The regex script "${script.name}" was skipped where it failed: ${why}.`)
-  if (!expired && runner.expired && runner.list.length > 0) {
-    report(
-      `The regex scripts ran out of time (${REGEX_MS} ms for one context): the rest of the messages are sent without them.`
-    )
-  }
-  return results
 }
 
 /** The example dialogue of one card, block by block (setOpenAIMessageExamples). */
@@ -1786,7 +1811,9 @@ const composeStage = sync("compose", (assembly) => {
   const projected = need(assembly, "projected")
   // The history stage ran the scripts on the verbatim messages it read; templates run here.
   const read = need(assembly, "scripted")
-  const scripted: Array<{ readonly text: string; readonly volatile: boolean } | undefined> = projected.map((p, i) =>
+  const scripted: Array<
+    { readonly text: string; readonly volatile: boolean; readonly applied?: ReadonlyArray<ScriptRef> } | undefined
+  > = projected.map((p, i) =>
     read.get(p.entry.versionId)?.depth === projected.length - 1 - i ? read.get(p.entry.versionId) : undefined
   )
   const rest = scripted.flatMap((s, i) => (s ? [] : [i]))
@@ -1800,6 +1827,10 @@ const composeStage = sync("compose", (assembly) => {
     }))
   )
   rest.forEach((index, i) => (scripted[index] = { ...ran[i]!, text: clipForSummary(assembly, ran[i]!.text) }))
+  // The inspector names the scripts that changed a message beside its source.
+  scripted.forEach((result, i) => {
+    if (result?.applied?.length) assembly.pieces[projected[i]!.piece]!.scripts = result.applied
+  })
   // Notes in-chat are extension prompts at their depth; the others go beside the main prompt,
   // one after another (injectToMain).
   // Lore above the history is pinned: what follows the first place it can go is stable only
@@ -2347,7 +2378,10 @@ const composeStage = sync("compose", (assembly) => {
     for (const failure of assembly.lcmFailures)
       assembly.issues.push({
         kind: "summary_failed",
-        message: `Messages ${failure.from}–${failure.to} could not be summarized; a failure marker replaces their originals.`
+        message:
+          failure.from === failure.to
+            ? `Message ${failure.from} could not be summarized; a failure marker replaces its original.`
+            : `Messages ${failure.from}–${failure.to} could not be summarized; a failure marker replaces their originals.`
       })
     const sentPieces = new Set(composition.messages.flatMap((m) => m.pieces))
     const retained = projected.filter((p) => sentPieces.has(p.piece))
@@ -2365,14 +2399,24 @@ const composeStage = sync("compose", (assembly) => {
     assembly.issues.push({
       kind: "history_truncated",
       message: assembly.lcmOmitted?.length
-        ? assembly.lcmOmitted.map((r) => `Messages ${r.from}–${r.to} left out: not summarized yet.`).join(" ")
-        : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
+        ? assembly.lcmOmitted
+            .map(
+              (r) =>
+                `${r.from === r.to ? `Message ${r.from}` : `Messages ${r.from}–${r.to}`} left out: not summarized yet.`
+            )
+            .join(" ")
+        : composition.historySent === 1
+          ? "The context holds only the last message: older ones don't fit the preset's context size."
+          : `The context holds the last ${composition.historySent} messages: older ones don't fit the preset's context size.`
     })
   }
   if (composition.examplesSent < composition.examplesTotal) {
     assembly.issues.push({
       kind: "examples_truncated",
-      message: `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit the preset's context size.`
+      message:
+        composition.examplesTotal - composition.examplesSent === 1
+          ? "1 example dialogue didn't fit the preset's context size."
+          : `${composition.examplesTotal - composition.examplesSent} example dialogues didn't fit the preset's context size.`
     })
   }
 })
@@ -2481,6 +2525,7 @@ const requestStage = sync("request", (assembly) => {
   const messages = need(assembly, "messages")
   const s = doc.samplers
   const firstSummary = messages.findIndex((m) => m.pieces.some((p) => hasSummary(assembly, p)))
+  const imagesOf = messageImagesOf(assembly)
   if ((assembly.lcm?.summaries.some((s) => s.content !== "") || assembly.lcmFailures?.length) && firstSummary < 0)
     throw new AssemblyFailed({
       reason: "invalid_document",
@@ -2491,7 +2536,7 @@ const requestStage = sync("request", (assembly) => {
     messages: limitImageEstimates(
       messages.map(({ role, content, name, pieces }) => {
         // Images the fork took out are left out here, so every limit counts only what's sent.
-        const images = messageImages(assembly, pieces).map(({ image }) => image)
+        const images = imagesOf(pieces).map(({ image }) => image)
         return { role, content, ...(name ? { name } : {}), ...(images.length ? { images } : {}) }
       }),
       assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES
@@ -2523,7 +2568,10 @@ const requestStage = sync("request", (assembly) => {
   if (imageCount > (assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES))
     assembly.issues.push({
       kind: "images_limited",
-      message: `Only the last ${assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES} images will be sent.`
+      message:
+        (assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES) === 1
+          ? "Only the last image will be sent."
+          : `Only the last ${assembly.model?.maxImages ?? DEFAULT_MAX_IMAGES} images will be sent.`
     })
   const mark = (piece: number, i: number) => {
     const record = assembly.pieces[piece]!
@@ -2552,7 +2600,7 @@ const breakpointsStage = sync("breakpoints", (assembly) => {
   if (assembly.model?.cacheBreakpoints === "explicit" && dropped.length)
     assembly.issues.push({
       kind: "cache_breakpoints",
-      message: `The provider takes ${EXPLICIT_MARKERS} cache markers here; ${dropped.map((b) => `"${b.reason}"`).join(", ")} isn't marked.`
+      message: `The provider takes ${EXPLICIT_MARKERS} cache markers here; ${dropped.map((b) => `"${b.reason}"`).join(", ")} ${dropped.length === 1 ? "isn't" : "aren't"} marked.`
     })
 })
 

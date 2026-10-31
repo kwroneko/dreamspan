@@ -938,6 +938,23 @@ describe("the bin with inserted messages (spec/MESSAGE-INSERT.md §3.1)", () => 
       }).pipe(Effect.provide(database()))
   )
 
+  it.live("a deleted message's origin keeps its place as the fork showed it, which insertions move off its depth", () =>
+    Effect.gen(function* () {
+      const t = yield* inserting()
+      const plain = yield* t.del(t.main, t.c.slotId)
+      assert.deepStrictEqual([plain.origin.depth, plain.origin.position], [3, 3])
+      yield* t.writer.RestoreBinItem({ userId: t.userId, itemId: plain.id })
+      const x = yield* t.insert(t.main, t.a.slotId, "x")
+      yield* t.insert(t.main, t.a.slotId, "y")
+      assert.deepStrictEqual(yield* t.shows(t.main), ["root", "a", "y", "x", "b", "c"])
+      const inserted = yield* t.del(t.main, x)
+      assert.deepStrictEqual([inserted.origin.depth, inserted.origin.position], [2, 3])
+      const below = yield* t.del(t.main, t.c.slotId)
+      // A deleted message keeps its number, as with depths: c is still sixth, after root, a, y, x, b.
+      assert.deepStrictEqual([below.origin.depth, below.origin.position], [3, 5])
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("an inserted message restored after its anchor left the fork's path comes back as a fork of its own", () =>
     Effect.gen(function* () {
       const t = yield* inserting()

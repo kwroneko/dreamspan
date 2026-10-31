@@ -12,6 +12,7 @@ export function Menu({
   side = "bottom",
   align = "end",
   label,
+  defaultOpen = false,
   onOpenChange
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
@@ -21,11 +22,17 @@ export function Menu({
   align?: "start" | "center" | "end"
   /** An accessible name for the list, when the trigger's text doesn't say what it holds. */
   label?: string
+  /** Open as it mounts: a menu mounted only once its trigger is first used, as a long list's rows do. */
+  defaultOpen?: boolean
   /** Told when it opens and closes: to read what it lists, say. */
   onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <BaseMenu.Root modal={false} {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}>
+    <BaseMenu.Root
+      modal={false}
+      defaultOpen={defaultOpen}
+      {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}
+    >
       <BaseMenu.Trigger render={trigger} />
       <BaseMenu.Portal>
         <BaseMenu.Positioner
@@ -125,38 +132,6 @@ export function MenuGroup({ label, children }: { label: ReactNode; children: Rea
       <BaseMenu.GroupLabel className="px-2.5 pt-1.5 pb-1 text-xs font-medium text-muted">{label}</BaseMenu.GroupLabel>
       {children}
     </BaseMenu.Group>
-  )
-}
-
-/** A choice of one among `children` (`MenuRadioItem`s). */
-export function MenuRadioGroup<Value>({
-  value,
-  onValueChange,
-  children
-}: {
-  value: Value
-  onValueChange: (value: Value) => void
-  children: ReactNode
-}) {
-  return (
-    <BaseMenu.RadioGroup value={value} onValueChange={(next) => onValueChange(next as Value)}>
-      {children}
-    </BaseMenu.RadioGroup>
-  )
-}
-
-export function MenuRadioItem({ value, children }: { value: unknown; children: ReactNode }) {
-  return (
-    <BaseMenu.RadioItem
-      value={value}
-      closeOnClick
-      className="grid min-h-9 cursor-default grid-cols-[1rem_1fr] items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-highlighted:bg-surface-raised"
-    >
-      <BaseMenu.RadioItemIndicator className="col-start-1 text-accent">
-        <Icon name="check" />
-      </BaseMenu.RadioItemIndicator>
-      <span className="col-start-2 min-w-0">{children}</span>
-    </BaseMenu.RadioItem>
   )
 }
 

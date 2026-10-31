@@ -4,6 +4,7 @@ import { makeRegistry, type Registry } from "./registry.ts"
 import { defaultReplyOutput, type ReplyOutputStrategy } from "./chat/replyOutput.ts"
 import { replySectionsParser, type ReplyParser } from "./chat/replySections.ts"
 import { continueJoinParser } from "./chat/continueJoin.ts"
+import { regexLiveRewrite, type LiveRewrite } from "./chat/liveRewrites.ts"
 import {
   directSummary,
   toolSummary,
@@ -23,6 +24,8 @@ export class ExecutionRegistry extends Context.Service<
      * leading tagged sections (spec/REPLY-SECTIONS.md).
      */
     readonly replyParsers: Registry<ReplyParser>
+    /** What a reply shows while it streams, in order: the scripts its finish runs (liveRewrites.ts). */
+    readonly liveRewrites: Registry<LiveRewrite>
     readonly summaries: Registry<SummaryStrategy>
     readonly summaryTools: Registry<SummaryToolFactory>
   }
@@ -39,10 +42,12 @@ export class ExecutionRegistry extends Context.Service<
       const replyParsers = makeRegistry<ReplyParser>()
       yield* replyParsers.register(continueJoinParser)
       yield* replyParsers.register(replySectionsParser)
+      const liveRewrites = makeRegistry<LiveRewrite>()
+      yield* liveRewrites.register(regexLiveRewrite)
       yield* summaries.register(directSummary)
       yield* summaries.register(toolSummary)
       yield* summaryTools.register(summaryToolFactory)
-      return { replyStrategies, replies, replyParsers, summaries, summaryTools }
+      return { replyStrategies, replies, replyParsers, liveRewrites, summaries, summaryTools }
     })
   )
 }

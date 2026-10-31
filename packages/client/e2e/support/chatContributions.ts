@@ -116,6 +116,8 @@ export const install = async (
         order: 0,
         icon: "note",
         shortcut: { key: "y", mod: true },
+        // A command with a key is listed in ⋯ only when it asks to be.
+        menu: true,
         run: () => {
           document.body.dataset.pluginCommands = String(Number(document.body.dataset.pluginCommands ?? 0) + 1)
         }

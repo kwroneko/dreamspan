@@ -1,13 +1,20 @@
 // Concrete composer contribution points. Draft/fork handling stays in the composer host.
+// Where each control goes:
+// - `banner` and `queue`: full-width rows above the composer, only while they have something;
+// - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) above the box;
+// - `speaker`: left of the box;
+// - `tools`: icon buttons inside the box, after the text;
+// - `actions`: the box's last buttons (guidance, regenerate, write, send).
+// A control may name its placement per context (`compact`: a phone), to move rather than vanish.
 import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
-import type { ComponentProps, ComponentType } from "react"
+import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
-import type { ReplyFrom } from "./ReplyFrom.tsx"
+import type { ReplyChoice } from "./ReplyFrom.tsx"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
-type Placement = "banner" | "settings" | "speaker" | "actions" | "guidance" | "reply" | "queue" | "help"
+export type Placement = "banner" | "queue" | "strip" | "speaker" | "tools" | "actions"
 type Invocation = "button" | "keyboard"
 
 export interface ComposerControlContext {
@@ -15,7 +22,8 @@ export interface ComposerControlContext {
   readonly recoverQueued: (text: string, images?: MessageImages) => void
   readonly session: ChatSession
   readonly view: ChatView
-  readonly onSettings: (tab: "model" | "preset") => void
+  /** Opens a side panel tab. */
+  readonly onSettings: (tab: "model" | "preset" | "cast") => void
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
   readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null }>
   readonly onRecent: (id: EntityId) => void
@@ -23,7 +31,8 @@ export interface ComposerControlContext {
   readonly prefsReady: boolean
   readonly changeGuidance: (next: boolean) => void
   readonly hint: string
-  readonly reply: ComponentProps<typeof ReplyFrom>
+  /** Who replies next, in a group. */
+  readonly reply: ReplyChoice
   readonly leaf: PathEntry | undefined
   readonly leafGenerating: boolean | undefined
   readonly busy: boolean
@@ -37,13 +46,15 @@ export interface ComposerControlContext {
   readonly generate: () => Promise<void>
   readonly send: () => Promise<void>
   readonly replyNow: () => Promise<void>
+  /** The draft's earlier text (null while a reply's guidance is edited). */
+  readonly history: ReactNode
   readonly report: (outcome: Outcome<unknown>) => void
 }
 
 export interface ComposerControl {
   readonly id: string
   readonly order: number
-  readonly placement: Placement
+  readonly placement: Placement | ((context: ComposerControlContext) => Placement)
   readonly available?: (context: ComposerControlContext) => boolean
   readonly component: ComponentType<ComposerControlContext & { readonly invoke: () => void }>
   readonly run?: (context: ComposerControlContext, source: Invocation) => void | Promise<void>
@@ -57,7 +68,11 @@ export const availableComposerControls = (
 ) =>
   [...snapshot.entries]
     .sort((a, b) => a.order - b.order)
-    .filter((entry) => entry.placement === placement && entry.available?.(context) !== false)
+    .filter(
+      (entry) =>
+        (typeof entry.placement === "function" ? entry.placement(context) : entry.placement) === placement &&
+        entry.available?.(context) !== false
+    )
 
 /** Both buttons and Enter resolve the effective registration at invocation time. */
 export const invokeComposerControl = (id: string, context: ComposerControlContext, source: Invocation) => {

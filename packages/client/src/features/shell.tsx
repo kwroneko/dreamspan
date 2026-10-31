@@ -11,7 +11,7 @@ export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined 
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { Link, Navigate, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../actions.tsx"
@@ -143,6 +143,12 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+// The phone's menu opened from elsewhere: an open chat's header takes the bar's place there.
+const menuRequests = new Set<() => void>()
+export const openAppMenu = () => {
+  for (const request of menuRequests) request()
+}
+
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
   // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
@@ -155,13 +161,22 @@ function PhoneBar() {
     }
   })
   const { selection } = useShellNavigation()
+  // On a phone, an open chat's header takes this bar's place; its ← opens this menu (ChatHeader.tsx).
+  const inChat = useLocation({ select: (location) => /^\/chats\/[^/]+$/.test(location.pathname) })
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
   const setOpen = (next: boolean) => setOpenOn(next ? pathname : null)
+  useEffect(() => {
+    const request = () => setOpenOn(pathname)
+    menuRequests.add(request)
+    return () => void menuRequests.delete(request)
+  }, [pathname])
   return (
     <>
-      <div className="flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden">
+      <div
+        className={`flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden ${inChat ? "max-sm:hidden" : ""}`}
+      >
         <button
           type="button"
           aria-label="Chats and menu"
@@ -312,49 +327,7 @@ function Main() {
   )
 }
 
-/** Settings: a section list from the registry beside (on phones, above) the open section. */
-function SettingsLayout() {
-  useTitle("Settings")
-  const session = useSession()
-  return (
-    <div className="flex flex-col gap-6 md:flex-row">
-      <nav aria-label="Settings" className="-mx-4 overflow-x-auto px-4 md:mx-0 md:w-48 md:shrink-0 md:px-0">
-        <ul className="flex gap-1 md:flex-col">
-          {navEntries("settings", session.user.role === "admin").map((entry) => (
-            <li key={entry.id}>
-              <Link
-                to={fullPath(entry)}
-                className="block rounded-md px-3 py-2 text-sm whitespace-nowrap text-muted hover:bg-surface-raised hover:text-text data-[status=active]:bg-surface-raised data-[status=active]:font-medium data-[status=active]:text-text"
-              >
-                {entry.nav!.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
-      <div className="min-w-0 flex-1">
-        <Outlet />
-      </div>
-    </div>
-  )
-}
-
-/** /settings opens its first section. */
-function SettingsIndex() {
-  const session = useSession()
-  const [first] = navEntries("settings", session.user.role === "admin")
-  return first ? <Navigate to={fullPath(first)} replace /> : null
-}
-
 export const register = () => {
   appTools.register({ id: "text-actions", order: 10, component: TextActionHost })
   routes.register({ id: "app", parent: "root", component: AppShell })
-  routes.register({
-    id: "settings",
-    parent: "app",
-    path: "/settings",
-    component: SettingsLayout,
-    nav: { label: "Settings", order: 90 }
-  })
-  routes.register({ id: "settings.index", parent: "settings", path: "/", component: SettingsIndex })
 }

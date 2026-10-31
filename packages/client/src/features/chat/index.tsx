@@ -1,9 +1,11 @@
+import { registerChatHeader } from "./headerContributions.tsx"
 import { registerSummaryDetails } from "./SummaryDetails.tsx"
 import { registerEditorHistory } from "./editorHistory.tsx"
 import { registerDisplay } from "./registerDisplay.tsx"
 import { registerPresentation } from "./registerPresentation.tsx"
 import { registerComposerControls } from "./registerComposerControls.tsx"
 import { registerMessageActions } from "./registerMessageActions.tsx"
+import { registerRewrites } from "./rewrites.tsx"
 import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
 import { registerReasoningPanels } from "./Reasoning.tsx"
@@ -16,6 +18,7 @@ import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
 import { ChatsPage } from "./ChatsPage.tsx"
+import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { sidebarSearch } from "../characters/sidebarSearch.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
@@ -28,7 +31,7 @@ const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ d
 
 function LazyChatPage() {
   return (
-    <Suspense fallback={<Loading label="Loading the chat…" onRetry={reloadPage} />}>
+    <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
       <ChatPage />
     </Suspense>
   )
@@ -65,12 +68,14 @@ export const register = () => {
   registerPresentation()
   registerComposerControls()
   registerMessageActions()
+  registerRewrites()
   registerGuidanceEdit()
   registerReasoningActions()
   registerReasoningPanels()
   registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()
+  registerChatHeader()
   registerReplyCommands()
   routes.register({
     id: "chats",

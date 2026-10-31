@@ -24,17 +24,20 @@ export const newestImages = (messages: ReadonlyArray<Pick<RequestMessage, "image
 
 /**
  * The history images a request message carries, in order, with the version each is of: those
- * of the message pieces it holds, less the ones the fork took out (`excluded`).
+ * of the message pieces it holds, less the ones the fork took out (`excluded`). Built once per
+ * request: the lookup by version covers the whole history, so building it per message is
+ * quadratic in a long chat.
  */
-export const messageImages = (assembly: Assembly, pieces: ReadonlyArray<number>) => {
+export const messageImagesOf = (assembly: Assembly) => {
   const byVersion = new Map(assembly.resolved?.map(({ entry }) => [entry.versionId, entry.images ?? []]))
-  return pieces.flatMap((p) => {
-    const source = assembly.pieces[p]?.source
-    if (source?.kind !== "message") return []
-    return (byVersion.get(source.version) ?? []).flatMap((image: HistoryImage, index) =>
-      image.excluded ? [] : [{ version: source.version, index, image }]
-    )
-  })
+  return (pieces: ReadonlyArray<number>) =>
+    pieces.flatMap((p) => {
+      const source = assembly.pieces[p]?.source
+      if (source?.kind !== "message") return []
+      return (byVersion.get(source.version) ?? []).flatMap((image: HistoryImage, index) =>
+        image.excluded ? [] : [{ version: source.version, index, image }]
+      )
+    })
 }
 
 /**
@@ -53,10 +56,9 @@ export const imagesStage: AssemblerStage = {
       const newest = newestImages(result.messages, max)
       // Where each image the request carries is: its message and place there.
       const sent = new Map<string, string>()
+      const imagesOf = messageImagesOf(assembly)
       messages.forEach((message, m) =>
-        messageImages(assembly, message.pieces).forEach(({ version, index }, i) =>
-          sent.set(`${version}:${index}`, `${m}:${i}`)
-        )
+        imagesOf(message.pieces).forEach(({ version, index }, i) => sent.set(`${version}:${index}`, `${m}:${i}`))
       )
       const images: Array<ImageLeftOut> = []
       for (const entry of assembly.history ?? []) {

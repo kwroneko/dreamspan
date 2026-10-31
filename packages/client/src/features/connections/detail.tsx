@@ -1,4 +1,4 @@
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect } from "react"
@@ -115,8 +115,8 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
 
   return (
     <Card>
-      <CardHeader title="Settings" />
-      <UserDraftStatus draft={durable} />
+      <CardHeader inline title="Settings" actions={<UserDraftUndo draft={durable} />} />
+      <UserDraftNotices draft={durable} />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <Field label="Name" error={shown(problems.name)}>
           <Input value={values.name} onValueChange={(name) => edit({ name })} autoComplete="off" />
@@ -721,7 +721,8 @@ function ConnectionView(props: ConnectionSectionProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <Link to="/settings/connections" className="text-sm text-muted hover:text-text">
+        {/* On a phone the settings layout has the way back above the page. */}
+        <Link to="/settings/connections" className="hidden self-start text-sm text-muted hover:text-text md:block">
           ← Connections
         </Link>
         <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>

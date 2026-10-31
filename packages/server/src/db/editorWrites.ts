@@ -273,7 +273,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         // A permission revoked since doesn't come back with the old revision.
         let doc = withoutGrantedAgentEdits(ref.kind, head, JSON.parse(earlier.doc_json) as Doc)
         // An old revision's scripts, an import's say, don't come back approved.
-        if (ref.kind === "preset" && doc.regex_approved === true) {
+        if ((ref.kind === "preset" || ref.kind === "card") && doc.regex_approved === true) {
           if (!keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
         }
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
@@ -334,7 +334,8 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
     SetRegexApproval: ({ userId, refId, approved, expectedRowVersion }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        if (ref.kind !== "preset") return yield* refused(ref, "Only presets have regex scripts.")
+        if (ref.kind !== "preset" && ref.kind !== "card")
+          return yield* refused(ref, "Only presets and cards have regex scripts.")
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const message = approved ? "Allowed the regex scripts to run" : "Stopped the regex scripts from running"

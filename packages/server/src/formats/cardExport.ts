@@ -5,6 +5,7 @@ import type { Effect } from "effect"
 import { type CardFile, embeddedPath } from "./cardImport.ts"
 import { present } from "./fields.ts"
 import { characterBookFromLorebook } from "./lorebook.ts"
+import { regexToSt } from "./preset.ts"
 import { cardTextChunk, readChunks, replaceCardChunks } from "./png.ts"
 import { attempt, defaultLimits, type FormatError, type Limits } from "./safety.ts"
 import { isSafePath, writeZip } from "./zip.ts"
@@ -42,7 +43,8 @@ export const cardToJson = (card: CardDoc, version: ExportVersion) => {
       modification_date: card.modification_date,
       assets: card.assets
     }),
-    extensions: card.extensions
+    // The scripts go back where ST keeps them; their approval is never written.
+    extensions: card.regex?.length ? { ...card.extensions, regex_scripts: regexToSt(card.regex) } : card.extensions
   }
   const v1 = {
     name: card.name,

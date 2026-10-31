@@ -51,13 +51,83 @@ test("the header names the chat as people do and switches branches from anywhere
   await expect(page).toHaveTitle(/Harbor/)
   // The newest branch is shown; the header says so and offers the other.
   const branches = page.getByRole("button", { name: /switch branch/ })
-  await expect(branches).toContainText("Branch 2 of 2")
+  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 1 of 2/)
   await branches.click()
-  await expect(page.getByRole("group", { name: "Branches at message #2 (You)" })).toBeVisible()
-  await page.getByRole("menuitemradio", { name: "Branch 1" }).click()
+  const list = page.getByRole("list", { name: "Branches" })
+  await expect(list.getByRole("listitem")).toHaveCount(2)
+  await list.getByRole("button", { name: /^Original/ }).click()
   await expect(message(page, "The fog rolls in.")).toBeVisible()
   await expect(message(page, "We wait for the tide.")).toHaveCount(0)
-  await expect(branches).toContainText("Branch 1 of 2")
+  await expect(branches).toHaveAccessibleName(/Branch: Original, 2 of 2, not the latest/)
+})
+
+test("Branch from here names the branch, shows it at once, keeps the URL, and the chat stays on top", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { chatId } = await forked()
+  // Another chat, chatted in after the first: until the branch, it's the newer one.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const other = yield* api.CreateChat({ title: "Lighthouse" })
+      yield* send(api, other.id, null, "The lamp turns.")
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}?panel=history`)
+  const branches = page.getByRole("button", { name: /switch branch/ })
+  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 1 of 2/)
+  const chats = page.getByRole("complementary").first().getByRole("region", { name: "Chats", exact: true })
+  const rows = chats.getByRole("button", { name: /^Open chat/ })
+  await expect(rows.first()).toHaveAttribute("data-chat-id", /./)
+  expect(await rows.first().getAttribute("data-chat-id")).not.toBe(chatId)
+  // The shown branch is the current one: Branch from here at message #2 makes "From #2".
+  const at = message(page, "We wait for the tide.")
+  const slot = await page.locator("article[data-slot]").first().getAttribute("data-slot")
+  await messageMenu(page.locator("article[data-slot]").first(), "Branch from here")
+  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await expect.poll(() => new URL(page.url()).searchParams.get("slot")).toBe(slot)
+  expect(new URL(page.url()).searchParams.get("panel")).toBe("history")
+  expect(new URL(page.url()).searchParams.get("fork")).toBeNull()
+  await expect(at).toHaveCount(0)
+  // The chat is on top of All chats now, listed once, with its branches counted.
+  await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)
+  await expect(chats.locator(`[data-chat-id="${chatId}"]`)).toHaveCount(1)
+  await expect(rows.first()).toContainText("3 branches")
+  // Back returns to the branch it came from, which is no longer the latest; Forward and a
+  // reload come back to the new one.
+  await page.goBack()
+  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 2 of 3, not the latest/)
+  expect(new URL(page.url()).searchParams.get("fork")).not.toBeNull()
+  await expect(at).toBeVisible()
+  await page.goForward()
+  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await page.reload()
+  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)
+  // As ST's "Back to parent chat": the list goes back to the branch it was made from.
+  await branches.click()
+  await page.getByRole("button", { name: "Back to “Branch 1”, where it came from", exact: true }).click()
+  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 2 of 3, not the latest/)
+  await expect(at).toBeVisible()
+})
+
+test("while a chat loads, it shows the shapes of its header and messages, not a spinner", async ({ page }) => {
+  const { chatId } = await forked()
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // Hold the chat view's code until the placeholder has been seen.
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(/\/assets\/ChatPage-[^/]*\.js$/, async (route) => {
+    await held
+    await route.continue()
+  })
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(page.getByTestId("messages-loading")).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "Loading the chat…" })).toBeAttached()
+  release()
+  await expect(message(page, "We wait for the tide.")).toBeVisible()
+  await expect(page.getByTestId("messages-loading")).toHaveCount(0)
 })
 
 test("a message shows its number and versions; one is picked from the list, and one's own written", async ({

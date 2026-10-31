@@ -207,5 +207,6 @@ export const inspectWire = (
 const sourceOf = (source: ContextSource, scrub: (text: string) => string): ContextSource => ({
   ...source,
   label: scrub(source.label),
-  activation: activationOf(source.activation, scrub)
+  activation: activationOf(source.activation, scrub),
+  ...(source.scripts ? { scripts: source.scripts.map((script) => ({ ...script, name: scrub(script.name) })) } : {})
 })

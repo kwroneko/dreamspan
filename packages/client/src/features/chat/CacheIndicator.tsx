@@ -1,10 +1,15 @@
-// The cache-warmth indicator (DESIGN §5.5), near the composer: whether the provider's cache
-// for this chat is likely still warm for the next reply. The server works the estimate out
-// and pushes it; the countdown runs here from its TTL, and can be turned off.
+// The cache chip in the next-reply strip (DESIGN §5.5): whether the next reply reads the chat's
+// prefix from the provider's cache, as one compact chip whose popover says why in plain words.
+// The server works the estimate out and pushes it; the countdown runs here from its TTL, and can
+// be turned off. A changed prefix shows whatever the TTL (DESIGN: even with none known); nothing
+// shows when what would be re-sent rounds to 0. Other parts of the chat add notes about what a
+// pending change will cost (`cacheNotes`: the insertion editor's re-read), shown in its popover.
 import type { CacheWarmth } from "@rp/shared/inspectorApi.ts"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { Badge } from "../../ui/Surface.tsx"
+import { Popover } from "../../ui/Popover.tsx"
+import { chipClass } from "./nextReplyStrip.tsx"
+import type { ChatSession, ChatView } from "./session.ts"
 
 const COUNTDOWN_KEY = "rp.cacheCountdown"
 
@@ -28,12 +33,123 @@ const duration = (seconds: number) =>
       ? `${seconds / 60} minute${seconds === 60 ? "" : "s"}`
       : `${seconds} seconds`
 
-export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
+/** "2.9k", "12k", "340"; "0" for what isn't worth a chip. */
+export const compactTokens = (tokens: number) =>
+  tokens >= 9_950
+    ? `${Math.round(tokens / 1000)}k`
+    : tokens >= 950
+      ? `${(Math.round(tokens / 100) / 10).toFixed(1)}k`
+      : `${Math.round(tokens / 10) * 10}`
+
+/** A note about the next reply's cache from a change still being made (an insertion, say). */
+interface CacheNote {
+  /** The chip's text when nothing else shows one. */
+  readonly short: string
+  readonly text: string
+}
+
+class CacheNotes {
+  private notes = new Map<string, CacheNote>()
+  private shown: ReadonlyArray<CacheNote> = []
+  private readonly listeners = new Set<() => void>()
+  readonly subscribe = (listener: () => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+  readonly snapshot = () => this.shown
+  /** Sets the note under `key`; null removes it. */
+  set(key: string, note: CacheNote | null) {
+    const before = this.notes.get(key)
+    if (note === null ? before === undefined : before?.text === note.text && before.short === note.short) return
+    this.notes = new Map(this.notes)
+    if (note === null) this.notes.delete(key)
+    else this.notes.set(key, note)
+    this.shown = [...this.notes.values()]
+    for (const listener of this.listeners) listener()
+  }
+}
+
+const notesBySession = new WeakMap<ChatSession, CacheNotes>()
+
+/** The cache notes of a chat's session, which the chip shows in its popover. */
+export const cacheNotes = (session: ChatSession) => {
+  let notes = notesBySession.get(session)
+  if (notes === undefined) {
+    notes = new CacheNotes()
+    notesBySession.set(session, notes)
+  }
+  return notes
+}
+
+type Shown =
+  | { readonly kind: "uncached"; readonly tokens: number; readonly why: string }
+  | { readonly kind: "warm"; readonly verified: boolean }
+  | null
+
+/** What the chip shows for an estimate as of `now`. */
+export const cacheState = (warmth: CacheWarmth | null, now: number): Shown => {
+  if (warmth === null) return null
+  const timed = warmth.ttlS != null && warmth.expiresAt !== null
+  if (warmth.changed !== null)
+    return compactTokens(warmth.changed.tokens) === "0"
+      ? null
+      : { kind: "uncached", tokens: warmth.changed.tokens, why: warmth.changed.reason }
+  if (!timed) return null
+  if (now < warmth.expiresAt!) return { kind: "warm", verified: warmth.verified }
+  return compactTokens(warmth.prefixTokens) === "0"
+    ? null
+    : {
+        kind: "uncached",
+        tokens: warmth.prefixTokens,
+        why: `More than ${duration((warmth.expiresAt! - warmth.lastRequestAt) / 1000)} passed since the last request, so the provider's cache has expired.`
+      }
+}
+
+/** How long the chip waits after a reply for the estimate that follows it (one that fails never comes). */
+const AFTER_REPLY_MS = 30_000
+
+/**
+ * Whether the estimate shown predates a reply in the chat: from the reply's start until the first
+ * estimate after it ends. The server works none out while a reply is written (CacheWarmth.hold),
+ * so the last one would otherwise read as current.
+ */
+const useBeforeReply = (session: ChatSession, replying: boolean) => {
+  const [waiting, setWaiting] = useState(replying)
+  if (replying && !waiting) setWaiting(true)
+  const replyingNow = useRef(replying)
+  useEffect(() => {
+    replyingNow.current = replying
+  }, [replying])
+  useEffect(
+    () =>
+      session.subscribeContext(() => {
+        if (!replyingNow.current) setWaiting(false)
+      }),
+    [session]
+  )
+  useEffect(() => {
+    if (replying || !waiting) return
+    const timer = setTimeout(() => setWaiting(false), AFTER_REPLY_MS)
+    return () => clearTimeout(timer)
+  }, [replying, waiting])
+  return waiting
+}
+
+export function CacheChip({ session, view }: { session: ChatSession; view: ChatView }) {
+  const warmth = view.cache
+  const waiting = useBeforeReply(
+    session,
+    view.entries.some((entry) => entry.version.status === "generating")
+  )
+  const notes = useSyncExternalStore(cacheNotes(session).subscribe, cacheNotes(session).snapshot)
   const [now, setNow] = useState(() => Date.now())
   const [countdown, setCountdown] = useState(countdownOn)
-  const expiresAt = warmth?.ttlS == null ? 0 : (warmth.expiresAt ?? 0)
-  const timed = warmth?.ttlS != null && warmth.expiresAt !== null
-  const warm = warmth !== null && warmth.changed === null && now < expiresAt
+  const [open, setOpen] = useState(false)
+  const shown = cacheState(warmth, now)
+  const warm = !waiting && shown?.kind === "warm"
+  const expiresAt = warmth?.expiresAt ?? 0
   // Ticks every second while counting down, otherwise once, when the cache expires.
   useEffect(() => {
     if (!warm) return
@@ -44,7 +160,26 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
     const timer = setTimeout(() => setNow(Date.now()), expiresAt - Date.now())
     return () => clearTimeout(timer)
   }, [warm, countdown, expiresAt])
-  if (warmth === null || (!timed && warmth.changed === null)) return null
+  if (view.loading || (shown === null && notes.length === 0)) return null
+  if (waiting)
+    return (
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={<span>Cache after reply</span>}
+        triggerLabel="Cache: worked out again when this reply ends. Details"
+        triggerClassName={chipClass("neutral")}
+        title="Cache"
+      >
+        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
+          <p>
+            The request being sent now changes what your next reply can read from the provider's cache, so the estimate
+            is worked out again when this reply ends.
+          </p>
+          <p className="text-xs text-muted">An estimate.</p>
+        </div>
+      </Popover>
+    )
 
   const toggle = () => {
     setCountdown(!countdown)
@@ -54,46 +189,59 @@ export function CacheIndicator({ warmth }: { warmth: CacheWarmth | null }) {
       // The choice then lasts until the page is reloaded.
     }
   }
-  const { changed } = warmth
-  const detail = changed
-    ? `${changed.reason} Next send rewrites ~${changed.tokens.toLocaleString()} tokens.`
-    : !warm
-      ? `More than ${duration((expiresAt - warmth.lastRequestAt) / 1000)} passed since the last request.`
-      : warmth.verified
-        ? "The provider reported using its cache on the last request."
-        : "Assumed: the provider didn't report its cache on the last request."
-  const badge = (
-    <Badge tone={warm ? "success" : changed ? "warning" : "neutral"}>
-      {!timed ? "Cache rewrite" : warm ? "Cache warm" : "Cache cold"} (estimate)
-    </Badge>
-  )
-  const timer = warm && countdown && <span className="tabular-nums">{clock(expiresAt - now)} left</span>
-  const countdownButton = warm && (
-    <Button variant="ghost" className="h-6 px-2 text-xs" onClick={toggle}>
-      {countdown ? "Hide countdown" : "Show countdown"}
-    </Button>
-  )
+  const left = warm && countdown ? clock(expiresAt - now) : null
+  const text =
+    shown?.kind === "uncached"
+      ? `↻ ${compactTokens(shown.tokens)} uncached`
+      : warm
+        ? `Cache warm${left ? ` ${left}` : ""}`
+        : `↻ ${notes[0]!.short}`
+  const label =
+    shown?.kind === "uncached"
+      ? `Cache: ${shown.tokens.toLocaleString()} tokens uncached on the next reply. Why`
+      : warm
+        ? `Cache warm${left ? `, ${left} left` : ""}. Details`
+        : `Cache: ${notes[0]!.text}`
   return (
-    <section aria-label="Cache estimate" className="mx-auto w-full max-w-3xl py-1 text-xs text-muted">
-      <details className="relative sm:hidden">
-        <summary className="flex cursor-pointer items-center gap-2 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus">
-          {badge}
-          {timer}
-          <span className="ml-auto">Cache details</span>
-        </summary>
-        <div className="absolute bottom-full z-20 mb-1 flex max-h-48 w-full flex-wrap items-center gap-2 overflow-y-auto rounded-md border border-border bg-surface p-3 text-text shadow-lg">
-          <span>{detail}</span>
-          {countdownButton}
-        </div>
-      </details>
-      <div className="hidden flex-wrap items-center gap-x-2 gap-y-1 sm:flex">
-        <span aria-live="polite" className="flex flex-wrap items-center gap-2">
-          {badge}
-          <span>{detail}</span>
-        </span>
-        {timer}
-        {countdownButton}
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger={<span className="tabular-nums">{text}</span>}
+      triggerLabel={label}
+      triggerClassName={chipClass(shown?.kind === "uncached" ? "warning" : warm ? "success" : "neutral")}
+      title={shown?.kind === "uncached" ? "Not cached" : warm ? "Cache warm" : "Cache"}
+    >
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
+        {shown?.kind === "uncached" && (
+          <>
+            <p>
+              Your next reply re-sends about {shown.tokens.toLocaleString()} tokens at full price, instead of reading
+              them from the provider's cache.
+            </p>
+            <p className="text-muted">Why: {shown.why}</p>
+          </>
+        )}
+        {shown?.kind === "warm" && (
+          <>
+            <p>
+              Your next reply should read this chat from the provider's cache
+              {left ? ` if it's sent in the next ${left}` : ""}.
+            </p>
+            <p className="text-muted">
+              {shown.verified
+                ? "The provider reported using its cache on the last request."
+                : "Assumed: the provider didn't report its cache on the last request."}
+            </p>
+            <Button variant="ghost" className="h-7 self-start px-2 text-xs" onClick={toggle}>
+              {countdown ? "Hide countdown" : "Show countdown"}
+            </Button>
+          </>
+        )}
+        {notes.map((note) => (
+          <p key={note.text}>{note.text}</p>
+        ))}
+        <p className="text-xs text-muted">An estimate.</p>
       </div>
-    </section>
+    </Popover>
   )
 }

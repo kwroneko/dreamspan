@@ -327,3 +327,41 @@ describe("CHARX export", () => {
     ])
   })
 })
+
+describe("a card's regex scripts (ST's scoped scripts)", () => {
+  const stScript = {
+    id: "strip",
+    scriptName: "Strip thinking",
+    findRegex: "/<think>[\\s\\S]*?<\\/think>/g",
+    replaceString: "",
+    trimStrings: [],
+    placement: [2],
+    disabled: false,
+    markdownOnly: false,
+    promptOnly: false,
+    runOnEdit: true,
+    substituteRegex: 0,
+    minDepth: null,
+    maxDepth: null
+  }
+  const file = {
+    spec: "chara_card_v2",
+    spec_version: "2.0",
+    data: { name: "Mira", extensions: { regex_scripts: [stScript], regex_approved: true, depth: 1 } }
+  }
+
+  it("imports them as data, never approved, and exports them back where ST keeps them", () => {
+    const card = imported(file)
+    expect(card.regex).toEqual([
+      expect.objectContaining({ id: "strip", name: "Strip thinking", run_on_edit: true, placement: [2] })
+    ])
+    expect(card.regex_approved).toBeUndefined()
+    expect(card.extensions).not.toHaveProperty("regex_scripts")
+    const exported = cardToJson({ ...card, regex_approved: true }, "v2") as {
+      data: { extensions: Record<string, unknown> }
+    }
+    expect(exported.data.extensions.regex_scripts).toEqual([stScript])
+    expect(exported.data).not.toHaveProperty("regex_approved")
+    expect(imported(exported).regex).toEqual(card.regex)
+  })
+})

@@ -23,6 +23,8 @@ const CARD_LABELS: Record<string, string> = {
   modules: "Modules",
   avatar_media_id: "Avatar",
   character_book: "Lorebook",
+  regex: "Regex scripts",
+  regex_approved: "Regex scripts allowed",
   extensions: "Extensions"
 }
 
@@ -50,6 +52,20 @@ const NOTE_LABELS: Record<string, string> = {
   agent_editable: "The agent may edit it"
 }
 
+/** A lorebook entry's fields as the entry table names them, after ST. */
+const ENTRY_LABELS: Record<string, string> = {
+  comment: "Title",
+  keys: "Primary keys",
+  secondary_keys: "Secondary keys",
+  selective: "Use secondary keys",
+  selective_logic: "Secondary keys logic",
+  constant: "Strategy (constant)",
+  vectorized: "Strategy (vectorized)",
+  role: "Position (role)",
+  probability: "Trigger %",
+  use_probability: "Use the trigger %"
+}
+
 const LABELS: Partial<Record<EntityKind, Record<string, string>>> = {
   card: CARD_LABELS,
   preset: PRESET_LABELS,
@@ -62,23 +78,40 @@ const words = (key: string) => {
 }
 
 /** What an element of a list is called: its name or title, else its id. */
-const elementName = (doc: Doc, path: FieldPath) => {
-  const element = getAt(doc, path) as { name?: unknown; title?: unknown } | undefined
-  const name = element?.name ?? element?.title
+const elementName = (doc: Doc, path: FieldPath, removedFrom?: Doc) => {
+  const element = (getAt(doc, path) ?? (removedFrom && getAt(removedFrom, path))) as
+    { name?: unknown; title?: unknown; comment?: unknown } | undefined
+  // A lorebook entry's title is its `comment`, as in ST.
+  const name = element?.name || element?.title || element?.comment
   const segment = String(path.at(-1))
   return typeof name === "string" && name !== "" ? `“${name}”` : segment.slice(segment.indexOf("=") + 1)
 }
 
-/** A field's label for the diff and the search, e.g. `Prompt “Main Prompt”: content`. */
-export const fieldLabel = (kind: EntityKind, doc: Doc, path: FieldPath): string => {
+/**
+ * A field's label for the diff and the search, e.g. `Prompt “Main Prompt”: content`. An element
+ * no longer in `doc` (a removed entry, say) is named from `removedFrom`, the saved document.
+ */
+export const fieldLabel = (kind: EntityKind, doc: Doc, path: FieldPath, removedFrom?: Doc): string => {
   const [top, second, ...rest] = path
   const first = LABELS[kind]?.[String(top)] ?? words(String(top))
   if (second === undefined) return first
-  if (typeof second === "number") return `${first} ${second + 1}${rest.length > 0 ? `: ${rest.join(" ")}` : ""}`
+  // A card's embedded book is labelled as a lorebook is: "Lorebook: Entry “Harbour”: Order".
+  if (kind === "card" && top === "character_book") {
+    const book = (at: Doc | undefined) => (at && (getAt(at, ["character_book"]) as Doc | undefined)) ?? undefined
+    return `${first}: ${fieldLabel("lorebook", book(doc) ?? {}, [second, ...rest], book(removedFrom))}`
+  }
+  const part = (key: unknown) =>
+    (kind === "lorebook" && top === "entries" && ENTRY_LABELS[String(key)]) || words(String(key))
+  const singular =
+    { prompts: "Prompt", modules: "Module", regex: "Regex script", entries: "Entry" }[String(top)] ?? first
+  if (typeof second === "number") {
+    const named = elementName(doc, [top!, second], removedFrom)
+    const head = named.startsWith("“") ? `${singular} ${named}` : `${first} ${second + 1}`
+    return `${head}${rest.length > 0 ? `: ${rest.map(part).join(" ")}` : ""}`
+  }
   const element = /^(id|identifier|uid)=/.test(second)
-  const singular = { prompts: "Prompt", modules: "Module", regex: "Regex script" }[String(top)] ?? first
-  const head = element ? `${singular} ${elementName(doc, [top!, second])}` : `${first}: ${words(second)}`
-  return rest.length > 0 ? `${head}: ${rest.map((part) => words(String(part))).join(" ")}` : head
+  const head = element ? `${singular} ${elementName(doc, [top!, second], removedFrom)}` : `${first}: ${words(second)}`
+  return rest.length > 0 ? `${head}: ${rest.map(part).join(" ")}` : head
 }
 
 /** A draft field's label. */
@@ -121,6 +154,13 @@ const identified = (doc: Doc, list: string, key: string, fields: ReadonlyArray<s
     )
   )
 }
+
+/** A document's regex scripts' text fields (`regex`), for a section that shows them. */
+export const regexScriptFields = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> =>
+  identified(doc, "regex", "id", ["name", "find_regex", "replace_string"]).map((entry) => ({
+    ...entry,
+    label: fieldLabel(kind, doc, entry.path)
+  }))
 
 /** Every text field of the document, in the order the editor shows them. */
 const builtinSearchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable> => {
@@ -170,7 +210,7 @@ const builtinSearchable = (kind: EntityKind, doc: Doc): ReadonlyArray<Searchable
           key
         ])
       ).map(label),
-      ...identified(doc, "regex", "id", ["name", "find_regex", "replace_string"]).map(label)
+      ...regexScriptFields(kind, doc)
     ]
   }
   return strings(doc, [["title"], ["content"]]).map(label)

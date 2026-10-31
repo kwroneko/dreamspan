@@ -11,11 +11,14 @@ import * as insertMessage from "./chat/insertMessage/index.tsx"
 import * as connections from "./connections/index.ts"
 import * as credentials from "./credentials.tsx"
 import * as editor from "./editor/index.tsx"
+import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as regex from "./regex/index.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
+import * as settings from "./settings/index.tsx"
 import * as shell from "./shell.tsx"
 import * as status from "./status.tsx"
 
@@ -23,6 +26,7 @@ export const registerFeatures = () => {
   cardForks.register()
   cardRename.register()
   shell.register()
+  settings.register()
   login.register()
   characters.register()
   status.register()
@@ -33,9 +37,11 @@ export const registerFeatures = () => {
   snippets.register()
   bin.register()
   connections.register()
+  firstRun.register()
   costs.register()
   credentials.register()
   network.register()
+  regex.register()
   accounts.register()
   notices.register()
   completionSound.register()

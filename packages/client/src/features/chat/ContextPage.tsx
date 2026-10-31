@@ -4,6 +4,7 @@
 // Text is shown as text. Measured virtual rows keep dense contexts bounded; collapsed
 // messages render only their previews.
 import type { ChatId, ForkId, VersionId } from "@rp/shared/chat.ts"
+import { scriptLabel } from "./rewrites.tsx"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import type {
   ContextMessage,
@@ -120,8 +121,15 @@ function SourceTitle({
       {source.summary?.stale && <span className="text-warning">Stale when this reply was generated.</span>}
       {source.summary?.changed && <span className="text-warning">Summary stale or replaced since this reply.</span>}
       {source.activation && <span className="break-words text-muted">{activationText(source.activation)}</span>}
+      <ScriptsNote source={source} />
     </span>
   )
+}
+
+/** The prompt regex scripts that changed the source's text in this request, in the order they ran. */
+function ScriptsNote({ source }: { source: ContextSource }) {
+  if (!source.scripts || source.scripts.length === 0) return null
+  return <span className="break-words text-muted">Changed by regex: {source.scripts.map(scriptLabel).join(", ")}</span>
 }
 
 /** Prompt text exactly as sent: monospace, so it never reads as the inspector's own labels. */
@@ -348,7 +356,7 @@ function Message({
                   : "Forced tool schema prefill"}
               </Badge>
             )}
-            <span className="text-muted tabular-nums">~{message.tokens.toLocaleString()} tokens</span>
+            <span className="text-muted tabular-nums">~{counted(message.tokens, "token")}</span>
           </span>
           {message.images && (
             <span className="flex flex-wrap gap-x-3 gap-y-1">
@@ -369,6 +377,7 @@ function Message({
                     {source.activation && (
                       <span className="break-words text-muted">{activationText(source.activation)}</span>
                     )}
+                    <ScriptsNote source={source} />
                   </span>
                 ))}
               </span>
@@ -435,6 +444,9 @@ function NotSent({ run }: { run: RunContext }) {
     </section>
   )
 }
+
+/** "1 message", "2,416 tokens". */
+const counted = (n: number, one: string) => `${n.toLocaleString()} ${one}${n === 1 ? "" : "s"}`
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 /** A request's times from the ledger: how long it took, its first token and its speed. */
@@ -599,7 +611,7 @@ function Inspector({ run }: { run: RunContext }) {
       <Card>
         <CardHeader
           title="Request"
-          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${run.messages.length} messages, about ${tokens.toLocaleString()} tokens.`}
+          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}.`}
         />
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Model</dt>
