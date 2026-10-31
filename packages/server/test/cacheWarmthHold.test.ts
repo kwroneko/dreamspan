@@ -4,9 +4,10 @@
 // published chat event (an edit, a delete, a branch, a swipe, a summary) or a refresh of the
 // user's chats (a lorebook, a preset, a model), and both are covered here.
 import { assert, it } from "@effect/vitest"
-import { Effect, Fiber, Layer } from "effect"
+import { Effect, Exit, Fiber, Layer } from "effect"
 import type { ChatId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { NotFound } from "@rp/shared/errors.ts"
 import { CacheWarmth } from "../src/chat/CacheWarmth.ts"
 import { ChatHub } from "../src/chat/ChatHub.ts"
 import { Reader } from "../src/db/Database.ts"
@@ -17,12 +18,13 @@ const chatId = "chat-1" as ChatId
 const fork = "fork-1" as ForkId
 
 const fixture = () => {
-  const state = { calls: 0, leaf: "leaf-1", slow: 0 }
+  const state = { calls: 0, leaf: "leaf-1", slow: 0, gone: false }
   const reader = Layer.succeed(Reader)({
     CacheWarmth: ({ leafSlotId }: { leafSlotId?: string | null }) =>
       Effect.gen(function* () {
         state.calls++
         if (state.slow > 0) yield* Effect.sleep(`${state.slow} millis`)
+        if (state.gone) return yield* new NotFound({ entity: "chat", id: chatId })
         return {
           warmth: null,
           leafSlotId: leafSlotId ?? state.leaf,
@@ -79,6 +81,19 @@ it.live("a read takes the pushed estimate until a chat event or a refresh change
     // Another user's read never takes it.
     yield* warmth.next("other" as UserId, chatId, null, null)
     assert.strictEqual(state.calls, 6)
+  }).pipe(Effect.scoped, Effect.provide(layer))
+})
+
+it.live("an estimate that fails after a change leaves nothing to reuse", () => {
+  const { state, layer } = fixture()
+  return Effect.gen(function* () {
+    const { hub, warmth } = yield* open(state)
+    // The chat went (or the read failed): the estimate before the change isn't the answer.
+    state.gone = true
+    change(hub)
+    const read = yield* Effect.exit(warmth.next(user, chatId, null, null))
+    assert.isTrue(Exit.isFailure(read))
+    assert.strictEqual(state.calls, 3)
   }).pipe(Effect.scoped, Effect.provide(layer))
 })
 
