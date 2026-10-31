@@ -160,7 +160,6 @@ const LearnedContext = Schema.Struct({
   context: Schema.Int.check(Schema.isGreaterThan(0)),
   at: Schema.Number
 })
-export type LearnedContext = typeof LearnedContext.Type
 
 /** What the user changed. Always wins over the upstream (DATA-MODEL §11). */
 export const ModelOverrides = Schema.Struct({ ...capabilityFields, learned: Schema.optionalKey(LearnedContext) })
