@@ -44,7 +44,7 @@ export interface ExposurePolicy {
   /**
    * Called for each refused connection: asks for the names to be resolved again, in case
    * the peer is a proxy that just moved, and returns the warning to log, at most once a
-   * minute per address.
+   * minute per address and WARNINGS_PER_MINUTE times a minute in all.
    */
   readonly refused: (ip: string | undefined, now?: number) => string | undefined
   /** The 403's body. */
@@ -64,6 +64,11 @@ const FIX =
   "ALLOW_INSECURE_EXPOSURE=true serves everyone without protection."
 
 const WARN_EVERY_MS = 60_000
+/**
+ * Warnings a minute across every address. Anyone who can reach the port can connect from
+ * many addresses (an IPv6 /64 holds more than enough), and the log mustn't grow with them.
+ */
+const WARNINGS_PER_MINUTE = 20
 /** Addresses remembered for the warning's rate limit; past this, the oldest are forgotten. */
 const WARNED_MAX = 1024
 
@@ -111,6 +116,9 @@ export const exposurePolicy = (
   }
   const accepted = () => [...(withLoopback ? ["loopback"] : []), ...(configured ? [set.describe()] : [])].join(", ")
   const warned = new Map<string, number>()
+  let windowStart = Number.NEGATIVE_INFINITY
+  let inWindow = 0
+  let unlogged = 0
   return {
     allows: (ip) =>
       ip !== undefined && ((withLoopback && isLoopback(ip)) || set.has(ip) || (byPassword && passwords())),
@@ -119,10 +127,21 @@ export const exposurePolicy = (
       const key = ip ?? "unknown"
       const last = warned.get(key)
       if (last !== undefined && now - last < WARN_EVERY_MS) return undefined
+      if (now - windowStart >= WARN_EVERY_MS) {
+        windowStart = now
+        inWindow = 0
+      }
+      if (inWindow >= WARNINGS_PER_MINUTE) {
+        unlogged++
+        return undefined
+      }
+      inWindow++
       warned.delete(key)
       if (warned.size >= WARNED_MAX) warned.delete(warned.keys().next().value!)
       warned.set(key, now)
-      return `Refused a connection from ${key}: AUTH_MODE=${config.authMode} accepts ${accepted()} only (${name}). At most one warning a minute per address.`
+      const more = unlogged > 0 ? ` ${unlogged} more refused connections weren't logged before this one.` : ""
+      unlogged = 0
+      return `Refused a connection from ${key}: AUTH_MODE=${config.authMode} accepts ${accepted()} only (${name}). At most one warning a minute per address, ${WARNINGS_PER_MINUTE} in all.${more}`
     },
     refusal,
     summary: () =>

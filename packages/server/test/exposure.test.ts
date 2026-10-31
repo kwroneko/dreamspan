@@ -247,6 +247,23 @@ describe("trusted host names", () => {
       assert.strictEqual(refusal("172.31.7.9"), "172.31.7.9 isn't a trusted proxy of this instance.\n")
     }).pipe(Effect.scoped)
   })
+
+  it.effect("connections from many addresses can't flood the log: 20 warnings a minute in all", () => {
+    const dns = fakeDns({ traefik: ["172.31.7.19"] })
+    return Effect.gen(function* () {
+      const { refused } = yield* proxyPolicy(["traefik"], dns)
+      const warnings = Array.from({ length: 1500 }, (_, i) => refused(`2001:db8::${i.toString(16)}`, 1000 + i))
+      assert.lengthOf(
+        warnings.filter((warning) => warning !== undefined),
+        20
+      )
+      // A suppressed address isn't remembered as warned, and the next warning counts what wasn't logged.
+      const next = refused("2001:db8::1f", 61_000)
+      assert.include(next, "from 2001:db8::1f")
+      assert.include(next, "1480 more refused connections weren't logged")
+      assert.notInclude(refused("2001:db8::20", 61_001), "weren't logged")
+    }).pipe(Effect.scoped)
+  })
 })
 
 describe("cross-site requests", () => {
