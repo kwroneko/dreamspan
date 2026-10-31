@@ -37,14 +37,21 @@ for (const width of [1440, 390])
       await expect(list).toContainText("Aria Vance", { timeout: 60_000 })
       await expect(page.getByRole("tab", { name: /^Cards · 4\d\d$/ })).toBeVisible()
       // No row wraps or clips: the name starts inside the viewport, the actions keep to one line.
+      // Rows off screen skip layout (content-visibility) and report a remembered size: lay each
+      // out (through the CSSOM: the CSP refuses a style tag), so every row measured is as drawn.
       const layout = await rows.evaluateAll((items) =>
-        items.slice(0, 80).map((li) => ({
-          text: li.textContent,
-          height: li.getBoundingClientRect().height,
-          name: li.querySelector("[title]")!.getBoundingClientRect().left,
-          right: li.getBoundingClientRect().right,
-          actions: li.lastElementChild!.getBoundingClientRect().height
-        }))
+        items.slice(0, 80).map((li) => {
+          li.style.setProperty("content-visibility", "visible")
+          const box = li.getBoundingClientRect()
+          return {
+            // Each part's height too, so a row that grew says which part did.
+            text: `${li.textContent} [${[...li.children].map((part) => Math.round(part.getBoundingClientRect().height)).join(", ")}]`,
+            height: box.height,
+            name: li.querySelector("[title]")!.getBoundingClientRect().left,
+            right: box.right,
+            actions: li.lastElementChild!.getBoundingClientRect().height
+          }
+        })
       )
       for (const row of layout) {
         expect(row.height, row.text!).toBeLessThan(90)
