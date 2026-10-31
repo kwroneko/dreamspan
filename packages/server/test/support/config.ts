@@ -13,7 +13,7 @@ import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import type { Generator } from "../../src/chat/Generator.ts"
 import { serverWith } from "../../src/server.ts"
-import { testBundles } from "./bundles.ts"
+import { testBundles, testWorkerMode } from "./bundles.ts"
 import { tempDir } from "./tempDir.ts"
 
 /**
@@ -30,8 +30,9 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   formatWorkers: 1,
   thumbnailWorkers: 1,
   dbAllowNetworkFs: false,
-  // The run's own bundles (bundles.ts); tests of the source entry points ask for source.
-  dbWorkers: "bundle",
+  // The run's own bundles unless TEST_DB_WORKERS=source (bundles.ts); tests of the source
+  // entry points ask for source.
+  dbWorkers: testWorkerMode,
   authMode: "single",
   authProxyHeader: "remote-user",
   allowedIps: [],
