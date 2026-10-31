@@ -10,6 +10,7 @@ import { positionOf } from "./position.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
+import type { RegexScript } from "@rp/shared/docs/regexScript.ts"
 import {
   memo,
   type MouseEvent,
@@ -39,6 +40,7 @@ import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { applyDisplayTransforms, displayTransforms } from "./displayPipeline.ts"
 import { useDisplayContext } from "./DisplaySettings.tsx"
+import { displayScripts, messageCharacter } from "./displayScripts.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
@@ -71,6 +73,9 @@ export interface ContextMark {
   readonly kind: "dropped" | "summarized"
   readonly reason: string
 }
+
+const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
+const noSubscription = () => () => {}
 
 /**
  * Text whose macros resolve against the chat's state at its position (DESIGN §5.6): a
@@ -110,6 +115,16 @@ function TemplateText({
     [positionCast, cast]
   )
   const display = useDisplayContext()
+  const character = messageCharacter(display.cast, version.speakerEntityId, placement)
+  const readCharacterScripts = useCallback(
+    () => display.cards?.get(character) ?? NO_SCRIPTS,
+    [display.cards, character]
+  )
+  const characterScripts = useSyncExternalStore(display.cards?.subscribe ?? noSubscription, readCharacterScripts)
+  const scripts = useMemo(
+    () => displayScripts(display.global, display.preset, characterScripts),
+    [display.global, display.preset, characterScripts]
+  )
   const stages = useSyncExternalStore(displayTransforms.subscribe, displayTransforms.snapshot)
   const input = useMemo(
     () => ({
@@ -118,11 +133,11 @@ function TemplateText({
       names: { user: here.user, char: modelNameOf(here, version.speakerEntityId) ?? here.char },
       card: fields ?? {},
       prefs: viewer.prefs,
-      scripts: display.scripts,
+      scripts,
       placement,
       depth: display.leafDepth === null ? null : Math.max(0, display.leafDepth - depth)
     }),
-    [version, here, fields, viewer.prefs, display, depth, placement]
+    [version, here, fields, viewer.prefs, scripts, display.leafDepth, depth, placement]
   )
   const [result, setResult] = useState<{
     input: typeof input
