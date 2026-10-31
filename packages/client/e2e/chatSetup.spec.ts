@@ -183,8 +183,11 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await expect(mine.locator("header")).toContainText("Tobin")
   await expect(mine).toHaveAttribute("aria-label", "Reply")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  // Recent speakers are one tap away.
+  // Recent speakers are one tap away where the composer has the width for them: with the side
+  // panel closed (open, the speaker picker lists them first).
+  await page.getByRole("button", { name: "Hide panel", exact: true }).click()
   await page.getByRole("button", { name: "Speak as Mira" }).click()
+  await expect(page.getByRole("button", { name: /^Speaking as Mira/ })).toBeVisible()
 
   // With guidance on, the box is a one-turn direction, and it leaves the box (DESIGN §2.2).
   await setGuidance(page, true)
