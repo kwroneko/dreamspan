@@ -87,7 +87,7 @@ export interface Assembler {
 }
 
 /** A text to rewrite: a message's own, or reasoning (the provider's, or a reply section's). */
-export interface RewriteItem {
+interface RewriteItem {
   readonly text: string
   readonly kind: "message" | "reasoning"
 }

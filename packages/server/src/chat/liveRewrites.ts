@@ -8,7 +8,7 @@ import type { Reader } from "../db/Database.ts"
 import type { GenerationRequest } from "./Generator.ts"
 import type { rewriteItems } from "./rewrites.ts"
 
-export type LiveItems = ReturnType<typeof rewriteItems>
+type LiveItems = ReturnType<typeof rewriteItems>
 
 export interface LiveRewrite {
   readonly id: string

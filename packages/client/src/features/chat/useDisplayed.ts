@@ -95,7 +95,10 @@ export function useDisplayed(
     issues: ReadonlyArray<string>
   } | null>(null)
   const latest = useRef({ input, stages })
-  latest.current = { input, stages }
+  // Before the run below: a run that ends takes the newest input from here.
+  useEffect(() => {
+    latest.current = { input, stages }
+  }, [input, stages])
   const running = useRef(false)
   const mounted = useRef(true)
   useEffect(() => {
