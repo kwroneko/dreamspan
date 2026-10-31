@@ -194,7 +194,7 @@ function NewConnectionForm({
   const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
   return (
     <Card>
-      <CardHeader title="New connection" actions={<UserDraftUndo draft={durable} />} />
+      <CardHeader inline title="New connection" actions={<UserDraftUndo draft={durable} />} />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <UserDraftNotices draft={durable} />
         <Field label="Provider">

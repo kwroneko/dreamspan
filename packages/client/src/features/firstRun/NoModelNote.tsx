@@ -1,10 +1,13 @@
-// Above the composer when neither the chat nor the account names a model: the send would
+// In the composer when neither the chat nor the account names a model: the send would
 // fail, so say so and offer the choice right there.
+import { useAtomValue } from "@effect/atom-react"
 import { Link } from "@tanstack/react-router"
+import { AsyncResult } from "effect/reactivity"
 import { useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import type { ChatView } from "../chat/session.ts"
+import { generationDefaultsAtom } from "../connections/data.ts"
 import { parseModelValue, useModelChoices } from "../chat/modelChoices.ts"
 
 const link = "font-medium text-accent underline-offset-4 hover:underline"
@@ -59,21 +62,32 @@ function ChooseModel() {
   )
 }
 
+function NoModel({ className = "" }: { className?: string }) {
+  return (
+    <p role="status" className={`flex flex-wrap items-baseline gap-x-2 text-sm ${className}`}>
+      <span>No model chosen</span>
+      <span aria-hidden="true" className="text-muted">
+        ·
+      </span>
+      <ChooseModel />
+    </p>
+  )
+}
+
+/** Above an open chat's composer (the `chat.composer-notes` slot). */
 export function NoModelNote({ view }: { view: ChatView }) {
   // Null (not absent) is the server saying no model is named anywhere.
   if (view.history?.model !== null) return null
   return (
     <div className="mx-auto w-full max-w-3xl pb-2">
-      <p
-        role="status"
-        className="flex flex-wrap items-baseline gap-x-2 rounded-md border border-warning/50 bg-surface px-3 py-2 text-sm"
-      >
-        <span>No model chosen</span>
-        <span aria-hidden="true" className="text-muted">
-          ·
-        </span>
-        <ChooseModel />
-      </p>
+      <NoModel className="rounded-md border border-warning/50 bg-surface px-3 py-2" />
     </div>
   )
+}
+
+/** Beside "Writing as" in a chat not started yet, which has only the account's model. */
+export function PendingNoModel() {
+  const defaults = useAtomValue(generationDefaultsAtom)
+  if (!AsyncResult.isSuccess(defaults) || defaults.value.model) return null
+  return <NoModel className="rounded-md border border-warning/50 px-2 py-1" />
 }

@@ -115,7 +115,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
 
   return (
     <Card>
-      <CardHeader title="Settings" actions={<UserDraftUndo draft={durable} />} />
+      <CardHeader inline title="Settings" actions={<UserDraftUndo draft={durable} />} />
       <UserDraftNotices draft={durable} />
       <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
         <Field label="Name" error={shown(problems.name)}>
