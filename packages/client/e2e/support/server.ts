@@ -40,7 +40,9 @@ const startOnce = async (env: Record<string, string>): Promise<TestServer | null
         PORT: String(serverPort),
         DATA_DIR: dataDir,
         DB_READERS: "1",
-        DB_WORKERS: process.env.E2E_DB_WORKERS ?? "source",
+        // The bundles `npm run test:browser` built: a source worker takes about five times the
+        // CPU to start. E2E_DB_WORKERS=source runs the source entry points.
+        DB_WORKERS: process.env.E2E_DB_WORKERS ?? "bundle",
         CLIENT_DIST: join(root, "packages/client/dist"),
         ...env
       },

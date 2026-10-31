@@ -256,7 +256,7 @@ it.live(
       assert.isAbove(entries.length, 0)
       assert.strictEqual(last!.recovered, true)
     }).pipe(Effect.scoped, withServer(testConfig())),
-  { timeout: 60000 }
+  { timeout: 60000, tags: ["slow"] }
 )
 
 it.live(
@@ -303,7 +303,7 @@ it.live(
       assert.strictEqual(response.status, 204)
       assert.isAbove(Number(response.headers.get("x-drafts-recovered")), 0)
     }).pipe(Effect.scoped, withServer(testConfig())),
-  { timeout: 60_000 }
+  { timeout: 60_000, tags: ["slow"] }
 )
 
 it.live("unsent copies cannot expire unacknowledged", () =>

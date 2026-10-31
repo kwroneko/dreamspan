@@ -11,6 +11,7 @@ import { AppConfig } from "../src/config.ts"
 import { AddressResolver, makeAddressSet, type Resolve } from "../src/net/addressSet.ts"
 import { crossSiteProblem, type ExposureConfig, exposurePolicy, parsePublicOrigins } from "../src/net/exposure.ts"
 import { ServerLive } from "../src/server.ts"
+import { testBundles } from "./support/bundles.ts"
 import { serverPort, testConfig, withServer } from "./support/config.ts"
 import { tempDir } from "./support/tempDir.ts"
 
@@ -500,10 +501,9 @@ describe("exposure at startup", () => {
   it.live("the server doesn't start beyond loopback without protection", () => {
     const config = testConfig({ host: "0.0.0.0" })
     return Effect.gen(function* () {
-      const error = yield* Layer.build(ServerLive.pipe(Layer.provide(Layer.succeed(AppConfig)(config)))).pipe(
-        Effect.scoped,
-        Effect.flip
-      )
+      const error = yield* Layer.build(
+        ServerLive.pipe(Layer.provide([Layer.succeed(AppConfig)(config), testBundles]))
+      ).pipe(Effect.scoped, Effect.flip)
       assert.strictEqual(error._tag, "UnsafeExposure")
     })
   })

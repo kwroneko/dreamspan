@@ -20,7 +20,8 @@ Built through the Phase 3 LCM implementation (2026-10-30): ST imports, streaming
 npm install
 npm run build        # the client and the database worker bundles
 npm start            # http://127.0.0.1:8080, data in ./data
-npm run check        # typecheck, lint, format, tests
+npm run check        # typecheck, lint, format, the fast tests
+npm run test:slow    # scale, model-based, timing and process-spawn tests
 ```
 
 For development, run `npm run dev:server` and `npm run dev:client` (Vite on :5173, proxying to the server).

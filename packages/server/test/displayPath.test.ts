@@ -308,6 +308,6 @@ describe("the display path", () => {
           yield* ops.check(`seed ${seed}`)
         }
       }).pipe(Effect.provide(layer())),
-    60_000
+    { timeout: 60_000, tags: ["slow"] }
   )
 })

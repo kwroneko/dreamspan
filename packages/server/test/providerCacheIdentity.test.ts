@@ -17,13 +17,14 @@ import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { eventually } from "./support/generation.ts"
 import { anthropicSse, sse, startMockProvider } from "./support/mockProvider.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const layer = () =>
   Providers.layer().pipe(
     Layer.provideMerge(Network.layer),
     Layer.provideMerge(Builtins.layer),
     Layer.provideMerge(
-      Database.layer({ dataDir: tempDir("cache-identity"), readers: 1, allowNetworkFs: false, workers: "source" })
+      Database.layer({ dataDir: tempDir("cache-identity"), readers: 1, allowNetworkFs: false, ...testWorkers })
     ),
     Layer.provideMerge(Layer.succeed(Secrets)(makeSecrets("synthetic cache identity secret")))
   )

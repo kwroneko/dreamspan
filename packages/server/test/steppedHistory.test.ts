@@ -16,6 +16,7 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { assembleFixture, type AssemblyFixture } from "./support/assemblySources.ts"
 import { loreBook, loreEntry } from "./support/loreFixtures.ts"
 import { cardDoc } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const preset = importStPreset(JSON.stringify({ openai_max_context: 400, openai_max_tokens: 40 })).document!
 const base: AssemblyFixture = {
@@ -804,7 +805,7 @@ describe("stepped history", () => {
 
 // Over the database: the sources read the display path by position (spec/MESSAGE-INSERT.md §3.2).
 const database = () =>
-  Database.layer({ dataDir: tempDir("stepped-insert"), readers: 1, allowNetworkFs: false, workers: "source" })
+  Database.layer({ dataDir: tempDir("stepped-insert"), readers: 1, allowNetworkFs: false, ...testWorkers })
 const NOW = Date.UTC(2026, 0, 1)
 const storedPreset = importStPreset(
   readFileSync(new URL("fixtures/presets/default.json", import.meta.url), "utf8")

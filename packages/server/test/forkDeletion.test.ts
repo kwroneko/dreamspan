@@ -16,6 +16,7 @@ import { historyRevision } from "../src/db/historyChanges.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const NOW = Date.UTC(2026, 0, 1)
 
@@ -24,7 +25,7 @@ const database = (dataDir: string, binLimits?: BinLimits) =>
     dataDir,
     readers: 2,
     allowNetworkFs: false,
-    workers: "source",
+    ...testWorkers,
     ...(binLimits ? { binLimits } : {})
   })
 

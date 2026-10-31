@@ -13,6 +13,7 @@ import { PasswordCost } from "../../src/auth/passwords.ts"
 import { AppConfig, type AppConfigShape } from "../../src/config.ts"
 import type { Generator } from "../../src/chat/Generator.ts"
 import { serverWith } from "../../src/server.ts"
+import { testBundles } from "./bundles.ts"
 import { tempDir } from "./tempDir.ts"
 
 /**
@@ -28,7 +29,8 @@ export const testConfig = (overrides: Partial<AppConfigShape> = {}): AppConfigSh
   dbReaders: 1,
   formatWorkers: 1,
   dbAllowNetworkFs: false,
-  dbWorkers: "source",
+  // The run's own bundles (bundles.ts); tests of the source entry points ask for source.
+  dbWorkers: "bundle",
   authMode: "single",
   authProxyHeader: "remote-user",
   allowedIps: [],
@@ -56,7 +58,7 @@ const testPasswordCost = Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 })
 /** The test server, with the generator its configuration picks unless one is given. */
 export const serverLayer = (config: AppConfigShape, generator?: Layer.Layer<Generator>, summaries = Summarizer.layer) =>
   serverWith(generator ?? ContextGenerator.layer, summaries).pipe(
-    Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost])
+    Layer.provide([Layer.succeed(AppConfig)(config), testPasswordCost, testBundles])
   )
 
 export const withServer = (config: AppConfigShape) => Effect.provide(serverLayer(config))

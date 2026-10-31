@@ -14,6 +14,7 @@ import { migrations } from "../src/db/migrations.ts"
 import { pathSegments } from "../src/db/pathSegments.ts"
 import { docFor } from "./support/docs.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const say = (speaker: EntityId, content: string, writer: "human" | "model" = "human") =>
   new NewVersion({
@@ -83,7 +84,7 @@ describe("chains", () => {
         const root2 = yield* append(null, true)
         const g = yield* append(root2)
         return { chatId: chat.id, root, a, b, c, d, e, f, root2, g }
-      }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })))
+      }).pipe(Effect.provide(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })))
 
       const db = new DatabaseSync(databaseFile(dataDir), { readOnly: true })
       const chains = Object.fromEntries(

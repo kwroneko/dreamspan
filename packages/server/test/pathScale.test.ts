@@ -17,6 +17,7 @@ import { pathPieces, placedInsertionsSql, positionOf, slotPlace } from "../src/d
 import { pathSegments } from "../src/db/pathSegments.ts"
 import { displayWindow, pathWindow, stateEventsOnPath } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 /** Branch points: below each of these path depths, the path takes the second child. */
 const BRANCHES = Array.from({ length: 200 }, (_, i) => 5 * (i + 1))
@@ -44,7 +45,7 @@ interface Fixture {
   readonly chatWide: number
 }
 
-const layer = (dataDir: string) => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })
+const layer = (dataDir: string) => Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })
 
 /**
  * A chat whose path runs from `p-0` to `p-<length>`. Its 200 branch points are in the first

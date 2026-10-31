@@ -18,9 +18,10 @@ import * as Database from "../src/db/Database.ts"
 import { pathWalks, pathWindow, walkTowards } from "../src/db/reads.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { docFor } from "./support/docs.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = (dataDir = tempDir("graph")) =>
-  Database.layer({ dataDir, readers: 2, allowNetworkFs: false, workers: "source" })
+  Database.layer({ dataDir, readers: 2, allowNetworkFs: false, ...testWorkers })
 
 const windowProbe = fileURLToPath(new URL("./support/windowProbe.ts", import.meta.url))
 
@@ -375,7 +376,7 @@ describe("message graph", () => {
           all.map((_, i) => i)
         )
       }).pipe(Effect.provide(database())),
-    120_000
+    { timeout: 120_000, tags: ["slow"] }
   )
 
   it.live("pages past a run of deleted messages", () =>

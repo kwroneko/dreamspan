@@ -55,7 +55,7 @@ describe("format workers", () => {
         assert.isAbove(onMain.maxLagMs, 200, `the baseline should block: ${lags}`)
         assert.isBelow(offMain.maxLagMs, Math.min(250, onMain.maxLagMs / 4), `main thread lag: ${lags}`)
       }).pipe(Effect.provide(Formats.layer({ workers: "source", size: 1 }))),
-    60_000
+    { timeout: 60_000, tags: ["slow"] }
   )
 
   it.live(

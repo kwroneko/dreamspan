@@ -18,6 +18,7 @@ import { priceCost } from "../src/providers/usage.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { anthropicSse, completionChunks, json, sse, startMockProvider } from "./support/mockProvider.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const layer = (bindKeysToOrigins = true) =>
   Providers.layer({ retry: { maxRetries: 2, baseDelayMs: 5, maxDelayMs: 1_000 }, bindKeysToOrigins }).pipe(
@@ -28,7 +29,7 @@ const layer = (bindKeysToOrigins = true) =>
         dataDir: tempDir("stream"),
         readers: 1,
         allowNetworkFs: false,
-        workers: "source"
+        ...testWorkers
       })
     ),
     Layer.provideMerge(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))

@@ -13,13 +13,14 @@ import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
 import { cardDoc, presetDoc } from "./support/docs.ts"
 import { LINEAGE_CAP } from "../src/db/forkState.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const database = (dataDir = tempDir("bin"), binLimits?: BinLimits) =>
   Database.layer({
     dataDir,
     readers: 2,
     allowNetworkFs: false,
-    workers: "source",
+    ...testWorkers,
     ...(binLimits ? { binLimits } : {})
   })
 
@@ -1191,6 +1192,6 @@ describe("the bin with inserted messages (spec/MESSAGE-INSERT.md §3.1)", () => 
           }
         }
       }).pipe(Effect.provide(database())),
-    120_000
+    { timeout: 120_000, tags: ["slow"] }
   )
 })

@@ -57,7 +57,15 @@ class WorkerBundleStale extends Schema.TaggedError<WorkerBundleStale>()("WorkerB
   }
 }
 
-export const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta.url))
+const defaultBundleDir = fileURLToPath(new URL("../../dist/workers", import.meta.url))
+
+/**
+ * Where bundled workers are looked for when the options name no directory. The tests point
+ * it at the bundles their run built (test/support/globalSetup.ts).
+ */
+export const WorkerBundleDir = Context.Reference<string>("rp/db/WorkerBundleDir", {
+  defaultValue: () => defaultBundleDir
+})
 
 /** A bundled worker's entry point, `<name>.mjs` in `dir`. It must exist and match the sources. */
 export const bundleEntry = (dir: string, name: string) =>
@@ -78,7 +86,7 @@ const workerEntries = (options: DatabaseOptions) =>
         bundleDir: undefined
       }
     }
-    const dir = options.bundleDir ?? defaultBundleDir
+    const dir = options.bundleDir ?? (yield* WorkerBundleDir)
     return { writer: yield* bundleEntry(dir, "writer"), reader: yield* bundleEntry(dir, "reader"), bundleDir: dir }
   })
 

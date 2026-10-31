@@ -861,6 +861,6 @@ describe("chats", () => {
         assert.isBelow(max, 250, `event loop delay max ${max.toFixed(1)} ms`)
       }).pipe(Effect.scoped, withGenerator(config, harness))
     },
-    60_000
+    { timeout: 60_000, tags: ["slow"] }
   )
 })

@@ -8,6 +8,7 @@ import * as Formats from "../src/importer/Formats.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"
 import { Reader } from "../src/db/Database.ts"
 import { serverWith } from "../src/server.ts"
+import { testBundles } from "./support/bundles.ts"
 import { client, post, serverPort, testConfig } from "./support/config.ts"
 import { json, stCardV2 } from "./formats/support.ts"
 import { importCard } from "../src/formats/cardImport.ts"
@@ -23,7 +24,13 @@ const server = serverWith(
     size: 1,
     entry: new URL("./support/exportPluginWorker.ts", import.meta.url)
   })
-).pipe(Layer.provide([Layer.succeed(AppConfig)(config), Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 })]))
+).pipe(
+  Layer.provide([
+    Layer.succeed(AppConfig)(config),
+    Layer.succeed(PasswordCost)({ n: 2 ** 10, r: 8, p: 1 }),
+    testBundles
+  ])
+)
 
 const text = (response: Response) => Effect.promise(() => response.text())
 

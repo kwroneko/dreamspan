@@ -13,6 +13,7 @@ import { Reader } from "../src/db/Database.ts"
 import { AddressResolver, type Resolve } from "../src/net/addressSet.ts"
 import { TrustedAddresses } from "../src/net/exposure.ts"
 import { ServerLive } from "../src/server.ts"
+import { testBundles } from "./support/bundles.ts"
 import { client, login, outcome, post, serverPort, testConfig, withServer } from "./support/config.ts"
 
 /** A login sent from `from`, so it can come from an address other than loopback. */
@@ -56,7 +57,10 @@ describe("accounts", () => {
       const stored = yield* (yield* Reader).GetPasswordHash({ userId: me.id })
       assert.match(stored?.passwordHash ?? "", /^scrypt\$32768\$8\$3\$/)
       assert.strictEqual((yield* login("local", "a-password")).status, 204)
-    }).pipe(Effect.scoped, Effect.provide(ServerLive.pipe(Layer.provide(Layer.succeed(AppConfig)(config)))))
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(ServerLive.pipe(Layer.provide([Layer.succeed(AppConfig)(config), testBundles])))
+    )
   })
 
   it.live("from passwordless local use to login, sessions and logout", () => {

@@ -7,10 +7,11 @@ import * as Network from "../src/net/Network.ts"
 import { makeSecrets, Secrets } from "../src/secrets.ts"
 import { startHttpProxy, startSocks5Proxy, startTarget } from "./support/proxies.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const layer = (dataDir: string) =>
   Network.layer.pipe(
-    Layer.provideMerge(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, workers: "source" })),
+    Layer.provideMerge(Database.layer({ dataDir, readers: 1, allowNetworkFs: false, ...testWorkers })),
     Layer.provide(Layer.succeed(Secrets)(makeSecrets("a server secret for tests")))
   )
 

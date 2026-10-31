@@ -176,83 +176,89 @@ const savedContexts = (dataDir: string) =>
   )
 
 for (const kind of ["openai-chat", "openai-responses", "anthropic", "google"]) {
-  it.live(`${kind} ignores ambient SDK authentication, headers and routing`, () => {
-    const config = testConfig()
-    return Effect.gen(function* () {
-      const mock = yield* resource(() =>
-        startMockProvider((r, res) => json(res, 401, { error: { message: "Rejected " + JSON.stringify(r.headers) } }))
-      )
-      const key = "synthetic-selected-key"
-      const api = yield* client()
-      const baseline = yield* generateReply(api, { connection: { kind, baseUrl: mock.url, apiKey: key }, model: {} })
-      const baselineSent = mock.requests().at(-1)!
-      const baselineRun = yield* api.GetRunContext({ versionId: baseline.version.id })
-      const env = Object.fromEntries(SDK_ENV.map((name) => [name, "synthetic-env-" + name]))
-      Object.assign(env, {
-        OPENAI_CUSTOM_HEADERS: "Authorization: Bearer synthetic-ambient-key\nX-Ambient: synthetic-ambient-header",
-        ANTHROPIC_CUSTOM_HEADERS: "x-api-key: synthetic-ambient-key",
-        OPENAI_ORG_ID: "synthetic-org",
-        OPENAI_PROJECT_ID: "synthetic-project",
-        GOOGLE_GENAI_USE_VERTEXAI: "true",
-        GOOGLE_GENAI_USE_ENTERPRISE: "true",
-        OPENAI_LOG: "debug",
-        ANTHROPIC_LOG: "debug",
-        GOOGLE_GENAI_DEBUG: "true",
-        PI_CACHE_RETENTION: "long",
-        ANTHROPIC_CONFIG_DIR: config.dataDir + "/no-sdk-config",
-        ANTHROPIC_IDENTITY_TOKEN_FILE: config.dataDir + "/no-identity-token",
-        GOOGLE_APPLICATION_CREDENTIALS: config.dataDir + "/no-google-credentials",
-        google_application_credentials: config.dataDir + "/no-google-credentials",
-        CLOUDSDK_CONFIG: config.dataDir + "/no-gcloud-config"
-      })
-      yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
-          scrubProviderEnvironment()
-        }),
-        () => Effect.sync(() => vi.unstubAllEnvs())
-      )
-      const { version, events, chat } = yield* generateReply(api, {
-        connection: { kind, baseUrl: mock.url, apiKey: key },
-        model: {}
-      })
-      assert.equal(version.status, "failed")
-      assert.isAbove(mock.requests().length, 0, JSON.stringify(version.error))
-      const headers = mock.requests().at(-1)!.headers
-      assert.equal(
-        headers[kind === "anthropic" ? "x-api-key" : kind === "google" ? "x-goog-api-key" : "authorization"],
-        kind.startsWith("openai") ? "Bearer " + key : key
-      )
-      assert.isUndefined(headers["x-ambient"])
-      assert.isUndefined(headers["openai-organization"])
-      assert.isUndefined(headers["openai-project"])
-      assert.notInclude(JSON.stringify(mock.requests().at(-1)!.body), '"prompt_cache_retention":"24h"')
-      for (const name of Object.keys(env))
-        assert.isUndefined(process.env[name], "startup must remove ambient SDK configuration")
-      const run = yield* api.GetRunContext({ versionId: version.id })
-      const sent = mock.requests().at(-1)!
-      assert.equal(sent.path, baselineSent.path, "environment must not change endpoint selection")
-      assert.deepEqual(
-        JSON.parse(JSON.stringify(sent.body).replaceAll(chat.id, "session")),
-        JSON.parse(JSON.stringify(baselineSent.body).replaceAll(baseline.chat.id, "session")),
-        "environment must not change the outgoing request"
-      )
-      const display = (context: typeof run) =>
-        context.messages.map(({ role, name, content }) => ({ role, name, content }))
-      assert.deepEqual(display(run), display(baselineRun), "environment must not change the recorded mapping")
-      assert.deepEqual(run.samplers, baselineRun.samplers)
+  it.live(
+    `${kind} ignores ambient SDK authentication, headers and routing`,
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* resource(() =>
+          startMockProvider((r, res) => json(res, 401, { error: { message: "Rejected " + JSON.stringify(r.headers) } }))
+        )
+        const key = "synthetic-selected-key"
+        const api = yield* client()
+        const baseline = yield* generateReply(api, { connection: { kind, baseUrl: mock.url, apiKey: key }, model: {} })
+        const baselineSent = mock.requests().at(-1)!
+        const baselineRun = yield* api.GetRunContext({ versionId: baseline.version.id })
+        const env = Object.fromEntries(SDK_ENV.map((name) => [name, "synthetic-env-" + name]))
+        Object.assign(env, {
+          OPENAI_CUSTOM_HEADERS: "Authorization: Bearer synthetic-ambient-key\nX-Ambient: synthetic-ambient-header",
+          ANTHROPIC_CUSTOM_HEADERS: "x-api-key: synthetic-ambient-key",
+          OPENAI_ORG_ID: "synthetic-org",
+          OPENAI_PROJECT_ID: "synthetic-project",
+          GOOGLE_GENAI_USE_VERTEXAI: "true",
+          GOOGLE_GENAI_USE_ENTERPRISE: "true",
+          OPENAI_LOG: "debug",
+          ANTHROPIC_LOG: "debug",
+          GOOGLE_GENAI_DEBUG: "true",
+          PI_CACHE_RETENTION: "long",
+          ANTHROPIC_CONFIG_DIR: config.dataDir + "/no-sdk-config",
+          ANTHROPIC_IDENTITY_TOKEN_FILE: config.dataDir + "/no-identity-token",
+          GOOGLE_APPLICATION_CREDENTIALS: config.dataDir + "/no-google-credentials",
+          google_application_credentials: config.dataDir + "/no-google-credentials",
+          CLOUDSDK_CONFIG: config.dataDir + "/no-gcloud-config"
+        })
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v)
+            scrubProviderEnvironment()
+          }),
+          () => Effect.sync(() => vi.unstubAllEnvs())
+        )
+        const { version, events, chat } = yield* generateReply(api, {
+          connection: { kind, baseUrl: mock.url, apiKey: key },
+          model: {}
+        })
+        assert.equal(version.status, "failed")
+        assert.isAbove(mock.requests().length, 0, JSON.stringify(version.error))
+        const headers = mock.requests().at(-1)!.headers
+        assert.equal(
+          headers[kind === "anthropic" ? "x-api-key" : kind === "google" ? "x-goog-api-key" : "authorization"],
+          kind.startsWith("openai") ? "Bearer " + key : key
+        )
+        assert.isUndefined(headers["x-ambient"])
+        assert.isUndefined(headers["openai-organization"])
+        assert.isUndefined(headers["openai-project"])
+        assert.notInclude(JSON.stringify(mock.requests().at(-1)!.body), '"prompt_cache_retention":"24h"')
+        for (const name of Object.keys(env))
+          assert.isUndefined(process.env[name], "startup must remove ambient SDK configuration")
+        const run = yield* api.GetRunContext({ versionId: version.id })
+        const sent = mock.requests().at(-1)!
+        assert.equal(sent.path, baselineSent.path, "environment must not change endpoint selection")
+        assert.deepEqual(
+          JSON.parse(JSON.stringify(sent.body).replaceAll(chat.id, "session")),
+          JSON.parse(JSON.stringify(baselineSent.body).replaceAll(baseline.chat.id, "session")),
+          "environment must not change the outgoing request"
+        )
+        const display = (context: typeof run) =>
+          context.messages.map(({ role, name, content }) => ({ role, name, content }))
+        assert.deepEqual(display(run), display(baselineRun), "environment must not change the recorded mapping")
+        assert.deepEqual(run.samplers, baselineRun.samplers)
 
-      for (const value of [
-        ...Object.values(env).filter((value) => value.startsWith("synthetic-env-") || value.startsWith(config.dataDir)),
-        key,
-        "synthetic-ambient-key",
-        "synthetic-ambient-header",
-        "synthetic-org",
-        "synthetic-project"
-      ])
-        assert.notInclude(JSON.stringify({ run, events, stored: yield* savedContexts(config.dataDir) }), value)
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
-  })
+        for (const value of [
+          ...Object.values(env).filter(
+            (value) => value.startsWith("synthetic-env-") || value.startsWith(config.dataDir)
+          ),
+          key,
+          "synthetic-ambient-key",
+          "synthetic-ambient-header",
+          "synthetic-org",
+          "synthetic-project"
+        ])
+          assert.notInclude(JSON.stringify({ run, events, stored: yield* savedContexts(config.dataDir) }), value)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+    },
+    { tags: ["slow"] }
+  )
 }
 for (const scheme of ["Bearer", "Basic"])
   it.live(`${scheme} components are scrubbed in capture and ordinary Version errors`, () => {
@@ -379,14 +385,16 @@ it.live("Google ignores Node's ambient proxy and uses the configured transport",
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 })
 
-it.live("Google uses the pinned transport in a fresh Node process with environment proxies enabled", () =>
-  Effect.gen(function* () {
-    const mock = yield* resource(() => startMockProvider(googleResponse))
-    const ambient = yield* resource(startHttpProxy)
-    const configured = yield* resource(startHttpProxy)
-    const config = testConfig()
-    const moduleUrl = (path: string) => new URL(path, import.meta.url).href
-    const source = `
+it.live(
+  "Google uses the pinned transport in a fresh Node process with environment proxies enabled",
+  () =>
+    Effect.gen(function* () {
+      const mock = yield* resource(() => startMockProvider(googleResponse))
+      const ambient = yield* resource(startHttpProxy)
+      const configured = yield* resource(startHttpProxy)
+      const config = testConfig()
+      const moduleUrl = (path: string) => new URL(path, import.meta.url).href
+      const source = `
       import { scrubProviderEnvironment } from ${JSON.stringify(moduleUrl("../src/providerEnvironment.ts"))};
       scrubProviderEnvironment();
       const { Effect, Layer } = await import(${JSON.stringify(import.meta.resolve("effect"))});
@@ -403,53 +411,54 @@ it.live("Google uses the pinned transport in a fresh Node process with environme
         if(result.stopReason==='error') throw new Error(result.errorMessage);
       }).pipe(Effect.scoped,Effect.provide(Network.layer.pipe(Layer.provide(Database.layer({dataDir:process.argv[4],readers:1,allowNetworkFs:false,workers:'source'})),Layer.provide(Layer.succeed(Secrets)(makeSecrets('synthetic-child-secret')))))));
     `
-    const script = config.dataDir + "/google-probe.mjs"
-    writeFileSync(script, source)
-    const proxy = ambient.url.replace("http://", "http://synthetic-user:synthetic-ambient-password@")
-    yield* Effect.promise(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          const child = spawn(
-            process.execPath,
-            ["--no-wasm-code-gc", "--use-env-proxy", script, mock.url, configured.url, config.dataDir],
-            {
-              cwd: fileURLToPath(new URL("../../../", import.meta.url)),
-              env: {
-                ...process.env,
-                NODE_USE_ENV_PROXY: "1",
-                HTTP_PROXY: proxy,
-                HTTPS_PROXY: proxy,
-                http_proxy: proxy,
-                https_proxy: proxy,
-                NO_PROXY: "",
-                no_proxy: ""
-              },
-              stdio: ["ignore", "pipe", "pipe"]
-            }
-          )
-          let output = ""
-          child.stdout.on("data", (data) => {
-            output += data
+      const script = config.dataDir + "/google-probe.mjs"
+      writeFileSync(script, source)
+      const proxy = ambient.url.replace("http://", "http://synthetic-user:synthetic-ambient-password@")
+      yield* Effect.promise(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            const child = spawn(
+              process.execPath,
+              ["--no-wasm-code-gc", "--use-env-proxy", script, mock.url, configured.url, config.dataDir],
+              {
+                cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+                env: {
+                  ...process.env,
+                  NODE_USE_ENV_PROXY: "1",
+                  HTTP_PROXY: proxy,
+                  HTTPS_PROXY: proxy,
+                  http_proxy: proxy,
+                  https_proxy: proxy,
+                  NO_PROXY: "",
+                  no_proxy: ""
+                },
+                stdio: ["ignore", "pipe", "pipe"]
+              }
+            )
+            let output = ""
+            child.stdout.on("data", (data) => {
+              output += data
+            })
+            child.stderr.on("data", (data) => {
+              output += data
+            })
+            const timer = setTimeout(() => child.kill("SIGTERM"), 20000)
+            child.once("error", (error) => {
+              clearTimeout(timer)
+              reject(error)
+            })
+            child.once("exit", (code) => {
+              clearTimeout(timer)
+              if (code === 0) resolve()
+              else reject(new Error(output))
+            })
           })
-          child.stderr.on("data", (data) => {
-            output += data
-          })
-          const timer = setTimeout(() => child.kill("SIGTERM"), 20000)
-          child.once("error", (error) => {
-            clearTimeout(timer)
-            reject(error)
-          })
-          child.once("exit", (code) => {
-            clearTimeout(timer)
-            if (code === 0) resolve()
-            else reject(new Error(output))
-          })
-        })
-    )
-    assert.deepEqual(ambient.tunnels(), [])
-    assert.include(configured.tunnels(), new URL(mock.url).host)
-    assert.equal(mock.requests().at(-1)!.headers["x-goog-api-key"], "synthetic-google-key")
-  }).pipe(Effect.scoped)
+      )
+      assert.deepEqual(ambient.tunnels(), [])
+      assert.include(configured.tunnels(), new URL(mock.url).host)
+      assert.equal(mock.requests().at(-1)!.headers["x-goog-api-key"], "synthetic-google-key")
+    }).pipe(Effect.scoped),
+  { tags: ["slow"] }
 )
 
 it.live("URL userinfo and query credentials are scrubbed from capture and Version errors", () => {

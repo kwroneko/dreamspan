@@ -2,9 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as Database from "../src/db/Database.ts"
 import { tempDir } from "./support/tempDir.ts"
+import { testWorkers } from "./support/bundles.ts"
 
 const layer = () =>
-  Database.layer({ dataDir: tempDir("user-drafts"), readers: 1, workers: "source", allowNetworkFs: false })
+  Database.layer({ dataDir: tempDir("user-drafts"), readers: 1, ...testWorkers, allowNetworkFs: false })
 
 describe("authored settings and pre-creation drafts", () => {
   it.effect("persists field undo, isolates account keys and recovers destructive and discarded text", () =>

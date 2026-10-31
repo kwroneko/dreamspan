@@ -158,59 +158,62 @@ it.live("message edit and scratchpad history survive reopening, restore and end 
 
 for (const kind of ["edit", "write", "summary"] as const) {
   const config = testConfig()
-  it.live(`${kind} history exposes the oldest retained text at the patch limit`, () =>
-    Effect.gen(function* () {
-      const api = yield* client()
-      const writer = yield* Writer
-      const user = yield* api.Whoami()
-      const chat = yield* api.CreateChat({ title: "Synthetic full history" })
-      const sent = yield* posted(
-        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "original" })
-      )
-      const summary = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [
-        { slotId: sent.entry.slotId, versionId: sent.entry.version.id, amendCount: 0 }
-      ])
-      const summaryKey = { forkId: chat.currentForkId!, summaryId: summary.id }
-      const target =
-        kind === "edit"
-          ? ({ _tag: "Edit", versionId: sent.entry.version.id } as const)
-          : ({ _tag: "Write", slotId: sent.entry.slotId } as const)
-      const save = {
-        draftId: null,
-        content: "Oldest retained text",
-        expectedRowVersion: null,
-        expectedSession: null
-      }
-      let draft = yield* kind === "summary"
-        ? api.SaveSummaryDraft({ ...summaryKey, ...save, baseRevisionId: summary.revisionId })
-        : api.SaveMessageDraft({ target, ...save })
-      const initial = draft.content
-      // Restores never coalesce. Exercise the real writer's retention boundary without a
-      // wall-clock wait, keeping all database work in its worker.
-      for (let n = 0; n < DraftHistoryPolicy.maxEntries; n++)
-        draft = yield* writer.RestoreDraftState({
-          userId: user.id,
-          key: new DraftKey(draft.key),
+  it.live(
+    `${kind} history exposes the oldest retained text at the patch limit`,
+    () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const writer = yield* Writer
+        const user = yield* api.Whoami()
+        const chat = yield* api.CreateChat({ title: "Synthetic full history" })
+        const sent = yield* posted(
+          api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "original" })
+        )
+        const summary = yield* completeFixture(config.dataDir, writer, user.id, chat.id, [
+          { slotId: sent.entry.slotId, versionId: sent.entry.version.id, amendCount: 0 }
+        ])
+        const summaryKey = { forkId: chat.currentForkId!, summaryId: summary.id }
+        const target =
+          kind === "edit"
+            ? ({ _tag: "Edit", versionId: sent.entry.version.id } as const)
+            : ({ _tag: "Write", slotId: sent.entry.slotId } as const)
+        const save = {
+          draftId: null,
+          content: "Oldest retained text",
+          expectedRowVersion: null,
+          expectedSession: null
+        }
+        let draft = yield* kind === "summary"
+          ? api.SaveSummaryDraft({ ...summaryKey, ...save, baseRevisionId: summary.revisionId })
+          : api.SaveMessageDraft({ target, ...save })
+        const initial = draft.content
+        // Restores never coalesce. Exercise the real writer's retention boundary without a
+        // wall-clock wait, keeping all database work in its worker.
+        for (let n = 0; n < DraftHistoryPolicy.maxEntries; n++)
+          draft = yield* writer.RestoreDraftState({
+            userId: user.id,
+            key: new DraftKey(draft.key),
+            draftId: draft.id,
+            seq: 0,
+            content: `Retained state ${n}`,
+            expectedRowVersion: draft.rowVersion
+          })
+        const limit = DraftHistoryPolicy.maxEntries + 1
+        const states = yield* kind === "summary"
+          ? api.SummaryDraftHistory({ ...summaryKey, limit })
+          : api.MessageDraftHistory({ target, limit })
+        assert.strictEqual(states.length, limit)
+        assert.strictEqual(states.at(-1)!.kind, "initial")
+        const restore = {
           draftId: draft.id,
-          seq: 0,
-          content: `Retained state ${n}`,
+          seq: states.at(-1)!.seq,
           expectedRowVersion: draft.rowVersion
-        })
-      const limit = DraftHistoryPolicy.maxEntries + 1
-      const states = yield* kind === "summary"
-        ? api.SummaryDraftHistory({ ...summaryKey, limit })
-        : api.MessageDraftHistory({ target, limit })
-      assert.strictEqual(states.length, limit)
-      assert.strictEqual(states.at(-1)!.kind, "initial")
-      const restore = {
-        draftId: draft.id,
-        seq: states.at(-1)!.seq,
-        expectedRowVersion: draft.rowVersion
-      }
-      const restored = yield* kind === "summary"
-        ? api.RestoreSummaryDraft({ ...summaryKey, ...restore })
-        : api.RestoreMessageDraft({ target, ...restore })
-      assert.strictEqual(restored.content, initial)
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
+        }
+        const restored = yield* kind === "summary"
+          ? api.RestoreSummaryDraft({ ...summaryKey, ...restore })
+          : api.RestoreMessageDraft({ target, ...restore })
+        assert.strictEqual(restored.content, initial)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none))),
+    { tags: ["slow"] }
   )
 }
