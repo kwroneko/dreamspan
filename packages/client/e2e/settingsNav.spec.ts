@@ -54,10 +54,31 @@ test("on a phone: the list, a page alone under the way back, and back to the lis
   // A link from elsewhere opens its page directly.
   await page.goto(`${server().url}/settings/keys`)
   await expect(main.getByRole("heading", { level: 1, name: "Keys" })).toBeVisible()
-  // A page inside one has its own way back (Cancel, "← Connections"), so no second one above it.
+  // A page inside one goes back to that page, not to the list.
   await page.goto(`${server().url}/settings/connections/new`)
   await expect(main.getByRole("heading", { name: "New connection" })).toBeVisible()
   await expect(main.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0)
+  await main.getByRole("link", { name: "Connections", exact: true }).click()
+  await expect(page).toHaveURL(/\/settings\/connections$/)
+  await expect(main.getByRole("heading", { level: 1, name: "Connections" })).toBeVisible()
+  // A connection's page has one way back on a phone: the layout's, not its own as well.
+  const connection = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.CreateConnection({
+      kind: "openai-chat",
+      settings: {
+        name: "Workshop model",
+        baseUrl: "http://127.0.0.1:9/v1",
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      },
+      apiKey: "sk-settings-nav-test-0042"
+    })
+  )
+  await page.goto(`${server().url}/settings/connections/${connection.id}`)
+  await expect(main.getByRole("heading", { level: 1, name: "Workshop model" })).toBeVisible()
+  await expect(main.getByRole("link", { name: /^(← )?Connections$/ })).toHaveCount(1)
   await context.close()
 })
 

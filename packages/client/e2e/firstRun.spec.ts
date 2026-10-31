@@ -93,7 +93,12 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   const box = await page.getByTestId("composer").boundingBox()
   expect(note!.y + note!.height).toBeLessThanOrEqual(box!.y)
   expect(note!.width).toBeGreaterThan(box!.width / 2)
-  await page.getByRole("button", { name: "Choose a model" }).click()
+  // The note's own button: the next-reply strip has one named the same.
+  await page
+    .getByRole("status")
+    .filter({ hasText: "No model chosen" })
+    .getByRole("button", { name: "Choose a model" })
+    .click()
   await page.getByRole("list", { name: "Models" }).getByRole("button").first().click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)
   expect((await admin((api) => api.GetGenerationDefaults())).model).not.toBeNull()
@@ -110,7 +115,12 @@ test("a composer with no model says so and offers the choice", async ({ page }) 
   await clearDefaultModel()
   await page.goto(`${server().url}/chats/${started.chat.id}`)
   await expect(page.getByText("No model chosen")).toBeVisible()
-  await page.getByRole("button", { name: "Choose a model" }).click()
+  // The note's own button: the next-reply strip has one named the same.
+  await page
+    .getByRole("status")
+    .filter({ hasText: "No model chosen" })
+    .getByRole("button", { name: "Choose a model" })
+    .click()
   await page.getByRole("list", { name: "Models" }).getByRole("button").first().click()
   await expect(page.getByText("No model chosen")).toHaveCount(0)
 

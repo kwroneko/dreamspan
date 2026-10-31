@@ -63,11 +63,13 @@ function ListTitle() {
 function SettingsLayout() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const atList = /^\/settings\/?$/.test(pathname)
-  // The open page's own name, for a phone, where the list isn't beside it. A page inside one
-  // (a connection) has its own way back to it, so it gets neither.
+  // On a phone, where the list isn't beside it: the open page's name under the way back to the
+  // list, or, on a page inside one (a connection), the way back to that page.
+  const path = pathname.replace(/\/$/, "")
   const open = useSettingsNav()
     .flatMap((section) => section.pages)
-    .find((entry) => pathname.replace(/\/$/, "") === fullPath(entry))
+    .find((entry) => path === fullPath(entry) || path.startsWith(`${fullPath(entry)}/`))
+  const inside = open !== undefined && path !== fullPath(open)
   return (
     <div className="flex flex-col gap-4 md:flex-row md:gap-8">
       {atList && <ListTitle />}
@@ -79,13 +81,13 @@ function SettingsLayout() {
         {open && (
           <div className="mb-4 flex flex-col items-start gap-1 md:hidden">
             <Link
-              to="/settings"
+              to={inside ? fullPath(open) : "/settings"}
               className="-ml-1 inline-flex items-center gap-1.5 rounded-md px-1 py-1 text-sm text-muted hover:text-text"
             >
               <Icon name="back" />
-              Settings
+              {inside ? open.nav!.label : "Settings"}
             </Link>
-            <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>
+            {!inside && <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>}
           </div>
         )}
         <Outlet />

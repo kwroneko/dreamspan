@@ -721,7 +721,8 @@ function ConnectionView(props: ConnectionSectionProps) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <Link to="/settings/connections" className="text-sm text-muted hover:text-text">
+        {/* On a phone the settings layout has the way back above the page. */}
+        <Link to="/settings/connections" className="hidden self-start text-sm text-muted hover:text-text md:block">
           ← Connections
         </Link>
         <h1 className="text-xl font-semibold [overflow-wrap:anywhere]">{connection.name}</h1>
