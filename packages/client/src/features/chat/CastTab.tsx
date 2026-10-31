@@ -229,7 +229,7 @@ function Member({
           title={name}
           aria-label={`${name}: open their card`}
           onClick={() => showPanel(`card:${card.entityId}`)}
-          className={`max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
+          className={`line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus ${muted ? "text-muted" : ""}`}
         >
           {name}
         </button>
@@ -276,7 +276,7 @@ function You({ session, card }: { session: ChatSession; card: CastCard | undefin
             title={card.name}
             aria-label={`${card.name}: open your persona`}
             onClick={() => showPanel(`card:${card.entityId}`)}
-            className="max-w-full truncate rounded-sm text-left font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+            className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
           >
             {card.name}
           </button>

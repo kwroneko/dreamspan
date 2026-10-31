@@ -6,12 +6,12 @@ import { StSettingsImporter } from "./StSettingsImport.tsx"
 // (spec/PROVIDERS.md §3.1). Each field shows where its value came from.
 import type { ModelRefresh } from "@rp/shared/api.ts"
 import { type CatalogMatch, type FieldSource, type Model, ModelOverrides, resolveModel } from "@rp/shared/providers.ts"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Fieldset, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
+import { Field, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
@@ -230,6 +230,17 @@ function Limit({
   )
 }
 
+/** A headed part of the form: what's reported, what it can do, your settings. A fieldset, named by its title. */
+function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <fieldset className="flex min-w-0 flex-col gap-3 pt-2">
+      <legend className="text-base font-semibold text-text">{title}</legend>
+      <p className="-mt-2 text-sm text-muted">{description}</p>
+      {children}
+    </fieldset>
+  )
+}
+
 /** Edits the user's overrides. Empty fields fall back to what the provider reports. */
 export function ModelSettingsEditor({
   model,
@@ -383,8 +394,8 @@ export function ModelSettingsEditor({
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
-      <Fieldset
-        legend="Model limits (from the provider)"
+      <Section
+        title="Model limits (from the provider)"
         description="The most this model takes and writes, as reported. Set one yourself only if that's wrong."
       >
         <Limit
@@ -408,7 +419,7 @@ export function ModelSettingsEditor({
           problem={maxOutputValue.problem}
           open={false}
         />
-      </Fieldset>
+      </Section>
       {learned && (
         <Alert
           title={`Learned context size: ${learned.context.toLocaleString()} tokens`}
@@ -433,7 +444,7 @@ export function ModelSettingsEditor({
           <ErrorAlert error={forget.error} />
         </Alert>
       )}
-      <Fieldset legend="What it can do" description="As the provider says, unless you choose otherwise.">
+      <Section title="What it can do" description="As the provider says, unless you choose otherwise.">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Vision">
             <Select items={triItems} value={vision} onValueChange={setVision} />
@@ -451,9 +462,9 @@ export function ModelSettingsEditor({
         >
           <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
         </Field>
-      </Fieldset>
-      <Fieldset
-        legend="Your settings for this model"
+      </Section>
+      <Section
+        title="Your settings for this model"
         description="Used in every chat that uses this model. Empty: the default shown. How much of the window to fill and how long a reply may be stay within its limits above."
       >
         <div className="grid gap-3 sm:grid-cols-2">
@@ -494,7 +505,7 @@ export function ModelSettingsEditor({
             )
           })}
         </div>
-      </Fieldset>
+      </Section>
       <Field
         label="Advanced model settings (JSON)"
         description='Stop strings, logit bias, streaming, cache retention, provider routing and wire roles. Example: {"stop":["END"],"squash":true,"names_behavior":"content","cacheRetention":"long"}'

@@ -119,7 +119,7 @@ for (const width of [1440, 390])
         .getByRole("button", { name: /^No\./ })
         .click()
       // A card's version shows on its own tab (the Cast shows one only to tell two of a name apart).
-      await expect(forked.getByRole("heading", { name, exact: true }).locator("..")).not.toContainText("Storm")
+      await expect(await openPanel(page, name)).not.toContainText("Storm")
       // The existing sibling never received the fork, and the original line still has it.
       await page.goto(`${server().url}/chats/${seed.chatId}?fork=${seed.other}`)
       await openCast(page)

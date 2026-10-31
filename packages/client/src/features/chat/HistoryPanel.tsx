@@ -332,16 +332,18 @@ export function HistoryPanel({
           Next
         </Button>
       </div>
-      {(["Messages", "Swipes", "Summaries"] as const).map((kind) => (
-        <section key={kind} className="flex flex-col gap-2">
-          <h3 className="font-medium">{kind}</h3>
-          {hits
-            .filter((h) =>
-              kind === "Summaries"
-                ? h.kind === "summary_revision"
-                : h.kind === "version_replace" && h.selected === (kind === "Messages")
-            )
-            .map((hit) => (
+      {(["Messages", "Swipes", "Summaries"] as const).map((kind) => {
+        const found = hits.filter((h) =>
+          kind === "Summaries"
+            ? h.kind === "summary_revision"
+            : h.kind === "version_replace" && h.selected === (kind === "Messages")
+        )
+        // A group shows once it has something found: before a search, no empty headings.
+        if (found.length === 0) return null
+        return (
+          <section key={kind} className="flex flex-col gap-2">
+            <h3 className="font-medium">{kind}</h3>
+            {found.map((hit) => (
               <article key={keyOf(hit)} className="rounded-md border border-border p-2">
                 <div className="flex items-center justify-between gap-2">
                   <button className="text-accent underline" onClick={() => openHit(hit)}>
@@ -393,8 +395,9 @@ export function HistoryPanel({
                 </div>
               </article>
             ))}
-        </section>
-      ))}
+          </section>
+        )
+      })}
       <section className="flex flex-col gap-3">
         <h2 className="font-semibold">History edits</h2>
         {!records.length && <p className="text-muted">No history edits yet.</p>}

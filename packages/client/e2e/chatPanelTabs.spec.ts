@@ -1,7 +1,7 @@
 // The side panel's tabs leading with what a person touches (night/ftabs): This chat's name,
 // persona and summaries before the advanced, collapsed parts; the persona's tab as its
-// description edited in place, with Switch persona; the Model tab's provider limits apart
-// from the settings; History edits before a search. Every card here is made up.
+// description edited in place, with Switch persona; History edits before a search (the Model
+// tab's form is models.spec.ts's). Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -93,7 +93,7 @@ test("the persona's tab is its description, edited in place, and Switch persona"
   await open(page, `card:${persona}`)
   const tab = page.getByRole("tabpanel", { name: "Juniper Ashgrove" })
   await expect(tab.getByText("You play", { exact: true })).toBeVisible()
-  await expectTextBox(tab.getByRole("textbox", { name: "Description", exact: true }), PERSONA.slice(0, 40))
+  await expectTextBox(tab.getByRole("textbox", { name: "Description", exact: true }), PERSONA)
   // One field; no New chat, no count of chats, no card actions meant for characters.
   await expect(tab.getByRole("textbox")).toHaveCount(1)
   await expect(tab).not.toContainText(/used by|New chat/)
@@ -110,24 +110,6 @@ test("the persona's tab is its description, edited in place, and Switch persona"
   await tab.getByRole("button", { name: /^Playing as Juniper Ashgrove/ }).click()
   await page.getByRole("option", { name: /^Wren/ }).click()
   await expect(page.getByRole("tab", { name: "Wren" })).toBeAttached()
-})
-
-test("the Model tab keeps the provider's limits apart from your settings for the model", async ({ page }) => {
-  await open(page)
-  const tab = await openPanel(page, "Model")
-  const limits = tab.getByRole("group", { name: /^Model limits \(from the provider\)/ })
-  await expect(limits).toContainText("Context window")
-  await expect(limits).toContainText("Longest reply")
-  // Read-only until the pencil: then your own value, which "Use what's reported" drops.
-  await expect(limits.getByRole("textbox")).toHaveCount(0)
-  await limits.getByRole("button", { name: "Set the context window yourself" }).click()
-  await expect(limits.getByLabel("Your context window (tokens)")).toBeFocused()
-  await limits.getByRole("button", { name: "Use what’s reported" }).click()
-  await expect(limits.getByRole("textbox")).toHaveCount(0)
-  const settings = tab.getByRole("group", { name: /^Your settings for this model/ })
-  await expect(settings.getByLabel("Context to send (tokens)")).toBeVisible()
-  await expect(settings.getByLabel("Reply length (tokens)")).toBeVisible()
-  await expect(tab).not.toContainText("no provider information")
 })
 
 test("History edits doesn't ask for a model before a search", async ({ page }) => {

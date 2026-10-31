@@ -168,7 +168,12 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
   const persona = personaId === null ? undefined : cast?.cards.find((card) => card.entityId === personaId)
   return (
     <section aria-label="This chat" className="flex flex-col gap-4">
-      <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{chatDisplayName(view)}</h2>
+      <h2
+        title={chatDisplayName(view)}
+        className="line-clamp-2 text-lg leading-snug font-semibold [overflow-wrap:anywhere]"
+      >
+        {chatDisplayName(view)}
+      </h2>
       <div role="group" aria-label="Your persona" className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {persona && <Avatar id={persona.entityId} name={persona.name} mediaId={persona.avatarMediaId} size="lg" />}
         <div className="flex min-w-0 flex-1 flex-col">

@@ -76,7 +76,7 @@ for (const width of [1440, 390]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `personas-${width}-${scheme}.png`) })
-      await persona.getByRole("button").click()
+      await persona.getByRole("button", { name: /^Playing as / }).click()
       await page.getByRole("option", { name: "Ada", exact: true }).click()
       await expect(persona.getByRole("button", { name: "Playing as Ada. Change your persona" })).toBeVisible()
       expect(
