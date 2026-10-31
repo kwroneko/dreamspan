@@ -1,3 +1,4 @@
+import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
 import {
@@ -1450,6 +1451,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed so far; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections so far; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },
@@ -1628,6 +1631,8 @@ export class WriteOps extends RpcGroup.make(
       content: Schema.String,
       /** The reasoning streamed; left as it is when absent. */
       reasoning: Schema.optionalKey(Schema.String),
+      /** The reply's leading tagged sections; left as they are when absent. */
+      replySections: Schema.optionalKey(ReplySections),
       status: VersionStatus,
       error: Schema.NullOr(VersionError)
     },

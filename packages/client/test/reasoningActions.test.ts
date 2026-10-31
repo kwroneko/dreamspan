@@ -2,17 +2,26 @@ import type { Version } from "@rp/shared/chat.ts"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { reasoningActions } from "../src/features/chat/presentation.tsx"
+import { type ReasoningActionProps, reasoningActions } from "../src/features/chat/presentation.tsx"
 import {
   collapseAllReasoning,
   collapseCount,
   registerReasoningActions,
   subscribeCollapses
 } from "../src/features/chat/reasoningActions.tsx"
+import type { ChatSession } from "../src/features/chat/session.ts"
 import { SlotOutlet } from "../src/slots.tsx"
 
-const props = { version: {} as Version, text: "Synthetic *raw* thought.", streaming: false }
-const render = () => renderToStaticMarkup(createElement(SlotOutlet<typeof props>, { slot: reasoningActions, props }))
+const props: ReasoningActionProps = {
+  version: {} as Version,
+  text: "Synthetic *raw* thought.",
+  streaming: false,
+  kind: "reasoning",
+  first: true,
+  session: {} as ChatSession
+}
+const render = () =>
+  renderToStaticMarkup(createElement(SlotOutlet<ReasoningActionProps>, { slot: reasoningActions, props }))
 
 describe("reasoning actions", () => {
   let dispose: Array<() => void>
@@ -26,7 +35,8 @@ describe("reasoning actions", () => {
   it("registers Copy reasoning and Collapse all, in order, each replaceable or removable", () => {
     expect([...reasoningActions.snapshot().entries].map((entry) => entry.id)).toEqual([
       "reasoning.copy",
-      "reasoning.collapse-all"
+      "reasoning.collapse-all",
+      "reasoning.show-as-text"
     ])
     const html = render()
     expect(html.indexOf("Copy reasoning")).toBeLessThan(html.indexOf("Collapse all"))
@@ -36,8 +46,26 @@ describe("reasoning actions", () => {
     expect(render()).not.toContain("Copy reasoning")
     replaced()
     expect(render()).toContain("Copy reasoning")
-    dispose.pop()!()
+    dispose[1]!()
     expect(render()).not.toContain("Collapse all")
+  })
+
+  it("offers Show as reply text only on a finished reply-section panel", () => {
+    const sections = { sections: [{ lead: "", open: "<think>", text: "Plan.", close: "</think>" }], gap: "" }
+    const of = (extra: Partial<ReasoningActionProps>) =>
+      renderToStaticMarkup(
+        createElement(SlotOutlet<ReasoningActionProps>, {
+          slot: reasoningActions,
+          props: { ...props, version: { replySections: sections } as unknown as Version, ...extra }
+        })
+      )
+    expect(of({ kind: "sections" })).toContain("Show as reply text")
+    expect(of({ kind: "sections" })).toContain("Copy thinking")
+    expect(of({ kind: "reasoning" })).not.toContain("Show as reply text")
+    expect(of({ kind: "sections", streaming: true })).not.toContain("Show as reply text")
+    // Collapse all once per reply: not on a panel below another.
+    expect(of({ kind: "sections" })).toContain("Collapse all")
+    expect(of({ kind: "sections", first: false })).not.toContain("Collapse all")
   })
 
   it("Collapse all tells every mounted block, which reads a new count", () => {

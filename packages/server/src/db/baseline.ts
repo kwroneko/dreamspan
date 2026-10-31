@@ -213,6 +213,7 @@ export const baseline: ReadonlyArray<string> = [
     context_form TEXT,
     display_form TEXT,
     reasoning TEXT,
+    reply_sections TEXT CHECK (reply_sections IS NULL OR json_valid(reply_sections)),
     frozen_macros TEXT CHECK (frozen_macros IS NULL OR json_valid(frozen_macros)),
     origin TEXT NOT NULL CHECK (origin IN
       ('generated', 'user_written', 'edited', 'greeting', 'imported', 'changeset', 'scratchpad', 'duplicate')),

@@ -11,7 +11,9 @@ import { NotFound } from "@rp/shared/errors.ts"
 import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import type { QueueOutcome } from "../db/ops.ts"
+import { sectionsDisplay, type ReplySections } from "@rp/shared/replySections.ts"
 import { ChatHub } from "./ChatHub.ts"
+import { settleHeld } from "./replySections.ts"
 import { Notices } from "./Notices.ts"
 import { type GenerationFailed, type GenerationRequest, Generator, type GeneratorShape } from "./Generator.ts"
 
@@ -25,6 +27,11 @@ interface Running {
   reasoning: string
   /** Whether this generation streamed any reasoning yet (a continuation starts with its source's). */
   reasoned: boolean
+  /** The reply's leading tagged sections as parsed so far (replySections.ts), and their panel text. */
+  sections: ReplySections | null
+  sectionsText: string
+  /** What a reply parser holds back for now, kept if the reply ends here. */
+  held: { readonly held: string; readonly into: "body" | "section" } | null
   waitingCache: boolean
   savedAt: number
   /** Stopped by the user (`stopped`), as opposed to the server going down (`interrupted`). */
@@ -47,6 +54,7 @@ export class Generations extends Context.Service<
       readonly text: string
       readonly waitingCache?: boolean
       readonly reasoning?: string
+      readonly sections?: string
     }>
     /** The versions generating in a chat. */
     readonly runningIn: (chatId: ChatId) => Array<VersionId>
@@ -74,11 +82,17 @@ export class Generations extends Context.Service<
       if (queued > 0)
         yield* Effect.logWarning(`${queued} queued messages were posted or dropped after the last shutdown`)
 
+      /** The text and sections to save: with what a parser holds back, as if the reply ended now. */
+      const settled = (entry: Running) => {
+        const { text, sections } = settleHeld(entry.text, entry.sections, entry.held)
+        return { content: text, ...(sections ? { replySections: sections } : {}) }
+      }
+
       const save = (entry: Running, status: Version["status"], error: Version["error"]) =>
         writer.SaveGeneration({
           userId: entry.request.userId,
           versionId: entry.request.versionId,
-          content: entry.text,
+          ...settled(entry),
           ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
           status,
           error
@@ -131,7 +145,7 @@ export class Generations extends Context.Service<
             writer.FinishGeneration({
               userId: request.userId,
               versionId: request.versionId,
-              content: entry.text,
+              ...settled(entry),
               ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
               status,
               error
@@ -219,6 +233,21 @@ export class Generations extends Context.Service<
                     offset,
                     text: chunk
                   })
+                } else if ("sections" in chunk) {
+                  entry.sections = chunk.sections
+                  if (chunk.text !== "") {
+                    const offset = entry.sectionsText.length
+                    entry.sectionsText += chunk.text
+                    hub.publish(entry.request.chatId, {
+                      _tag: "Section",
+                      versionId: entry.request.versionId,
+                      offset,
+                      text: chunk.text
+                    })
+                  }
+                } else if ("held" in chunk) {
+                  entry.held = chunk
+                  return Effect.void
                 } else {
                   const offset = entry.reasoning.length
                   // A continuation's own reasoning goes after its source's, a paragraph apart.
@@ -263,6 +292,9 @@ export class Generations extends Context.Service<
             text: request.initial?.text ?? "",
             reasoning: request.initial?.reasoning ?? "",
             reasoned: false,
+            sections: request.initial?.sections ?? null,
+            sectionsText: sectionsDisplay(request.initial?.sections),
+            held: null,
             waitingCache: false,
             savedAt: Date.now(),
             stopped: false,
@@ -294,7 +326,8 @@ export class Generations extends Context.Service<
               versionId: entry.request.versionId,
               text: entry.text,
               waitingCache: entry.waitingCache,
-              ...(entry.reasoning ? { reasoning: entry.reasoning } : {})
+              ...(entry.reasoning ? { reasoning: entry.reasoning } : {}),
+              ...(entry.sectionsText ? { sections: entry.sectionsText } : {})
             })),
         runningIn: (chatId) =>
           [...running.values()]

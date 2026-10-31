@@ -250,6 +250,8 @@ export interface CardOverride {
 /** A context as built, stored as its rollout's frozen snapshot (DATA-MODEL §7.1). */
 export interface ContextSnapshot {
   readonly contextBudget?: ContextBudget
+  /** The preset's reply-section setting a reply is parsed with; absent for summaries. */
+  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
   /** What `{{summary}}` filled in, for the preset editor and the Notes tab. */
   readonly summaryFill?: import("@rp/shared/inspectorApi.ts").SummaryFill
   readonly historyStart?: HistoryStart
@@ -431,6 +433,8 @@ export interface Generation {
   readonly leafSlotId: string | null
   readonly request: AssembledRequest
   readonly model: ModelInput | null
+  /** How the reply's leading tagged sections are parsed (spec/REPLY-SECTIONS.md); absent: not at all. */
+  readonly replySections?: import("@rp/shared/replySections.ts").ReplySectionSettings
   /** The chat variables the preset's and cards' macros wrote, in order: `null` deletes one. */
   readonly variables: ReadonlyArray<{ readonly name: string; readonly value: string | number | null }>
   /** What the user should know about the context, kept on its rollout for the version to show. */
@@ -452,6 +456,7 @@ export const generationOf = (snapshot: ContextSnapshot): Generation => {
   return {
     leafSlotId: snapshot.inputs.leafSlotId,
     request: snapshot.request,
+    ...(snapshot.replySections ? { replySections: snapshot.replySections } : {}),
     model: snapshot.inputs.model,
     variables: snapshot.effects.filter((e) => e.scope === "local").map(({ name, value }) => ({ name, value })),
     issues: snapshot.lcm ? snapshot.issues.filter((issue) => issue.kind !== "history_truncated") : snapshot.issues,
@@ -522,6 +527,11 @@ export interface HistoryEntry {
    */
   readonly side: "user" | "assistant"
   readonly content: string
+  /**
+   * The reply's leading tagged sections in their tags, as they came (spec/REPLY-SECTIONS.md):
+   * not part of `content`; sent before it only where the preset sends sections back.
+   */
+  readonly sectionsPrefix?: string
   readonly macroMode: "template" | "verbatim"
   readonly frozen: FrozenValues | null
   /** Whether a template's variable writes are recorded already, as state events of its version. */

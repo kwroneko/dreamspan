@@ -34,7 +34,7 @@ import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { castView, messageSide, modelNameOf, useCast } from "./cast.ts"
 import { MessageActions } from "./messageActions.tsx"
-import { Reasoning } from "./Reasoning.tsx"
+import { ReasoningPanels } from "./Reasoning.tsx"
 import { formatWhen } from "./chatTitle.ts"
 import { displayText } from "./macros.ts"
 import { applyDisplayTransforms, displayTransforms } from "./displayPipeline.ts"
@@ -178,7 +178,7 @@ function VersionBody({
   const text = live ?? version.content
   return (
     <div className="flex flex-col gap-2">
-      <Reasoning version={version} />
+      <ReasoningPanels version={version} session={session} />
       {text === "" && generating ? (
         <p className="text-sm text-muted" aria-live="polite">
           {waiting ? "Waiting for the cache…" : "Writing…"}
