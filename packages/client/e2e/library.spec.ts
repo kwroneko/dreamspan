@@ -149,25 +149,27 @@ test("import files, read their reports as text, export them, and update one from
 
   await page.getByRole("link", { name: "Back to the library" }).click()
   await expect(page.getByRole("list", { name: "Cards" })).toContainText(NAME)
-  await expect(page.getByRole("list", { name: "Presets" })).toContainText("narrator")
   await shoot(page, "library-filled")
+  await page.getByRole("tab", { name: /^Presets/ }).click()
+  await expect(page.getByRole("list", { name: "Presets" })).toContainText("narrator")
 
+  await page.getByRole("button", { name: "More actions for narrator" }).click()
   const exported = await exportedFile(
     page,
     browser,
-    page.getByRole("button", { name: "Export narrator" }),
+    page.getByRole("menuitem", { name: "Preset JSON", exact: true }),
     "narrator.json"
   )
   expect(exported.prompts.find((p: { identifier: string }) => p.identifier === "main").content).toBe(
     "Write vivid prose."
   )
 
-  await page.getByRole("combobox", { name: `Export format for ${NAME}` }).click()
-  await page.getByRole("option", { name: "V2 JSON" }).click()
+  await page.getByRole("tab", { name: /^Cards/ }).click()
+  await page.getByRole("button", { name: `More actions for ${NAME}` }).click()
   const cardFile = await exportedFile(
     page,
     browser,
-    page.getByRole("button", { name: `Export ${NAME}` }),
+    page.getByRole("menuitem", { name: "V2 JSON", exact: true }),
     "_b_Wren__b_ __bold__.json"
   )
   expect(cardFile.data.name).toBe(NAME)
@@ -177,7 +179,9 @@ test("import files, read their reports as text, export them, and update one from
     role: "system"
   })
 
-  await page.getByRole("link", { name: "Update narrator from a file" }).click()
+  await page.getByRole("tab", { name: /^Presets/ }).click()
+  await page.getByRole("button", { name: "More actions for narrator" }).click()
+  await page.getByRole("menuitem", { name: "Update from file…", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Update “narrator”" })).toBeVisible()
   await page.getByLabel("Choose the new version, or drop it here").setInputFiles({
     name: "narrator v2.json",

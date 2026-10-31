@@ -87,6 +87,34 @@ export function MenuLinkItem({
   )
 }
 
+/** An on/off switch in a menu, ticked when on. */
+export function MenuCheckboxItem({
+  checked,
+  onCheckedChange,
+  disabled,
+  children
+}: {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  disabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <BaseMenu.CheckboxItem
+      checked={checked}
+      onCheckedChange={(next) => onCheckedChange(next)}
+      closeOnClick
+      {...(disabled ? { disabled } : {})}
+      className={itemClass("default")}
+    >
+      <BaseMenu.CheckboxItemIndicator keepMounted className="inline-flex w-4 justify-center text-accent">
+        {checked ? <Icon name="check" /> : null}
+      </BaseMenu.CheckboxItemIndicator>
+      <span className="min-w-0 flex-1">{children}</span>
+    </BaseMenu.CheckboxItem>
+  )
+}
+
 export function MenuSeparator() {
   return <BaseMenu.Separator className="mx-1 my-1 h-px bg-border" />
 }
