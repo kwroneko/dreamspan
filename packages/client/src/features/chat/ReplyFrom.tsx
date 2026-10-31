@@ -15,17 +15,19 @@ export interface ReplyChoice {
   /** The one picked for the next reply; null: the next in turn replies. */
   readonly picked: EntityId | null
   readonly onPick: (id: EntityId | null) => void
+  /** The turn order isn't read yet: who's next shows as "…", not "no one". */
+  readonly loading?: boolean
 }
 
 /** Whether there's anyone to choose between. */
 export const hasReplyChoice = (reply: ReplyChoice) => reply.candidates.length >= 2
 
-export function NextReplyChip({ candidates, muted, next, picked, onPick }: ReplyChoice) {
+export function NextReplyChip({ candidates, muted, next, picked, onPick, loading = false }: ReplyChoice) {
   const view = useCast()
   if (candidates.length < 2) return null
   const name = (id: EntityId) => nameOf(view, id) ?? "?"
   const replier = picked ?? next?.id ?? null
-  const who = replier === null ? "no one" : name(replier)
+  const who = replier === null ? (loading ? "…" : "no one") : name(replier)
   return (
     <ChoiceChip<EntityId | typeof AUTO>
       label={`Next: ${who}. Choose who replies next`}

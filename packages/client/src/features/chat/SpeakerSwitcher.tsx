@@ -231,8 +231,11 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
   const search = useRef<HTMLInputElement>(null)
   const listId = useId()
   const [names, setNames] = useState<ReadonlyMap<EntityId, CastCard>>(new Map())
+  // Before the cast is read, "…" rather than a "You" that flashes before the real speaker.
   const name =
-    nameOf(view, speaker) ?? (speaker ? names.get(speaker)?.name : undefined) ?? (persona ? "No persona" : "You")
+    nameOf(view, speaker) ??
+    (speaker ? names.get(speaker)?.name : undefined) ??
+    (persona ? "No persona" : view.cast === null && !pending ? "…" : "You")
   const participants = view.cast?.participants
   const played = view.cast?.playedByMe
   const memberIds = useMemo(() => participants ?? [], [participants])

@@ -66,7 +66,7 @@ function ReplyNow({ replier, busy, ready, invoke }: ComposerControlContext & { r
         aria-label={label}
         disabled={busy || !ready || replier === null}
         onClick={invoke}
-        className={`${chipClass()} w-7 justify-center px-0! text-accent`}
+        className={`${chipClass()} w-7 justify-center px-0! text-accent!`}
       >
         <Icon name="play" size={12} />
       </button>
@@ -260,7 +260,7 @@ export const registerComposerControls = () => [
     available: ({ leafGenerating }) => leafGenerating === true,
     run: ({ stop }) => stop(),
     component: ({ invoke }) => (
-      <SquareIconButton label="Stop" hint="Stop the reply being written" onClick={invoke}>
+      <SquareIconButton label="Stop the reply" hint="Stop the reply being written" onClick={invoke}>
         <Icon name="stop" size={14} />
       </SquareIconButton>
     )
@@ -290,7 +290,7 @@ export const registerComposerControls = () => [
             aria-label={generateText}
             disabled={busy || !ready}
             onClick={invoke}
-            className="max-w-48"
+            className={guidance ? "max-w-56" : "max-w-48"}
           >
             {guidance && !busy && <GenerateIcon />}
             <span className="truncate">{generateText}</span>

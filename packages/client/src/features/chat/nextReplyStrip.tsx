@@ -16,7 +16,7 @@ const chipTones: Record<ChipTone, string> = {
 
 /** A strip chip's look: a pill, one line, its text cut with an ellipsis when it's long. */
 export const chipClass = (tone: ChipTone = "neutral") =>
-  `inline-flex h-7 max-w-56 min-w-0 shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
+  `inline-flex h-7 max-w-56 min-w-0 shrink-0 max-sm:max-w-36 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
 
 /** A chip whose value isn't known yet: "…", disabled, never a placeholder that flashes first. */
 export function LoadingChip({ label }: { label: string }) {

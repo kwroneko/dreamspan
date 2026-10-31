@@ -417,7 +417,9 @@ export function Composer({
       : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
-  const generateText = editing !== null ? "New version" : name ? `Write for ${name}` : "Reply"
+  // Before the cast is read, "Write for …" rather than a "Reply" that flashes first.
+  const generateText =
+    editing !== null ? "New version" : name ? `Write for ${name}` : cast === null ? "Write for …" : "Reply"
   const generateHint =
     editing !== null
       ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
@@ -464,6 +466,7 @@ export function Composer({
       muted: cast?.absent ?? [],
       next,
       picked: pickedReply,
+      loading: turnEntries === null,
       onPick: (id) => void choices.change({ replyFrom: id }).then(report)
     },
     leaf,
@@ -491,7 +494,7 @@ export function Composer({
   )
 
   return (
-    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2">
+    <div className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2 max-sm:px-2">
       <ComposerControls placement="banner" context={controls} />
       <ComposerControls placement="queue" context={controls} />
       {conflict && (
