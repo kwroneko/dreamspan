@@ -21,7 +21,7 @@ const createConnection = async (page: Page, name: string, baseUrl: string, key: 
   await page.getByRole("link", { name: "New connection" }).click()
   await page.getByLabel("Name").fill(name)
   await page.getByLabel("Base URL").fill(baseUrl)
-  await page.getByLabel("Key", { exact: true }).fill(key)
+  await page.getByLabel("API key", { exact: true }).fill(key)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible()
 }

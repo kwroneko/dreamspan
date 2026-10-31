@@ -1,5 +1,5 @@
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
-import { useEffect, useMemo, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Draft, DraftDisplacement, DraftState } from "@rp/shared/drafts.ts"
 import type { UserDraftSave } from "@rp/shared/editorApi.ts"
@@ -7,6 +7,9 @@ import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { userNoticeReceivers } from "../noticeContributions.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Popover } from "../../ui/Popover.tsx"
+import { iconButtonClass } from "../../ui/Tooltip.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
 
 const openStores = new Set<UserDraftStore>()
@@ -455,28 +458,78 @@ export function useUserDraft(targetId: string, field: string, saved: string) {
   }
 }
 
-export function UserDraftStatus({ draft }: { draft: ReturnType<typeof useUserDraft> }) {
+type UserDraft = ReturnType<typeof useUserDraft>
+
+/**
+ * A form's undo: one small button for its header, opening the field's server-kept history. The
+ * history is read when it opens; picking a version restores it.
+ */
+export function UserDraftUndo({ draft }: { draft: UserDraft }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-      <Button variant="ghost" disabled={!draft.ready} onClick={draft.undo}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) draft.showHistory()
+      }}
+      trigger={<Icon name="undo" />}
+      triggerLabel="Undo / history"
+      hint="Undo / history"
+      triggerClassName={iconButtonClass()}
+      title="Undo / history"
+      side="bottom"
+      align="end"
+    >
+      <Button
+        disabled={!draft.ready}
+        onClick={() => {
+          draft.undo()
+          draft.showHistory()
+        }}
+      >
         Undo field change
       </Button>
-      <Button variant="ghost" disabled={!draft.ready} onClick={draft.showHistory}>
-        Field undo history
-      </Button>
-      {draft.history && (
-        <ul aria-label="Field undo history" className="max-h-64 w-full overflow-auto">
+      {draft.history === null ? (
+        <p className="text-sm text-muted">Reading the history…</p>
+      ) : draft.history.length === 0 ? (
+        <p className="text-sm text-muted">No earlier versions yet.</p>
+      ) : (
+        <ul aria-label="Field undo history" className="-mx-1 flex min-h-0 flex-col overflow-auto">
           {draft.history.map((entry) => (
             <li key={entry.seq}>
-              <Button variant="ghost" onClick={() => draft.restore(entry.seq)}>
-                {entry.kind === "initial" ? "Starting text" : new Date(entry.at).toLocaleString()} ({entry.length}{" "}
-                characters) {entry.inserted}
-              </Button>
+              <button
+                type="button"
+                className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
+                onClick={() => {
+                  draft.restore(entry.seq)
+                  setOpen(false)
+                }}
+              >
+                <span>
+                  {entry.kind === "initial" ? "Starting text" : new Date(entry.at).toLocaleString()}{" "}
+                  <span className="text-muted">· {entry.length} characters</span>
+                </span>
+                {entry.inserted && <span className="line-clamp-1 text-xs text-muted">{entry.inserted}</span>}
+              </button>
             </li>
           ))}
         </ul>
       )}
-      <span>{draft.error ?? "Draft and field undo are kept on the server."}</span>
+    </Popover>
+  )
+}
+
+/** What a draft needs to tell the user: a failed save, recovered text, another device's edit. */
+export function UserDraftNotices({ draft }: { draft: UserDraft }) {
+  if (!draft.error && draft.recovered === 0 && !draft.remote && !draft.displaced) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+      {draft.error && (
+        <span role="alert" className="text-danger">
+          {draft.error}
+        </span>
+      )}
       {draft.recovered > 0 && (
         <span>
           Earlier text was kept in{" "}
@@ -535,6 +588,18 @@ export function UserDraftStatus({ draft }: { draft: ReturnType<typeof useUserDra
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** The undo button and the notices together, for a form without a header to put the button in. */
+export function UserDraftStatus({ draft }: { draft: UserDraft }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex justify-end">
+        <UserDraftUndo draft={draft} />
+      </div>
+      <UserDraftNotices draft={draft} />
     </div>
   )
 }

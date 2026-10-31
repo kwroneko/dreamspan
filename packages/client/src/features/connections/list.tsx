@@ -1,19 +1,18 @@
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StSettingsImporter } from "./StSettingsImport.tsx"
 import { Dialog } from "../../ui/Dialog.tsx"
 // The connection list and the form for a new connection.
 import type { Credential, CredentialId, ProviderKindInfo } from "@rp/shared/providers.ts"
 import { originOf } from "@rp/shared/providers.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useId, useState } from "react"
+import { type FormEvent, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
-import { RadioGroup } from "../../ui/Choice.tsx"
-import { Field, Fieldset, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
+import { Field, focusFirstInvalid, formText, Input, SecretInput } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { effectiveOrigin, parseOptionalInt, providerSetupAtom } from "./data.ts"
+import { effectiveOrigin, freshConnections, parseOptionalInt, providerSetupAtom } from "./data.ts"
 
 export function ConnectionsPage() {
   useTitle("Connections")
@@ -115,7 +114,8 @@ export function ConnectionsPage() {
   )
 }
 
-type KeyMode = "typed" | "saved" | "none"
+/** A key typed here, or one saved in Keys. An empty typed key means none, where the provider allows it. */
+type KeyMode = "typed" | "saved"
 
 function NewConnectionForm({
   kinds,
@@ -126,7 +126,6 @@ function NewConnectionForm({
 }) {
   const navigate = useNavigate()
   const action = useAction()
-  const keyModeLabel = useId()
   const durable = useUserDraft(
     "connection:new",
     "Settings",
@@ -151,7 +150,12 @@ function NewConnectionForm({
   const problems = {
     name: name.trim() === "" ? "Give the connection a name." : null,
     baseUrl: baseUrl.trim() !== "" && origin === null ? "Enter a full URL, such as http://localhost:8000/v1." : null,
-    apiKey: keyMode === "typed" && keyEmpty ? "Enter the key, or choose another option." : null,
+    apiKey:
+      keyMode === "typed" && keyEmpty && !kind?.keyOptional
+        ? credentials.length > 0
+          ? "Enter the key, or use a saved one."
+          : "Enter the key."
+        : null,
     maxConcurrent: concurrency.problem
   }
 
@@ -173,11 +177,13 @@ function NewConnectionForm({
               maxConcurrent: concurrency.value,
               presetOverrideRefId: null
             },
-            ...(keyMode === "typed" ? { apiKey } : keyMode === "saved" ? { credentialId } : {})
+            ...(keyMode === "saved" ? { credentialId } : apiKey !== "" ? { apiKey } : {})
           }),
         ["connections", "credentials"]
       )
       if (result.ok) {
+        // Its page fetches the model list at once (defaultModel.tsx).
+        freshConnections.add(result.value.id)
         void navigate({ to: "/settings/connections/$connectionId", params: { connectionId: result.value.id } })
       }
       return result.ok
@@ -185,104 +191,98 @@ function NewConnectionForm({
   }
 
   const shown = (problem: string | null) => (submitted ? problem : null)
+  const sentTo = origin ? `It's sent only to ${origin} and never shown again.` : "It's never shown again."
   return (
-    <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
-      <UserDraftStatus draft={durable} />
-      <Field label="Provider">
-        <Select
-          items={kinds.map((entry) => ({ value: entry.id, label: entry.label }))}
-          value={kindId}
-          onValueChange={(value) => {
-            setKindId(value)
-            if (keyMode === "none" && !kinds.find((entry) => entry.id === value)?.keyOptional) setKeyMode("typed")
-          }}
-        />
-      </Field>
-      <Field label="Name" error={shown(problems.name)}>
-        <Input value={name} onValueChange={setName} placeholder={kind?.label} autoComplete="off" />
-      </Field>
-      <Field
-        label="Base URL"
-        description="Leave empty for the provider's own address. The whole API moves with it."
-        error={shown(problems.baseUrl)}
-      >
-        <Input
-          value={baseUrl}
-          onValueChange={setBaseUrl}
-          placeholder={kind?.defaultBaseUrl}
-          inputMode="url"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
-      </Field>
-      <Fieldset legend={<span id={keyModeLabel}>API key</span>}>
-        <RadioGroup<KeyMode>
-          aria-labelledby={keyModeLabel}
-          value={keyMode}
-          onValueChange={(mode) => {
-            setKeyMode(mode)
-            setKeyEmpty(true)
-          }}
-          options={[
-            { value: "typed", label: "Enter a key" },
-            ...(credentials.length > 0 ? [{ value: "saved" as const, label: "Use a saved key" }] : []),
-            ...(kind?.keyOptional
-              ? [{ value: "none" as const, label: "No key", description: "For local servers that take none." }]
-              : [])
-          ]}
-        />
-        {keyMode === "typed" && (
-          <Field
-            label="Key"
-            description={
-              origin ? `It will be sent only to ${origin}. It's never shown again.` : "It's never shown again."
-            }
-            error={shown(problems.apiKey)}
-          >
-            <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
-          </Field>
-        )}
-        {keyMode === "saved" && (
-          <Field label="Saved key" description="It's sent only to the addresses it was allowed for.">
-            <Select
-              items={credentials.map((credential) => ({
-                value: credential.id,
-                label: credential.keyHint ? `${credential.name} (•••• ${credential.keyHint})` : credential.name
-              }))}
-              value={credentialId}
-              onValueChange={setCredentialId}
-            />
-          </Field>
-        )}
-      </Fieldset>
-      <Field
-        label="Concurrent requests"
-        description="At most this many requests at once; more wait their turn. Empty: no limit."
-        error={shown(problems.maxConcurrent)}
-      >
-        <Input value={maxConcurrent} onValueChange={setMaxConcurrent} inputMode="numeric" className="sm:max-w-32" />
-      </Field>
-      <ErrorAlert error={action.error} title="The connection wasn't created" />
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <Button type="submit" variant="primary" pending={action.pending}>
-          Create connection
-        </Button>
-        <Link to="/settings/connections" className={buttonClass("ghost")}>
-          Cancel
-        </Link>
-      </div>
-    </form>
+    <Card>
+      <CardHeader title="New connection" actions={<UserDraftUndo draft={durable} />} />
+      <form onSubmit={submit} className="flex flex-col gap-5" noValidate>
+        <UserDraftNotices draft={durable} />
+        <Field label="Provider">
+          <Select
+            items={kinds.map((entry) => ({ value: entry.id, label: entry.label }))}
+            value={kindId}
+            onValueChange={setKindId}
+          />
+        </Field>
+        <Field label="Name" error={shown(problems.name)}>
+          <Input value={name} onValueChange={setName} placeholder={kind?.label} autoComplete="off" />
+        </Field>
+        <Field
+          label="Base URL"
+          description="Leave empty for the provider's own address. The whole API moves with it."
+          error={shown(problems.baseUrl)}
+        >
+          <Input
+            value={baseUrl}
+            onValueChange={setBaseUrl}
+            placeholder={kind?.defaultBaseUrl}
+            inputMode="url"
+            autoCapitalize="none"
+            spellCheck={false}
+          />
+        </Field>
+        <div className="flex flex-col gap-2">
+          {keyMode === "typed" ? (
+            <Field
+              label={kind?.keyOptional ? "API key (optional)" : "API key"}
+              description={
+                kind?.keyOptional ? `${sentTo} Leave it empty for a local server that takes no key.` : sentTo
+              }
+              error={shown(problems.apiKey)}
+            >
+              <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
+            </Field>
+          ) : (
+            <Field label="API key" description="A saved key is sent only to the addresses it was allowed for.">
+              <Select
+                items={credentials.map((credential) => ({
+                  value: credential.id,
+                  label: credential.keyHint ? `${credential.name} (•••• ${credential.keyHint})` : credential.name
+                }))}
+                value={credentialId}
+                onValueChange={setCredentialId}
+              />
+            </Field>
+          )}
+          {credentials.length > 0 && (
+            <button
+              type="button"
+              className="self-start text-sm text-accent underline-offset-4 hover:underline"
+              onClick={() => {
+                setKeyMode(keyMode === "typed" ? "saved" : "typed")
+                setKeyEmpty(true)
+              }}
+            >
+              {keyMode === "typed" ? "Use a saved key instead" : "Enter a new key instead"}
+            </button>
+          )}
+        </div>
+        <Field
+          label="Concurrent requests"
+          description="At most this many requests at once; more wait their turn. Empty: no limit."
+          error={shown(problems.maxConcurrent)}
+        >
+          <Input value={maxConcurrent} onValueChange={setMaxConcurrent} inputMode="numeric" className="sm:max-w-32" />
+        </Field>
+        <ErrorAlert error={action.error} title="The connection wasn't created" />
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button type="submit" variant="primary" pending={action.pending}>
+            Create connection
+          </Button>
+          <Link to="/settings/connections" className={buttonClass("ghost")}>
+            Cancel
+          </Link>
+        </div>
+      </form>
+    </Card>
   )
 }
 
 export function NewConnectionPage() {
   useTitle("New connection")
   return (
-    <Card>
-      <CardHeader title="New connection" />
-      <AsyncView atom={providerSetupAtom}>
-        {({ kinds, credentials }) => <NewConnectionForm kinds={kinds} credentials={credentials} />}
-      </AsyncView>
-    </Card>
+    <AsyncView atom={providerSetupAtom}>
+      {({ kinds, credentials }) => <NewConnectionForm kinds={kinds} credentials={credentials} />}
+    </AsyncView>
   )
 }
