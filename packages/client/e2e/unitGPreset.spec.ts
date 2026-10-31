@@ -112,6 +112,9 @@ for (const width of [1440, 390])
       await scroll.evaluate((e) => {
         e.scrollTop = 0
       })
+      // The search is folded away until asked for.
+      await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
+      await overlay.getByRole("button", { name: "Search", exact: true }).click()
       await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toBeInViewport()
       await shoot("document")
       await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
@@ -160,38 +163,41 @@ for (const width of [1440, 390])
       await expect(page.getByRole("option", { name: "Start of context", exact: true })).toBeVisible()
       await shoot("note-positions")
       await page.keyboard.press("Escape")
-      // Reopening from the library is an overlay too and has no chat-specific fills.
+      // From the library the preset opens at its own address, with no chat-specific fills.
       await page.goto(`${server().url}/library`)
       await page.getByRole("tab", { name: /^Presets/ }).click()
-      await page.getByRole("button", { name: "Edit Celia 4.2", exact: true }).click()
-      await expect(overlay).toContainText("no chat open")
+      await page.getByRole("link", { name: "Edit Celia 4.2", exact: true }).click()
+      await expect(page).toHaveURL(`${server().url}/library/${preset.id}`)
+      const editor = page.getByRole("main")
+      await expect(editor).toContainText("no chat open")
       await shoot("library-document")
-      await overlay
+      await editor
         .getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
         .fill(`Keep continuity in vivid prose ${width} ${theme}.`)
-      await overlay
+      await editor
         .getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true })
         .fill(`Keep continuity ${width} ${theme}.`)
-      await overlay.getByRole("textbox", { name: "Find", exact: true }).fill("continuity")
-      await overlay.getByRole("textbox", { name: "Replace with", exact: true }).fill("coherence")
-      await overlay.getByRole("button", { name: "Find", exact: true }).click()
-      await overlay.getByRole("button", { name: "Replace all", exact: true }).click()
+      await editor.getByRole("button", { name: "Search", exact: true }).click()
+      await editor.getByRole("textbox", { name: "Find", exact: true }).fill("continuity")
+      await editor.getByRole("textbox", { name: "Replace with", exact: true }).fill("coherence")
+      await editor.getByRole("button", { name: "Find", exact: true }).click()
+      await editor.getByRole("button", { name: "Replace all", exact: true }).click()
       await expectTextBox(
-        overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }),
+        editor.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }),
         `Keep coherence in vivid prose ${width} ${theme}.`
       )
       await expectTextBox(
-        overlay.getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true }),
+        editor.getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true }),
         `Keep coherence ${width} ${theme}.`
       )
-      await overlay.getByRole("button", { name: /^Save \(/ }).click()
+      await editor.getByRole("button", { name: /^Save \(/ }).click()
       const diff = page.getByRole("dialog", { name: "Save a revision", exact: true })
       await expect(diff.getByRole("list", { name: "Changes", exact: true })).toContainText("Main Prompt")
       await expect(diff.getByRole("list", { name: "Changes", exact: true })).toContainText("Post-History Instructions")
       await shoot("save-diff")
       await diff.getByRole("button", { name: "Save revision", exact: true }).click()
       await expect(diff).toHaveCount(0)
-      await overlay.getByRole("button", { name: "History", exact: true }).first().click()
+      await editor.getByRole("button", { name: "History", exact: true }).first().click()
       const revisions = page.getByRole("dialog", { name: "History", exact: true })
       await revisions.getByRole("list", { name: "Revisions", exact: true }).getByRole("button").first().click()
       await revisions.locator("summary").first().click()

@@ -21,7 +21,6 @@ import { Tabs } from "../../ui/Tabs.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { usageLine } from "../characters/data.ts"
 import { shellAtom } from "../characters/shellData.tsx"
-import { PresetOverlayHost, PresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { useTitle } from "../shell.tsx"
 import { LISTED, libraryAtom } from "./data.ts"
 import { itemName, LibraryItemActions } from "./itemActions.tsx"
@@ -125,63 +124,75 @@ function Badges({ item, seen }: { item: Item; seen: boolean }) {
   )
 }
 
-/** Where an item's picture and name lead: a character's page, else its editor. */
-function OpenLink({ item, className, children }: { item: Item; className: string; children: ReactNode }) {
+/** Where an item's picture and name lead: a character's page, else its editor. The picture's
+ * link repeats the name's for a pointer, so it's skipped by the keyboard and screen readers. */
+function OpenLink({
+  item,
+  className,
+  picture = false,
+  children
+}: {
+  item: Item
+  className: string
+  picture?: boolean
+  children: ReactNode
+}) {
   const { entry } = item
-  const label = `Open ${itemName(entry)}`
-  if (entry.kind === "card" && !persona(item))
-    return (
-      <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} aria-label={label} className={className}>
-        {children}
-      </Link>
-    )
-  if (entry.kind === "card")
-    return (
-      <Link to="/library/$refId" params={{ refId: entry.id }} aria-label={label} className={className}>
-        {children}
-      </Link>
-    )
-  return <span className={className}>{children}</span>
+  const props = picture ? { tabIndex: -1, "aria-hidden": true, className } : { title: itemName(entry), className }
+  return entry.kind === "card" && !persona(item) ? (
+    <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
+      {children}
+    </Link>
+  ) : (
+    <Link to="/library/$refId" params={{ refId: entry.id }} {...props}>
+      {children}
+    </Link>
+  )
 }
+const nameLink =
+  "rounded-sm font-medium outline-none [overflow-wrap:anywhere] hover:underline underline-offset-4 focus-visible:ring-2 focus-visible:ring-focus"
 
-function Picture({ item, size }: { item: Item; size: "md" | "fill" }) {
+function Picture({ item, size }: { item: Item; size: "lg" | "fill" }) {
   const { entry } = item
   if (entry.kind === "card")
     return <Avatar id={entry.entityId} name={entry.label} mediaId={item.card?.avatarMediaId ?? null} size={size} />
   return (
-    <span className="inline-flex h-12 w-8 shrink-0 items-center justify-center rounded-sm bg-surface-raised text-muted">
-      <Icon name={entry.kind === "lorebook" ? "book" : "sliders"} />
+    <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-surface-raised text-muted">
+      <Icon name={entry.kind === "lorebook" ? "book" : "sliders"} size={20} />
     </span>
   )
 }
 
 function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportFormatInfo> }) {
   const [ref, seen] = useSeen<HTMLLIElement>()
-  // The name beside the actions, and the line under it running beneath them: one row, never wrapped.
+  const { entry } = item
+  // A card always has a line under its name (badges, usage); a lorebook or preset may not.
+  const line = entry.kind === "card" || entry.subtitle !== "" || entry.refKind === "variant" || entry.updateAvailable
+  // The name beside the actions, and the line under it: one row, never wrapped. On a phone the
+  // line runs on beneath the actions; wider, the actions stand centred beside both lines.
   return (
     <li
       ref={ref}
-      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2 [contain-intrinsic-size:auto_4rem] [content-visibility:auto]"
+      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 py-2 [contain-intrinsic-size:auto_4.75rem] [content-visibility:auto]"
     >
+      <OpenLink item={item} picture className="col-start-1 row-span-2 row-start-1 flex shrink-0 self-center">
+        <Picture item={item} size="lg" />
+      </OpenLink>
       <OpenLink
         item={item}
-        className="row-span-2 shrink-0 self-start rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className={`col-start-2 row-start-1 line-clamp-2 ${line ? "self-end" : "row-span-2 self-center"} ${nameLink}`}
       >
-        <Picture item={item} size="md" />
+        {entry.label}
       </OpenLink>
-      <span
-        title={itemName(item.entry)}
-        className="col-start-2 row-start-1 line-clamp-2 font-medium [overflow-wrap:anywhere]"
-      >
-        {item.entry.label}
-      </span>
-      <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 self-start text-xs text-muted">
-        <Badges item={item} seen={seen} />
-        <span className="min-w-0 truncate">
-          <Meta item={item} />
+      {line && (
+        <span className="col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-1.5 self-start text-xs text-muted sm:col-span-1">
+          <Badges item={item} seen={seen} />
+          <span className="min-w-0 truncate">
+            <Meta item={item} />
+          </span>
         </span>
-      </span>
-      <div className="col-start-3 row-start-1">
+      )}
+      <div className="col-start-3 row-start-1 sm:row-span-2">
         <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
       </div>
     </li>
@@ -195,16 +206,13 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
       ref={ref}
       className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface [contain-intrinsic-size:auto_22rem] [content-visibility:auto]"
     >
-      <OpenLink
-        item={item}
-        className="block aspect-[2/3] w-full overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset"
-      >
+      <OpenLink item={item} picture className="block aspect-[2/3] w-full overflow-hidden">
         <Picture item={item} size="fill" />
       </OpenLink>
       <div className="flex min-w-0 flex-1 flex-col gap-1 p-2">
-        <span title={itemName(item.entry)} className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]">
+        <OpenLink item={item} className={`line-clamp-2 text-sm ${nameLink}`}>
           {item.entry.label}
-        </span>
+        </OpenLink>
         <span className="truncate text-xs text-muted">
           <Meta item={item} />
         </span>
@@ -231,7 +239,7 @@ function Items({
   formats: ReadonlyArray<ExportFormatInfo>
 }) {
   return view === "grid" ? (
-    <ul aria-label={title} className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
+    <ul aria-label={title} className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-3">
       {items.map((item) => (
         <Tile key={item.entry.id} item={item} formats={formats} />
       ))}
@@ -304,37 +312,39 @@ function Section({
             ]}
           />
         )}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted" aria-live="polite">
+          {items.length === all.length
+            ? `${all.length.toLocaleString()} ${noun}`
+            : `${items.length.toLocaleString()} of ${all.length.toLocaleString()} ${noun}`}
+        </p>
         {cards && (
-          <Field label={<span className="sr-only">Sort cards</span>} className="w-40 shrink-0">
-            <Select<Sort>
-              items={[
-                { value: "used", label: "Last used" },
-                { value: "name", label: "Name" },
-                { value: "chats", label: "Most chats" },
-                { value: "changed", label: "Recently changed" }
+          <div className="flex items-center gap-2">
+            <Field label={<span className="sr-only">Sort cards</span>} className="w-36 shrink-0">
+              <Select<Sort>
+                items={[
+                  { value: "used", label: "Last used" },
+                  { value: "name", label: "Name" },
+                  { value: "chats", label: "Most chats" },
+                  { value: "changed", label: "Recently changed" }
+                ]}
+                value={prefs.sort}
+                onValueChange={(sort) => setPrefs({ sort })}
+              />
+            </Field>
+            <Segmented
+              label="View"
+              value={prefs.view}
+              onValueChange={(view) => setPrefs({ view })}
+              options={[
+                { value: "list", label: "List" },
+                { value: "grid", label: "Grid" }
               ]}
-              value={prefs.sort}
-              onValueChange={(sort) => setPrefs({ sort })}
             />
-          </Field>
-        )}
-        {cards && (
-          <Segmented
-            label="View"
-            value={prefs.view}
-            onValueChange={(view) => setPrefs({ view })}
-            options={[
-              { value: "list", label: "List" },
-              { value: "grid", label: "Grid" }
-            ]}
-          />
+          </div>
         )}
       </div>
-      <p className="text-sm text-muted" aria-live="polite">
-        {items.length === all.length
-          ? `${all.length.toLocaleString()} ${noun}`
-          : `${items.length.toLocaleString()} of ${all.length.toLocaleString()} ${noun}`}
-      </p>
       {items.length === 0 ? (
         <EmptyState title={needle ? `No ${noun} match “${search.trim()}”` : `No ${noun} here`}>
           {needle && (
@@ -350,7 +360,7 @@ function Section({
   )
 }
 
-function LibraryContent() {
+export function LibraryPage() {
   useTitle("Library")
   const [prefs, setPrefs] = usePrefs()
   const shell = useAtomValue(shellAtom)
@@ -397,14 +407,5 @@ function LibraryContent() {
         }}
       </AsyncView>
     </div>
-  )
-}
-
-export function LibraryPage() {
-  return (
-    <PresetWorkspace>
-      <LibraryContent />
-      <PresetOverlayHost page />
-    </PresetWorkspace>
   )
 }

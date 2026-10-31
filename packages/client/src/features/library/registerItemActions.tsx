@@ -2,10 +2,9 @@
 // or disable one (`library.chat`, `.edit`, `.persona`, `.update`, `.export`).
 import { Link } from "@tanstack/react-router"
 import { useAction } from "../../actions.tsx"
-import { Button, buttonClass } from "../../ui/Button.tsx"
+import { buttonClass } from "../../ui/Button.tsx"
 import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { downloadExport } from "./files.ts"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
@@ -25,12 +24,7 @@ function ChatAction({ entry }: LibraryItemProps) {
 }
 
 function EditAction({ entry }: LibraryItemProps) {
-  const workspace = usePresetWorkspace()
-  return entry.kind === "preset" ? (
-    <Button aria-label={`Edit ${entry.label}`} className={compact} onClick={() => workspace?.open(entry.id)}>
-      Edit
-    </Button>
-  ) : (
+  return (
     <Link
       to="/library/$refId"
       params={{ refId: entry.id }}
@@ -97,7 +91,7 @@ export const registerItemActions = () => [
   libraryItemActions.register({
     id: "library.edit",
     order: 20,
-    available: ({ entry }) => entry.kind !== "lorebook",
+    // Every kind's editor is its own page (`/library/$refId`).
     direct: EditAction
   }),
   libraryItemActions.register({

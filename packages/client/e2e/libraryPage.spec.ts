@@ -1,151 +1,17 @@
-// The library at a heavy user's scale: the realistic synthetic ST folder plus 420 more cards
-// with pictures, long names, personas and forks. Every name is made up.
-import { mkdirSync, writeFileSync } from "node:fs"
+// The library at a heavy user's scale (support/librarySeed.ts): 438 cards with pictures, long
+// names, personas and forks, at 1440 and 390 px in light and dark.
+import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { crc32, deflateSync } from "node:zlib"
 import { expect, test, type Page } from "@playwright/test"
-import { Effect } from "effect"
-import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
-import { cardChunk } from "../../server/test/formats/support.ts"
-import { asUser } from "./support/rpc.ts"
+import { seedLibrary } from "./support/librarySeed.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
 
-const pngChunk = (type: string, data: Uint8Array) => {
-  const body = Buffer.concat([Buffer.from(type, "latin1"), data])
-  const out = Buffer.alloc(body.length + 8)
-  out.writeUInt32BE(data.length, 0)
-  body.copy(out, 4)
-  out.writeUInt32BE(crc32(body), body.length + 4)
-  return out
-}
-/** A 64×96 picture: a vertical gradient in a hue picked from `seed`, with the card data in it. */
-const picture = (seed: number, card: unknown) => {
-  const [w, h] = [64, 96]
-  const hue = (seed * 47) % 360
-  const rgb = (l: number) => {
-    const c = (1 - Math.abs(2 * l - 1)) * 0.6
-    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1))
-    const [r, g, b] =
-      hue < 60
-        ? [c, x, 0]
-        : hue < 120
-          ? [x, c, 0]
-          : hue < 180
-            ? [0, c, x]
-            : hue < 240
-              ? [0, x, c]
-              : hue < 300
-                ? [x, 0, c]
-                : [c, 0, x]
-    const m = l - c / 2
-    return [r + m, g + m, b + m].map((v) => Math.round(v * 255))
-  }
-  const rows = Buffer.alloc((w * 3 + 1) * h)
-  for (let y = 0; y < h; y++) {
-    const [r, g, b] = rgb(0.25 + (0.5 * y) / h)
-    for (let x = 0; x < w; x++) rows.set([r!, g!, b!], y * (w * 3 + 1) + 1 + x * 3)
-  }
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(w, 0)
-  ihdr.writeUInt32BE(h, 4)
-  ihdr.set([8, 2, 0, 0, 0], 8)
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", deflateSync(rows)),
-    cardChunk("chara", card),
-    pngChunk("IEND", new Uint8Array())
-  ])
-}
-const FIRST = ["Aurelia", "Bram", "Cassia", "Dorian", "Elowen", "Fenwick", "Galen", "Hesper", "Isolde", "Jareth"]
-const LAST = ["Ashdown", "Blackwood", "Corrigan", "Dunmore", "Everly", "Fairweather", "Greaves", "Hollis"]
-const LONG = "Lady Seraphina Evangeline Montgomery-Ashworth of the Northern Reaches and the Glass Coast"
-/** The extra cards: names, versions and whether they have a picture. */
-export const EXTRA = Array.from({ length: 420 }, (_, i) => ({
-  name:
-    i === 7
-      ? LONG
-      : i === 8
-        ? "Supercalifragilisticexpialidocious_Unbroken_Name_Without_Any_Spaces_At_All"
-        : `${FIRST[i % FIRST.length]} ${LAST[Math.floor(i / FIRST.length) % LAST.length]}${i >= 80 ? ` ${Math.floor(i / 80) + 1}` : ""}`,
-  version:
-    i % 3 === 0 ? "" : i % 3 === 1 ? `v${(i % 7) + 1}.${i % 4}` : `Alternate universe, rewritten for slow burn ${i}`,
-  picture: i % 5 !== 4
-}))
-export const LONG_NAME = LONG
-
-export const seedLibrary = async (page: Page) => {
-  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  const folder = writeRealisticStFolder(join(server().dataDir, "synthetic-st"))
-  for (const [i, spec] of EXTRA.entries()) {
-    const card = {
-      name: spec.name,
-      spec: "chara_card_v2",
-      spec_version: "2.0",
-      data: {
-        name: spec.name,
-        description: `${spec.name} is made up for the library page.`,
-        personality: "",
-        scenario: "",
-        first_mes: "Hello.",
-        mes_example: "",
-        creator_notes: "",
-        system_prompt: "",
-        post_history_instructions: "",
-        tags: [],
-        creator: "tests",
-        character_version: spec.version,
-        alternate_greetings: [],
-        extensions: {}
-      }
-    }
-    // ST gives every character a picture; the ones without are made here (New card).
-    if (spec.picture) writeFileSync(join(folder, "characters", `extra-${i}.png`), picture(i, card))
-  }
-  await page.goto(`${server().url}/import/st`)
-  await page.getByLabel("Folder path").fill(folder)
-  await page.getByRole("button", { name: "Look in this folder" }).click()
-  await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByRole("list", { name: "Imported" })).toBeVisible({ timeout: 280_000 })
-  // Two generations of forks, and a fork of a long name.
-  await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-    Effect.gen(function* () {
-      for (const spec of EXTRA.filter((s) => !s.picture))
-        yield* api.CreateCard({ label: spec.name, name: spec.name, version: spec.version })
-      const cards = yield* api.ListLibrary({ kind: "card" })
-      const aria = cards.find((c) => c.label === "Aria Vance")!
-      const fork = yield* api.ForkCard({
-        refId: aria.id,
-        name: "Aria Vance",
-        nickname: "Aria",
-        characterVersion: "Stormbound rewrite",
-        moveDrafts: false
-      })
-      yield* api.ForkCard({
-        refId: fork.id,
-        name: "Aria Vance",
-        nickname: "Aria",
-        characterVersion: "Stormbound, epilogue",
-        moveDrafts: false
-      })
-      const long = cards.find((c) => c.label === LONG)!
-      yield* api.ForkCard({
-        refId: long.id,
-        name: LONG,
-        nickname: "Seraphina",
-        characterVersion: "Court intrigue",
-        moveDrafts: false
-      })
-    })
-  )
-}
-
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(400_000)
   const page = await browser.newPage()
-  await seedLibrary(page)
+  await seedLibrary(page, server())
   await page.close()
 })
 
@@ -238,3 +104,52 @@ for (const width of [1440, 390])
       await expect(page.getByRole("list", { name: "Presets" }).locator(":scope > li").first()).toBeVisible()
       await shot(page, `presets-${width}-${theme}`, width)
     })
+
+test("every item opens at its own address, and a stale address says so", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library`)
+  // A card's name is its link: to the character's page.
+  const cards = page.getByRole("list", { name: "Cards" })
+  await cards.getByRole("link", { name: "Aria Vance", exact: true }).first().click()
+  await expect(page).toHaveURL(/\/cards\/[^/]+$/)
+
+  // A lorebook's Edit opens its editor's page; Back returns to the library.
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("tab", { name: /^Lorebooks/ }).click()
+  const lorebooks = page.getByRole("list", { name: "Lorebooks" })
+  const book = lorebooks.locator(":scope > li").first()
+  const title = (await book.getByRole("link").first().textContent())!
+  await book.getByRole("link", { name: `Edit ${title}`, exact: true }).click()
+  await expect(page).toHaveURL(/\/library\/[^/]+$/)
+  await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible()
+  await page.goBack()
+  await expect(lorebooks).toBeVisible()
+
+  // A preset's editor is a page too, with its search folded away until asked for.
+  await page.getByRole("tab", { name: /^Presets/ }).click()
+  const preset = page.getByRole("list", { name: "Presets" }).locator(":scope > li").first()
+  const name = (await preset.getByRole("link").first().textContent())!
+  await preset.getByRole("link", { name: `Edit ${name}`, exact: true }).click()
+  await expect(page).toHaveURL(/\/library\/[^/]+$/)
+  const editor = page.getByRole("main")
+  await expect(editor.getByRole("heading", { level: 1, name })).toBeVisible()
+  await expect(editor.getByRole("button", { name: "Close preset editor" })).toHaveCount(0)
+  await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toHaveCount(0)
+  const search = editor.getByRole("button", { name: "Search", exact: true })
+  await expect(search).toHaveAttribute("aria-expanded", "false")
+  await search.click()
+  await expect(search).toHaveAttribute("aria-expanded", "true")
+  await expect(editor.getByRole("textbox", { name: "Find", exact: true })).toBeVisible()
+  const address = page.url()
+  await page.reload()
+  await expect(page).toHaveURL(address)
+  await expect(editor.getByRole("heading", { level: 1, name })).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole("list", { name: "Presets" })).toBeVisible()
+
+  await page.goto(`${server().url}/library/0190a5c0-0000-7000-8000-000000000000`)
+  await expect(page.getByText("This item was deleted or never existed ·")).toBeVisible()
+  await page.getByRole("main").getByRole("link", { name: "Library", exact: true }).click()
+  await expect(page).toHaveURL(`${server().url}/library`)
+})

@@ -146,7 +146,7 @@ test("with Chat History last the tail still starts after it", async ({ page }) =
   await page.setViewportSize({ width: 1440, height: 900 })
   const chatId = await setUp(page, "History last", true)
   const overlay = await open(page, chatId)
-  await expect(overlay.getByRole("textbox", { name: "Find", exact: true })).toBeVisible()
+  await expect(overlay.getByRole("button", { name: "Search", exact: true })).toBeVisible()
   await expect(overlay.getByText("Tail starts", { exact: true })).toHaveCount(1)
   await expect(overlay.getByText("Tail rule")).toHaveCount(1)
   // After Chat History's block, before the end of the document.
@@ -159,6 +159,8 @@ test("Find's matches go when the question or the text changes", async ({ page })
   await page.setViewportSize({ width: 1440, height: 900 })
   const chatId = await setUp(page, "Find list", false)
   const overlay = await open(page, chatId)
+  // The search is folded away until asked for.
+  await overlay.getByRole("button", { name: "Search", exact: true }).click()
   const find = overlay.getByRole("textbox", { name: "Find", exact: true })
   const matches = overlay.getByRole("list", { name: "Matches", exact: true })
   await find.fill("narrate")
@@ -187,6 +189,8 @@ for (const width of [1440, 390])
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       const chatId = await setUp(page, `Find navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
+      // The search is folded away until asked for.
+      await overlay.getByRole("button", { name: "Search", exact: true }).click()
       await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()
       const find = overlay.getByRole("textbox", { name: "Find", exact: true })
       await find.fill("narrate")
@@ -275,6 +279,8 @@ for (const width of [1440, 390])
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       const chatId = await setUp(page, `Marker navigation ${width} ${theme}`, false)
       const overlay = await open(page, chatId)
+      // The search is folded away until asked for.
+      await overlay.getByRole("button", { name: "Search", exact: true }).click()
       await overlay.getByRole("textbox", { name: "Find", exact: true }).fill("History")
       await overlay.getByRole("button", { name: "Find", exact: true }).click()
       const result = overlay
@@ -300,6 +306,8 @@ test("Find reveals closed utility prompts and regex script fields", async ({ pag
   await page.setViewportSize({ width: 390, height: 900 })
   const chatId = await setUp(page, "Utility navigation", false)
   const overlay = await open(page, chatId)
+  // The search is folded away until asked for.
+  await overlay.getByRole("button", { name: "Search", exact: true }).click()
   const find = overlay.getByRole("textbox", { name: "Find", exact: true })
   const submit = overlay.getByRole("button", { name: "Find", exact: true })
   await find.fill("new story")
@@ -339,6 +347,8 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
   await page.setViewportSize({ width: 390, height: 900 })
   const chatId = await setUp(page, "Long prompt navigation", false)
   const overlay = await open(page, chatId)
+  // The search is folded away until asked for.
+  await overlay.getByRole("button", { name: "Search", exact: true }).click()
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill(`${"A synthetic line of prompt text.\n".repeat(200)}select this distant range\nLast line.`)
   await overlay.getByRole("button", { name: "Collapse all", exact: true }).click()

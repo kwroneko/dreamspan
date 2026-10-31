@@ -14,6 +14,7 @@ import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { AppClient } from "../../rpc.ts"
@@ -88,6 +89,9 @@ export function Editor({
   const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
   const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
   const [open, setOpen] = useState<Open>(null)
+  // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
+  // folded away until asked for.
+  const [searching, setSearching] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   // The page shows the state: loads, and fields starting or ending unsaved changes.
@@ -115,6 +119,17 @@ export function Editor({
   }, [store])
   useLeaveGuard(store)
 
+  if (state.loadError?.tag === "NotFound")
+    return (
+      <Alert tone="warning">
+        <p>
+          This item was deleted or never existed ·{" "}
+          <Link to="/library" className="text-accent underline-offset-4 hover:underline">
+            Library
+          </Link>
+        </p>
+      </Alert>
+    )
   if (state.loadError) {
     return (
       <ErrorAlert
@@ -233,7 +248,14 @@ export function Editor({
             <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
               Save{dirty > 0 ? ` (${dirty})` : ""}
             </Button>
-            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
+            {ref.kind === "preset" ? (
+              <Button aria-expanded={searching} aria-controls="preset-search" onClick={() => setSearching(!searching)}>
+                <Icon name="search" />
+                Search
+              </Button>
+            ) : (
+              <Button onClick={() => setOpen("search")}>Search</Button>
+            )}
             <Button onClick={() => setOpen("history")}>History</Button>
             {ref.kind === "card" && <CardSurface placement="actions" entityId={ref.entityId} store={store} />}
             {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
@@ -250,7 +272,11 @@ export function Editor({
               {clash}
             </p>
           )}
-          {ref.kind === "preset" && <SearchDialog store={store} inline onReveal={setSearchMatch} />}
+          {ref.kind === "preset" && searching && (
+            <div id="preset-search">
+              <SearchDialog store={store} inline onReveal={setSearchMatch} />
+            </div>
+          )}
           <p role="status" className="text-sm text-muted">
             {state.saving
               ? "Keeping your changes…"

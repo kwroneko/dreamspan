@@ -63,7 +63,14 @@ const describeError = (error: unknown): AppError => {
       "BinChanged",
       "The bin or affected forks changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
     )
-  if (error instanceof NotFound) return make("NotFound", `This ${error.entity} doesn't exist any more.`)
+  if (error instanceof NotFound)
+    return make(
+      "NotFound",
+      // A library entry is an "item" to the user; a link to one may be stale or mistyped.
+      error.entity === "ref"
+        ? "This item was deleted or never existed."
+        : `This ${error.entity} doesn't exist any more.`
+    )
   if (error instanceof StaleWrite) return stale(error.entity)
   if (error instanceof ProviderError) return make("ProviderError", sentence(error.message), error.reason)
   if (error instanceof AccountRejected) return make("AccountRejected", sentence(error.message), error.reason)

@@ -45,13 +45,14 @@ const format = (id: string, kind: ExportFormatInfo["kind"]): ExportFormatInfo =>
 const formats = [format("png", "card"), format("preset-json", "preset")]
 const ids = (context: LibraryItemContext) => availableItemActions(context).map((action) => action.id)
 
-it("offers each kind its own actions, a newly made fork no update from a file", () => {
+it("offers each kind its own actions, a lorebook an Edit, a newly made fork no update from a file", () => {
   const dispose = registerItemActions()
   try {
     const card = { entry: ref({ hasImport: true }), persona: false, exportFormats: formats }
     expect(ids(card)).toEqual(["library.chat", "library.edit", "library.persona", "library.update", "library.export"])
     expect(ids({ ...card, entry: ref({ hasImport: false }) })).not.toContain("library.update")
-    expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.update"])
+    // Every kind opens in its editor's page, a lorebook too.
+    expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])
     expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "variant" }) })).toEqual([
       "library.edit",
       "library.export"

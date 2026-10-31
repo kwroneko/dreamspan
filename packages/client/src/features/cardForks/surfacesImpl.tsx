@@ -10,6 +10,7 @@ import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { MenuItem } from "../../ui/Menu.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { showToast } from "../../ui/Toast.tsx"
@@ -159,14 +160,16 @@ export function ForkBadge({ entityId }: CardSurfaceContext) {
   const children = result.value.members.filter((m) => m.parentEntityId === entityId).length
   return (
     <>
-      <Button
-        variant="ghost"
-        className="h-auto! px-1! py-1! text-xs!"
+      {/* A badge that opens the family tree: shaped like the other badges beside it. */}
+      <button
+        type="button"
+        className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium whitespace-nowrap text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
         onClick={() => setOpen(true)}
         aria-label={`Forks of ${result.value.members.find((m) => m.entityId === entityId)?.label}`}
       >
+        <Icon name="branch" size={12} />
         {children ? `${children} ${children === 1 ? "fork" : "forks"}` : "Fork"}
-      </Button>
+      </button>
       {open && <FamilyDialog entityId={entityId} onClose={() => setOpen(false)} />}
     </>
   )
