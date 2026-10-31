@@ -460,7 +460,7 @@ test("a change that can't reach the server survives its note going to the bin an
   const item = await admin((api) => api.DeleteNote({ noteRefId: seeded.note.id }))
   // In the bin, the note can't be opened, and its copy waits.
   await page.reload()
-  await expect(page.getByRole("alert")).toBeVisible()
+  await expect(page.getByText("This item was deleted or never existed", { exact: false })).toBeVisible()
   expect((await copies(page)).map(text)).toContain(unsent)
   hold.release()
   await page.unroute("**/library/drafts")
@@ -515,7 +515,7 @@ test("text a revision's save sent to the recovered texts is pointed to from the 
     .click()
   await expect(page.getByText("Saved a revision.", { exact: true })).toBeVisible()
   await expect(page.getByText("Earlier text is in the bin")).toBeVisible()
-  await page.getByRole("link", { name: "bin, under recovered text" }).click()
+  await page.getByRole("link", { name: "Open the bin", exact: true }).click()
   await expect(page.getByRole("listitem", { name: /^Recovered from Recovery notice/ })).toContainText(
     "hello from another tab"
   )

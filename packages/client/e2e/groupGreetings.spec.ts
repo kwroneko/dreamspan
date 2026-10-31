@@ -87,7 +87,9 @@ for (const width of [1440, 390]) {
       await page.getByRole("combobox", { name: "Find a card to play as" }).fill(second)
       await page.getByRole("option", { name: second, exact: true }).click()
       await expect(greeting).toContainText("Mira opens the door.")
-      await expect(page.getByRole("status")).toContainText("selected group greeting is no longer available")
+      await expect(
+        page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
+      ).toBeVisible()
       await expect(page.getByText("group greeting", { exact: true })).toHaveCount(0)
       await expect(page.getByLabel("Reply from", { exact: true })).toContainText(name)
       await page.getByLabel(/^Playing as /).click()
@@ -97,7 +99,9 @@ for (const width of [1440, 390]) {
       await expect(greeting).toContainText("Mira welcomes the crew.")
       await page.getByRole("button", { name: `Remove ${second} from pending cast` }).click()
       await expect(greeting).toContainText("Mira opens the door.")
-      await expect(page.getByRole("status")).toContainText("selected group greeting is no longer available")
+      await expect(
+        page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
+      ).toBeVisible()
       await expect(page.getByText("group greeting", { exact: true })).toHaveCount(0)
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `fallback-${width}-${theme}.png`) })
@@ -156,7 +160,9 @@ test("a pending group can restore a removed original member", async ({ page }) =
   await expect(greeting).toContainText("group greeting")
   await page.getByRole("button", { name: "Remove Group Tobin from pending cast" }).click()
   await expect(greeting).toContainText("Group Mira waves.")
-  await expect(page.getByRole("status")).toContainText("selected group greeting is no longer available")
+  await expect(
+    page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
+  ).toBeVisible()
   await page.getByLabel("Add character", { exact: true }).click()
   await page.getByRole("option", { name: "Group Tobin", exact: true }).click()
   await expect(page.getByRole("article", { name: "Greeting from Group Tobin", exact: true })).toBeVisible()

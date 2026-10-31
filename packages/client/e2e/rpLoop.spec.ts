@@ -258,7 +258,7 @@ for (const width of [1440, 390])
       await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
-      await page.getByRole("option", { name: mutedName, exact: true }).click()
+      await page.getByRole("group", { name: "Speak as" }).getByRole("option", { name: mutedName, exact: true }).click()
       await expect(page.getByRole("button", { name: `Speaking as ${mutedName}. Change the speaker` })).toBeVisible()
       const castAgain = await openPanel(page, "Cast")
       await expect(
@@ -269,7 +269,11 @@ for (const width of [1440, 390])
       // Writing for the persona: an impersonation, with the preset's impersonation prompt.
       await page.getByRole("button", { name: /^Speaking as / }).click()
       const personaName = personaLabel!.replace(/^Playing as /, "").replace(/\. Change your persona$/, "")
-      await page.getByRole("option", { name: personaName, exact: true }).click()
+      // In "Speak as": the popover's "Your persona" section lists them too, to play another persona.
+      await page
+        .getByRole("group", { name: "Speak as" })
+        .getByRole("option", { name: personaName, exact: true })
+        .click()
       const impersonated = provider.completions.length
       await page.getByRole("button", { name: `Write for ${personaName}`, exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(impersonated + 1)
@@ -344,6 +348,8 @@ for (const width of [1440, 390])
       await condition.click()
       await page.getByRole("option", { name: "Always" }).click()
       await expect(warnings).toHaveCount(0)
+      // Back as it was, and the server has it: the next test opens this preset in a fresh browser.
+      await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
 
       // The one-time notice, with a preset that marks no prompt for writing as {{user}}.
       if (theme === "light") {
