@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test"
 
 /** Shows the app's navigation (Characters, Library, Settings…, image settings) if it's hidden. */
 export const showAppNavigation = async (page: Page) => {
+  if (await page.getByRole("button", { name: "Close the menu", exact: true }).isVisible()) return
   const menu = page.getByRole("button", { name: "Chats and menu", exact: true }).filter({ visible: true })
   if ((await menu.count()) > 0) await menu.first().click()
 }

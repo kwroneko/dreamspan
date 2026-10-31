@@ -44,11 +44,14 @@ const chat = async (page: Page) => {
   await expect(page.locator("article[data-slot]")).toHaveCount(3)
 }
 const select = async (page: Page, field: string, option: string) => {
-  await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
+  // In a phone's chat the image settings are in the menu its header's ← opens.
+  await showAppNavigation(page)
+  await page.getByRole("button", { name: "Image settings", exact: true }).filter({ visible: true }).first().click()
   const popover = page.getByRole("dialog", { name: "Images in this browser" })
   await popover.getByLabel(field).click()
   await page.getByRole("option", { name: option, exact: true }).click()
   await page.keyboard.press("Escape")
+  await hideAppNavigation(page)
 }
 
 for (const width of [1440, 390]) {
@@ -89,7 +92,10 @@ for (const width of [1440, 390]) {
     await page.locator("article[data-slot]").getByRole("button", { name: "View Bo's portrait" }).click()
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
     await page.keyboard.press("Escape")
-    await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
+    // The header's faces open a character's tab; a phone's header leaves them out for the name,
+    // so there it's the panel's cast strip (fheader).
+    if (width === 390) await openPanel(page, "Mira")
+    else await page.locator("header").getByRole("button", { name: "Show Mira's card", exact: true }).first().click()
     // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
     const card = page.getByRole("tabpanel", { name: "Mira", exact: true })
     await expect(card.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
@@ -122,11 +128,12 @@ for (const width of [1440, 390]) {
       await expect(portrait).toHaveCSS("height", `${pixels * 1.5}px`)
       await expect(portrait).toHaveCSS("border-radius", "10px")
     }
-    // Measure the rendered shape, including header, recent speakers and reply-from.
+    // Measure the rendered shape, including header, recent speakers and reply-from (those shown:
+    // a phone's header leaves the faces out).
     const ratios = await page.locator("main [data-portrait]").evaluateAll((nodes) =>
-      nodes.map((node) => {
+      nodes.flatMap((node) => {
         const box = node.getBoundingClientRect()
-        return box.width / box.height
+        return box.height > 0 ? [box.width / box.height] : []
       })
     )
     expect(ratios.length).toBeGreaterThan(3)
