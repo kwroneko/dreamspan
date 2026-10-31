@@ -26,6 +26,7 @@ import { defaultLimits } from "../formats/safety.ts"
 import { BodyRefused, firstBytes, readBody } from "./body.ts"
 import { Formats } from "./Formats.ts"
 import { MediaHolds } from "./MediaHolds.ts"
+import { StImportJobs } from "./StImportJobs.ts"
 import { StImports } from "./StImports.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { classifyStPath, ST_CHAT_PART_BYTES } from "@rp/shared/stFolder.ts"
@@ -385,6 +386,7 @@ export const layer = Layer.unwrap(
     // --- ST data folder import (ARCHITECTURE.md §13): one file of the folder, or one part
     // of a chat file, through the same limits as a library upload.
     const stImports = yield* StImports
+    const stImportJobs = yield* StImportJobs
     const stImportFile = Effect.gen(function* () {
       const request = yield* HttpServerRequest.HttpServerRequest
       const user = yield* CurrentUser
@@ -425,12 +427,22 @@ export const layer = Layer.unwrap(
             limits.deadline - Date.now(),
             Effect.gen(function* () {
               const body = yield* readBody(message, limits)
-              const answer = yield* stImports.file(user, importId, path, body, {
-                part,
-                last: query.get("last") !== "0",
-                card: card as EntityId | "none" | null,
-                orphan: query.get("orphan") === "1"
-              })
+              const answer = yield* stImports
+                .file(user, importId, path, body, {
+                  part,
+                  last: query.get("last") !== "0",
+                  card: card as EntityId | "none" | null,
+                  orphan: query.get("orphan") === "1"
+                })
+                .pipe(
+                  Effect.tapError((error) =>
+                    error._tag === "StImportFailed"
+                      ? stImportJobs.arrived(user, importId, path, body.byteLength, { failed: error.message })
+                      : Effect.void
+                  )
+                )
+              // The job's progress, recorded as files arrive.
+              yield* stImportJobs.arrived(user, importId, path, body.byteLength, answer)
               return yield* HttpServerResponse.schemaJson(StFileResult)(answer)
             })
           )

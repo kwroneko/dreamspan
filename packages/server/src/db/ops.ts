@@ -80,6 +80,7 @@ import {
   ComposerChoice
 } from "@rp/shared/composerApi.ts"
 import { AccountRejected, LeafMoved, ModelKeyTaken, NotFound, StaleWrite } from "@rp/shared/errors.ts"
+import { StImportJob } from "@rp/shared/stImportApi.ts"
 import {
   CardFamily,
   Doc,
@@ -1680,6 +1681,81 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  // --- ST import jobs (stImportJobs.ts): what the import page lists.
+  /** A new job, running; an upload of the user's still running ends as interrupted (a new run fences it). */
+  Rpc.make("StImportJobStart", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      mode: Schema.Literals(["path", "upload"]),
+      source: Schema.String,
+      root: Schema.NullOr(Schema.String),
+      prefix: Schema.String,
+      filesTotal: Schema.Int,
+      bytesTotal: Schema.Number,
+      at: Schema.Number
+    },
+    success: Schema.Void,
+    error: StorageError
+  }),
+  /**
+   * A running job's progress, and with `end` its outcome. Only a job still running changes,
+   * so a job ended elsewhere (cancelled, interrupted) stays as it ended. `report`, when
+   * given, replaces the stored one. Whether the job was running.
+   */
+  Rpc.make("StImportJobUpdate", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      at: Schema.Number,
+      filesTotal: Schema.Int,
+      filesDone: Schema.Int,
+      bytesTotal: Schema.Number,
+      bytesDone: Schema.Number,
+      currentFile: Schema.NullOr(Schema.String),
+      countsJson: Schema.String,
+      attention: Schema.Int,
+      reportJson: Schema.optionalKey(Schema.String),
+      notSentJson: Schema.optionalKey(Schema.String),
+      end: Schema.optionalKey(
+        Schema.Struct({
+          status: Schema.Literals(["complete", "failed", "cancelled", "interrupted"]),
+          error: Schema.NullOr(Schema.String)
+        })
+      )
+    },
+    success: Schema.Boolean,
+    error: StorageError
+  }),
+  /** A finished job's report again, after the user acted on it (a chat linked, a run un-hidden). */
+  Rpc.make("StImportJobReport", {
+    payload: {
+      userId: UserId,
+      id: Schema.String,
+      reportJson: Schema.String,
+      countsJson: Schema.String,
+      attention: Schema.Int
+    },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** At startup: every job still running stopped with the server, keeping what it had. How many. */
+  Rpc.make("StImportJobsInterrupted", {
+    payload: { at: Schema.Number, error: Schema.String },
+    success: Schema.Int,
+    error: StorageError
+  }),
+  Rpc.make("StImportJobSeen", {
+    payload: { userId: UserId, id: Schema.String, at: Schema.Number },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** Removes one finished job, or (null) all the user's finished ones; how many. */
+  Rpc.make("StImportJobsClear", {
+    payload: { userId: UserId, id: Schema.NullOr(Schema.String) },
+    success: Schema.Int,
+    error: StorageError
+  }),
   Rpc.make("StImportStartChat", {
     payload: {
       userId: UserId,
@@ -2651,6 +2727,23 @@ export class ReadOps extends RpcGroup.make(
       )
     }),
     error: StorageError
+  }),
+  /** The user's import jobs, newest first (at most 200). */
+  Rpc.make("ListStImportJobs", {
+    payload: { userId: UserId },
+    success: Schema.Array(StImportJob),
+    error: StorageError
+  }),
+  Rpc.make("GetStImportJob", {
+    payload: { userId: UserId, id: Schema.String },
+    success: Schema.Struct({
+      job: StImportJob,
+      root: Schema.NullOr(Schema.String),
+      prefix: Schema.String,
+      reportJson: Schema.NullOr(Schema.String),
+      notSentJson: Schema.String
+    }),
+    error: Schema.Union([NotFound, StorageError])
   }),
   // --- The card and preset editors (editorReads.ts).
   Rpc.make("OpenEditor", {
