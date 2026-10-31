@@ -368,7 +368,18 @@ const changedUids = (store: EditorStore, root: FieldPath) =>
     })
   )
 
-export function LorebookTable({ store, root, book }: { store: EditorStore; root: FieldPath; book: LorebookDoc }) {
+export function LorebookTable({
+  store,
+  root,
+  book,
+  added = null
+}: {
+  store: EditorStore
+  root: FieldPath
+  book: LorebookDoc
+  /** An entry added before the table showed (a card's first, which makes its book): shown open. */
+  added?: number | null
+}) {
   const columns = useRegistry(lorebookColumns)
   const sorts = useRegistry(lorebookSorts)
   const actions = useRegistry(lorebookEntryActions)
@@ -376,10 +387,12 @@ export function LorebookTable({ store, root, book }: { store: EditorStore; root:
   const [query, setQuery] = useState("")
   const [enabled, setEnabled] = useState<EnabledFilter>("all")
   const [sortId, setSortId] = useState("order")
-  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set(added === null ? [] : [added]))
   // An entry just added leads the table until the search, filter or sort changes.
-  const [first, setFirst] = useState<number | null>(null)
-  const [focus, setFocus] = useState<{ uid: number; at: "title" | "keys" } | null>(null)
+  const [first, setFirst] = useState<number | null>(added)
+  const [focus, setFocus] = useState<{ uid: number; at: "title" | "keys" } | null>(
+    added === null ? null : { uid: added, at: "title" }
+  )
   const [dialog, setDialog] = useState<{ uid: number; action: ComponentType<LorebookActionProps> } | null>(null)
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
 
@@ -493,7 +506,7 @@ export function LorebookTable({ store, root, book }: { store: EditorStore; root:
             }}
           >
             <Icon name="insert" />
-            Entry
+            Add entry
           </Button>
           <div className="min-w-[12rem] flex-1">
             <Input
@@ -570,7 +583,7 @@ export function LorebookTable({ store, root, book }: { store: EditorStore; root:
         )}
         {uids.length === 0 ? (
           <p className="p-4 text-sm text-muted">
-            {book.entries.length === 0 ? "No entries yet. + Entry adds one." : "No entry matches."}
+            {book.entries.length === 0 ? "No entries yet." : "No entry matches."}
           </p>
         ) : (
           <Rows

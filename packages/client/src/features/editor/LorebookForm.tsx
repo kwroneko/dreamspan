@@ -2,6 +2,7 @@
 // standalone lorebook editor: the book's settings, and its entries as a table (LorebookTable)
 // whose rows open to every field of the entry here. Every edit is a field draft in the owning
 // entry's EditorStore.
+import { useState } from "react"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import type { FieldPath } from "@rp/shared/editing.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -56,18 +57,19 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
  */
 export function LorebookForm({ store, root, absent }: { store: EditorStore; root: FieldPath; absent: string }) {
   const book = useValue<LorebookDoc | undefined>(store, root)
+  const [added, setAdded] = useState<number | null>(null)
   if (!book) {
     return (
       <div className="flex min-w-0 flex-col items-start gap-3">
         <p className="text-sm text-muted">{absent}</p>
-        <Button onClick={() => addEntry(store, root, book)}>+ Entry</Button>
+        <Button onClick={() => setAdded(addEntry(store, root, book))}>Add entry</Button>
       </div>
     )
   }
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <BookSettings store={store} root={root} entries={book.entries.length} />
-      <LorebookTable store={store} root={root} book={book} />
+      <LorebookTable store={store} root={root} book={book} added={added} />
     </div>
   )
 }

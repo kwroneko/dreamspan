@@ -9,7 +9,7 @@ import { Select } from "../../ui/Select.tsx"
 import { FieldTools, NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
 import { entryPath } from "./lorebookTable.ts"
 import { SearchNavigation, scrollToSearchField } from "./searchNavigation.ts"
-import { type EditorStore, useDirty, useValue } from "./store.ts"
+import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
 
 const EMPTY_KEYS: ReadonlyArray<string> = []
 
@@ -160,7 +160,6 @@ const MATCH_SOURCES = [
 
 /** The row's own fields, edited in the table: their Undo, History and Revert, while changed. */
 const ROW_FIELDS = [
-  [[], "The whole entry"],
   [["comment"], "Title"],
   [["enabled"], "Enabled"],
   [["constant"], "Strategy (constant)"],
@@ -207,18 +206,20 @@ export function EntryDetails({
   card: boolean
 }) {
   const path = entryPath(root, uid)
+  const title = useText(store, [...path, "comment"]) || "Untitled entry"
   const position = useValue<string>(store, [...path, "position"])
   const selective = useValue<boolean>(store, [...path, "selective"])
   return (
     <div role="group" aria-label={`Lorebook entry ${uid}`} className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-1 empty:hidden">
+        <RowFieldChange store={store} path={path} label={title} />
         {ROW_FIELDS.map(([at, label]) => (
           <RowFieldChange key={label} store={store} path={[...path, ...at]} label={label} />
         ))}
       </div>
       <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""}`}>
         <div className="flex min-w-0 flex-col gap-4">
-          <TextField store={store} path={[...path, "content"]} label="Content" rows={8} />
+          <TextField store={store} path={[...path, "content"]} label="Entry content" rows={8} />
           <Keys store={store} path={[...path, "keys"]} label="Primary keys" id={`lore-keys-${uid}`} />
           <section className={group} aria-label="Secondary keys">
             <SwitchField
