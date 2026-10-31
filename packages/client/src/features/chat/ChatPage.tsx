@@ -616,7 +616,10 @@ function ChatSurface({
               </div>
             )}
             {view.loading ? (
-              <Loading label="Loading the chat…" />
+              // Takes the messages' place, so the composer is where it will stay.
+              <div className="mx-auto min-h-0 w-full max-w-3xl flex-1 px-4">
+                <Loading label="Loading the chat…" />
+              </div>
             ) : (
               <MessageList
                 // A replacement layer has different row coordinates. Give it fresh

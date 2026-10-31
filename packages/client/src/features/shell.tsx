@@ -19,6 +19,7 @@ import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
 import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
+import { sidebarSearch } from "./characters/sidebarSearch.ts"
 import { setPageTitle, useNotices } from "./notices.tsx"
 
 /** Sets the tab's title while a screen is shown. */
@@ -138,8 +139,15 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
 /** Phones: a bar with the menu, which opens the sidebar over the page. */
 function PhoneBar() {
-  // Open on the page it was opened on: going anywhere closes it.
-  const href = useLocation({ select: (location) => location.href })
+  // Open on the page it was opened on: going anywhere closes it. Browsing the panel itself
+  // (its crumbs and tabs, in the URL's sidebar params) doesn't; picking in it does.
+  const href = useLocation({
+    select: (location) => {
+      const params = new URLSearchParams(location.searchStr)
+      for (const key of sidebarSearch) params.delete(key)
+      return `${location.pathname}?${params}`
+    }
+  })
   const { selection } = useShellNavigation()
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)

@@ -5,7 +5,7 @@ import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { useTitle } from "../shell.tsx"
-import { CharacterTile, shellAtom, useShellNavigation, type ShellLibrary } from "./shellData.tsx"
+import { CharacterTile, shellAtom, type ShellLibrary } from "./shellData.tsx"
 import { GroupTile, PinnedChats, SortSwitch, sortForks, type ShellSort } from "./ShellBrowser.tsx"
 
 type Filter = "all" | "used" | "unused" | "groups" | "archive"
@@ -13,7 +13,6 @@ function Home({ data }: { data: ShellLibrary }) {
   const [filter, setFilter] = useState<Filter>("all")
   const [sort, setSort] = useState<ShellSort>("recent")
   const [search, setSearch] = useState("")
-  const navigation = useShellNavigation()
   const needle = search.trim().toLowerCase()
   const cards = data.cards
     .filter(
@@ -83,11 +82,7 @@ function Home({ data }: { data: ShellLibrary }) {
           ))}
           {!cards.length && (
             <EmptyState title="No characters here">
-              <Link
-                to="/import/st"
-                className="text-accent"
-                onClick={() => navigation.setScope({ entity: null, chat: null })}
-              >
+              <Link to="/import/st" className="text-accent">
                 Import from SillyTavern
               </Link>
             </EmptyState>

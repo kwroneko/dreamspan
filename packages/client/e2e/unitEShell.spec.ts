@@ -83,14 +83,17 @@ for (const width of [1440, 390]) {
         .first()
         .getByRole("button", { name: /^Open chat / })
     ).toHaveCount(scopedPins.length)
-    const before = page.url()
+    // The left panel's place is in the URL (owner, 2026-10-31); browsing it keeps the chat in the middle.
+    const before = new URL(page.url()).pathname
     await crumbs.getByRole("button", { name: "All chats", exact: true }).click()
-    await expect(crumbs).not.toContainText(character.card.label)
-    expect(page.url()).toBe(before)
+    await expect(crumbs).toHaveCount(0)
+    await expect.poll(() => new URL(page.url()).searchParams.get("character")).toBeNull()
+    expect(new URL(page.url()).pathname).toBe(before)
     // Browsing the grid changes only the left panel until a character is picked.
     const left = page.getByRole("group", { name: "Left panel", exact: true })
     await left.getByRole("button", { name: "Characters", exact: true }).click()
-    expect(page.url()).toBe(before)
+    await expect.poll(() => new URL(page.url()).searchParams.get("side")).toBe("characters")
+    expect(new URL(page.url()).pathname).toBe(before)
     await page
       .getByRole("button", {
         name: `Open ${character.card.label}${character.card.subtitle ? ` · ${character.card.subtitle}` : ""}`,

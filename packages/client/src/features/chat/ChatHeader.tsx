@@ -23,7 +23,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { PinButton } from "../characters/ShellBrowser.tsx"
-import { shellAtom } from "../characters/shellData.tsx"
+import { shellAtom, sidebarCleared } from "../characters/shellData.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import {
   Menu,
@@ -214,9 +214,25 @@ export function BranchMenu({
             </MenuGroup>
           )
         })}
+        {(forks.length > 0 || off) && <MenuSeparator />}
+        {/* The chat's forks, current and peers first, are listed where chats are (UX-REWORK §3). */}
+        <MenuLinkItem
+          icon="branch"
+          render={
+            <Link
+              to="."
+              search={(prev: Record<string, unknown>) => ({
+                ...prev,
+                ...sidebarCleared,
+                forks: session.id
+              })}
+            />
+          }
+        >
+          List this chat&rsquo;s forks
+        </MenuLinkItem>
         {shownFork !== null && (
           <>
-            {(forks.length > 0 || off) && <MenuSeparator />}
             <MenuItem
               icon="trash"
               tone="danger"
