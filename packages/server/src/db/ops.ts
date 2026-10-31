@@ -871,7 +871,8 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       fromForkId: Schema.NullOr(ForkId),
       atSlotId: Schema.NullOr(SlotId),
-      notes: Schema.optionalKey(ForkNoteSelection)
+      notes: Schema.optionalKey(ForkNoteSelection),
+      name: Schema.optionalKey(Schema.String)
     },
     success: Schema.Struct({ fork: Fork, chat: Chat }),
     error: Schema.Union([NotFound, StorageError, ForkNotesChanged])

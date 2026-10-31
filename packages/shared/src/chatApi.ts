@@ -732,7 +732,9 @@ export class ChatApi extends RpcGroup.make(
       chatId: ChatId,
       fromForkId: Schema.NullOr(ForkId),
       atSlotId: Schema.NullOr(SlotId),
-      notes: Schema.optionalKey(ForkNoteSelection)
+      notes: Schema.optionalKey(ForkNoteSelection),
+      /** An automatic name ("From #14"): shown like a given one, and the user renames it as one. */
+      name: Schema.optionalKey(BranchNameInput)
     },
     success: Schema.Struct({ fork: Fork, chat: Chat }),
     error: Schema.Union([...Errors, ForkNotesChanged])
