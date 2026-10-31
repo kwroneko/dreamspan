@@ -26,7 +26,7 @@ const duration = (ms: number) => {
 }
 
 function Status() {
-  useTitle("Status")
+  useTitle("Server status")
   const { user } = useSession()
   const refreshHealth = useAtomRefresh(healthAtom)
 
@@ -44,8 +44,11 @@ function Status() {
             <>
               <Card>
                 <CardHeader title="Server" description={`Signed in as ${user.displayName} (${user.role}).`} />
-                <p className="mb-3 flex items-center gap-2 text-sm">
-                  <span aria-hidden="true" className={`size-2 rounded-full ${slow ? "bg-warning" : "bg-success"}`} />
+                <p className="mb-3 flex items-start gap-2 text-sm">
+                  <span
+                    aria-hidden="true"
+                    className={`mt-1.5 size-2 shrink-0 rounded-full ${slow ? "bg-warning" : "bg-success"}`}
+                  />
                   {slow ? "Running, but busy: replies and pages may be slow." : "Running normally."}
                 </p>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
@@ -89,6 +92,6 @@ export const register = () => {
     parent: "settings",
     path: "status",
     component: Status,
-    nav: { label: "Status", order: 80 }
+    nav: { label: "Server status", order: 80 }
   })
 }

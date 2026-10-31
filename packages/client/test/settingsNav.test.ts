@@ -42,3 +42,25 @@ it("lists settings pages under their groups: claimed by a group, named by the pa
   for (const done of [hidden, moved, added, ...undo]) done()
   expect(shown(true)).toEqual([])
 })
+
+it("puts a page an admin-only group claims in the next group that claims it for anyone else, and hides that group", () => {
+  const undo = [
+    settingsGroups.register({ id: "account", label: "Account", order: 30, pages: ["t.account", "t.status"] }),
+    settingsGroups.register({ id: "admin", label: "Admin", order: 40, adminOnly: true, pages: ["t.status"] }),
+    settingsGroups.register({ id: "ops", label: "Ops", order: 50, adminOnly: true }),
+    page("t.account", 40),
+    page("t.status", 80),
+    page("t.logs", 90, { group: "ops" })
+  ]
+  expect(shown(true)).toEqual([
+    ["Account", ["t.account"]],
+    ["Admin", ["t.status"]],
+    ["Ops", ["t.logs"]]
+  ])
+  // A page naming a group this user doesn't see, claimed by none, goes under More.
+  expect(shown(false)).toEqual([
+    ["Account", ["t.account", "t.status"]],
+    ["More", ["t.logs"]]
+  ])
+  for (const done of undo) done()
+})

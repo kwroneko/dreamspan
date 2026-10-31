@@ -6,8 +6,10 @@ export const binTitle = (item: BinItem) => {
   if (item.kind === "chat") return item.title === "" ? "Untitled chat" : readableChatTitle(item.title)
   const chat = typeof item.origin.chatTitle === "string" ? readableChatTitle(item.origin.chatTitle) : null
   if (chat === null) return item.title
-  // Numbered as the chat numbers it (its depth from 1); items binned before origins kept it aren't.
-  const number = typeof item.origin.depth === "number" ? item.origin.depth + 1 : null
+  // Numbered as the chat numbered it where it was deleted (its position from 1, which inserted
+  // messages above it move off its depth); older items have only the depth, or neither.
+  const place = typeof item.origin.position === "number" ? item.origin.position : item.origin.depth
+  const number = typeof place === "number" ? place + 1 : null
   switch (item.kind) {
     case "message":
       return number === null ? `Message in “${chat}”` : `Message ${number} in “${chat}”`

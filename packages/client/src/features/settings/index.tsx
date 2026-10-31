@@ -54,22 +54,29 @@ function SettingsNavigation() {
   )
 }
 
-function SettingsLayout() {
+/** The list's title. Only at the list: a layout's effect runs after its page's, and would replace the page's own. */
+function ListTitle() {
   useTitle("Settings")
+  return null
+}
+
+function SettingsLayout() {
   const pathname = useLocation({ select: (location) => location.pathname })
   const atList = /^\/settings\/?$/.test(pathname)
-  // The open page's own name, for a phone, where the list isn't beside it.
+  // The open page's own name, for a phone, where the list isn't beside it. A page inside one
+  // (a connection) has its own way back to it, so it gets neither.
   const open = useSettingsNav()
     .flatMap((section) => section.pages)
-    .find((entry) => pathname === fullPath(entry) || pathname.startsWith(`${fullPath(entry)}/`))
+    .find((entry) => pathname.replace(/\/$/, "") === fullPath(entry))
   return (
     <div className="flex flex-col gap-4 md:flex-row md:gap-8">
+      {atList && <ListTitle />}
       <div className={`md:sticky md:top-0 md:block md:w-48 md:shrink-0 md:self-start ${atList ? "" : "hidden"}`}>
         <h1 className="mb-4 px-1 text-lg font-semibold md:hidden">Settings</h1>
         <SettingsNavigation />
       </div>
       <div className={`min-w-0 flex-1 ${atList ? "hidden md:block" : ""}`}>
-        {!atList && (
+        {open && (
           <div className="mb-4 flex flex-col items-start gap-1 md:hidden">
             <Link
               to="/settings"
@@ -78,7 +85,7 @@ function SettingsLayout() {
               <Icon name="back" />
               Settings
             </Link>
-            {open && <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>}
+            <h1 className="px-1 text-lg font-semibold">{open.nav!.label}</h1>
           </div>
         )}
         <Outlet />
@@ -116,6 +123,13 @@ export const register = () => {
     order: 20,
     pages: ["settings.chats", "settings.display", "settings.regex", "settings.notifications"]
   })
-  settingsGroups.register({ id: "account", label: "Account", order: 30, pages: ["settings.account", "settings.users"] })
-  settingsGroups.register({ id: "admin", label: "Admin", order: 40, pages: ["settings.status"] })
+  // Server status is the admins' (with its diagnostics); anyone else finds its plain part
+  // under Account, so they never see an Admin heading.
+  settingsGroups.register({
+    id: "account",
+    label: "Account",
+    order: 30,
+    pages: ["settings.account", "settings.users", "settings.status"]
+  })
+  settingsGroups.register({ id: "admin", label: "Admin", order: 40, adminOnly: true, pages: ["settings.status"] })
 }

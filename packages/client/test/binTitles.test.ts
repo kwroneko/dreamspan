@@ -75,3 +75,20 @@ test("a message or version in the bin is named by its number in the chat", () =>
     expect(binTitle(item)).toBe(`${label} in “Lighthouse”`)
   }
 })
+
+test("a message is numbered by its place where it was deleted, which insertions move off its depth", () => {
+  const item = (origin: Record<string, unknown>) =>
+    new BinItem({
+      id: "bin",
+      kind: "message",
+      targetId: "t",
+      title: "",
+      excerpt: "",
+      origin,
+      byteSize: 0,
+      deletedAt: 0
+    })
+  expect(binTitle(item({ chatTitle: "Lighthouse", depth: 3, position: 4 }))).toBe("Message 5 in “Lighthouse”")
+  expect(binTitle(item({ chatTitle: "Lighthouse", depth: 3 }))).toBe("Message 4 in “Lighthouse”")
+  expect(binTitle(item({ chatTitle: "Lighthouse" }))).toBe("Message in “Lighthouse”")
+})
