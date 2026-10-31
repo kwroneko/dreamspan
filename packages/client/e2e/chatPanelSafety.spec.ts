@@ -9,6 +9,7 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { asUser } from "./support/rpc.ts"
 import { level1 } from "./support/summaries.ts"
+import { choices, modelChip, modelName } from "./support/strip.ts"
 import type { SummaryId } from "@rp/shared/lcm.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
@@ -147,12 +148,17 @@ test("the composer's model follows a default changed in another tab", async ({ p
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: a.id }, preset: null } })
   )
   await page.goto(`${server().url}/chats/${chat.id}`)
-  const model = page.getByRole("combobox", { name: "Model", exact: true })
-  await expect(model).toHaveText(`${connection.name} · model-a`)
+  const model = modelChip(page)
+  await expect(model).toHaveAccessibleName(modelName(`${connection.name} · model-a`))
+  await expect(model).toHaveText("model-a")
   await admin((api) =>
     api.SetGenerationDefaults({ defaults: { model: { connection: connection.id, model: b.id }, preset: null } })
   )
-  await expect(model).toHaveText(`${connection.name} · model-b`)
+  await expect(model).toHaveAccessibleName(modelName(`${connection.name} · model-b`))
+  await model.click()
+  await expect(
+    choices(page, "Model").getByRole("radio", { name: `${connection.name} · model-b`, exact: true })
+  ).toBeChecked()
 })
 
 test("a hidden model in use is named, not described as gone", async ({ page }) => {
@@ -163,9 +169,7 @@ test("a hidden model in use is named, not described as gone", async ({ page }) =
   )
   await admin((api) => api.SetModelHidden({ modelId: a.id, hidden: true }))
   await page.goto(`${server().url}/chats/${chat.id}`)
-  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText(
-    `${connection.name} · model-a (hidden)`
-  )
+  await expect(modelChip(page)).toHaveAccessibleName(modelName(`${connection.name} · model-a (hidden)`))
   await page.goto(`${server().url}/settings/chats`)
   await expect(page.getByRole("combobox", { name: "Default model" })).toHaveText(
     `${connection.name} · model-a (hidden)`

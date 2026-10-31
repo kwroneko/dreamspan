@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { card, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openModelSettings } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -161,8 +162,8 @@ test("a budget refusal sits in the composer's column, names its sources and open
   )
   expect(edited.find((m) => m.id === model.id)?.overrides.context).toBe(32000)
 
-  // The composer's gear opens the model the chat's reply uses, named, in the Model tab.
-  await page.getByRole("button", { name: "Model settings", exact: true }).click()
+  // The model chip's "Model settings…" opens the model the chat's reply uses, named, in the Model tab.
+  await openModelSettings(page)
   await expect(page.getByTestId("model-panel-name")).toHaveText("tiny-window on Tiny")
   await expect(page.getByText("The model this chat's next reply uses")).toBeVisible()
 
@@ -171,7 +172,7 @@ test("a budget refusal sits in the composer's column, names its sources and open
     api.SaveLearnedContext({ modelId: model.id, context: 24_000 })
   )
   await page.reload()
-  await page.getByRole("button", { name: "Model settings", exact: true }).click()
+  await openModelSettings(page)
   await page.getByRole("textbox", { name: "Display name" }).fill("Tiny window")
   await page.getByRole("button", { name: "Forget it" }).click()
   await expect(page.getByText("Learned context size")).toHaveCount(0)

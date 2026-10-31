@@ -1,5 +1,5 @@
-// Who speaks and who replies at the composer (ST-GRIPES E4, D8; DESIGN §2.2): "Reply from"
-// with the next in turn and a pick for one reply, an empty Send asking for the reply alone,
+// Who speaks and who replies at the composer (ST-GRIPES E4, D8; DESIGN §2.2): the strip's
+// "Next" chip with the next in turn and a pick for one reply, an empty Send asking for the reply alone,
 // Generate saying whose turn it writes, a speaker that stays chosen through a reload and in
 // a second tab, and the switcher's search. Every card here is made up.
 import { expect, type Page, test } from "@playwright/test"
@@ -7,6 +7,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
 // One session for the file's setup calls: the server allows 50 logins per address in 15 minutes.
@@ -18,7 +19,9 @@ const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server
 
 const composer = (page: Page) => page.getByLabel("Message", { exact: true })
 const generating = (page: Page) => page.getByText("generating", { exact: true })
-const replyFrom = (page: Page) => page.getByRole("group", { name: "Reply from" })
+const whoReplies = (page: Page) => choices(page, "Who replies next")
+/** The composer switcher's first section: the chat's cast, without the persona folder below it. */
+const speakAs = (page: Page) => page.getByRole("group", { name: "Speak as", exact: true })
 const speakerChip = (page: Page) => page.getByRole("button", { name: /^Speaking as / })
 const lastHeader = (page: Page) => page.locator("article[data-slot]").last().locator("header").first()
 
@@ -81,21 +84,23 @@ for (const [width, height] of [
         })
       )
       await page.goto(`${server().url}/chats/${chatId}`)
-      if (width < 640) await page.getByRole("button", { name: "Composer options", exact: true }).click()
-      await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
+      // The chips are always shown, a phone's too: who's next, and Auto naming them.
+      await expect(nextChip(page)).toHaveAccessibleName(nextName("Tobin"))
+      await nextChip(page).click()
+      await expect(
+        whoReplies(page).getByRole("radio", { name: "Auto: Tobin, next in turn", exact: true })
+      ).toBeChecked()
+      await page.keyboard.press("Escape")
+      await expect(whoReplies(page)).toHaveCount(0)
       if (turns > 60) await expect(page.getByText("Mira's earlier turn", { exact: true })).toHaveCount(0)
       const deleted = await admin((api) => api.DeleteMessage({ slotId: first }))
-      await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
+      await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
       await expect(page.getByRole("button", { name: "Mira replies", exact: true })).toBeEnabled()
       await admin((api) => api.RestoreBinItem({ itemId: deleted.id }))
-      await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
+      await expect(nextChip(page)).toHaveAccessibleName(nextName("Tobin"))
       // Delete again, then verify both send paths actually use the corrected order.
       await admin((api) => api.DeleteMessage({ slotId: first }))
-      await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
-      if (width < 640) {
-        await page.keyboard.press("Escape")
-        await expect(page.getByRole("dialog", { name: "Next reply", exact: true })).toHaveCount(0)
-      }
+      await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
       if (turns === 2) {
         await composer(page).fill("A new persona turn after deletion.")
         await page.getByRole("button", { name: "Send as Ana", exact: true }).click()
@@ -116,22 +121,24 @@ for (const [width, height] of [
       })
     )
     await page.goto(`${server().url}/chats/${chatId}`)
-    const search = page.getByRole("combobox", { name: "Find a card to speak as" })
+    const search = page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true })
     await speakerChip(page).click()
     await expect(search).toBeFocused()
     await expect(page.getByRole("tab")).toHaveCount(0)
-    await expect(page.getByRole("option")).toHaveText(
+    await expect(speakAs(page).getByRole("option")).toHaveText(
       // The selected persona first, then the rest of the cast in its order.
       ["Ana", "Mira", "Tobin", "Bo"].map((name) => new RegExp(name)),
       {
         useInnerText: true
       }
     )
-    await expect(page.getByText("joins the chat")).toHaveCount(0)
+    await expect(page.getByText("adds to this chat")).toHaveCount(0)
     if (process.env.RP_SCREENS) await page.screenshot({ path: `${process.env.RP_SCREENS}/speaker-cast-${width}.png` })
     await page.keyboard.type("Harbor")
     await expect(page.getByRole("option")).toHaveCount(0)
-    await expect(page.getByText("No card's name has “Harbor”.")).toBeVisible()
+    await expect(page.getByText("No one in this chat is called “Harbor”.")).toBeVisible()
+    // Adding a card is the Cast tab's, a button away.
+    await expect(speakAs(page).getByRole("button", { name: "Add to chat", exact: true })).toBeVisible()
     await search.fill("Bo")
     await search.press("Enter")
     await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
@@ -140,31 +147,47 @@ for (const [width, height] of [
   })
 }
 
-test("Reply from: the next in turn, a pick for one reply, and an empty Send", async ({ page }) => {
+test("Next: the next in turn, a pick for one reply, and an empty Send", async ({ page }) => {
   const chatId = await chatWith(["Mira", "Tobin", "Wren"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
-  // The characters only: the cards the user plays never reply.
-  await expect(replyFrom(page).getByRole("button", { name: /^Reply from / })).toHaveCount(3)
-  await expect(replyFrom(page).getByRole("button", { name: "Reply from Mira" })).toHaveAttribute("aria-pressed", "true")
-  await expect(replyFrom(page)).toContainText("Next in turn: Mira, first in the cast")
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
+  await expect(nextReply(page).getByRole("button", { name: "Mira replies now", exact: true })).toBeEnabled()
+  // Auto and the characters only: the cards the user plays never reply.
+  await nextChip(page).click()
+  await expect(whoReplies(page).getByRole("radio")).toHaveCount(4)
+  await expect(whoReplies(page).getByRole("radio", { name: /^(Mira|Tobin|Wren)$/ })).toHaveCount(3)
+  await expect(whoReplies(page).getByRole("radio", { name: "Ana", exact: true })).toHaveCount(0)
+  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira, next in turn", exact: true })).toBeChecked()
+  await page.keyboard.press("Escape")
+  await expect(whoReplies(page)).toHaveCount(0)
 
   await composer(page).fill("The lantern gutters.")
   await page.keyboard.press("Enter")
   await expect(lastHeader(page)).toContainText("Mira")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  await expect(replyFrom(page)).toContainText("Next in turn: Tobin, after Mira")
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Tobin"))
 
   // A pick is for one reply, kept on the server until it's used.
-  await replyFrom(page).getByRole("button", { name: "Reply from Wren" }).click()
-  await expect(replyFrom(page)).toContainText("Wren replies next: your pick")
+  await pickReply(page, "Wren")
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
   await page.reload()
-  await expect(replyFrom(page).getByRole("button", { name: "Reply from Wren" })).toHaveAttribute("aria-pressed", "true")
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
+  await nextChip(page).click()
+  await expect(whoReplies(page).getByRole("radio", { name: "Wren", exact: true })).toBeChecked()
+  await expect(
+    whoReplies(page).getByRole("radio", { name: "Auto: Tobin, next in turn", exact: true })
+  ).not.toBeChecked()
+  await page.keyboard.press("Escape")
   // With nothing typed, Send asks for that reply alone.
-  await page.getByRole("button", { name: "Wren replies" }).click()
+  await page.getByRole("button", { name: "Wren replies", exact: true }).click()
   await expect(lastHeader(page)).toContainText("Wren")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  await expect(replyFrom(page)).toContainText("Next in turn: Mira, after Wren")
+  // The pick is used up: Auto again, the next after Wren.
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
+  await nextChip(page).click()
+  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira, next in turn", exact: true })).toBeChecked()
+  await page.keyboard.press("Escape")
 
   // Generate says whose turn it writes: the persona's, for the user.
   const write = page.getByRole("button", { name: "Write for Ana" })
@@ -181,20 +204,20 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
 
   // The search field has focus as the switcher opens; type part of a name, then Enter.
   await speakerChip(page).click()
-  const search = page.getByRole("combobox", { name: "Find a card to speak as" })
+  const search = page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true })
   await expect(search).toBeFocused()
   await page.keyboard.type("bo")
-  await expect(page.getByRole("option")).toHaveCount(1)
-  await expect(page.getByRole("option", { name: /Bo/ })).toHaveAttribute("aria-selected", "true")
+  await expect(speakAs(page).getByRole("option")).toHaveCount(1)
+  await expect(speakAs(page).getByRole("option", { name: /Bo/ })).toHaveAttribute("aria-selected", "true")
   await page.keyboard.press("Enter")
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
 
   // Arrow keys move through what's left; Escape closes without a change.
   await speakerChip(page).click()
   await page.keyboard.type("i")
-  await expect(page.getByRole("option")).toHaveCount(2)
+  await expect(speakAs(page).getByRole("option")).toHaveCount(2)
   await page.keyboard.press("ArrowDown")
-  await expect(page.getByRole("option", { name: /Tobin/ })).toHaveAttribute("aria-selected", "true")
+  await expect(speakAs(page).getByRole("option", { name: /Tobin/ })).toHaveAttribute("aria-selected", "true")
   await page.keyboard.press("Escape")
   await expect(search).toBeHidden()
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Bo/)
@@ -214,12 +237,14 @@ test("the speaker stays chosen through a reload and in every tab; the switcher s
   await second.close()
 })
 
-test("a one-card chat has no Reply from, and an empty Send asks its character", async ({ page }) => {
+test("a one-card chat has no Next chip, and an empty Send asks its character", async ({ page }) => {
   const chatId = await chatWith(["Mira"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
-  await expect(replyFrom(page)).toHaveCount(0)
-  await page.getByRole("button", { name: "Mira replies" }).click()
+  await expect(nextReply(page)).toBeVisible()
+  await expect(nextChip(page)).toHaveCount(0)
+  await expect(nextReply(page).getByRole("button", { name: /replies now$/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Mira replies", exact: true }).click()
   await expect(lastHeader(page)).toContainText("Mira")
 })
 
@@ -260,18 +285,19 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone, pi
   await expect(page.getByRole("button", { name: /^Playing as Visitor 239/ })).toBeVisible()
 })
 
-test("a phone shows the full named Write for action and keeps an empty input compact", async ({ page }) => {
+test("a phone names the Write for action in full on its icon and keeps an empty input compact", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const chatId = await chatWith(["Mira", "Captain Rhee"])
   await page.goto(`${server().url}/chats/${chatId}`)
   await speakerChip(page).click()
-  await page.getByRole("combobox", { name: "Find a card to speak as" }).fill("rhee")
+  await page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true }).fill("rhee")
   await page.keyboard.press("Enter")
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Captain Rhee/)
-  const write = page.getByRole("button", { name: "Write for Captain Rhee" })
+  // An icon on a phone, its full name its label (and tooltip), never a cut-off "Write for Capt…".
+  const write = page.getByRole("button", { name: "Write for Captain Rhee", exact: true })
   await expect(write).toBeEnabled()
-  const label = write.locator("span").first()
-  expect(await label.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await expect(write).toBeInViewport({ ratio: 1 })
+  expect((await write.boundingBox())!.width).toBeLessThan(45)
   expect((await composer(page).boundingBox())!.height).toBeLessThan(45)
 })
 
@@ -301,10 +327,10 @@ test("reply order follows the branch tip, including a character turn beyond the 
   )
   // An old-message deep link opens around Mira, not the actual last character, Tobin.
   await page.goto(`${server().url}/chats/${chatId}?slot=${firstSlot}`)
-  await expect(replyFrom(page)).toContainText("Next in turn: Wren, after Tobin")
-  await expect(page.getByRole("button", { name: "Wren replies" })).toBeEnabled()
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
+  await expect(page.getByRole("button", { name: "Wren replies", exact: true })).toBeEnabled()
   await page.goto(`${server().url}/chats/${chatId}`)
-  await expect(replyFrom(page)).toContainText("Next in turn: Wren, after Tobin")
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
 })
 
 test("typing stays available while the saved speaker is loading; sending waits for it", async ({ page }) => {

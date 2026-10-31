@@ -10,7 +10,9 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
+import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { choices, nextChip, nextName, pickReply } from "./support/strip.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -110,6 +112,15 @@ const shoot = async (page: Page, name: string, width: number, theme: string) => 
 const composerBox = (page: Page) => page.locator("#composer")
 const guidanceSwitch = (page: Page) => page.getByRole("switch", { name: "Guidance", exact: true })
 const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
+/** The composer's regenerate on a wide screen; on a phone, which leaves the box its width, the reply's own. */
+const regenerateLatest = async (page: Page) => {
+  if ((page.viewportSize()?.width ?? 1280) >= 640)
+    return page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Regenerate the latest reply", exact: true })).toHaveCount(0)
+  const reply = lastMessage(page)
+  await showActions(reply)
+  await reply.getByRole("button", { name: "Regenerate", exact: true }).click()
+}
 /** The inspector's list draws rows as they scroll in: its end, where the tail is. */
 const inspectorEnd = async (page: Page, text: string) => {
   await expect
@@ -174,7 +185,7 @@ for (const width of [1440, 390])
 
       // A swipe reuses the guidance of the version it re-rolls, not the box's text.
       await guidance.fill("My own next line, not guidance for this reply.")
-      await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
+      await regenerateLatest(page)
       await expect.poll(() => provider.completions.length).toBe(sent + 2)
       await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
       await expect(lastMessage(page)).toContainText(`Direction: ${direction}`)
@@ -189,7 +200,7 @@ for (const width of [1440, 390])
       // Off: a swipe still reuses the re-rolled version's guidance, and takes nothing from the box.
       await guidanceSwitch(page).click()
       await expect(guidanceSwitch(page)).not.toBeChecked()
-      await page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
+      await regenerateLatest(page)
       await expect.poll(() => provider.completions.length).toBe(sent + 3)
       await expect.poll(async () => (await newestVersion()).direction).toBe(direction)
       const swiped = provider.completions
@@ -229,19 +240,22 @@ for (const width of [1440, 390])
       await shot("09-cast-tab-muted")
       // Never picked automatically: it's not offered to reply.
       if (width < 1024) await closePanel(page)
-      if (width < 640) await page.getByRole("button", { name: "Composer options", exact: true }).click()
-      const replyFrom = page.getByRole("group", { name: "Reply from" })
-      await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
-      await expect(replyFrom.getByRole("status")).not.toContainText(mutedName)
+      await expect(nextChip(page)).toBeVisible()
+      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
+      const whoReplies = choices(page, "Who replies next")
+      await nextChip(page).click()
+      await expect(whoReplies.getByRole("radio", { name: /^Auto: .+, next in turn$/ })).toBeChecked()
+      await expect(whoReplies.getByRole("radio", { name: /^Auto: / })).not.toHaveAccessibleName(
+        `Auto: ${mutedName}, next in turn`
+      )
       // It can still be picked for one reply, explicitly.
-      await replyFrom.getByRole("button", { name: `Reply from ${mutedName} (muted)` }).click()
-      await expect(replyFrom.getByRole("status")).toContainText(`${mutedName} replies next: your pick`)
-      await replyFrom.getByRole("button", { name: "Back to turn order" }).click()
-      await expect(replyFrom.getByRole("status")).toContainText("Next in turn")
-      if (width < 640) {
-        await page.keyboard.press("Escape")
-        await expect(page.getByRole("dialog", { name: "Next reply", exact: true })).toHaveCount(0)
-      }
+      const muted = whoReplies.getByRole("radio", { name: mutedName, exact: true })
+      await expect(muted).toHaveAttribute("aria-description", "Muted: replies only when picked")
+      await muted.click()
+      await expect(nextChip(page)).toHaveAccessibleName(nextName(mutedName))
+      // Auto goes back to the turn order.
+      await pickReply(page, null)
+      await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.
       await page.getByRole("button", { name: /^Speaking as / }).click()
       await page.getByRole("option", { name: mutedName, exact: true }).click()

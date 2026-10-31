@@ -6,6 +6,7 @@ import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
+import { modelChip, modelName } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 let provider: FakeProvider
@@ -83,8 +84,8 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   })
   await expect.poll(async () => (await admin((api) => api.ListLibrary({ kind: "lorebook" }))).length).toBe(1)
   await page.goto(`${server().url}/chats/${chatId}`)
-  // What the chat sends with: the account's current model, in the composer.
-  await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Local model server · fake-small")
+  // What the chat sends with: the account's current model, in the composer's strip.
+  await expect(modelChip(page)).toHaveAccessibleName(modelName("Local model server · fake-small"))
   // Only the lorebooks that apply are listed; the library's are a search away.
   const tab = await openPanel(page, "Lorebooks")
   const inChat = tab.getByRole("list", { name: "Added to this chat" })

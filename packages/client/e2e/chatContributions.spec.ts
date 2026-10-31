@@ -7,6 +7,7 @@ import { createServer, type ViteDevServer } from "vite"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { showActions } from "./support/message.ts"
+import { modelChip, presetChip } from "./support/strip.ts"
 import type { install, close } from "./support/chatContributions.ts"
 
 const server = serverPerFile(withAdmin)
@@ -100,16 +101,29 @@ test("scoped contributions update mounted panels, controls, commands and dialogs
   await expect(page.locator("body")).toHaveAttribute("data-plugin-commands", "2")
 })
 
+/** Whether the chip's popover offers its side panel tab in its footer, then closes it. */
+const expectFooter = async (page: Page, chip: "model" | "preset", shown: boolean) => {
+  await (chip === "model" ? modelChip(page) : presetChip(page)).click()
+  await expect(page.getByRole("radiogroup", { name: chip === "model" ? "Model" : "Prompt preset" })).toBeVisible()
+  const row = page.getByRole("button", { name: chip === "model" ? "Model settings…" : "Edit preset…", exact: true })
+  if (shown) await expect(row).toBeVisible()
+  else await expect(row).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("radiogroup")).toHaveCount(0)
+}
+
 test("panel disablement removes dependent settings buttons, notes links and history shortcuts", async ({ page }) => {
+  // Each settings check opens and closes a chip's popover: twelve round trips on a shared host.
+  test.setTimeout(120_000)
   await setup(page)
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
+  await expectFooter(page, "model", true)
+  await expectFooter(page, "preset", true)
   await contribution(page, "install", "settings")
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toHaveCount(0)
+  await expectFooter(page, "model", false)
+  await expectFooter(page, "preset", false)
   await contribution(page, "close", "settings")
-  await expect(page.getByRole("button", { name: "Model settings", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Prompt preset settings", exact: true })).toBeVisible()
+  await expectFooter(page, "model", true)
+  await expectFooter(page, "preset", true)
   await page.getByRole("button", { name: "Show Mira's card", exact: true }).click()
   const notes = page.getByRole("button", { name: /^Notes \(/ })
   await expect(notes).toBeVisible()

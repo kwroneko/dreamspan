@@ -42,7 +42,7 @@ export const compactTokens = (tokens: number) =>
       : `${Math.round(tokens / 10) * 10}`
 
 /** A note about the next reply's cache from a change still being made (an insertion, say). */
-export interface CacheNote {
+interface CacheNote {
   /** The chip's text when nothing else shows one. */
   readonly short: string
   readonly text: string

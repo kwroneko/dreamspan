@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { card, encode, header, jsonl, message } from "../../server/test/support/stFolder.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { presetChip, presetName } from "./support/strip.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -118,12 +119,12 @@ for (const chars of [14_000, 20_000]) {
       }
     await page.setViewportSize({ width: 1440, height: 960 })
     // The composer names the prompt preset in effect: ST's selected one isn't imported yet.
-    const preset = page.getByRole("combobox", { name: "Prompt preset", exact: true })
-    await expect(preset).toHaveText("Default (built-in)")
+    const preset = presetChip(page)
+    await expect(preset).toHaveAccessibleName(presetName("Default (built-in)"))
     // The later preset upload becomes the current prompt preset; its budget stays in the file.
     await upload("OpenAI Settings/Roomy.json", encode({ openai_max_context: 32000, openai_max_tokens: 300 }))
     await page.reload()
-    await expect(preset).toHaveText("Roomy")
+    await expect(preset).toHaveAccessibleName(presetName("Roomy"))
     await expect(last).toBeVisible()
     await expect(refusal).toContainText("4,095 tokens")
     await expect(explanation).toHaveCount(0)
