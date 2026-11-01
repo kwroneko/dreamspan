@@ -1,12 +1,13 @@
 // Synthetic cards and chats only. Exercise the UI's connection to the existing
-// fork-aware rename backend, including a name save that outlives a failed action.
+// fork-aware rename backend: the name header asks on confirm (owner, 2026-11-01), and a
+// replacement that failed outlives a reload.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel } from "./support/panel.ts"
-import { saveButton } from "./support/saveRevision.ts"
+import { chatNameLine, renameCard } from "./support/cardEditor.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -15,8 +16,16 @@ test.beforeAll(async () => {
   adminCookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
 })
 const admin = <A>(use: Parameters<typeof withCookie<A>>[2]) => withCookie(server(), adminCookie, use)
-const modelBox = (page: Page) =>
-  page.getByRole("textbox", { name: "Name the model sees (leave empty to use the display name)", exact: true })
+/** Renames the chat name (nickname) in the header; a change asks about past messages at once. */
+const rename = (page: Page, name: string) => renameCard(page, "nickname", name)
+/** Closes the question, past the focused answer's explanation. */
+const closePrompt = async (page: Page) =>
+  expect(async () => {
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("dialog", { name: /Replace the name|History replacement/ })).toHaveCount(0, {
+      timeout: 500
+    })
+  }).toPass()
 const prompt = (page: Page) => page.getByRole("dialog", { name: "Replace the name in past messages?", exact: true })
 const seed = (label: string) =>
   admin((api) =>
@@ -61,8 +70,6 @@ const texts = (f: Seed) =>
       return results
     })
   )
-/** Saves the card; a rename then offers to rename it in chats (Save itself asks nothing). */
-const save = (page: Page) => saveButton(page).click()
 const shot = async (page: Page, name: string) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
   expect(await page.getByRole("dialog").evaluate((dialog) => dialog.scrollWidth - dialog.clientWidth)).toBe(0)
@@ -83,13 +90,12 @@ for (const width of [1440, 390])
       const f = await seed(`Library Aria ${width} ${theme}`)
       await page.goto(`${server().url}/library/${f.card.id}`)
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe(theme)
-      // Display-only and version edits leave the effective model name unchanged.
-      await page.getByRole("textbox", { name: "Display name", exact: true }).fill(`Display Aria ${width} ${theme}`)
-      await save(page)
+      // A display name change leaves the name chats use unchanged: nothing is asked.
+      await renameCard(page, "display", `Display Aria ${width} ${theme}`)
+      await expect(page.getByRole("heading", { level: 1, name: `Display Aria ${width} ${theme}` })).toBeVisible()
       await expect(page.getByRole("dialog")).toHaveCount(0)
-      await expect(modelBox(page)).toHaveValue("Aria")
-      await modelBox(page).fill("Ari")
-      await save(page)
+      await expect(chatNameLine(page, "Aria")).toBeVisible()
+      await rename(page, "Ari")
       await expect(
         prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true })
       ).toBeEnabled()
@@ -105,11 +111,9 @@ for (const width of [1440, 390])
         .getByRole("button", { name: `Open Display Aria ${width} ${theme} in the full editor`, exact: true })
         .click()
       await expect(page.getByRole("dialog", { name: "Card editor", exact: true })).toBeVisible()
-      await modelBox(page).fill("Aria")
-      await save(page)
+      await rename(page, "Aria")
       await prompt(page).getByRole("button", { name: /^No\./ }).click()
-      await modelBox(page).fill("Ari")
-      await save(page)
+      await rename(page, "Ari")
       await expect(prompt(page).getByRole("status").filter({ hasText: "Only this chat refers to:" })).toContainText(
         "The lantern garden"
       )
@@ -129,15 +133,13 @@ for (const width of [1440, 390])
       expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
       // Clearing nickname falls back to the display name; all includes the sibling fork.
       await page.goto(`${server().url}/library/${f.card.id}`)
-      await modelBox(page).fill("")
-      await save(page)
-      await expect(prompt(page)).toContainText(`from “Ari” to “Display Aria ${width} ${theme}”`)
+      await rename(page, "")
+      await expect(prompt(page)).toContainText(`call them “Display Aria ${width} ${theme}” instead of “Ari”`)
       await prompt(page).getByRole("button", { name: /^No\./ }).click()
       // Use a separate card to exercise a successful all-chats rename from its old model name.
       const all = await seed(`All scope ${width} ${theme}`)
       await page.goto(`${server().url}/library/${all.card.id}`)
-      await modelBox(page).fill("Ari")
-      await save(page)
+      await rename(page, "Ari")
       await prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true }).click()
       await expect(page.getByRole("status").filter({ hasText: "in 3 chats" })).toBeVisible()
       expect(await texts(all)).toEqual(Array(3).fill("Ari lights the lantern."))
@@ -161,11 +163,12 @@ test("a failed history action survives reload without saving the card twice", as
     })
   })
   await page.goto(`${server().url}/library/${f.card.id}`)
-  await modelBox(page).fill("Ari")
-  await save(page)
+  await rename(page, "Ari")
   await prompt(page).getByRole("button", { name: "Yes, in all 3 chats with Aria", exact: true }).click()
   await expect(prompt(page).getByRole("alert")).toBeVisible()
-  expect((await admin((api) => api.OpenEditor({ refId: f.card.id }))).doc.nickname).toBe("Ari")
+  // Closed after the failure, the rename still goes ahead; the replacement can be resumed.
+  await closePrompt(page)
+  await expect(chatNameLine(page, "Ari")).toBeVisible()
   expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
   const revision = (await admin((api) => api.OpenEditor({ refId: f.card.id }))).ref.headRevisionId
   await page.reload()
@@ -202,23 +205,20 @@ test("forking a card for this chat replaces history only in the viewed fork", as
   expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
 })
 
-test("later name saves keep earlier outstanding history offers", async ({ page }) => {
+test("closing the question cancels the rename and leaves nothing to resume", async ({ page }) => {
   const f = await seed("Repeated rename")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${f.card.id}`)
   for (const name of ["Ari", "Ada"]) {
-    await modelBox(page).fill(name)
-    await save(page)
+    await rename(page, name)
     await expect(prompt(page)).toBeVisible()
-    await page.keyboard.press("Escape")
-    await expect(prompt(page)).toHaveCount(0)
+    await closePrompt(page)
+    await expect(page.getByRole("textbox", { name: "Chat name (nickname)", exact: true })).toHaveValue(name)
+    await page.getByRole("button", { name: "Cancel renaming", exact: true }).click()
+    await expect(chatNameLine(page, "Aria")).toBeVisible()
   }
   await page.reload()
-  for (const names of ["from “Aria” to “Ari”", "from “Ari” to “Ada”"]) {
-    await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()
-    await expect(prompt(page)).toContainText(names)
-    await prompt(page).getByRole("button", { name: /^No\./ }).click()
-  }
+  await expect(chatNameLine(page, "Aria")).toBeVisible()
   await expect(page.getByRole("button", { name: "Resume history replacement", exact: true })).toHaveCount(0)
   expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
 })
@@ -227,8 +227,7 @@ test("a library rename can target a chosen fork instead of the current one", asy
   const f = await seed("Library fork choice")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${f.card.id}`)
-  await modelBox(page).fill("Ari")
-  await save(page)
+  await rename(page, "Ari")
   await prompt(page).getByRole("combobox", { name: "Chat for only this chat" }).click()
   await page.getByRole("option", { name: /^The lantern garden · Garden sibling/ }).click()
   await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
@@ -239,13 +238,26 @@ test("a library rename can target a chosen fork instead of the current one", asy
 test("a recovered chat offer names its original target when opened from another chat", async ({ page }) => {
   const f = await seed("Recovery target")
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  // The replacement fails once, so it's kept for Resume.
+  let fail = true
+  await page.routeWebSocket("**/rpc", (socket) => {
+    const upstream = socket.connectToServer()
+    socket.onMessage((data) => {
+      const request = JSON.parse(String(data))
+      if (request.tag === "RenameHistory" && fail) {
+        request.payload.entityId = "synthetic-missing-card"
+        upstream.send(JSON.stringify(request))
+      } else upstream.send(data)
+    })
+  })
   await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.sibling.id}&panel=cast`)
   await page.getByRole("button", { name: "More for Recovery target", exact: true }).click()
   await page.getByRole("button", { name: "Open Recovery target in the full editor", exact: true }).click()
-  await modelBox(page).fill("Ari")
-  await save(page)
-  await expect(prompt(page)).toBeVisible()
-  await page.keyboard.press("Escape")
+  await rename(page, "Ari")
+  await prompt(page).getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
+  await expect(prompt(page).getByRole("alert")).toBeVisible()
+  await closePrompt(page)
+  fail = false
   await page.goto(`${server().url}/chats/${f.other.chat.id}?panel=cast`)
   await page.getByRole("button", { name: "More for Recovery target", exact: true }).click()
   await page.getByRole("button", { name: "Resume history replacement", exact: true }).click()

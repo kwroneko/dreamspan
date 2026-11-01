@@ -18,6 +18,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
 import { type CardSaved, type RenameAnswer, showCardSaved } from "./cardSaved.ts"
 import { checkCardNames } from "./checkCardNames.ts"
+import { useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useWorkingDoc } from "./store.ts"
 
 /** The chat the editor is opened from, for "only in this chat". */
@@ -83,6 +84,10 @@ export function CardNameHeader({
   const version = useText(store, ["character_version"]) ?? ""
   const url = useSearch({ strict: false }) as { renameChat?: unknown; renameFork?: unknown }
   const [problem, setProblem] = useState<string | null>(null)
+  // Search's Go to a match in a name opens its field with the match selected.
+  const nameMatch = useSearchMatch(["name"])
+  const versionMatch = useSearchMatch(["character_version"])
+  const nicknameMatch = useSearchMatch(["nickname"])
   const chat = (() => {
     if (current?.forkId) return { chatId: current.chatId as ChatId, forkId: current.forkId as ForkId }
     const chatId = Schema.decodeUnknownOption(ChatId)(url.renameChat)
@@ -140,26 +145,29 @@ export function CardNameHeader({
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <Title
-          className={`min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl" : "text-lg leading-snug"}`}
+        {/* The pencil beside the heading, not in it: the heading's name is the card's name. */}
+        <InlineRename
+          value={name}
+          label="the display name"
+          hint={DISPLAY_HINT}
+          fieldLabel="Display name"
+          goTo={nameMatch}
+          onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
         >
-          <InlineRename
-            value={name}
-            label="the display name"
-            hint={DISPLAY_HINT}
-            fieldLabel="Display name"
-            onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
-          >
-            <Tooltip label={DISPLAY_HINT}>
-              <span className="min-w-0 [overflow-wrap:anywhere]">{name || "Unnamed card"}</span>
-            </Tooltip>
-          </InlineRename>
-        </Title>
+          <Tooltip label={DISPLAY_HINT}>
+            <Title
+              className={`min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl" : "text-lg leading-snug"}`}
+            >
+              {name || "Unnamed card"}
+            </Title>
+          </Tooltip>
+        </InlineRename>
         <InlineRename
           value={version}
           label="the version"
           hint={VERSION_HINT}
           fieldLabel="Version"
+          goTo={versionMatch}
           allowEmpty
           className="text-sm"
           onRename={async (next) => {
@@ -184,6 +192,7 @@ export function CardNameHeader({
         label="the chat name"
         hint={NICKNAME_HINT}
         fieldLabel="Chat name (nickname)"
+        goTo={nicknameMatch}
         allowEmpty
         className="text-sm"
         onRename={(next) => rename({ name, nickname: next })}

@@ -8,6 +8,7 @@ import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openEntry, openSettings } from "./support/lorebook.ts"
 import { expectTextBox } from "./support/textbox.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -60,7 +61,9 @@ for (const width of [1440, 390]) {
     const {
       library: { ref }
     } = await response.json()
-    await page.goto(`${server().url}/library/${ref.id}`)
+    // The book's own view, the large editor: its entries in the table (the card's Lorebook tab
+    // has the side panel's book editor, lorebookPanel.spec.ts).
+    await page.goto(`${server().url}/library/${ref.id}?focus=lorebook`)
     const entry = page.getByRole("group", { name: "Lorebook entry 7", exact: true })
     // Rows stay closed until opened; large books do not mount every text editor.
     await expect(page.getByRole("group", { name: /^Lorebook entry/ })).toHaveCount(0)
@@ -212,7 +215,7 @@ test("an absent embedded book can be authored, including an empty book after rem
 }) => {
   const card = await admin((api) => api.CreateCard({ label: "New lore", name: "New lore" }))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  await page.goto(`${server().url}/library/${card.id}`)
+  await page.goto(`${server().url}/library/${card.id}?focus=lorebook`)
   await expect(page.getByText("This card has no embedded lorebook.")).toBeVisible()
   await page.getByRole("button", { name: "Add entry", exact: true }).click()
   await page.getByText("Book settings").click()
@@ -239,7 +242,7 @@ for (const target of ["book", "entry"] as const)
     const name = `${target === "book" ? "Restore" : "Delete"} lore ${target}`
     const card = await admin((api) => api.CreateCard({ label: name, name }))
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    await page.goto(`${server().url}/library/${card.id}`)
+    await page.goto(`${server().url}/library/${card.id}?focus=lorebook`)
     await page.getByRole("button", { name: "Add entry", exact: true }).click()
     await page.getByText("Book settings").click()
     await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Draft book")
@@ -287,6 +290,8 @@ for (const target of ["book", "entry"] as const)
         return recovered.some((r) => r.content === text) || history.includes(text)
       })
       .toBe(true)
+    await page.getByRole("button", { name: "Show the whole card", exact: true }).click()
+    await cardFieldsTab(page, "Metadata")
     await page.getByRole("textbox", { name: "Creator", exact: true }).fill("Synthetic creator")
     await save(page)
     await page.reload()

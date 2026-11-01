@@ -3,6 +3,7 @@
 // editor (a wide page). Each tab is a registered part: a plugin can add one, replace one or
 // disable one, as with every other slot (spec/PLUGINS.md §8). The built-ins register in
 // `index.tsx`: Definition, Greetings, Metadata, Lorebook, Notes and Extra.
+import type { FieldPath } from "@rp/shared/editing.ts"
 import type { ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { Caller } from "./caller.ts"
@@ -24,6 +25,8 @@ export interface CardTab {
   /** What the tab holds, on hover and focus. */
   readonly description: string
   readonly component: ComponentType<CardTabProps>
+  /** Whether a field of the card is in this tab: search's Go to opens the tab that holds it. */
+  readonly holds?: (path: FieldPath) => boolean
 }
 
 export const cardEditorTabs = makeRegistry<CardTab>()

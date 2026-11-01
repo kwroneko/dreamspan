@@ -1,5 +1,6 @@
 // The built-in card editor tabs (`cardTabs.ts`), each loaded with the editor that shows it.
 import { lazy, Suspense } from "react"
+import type { FieldPath } from "@rp/shared/editing.ts"
 import { Loading } from "../../ui/Spinner.tsx"
 import {
   CARD_TAB_DEFINITION,
@@ -11,6 +12,12 @@ import {
   type CardTabProps,
   cardEditorTabs
 } from "./cardTabs.ts"
+
+/** The fields at the top of a card's document each tab holds, for search's Go to. */
+const top =
+  (...fields: ReadonlyArray<string>) =>
+  (path: FieldPath) =>
+    fields.includes(String(path[0]))
 
 type Panel = "definition" | "greetings" | "metadata" | "lorebook" | "notes" | "extra"
 
@@ -32,14 +39,16 @@ export const registerCardTabs = () => [
     label: "Definition",
     description:
       "What goes into the prompt: description, personality, scenario, example messages and the card's own prompts.",
-    component: panel("definition")
+    component: panel("definition"),
+    holds: top("description", "personality", "scenario", "mes_example", "system_prompt", "post_history_instructions")
   }),
   cardEditorTabs.register({
     id: CARD_TAB_GREETINGS,
     order: 20,
     label: "Greetings",
     description: "The first message, alternate greetings, and greetings for group chats.",
-    component: panel("greetings")
+    component: panel("greetings"),
+    holds: top("first_mes", "alternate_greetings", "group_only_greetings")
   }),
   cardEditorTabs.register({
     id: CARD_TAB_METADATA,
@@ -47,14 +56,16 @@ export const registerCardTabs = () => [
     label: "Metadata",
     description:
       "What isn't prompt text: creator's notes, tags, creator, talkativeness in group chats, where the card came from.",
-    component: panel("metadata")
+    component: panel("metadata"),
+    holds: top("creator_notes", "tags", "creator", "extensions")
   }),
   cardEditorTabs.register({
     id: CARD_TAB_LOREBOOK,
     order: 40,
     label: "Lorebook",
     description: "The card's own lorebook, which travels with it.",
-    component: panel("lorebook")
+    component: panel("lorebook"),
+    holds: top("character_book")
   }),
   cardEditorTabs.register({
     id: CARD_TAB_NOTES,
@@ -68,6 +79,7 @@ export const registerCardTabs = () => [
     order: 60,
     label: "Extra",
     description: "Regex scripts and anything else the card carries.",
-    component: panel("extra")
+    component: panel("extra"),
+    holds: top("regex")
   })
 ]

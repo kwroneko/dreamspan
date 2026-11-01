@@ -26,6 +26,7 @@ import {
 import { asUser } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -305,6 +306,7 @@ for (const width of [1440, 390])
       // The card editor's notes, collapsed.
       await page.goto(`${server().url}/library/${ariaRef}`)
       await expect(page.getByRole("heading", { level: 1, name: "Aria Vance" })).toBeVisible()
+      await cardFieldsTab(page, "Notes")
       const notes = page.getByRole("list", { name: "The card's notes" })
       await expect(notes.getByRole("button").first()).toBeVisible()
       await notes.scrollIntoViewIfNeeded()

@@ -12,6 +12,7 @@ import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
 import { editHistoryTexts, revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -74,6 +75,7 @@ test.beforeAll(async ({ browser }) => {
   const id = (name: string) => refs.find((ref) => ref.label === name)!.entityId as EntityId
   // One portrait with an image, for the lightbox and the strip.
   await page.goto(`${server().url}/library/${refs.find((ref) => ref.label === "Wren")!.id}`)
+  await cardFieldsTab(page, "Metadata")
   await page
     .getByLabel("Choose an avatar, or drop it here")
     .setInputFiles({ name: "wren.png", mimeType: "image/png", buffer: portraitPng() })
@@ -250,9 +252,8 @@ for (const width of [1440, 390])
     await tab.getByRole("button", { name: `Open ${name} in the full editor`, exact: true }).click()
     const overlay = page.getByRole("dialog", { name: "Card editor", exact: true })
     await expect(overlay.getByRole("heading", { level: 1, name, exact: true })).toBeVisible()
-    await expect(
-      textBox(overlay, "Alternate greetings").or(overlay.getByRole("button", { name: "Add a greeting" }))
-    ).toBeVisible()
+    await cardFieldsTab(overlay, "Greetings")
+    await expect(overlay.getByRole("button", { name: "Add a greeting" })).toBeVisible()
     await shoot(page, `full-editor-over-chat-${width}`)
     await overlay.getByRole("button", { name: "More actions", exact: true }).click()
     await shoot(page, `full-editor-more-${width}`)

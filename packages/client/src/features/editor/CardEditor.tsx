@@ -9,7 +9,7 @@ import { estimateTextTokens } from "@rp/shared/cardTokens.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
-import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -31,6 +31,7 @@ import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
 import { AddNoteMenu, SharedNotePicker } from "./notes.tsx"
 import { EditorPortrait } from "./PortraitControls.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
+import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
 
 /** What each field is for, on hover over its label. */
@@ -517,6 +518,14 @@ export function CardEditor({
   if (initial !== lastInitial) {
     setLastInitial(initial)
     setTab(initial)
+  }
+  // Search's Go to opens the tab that holds the field it goes to.
+  const match = useContext(SearchNavigation)
+  const [lastMatch, setLastMatch] = useState(match)
+  if (match !== lastMatch) {
+    setLastMatch(match)
+    const holder = match && tabs.find((entry) => entry.holds?.(match.path))
+    if (holder) setTab(holder.id)
   }
   const shown = tabs.some((entry) => entry.id === tab) ? tab : (tabs[0]?.id ?? "")
   if (tabs.length === 0) return null

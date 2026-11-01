@@ -66,7 +66,7 @@ for (const width of [1440, 390])
           .filter({ hasText: /^Saved as revision \d+$/ })
           .first()
       ).toBeVisible()
-      await page.getByRole("button", { name: "More actions", exact: true }).click()
+      // In the header itself, beside Fork and Export….
       await page.getByRole("button", { name: "Import a new version…", exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Import a new version of Wren" })
       await expect(dialog).toBeVisible()
