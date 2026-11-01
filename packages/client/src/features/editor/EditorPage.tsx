@@ -287,19 +287,26 @@ export function Editor({
               saveDisabled={clash !== null}
               onSaved={(saved) => setNotice(savedNotice(saved))}
             />
-            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
-            <Tooltip label="Earlier revisions: compare them or bring one back">
-              <Button onClick={() => setOpen("history")}>History</Button>
-            </Tooltip>
+            {ref.kind !== "preset" && (
+              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
+                Search
+              </Button>
+            )}
+            <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
+              History
+            </Button>
             {ref.kind === "card" && (
               <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
             )}
             {ref.kind !== "card" ? (
               ref.kind !== "note" &&
               ref.refKind !== "chat_override" && (
-                <Tooltip label={`A copy under its own name that still takes this ${KINDS[ref.kind]}'s later changes`}>
-                  <Button onClick={() => setOpen("fork")}>Make a variant</Button>
-                </Tooltip>
+                <Button
+                  hint="A named copy with its own changes, which still gets this one's updates."
+                  onClick={() => setOpen("fork")}
+                >
+                  Make a variant
+                </Button>
               )
             ) : (
               // What's used less, grouped; each opens its own dialog.
@@ -338,18 +345,17 @@ export function Editor({
                     : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
               </p>
               {ref.kind === "preset" && (
-                <Tooltip label="Find, and find and replace, across every prompt">
-                  <Button
-                    variant="ghost"
-                    className="h-7! shrink-0 px-2!"
-                    aria-expanded={searching}
-                    aria-controls="preset-search"
-                    onClick={() => setSearching(!searching)}
-                  >
-                    <Icon name="search" />
-                    Search
-                  </Button>
-                </Tooltip>
+                <Button
+                  variant="ghost"
+                  className="h-7! shrink-0 px-2!"
+                  aria-expanded={searching}
+                  aria-controls="preset-search"
+                  hint="Find and replace text anywhere in the preset."
+                  onClick={() => setSearching(!searching)}
+                >
+                  <Icon name="search" />
+                  Search
+                </Button>
               )}
             </div>
           </div>

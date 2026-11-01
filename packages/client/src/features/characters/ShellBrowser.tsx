@@ -37,6 +37,7 @@ export function PinButton({ fork }: { fork: ShellFork }) {
         pending={action.pending}
         aria-label={`${fork.pinned ? "Unpin" : "Pin"} ${fork.name}`}
         aria-pressed={fork.pinned}
+        hint={fork.pinned ? "Takes it out of Pinned chats." : "Keeps this branch in Pinned chats, above the rest."}
         className="h-8 px-2"
         onClick={() =>
           void action.run(
@@ -209,8 +210,8 @@ export function SortSwitch({
       value={value}
       onValueChange={onChange}
       options={[
-        { value: "recent", label: "Recent" },
-        { value: "created", label: "Created" },
+        { value: "recent", label: "Recent", description: "Latest activity first." },
+        { value: "created", label: "Created", description: "Newest first." },
         { value: "name", label: "Name" }
       ]}
     />

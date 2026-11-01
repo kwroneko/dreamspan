@@ -166,6 +166,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
         <div className="flex flex-wrap gap-2">
           <Button
             pending={restoring}
+            hint="Puts it back where it was deleted from."
             onClick={async () => {
               setRestoring(true)
               // The bin keeps showing it, with where it went back to, until the page reloads.
@@ -183,6 +184,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           </Button>
           <Button
             variant="ghost"
+            hint="Erases it so it can’t be restored. You see what it affects and confirm first."
             onClick={() => {
               setExpectedForkIds(null)
               setConfirming(true)
@@ -251,6 +253,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
         <Button
           variant="ghost"
           disabled={!end}
+          hint="Deletes everything in this list for good, after you confirm. Recovered text stays."
           onClick={() => {
             setExpectedForkIds(null)
             setEmptying(shown.map((item) => item.id))
@@ -320,6 +323,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
       <div className="flex flex-wrap gap-2">
         <Button
           pending={open.pending}
+          hint="Opens the whole text, to copy what you need."
           onClick={async () => {
             const result = await open.run((client) => client("GetRecoveredText", { id: text.id }))
             if (result.ok) setFull(result.value.content)
@@ -327,7 +331,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
         >
           Show all
         </Button>
-        <Button variant="ghost" onClick={() => setConfirming(true)}>
+        <Button variant="ghost" hint="Erases this text, after you confirm." onClick={() => setConfirming(true)}>
           Delete for good
         </Button>
       </div>

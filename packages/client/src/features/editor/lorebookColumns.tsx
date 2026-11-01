@@ -81,10 +81,14 @@ function NumberCell({
   )
 }
 
-const STRATEGIES: ReadonlyArray<{ readonly value: Strategy; readonly label: string; readonly short: string }> = [
-  { value: "constant", label: "Constant · always included", short: "Constant" },
-  { value: "normal", label: "Normal · when a key matches", short: "Normal" },
-  { value: "vectorized", label: "Vectorized · by similarity", short: "Vectorized" }
+const STRATEGIES: ReadonlyArray<{ readonly value: Strategy; readonly label: string; readonly description: string }> = [
+  { value: "constant", label: "Constant", description: "Included without a key match, while it's enabled." },
+  { value: "normal", label: "Normal", description: "Included when one of its primary keys appears in the chat." },
+  {
+    value: "vectorized",
+    label: "Vectorized",
+    description: "ST matches it by similarity to the chat. Chats here don't yet, and match its keys."
+  }
 ]
 
 function StrategyCell({ store, path, entry, title }: LorebookEntryContext) {
@@ -97,7 +101,6 @@ function StrategyCell({ store, path, entry, title }: LorebookEntryContext) {
       className={`h-8! ${edited(dirty)}`}
       items={STRATEGIES}
       value={strategyOf(entry)}
-      shown={(value) => STRATEGIES.find((item) => item.value === value)?.short ?? value}
       onValueChange={(next) => {
         if ((next === "constant") !== entry.constant) store.setValue([...path, "constant"], next === "constant")
         if ((next === "vectorized") !== entry.vectorized) store.setValue([...path, "vectorized"], next === "vectorized")
@@ -262,18 +265,31 @@ export const registerLorebookTable = () => {
   lorebookColumns.register({ id: "trigger", order: 50, header: "Trigger %", width: "4.75rem", cell: TriggerCell })
 
   // ST's "Priority": the highest order first.
-  lorebookSorts.register({ id: "order", order: 10, label: "Order", compare: (a, b) => number(b.order, a.order) })
+  lorebookSorts.register({
+    id: "order",
+    order: 10,
+    label: "Order",
+    description: "Highest order first, as ST's Priority sorts.",
+    compare: (a, b) => number(b.order, a.order)
+  })
   lorebookSorts.register({
     id: "title",
     order: 20,
     label: "Title",
     compare: (a, b, facts) => facts(a).title.localeCompare(facts(b).title, undefined, { numeric: true })
   })
-  lorebookSorts.register({ id: "depth", order: 30, label: "Depth", compare: (a, b) => number(a.depth, b.depth) })
+  lorebookSorts.register({
+    id: "depth",
+    order: 30,
+    label: "Depth",
+    description: "Lowest depth first.",
+    compare: (a, b) => number(a.depth, b.depth)
+  })
   lorebookSorts.register({
     id: "trigger",
     order: 40,
     label: "Trigger %",
+    description: "Highest chance first.",
     compare: (a, b) => number(b.probability, a.probability)
   })
   // Entries keep no time of change: the ones with unsaved changes come first, then the newest added.
@@ -281,6 +297,7 @@ export const registerLorebookTable = () => {
     id: "changed",
     order: 50,
     label: "Recently changed",
+    description: "Entries with unsaved changes first, then the newest added.",
     compare: (a, b, facts) => Number(facts(b).changed) - Number(facts(a).changed) || facts(b).index - facts(a).index
   })
 
@@ -288,6 +305,7 @@ export const registerLorebookTable = () => {
     id: "duplicate",
     order: 10,
     label: "Duplicate",
+    description: "A copy in this book, kept with its other unsaved changes.",
     icon: "duplicate",
     run: ({ store, path, entry, book, root, reveal }) => {
       const uid = freshUid(book)
@@ -300,6 +318,7 @@ export const registerLorebookTable = () => {
     id: "copy",
     order: 20,
     label: "Copy to another lorebook…",
+    description: "Saves a copy in the lorebook you pick, right away. This book keeps it.",
     icon: "copy",
     dialog: CopyToBook
   })
@@ -307,6 +326,8 @@ export const registerLorebookTable = () => {
     id: "move",
     order: 30,
     label: "Move to another lorebook…",
+    description:
+      "Saves it in the lorebook you pick right away. Its removal here is saved with this book's other changes.",
     icon: "right",
     dialog: MoveToBook
   })
@@ -314,6 +335,7 @@ export const registerLorebookTable = () => {
     id: "delete",
     order: 100,
     label: "Delete",
+    description: "Removed when you save the book. Until then, Restore above the table brings it back.",
     icon: "trash",
     tone: "danger",
     run: ({ store, path }) => void store.removeItem(path)

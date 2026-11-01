@@ -24,6 +24,8 @@ export interface PanelProps {
 export interface PanelDescriptor {
   readonly id: string
   readonly label: string
+  /** What the panel holds, on its tool tab's tooltip: "This chat's notes for the model", say. */
+  readonly description?: string
   readonly order: number
   readonly icon: IconName
   readonly component: ComponentType<PanelProps>

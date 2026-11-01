@@ -112,7 +112,11 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
       )}
       {revision.id !== state.snapshot!.ref.headRevisionId && (
         <div>
-          <Button disabled={!docs || clash !== null} onClick={() => void restore()}>
+          <Button
+            disabled={!docs || clash !== null}
+            hint="Saves this revision's content as a new revision. Nothing in between is lost."
+            onClick={() => void restore()}
+          >
             Restore
           </Button>
           {docs && clash && (

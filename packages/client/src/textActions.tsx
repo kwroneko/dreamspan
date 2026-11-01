@@ -16,6 +16,8 @@ export interface TextAction {
   readonly label: string
   /** What a phone's narrow editor bar shows, `label` remaining its accessible name. */
   readonly shortLabel?: string
+  /** What it does, in a sentence, when the label alone doesn't say: shown in its tooltip. */
+  readonly description?: string
   readonly icon?: IconName
   /**
    * Where an editor offers it in its own chrome: on its whole text, or on its selection,
@@ -100,11 +102,17 @@ export function EditorTextActions({
       {offered.map(({ action, context }) => (
         <Tooltip
           key={action.id}
-          label={action.shortcut ? `${action.label} (${shortcutLabel(action.shortcut)})` : action.label}
+          label={
+            <>
+              {action.shortcut ? `${action.label} (${shortcutLabel(action.shortcut)})` : action.label}
+              {action.description && <span className="block">{action.description}</span>}
+            </>
+          }
         >
           <button
             type="button"
             aria-label={action.label}
+            aria-description={action.description}
             // The editor keeps its focus and selection.
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => action.run(context)}

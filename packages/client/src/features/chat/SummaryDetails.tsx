@@ -5,6 +5,7 @@ import { useAction } from "../../actions.tsx"
 import { routes } from "../../routes.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Alert, Card, CardHeader } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { summaryPreviews } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 import { moneyText } from "./lcm.ts"
@@ -84,7 +85,12 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
   }, [session, summary.id, open, read])
   return (
     <div className="flex flex-col gap-2">
-      <Button variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button
+        variant="ghost"
+        aria-expanded={open}
+        hint="How this summary was written: its model, time, tokens and cost."
+        onClick={() => setOpen(!open)}
+      >
         Details
       </Button>
       {open &&
@@ -96,13 +102,15 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
           <>
             <Provenance details={details} />
             {details.request ? (
-              <Link
-                to="/chats/$chatId/summaries/$summaryId/request"
-                params={{ chatId: session.id, summaryId: summary.id }}
-                className="text-sm text-accent underline"
-              >
-                Open request in inspector
-              </Link>
+              <Tooltip label="The request this summary was written from, exactly as it was sent.">
+                <Link
+                  to="/chats/$chatId/summaries/$summaryId/request"
+                  params={{ chatId: session.id, summaryId: summary.id }}
+                  className="self-start text-sm text-accent underline"
+                >
+                  Open request in inspector
+                </Link>
+              </Tooltip>
             ) : (
               <p className="text-sm text-muted">Request capture: unavailable.</p>
             )}

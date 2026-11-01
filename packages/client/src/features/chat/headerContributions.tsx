@@ -43,6 +43,7 @@ export const registerChatHeader = () => [
   chatCommands.register({
     id: "chat.branches",
     label: "Branches…",
+    description: "Switch to, rename or delete this chat's branches.",
     order: 2,
     icon: "branch",
     available: ({ view }) => view.chat !== null,
@@ -51,6 +52,7 @@ export const registerChatHeader = () => [
   chatCommands.register({
     id: "chat.new-with-cast",
     label: "New chat with this cast",
+    description: "A fresh chat with the same characters, each greeting again. It's saved when you first send.",
     order: 3,
     icon: "plus",
     available: ({ view, navigate }) => navigate !== undefined && castCharacters(view).length > 0,
@@ -64,6 +66,7 @@ export const registerChatHeader = () => [
   chatCommands.register({
     id: "chat.export",
     label: "Export…",
+    description: "Downloads the branch shown as a SillyTavern chat file or plain text.",
     order: 4,
     icon: "download",
     available: ({ view }) => view.chat !== null,
@@ -80,6 +83,7 @@ export const registerChatHeader = () => [
   chatCommands.register({
     id: "chat.delete",
     label: "Delete chat",
+    description: "Moves the chat, with all its branches, to the bin, with Undo.",
     order: 90,
     icon: "trash",
     tone: "danger",

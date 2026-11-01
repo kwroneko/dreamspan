@@ -83,6 +83,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button
+              hint="When you save, your list replaces the saved one."
               onClick={() => {
                 action.clearError()
                 durable.setText(JSON.stringify({ ...values, revision: saved.revision }))
@@ -92,6 +93,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
             </Button>
             <Button
               variant="ghost"
+              hint="Drops your unsaved changes for the scripts saved now."
               onClick={() => {
                 action.clearError()
                 void durable.discard()
@@ -119,17 +121,27 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
                   onOpenChange={(next) => toggle(script.id, next)}
                   actions={
                     <>
-                      <Button variant="ghost" disabled={index === 0} onClick={() => move(index, -1)}>
+                      <Button
+                        variant="ghost"
+                        disabled={index === 0}
+                        hint="Scripts run in list order, top first."
+                        onClick={() => move(index, -1)}
+                      >
                         Move up
                       </Button>
                       <Button
                         variant="ghost"
                         disabled={index === values.scripts.length - 1}
+                        hint="Scripts run in list order, top first."
                         onClick={() => move(index, 1)}
                       >
                         Move down
                       </Button>
-                      <Button variant="ghost" onClick={() => edit(values.scripts.filter((_, i) => i !== index))}>
+                      <Button
+                        variant="ghost"
+                        hint="Removed when you save the scripts."
+                        onClick={() => edit(values.scripts.filter((_, i) => i !== index))}
+                      >
                         Delete the script
                       </Button>
                     </>
@@ -142,6 +154,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={values.scripts.length >= MAX_GLOBAL_SCRIPTS}
+            hint="A new script at the end, applied to replies and off until you turn it on."
             onClick={() => {
               const script = newScript()
               edit([...values.scripts, script])
@@ -155,6 +168,7 @@ function GlobalRegexForm({ saved }: { saved: GlobalRegex }) {
           </Button>
           <Button
             variant="ghost"
+            hint="Drops every unsaved change, back to the saved scripts."
             onClick={() => {
               void durable.discard()
               setMessage(null)

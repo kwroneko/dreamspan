@@ -4,10 +4,30 @@ import type { HistoryHit, HistoryRecord, HistorySearch, HistoryCursor } from "@r
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Button } from "../../ui/Button.tsx"
 import { showToast } from "../../ui/Toast.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
 type Record = typeof HistoryRecord.Type
 const keyOf = (hit: HistoryHit) => `${hit.kind}:${hit.targetId}`
+/** The search's switches, each with what it does. */
+const OPTIONS = [
+  ["matchCase", "Aa · Match case", "Finds only text with the same capitals."],
+  ["wholeWord", "ab · Whole word", "Finds it only as a whole word, not inside a longer one."],
+  [
+    "regex",
+    ".* · Regular expression",
+    "Find is a regular expression, and Replace can use its groups: $1, $<name>, $& for the whole match."
+  ],
+  [
+    "preserveCase",
+    "Preserve case",
+    "Each replacement takes the capitals of the text it replaces: replacing cat with dog makes “Cat” “Dog”."
+  ],
+  ["messages", "Messages", "The version each message shows."],
+  ["swipes", "Swipes", "Each message's other versions, the ones it doesn't show."],
+  ["summaries", "Summaries", "This branch's summaries of older messages."]
+] as const
+
 const initial: HistorySearch = {
   pairs: [{ find: "", replace: "" }],
   matchCase: false,
@@ -225,7 +245,7 @@ export function HistoryPanel({
   return (
     <div className="flex flex-col gap-4 p-3 text-sm">
       <h2 className="font-semibold">Search and replace</h2>
-      <p className="text-muted">Only this chat. Forks and other chats keep their history.</p>
+      <p className="text-muted">Only this branch: other branches and chats keep their history.</p>
       {search.pairs.map((pair, i) => (
         <fieldset key={i} className="flex flex-col gap-2">
           <label>
@@ -271,25 +291,18 @@ export function HistoryPanel({
         ＋ Add pair
       </Button>
       <div className="flex flex-wrap gap-3">
-        {(
-          [
-            ["matchCase", "Aa · Match case"],
-            ["wholeWord", "ab · Whole word"],
-            ["regex", ".* · Regular expression"],
-            ["preserveCase", "Preserve case"],
-            ["messages", "Messages"],
-            ["swipes", "Swipes"],
-            ["summaries", "Summaries"]
-          ] as const
-        ).map(([key, label]) => (
-          <label key={key} className="flex items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={search[key]}
-              onChange={(e) => setSearch({ ...search, [key]: e.target.checked })}
-            />
-            {label}
-          </label>
+        {OPTIONS.map(([key, label, description]) => (
+          <Tooltip key={key} label={description}>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                aria-description={description}
+                checked={search[key]}
+                onChange={(e) => setSearch({ ...search, [key]: e.target.checked })}
+              />
+              {label}
+            </label>
+          </Tooltip>
         ))}
       </div>
       {error && (
@@ -315,12 +328,14 @@ export function HistoryPanel({
       <div className="flex flex-wrap gap-2">
         <Button
           disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
+          hint="Replaces only the current match: the first, or the one Previous or Next went to."
           onClick={() => void apply(true)}
         >
           Replace
         </Button>
         <Button
           disabled={pending || scanning || JSON.stringify(search) !== completedSearch || !included.length || !!error}
+          hint="Replaces every match you haven't skipped, as one edit you can undo."
           onClick={() => void apply(false)}
         >
           Replace all
@@ -408,7 +423,11 @@ export function HistoryPanel({
               {record.inherited ? `Made in ${record.madeInName} · ` : ""}
               {record.status}
             </p>
-            <Button disabled={pending || record.status === "undone"} onClick={() => void undo(record)}>
+            <Button
+              disabled={pending || record.status === "undone"}
+              hint="Puts back everything this edit changed in this branch. Text changed again since is kept."
+              onClick={() => void undo(record)}
+            >
               Undo all
             </Button>
             {record.items.map((item) => (
@@ -422,6 +441,9 @@ export function HistoryPanel({
                 </div>
                 <Button
                   disabled={pending || !item.applied}
+                  {...(item.kind === "version_replace" && item.slotId
+                    ? { hint: "Puts this message back, with the summaries of it that this edit changed." }
+                    : {})}
                   onClick={() =>
                     void (item.kind === "version_replace" && item.slotId
                       ? undo(record, item.slotId)
@@ -432,7 +454,7 @@ export function HistoryPanel({
                     ? "Undo this summary"
                     : item.kind === "state_event"
                       ? "Undo this state change"
-                      : "Undo this message and covering summaries"}
+                      : "Undo this message"}
                 </Button>
               </details>
             ))}

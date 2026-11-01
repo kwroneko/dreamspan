@@ -20,6 +20,8 @@ export interface LibraryItemContext {
 export interface LibraryItemProps extends LibraryItemContext {
   readonly openDialog: () => void
   readonly closeDialog: () => void
+  /** The action's `description`, for its control or menu entry to show beside it. */
+  readonly description?: string | undefined
 }
 export interface LibraryItemAction {
   readonly id: string
@@ -31,6 +33,8 @@ export interface LibraryItemAction {
   readonly menu?: ComponentType<LibraryItemProps>
   /** The dialog its menu entry opens, kept mounted by the host after the menu closes. */
   readonly dialog?: ComponentType<LibraryItemProps>
+  /** What it does, in a sentence: the host hands it to `direct` and `menu` to show beside them. */
+  readonly description?: string
 }
 export const libraryItemActions = makeRegistry<LibraryItemAction>()
 
@@ -55,7 +59,8 @@ export function LibraryItemActions({ context }: { context: LibraryItemContext })
   const [open, setOpen] = useState<Open | null>(null)
   const props = (target: Open) => ({
     openDialog: () => setOpen(target),
-    closeDialog: () => setOpen(null)
+    closeDialog: () => setOpen(null),
+    description: target.from === "library" ? actions.find((action) => action.id === target.id)?.description : undefined
   })
   // A dialog whose action was removed or disabled goes with it.
   const libraryDialog = open?.from === "library" ? actions.find((action) => action.id === open.id) : undefined

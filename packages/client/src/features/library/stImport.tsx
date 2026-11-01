@@ -281,7 +281,7 @@ function LinkChoiceRow({
   const items = [
     ...choice.candidates.map((candidate) => ({ value: candidate.entityId as string, label: candidate.label })),
     ...others,
-    { value: "none", label: "No card" }
+    { value: "none", label: "No card", description: "Imports it without linking it to any of your cards." }
   ]
   return (
     <li className="flex min-w-0 flex-col gap-2 py-3 first:pt-0 last:pb-0">
@@ -294,6 +294,7 @@ function LinkChoiceRow({
         <Button
           disabled={card === null}
           pending={pending}
+          hint="Imports this chat now, linked to the card you chose."
           onClick={async () => {
             setPending(true)
             // The report's candidates are the user's cards, or "none".
@@ -401,7 +402,12 @@ function ReportActions({
                         : "It has no summary."}
                   </span>
                 </div>
-                <Button onClick={() => unhide(run)}>Un-hide</Button>
+                <Button
+                  hint="Sends these messages to the model again, from the chat’s first message to the end of the run."
+                  onClick={() => unhide(run)}
+                >
+                  Un-hide
+                </Button>
               </li>
             ))}
           </ul>
@@ -558,12 +564,18 @@ function FinishedJob({ job, open }: { job: StImportJob; open: StImportSectionPro
             )}
             <div className="mt-4 flex flex-wrap gap-2">
               {ended && job.mode === "path" && admin && (
-                <Button variant="primary" pending={action.pending} onClick={() => void again()}>
+                <Button
+                  variant="primary"
+                  pending={action.pending}
+                  hint="Starts a new import of the same folder, which takes in only what’s new or changed."
+                  onClick={() => void again()}
+                >
                   Import again
                 </Button>
               )}
               <Button
                 variant="ghost"
+                hint="Forgets this import and its report. Nothing it imported changes."
                 onClick={async () => {
                   const cleared = await action.run(
                     (client) => client("ClearStImports", { importId: job.id }),
@@ -879,6 +891,7 @@ function StartSection({ open }: StImportSectionProps) {
                 className="justify-self-start"
                 disabled={folderPath.trim() === "" || action.pending}
                 pending={scanning}
+                hint="Lists what’s in it and how much is new. Nothing is imported yet."
               >
                 {scanning ? "Looking through the folder…" : "Look in this folder"}
               </Button>
@@ -956,6 +969,7 @@ function StartSection({ open }: StImportSectionProps) {
                 variant="primary"
                 disabled={plan === null || plan.send.length === 0 || running}
                 pending={starting}
+                hint="Adds what’s new, and takes in what changed since an earlier import."
                 onClick={() => void runImport()}
               >
                 Import
@@ -1025,6 +1039,7 @@ function JobsSection({ opened }: StImportSectionProps) {
               <Button
                 variant="ghost"
                 pending={action.pending}
+                hint="Forgets every finished import and its report. Nothing they imported changes."
                 onClick={async () => {
                   const cleared = await action.run(
                     (client) => client("ClearStImports", { importId: null }),

@@ -32,5 +32,12 @@ export const registerDisplay = () => [
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
-  chatPanels.register({ id: "display", label: "Display", order: 85, icon: "type", component: DisplaySettings })
+  chatPanels.register({
+    id: "display",
+    label: "Display",
+    description: "How your chats look to you: Enter to send, colours, macros and display scripts.",
+    order: 85,
+    icon: "type",
+    component: DisplaySettings
+  })
 ]

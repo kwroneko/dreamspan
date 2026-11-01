@@ -112,6 +112,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
           variant="primary"
           pending={pending}
           disabled={raw === null || (raw.content === null && raw.reasoning === null && raw.sections === null)}
+          hint="Adds it as a new version of the message, which scripts don't change."
           onClick={() => void restore()}
         >
           Restore it

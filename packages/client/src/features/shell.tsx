@@ -59,6 +59,7 @@ export function LogoutButton({ variant = "secondary" }: { variant?: "secondary" 
       <Button
         variant={variant}
         pending={pending}
+        hint="Saves any text still being written, then ends this session."
         onClick={async () => {
           setPending(true)
           setError("")

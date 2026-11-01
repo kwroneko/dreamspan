@@ -189,14 +189,17 @@ for (const width of [1440, 390])
       await page.getByRole("option", { name: "Start of context" }).click()
       await expect(fresh.getByText(/rewrites the cached part/)).toBeVisible()
       await fresh.getByRole("combobox", { name: "Position" }).click()
-      // Exactly the five decided places for a new note.
+      // Exactly the five decided places for a new note, each with what it means.
       await expect(page.getByRole("option")).toHaveText([
-        "Start of context",
-        "With the definitions (after the main prompt)",
-        "In the history, at a depth",
-        "Start of the tail",
-        "End of the tail"
+        /^Start of context/,
+        /^With the definitions/,
+        /^In the history/,
+        /^Start of the tail/,
+        /^End of the tail/
       ])
+      await expect(page.getByRole("option", { name: "With the definitions" })).toHaveAccessibleDescription(
+        "Right after the preset's main prompt."
+      )
       await page.keyboard.press("Escape")
       await fresh.getByRole("button", { name: "Save the note" }).click()
       await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
@@ -299,10 +302,12 @@ for (const width of [1440, 390])
       await shoot("card-note-open")
       // A card's note "with the definitions" goes inside its card's part.
       await characterNote.getByRole("combobox", { name: "Position" }).click()
-      await expect(page.getByRole("option", { name: "With the definitions (in the card's part)" })).toBeVisible()
+      await expect(page.getByRole("option", { name: "With the definitions" })).toHaveAccessibleDescription(
+        /this card's own part of the definitions/
+      )
       await expect(
-        page.getByRole("option", { name: "Just before the chat's author's note (imported from ST)" })
-      ).toBeVisible()
+        page.getByRole("option", { name: "Before the author's note", exact: true })
+      ).toHaveAccessibleDescription(/Imported from ST/)
       await shoot("card-note-positions")
       await page.keyboard.press("Escape")
 

@@ -101,3 +101,21 @@ it("renders direct actions and a menu only when something registered fills it", 
   direct()
   expect(render()).toBe('<div class="flex shrink-0 items-center gap-1"></div>')
 })
+
+it("hands an action its registered description, so a plugin's entry explains itself", () => {
+  const context = { entry: ref({}), persona: false, exportFormats: formats }
+  const direct = libraryItemActions.register({
+    id: "synthetic.described",
+    order: 0,
+    description: "Does a synthetic thing.",
+    direct: ({ description }) => createElement("button", { title: description }, "Synthetic")
+  })
+  try {
+    const html = renderToStaticMarkup(
+      createElement(TooltipProvider, null, createElement(LibraryItemActions, { context }))
+    )
+    expect(html).toContain('title="Does a synthetic thing."')
+  } finally {
+    direct()
+  }
+})

@@ -285,20 +285,21 @@ export function ChatHeader({
           characters.length > 0 && (
             <div className="flex shrink-0 -space-x-2 max-sm:hidden">
               {characters.slice(0, 4).map((c) => (
-                <button
-                  key={c.entityId}
-                  type="button"
-                  aria-label={`Show ${c.label}'s card`}
-                  className="rounded-full ring-2 ring-surface outline-none focus-visible:ring-focus"
-                  onClick={() =>
-                    void navigate({
-                      to: ".",
-                      search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
-                    })
-                  }
-                >
-                  <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
-                </button>
+                <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
+                  <button
+                    type="button"
+                    aria-label={`Show ${c.label}'s card`}
+                    className="rounded-full ring-2 ring-surface outline-none focus-visible:ring-focus"
+                    onClick={() =>
+                      void navigate({
+                        to: ".",
+                        search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
+                      })
+                    }
+                  >
+                    <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
+                  </button>
+                </Tooltip>
               ))}
               {characters.length > 4 && (
                 <span className="inline-flex size-9 items-center justify-center rounded-full bg-surface-raised text-xs text-muted ring-2 ring-surface">

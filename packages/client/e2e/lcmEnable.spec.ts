@@ -113,10 +113,9 @@ for (const [name, viewport, chat] of [
 
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(dialog.getByText(IMPORTED_SUMMARY)).toBeVisible()
-      const keep = dialog.getByRole("radio", {
-        name: /Keep the imported summary as the first level over messages 1–12/
-      })
+      const keep = dialog.getByRole("radio", { name: /^Keep the imported summary/ })
       await expect(keep).toBeChecked()
+      await expect(keep).toHaveAccessibleName(/As the first level over messages 1–12/)
       const estimate = dialog.getByRole("group", { name: "Estimate" })
       await expect(estimate).toContainText("Summaries")
       await expect(estimate).toContainText("Sent in full")

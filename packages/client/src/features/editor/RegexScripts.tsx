@@ -22,18 +22,32 @@ import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
-const PLACEMENTS = [
-  [1, "Your messages"],
-  [2, "Replies"],
-  [3, "Slash commands"],
-  [5, "Lorebook entries"],
-  [6, "Reasoning"]
-] as const
+/** ST's placements (regexScript.ts), with what each reaches here. */
+const PLACEMENTS: ReadonlyArray<readonly [number, string, string?]> = [
+  [1, "Your messages", "Messages on your side of the chat."],
+  [2, "Replies", "Messages on the characters' side: the model's replies."],
+  [3, "Slash commands", "ST's slash commands. Nothing here runs them, so this changes nothing."],
+  [5, "Lorebook entries", "Entries' text as it goes into the prompt, for a script that changes the prompt."],
+  [6, "Reasoning", "A reply's reasoning, and the text of its reply sections."]
+]
 
-const SUBSTITUTIONS: ReadonlyArray<{ readonly value: RegexScript["substitute_regex"]; readonly label: string }> = [
-  { value: "none", label: "Not expanded" },
-  { value: "raw", label: "Expanded" },
-  { value: "escaped", label: "Expanded, with regex characters escaped" }
+const SUBSTITUTIONS: ReadonlyArray<{
+  readonly value: RegexScript["substitute_regex"]
+  readonly label: string
+  readonly description: string
+}> = [
+  { value: "none", label: "Not expanded", description: "{{char}} and other macros in the pattern stay as typed." },
+  {
+    value: "raw",
+    label: "Expanded",
+    description: "Macros become their values before the pattern runs, so a value's regex characters act as regex."
+  },
+  {
+    value: "escaped",
+    label: "Expanded and escaped",
+    description:
+      "Macros become their values, matched as plain text. Only what's shown runs it: the prompt and saved messages skip it."
+  }
 ]
 
 /** A new script: off until the user turns it on, applied to replies. */
@@ -137,15 +151,40 @@ function ScriptLines({ binding }: { binding: ScriptBinding }) {
   )
 }
 
-function ScriptCheck({ binding, field, label }: { binding: ScriptBinding; field: CheckKey; label: string }) {
+function ScriptCheck({
+  binding,
+  field,
+  label,
+  description
+}: {
+  binding: ScriptBinding
+  field: CheckKey
+  label: string
+  description?: string
+}) {
   if (binding.kind === "store")
-    return <SwitchField store={binding.store} path={[...binding.at, field]} label={label} checkbox />
+    return (
+      <SwitchField
+        store={binding.store}
+        path={[...binding.at, field]}
+        label={label}
+        description={description}
+        checkbox
+      />
+    )
   return (
-    <Checkbox checked={binding.script[field]} onCheckedChange={(checked) => binding.change({ [field]: checked })}>
+    <Checkbox
+      checked={binding.script[field]}
+      onCheckedChange={(checked) => binding.change({ [field]: checked })}
+      description={description}
+    >
       {label}
     </Checkbox>
   )
 }
+
+/** What a script's depths count, said under each. */
+const DEPTH_NOTE = "0 is the newest message. Depths limit what's shown and the prompt, not saved messages."
 
 function LocalDepth({
   binding,
@@ -159,7 +198,7 @@ function LocalDepth({
   const value = binding.script[field]
   const [typed, setTyped] = useState<string | null>(null)
   return (
-    <Field label={label}>
+    <Field label={label} description={DEPTH_NOTE}>
       <Input
         type="number"
         inputMode="numeric"
@@ -178,7 +217,14 @@ function LocalDepth({
 
 function ScriptDepth({ binding, field, label }: { binding: ScriptBinding; field: DepthKey; label: string }) {
   return binding.kind === "store" ? (
-    <NumberField store={binding.store} path={[...binding.at, field]} label={label} nullable integer />
+    <NumberField
+      store={binding.store}
+      path={[...binding.at, field]}
+      label={label}
+      description={DEPTH_NOTE}
+      nullable
+      integer
+    />
   ) : (
     <LocalDepth binding={binding} field={field} label={label} />
   )
@@ -217,10 +263,11 @@ function PlacementChecks({
 }) {
   return (
     <Fieldset legend="Applies to">
-      <div className="flex flex-wrap gap-4">
-        {PLACEMENTS.map(([value, label]) => (
+      <div className="flex flex-col gap-2">
+        {PLACEMENTS.map(([value, label, description]) => (
           <Checkbox
             key={value}
+            description={description}
             checked={placement.includes(value)}
             onCheckedChange={(checked) =>
               onChange(
@@ -350,7 +397,12 @@ function ScriptFields({ binding, script }: { binding: ScriptBinding; script: Reg
         </div>
         <p className="text-sm text-muted">{effect(script)}</p>
       </Fieldset>
-      <ScriptCheck binding={binding} field="run_on_edit" label="Run on edits" />
+      <ScriptCheck
+        binding={binding}
+        field="run_on_edit"
+        label="Run on edits"
+        description="With neither box above ticked, it also rewrites a message's new text when you edit it."
+      />
       <div className="grid gap-3 sm:grid-cols-2">
         <ScriptDepth binding={binding} field="min_depth" label="From depth (empty: any)" />
         <ScriptDepth binding={binding} field="max_depth" label="To depth (empty: any)" />
@@ -427,7 +479,7 @@ function StoreScript({ store, script }: { store: EditorStore; script: RegexScrip
       open={open}
       onOpenChange={setOpen}
       actions={
-        <Button variant="ghost" onClick={() => void store.removeItem(at)}>
+        <Button variant="ghost" hint="Removed when you save." onClick={() => void store.removeItem(at)}>
           Delete the script
         </Button>
       }
@@ -492,7 +544,11 @@ export function DocumentRegexScripts({
             tone="success"
             title="These scripts are allowed to run"
             actions={
-              <Button pending={pending} onClick={() => void setApproval(false)}>
+              <Button
+                pending={pending}
+                hint="They stop running until you allow them again."
+                onClick={() => void setApproval(false)}
+              >
                 Stop them
               </Button>
             }
@@ -520,7 +576,9 @@ export function DocumentRegexScripts({
         </ul>
       )}
       <div>
-        <Button onClick={add}>Add a script</Button>
+        <Button hint="A new script, applied to replies and off until you turn it on." onClick={add}>
+          Add a script
+        </Button>
       </div>
       <ConfirmDialog
         open={confirming}

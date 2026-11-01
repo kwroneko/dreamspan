@@ -204,6 +204,14 @@ export function TimelineSummary({
         variant="ghost"
         className="self-start"
         aria-expanded={open}
+        {...(open
+          ? {}
+          : {
+              hint:
+                summary.level > 1
+                  ? "Shows the summaries this one condenses, here in the chat."
+                  : "Shows the messages this summary stands in for, here in the chat."
+            })}
         onClick={() => setExpansion({ targetId, open: !open })}
       >
         {open ? "Collapse" : summary.level > 1 ? "Expand to summaries" : "Expand to messages"}

@@ -73,6 +73,11 @@ export function StSettingsImporter({
           </ul>
           <Button
             pending={pending}
+            hint={
+              surface === "model"
+                ? "Fills the form with these settings. Nothing is saved until you save the model’s settings."
+                : "Makes a new connection with these settings, and adds the model it names."
+            }
             disabled={
               pending ||
               preview.report.issues.some((issue) => issue.level === "error") ||

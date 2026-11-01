@@ -6,10 +6,37 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Alert } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { editorTextFields, type Searchable, searchable } from "./fields.ts"
 import type { SearchMatch } from "./searchNavigation.ts"
 import { runSearch, type SearchResponse } from "./search.ts"
 import { type EditorStore, useWorkingDoc } from "./store.ts"
+
+/**
+ * An option with its explanation on hover and focus: under the label it would make the
+ * preset's sticky search bar too tall.
+ */
+function SearchOption({
+  checked,
+  onCheckedChange,
+  hint,
+  children
+}: {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  hint: string
+  children: ReactNode
+}) {
+  return (
+    <Tooltip label={hint}>
+      <span className="inline-flex">
+        <Checkbox checked={checked} onCheckedChange={onCheckedChange}>
+          {children}
+        </Checkbox>
+      </span>
+    </Tooltip>
+  )
+}
 
 /** Matches listed at most; Replace all still replaces every one. */
 const MAX_MATCHES = 500
@@ -158,15 +185,27 @@ export function SearchDialog({
           id={inline ? "search-options" : undefined}
           className={`${inline ? `col-span-2 sm:col-span-1 ${options ? "flex" : "hidden"} sm:flex` : "flex"} flex-wrap gap-4`}
         >
-          <Checkbox checked={wholeWord} onCheckedChange={setWholeWord}>
+          <SearchOption
+            checked={wholeWord}
+            onCheckedChange={setWholeWord}
+            hint="Only where it isn't part of a longer word."
+          >
             Whole word
-          </Checkbox>
-          <Checkbox checked={preserveCase} onCheckedChange={setPreserveCase}>
+          </SearchOption>
+          <SearchOption
+            checked={preserveCase}
+            onCheckedChange={setPreserveCase}
+            hint="The replacement takes each match's case: all capitals, all lower case, or a capital first."
+          >
             Preserve case
-          </Checkbox>
-          <Checkbox checked={regex} onCheckedChange={setRegex}>
+          </SearchOption>
+          <SearchOption
+            checked={regex}
+            onCheckedChange={setRegex}
+            hint="Find is a JavaScript regular expression; Replace with can use $1 or $<name> for its groups."
+          >
             Regular expression
-          </Checkbox>
+          </SearchOption>
           <Checkbox checked={caseSensitive} onCheckedChange={setCaseSensitive}>
             Match case
           </Checkbox>
@@ -187,6 +226,7 @@ export function SearchDialog({
             <Button
               disabled={find === "" || !response?.ok || response.matches.length === 0}
               pending={pending}
+              hint="Replaces every match in every field, as unsaved changes."
               onClick={() => void replaceIn(null)}
             >
               Replace all
@@ -249,6 +289,7 @@ export function SearchDialog({
                     <Button
                       variant="ghost"
                       aria-label={`Replace in ${field.label}`}
+                      hint="Replaces every match in this field, as an unsaved change."
                       onClick={() => void replaceIn(match.index)}
                     >
                       Replace in this field

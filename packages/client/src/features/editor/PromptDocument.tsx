@@ -416,18 +416,22 @@ function Block({
       }
     >
       {actions.openLarge && (
-        <MenuItem icon="expand" onClick={actions.openLarge} hint="The preset editor over the chat, at this prompt">
+        <MenuItem
+          icon="expand"
+          onClick={actions.openLarge}
+          description="The preset editor over the chat, at this prompt"
+        >
           Open in the large editor
         </MenuItem>
       )}
-      <MenuItem icon="plus" onClick={actions.insertAbove} hint="A new empty prompt just above this one">
+      <MenuItem icon="plus" onClick={actions.insertAbove} description="A new empty prompt just above this one">
         Insert a prompt above
       </MenuItem>
-      <MenuItem icon="plus" onClick={actions.insertBelow} hint="A new empty prompt just below this one">
+      <MenuItem icon="plus" onClick={actions.insertBelow} description="A new empty prompt just below this one">
         Insert a prompt below
       </MenuItem>
       {actions.definitionsBelow && (
-        <MenuItem icon="insert" onClick={actions.definitionsBelow} hint={DEFINITIONS_HINT}>
+        <MenuItem icon="insert" onClick={actions.definitionsBelow} description={DEFINITIONS_HINT}>
           Insert a {DEFINITIONS_LABEL.toLowerCase()} below
         </MenuItem>
       )}
@@ -438,7 +442,7 @@ function Block({
             icon="trash"
             tone="danger"
             onClick={remove}
-            hint="Takes it out of the preset; Revert brings it back until you save"
+            description="Takes it out of the preset; Revert brings it back until you save"
           >
             Delete the prompt
           </MenuItem>
@@ -682,10 +686,10 @@ export function PromptDocument({
           </Button>
         }
       >
-        <MenuItem icon="plus" onClick={() => add(index)} hint={NEW_PROMPT_HINT}>
+        <MenuItem icon="plus" onClick={() => add(index)} description={NEW_PROMPT_HINT}>
           New prompt
         </MenuItem>
-        <MenuItem icon="insert" onClick={() => addDefinitions(index)} hint={DEFINITIONS_HINT}>
+        <MenuItem icon="insert" onClick={() => addDefinitions(index)} description={DEFINITIONS_HINT}>
           {DEFINITIONS_LABEL}
         </MenuItem>
       </Menu>

@@ -184,8 +184,8 @@ export function EnableLcmDialog({
                 options={[
                   {
                     value: "adopt",
-                    label: `Keep the imported summary as the first level over ${rangeText(1, offer.imported.to).toLowerCase()}`,
-                    description: `It stands in for those messages (${tokensText(offer.imported.tokens)}); they are shown again, and the rest is summarized from there.`
+                    label: "Keep the imported summary",
+                    description: `As the first level over ${rangeText(1, offer.imported.to).toLowerCase()}: it stands in for those messages (${tokensText(offer.imported.tokens)}); they are shown again, and the rest is summarized from there.`
                   },
                   {
                     value: "scratch",

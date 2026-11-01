@@ -7,6 +7,7 @@ import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Definition } from "./CardPage.tsx"
 import { shellAtom, sidebarCleared } from "./shellData.tsx"
 
@@ -66,14 +67,16 @@ export function CharacterPanel({
           </div>
         </header>
       )}
-      <Link
-        to="/cards/$entityId/chat"
-        params={{ entityId }}
-        search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
-        className={buttonClass("primary")}
-      >
-        New chat
-      </Link>
+      <Tooltip label="Opens a new chat at their greeting. Nothing is saved until you send.">
+        <Link
+          to="/cards/$entityId/chat"
+          params={{ entityId }}
+          search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
+          className={buttonClass("primary")}
+        >
+          New chat
+        </Link>
+      </Tooltip>
       {actions ?? (
         <Link to="/library/$refId" params={{ refId: ref }} className={buttonClass()}>
           Edit card

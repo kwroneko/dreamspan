@@ -1,39 +1,66 @@
 // Checkboxes, switches and radio groups. Each renders inside its own <label>, so the
-// whole row is the click target.
+// whole row is the click target. `description` shows under the label; a checkbox's or a
+// switch's `hint` says what turning it on or off does: a tooltip on hover and focus, under
+// the label on touch screens and narrow windows, and its description for screen readers.
 import { Checkbox as BaseCheckbox } from "@base-ui/react/checkbox"
 import { Radio as BaseRadio } from "@base-ui/react/radio"
 import { RadioGroup as BaseRadioGroup } from "@base-ui/react/radio-group"
 import { Switch as BaseSwitch } from "@base-ui/react/switch"
-import type { ReactNode } from "react"
+import { type ReactElement, type ReactNode, useId } from "react"
+import { inlineExplanationClass } from "./Explanation.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 const focusRing =
   "outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
 
-function ChoiceLabel({ children, description }: { children: ReactNode; description?: ReactNode }) {
+function ChoiceLabel({
+  children,
+  description,
+  hint
+}: {
+  children: ReactNode
+  description?: ReactNode
+  hint?: { readonly id: string; readonly text: string } | undefined
+}) {
   return (
     <span className="flex min-w-0 flex-col">
       <span className="text-sm text-text">{children}</span>
       {description && <span className="text-sm text-muted">{description}</span>}
+      {hint && (
+        // Hidden from the name, and still the description: a reference reads hidden text.
+        <span id={hint.id} aria-hidden="true" className={`hidden pt-0.5 text-xs text-muted ${inlineExplanationClass}`}>
+          {hint.text}
+        </span>
+      )}
     </span>
   )
 }
+
+/** The row, with its hint's tooltip when it has one. */
+const withHint = (hint: string | undefined, row: ReactElement) => (hint ? <Tooltip label={hint}>{row}</Tooltip> : row)
 
 export function Checkbox({
   checked,
   onCheckedChange,
   children,
-  description
+  description,
+  hint
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
+  /** What ticking it does, when the label doesn't say. */
+  hint?: string | undefined
 }) {
-  return (
+  const id = useId()
+  return withHint(
+    hint,
     <label className="flex items-start gap-2.5">
       <BaseCheckbox.Root
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
+        {...(hint ? { "aria-describedby": id } : {})}
         className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
@@ -42,7 +69,9 @@ export function Checkbox({
           </svg>
         </BaseCheckbox.Indicator>
       </BaseCheckbox.Root>
-      <ChoiceLabel description={description}>{children}</ChoiceLabel>
+      <ChoiceLabel description={description} hint={hint ? { id, text: hint } : undefined}>
+        {children}
+      </ChoiceLabel>
     </label>
   )
 }
@@ -52,25 +81,33 @@ export function Switch({
   onCheckedChange,
   children,
   description,
+  hint,
   disabled = false
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
+  /** What switching it on or off does, when the label doesn't say. */
+  hint?: string | undefined
   disabled?: boolean
 }) {
-  return (
+  const id = useId()
+  return withHint(
+    hint,
     <label className="flex items-start gap-3">
       <BaseSwitch.Root
         disabled={disabled}
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
+        {...(hint ? { "aria-describedby": id } : {})}
         className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
       </BaseSwitch.Root>
-      <ChoiceLabel description={description}>{children}</ChoiceLabel>
+      <ChoiceLabel description={description} hint={hint ? { id, text: hint } : undefined}>
+        {children}
+      </ChoiceLabel>
     </label>
   )
 }

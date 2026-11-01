@@ -11,12 +11,12 @@ export type PresetView = PresetSort | "archived"
 export const PRESET_VIEWS: ReadonlyArray<{
   readonly value: PresetView
   readonly label: string
-  readonly hint: string
+  readonly description: string
 }> = [
-  { value: "name", label: "Name", hint: "Sort by name, A to Z" },
-  { value: "modified", label: "Modified", hint: "Sort by when each was last edited, latest first" },
-  { value: "used", label: "Used", hint: "Sort by when each last wrote a reply, latest first" },
-  { value: "archived", label: "Archived", hint: "Only archived presets, the most recently archived first" }
+  { value: "name", label: "Name", description: "Sort by name, A to Z" },
+  { value: "modified", label: "Modified", description: "Sort by when each was last edited, latest first" },
+  { value: "used", label: "Used", description: "Sort by when each last wrote a reply, latest first" },
+  { value: "archived", label: "Archived", description: "Only archived presets, the most recently archived first" }
 ]
 
 /** Case and accents don't matter: "cafe" finds "Café". */

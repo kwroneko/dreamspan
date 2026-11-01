@@ -133,7 +133,7 @@ export function PresetPicker({ selection, focusRef, focus, onChosen, onNew }: Pr
         }}
         options={PRESET_VIEWS.map((option) => ({
           value: option.value,
-          hint: option.hint,
+          description: option.description,
           label: option.value === "archived" && archivedCount > 0 ? `${option.label} · ${archivedCount}` : option.label
         }))}
       />

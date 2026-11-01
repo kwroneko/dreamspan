@@ -100,8 +100,16 @@ function AccountPage() {
 }
 
 const roleItems = [
-  { value: "user" as const, label: "User" },
-  { value: "admin" as const, label: "Admin" }
+  {
+    value: "user" as const,
+    label: "User",
+    description: "Their own characters, chats and settings, and nobody else’s."
+  },
+  {
+    value: "admin" as const,
+    label: "Admin",
+    description: "Also creates and disables accounts, sets passwords and changes the server’s network settings."
+  }
 ]
 
 function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
@@ -206,11 +214,20 @@ function UserRow({ user, self }: { user: UserAccount; self: UserId }) {
         </div>
         {user.id !== self && (
           <div className="flex flex-wrap gap-2">
-            <Button variant="ghost" onClick={() => setDialog("password")}>
+            <Button
+              variant="ghost"
+              hint="Gives them a new password. Their sessions end."
+              onClick={() => setDialog("password")}
+            >
               Set password
             </Button>
             {user.disabled ? (
-              <Button variant="ghost" pending={toggle.pending} onClick={() => void setDisabled(false)}>
+              <Button
+                variant="ghost"
+                pending={toggle.pending}
+                hint="Lets them log in again."
+                onClick={() => void setDisabled(false)}
+              >
                 Enable
               </Button>
             ) : (

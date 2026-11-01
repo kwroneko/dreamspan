@@ -5,14 +5,14 @@ import { useAction } from "../../actions.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
 import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { downloadExport } from "./files.ts"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
 const compact = "h-8! px-2.5!"
 
-function ChatAction({ entry }: LibraryItemProps) {
-  return (
+function ChatAction({ entry, description }: LibraryItemProps) {
+  const link = (
     <Link
       to="/cards/$entityId/chat"
       params={{ entityId: entry.entityId }}
@@ -22,6 +22,7 @@ function ChatAction({ entry }: LibraryItemProps) {
       Chat
     </Link>
   )
+  return description ? <Tooltip label={description}>{link}</Tooltip> : link
 }
 
 function EditAction({ entry }: LibraryItemProps) {
@@ -37,11 +38,12 @@ function EditAction({ entry }: LibraryItemProps) {
   )
 }
 
-function PersonaItem({ entry, persona }: LibraryItemProps) {
+function PersonaItem({ entry, persona, description }: LibraryItemProps) {
   const action = useAction()
   return (
     <MenuCheckboxItem
       checked={persona}
+      description={description}
       onCheckedChange={(next) =>
         void action
           .run((client) => client("SetPersona", { entityId: entry.entityId, persona: next }), ["library"])
@@ -57,9 +59,13 @@ function PersonaItem({ entry, persona }: LibraryItemProps) {
   )
 }
 
-function UpdateItem({ entry }: LibraryItemProps) {
+function UpdateItem({ entry, description }: LibraryItemProps) {
   return (
-    <MenuLinkItem icon="regenerate" render={<Link to="/import" search={{ into: entry.id }} />}>
+    <MenuLinkItem
+      icon="regenerate"
+      description={description}
+      render={<Link to="/import" search={{ into: entry.id }} />}
+    >
       Update from file…
     </MenuLinkItem>
   )
@@ -103,7 +109,7 @@ function ExportItems({ entry, exportFormats }: LibraryItemProps) {
   return (
     <MenuGroup label="Export as">
       {formats.map((format) => (
-        <MenuItem key={format.id} onClick={() => void exportAs(format.id)}>
+        <MenuItem key={format.id} description={format.description} onClick={() => void exportAs(format.id)}>
           {format.label}
         </MenuItem>
       ))}
@@ -116,7 +122,8 @@ export const registerItemActions = () => [
     id: "library.chat",
     order: 10,
     available: ({ entry }) => entry.kind === "card",
-    direct: ChatAction
+    direct: ChatAction,
+    description: "Opens a new chat with them at their greeting. Nothing is saved until you send."
   }),
   libraryItemActions.register({
     id: "library.edit",
@@ -134,14 +141,16 @@ export const registerItemActions = () => [
     id: "library.persona",
     order: 30,
     available: ({ entry }) => entry.kind === "card",
-    menu: PersonaItem
+    menu: PersonaItem,
+    description: "Whether it’s in the persona folder, offered when you pick who you play."
   }),
   libraryItemActions.register({
     id: "library.update",
     order: 40,
     // A newly made fork has no import line to update from.
     available: ({ entry }) => entry.refKind === "upstream" && (entry.kind !== "card" || entry.hasImport === true),
-    menu: UpdateItem
+    menu: UpdateItem,
+    description: "Imports a new version of its file, merged with your own edits."
   }),
   libraryItemActions.register({
     id: "library.export",

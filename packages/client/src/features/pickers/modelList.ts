@@ -7,11 +7,14 @@ import { exactTime, fold } from "./presetList.ts"
 
 export type ModelSort = DisplayPrefs["modelSort"]
 
-export const MODEL_SORTS: ReadonlyArray<{ readonly value: ModelSort; readonly label: string; readonly hint: string }> =
-  [
-    { value: "name", label: "Name", hint: "Sort by connection and model name, A to Z" },
-    { value: "used", label: "Used", hint: "Sort by when each last wrote a reply, latest first" }
-  ]
+export const MODEL_SORTS: ReadonlyArray<{
+  readonly value: ModelSort
+  readonly label: string
+  readonly description: string
+}> = [
+  { value: "name", label: "Name", description: "Sort by connection and model name, A to Z" },
+  { value: "used", label: "Used", description: "Sort by when each last wrote a reply, latest first" }
+]
 
 const byName = (a: ModelChoice, b: ModelChoice) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value)
 

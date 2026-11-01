@@ -77,8 +77,12 @@ export function ExportChatDialog({ context, onClose }: ChatCommandDialogProps) {
         value={format}
         onValueChange={setFormat}
         options={[
-          { value: "jsonl", label: "SillyTavern (.jsonl)" },
-          { value: "txt", label: "Plain text (.txt)" }
+          {
+            value: "jsonl",
+            label: "SillyTavern (.jsonl)",
+            description: "A chat file that SillyTavern, and this app's import, can open."
+          },
+          { value: "txt", label: "Plain text (.txt)", description: "Easy to read: each message as “Name: text”." }
         ]}
       />
       <ErrorAlert error={error} />

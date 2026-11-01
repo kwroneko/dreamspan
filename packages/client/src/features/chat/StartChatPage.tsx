@@ -527,6 +527,7 @@ function Pending({
               <Button
                 variant="ghost"
                 aria-label={`Remove ${item.card.name} from pending cast`}
+                hint="Leaves them out of the new chat, with their greeting."
                 onClick={() => {
                   changePendingCast((current) => ({
                     ...current,
