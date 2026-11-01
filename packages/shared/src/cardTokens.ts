@@ -12,7 +12,7 @@ import type { Doc } from "./library.ts"
 export const estimateTextTokens = (text: string) => Math.ceil(text.length / 4)
 
 /** The card's text fields ST counts, and whether each is in every request. */
-export const CARD_TOKEN_FIELDS: ReadonlyArray<{ readonly field: string; readonly permanent: boolean }> = [
+const CARD_TOKEN_FIELDS: ReadonlyArray<{ readonly field: string; readonly permanent: boolean }> = [
   { field: "description", permanent: true },
   { field: "personality", permanent: true },
   { field: "scenario", permanent: true },

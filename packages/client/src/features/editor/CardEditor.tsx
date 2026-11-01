@@ -9,7 +9,7 @@ import { estimateTextTokens } from "@rp/shared/cardTokens.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
-import { type ReactNode, useContext, useEffect, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -517,13 +517,16 @@ export function CardEditor({
   layout = "page",
   initial = CARD_TAB_DEFINITION,
   onOpenBook,
-  header
+  header,
+  reveal = false
 }: {
   store: EditorStore
   call: Caller
   layout?: CardTabProps["layout"]
   initial?: string
   onOpenBook?: (() => void) | undefined
+  /** Brought into view as it opens: opened on a tab from elsewhere (Show the whole card). */
+  reveal?: boolean
   /** Above the tabs' panels, under the tab row: nothing by default. */
   header?: ReactNode
 }) {
@@ -536,6 +539,13 @@ export function CardEditor({
     setLastInitial(initial)
     setTab(initial)
   }
+  // Opened again on a tab from elsewhere (Show the whole card): the tabs come into view.
+  const root = useRef<HTMLDivElement>(null)
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (mounted.current || reveal) root.current?.scrollIntoView({ block: "start" })
+    mounted.current = true
+  }, [lastInitial, reveal])
   // Search's Go to opens the tab that holds the field it goes to.
   const match = useContext(SearchNavigation)
   const [lastMatch, setLastMatch] = useState(match)
@@ -547,7 +557,11 @@ export function CardEditor({
   const shown = tabs.some((entry) => entry.id === tab) ? tab : (tabs[0]?.id ?? "")
   if (tabs.length === 0) return null
   return (
-    <div data-card-tabs={layout} className="flex min-w-0 flex-col gap-4">
+    <div
+      ref={root}
+      data-card-tabs={layout}
+      className="flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-4"
+    >
       {header}
       <Tabs
         label="Card fields"

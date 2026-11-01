@@ -487,7 +487,7 @@ export function Editor({
             store={store}
             call={call}
             layout="page"
-            {...(cardTab ? { initial: cardTab } : {})}
+            {...(cardTab ? { initial: cardTab, reveal: true } : {})}
             onOpenBook={() => setBookView(true)}
           />
         )}

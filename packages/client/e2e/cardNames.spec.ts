@@ -147,8 +147,9 @@ for (const width of [1440, 390]) {
     // A normal name/version save refreshes the mounted sidebar, and History cannot
     // restore an occupied imported pair. All surrounding data is the realistic import.
     await page.goto(`${server().url}/library/${aria.id}`)
-    await page.getByRole("textbox", { name: /^Display name/ }).fill(`Aria revised ${width}`)
-    await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`revised-${width}`)
+    // Aria has a chat name, so changing the display name asks nothing.
+    await renameCard(page, "display", `Aria revised ${width}`)
+    await renameCard(page, "version", `revised-${width}`)
     await saveButton(page).click()
     await expect(page.getByRole("dialog")).toHaveCount(0)
     if (width === 1440) {

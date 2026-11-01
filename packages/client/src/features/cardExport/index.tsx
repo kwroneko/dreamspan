@@ -6,8 +6,6 @@ import { cardContributions } from "../cardForks/surfaces.tsx"
 import { chatCardActions } from "../chat/presentation.tsx"
 import { CardExport } from "./CardExport.tsx"
 
-export { CardExport }
-
 export const register = () => [
   cardContributions.register({
     id: "card-export.editor",

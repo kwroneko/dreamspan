@@ -7,7 +7,7 @@ import { makeRegistry } from "../../registry.ts"
 /** The parts of a card a recognizer reads. */
 export type SourceInput = Pick<CardDoc, "source" | "extensions" | "creator" | "creator_notes">
 
-export interface SourceLink {
+interface SourceLink {
   /** The site's name; a recognizer's own `site` when left out. */
   readonly site?: string
   readonly url: string
@@ -31,7 +31,7 @@ export type CardSource =
 export const sourceRecognizers = makeRegistry<SourceRecognizer>()
 
 /** The URL in its canonical spelling, when it is an http(s) URL; anything else never links. */
-export const webUrl = (text: string): URL | undefined => {
+const webUrl = (text: string): URL | undefined => {
   if (!/^https?:\/\//i.test(text.trim())) return undefined
   try {
     const url = new URL(text.trim())
@@ -109,7 +109,7 @@ const byHost =
 // characterhub.org is chub's former domain (ST's parseChubUrl accepts both).
 const CHUB_HOSTS = ["chub.ai", "characterhub.org"]
 const chubPath = (path: string) => path.split("/").filter(Boolean).map(encodeURIComponent).join("/")
-export const chubRecognizer: SourceRecognizer = {
+const chubRecognizer: SourceRecognizer = {
   id: "card-sources.chub",
   site: "Chub",
   links: (doc) => {
@@ -143,7 +143,7 @@ export const chubRecognizer: SourceRecognizer = {
 // `extensions.risuai.source` when it exports V2 and reads them back from there or from
 // `source` (RisuAI src/ts/characterCards.ts), so entries there count as sources too: realm
 // URLs are named RisuRealm, other URLs are plain links.
-export const risuRecognizer: SourceRecognizer = {
+const risuRecognizer: SourceRecognizer = {
   id: "card-sources.risurealm",
   site: "RisuRealm",
   links: (doc) => {

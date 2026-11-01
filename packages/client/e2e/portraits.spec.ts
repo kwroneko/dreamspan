@@ -217,6 +217,7 @@ test("every image follows concealment, reload's first frame and another tab", as
   await expect(page.locator("#future-canvas")).toHaveCSS("filter", "blur(14px) saturate(0.6)")
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Edit Mira", exact: true }).click()
+  await cardFieldsTab(page, "Metadata")
   await expect(page.getByRole("img", { name: "The card's avatar" })).toHaveCSS("filter", "blur(14px) saturate(0.6)")
 })
 

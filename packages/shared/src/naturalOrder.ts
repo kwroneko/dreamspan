@@ -42,7 +42,7 @@ export const mulberry32 = (seed: number): (() => number) => {
 }
 
 /** Lowercased words of a text (ST's `extractAllWords`, with letters beyond ASCII too). */
-export const wordsOf = (text: string): Array<string> =>
+const wordsOf = (text: string): Array<string> =>
   Array.from(text.toLowerCase().matchAll(/[\p{L}\p{N}_]+/gu), (m) => m[0])
 
 export interface NaturalMember<Id> {

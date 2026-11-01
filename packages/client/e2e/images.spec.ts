@@ -112,6 +112,7 @@ for (const width of [1440, 390]) {
     if (process.env.SCREENSHOT_DIR)
       await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `large-avatar-${width}.png`) })
     await page.reload()
+    await cardFieldsTab(page, "Metadata")
     await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(6000)
     await avatar.evaluate((img) => (img as HTMLImageElement).decode())
   })
