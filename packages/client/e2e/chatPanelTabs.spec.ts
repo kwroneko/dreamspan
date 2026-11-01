@@ -93,13 +93,15 @@ test("This chat leads with the chat's name, your persona and summaries; the rest
   await expect(summaries.getByRole("group", { name: "Recent messages kept as written" })).toBeVisible()
 })
 
-test("the persona's tab is its description, edited in place, and Switch persona", async ({ page }) => {
+test("the persona's tab is a full card, edited in place, and Switch persona", async ({ page }) => {
   await open(page, `card:${persona}`)
   const tab = page.getByRole("tabpanel", { name: "Juniper Ashgrove" })
   await expect(tab.getByText("You play", { exact: true })).toBeVisible()
   await expectTextBox(tab.getByRole("textbox", { name: "Description", exact: true }), PERSONA)
-  // One field; no New chat, no count of chats, no card actions meant for characters.
-  await expect(tab.getByRole("textbox")).toHaveCount(1)
+  // A persona is a card: every field, in the card's tabs; no New chat, no count of chats, no
+  // card actions meant for characters.
+  await expect(tab.getByRole("tablist", { name: "Card fields" })).toBeVisible()
+  await expect(tab.getByRole("textbox", { name: "Personality", exact: true })).toBeVisible()
   await expect(tab).not.toContainText(/used by|New chat/)
   await expect(tab.getByRole("button", { name: /^Fork for this chat/ })).toHaveCount(0)
   await expect(tab.getByRole("button", { name: "Open Description large" })).toBeVisible()

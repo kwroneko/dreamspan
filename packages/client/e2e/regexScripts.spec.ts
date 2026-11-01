@@ -10,6 +10,7 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { messageMenu } from "./support/message.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 const REPLY = "<cot>secret plan</cot>Hello there"
@@ -202,6 +203,7 @@ for (const width of [1440, 390])
         }
       })
       await page.goto(`${server().url}/library/${refId}`)
+      await cardFieldsTab(page, "Extra")
       const scripts = page.getByRole("list", { name: "Regex scripts" })
       await expect(scripts.getByRole("button", { name: "Edit Mask the keeper", exact: true })).toBeVisible()
       await expect(page.getByText("These scripts don't run until you allow them")).toBeVisible()

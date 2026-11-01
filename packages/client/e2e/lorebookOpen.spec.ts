@@ -11,6 +11,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -142,9 +143,12 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("heading", { level: 1, name: `Harbour ${width}` })).toBeVisible()
     await expect(page.getByRole("button", { name: "Open Tides", exact: true })).toBeInViewport()
     await expect(page.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(0)
+    // The whole card opens on its Lorebook tab, the book in the side panel's editor.
     await page.getByRole("button", { name: "Show the whole card", exact: true }).click()
     await expect(page.getByRole("heading", { level: 1, name: `Keeper ${width}` })).toBeVisible()
-    await expect(page.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(1)
+    await expect(page.getByRole("tab", { name: "Lorebook", exact: true })).toHaveAttribute("aria-selected", "true")
     await expect(page.getByRole("button", { name: "Open Tides", exact: true })).toBeInViewport()
+    await cardFieldsTab(page, "Definition")
+    await expect(page.getByRole("textbox", { name: "Description", exact: true })).toHaveCount(1)
   })
 }

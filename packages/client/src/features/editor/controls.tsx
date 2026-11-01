@@ -10,7 +10,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
@@ -18,13 +18,35 @@ import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
 import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistory, useText, useValue } from "./store.ts"
 
-/** "Edited" while the field has changes, with its undo, history and revert. */
-function FieldLabel({ store, field, label }: { store: EditorStore; field: string; label: string }) {
+/**
+ * "Edited" while the field has changes, with its undo, history and revert. `hint` says what the
+ * field is for, on hover; `aside` sits at the label's end (a field's token count, say).
+ */
+function FieldLabel({
+  store,
+  field,
+  label,
+  hint,
+  aside
+}: {
+  store: EditorStore
+  field: string
+  label: string
+  hint?: ReactNode
+  aside?: ReactNode
+}) {
   const dirty = useDirty(store, field)
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-2">
-      <span>{label}</span>
+      {hint ? (
+        <Tooltip label={hint}>
+          <span className="cursor-help underline decoration-border decoration-dotted underline-offset-4">{label}</span>
+        </Tooltip>
+      ) : (
+        <span>{label}</span>
+      )}
       {dirty && <Badge tone="accent">edited</Badge>}
+      {aside}
     </span>
   )
 }
@@ -85,13 +107,19 @@ export function TextField({
   readOnly = false,
   expandable = false,
   labelHidden = false,
-  source
+  source,
+  hint,
+  aside
 }: {
   store: EditorStore
   path: FieldPath
   label: string
   rows?: number
   description?: ReactNode
+  /** What the field is for, on hover over its label. */
+  hint?: ReactNode
+  /** At the end of the label's line: the field's token count, say. */
+  aside?: ReactNode
   mono?: boolean
   readOnly?: boolean
   /** A button opening the field large over the page, as ST's maximize does: a narrow panel's long field. */
@@ -135,6 +163,7 @@ export function TextField({
       {expandable && rows !== undefined && (
         <IconButton
           label={`Open ${label} large`}
+          hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
           icon="expand"
           className="absolute -top-1.5 right-0 size-7!"
           onClick={() => setLarge(true)}
@@ -142,7 +171,7 @@ export function TextField({
       )}
       {large && <LargeField store={store} path={path} field={field} label={label} onClose={() => setLarge(false)} />}
       <Field
-        label={labelHidden ? label : <FieldLabel store={store} field={field} label={label} />}
+        label={labelHidden ? label : <FieldLabel store={store} field={field} label={label} hint={hint} aside={aside} />}
         labelHidden={labelHidden}
         description={description}
       >

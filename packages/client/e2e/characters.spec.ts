@@ -59,8 +59,7 @@ test("a card opens all three panels, with its definition and actions beside the 
   // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
   const tab = page.getByRole("tabpanel", { name: "Mira", exact: true })
   await expect(tab.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
-  await tab.getByRole("button", { name: "More for Mira", exact: true }).click()
-  await page.getByRole("menuitem", { name: "New chat with Mira", exact: true }).click()
+  await tab.getByRole("link", { name: "New chat with Mira", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/cards/${mira}/chat`))
   expect(await chatCount()).toBe(2)
 })

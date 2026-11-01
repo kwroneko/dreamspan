@@ -9,6 +9,7 @@ import { asUser } from "./support/rpc.ts"
 import { saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
+import { renameCard } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -53,17 +54,11 @@ for (const width of [1440, 390]) {
     await expect(page.locator("main header")).toContainText("1")
     await shoot("card")
     await page.goto(`${server().url}/library/${aria.id}`)
-    await expect(page.getByRole("textbox", { name: "Display name", exact: true })).toHaveValue("Aria Vance")
-    await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue("1")
-    await expect(
-      page.getByRole("textbox", { name: "Name the model sees (leave empty to use the display name)", exact: true })
-    ).toBeVisible()
+    // The names in the header, each renamed in place (no identity section).
+    await expect(page.getByRole("heading", { level: 1, name: "Aria Vance", exact: true })).toBeVisible()
+    await expect(page.getByRole("main").getByText("1", { exact: true }).first()).toBeVisible()
+    await expect(page.getByRole("button", { name: "Rename the chat name", exact: true })).toBeVisible()
     await shoot("editor")
-    if (screens)
-      await page
-        .locator("section")
-        .filter({ has: page.getByRole("heading", { name: "Identity", exact: true }) })
-        .screenshot({ path: join(screens, `editor-fields-${width}.png`) })
     // Fork pair checks; the chosen names become the fork revision, with parent unchanged.
     await page.getByRole("button", { name: "Fork", exact: true }).click()
     const fork = page.getByRole("dialog", { name: "Fork card" })
@@ -76,17 +71,15 @@ for (const width of [1440, 390]) {
     await fork.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill(`fork-${width}`)
     await expect(fork.getByRole("button", { name: "Fork card" })).toBeEnabled()
     await fork.getByRole("button", { name: "Fork card" }).click()
-    await expect(page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true })).toHaveValue(
-      `fork-${width}`
-    )
+    await expect(page.getByRole("main").getByText(`fork-${width}`, { exact: true }).first()).toBeVisible()
     await expect(page.getByRole("navigation", { name: "Variants" })).toHaveCount(0)
     await shoot("fork")
-    // Existing card rename also checks the pair before Save.
-    await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
-    await expect(saveButton(page)).toBeDisabled()
-    await expect(page.getByRole("status").filter({ hasText: "Another card is already called" })).toHaveText(clash)
+    // Renaming an existing card checks the pair on confirm: the field stays open with the clash.
+    await renameCard(page, "version", "1")
+    await expect(page.getByRole("alert").filter({ hasText: "Another card is already called" })).toContainText(clash)
+    await expect(page.getByRole("textbox", { name: "Version", exact: true })).toBeVisible()
     await shoot("rename-clash")
-    await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`fork-${width}`)
+    await page.getByRole("button", { name: "Cancel renaming", exact: true }).click()
     // New card check, then choose a distinct version.
     await page.goto(`${server().url}/library`)
     await page.getByRole("button", { name: "New card", exact: true }).click()
@@ -154,8 +147,9 @@ for (const width of [1440, 390]) {
     // A normal name/version save refreshes the mounted sidebar, and History cannot
     // restore an occupied imported pair. All surrounding data is the realistic import.
     await page.goto(`${server().url}/library/${aria.id}`)
-    await page.getByRole("textbox", { name: /^Display name/ }).fill(`Aria revised ${width}`)
-    await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`revised-${width}`)
+    // Aria has a chat name, so changing the display name asks nothing.
+    await renameCard(page, "display", `Aria revised ${width}`)
+    await renameCard(page, "version", `revised-${width}`)
     await saveButton(page).click()
     await expect(page.getByRole("dialog")).toHaveCount(0)
     if (width === 1440) {

@@ -60,7 +60,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
       {state.saveError && (
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
       )}
-      <SaveRevision store={store} current={workspace?.chat} />
+      <SaveRevision store={store} />
       <RestoredNotice count={state.restored} />
       <RecoveredNotice store={store} />
       <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />

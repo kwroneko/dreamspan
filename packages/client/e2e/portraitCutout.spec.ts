@@ -8,6 +8,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(240_000)
@@ -75,6 +76,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
 
   // The editor: a new picture (wide) opens the chooser, the box over the whole image at 2:3.
   await page.goto(`${server().url}/library/${refId}`)
+  await cardFieldsTab(page, "Metadata")
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles(file("wide.png", shapeCard(wide, 80)))
   const chooser = page.getByRole("dialog", { name: "Cut out Tall's new picture" })
   await expect(chooser).toBeVisible()
@@ -118,7 +120,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   await expect(chooser).toHaveCount(0)
 
   // The editor's portrait shows the cutout chosen; Adjust cutout opens the original whole.
-  const portrait = page.locator("[data-change-portrait] img")
+  const portrait = page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-change-portrait] img")
   const first = await named(portrait)
   expect(first.crop).not.toBe("auto")
   await page.getByRole("button", { name: "Adjust cutout" }).click()
@@ -190,6 +192,7 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   await page.setViewportSize({ width: 390, height: 844 })
   const { refId } = await open(page)
   await page.goto(`${server().url}/library/${refId}`)
+  await cardFieldsTab(page, "Metadata")
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles(file("wide.png", shapeCard(wide, 160)))
   const chooser = page.getByRole("dialog", { name: "Cut out Tall's new picture" })
   await expect(chooser.locator("[data-cutout-box]")).toBeVisible()
@@ -231,7 +234,7 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   expect(Math.abs(after.x - stage.x)).toBeLessThan(3)
   await chooser.getByRole("button", { name: "Save picture" }).click()
   await expect(chooser).toHaveCount(0)
-  const saved = await named(page.locator("[data-change-portrait] img"))
+  const saved = await named(page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-change-portrait] img"))
   expect(saved.crop.startsWith("0_")).toBe(true)
 
   // Blurred images stay blurred in the chooser.

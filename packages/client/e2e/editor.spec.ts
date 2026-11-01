@@ -13,6 +13,7 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile(withAdmin)
 
@@ -79,7 +80,10 @@ const open = async (page: Page, refId: string) => {
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
 
 /** Opens a card's note from its collapsed row (DESIGN §4.1). */
-const openNote = (page: Page, title: string) => noteText(page.getByRole("list", { name: "The card's notes" }), title)
+const openNote = async (page: Page, title: string) => {
+  await cardFieldsTab(page, "Notes")
+  return noteText(page.getByRole("list", { name: "The card's notes" }), title)
+}
 const state = (page: Page) =>
   page.getByRole("status").filter({ hasText: /^(Saved as revision|Changed since revision|Keeping your changes)/ })
 
@@ -147,6 +151,7 @@ test("a new card's fields save as a revision with a message, and survive a reloa
 test("a field's edit history brings its text back after select-all and a stray key", async ({ page }) => {
   const refId = await savedCard("Undo", {})
   await open(page, refId)
+  await cardFieldsTab(page, "Greetings")
   const greeting = field(page, "First message")
   await greeting.fill("The lamp needs oil before the storm comes in from the west.")
   await kept(page)
@@ -171,6 +176,7 @@ test("a field's edit history brings its text back after select-all and a stray k
 test("a field another tab typed on meanwhile keeps that tab's text in its edit history", async ({ page }) => {
   const refId = (await savedCard("Two tabs", {})) as RefId
   await open(page, refId)
+  await cardFieldsTab(page, "Greetings")
   const greeting = field(page, "First message")
   await greeting.fill("hello")
   await kept(page)
@@ -360,8 +366,10 @@ test("search and replace runs across fields, and a pattern that backtracks forev
   await dialog.press("Escape")
 
   await expectTextBox(field(page, "Description"), "The warden keeps the great lamp.")
+  await cardFieldsTab(page, "Greetings")
   await expectTextBox(field(page, "First message"), "Hello, warden.")
   // The page stayed responsive: typing still works.
+  await cardFieldsTab(page, "Definition")
   await field(page, "Scenario").fill("Still here.")
   await expectTextBox(field(page, "Scenario"), "Still here.")
 })
@@ -457,6 +465,7 @@ test("a card's notes are blocks, and the card has no modules section (DESIGN §5
   await admin((api) => api.CreateCardNote({ cardRefId: refId as RefId, title: "Scarf" }))
   await open(page, refId)
   await expect(page.getByRole("button", { name: "Add a module" })).toHaveCount(0)
+  await cardFieldsTab(page, "Notes")
   const list = page.getByRole("list", { name: "The card's notes" })
   // Its header says where it goes, open or closed; its settings are folded under its text.
   await expect(noteToggle(list, "Scarf")).toContainText("End of tail")

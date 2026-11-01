@@ -13,7 +13,8 @@ import { mediaUrl } from "../../ui/mediaImage.ts"
 import { useCutoutChooser } from "../../ui/portraitParts.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
-import { type EditorStore, useEditorState, useValue } from "./store.ts"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
+import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
 const ACCEPT = "image/png,image/jpeg,image/gif,image/webp"
 
@@ -239,6 +240,28 @@ export function EditorPortrait({ store, call }: { store: EditorStore; call: Call
 }
 
 /**
+ * The full editor's header portrait: `TabPortrait` showing the card's own picture and cutout. A
+ * click changes it; Adjust cutout and the drop zone are in the Metadata tab's Picture.
+ */
+export function StorePortrait({ store, call, id }: { store: EditorStore; call: Caller; id: string }) {
+  const stored = useValue<unknown>(store, ["avatar_media_id"])
+  const crop = avatarCropOf(stored, useValue<unknown>(store, ["avatar_crop"]))
+  const name = useText(store, ["name"]) ?? ""
+  const viewer = usePortraitViewer()
+  const mediaId = typeof stored === "string" ? stored : null
+  return (
+    <TabPortrait
+      store={store}
+      call={call}
+      id={id}
+      shown={{ name, mediaId, crop }}
+      adjust={false}
+      onViewFull={viewer && mediaId !== null ? () => viewer.show({ id, name, mediaId }) : undefined}
+    />
+  )
+}
+
+/**
  * A character tab's portrait (owner, 2026-11-01: "clicking on the thumbnail in the sidebar
  * would open the UI to replace it"): a click changes the picture; Adjust cutout and View full
  * image sit beside it.
@@ -249,7 +272,8 @@ export function TabPortrait({
   id,
   shown,
   onViewFull,
-  onChanged
+  onChanged,
+  adjust = true
 }: {
   store: EditorStore
   call: Caller
@@ -259,6 +283,8 @@ export function TabPortrait({
   onViewFull: (() => void) | undefined
   /** After a change is saved: the chat reads its cast again, so its portraits follow. */
   onChanged?: () => void
+  /** Adjust cutout beside it; off where the page shows the picture's own controls (the full editor). */
+  adjust?: boolean
 }) {
   const portrait = usePortraitChange(store, call, onChanged)
   return (
@@ -274,7 +300,7 @@ export function TabPortrait({
       />
       {shown.mediaId !== null && (
         <span className="flex">
-          {portrait.canAdjust && (
+          {adjust && portrait.canAdjust && (
             <IconButton
               icon="crop"
               label="Adjust cutout"

@@ -248,7 +248,7 @@ for (const width of [1440, 390])
       await expect(muted).toHaveAttribute("aria-description", "Muted: replies only when picked")
       await muted.click()
       await expect(nextChip(page)).toHaveAccessibleName(nextName(mutedName))
-      // Auto goes back to the turn order.
+      // Auto goes back to its own pick.
       await pickReply(page, null)
       await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
       // Writing as a member (the muted one, explicitly) doesn't change who {{user}} is.

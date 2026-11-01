@@ -3,7 +3,13 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
-import { ExportSource, type ReadOps } from "./ops.ts"
+import { CardReplaceSource } from "@rp/shared/cardReplace.ts"
+import type { ChatId } from "@rp/shared/chat.ts"
+import type { RevisionId } from "@rp/shared/library.ts"
+import { readFavourites } from "./cardFavourites.ts"
+import { chatStateAt } from "./cards.ts"
+import { ExportSource, NotFound, type ReadOps } from "./ops.ts"
+import { revisionNumber } from "./revisionNumbers.ts"
 import { query } from "./tx.ts"
 
 export const makeImportReadHandlers = Effect.gen(function* () {
@@ -87,6 +93,46 @@ export const makeImportReadHandlers = Effect.gen(function* () {
           assets: assets.flat()
         })
       }).pipe(query("ExportSource")),
+
+    CardReplaceSource: ({ userId, refId }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "card" || ref.ref_kind !== "upstream")
+          return yield* new NotFound({ entity: "card", id: refId })
+        const json = yield* docJson(ref.head_revision_id)
+        const doc = JSON.parse(json) as Record<string, unknown>
+        const [avatar] =
+          typeof doc.avatar_media_id === "string"
+            ? yield* sql<{ sha256: string }>`SELECT sha256 FROM media_assets WHERE id = ${doc.avatar_media_id}`
+            : []
+        const note = yield* lib.cardNote(userId, ref.entity_id)
+        const noteDoc = note === null ? null : yield* lib.loadDoc(note.head_revision_id)
+        // Where each chat the card is in stands now (its active leaf): bound to a fixed
+        // revision there, it keeps it; otherwise it reads the card's latest.
+        const chats = yield* sql<{ id: string; leaf: string | null }>`
+          SELECT c.id, c.active_leaf_slot_id AS leaf FROM chats c
+          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND EXISTS (
+            SELECT 1 FROM state_events s WHERE s.chat_id = c.id AND s.key IN ('participant.join', 'card.swap')
+              AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})`
+        let pinned = 0
+        for (const chat of chats) {
+          const state = yield* chatStateAt(sql, chat.id as ChatId, chat.leaf)
+          if (state.cardBindings[ref.entity_id]?.revision) pinned++
+        }
+        const used = yield* lib.usedByChats(userId, ref)
+        const favourites = yield* readFavourites(sql, userId)
+        return new CardReplaceSource({
+          headRevisionId: ref.head_revision_id as RevisionId,
+          revisionNumber: yield* revisionNumber(sql, ref.head_revision_id),
+          docJson: json,
+          avatarSha256: avatar?.sha256 ?? null,
+          noteContent: typeof noteDoc?.content === "string" ? noteDoc.content : null,
+          followingChats: Math.max(0, used - pinned),
+          pinnedChats: pinned,
+          hasImport: ref.followed_head !== null,
+          favourite: favourites.on.includes(ref.entity_id)
+        })
+      }).pipe(query("CardReplaceSource")),
 
     GetLibraryRef: ({ userId, refId }) =>
       lib.ownedRef(userId, refId).pipe(Effect.map(toLibraryRef), query("GetLibraryRef")),

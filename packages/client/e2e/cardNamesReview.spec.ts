@@ -4,6 +4,7 @@ import { Effect } from "effect"
 import { apiLogin, serverPerFile, withAdmin, ADMIN } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveButton, saveRevision } from "./support/saveRevision.ts"
+import { chatNameLine, renameCard } from "./support/cardEditor.ts"
 const server = serverPerFile(withAdmin)
 test("another tab creating the same pair must disable Create in the waiting tab", async ({ context, page }) => {
   test.setTimeout(120000)
@@ -18,7 +19,7 @@ test("another tab creating the same pair must disable Create in the waiting tab"
     await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
   }
   await page.getByRole("dialog").getByRole("button", { name: "Create", exact: true }).click()
-  await expect(page.getByRole("textbox", { name: "Display name", exact: true })).toHaveValue("Review cross-tab")
+  await expect(page.getByRole("heading", { level: 1, name: "Review cross-tab", exact: true })).toBeVisible()
   const create = other.getByRole("dialog").getByRole("button", { name: "Create", exact: true })
   await expect(create).toBeDisabled()
   const refs = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListLibrary({ kind: "card" }))
@@ -79,13 +80,12 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
     .click()
   await expect(sidebar).toContainText("Cache original")
   await expect(sidebar.getByRole("button", { name: "Open Cache original · 1", exact: true })).toBeVisible()
-  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Cache renamed")
-  await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("2")
+  // The name chats use changes, so the rename asks about past messages on confirm.
+  await renameCard(page, "display", "Cache renamed")
+  await page.getByRole("dialog").getByRole("button", { name: "Just change it", exact: true }).click()
+  await renameCard(page, "version", "2")
   await saveButton(page).click()
   await expect(page.getByRole("heading", { name: "Cache renamed", exact: true })).toBeVisible()
-  // The card has a chat, so the save offers to rename it in past messages; that dialog keeps
-  // the rest of the page out of reach until it's answered.
-  await page.getByRole("button", { name: /^No\. Past messages will keep/ }).click()
   await expect(sidebar.getByRole("button", { name: "Open Cache renamed · 2", exact: true })).toBeVisible()
 })
 test("three name drafts and diffs work, but history must refuse a colliding restore", async ({ page }) => {
@@ -95,21 +95,23 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${original.id}`)
-  const fields: ReadonlyArray<readonly [string, string]> = [
-    ["Display name", "History renamed"],
-    ["Name the model sees (leave empty to use the display name)", "Model renamed"],
-    ["Version (shown as subtitle)", "2"],
-    ["Description", "Synthetic CodeMirror text beside the three identity fields."]
-  ]
-  for (const [name, value] of fields)
-    await page.getByRole("textbox", { name: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).fill(value)
+  // A display name changed with a nickname set asks nothing; the nickname asks (no chats here).
+  await renameCard(page, "display", "History renamed")
+  await expect(page.getByRole("heading", { level: 1, name: "History renamed", exact: true })).toBeVisible()
+  await renameCard(page, "nickname", "Model renamed")
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /^No\. Past messages will keep/ })
+    .click()
+  await renameCard(page, "version", "2")
+  const description = "Synthetic CodeMirror text beside the three identity fields."
+  await page.getByRole("textbox", { name: "Description", exact: true }).fill(description)
   await expect(page.getByRole("status").filter({ hasText: "Changed since revision 1" })).toBeVisible()
   await page.reload()
-  for (const [name, value] of fields)
-    await expectTextBox(
-      page.getByRole("textbox", { name: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }),
-      value
-    )
+  await expect(page.getByRole("heading", { level: 1, name: "History renamed", exact: true })).toBeVisible()
+  await expect(chatNameLine(page, "Model renamed")).toBeVisible()
+  await expect(page.getByRole("main").getByText("2", { exact: true }).first()).toBeVisible()
+  await expectTextBox(page.getByRole("textbox", { name: "Description", exact: true }), description)
   // Save asks nothing; History's comparison below names the four fields it saved.
   await saveRevision(page)
   await expect(page.getByRole("dialog")).toHaveCount(0)
@@ -191,7 +193,8 @@ test("Save rechecks names and disables the action after an unannounced collision
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${original.id}`)
-  await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Late target")
+  await renameCard(page, "display", "Late target")
+  await page.getByRole("dialog").getByRole("button", { name: "Just change it", exact: true }).click()
   const save = saveButton(page)
   await expect(save).toBeEnabled()
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>

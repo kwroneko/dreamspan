@@ -3,6 +3,7 @@
 // among it, runs without a single violation.
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 /** A 1×1 PNG. */
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -90,6 +91,7 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
   await page.getByRole("button", { name: "New card" }).click()
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Wren")
   await page.getByRole("button", { name: "Create" }).click()
+  await cardFieldsTab(page, "Metadata")
   await page.getByLabel("Choose an avatar, or drop it here").setInputFiles({
     name: "wren.png",
     mimeType: "image/png",

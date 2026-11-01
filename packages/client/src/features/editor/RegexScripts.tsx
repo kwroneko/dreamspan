@@ -19,6 +19,7 @@ import type { DisplayResult } from "../chat/displayPipeline.ts"
 import { runRegexJob } from "../chat/displayWorker.ts"
 import type { Caller } from "./caller.ts"
 import { LinesField, NumberField, SelectField, SwitchField, TextField } from "./controls.tsx"
+import { addScriptChange } from "./regexAdd.ts"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
@@ -531,8 +532,9 @@ export function DocumentRegexScripts({
   }
 
   const add = () => {
-    const script = newScript()
-    store.setValue(["regex", `id=${script.id}`], script)
+    const current = store.value(["regex"]) as ReadonlyArray<RegexScript> | undefined
+    const { path, value } = addScriptChange(current, newScript())
+    store.setValue(path, value)
   }
 
   return (

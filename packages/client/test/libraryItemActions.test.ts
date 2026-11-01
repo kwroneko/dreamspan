@@ -12,6 +12,8 @@ import {
   type LibraryItemContext
 } from "../src/features/library/itemActions.tsx"
 import { registerItemActions } from "../src/features/library/registerItemActions.tsx"
+import { register as registerCardImport } from "../src/features/cardImport/index.tsx"
+import { chatCardActions } from "../src/features/chat/presentation.tsx"
 import { TooltipProvider } from "../src/ui/Tooltip.tsx"
 
 vi.hoisted(() => {
@@ -45,11 +47,12 @@ const format = (id: string, kind: ExportFormatInfo["kind"]): ExportFormatInfo =>
 const formats = [format("png", "card"), format("preset-json", "preset")]
 const ids = (context: LibraryItemContext) => availableItemActions(context).map((action) => action.id)
 
-it("offers each kind its own actions, a lorebook an Edit, a newly made fork no update from a file", () => {
+it("offers each kind its own actions, a lorebook an Edit, a card no merging update from a file", () => {
   const dispose = registerItemActions()
   try {
     const card = { entry: ref({ hasImport: true }), persona: false, exportFormats: formats }
-    expect(ids(card)).toEqual(["library.chat", "library.edit", "library.persona", "library.update", "library.export"])
+    // A card takes a new version wholesale through "Import a new version…" (features/cardImport).
+    expect(ids(card)).toEqual(["library.chat", "library.edit", "library.persona", "library.export"])
     expect(ids({ ...card, entry: ref({ hasImport: false }) })).not.toContain("library.update")
     // Every kind opens in its editor's page, a lorebook too.
     expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])
@@ -60,6 +63,22 @@ it("offers each kind its own actions, a lorebook an Edit, a newly made fork no u
       "library.export"
     ])
     expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "chat_override" }) })).not.toContain("library.archive")
+  } finally {
+    for (const undo of dispose) undo()
+  }
+  expect(libraryItemActions.list()).toHaveLength(0)
+})
+
+it("registers Import a new version… for cards, in the library, the card's actions and a chat's card", () => {
+  const dispose = registerCardImport()
+  try {
+    const card = { entry: ref({}), persona: false, exportFormats: formats }
+    expect(ids(card)).toEqual(["card-import.new-version"])
+    expect(ids({ ...card, entry: ref({ kind: "preset" }) })).toEqual([])
+    expect(cardContributions.list().map((entry) => [entry.id, entry.placement])).toEqual([
+      ["card-import.new-version", "actions"]
+    ])
+    expect(chatCardActions.list().map((entry) => entry.id)).toEqual(["card-import.new-version"])
   } finally {
     for (const undo of dispose) undo()
   }

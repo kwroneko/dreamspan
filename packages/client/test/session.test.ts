@@ -6,7 +6,7 @@ import type { ChatEvent, PathWindow } from "@rp/shared/chatApi.ts"
 import { Cast } from "@rp/shared/chatSetupApi.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { describe, expect, it, vi } from "vitest"
-import { planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
+import { AUTO_POLICY, planReply, replyPolicies } from "../src/features/chat/replyPolicy.ts"
 
 // rpc.ts reads the page's location when imported.
 vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
@@ -238,7 +238,7 @@ describe("ChatSession", () => {
           return { _tag: queued ? "Queued" : "Posted", queue: [], entry: first, chat, draft: null, recovered: 0 }
         })
       })
-      const undo = replyPolicies.disable("round-robin")
+      const undo = replyPolicies.disable(AUTO_POLICY)
       try {
         const plan = planReply(null, [], null, null)
         const outcome = await s.send("Synthetic message.", null, plan.replier, undefined, plan.reply)

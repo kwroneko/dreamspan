@@ -1,6 +1,6 @@
 // A name with a pencil beside it: the pencil turns the name into a field with Save and Cancel
 // beside it; Enter saves, Escape cancels. The usual way to rename one thing in place.
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Input } from "./Field.tsx"
 import { IconButton } from "./Tooltip.tsx"
 
@@ -11,7 +11,10 @@ export function InlineRename({
   children,
   allowEmpty = false,
   className = "",
-  inputClassName = ""
+  inputClassName = "",
+  hint = "Rename",
+  fieldLabel,
+  goTo
 }: {
   /** The name as it is, what the field starts with. */
   value: string
@@ -25,8 +28,28 @@ export function InlineRename({
   allowEmpty?: boolean
   className?: string
   inputClassName?: string
+  /** The pencil's tooltip: what the name is, when that isn't obvious ("Rename" by default). */
+  hint?: ReactNode
+  /** The field's accessible name while renaming ("New name for <label>" by default). */
+  fieldLabel?: string
+  /** A search match in the name: opens the field with that part selected. */
+  goTo?: { readonly at: number; readonly length: number } | undefined
 }) {
   const [typed, setTyped] = useState<string | null>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const [lastGoTo, setLastGoTo] = useState(goTo)
+  if (goTo !== lastGoTo) {
+    setLastGoTo(goTo)
+    if (goTo) setTyped(value)
+  }
+  useEffect(() => {
+    if (!goTo) return
+    const frame = requestAnimationFrame(() => {
+      input.current?.focus({ preventScroll: true })
+      input.current?.setSelectionRange(goTo.at, goTo.at + goTo.length)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [goTo])
   const [pending, setPending] = useState(false)
   const save = async () => {
     if (typed === null || pending) return
@@ -43,7 +66,7 @@ export function InlineRename({
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         <IconButton
           label={`Rename ${label}`}
-          hint="Rename"
+          hint={hint}
           icon="edit"
           className="size-7! shrink-0"
           onClick={() => setTyped(value)}
@@ -53,10 +76,13 @@ export function InlineRename({
   return (
     <span className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
       <Input
-        aria-label={`New name for ${label}`}
+        aria-label={fieldLabel ?? `New name for ${label}`}
+        ref={input}
         value={typed}
         autoFocus
-        onFocus={(event) => event.currentTarget.select()}
+        onFocus={(event) => {
+          if (!goTo) event.currentTarget.select()
+        }}
         onChange={(event) => setTyped(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

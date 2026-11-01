@@ -1,9 +1,9 @@
 import { useEffect, useSyncExternalStore } from "react"
-import { cardSavedContribution, cardSavedContributions, type CardSaved } from "./cardSaved.ts"
+import { cardSavedContribution, cardSavedContributions, type CardSaved, type CardSavedDone } from "./cardSaved.ts"
 
 // Resolve at the rendering boundary, including recovered and already queued offers.
 // A plugin replacement or disablement must apply to those offers too.
-export function CardSavedFlow({ change, onDone }: { change: CardSaved; onDone: (stay?: boolean) => void }) {
+export function CardSavedFlow({ change, onDone }: { change: CardSaved; onDone: CardSavedDone }) {
   useSyncExternalStore(
     cardSavedContributions.subscribe,
     cardSavedContributions.snapshot,

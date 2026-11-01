@@ -4,6 +4,7 @@ import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "80", FAKE_GENERATOR_TOKENS: "80" })
 test.setTimeout(120_000)
@@ -22,6 +23,7 @@ const prepare = async (page: Page) => {
       expect(response.ok()).toBeTruthy()
       await page.goto(`${server().url}/library`)
       await page.getByRole("link", { name: `Edit ${name}`, exact: true }).click()
+      await cardFieldsTab(page, "Metadata")
       await page
         .getByLabel("Choose an avatar, or drop it here")
         .setInputFiles({ name: "wide.png", mimeType: "image/png", buffer: portraitPng() })
@@ -215,6 +217,7 @@ test("every image follows concealment, reload's first frame and another tab", as
   await expect(page.locator("#future-canvas")).toHaveCSS("filter", "blur(14px) saturate(0.6)")
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Edit Mira", exact: true }).click()
+  await cardFieldsTab(page, "Metadata")
   await expect(page.getByRole("img", { name: "The card's avatar" })).toHaveCSS("filter", "blur(14px) saturate(0.6)")
 })
 

@@ -6,6 +6,7 @@ import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { avatarCropField } from "@rp/shared/media.ts"
+import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
 // selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
@@ -40,6 +41,14 @@ export interface CardText {
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 
+/** The card's `extensions.talkativeness`, defaulted and clamped (ST's natural order). */
+const talkativenessFrom = (doc: Record<string, unknown>) =>
+  talkativenessOf(
+    typeof doc.extensions === "object" && doc.extensions !== null
+      ? (doc.extensions as Record<string, unknown>).talkativeness
+      : undefined
+  )
+
 const parse = (row: CardRow): CardText => {
   let doc: Record<string, unknown> = {}
   try {
@@ -68,6 +77,7 @@ const parse = (row: CardRow): CardText => {
       subtitle: names.version,
       persona: row.persona === 1,
       inBin: row.in_bin === 1,
+      talkativeness: talkativenessFrom(doc),
       lorebook: book !== null,
       ...(bookName === "" ? {} : { lorebookName: bookName }),
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
@@ -126,18 +136,14 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
         subtitle: names.version,
         avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
         ...avatarCropField(doc.avatar_media_id, doc.avatar_crop),
+        talkativeness: talkativenessFrom(doc),
         lorebook: typeof doc.character_book === "object" && doc.character_book !== null
       })
     })
   )
 
-/** The same selected revisions for chat-list metadata and chat search. */
-export const chatCast = Effect.fnUntraced(function* (
-  sql: SqlClient.SqlClient,
-  userId: UserId,
-  chatId: ChatId,
-  leaf: string | null
-) {
+/** A chat's state folded at `leaf`, as its cast is read there. */
+export const chatStateAt = Effect.fnUntraced(function* (sql: SqlClient.SqlClient, chatId: ChatId, leaf: string | null) {
   const fork = yield* forkAt(sql, chatId, leaf)
   // At the fork's tip, its cast as it stands: through its display end, which an inserted
   // message after the tip is (spec/MESSAGE-INSERT.md §2.3).
@@ -148,7 +154,7 @@ export const chatCast = Effect.fnUntraced(function* (
     SELECT id, tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId}`
   const at = tip !== undefined && tip.tip_slot_id === leaf ? yield* displayEndOf(sql, chatId, tip) : leaf
   const events = yield* stateEventsThrough(sql, chatId, at as SlotId | null, fork)
-  const state = foldState(
+  return foldState(
     yield* withoutPurged(
       sql,
       events.map((e) => ({
@@ -157,6 +163,16 @@ export const chatCast = Effect.fnUntraced(function* (
       })) as Array<FoldableEvent>
     )
   )
+})
+
+/** The same selected revisions for chat-list metadata and chat search. */
+export const chatCast = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: ChatId,
+  leaf: string | null
+) {
+  const state = yield* chatStateAt(sql, chatId, leaf)
   const ids = state.participants as ReadonlyArray<EntityId>
   const cards = yield* loadCards(sql, userId, ids)
   const bindings = state.cardBindings

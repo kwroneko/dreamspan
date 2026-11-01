@@ -126,17 +126,19 @@ test("panel disablement removes dependent settings buttons, notes links and hist
   await expectFooter(page, "model", true)
   await expectFooter(page, "preset", true)
   await page.getByRole("button", { name: "Show Mira's card", exact: true }).click()
-  // The character tab's More menu has the card's notes while the Notes panel is there.
-  const notes = async (count: number) => {
-    await page.getByRole("button", { name: "More for Mira", exact: true }).click()
-    await expect(page.getByRole("menuitem", { name: "Mira's notes", exact: true })).toHaveCount(count)
-    await page.keyboard.press("Escape")
+  // The character tab has no More menu: the card's notes are its own Notes sub-tab, with or
+  // without the chat's Notes panel.
+  const notes = async () => {
+    await expect(page.getByRole("button", { name: "More for Mira", exact: true })).toHaveCount(0)
+    await expect(
+      page.getByRole("tablist", { name: "Card fields" }).getByRole("tab", { name: "Notes", exact: true })
+    ).toBeVisible()
   }
-  await notes(1)
+  await notes()
   await contribution(page, "install", "notes")
-  await notes(0)
+  await notes()
   await contribution(page, "close", "notes")
-  await notes(1)
+  await notes()
   await page.getByRole("button", { name: "Close the panel", exact: true }).click()
   await contribution(page, "install", "history")
   // The menu stays for the chat's commands, without the history ones; keys are listed apart.

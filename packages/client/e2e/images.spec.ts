@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test"
 import { oversizedPortraitPng, writeLargeImageStFolder } from "../../server/test/support/stLargeImages.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { portraitView } from "./support/portrait.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 test.setTimeout(600_000)
@@ -54,14 +55,12 @@ for (const width of [1440, 390]) {
       const portrait = page.locator("main img").first()
       await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)
       // With no chat yet the tile opens a new one, the card's panel offering New chat; with one,
-      // its latest chat at the card's tab, whose More menu starts another (fpanel).
+      // its latest chat at the card's tab, whose New chat with button starts another.
       const newChat = page.getByRole("link", { name: "New chat", exact: true }).filter({ visible: true })
-      const more = page.getByRole("button", { name: "More for Synthetic 001", exact: true })
-      await expect(newChat.or(more).first()).toBeVisible()
-      if (await more.isVisible()) {
-        await more.click()
-        await page.getByRole("menuitem", { name: "New chat with Synthetic 001", exact: true }).click()
-      } else await newChat.last().click()
+      const another = page.getByRole("link", { name: "New chat with Synthetic 001", exact: true })
+      await expect(newChat.or(another).first()).toBeVisible()
+      if (await another.isVisible()) await another.click()
+      else await newChat.last().click()
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
       await page.getByRole("button", { name: /^Send as / }).click()
@@ -94,6 +93,7 @@ for (const width of [1440, 390]) {
     await page.getByRole("link", { name: `Edit ${name}`, exact: true }).click()
     const bytes = await oversizedPortraitPng()
     const uploaded = page.waitForResponse((response) => response.url().includes("/library/avatar?"))
+    await cardFieldsTab(page, "Metadata")
     await page.getByLabel("Choose an avatar, or drop it here").setInputFiles({
       name: "large.png",
       mimeType: "image/png",
@@ -112,6 +112,7 @@ for (const width of [1440, 390]) {
     if (process.env.SCREENSHOT_DIR)
       await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `large-avatar-${width}.png`) })
     await page.reload()
+    await cardFieldsTab(page, "Metadata")
     await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(6000)
     await avatar.evaluate((img) => (img as HTMLImageElement).decode())
   })
