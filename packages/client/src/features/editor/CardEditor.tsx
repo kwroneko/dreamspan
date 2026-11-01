@@ -25,6 +25,7 @@ import { CardTextEditor } from "./CardTextEditor.tsx"
 import { CARD_LOREBOOK_SECTION, cardEditorSections } from "./cardSections.ts"
 import { CARD_TAB_DEFINITION, type CardTabProps, cardEditorTabs } from "./cardTabs.ts"
 import { FieldTools, TextField } from "./controls.tsx"
+import { LorebookForm } from "./LorebookForm.tsx"
 import { LorebookPanelEditor } from "./LorebookPanelEditor.tsx"
 import { addEntry } from "./lorebookTable.ts"
 import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
@@ -437,9 +438,25 @@ function MetadataTab({ store, call, layout }: CardTabProps) {
 
 const BOOK: FieldPath = ["character_book"]
 
+/**
+ * The card's own book: in the side panel, the panel's book editor (entry headers opening to
+ * their text, settings a level down; Large editor opens the table); in the full editor, the
+ * table editor its width suits (`LorebookForm`, as the book's own view and a library lorebook).
+ */
 function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
   const book = useValue<LorebookDoc | undefined>(store, BOOK)
   const name = useText(store, ["name"]) || "This card"
+  if (layout === "page")
+    return (
+      <div data-card-lorebook className="flex min-w-0 flex-col gap-4">
+        <p className="text-sm text-muted">
+          Travels with this card on export and is used automatically in new chats. What's typed is used as it's typed;
+          saving the card saves it.
+        </p>
+        <LorebookForm store={store} root={BOOK} absent={`${name} has no lorebook of its own.`} />
+        <FieldTools store={store} field={valueField(BOOK)} label="Lorebook" />
+      </div>
+    )
   if (!book)
     return (
       <div className="flex min-w-0 flex-col items-start gap-3">
@@ -457,7 +474,7 @@ function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
       </div>
     )
   return (
-    <div className={`flex min-w-0 flex-col gap-3 ${layout === "page" ? "max-w-4xl" : ""}`}>
+    <div className="flex min-w-0 flex-col gap-3">
       <LorebookPanelEditor
         store={store}
         root={BOOK}
