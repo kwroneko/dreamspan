@@ -16,6 +16,7 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ChatList } from "../chat/ChatList.tsx"
 import { NameDialog } from "../chat/NameDialog.tsx"
 import { useTitle } from "../shell.tsx"
@@ -49,10 +50,13 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
             <Link to="/chats/$chatId" params={{ chatId: group.latestChatId }} className={buttonClass("primary")}>
               Continue the latest chat
             </Link>
-            <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
-              New chat
-            </Link>
+            <Tooltip label="Opens a new chat with these characters, each greeting in turn. Nothing is saved until you send.">
+              <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
+                New chat
+              </Link>
+            </Tooltip>
             <Button
+              hint="Renames every chat of the group, and the ones you start from here."
               onClick={() => {
                 rename.clearError()
                 setRenaming(true)

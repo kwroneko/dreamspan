@@ -91,7 +91,11 @@ const triItems = (upstream: boolean | undefined) => [
     label:
       upstream === undefined
         ? "Not known: the provider doesn't say"
-        : `As the provider says: ${upstream ? "yes" : "no"}`
+        : `As the provider says: ${upstream ? "yes" : "no"}`,
+    description:
+      upstream === undefined
+        ? "Treated as no until the provider reports it or you choose."
+        : "Follows what the provider reports, also after a refresh changes it."
   },
   { value: "yes" as const, label: "Yes" },
   { value: "no" as const, label: "No" }
@@ -112,11 +116,29 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
           ? "As the provider says: yes"
           : upstream === "tool_schema"
             ? "As the provider says: through a tool schema"
-            : "As the provider says: no"
+            : "As the provider says: no",
+    description:
+      upstream === undefined
+        ? "No prefill is sent, and Continue stays off until you choose."
+        : "Follows what the provider reports, also after a refresh changes it."
   },
-  { value: "assistant" as const, label: "Yes: start an assistant reply" },
-  { value: "none" as const, label: "No" },
-  { value: "tool_schema" as const, label: "Through a tool schema" }
+  {
+    value: "assistant" as const,
+    label: "Yes",
+    description: "The reply’s start is sent as a last assistant message, which the model carries on from."
+  },
+  {
+    value: "none" as const,
+    label: "No",
+    description:
+      "The preset’s prefill is left out; Continue sends the text as the model’s own last message and asks it to go on."
+  },
+  {
+    value: "tool_schema" as const,
+    label: "Through a tool schema",
+    description:
+      "For OpenAI’s APIs: the reply comes back through a forced tool call whose schema makes it start with the prefill."
+  }
 ]
 
 type SamplerKey = keyof NonNullable<ModelSettings["samplers"]>
@@ -231,6 +253,7 @@ function Limit({
           <Button
             variant="ghost"
             className="self-start"
+            hint="Clears your value, so what the provider reports applies again."
             onClick={() => {
               onValueChange("")
               setEditing(false)
@@ -441,6 +464,7 @@ export function ModelSettingsEditor({
             <Button
               variant="ghost"
               pending={forget.pending}
+              hint="Stops using the learned size, so the provider’s figure applies again."
               onClick={async () => {
                 const result = await forget.run(
                   (client) => client("SaveLearnedContext", { modelId: model.id, context: null }),
@@ -462,7 +486,10 @@ export function ModelSettingsEditor({
         {/* Two columns only where there's room for the choices (a dialog, not the chat's panel). */}
         <div className="@container">
           <div className="grid gap-4 @lg:grid-cols-2">
-            <Field label="Vision">
+            <Field
+              label="Vision"
+              description="Whether it can see images. When it can’t, a chat’s images aren’t sent to it."
+            >
               <Select items={triItems(model.upstream.vision)} value={vision} onValueChange={setVision} />
             </Field>
             <Field label="Reasoning">
@@ -475,7 +502,7 @@ export function ModelSettingsEditor({
         </div>
         <Field
           label="Prefill"
-          description="Whether it carries on from text put at the start of its reply. The preset's prefill and Continue need it: while it isn't known, Continue stays off. Choose Yes if you know it can."
+          description="Whether it carries on from text put at the start of its reply, as the preset's prefill and Continue use. Choose Yes if you know it can."
         >
           <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
         </Field>
@@ -574,6 +601,7 @@ export function ModelSettingsEditor({
           action.error?.tag === "StaleWrite" ? (
             <Button
               variant="ghost"
+              hint="Drops your changes here and shows the settings saved meanwhile."
               onClick={() =>
                 void durable.discard(async () => {
                   const result = await action.run((client) =>
@@ -768,6 +796,11 @@ function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionPr
           variant="ghost"
           pending={hide.pending}
           aria-label={`${model.hidden ? "Show" : "Hide"} ${model.key}`}
+          hint={
+            model.hidden
+              ? "Lists it again where you choose a model."
+              : "Leaves it out of the lists where you choose a model."
+          }
           onClick={() =>
             void hide.run(
               (client) => client("SetModelHidden", { modelId: model.id, hidden: !model.hidden }),
@@ -804,6 +837,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
           <>
             <Button
               pending={refresh.pending}
+              hint="Reads the provider’s model list again. Your own settings for each model stay."
               onClick={async () => {
                 setRefreshed(null)
                 const result = await refresh.run(
@@ -815,7 +849,11 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
             >
               Refresh from provider
             </Button>
-            <Button variant="ghost" onClick={() => setAdding(true)}>
+            <Button
+              variant="ghost"
+              hint="Adds one the provider doesn’t list, by its id."
+              onClick={() => setAdding(true)}
+            >
               Add a model
             </Button>
           </>

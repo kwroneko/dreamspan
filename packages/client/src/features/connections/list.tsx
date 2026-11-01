@@ -26,7 +26,12 @@ export function ConnectionsPage() {
         description="Each connection is one provider API at one address, with the key it sends."
         actions={
           <>
-            <Button onClick={() => setImporting(true)}>Import connection settings</Button>
+            <Button
+              hint="Makes a connection from an ST preset’s API type, address and model. Keys aren’t read."
+              onClick={() => setImporting(true)}
+            >
+              Import connection settings
+            </Button>
             <Link to="/settings/connections/new" className={buttonClass("primary")}>
               New connection
             </Link>

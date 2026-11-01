@@ -93,7 +93,10 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
             {settings.revision}.
           </p>
           <p>Saved formulas: {settings.rules.map((r) => r.name).join(", ") || "None"}.</p>
-          <Button onClick={() => durable.setText(JSON.stringify({ ...values, revision: settings.revision }))}>
+          <Button
+            hint="Your rules replace the newer saved ones when you save."
+            onClick={() => durable.setText(JSON.stringify({ ...values, revision: settings.revision }))}
+          >
             Keep my rules on the latest version
           </Button>
         </Alert>
@@ -202,6 +205,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
             <div>
               <Button
                 disabled={rule.tiers.length >= 16}
+                hint="Other rates for requests whose total input is above a size you set."
                 onClick={() => update(index, { tiers: [...rule.tiers, { above: 128000, rates: rule.rates }] })}
               >
                 Add context tier
@@ -217,6 +221,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
         <div className="flex flex-wrap gap-2">
           <Button
             disabled={values.rules.length >= 100}
+            hint="Your own prices for one model, which win over the provider’s and the built-in ones."
             onClick={() =>
               edit([
                 ...values.rules,

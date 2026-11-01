@@ -119,6 +119,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "image/png",
     extension: "png",
     media: "avatar",
+    description: "A PNG of its avatar with the card inside, as most apps share cards. Embedded assets stay out.",
     write: cardWriter((card, input) =>
       Effect.gen(function* () {
         if (input.avatar && input.avatar.mime !== "image/png") {
@@ -140,6 +141,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The card as Character Card V2 JSON, with no images: for apps that don’t read V3.",
     write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v2")))
   },
   {
@@ -149,6 +151,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The card as Character Card V3 JSON, with no images.",
     write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v3")))
   },
   {
@@ -158,6 +161,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/zip",
     extension: "charx",
     media: "all",
+    description: "A CHARX archive: the card with its avatar and every embedded asset.",
     write: cardWriter((card, input) =>
       Effect.sync(() => {
         const mainIcon = card.assets?.find(
@@ -180,6 +184,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The lorebook as a SillyTavern World Info file.",
     write: (input) => Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
   },
   {
@@ -189,6 +194,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "Its prompts as a SillyTavern chat-completion preset, with no model or connection settings.",
     // Hydrate legacy export fields from a recognized chat-completion document.
     // Prompt-only revisions deliberately have no sampler or wire fields.
     write: (input) =>
@@ -243,4 +249,12 @@ export const exportFile = (
 
 /** Never pass executable code across the worker boundary. */
 export const listFormats = (registry: Registry<Exporter>): ReadonlyArray<ExportFormatInfo> =>
-  registry.list().map(({ id, kind, label, mime, extension, media }) => ({ id, kind, label, mime, extension, media }))
+  registry.list().map(({ id, kind, label, mime, extension, media, description }) => ({
+    id,
+    kind,
+    label,
+    mime,
+    extension,
+    media,
+    ...(description === undefined ? {} : { description })
+  }))

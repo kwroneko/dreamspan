@@ -15,6 +15,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ForkRow } from "./ShellBrowser.tsx"
 import { shellAtom, useShellForks } from "./shellData.tsx"
 import { useOpenCharacter } from "./shellData.tsx"
@@ -236,14 +237,23 @@ function Page({ card }: { card: CardUsage }) {
           <p className="text-sm text-muted">{usageLine(card)}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <CardSurface placement="actions" entityId={card.entityId} />
-            {used && <Button onClick={() => openCharacter(card.entityId)}>Continue</Button>}
-            <Link
-              to="/cards/$entityId/chat"
-              params={{ entityId: card.entityId }}
-              className={buttonClass(used ? "secondary" : "primary")}
-            >
-              New chat
-            </Link>
+            {used && (
+              <Button
+                hint="Opens the chat they last spoke in, at that message."
+                onClick={() => openCharacter(card.entityId)}
+              >
+                Continue
+              </Button>
+            )}
+            <Tooltip label="Opens a new chat at their greeting. Nothing is saved until you send.">
+              <Link
+                to="/cards/$entityId/chat"
+                params={{ entityId: card.entityId }}
+                className={buttonClass(used ? "secondary" : "primary")}
+              >
+                New chat
+              </Link>
+            </Tooltip>
             <Link to="/library/$refId" params={{ refId: card.refId }} className={buttonClass("ghost")}>
               Edit card
             </Link>

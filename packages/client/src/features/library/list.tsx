@@ -307,8 +307,12 @@ function Section({
             onValueChange={(show) => setPrefs({ show })}
             options={[
               { value: "all", label: "All" },
-              { value: "characters", label: "Characters" },
-              { value: "personas", label: `Personas · ${personas}` }
+              { value: "characters", label: "Characters", description: "Cards outside the persona folder." },
+              {
+                value: "personas",
+                label: `Personas · ${personas}`,
+                description: "Cards in the persona folder, offered when you pick who you play."
+              }
             ]}
           />
         )}

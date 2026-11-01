@@ -83,7 +83,15 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
           options={[
             { value: "keep", label: settings.proxy === null ? "No proxy" : "Keep this proxy" },
             { value: "replace", label: settings.proxy === null ? "Set a proxy" : "Replace it" },
-            ...(settings.proxy === null ? [] : [{ value: "remove" as const, label: "Remove it" }])
+            ...(settings.proxy === null
+              ? []
+              : [
+                  {
+                    value: "remove" as const,
+                    label: "Remove it",
+                    description: "Requests go direct, unless a connection sets its own proxy."
+                  }
+                ])
           ]}
         />
         {values.proxy === "replace" && (

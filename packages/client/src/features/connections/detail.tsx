@@ -141,7 +141,11 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
         >
           <Select
             items={[
-              { value: "none", label: "No lock" },
+              {
+                value: "none",
+                label: "No lock",
+                description: "Switching to this connection leaves the preset as it is."
+              },
               ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
             ]}
             value={values.preset}
@@ -169,7 +173,11 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           title="Not saved"
           actions={
             action.error?.tag === "StaleWrite" ? (
-              <Button variant="ghost" onClick={discard}>
+              <Button
+                variant="ghost"
+                hint="Drops your changes here and shows the settings saved meanwhile."
+                onClick={discard}
+              >
                 Load the latest
               </Button>
             ) : undefined
@@ -329,10 +337,23 @@ export function KeySection(props: ConnectionSectionProps) {
         description="Keys go in and never come back out: only their last four characters show."
         actions={
           <>
-            <Button onClick={() => setDialog("set")}>Enter a new key</Button>
-            {credentials.length > 0 && <Button onClick={() => setDialog("saved")}>Use a saved key</Button>}
+            <Button hint="Gives it a key you type, sent only to its address." onClick={() => setDialog("set")}>
+              Enter a new key
+            </Button>
+            {credentials.length > 0 && (
+              <Button
+                hint="Uses a key saved in Settings → Keys, which other connections can share."
+                onClick={() => setDialog("saved")}
+              >
+                Use a saved key
+              </Button>
+            )}
             {connection.hasKey && (
-              <Button variant="ghost" onClick={() => setDialog("remove")}>
+              <Button
+                variant="ghost"
+                hint="The connection sends no key afterwards. You confirm first."
+                onClick={() => setDialog("remove")}
+              >
                 Remove key
               </Button>
             )}
@@ -358,7 +379,14 @@ export function KeySection(props: ConnectionSectionProps) {
           <Alert
             tone="warning"
             title={`This key isn't allowed for ${origin}`}
-            actions={<Button onClick={() => setDialog("allow")}>Allow it</Button>}
+            actions={
+              <Button
+                hint="Asks for the key again, then lets it go to this address."
+                onClick={() => setDialog("allow")}
+              >
+                Allow it
+              </Button>
+            }
           >
             Requests are refused until you type the key again to allow this address. That happens when the address
             changes, or when the key is replaced without allowing it. If you made neither change, check the address

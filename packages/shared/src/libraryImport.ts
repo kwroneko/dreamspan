@@ -46,7 +46,9 @@ export const ExportFormatInfo = Schema.Struct({
   label: Schema.String,
   mime: Schema.String,
   extension: Schema.String,
-  media: Schema.Literals(["none", "avatar", "all"])
+  media: Schema.Literals(["none", "avatar", "all"]),
+  /** What the file holds, in a sentence, shown beside the format's menu entry. */
+  description: Schema.optionalKey(Schema.String)
 })
 export type ExportFormatInfo = typeof ExportFormatInfo.Type
 
