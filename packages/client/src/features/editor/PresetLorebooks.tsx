@@ -10,7 +10,7 @@ import { useState } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useLibraryLorebooks } from "./libraryLorebooks.ts"
 import { LorebookPicker } from "./LorebookPicker.tsx"
 import { type EditorStore, useValue } from "./store.ts"
@@ -87,14 +87,16 @@ export function PresetLorebooks({
                       Open
                     </Button>
                   ) : (
-                    <Link
-                      to="/library/$refId"
-                      params={{ refId: ref.id }}
-                      className="shrink-0 px-2 text-sm text-accent underline-offset-4 hover:underline"
-                      aria-label={`Open ${name}`}
-                    >
-                      Open
-                    </Link>
+                    <Tooltip label="Opens the book's page. It's the library's book: a change there reaches every chat and preset using it.">
+                      <Link
+                        to="/library/$refId"
+                        params={{ refId: ref.id }}
+                        className="shrink-0 px-2 text-sm text-accent underline-offset-4 hover:underline"
+                        aria-label={`Open ${name}`}
+                      >
+                        Open
+                      </Link>
+                    </Tooltip>
                   ))}
                 <IconButton
                   label={`Take ${name} off the preset`}
