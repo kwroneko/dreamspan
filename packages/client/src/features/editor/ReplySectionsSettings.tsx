@@ -42,7 +42,11 @@ function PairRow({
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border p-3" data-section-pair={index}>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Field label="Opening tag" error={patternError(pair.open)}>
+        <Field
+          label="Opening tag"
+          description="Where a section starts: a regular expression."
+          error={patternError(pair.open)}
+        >
           <Input
             value={pair.open}
             spellCheck={false}
@@ -50,7 +54,7 @@ function PairRow({
             onChange={(event) => onChange({ ...pair, open: event.currentTarget.value })}
           />
         </Field>
-        <Field label="Closing tag" error={patternError(pair.close)}>
+        <Field label="Closing tag" description="Where it ends." error={patternError(pair.close)}>
           <Input
             value={pair.close}
             spellCheck={false}
@@ -61,6 +65,7 @@ function PairRow({
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Checkbox
+          hint="On: the tags match only as written. Off: any case, so <THINK> too."
           checked={pair.case_sensitive === true}
           onCheckedChange={(checked) => {
             const { case_sensitive: _, ...rest } = pair
@@ -69,7 +74,7 @@ function PairRow({
         >
           Match case
         </Checkbox>
-        <Button variant="ghost" onClick={onRemove}>
+        <Button variant="ghost" hint="These tags no longer mark thinking." onClick={onRemove}>
           Remove pair
         </Button>
       </div>
@@ -95,7 +100,11 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
         description="Some presets ask the model to think in tags before it replies. That part shows in a folded panel, “Thinking in the reply”, above the reply text."
       />
       <div className="flex flex-col gap-4" data-preset-section="reply-sections">
-        <Switch checked={settings.enabled} onCheckedChange={(enabled) => change({ enabled })}>
+        <Switch
+          checked={settings.enabled}
+          hint="On: thinking in these tags at a reply's start goes to its own panel. Off: it stays in the reply text."
+          onCheckedChange={(enabled) => change({ enabled })}
+        >
           Move tagged thinking into its own panel
         </Switch>
         <p className="text-sm text-muted">
@@ -116,9 +125,18 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
           ))}
         </ul>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => change({ pairs: [...settings.pairs, { open: "", close: "" }] })}>Add a pair</Button>
+          <Button
+            hint="Another opening and closing tag that mark thinking."
+            onClick={() => change({ pairs: [...settings.pairs, { open: "", close: "" }] })}
+          >
+            Add a pair
+          </Button>
           {!hasDefault && (
-            <Button variant="ghost" onClick={() => change({ pairs: [...settings.pairs, DEFAULT_SECTION_PAIR] })}>
+            <Button
+              variant="ghost"
+              hint="Adds the <think> and <thinking> pair back."
+              onClick={() => change({ pairs: [...settings.pairs, DEFAULT_SECTION_PAIR] })}
+            >
               Add the default pair
             </Button>
           )}

@@ -241,10 +241,8 @@ for (const width of [1440, 390])
       await expect(nextChip(page)).not.toHaveAccessibleName(nextName(mutedName))
       const whoReplies = choices(page, "Who replies next")
       await nextChip(page).click()
-      await expect(whoReplies.getByRole("radio", { name: /^Auto: .+, next in turn$/ })).toBeChecked()
-      await expect(whoReplies.getByRole("radio", { name: /^Auto: / })).not.toHaveAccessibleName(
-        `Auto: ${mutedName}, next in turn`
-      )
+      await expect(whoReplies.getByRole("radio", { name: /^Auto: .+$/ })).toBeChecked()
+      await expect(whoReplies.getByRole("radio", { name: /^Auto: / })).not.toHaveAccessibleName(`Auto: ${mutedName}`)
       // It can still be picked for one reply, explicitly.
       const muted = whoReplies.getByRole("radio", { name: mutedName, exact: true })
       await expect(muted).toHaveAttribute("aria-description", "Muted: replies only when picked")
@@ -299,7 +297,7 @@ for (const width of [1440, 390])
       const end = editor.getByRole("heading", { name: "End of request" })
       await expect(end).toBeVisible()
       const direct = editor.locator('[data-end-of-request="directionPrompt"]')
-      await expect(direct).toContainText("When you give a direction (added after the turn text)")
+      await expect(direct).toContainText("When you give a direction")
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")

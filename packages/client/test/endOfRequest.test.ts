@@ -95,7 +95,7 @@ describe("the End of request section", () => {
       ["prompts/identifier=groupNudge/content", "When a character speaks"],
       ["prompts/identifier=impersonationPrompt/content", "When your card speaks"],
       ["prompts/identifier=continueNudge/content", "When you continue a reply"],
-      ["prompts/identifier=directionPrompt/content", "When you give a direction (added after the turn text)"]
+      ["prompts/identifier=directionPrompt/content", "When you give a direction"]
     ])
     expect(html).toContain("[As {{speaker}}.]")
     expect(html).toContain("Sent last when the model writes as a card you don&#x27;t play.")

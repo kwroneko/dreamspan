@@ -168,6 +168,7 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
         onOpenChange={setOpen}
         trigger={<span>Cache after reply</span>}
         triggerLabel="Cache: worked out again when this reply ends. Details"
+        hint="Whether your next reply can read this chat from the provider's cache, at a lower price: known once this reply ends"
         triggerClassName={chipClass("neutral")}
         title="Cache"
       >
@@ -208,6 +209,13 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
       onOpenChange={setOpen}
       trigger={<span className="tabular-nums">{text}</span>}
       triggerLabel={label}
+      hint={
+        shown?.kind === "uncached"
+          ? "Part of your next reply's request is re-sent at full price instead of read from the provider's cache. Why"
+          : warm
+            ? "Your next reply should read this chat from the provider's cache, at a lower price. Details"
+            : "What your next reply can read from the provider's cache. Details"
+      }
       triggerClassName={chipClass(shown?.kind === "uncached" ? "warning" : warm ? "success" : "neutral")}
       title={shown?.kind === "uncached" ? "Not cached" : warm ? "Cache warm" : "Cache"}
     >
@@ -232,7 +240,16 @@ export function CacheChip({ session, view }: { session: ChatSession; view: ChatV
                 ? "The provider reported using its cache on the last request."
                 : "Assumed: the provider didn't report its cache on the last request."}
             </p>
-            <Button variant="ghost" className="h-7 self-start px-2 text-xs" onClick={toggle}>
+            <Button
+              variant="ghost"
+              className="h-7 self-start px-2 text-xs"
+              hint={
+                countdown
+                  ? "The chip stops showing the time left"
+                  : "The chip shows the time left before the cache expires"
+              }
+              onClick={toggle}
+            >
               {countdown ? "Hide countdown" : "Show countdown"}
             </Button>
           </>
