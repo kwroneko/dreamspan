@@ -8,10 +8,9 @@ import { exportCardPng } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { exportStPreset, importStPreset } from "../../src/formats/preset.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
-import { ROLES } from "../../src/formats/lorebook.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
-import { gateLore } from "../support/loreFixtures.ts"
+import { GATE_AUTHOR_NOTE_ENTRIES, gateLore } from "../support/loreFixtures.ts"
 import { json, png, run } from "../formats/support.ts"
 
 interface ChatLine {
@@ -220,22 +219,16 @@ const presetRoundTrips = () =>
   })
 
 /**
- * A book as ST's World Info file, its entries at ST's author's note (positions 2 and 3) kept
- * there: our export writes them at a depth, as the harness places them (owner, 2026-11-01), but
- * the gate compares what ST does with ST's own positions to what our import makes of them.
+ * The gate book as ST's World Info file, with the entries `GATE_AUTHOR_NOTE_ENTRIES` names at
+ * ST's author's note (positions 2 and 3): the harness has no such position (owner, 2026-11-01),
+ * but the gate compares what ST does with them to what our import makes of them.
  */
 const stWorldFile = (book: LorebookDoc) => {
   const file = JSON.parse(new TextDecoder().decode(exportLorebook(book))) as {
     entries: Record<string, Record<string, unknown>>
   }
-  for (const entry of book.entries)
-    if (entry.position === "an_top" || entry.position === "an_bottom")
-      file.entries[String(entry.uid)] = {
-        ...file.entries[String(entry.uid)],
-        position: entry.position === "an_top" ? 2 : 3,
-        depth: entry.depth,
-        role: ROLES.indexOf(entry.role)
-      }
+  for (const [uid, position] of Object.entries(GATE_AUTHOR_NOTE_ENTRIES))
+    file.entries[uid] = { ...file.entries[uid], position }
   return new TextEncoder().encode(JSON.stringify(file, null, 4))
 }
 

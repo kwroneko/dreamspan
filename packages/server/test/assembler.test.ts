@@ -392,12 +392,8 @@ describe("the context assembler", () => {
       { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
     )
     expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
-    // With the card's definition there is no card to put a chat's note with. An old revision's
-    // place at the author's note's top or bottom is read as ST's default note place, depth 4.
+    // With the card's definition there is no card to put a chat's note with.
     expect(contents(await imported({ mode: "section", section: "card" })).join("\n")).not.toContain("lost the ledger")
-    for (const section of ["author_note_top", "author_note_bottom"] as const) {
-      expect(contents(await imported({ mode: "section", section })).join("\n")).toContain("lost the ledger")
-    }
     const off = await imported({ mode: "section", section: "after_main_prompt" }, { events: [] })
     expect(contents(off).join("\n")).not.toContain("lost the ledger")
   })
@@ -424,7 +420,7 @@ describe("the context assembler", () => {
     const on = (...notes: ReadonlyArray<string>) =>
       notes.map((note) => at(null, { key: "note.activate", value: { note: note as never } }))
     const authorNote = (placement: NoteDoc["placement"], fields: Partial<NoteDoc> = {}) =>
-      chatNote("note-z-author", "{{user}} is soaked.", placement, { kind: "author_note", ...fields })
+      chatNote("note-z-author", "{{user}} is soaked.", placement, fields)
     const main = "system: Write Mira's next reply in a fictional chat between Mira and Tobin."
     // A condition that never holds here (Oren isn't in the cast), and a group whose turns
     // alternate a note on Mira's turn between due (Mira speaks) and not (Oren does).
@@ -573,34 +569,6 @@ describe("the context assembler", () => {
           chat({ notes: [persona(inChat), authorNote(inChat, never)], events: on("note-z-author") })
         )
         expect(sent(skipped)).toEqual(["system: Tobin draws maps."])
-      })
-
-      it("reads an old revision's place at the author's note's top or bottom as depth 4 as the system", async () => {
-        const messages = [
-          { side: "assistant", content: "One." },
-          { side: "user", content: "Two." },
-          { side: "assistant", content: "Three." },
-          { side: "user", content: "Four." },
-          { side: "assistant", content: "Five." },
-          { side: "user", content: "Six." }
-        ] as const
-        for (const section of ["author_note_top", "author_note_bottom"] as const) {
-          const snapshot = await assembled(
-            chat({
-              messages: [...messages],
-              notes: [persona({ mode: "section", section }), authorNote(inChat)],
-              events: on("note-z-author")
-            })
-          )
-          expect(contents(snapshot).slice(-7, -1)).toEqual([
-            "system: Tobin draws maps.",
-            "assistant: Three.",
-            "user: Four.",
-            "assistant: Five.",
-            "system: Tobin is soaked.",
-            "user: Six."
-          ])
-        }
       })
 
       it("sends its note placed with the card inside the persona's part of the Definitions marker", async () => {
@@ -2908,14 +2876,14 @@ describe("lorebooks: global books, placement and pins (DESIGN §1.3)", () => {
     loreEntry({ constant: true, content: "AT_BEFORE", position: "before_char" }, 0),
     loreEntry({ constant: true, content: "AT_AFTER", position: "after_char" }, 1),
     loreEntry({ constant: true, content: "AT_DEPTH", position: "at_depth", depth: 1, role: "system" }, 2),
-    loreEntry({ constant: true, content: "AT_AN_TOP", position: "an_top" }, 3),
+    loreEntry({ constant: true, content: "SECOND_DEPTH", position: "at_depth", depth: 2, role: "user" }, 3),
     loreEntry({ constant: true, content: "<START>\n{{user}}: EM?\n{{char}}: EM.", position: "em_top" }, 4)
   ])
 
   it("puts every position in one block at the start of the tail when only below the history", async () => {
     const snapshot = await assembled(chat({ lorebooks: [positions], events: [attach("positions")] }))
     const block = contents(snapshot).find((m) => m.includes("AT_BEFORE"))!
-    for (const text of ["AT_AFTER", "AT_DEPTH", "AT_AN_TOP", "EM?"]) expect(block).toContain(text)
+    for (const text of ["AT_AFTER", "AT_DEPTH", "SECOND_DEPTH", "EM?"]) expect(block).toContain(text)
     // After the history's last message, before the tail: here, at the end.
     expect(contents(snapshot).indexOf(block)).toBe(contents(snapshot).indexOf("user: The road flooded.") + 1)
     expect(snapshot.historyStart?.state?.pinnedLore).toBeUndefined()
@@ -3099,52 +3067,6 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
     expect((plainWire.context as { messages: ReadonlyArray<unknown> }).messages.length).toBe(
       plain.request.messages.length - leading
     )
-  })
-})
-
-describe("an old revision's lore at the author's note, with the setting off (DESIGN §1.3)", () => {
-  it("goes in the chat at depth 4 as the system, where ST's default author's note is, beside nothing", async () => {
-    const book = {
-      id: "an",
-      entity: "an-entity",
-      revision: "an-rev",
-      doc: loreBook([loreEntry({ keys: ["flooded"], content: "AN_LORE", position: "an_top" }, 0)]).document
-    }
-    const author: NoteInput = {
-      entity: "note-author",
-      revision: "r",
-      doc: {
-        schema_version: 1,
-        title: "Author's Note",
-        content: "{{user}} is soaked.",
-        placement: { mode: "section", section: "after_main_prompt" },
-        owner: { chat: "chat-1" as never },
-        exportable: false,
-        kind: "author_note"
-      } as NoteDoc
-    }
-    const messages = [
-      { side: "assistant", content: "One." },
-      { side: "user", content: "Two." },
-      { side: "assistant", content: "Three." },
-      { side: "user", content: "The road flooded." }
-    ] as const
-    const snapshot = await assembled(
-      chat({
-        messages: [...messages],
-        lorebooks: [book],
-        notes: [author],
-        events: [
-          at(null, { key: "lorebook.attach", value: { ref: "an" as never } }),
-          at(null, { key: "note.activate", value: { note: "note-author" as never } }),
-          loreByPosition
-        ]
-      })
-    )
-    // Depth 4 of four messages is before the first; the chat's note stays beside the main prompt.
-    const lines = contents(snapshot)
-    expect(lines.indexOf("system: AN_LORE")).toBe(lines.indexOf("assistant: One.") - 1)
-    expect(lines.some((line) => line.includes("AN_LORE") && line.includes("soaked"))).toBe(false)
   })
 })
 

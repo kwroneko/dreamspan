@@ -4,7 +4,7 @@
 // can't be read is a report with an error.
 import { docHash, searchText } from "../db/documents.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
-import { LEGACY_PLACEMENT, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, type Placement } from "@rp/shared/docs/note.ts"
+import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, type Placement } from "@rp/shared/docs/note.ts"
 import { ImportReport, ReportBuilder } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
 import { Effect, Schema } from "effect"
@@ -182,7 +182,8 @@ export const buildPersona = (
   bytes: Uint8Array,
   fileName: string,
   persona: StPersona | null,
-  authorNote: Placement = LEGACY_PLACEMENT
+  // ST's default author's note place: in the chat at depth 4 as the system.
+  authorNote: Placement = { mode: "depth", depth: 4, role: "system" }
 ) => {
   const named: StPersona = persona ?? {
     avatar: fileName,

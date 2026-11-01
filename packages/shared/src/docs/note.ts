@@ -29,9 +29,8 @@ export const Placement = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("tail"), role: LoreRole }),
   /**
    * [P] `card`: with the card's definition, at the top. Before or after the main prompt (story
-   * string) are the fixed places ST puts an extension prompt. `author_note_top` and
-   * `author_note_bottom` are only decoded, in revisions from before notes had no author's note
-   * to ride on (owner, 2026-11-01): nothing writes them, and they're read as `LEGACY_PLACEMENT`.
+   * string) are the fixed places ST puts an extension prompt. Nothing is placed relative to
+   * another note (owner, 2026-11-01: no author's note).
    */
   Schema.Struct({
     mode: Schema.Literal("section"),
@@ -41,9 +40,7 @@ export const Placement = Schema.Union([
       "tail_end",
       "card",
       "before_main_prompt",
-      "after_main_prompt",
-      "author_note_top",
-      "author_note_bottom"
+      "after_main_prompt"
     ]),
     role: Schema.optionalKey(LoreRole)
   }),
@@ -51,20 +48,6 @@ export const Placement = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("none") })
 ])
 export type Placement = typeof Placement.Type
-
-/**
- * Where a placement from an old revision that put a note at the top or bottom of the chat's
- * author's note goes: ST's default author's note place, in the chat at depth 4 as the system.
- * The startup conversion gave every live note its chat's concrete place; this is for history.
- */
-export const LEGACY_PLACEMENT = { mode: "depth", depth: 4, role: "system" } as const satisfies Placement
-
-/** A placement as it's used: an old revision's author's-note-relative one as `LEGACY_PLACEMENT`. */
-export const concretePlacement = (placement: Placement): Placement =>
-  placement.mode === "section" &&
-  (placement.section === "author_note_top" || placement.section === "author_note_bottom")
-    ? LEGACY_PLACEMENT
-    : placement
 
 /**
  * When a note applies (DESIGN §4.1): always; only on a card's turn (the speaker of the
@@ -114,14 +97,12 @@ export const NoteDoc = Schema.Struct({
   /**
    * [P] What an imported note was in ST: the Summarize extension's summary (DESIGN §8.1), kept
    * in its own note; or a card's Character Author's Note from ST's settings
-   * (`extension_settings.note.chara`), which a re-import finds by it. `author_note` and
-   * `persona_description` are still decoded in old revisions, never written and ignored: a
-   * chat's imported author's note is an ordinary note (owner, 2026-11-01), and migration 0050
-   * made persona notes ordinary (DESIGN §4.1: no hidden note kinds).
+   * (`extension_settings.note.chara`), which a re-import finds by it. A chat's imported author's
+   * note is an ordinary note with no kind (owner, 2026-11-01). `persona_description` is still
+   * decoded in old revisions, never written and ignored: migration 0050 made those notes
+   * ordinary (DESIGN §4.1: no hidden note kinds).
    */
-  kind: Schema.optionalKey(
-    Schema.Literals(["author_note", "imported_summary", "persona_description", "character_author_note"])
-  ),
+  kind: Schema.optionalKey(Schema.Literals(["imported_summary", "persona_description", "character_author_note"])),
   /**
    * Deprecated: ST's author's note frequency, which older imports kept. Still read, never
    * written; the assembler ignores it (a note goes every turn, DESIGN §4.1).

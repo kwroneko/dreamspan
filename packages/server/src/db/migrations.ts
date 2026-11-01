@@ -1,7 +1,6 @@
 import { SqliteMigrator } from "@effect/sql-sqlite-node"
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
-import { authorNoteMigration } from "./authorNoteMigration.ts"
 import { baseline } from "./baseline.ts"
 
 /** node:sqlite prepares one statement at a time, so DDL is kept as a list of statements. */
@@ -13,11 +12,8 @@ const runAll = (statements: ReadonlyArray<string>) =>
 
 // Migrations run in the writer worker, before any reader connection is opened.
 // While no one uses the app the schema is edited in the baseline and the deploy starts fresh.
-// A data change the owner's kept database needs runs after it.
 export const migrations = {
-  "0001_baseline": runAll(baseline),
-  // Notes and lore at the author's note's top or bottom get the place it resolves to (owner, 2026-11-01).
-  "0004_concrete_author_note": authorNoteMigration
+  "0001_baseline": runAll(baseline)
 }
 
 /**

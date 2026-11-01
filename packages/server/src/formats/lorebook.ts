@@ -2,8 +2,6 @@
 // mapping follows ST's `convertCharacterBook` (public/scripts/world-info.js), which keeps
 // its World Info fields in each entry's `extensions`.
 import {
-  concreteLore,
-  LEGACY_LORE_DEPTH,
   LOREBOOK_SCHEMA_VERSION,
   type LorebookDoc,
   type LorebookEntry,
@@ -20,8 +18,11 @@ import { fail, type Limits, type Path } from "./safety.ts"
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
 export const OUR_EXTENSION = "rp_harness"
 
+/** A position in ST's files: ours, or before or after ST's author's note, which an import places. */
+type StPosition = LorePosition | "an_top" | "an_bottom"
+
 /** ST's `world_info_position` by its index in ST's files; 2 and 3 are before and after its author's note. */
-export const POSITIONS: ReadonlyArray<LorePosition> = [
+export const POSITIONS: ReadonlyArray<StPosition> = [
   "before_char",
   "after_char",
   "an_top",
@@ -129,6 +130,12 @@ export interface Candidate {
   readonly entry: Omit<LorebookEntry, "uid">
 }
 
+/** A candidate as read from ST's file, its position possibly at ST's author's note. */
+export interface StCandidate {
+  readonly id: number | undefined
+  readonly entry: Omit<LorebookEntry, "uid" | "position"> & { readonly position: StPosition }
+}
+
 /**
  * Settles uids, which the merge matches entries by: unique safe integers. Usable ids are kept,
  * the first one wins, and every other entry gets a number no entry has, after the largest.
@@ -165,7 +172,7 @@ export const checkEntryCount = (count: number, limits: Limits) => {
   }
 }
 
-const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBuilder): Candidate | undefined => {
+const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBuilder): StCandidate | undefined => {
   const entryPath = [...path, "entries", index]
   if (!Predicate.isObject(source)) {
     issues.add("warning", "lorebook.invalid_entry", `Entry ${index} isn't an object; it was dropped.`, entryPath)
@@ -262,6 +269,9 @@ export interface AuthorNoteLore {
   readonly role: LoreRole
 }
 
+/** ST's default author's note place: in the chat at depth 4, as the system. */
+export const DEFAULT_AUTHOR_NOTE_LORE: AuthorNoteLore = { depth: 4, role: "system" }
+
 /**
  * Entries ST placed before or after its author's note (positions 2 and 3), at a concrete place
  * instead, kept (owner, 2026-11-01): `place`, the author's note's depth and role. A file's
@@ -269,16 +279,17 @@ export interface AuthorNoteLore {
  * and a folder import the folder's default author's note's. The report says so once.
  */
 export const placeAuthorNoteEntries = (
-  entries: ReadonlyArray<LorebookEntry>,
+  candidates: ReadonlyArray<StCandidate>,
   place: AuthorNoteLore,
   path: Path,
   issues: ReportBuilder
-): Array<LorebookEntry> => {
+): Array<Candidate> => {
   let moved = 0
-  const placed = entries.map((entry) => {
-    if (entry.position !== "an_top" && entry.position !== "an_bottom") return entry
+  const placed = candidates.map(({ id, entry }): Candidate => {
+    const { position } = entry
+    if (position !== "an_top" && position !== "an_bottom") return { id, entry: { ...entry, position } }
     moved++
-    return { ...entry, position: "at_depth" as const, depth: place.depth, role: place.role }
+    return { id, entry: { ...entry, position: "at_depth", depth: place.depth, role: place.role } }
   })
   if (moved > 0)
     issues.add(
@@ -308,13 +319,13 @@ export const lorebookFromCharacterBook = (
     token_budget: book.nullableInt("token_budget"),
     recursive_scanning: book.nullableBoolean("recursive_scanning"),
     extensions: book.object("extensions"),
-    entries: placeAuthorNoteEntries(
-      assignUids(
+    entries: assignUids(
+      placeAuthorNoteEntries(
         entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+        DEFAULT_AUTHOR_NOTE_LORE,
         path,
         issues
       ),
-      LEGACY_LORE_DEPTH,
       path,
       issues
     ),
@@ -346,7 +357,7 @@ export const characterBookFromLorebook = (book: LorebookDoc) => ({
     recursive_scanning: book.recursive_scanning
   }),
   extensions: book.extensions,
-  entries: book.entries.map(concreteLore).map((entry) => ({
+  entries: book.entries.map((entry) => ({
     ...entry.unknown_fields,
     // An id the import had to replace goes back as it was.
     id: entry.unknown_fields?.id ?? entry.uid,

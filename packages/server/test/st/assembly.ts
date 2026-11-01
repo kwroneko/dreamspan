@@ -9,7 +9,6 @@ import { ReportBuilder } from "@rp/shared/importReport.ts"
 import { parseStChatPart } from "../../src/formats/stChat.ts"
 import { parseStSettings } from "../../src/formats/stData.ts"
 import { authorNotePlace, chatStateChange } from "../../src/importer/stMapping.ts"
-import { placeAuthorNoteEntries } from "../../src/formats/lorebook.ts"
 import { chatCompletionsFields } from "../../src/assembler/wire.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
@@ -17,7 +16,7 @@ import * as Importers from "../../src/importer/importers.ts"
 import { json, png, run } from "../formats/support.ts"
 import type { NoteInput } from "../../src/assembler/types.ts"
 import { assembleFixture, type FixtureMessage } from "../support/assemblySources.ts"
-import { gateLore } from "../support/loreFixtures.ts"
+import { GATE_AUTHOR_NOTE_ENTRIES, gateLore } from "../support/loreFixtures.ts"
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
@@ -424,7 +423,9 @@ const ourRequest = async (
   const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona, place) : null
   const lore = {
     ...gateLore.document,
-    entries: placeAuthorNoteEntries(gateLore.document.entries, place.lore, [], new ReportBuilder())
+    entries: gateLore.document.entries.map((entry) =>
+      entry.uid in GATE_AUTHOR_NOTE_ENTRIES ? { ...entry, depth: place.lore.depth, role: place.lore.role } : entry
+    )
   }
   // The import keeps one copy of the text: with a note, the persona card's description is empty.
   const personaDoc = personaNote ? { ...persona, description: "" } : persona

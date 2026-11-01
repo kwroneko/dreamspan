@@ -4,7 +4,7 @@ import { textActions } from "../../textActions.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { concretePlacement, type NoteCondition, type Placement } from "@rp/shared/docs/note.ts"
+import type { NoteCondition, Placement } from "@rp/shared/docs/note.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc, LibraryRef } from "@rp/shared/library.ts"
@@ -74,14 +74,12 @@ const DECIDED: ReadonlyArray<Place> = [
 /** Where a new note goes, and one without a placement. */
 const END_OF_TAIL: Placement = { mode: "section", section: "tail_end", role: "system" }
 
-const placeOf = (placement: Placement): Place => {
-  const place = concretePlacement(placement)
-  return place.mode === "section" ? (`section:${place.section}` as Place) : place.mode
-}
+const placeOf = (placement: Placement): Place =>
+  placement.mode === "section" ? `section:${placement.section}` : placement.mode
 
 /** A note's place in a few words, for its collapsed row. */
 const shortPlace = (placement: Placement | undefined): string => {
-  const place = concretePlacement(placement ?? END_OF_TAIL)
+  const place = placement ?? END_OF_TAIL
   switch (place.mode) {
     case "depth":
       return `Depth ${place.depth}`
@@ -96,10 +94,7 @@ const shortPlace = (placement: Placement | undefined): string => {
         tail_start: "Start of tail",
         tail_end: "End of tail",
         card: "Beside the card",
-        before_main_prompt: "Before the main prompt",
-        // An old revision's: read as `LEGACY_PLACEMENT`, above.
-        author_note_top: "",
-        author_note_bottom: ""
+        before_main_prompt: "Before the main prompt"
       }[place.section]
   }
 }
@@ -132,8 +127,7 @@ function PlacementField({
   /** A card's note: "with the definitions" is inside its card's part. */
   card: boolean
 }) {
-  // An old revision's place at the author's note shows, and saves, as the place it's read as.
-  const placement = concretePlacement(useValue<Placement | undefined>(store, path) ?? END_OF_TAIL)
+  const placement = useValue<Placement | undefined>(store, path) ?? END_OF_TAIL
   const [depth, setDepth] = useState<string | null>(null)
   const role: Role = placement.mode === "none" ? "system" : (placement.role ?? "system")
   const set = (place: Place, change: { depth?: number; role?: Role } = {}) => {

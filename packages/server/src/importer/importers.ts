@@ -6,14 +6,7 @@ import { importPromptPreset } from "../formats/presetSettings.ts"
 import { createHash } from "node:crypto"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
-import {
-  concretePlacement,
-  MAX_NOTE_DEPTH,
-  NOTE_SCHEMA_VERSION,
-  noteDepth,
-  type NoteDoc,
-  Placement
-} from "@rp/shared/docs/note.ts"
+import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, Placement } from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
@@ -144,9 +137,8 @@ const exportedNotes = (card: CardDoc) => {
         )
         return
       }
-      // A placement that isn't valid is dropped, so the note goes with the definitions. One an
-      // older export put at the author's note goes where ST's default author's note is.
-      const placement = Schema.is(Placement)(item.placement) ? concretePlacement(item.placement) : WITH_THE_DEFINITIONS
+      // A placement that isn't valid is dropped, so the note goes with the definitions.
+      const placement = Schema.is(Placement)(item.placement) ? item.placement : WITH_THE_DEFINITIONS
       notes.push({
         schema_version: NOTE_SCHEMA_VERSION,
         title: item.title,

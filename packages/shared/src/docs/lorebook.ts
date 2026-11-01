@@ -8,35 +8,11 @@ export const LOREBOOK_SCHEMA_VERSION = 1
 const Extensions = Schema.Record(Schema.String, Schema.Unknown)
 
 /**
- * ST's `world_info_position`, 0 to 7 in its files. `an_top` and `an_bottom` (ST's before and
- * after the author's note) are only decoded, in revisions from before the harness dropped the
- * author's note (owner, 2026-11-01): an import places those entries at a depth, and the
- * assembler reads an old one as `LEGACY_LORE_DEPTH`.
+ * ST's `world_info_position` but its 2 and 3, before and after the author's note, which the
+ * harness doesn't have (owner, 2026-11-01): an import places those entries at a depth.
  */
-export const LorePosition = Schema.Literals([
-  "before_char",
-  "after_char",
-  "an_top",
-  "an_bottom",
-  "at_depth",
-  "em_top",
-  "em_bottom",
-  "outlet"
-])
+export const LorePosition = Schema.Literals(["before_char", "after_char", "at_depth", "em_top", "em_bottom", "outlet"])
 export type LorePosition = typeof LorePosition.Type
-
-/** Where an old revision's entry at ST's author's note goes: ST's default note place, depth 4 as the system. */
-export const LEGACY_LORE_DEPTH = { depth: 4, role: "system" } as const
-
-/** An entry's position as it's used: an old revision's `an_top` or `an_bottom` at `LEGACY_LORE_DEPTH`. */
-export const concreteLore = <
-  E extends { readonly position: LorePosition; readonly depth: number; readonly role: string }
->(
-  entry: E
-): E =>
-  entry.position === "an_top" || entry.position === "an_bottom"
-    ? { ...entry, position: "at_depth", ...LEGACY_LORE_DEPTH }
-    : entry
 
 /** ST's `world_info_logic`: how secondary keys combine with a primary match. */
 export const SelectiveLogic = Schema.Literals(["and_any", "not_all", "not_any", "and_all"])

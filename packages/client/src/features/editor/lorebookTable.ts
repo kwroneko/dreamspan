@@ -167,16 +167,9 @@ export const POSITIONS: ReadonlyArray<{
   { value: "outlet", position: "outlet", short: "Outlet", label: "Outlet · Only where an {{outlet}} macro asks" }
 ]
 
-/**
- * The position picker's value for an entry: at a depth, its role says which. An old revision's
- * entry before or after the author's note is read at a depth as the system (`concreteLore`).
- */
+/** The position picker's value for an entry: at a depth, its role says which. */
 export const positionValue = (entry: Pick<LorebookEntry, "position" | "role">) =>
-  entry.position === "an_top" || entry.position === "an_bottom"
-    ? "at_depth:system"
-    : entry.position === "at_depth"
-      ? `at_depth:${entry.role}`
-      : entry.position
+  entry.position === "at_depth" ? `at_depth:${entry.role}` : entry.position
 
 /** ST's strategies: constant (always in), normal (on a key match), vectorized (by similarity). */
 export type Strategy = "constant" | "normal" | "vectorized"

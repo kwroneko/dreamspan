@@ -25,8 +25,7 @@ import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
-import { concretePlacement, noteCondition } from "@rp/shared/docs/note.ts"
-import { concreteLore } from "@rp/shared/docs/lorebook.ts"
+import { noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -1191,7 +1190,7 @@ type NotePlace =
     }
 
 const placeOf = (note: NoteInput): NotePlace | null => {
-  const placement = concretePlacement(note.doc.placement)
+  const { placement } = note.doc
   switch (placement.mode) {
     case "depth":
       return { at: "chat", depth: placement.depth, role: placement.role }
@@ -1724,7 +1723,7 @@ const composeStage = sync("compose", (assembly) => {
     const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
       place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
     )
-    for (const e of positioned.map((e) => ({ ...e, entry: concreteLore(e.entry) })))
+    for (const e of positioned)
       if (e.entry.position === "at_depth")
         injections.push({
           depth: Math.max(0, Math.min(10000, e.entry.depth)),

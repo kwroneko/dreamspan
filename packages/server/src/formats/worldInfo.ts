@@ -1,14 +1,15 @@
 // SillyTavern's standalone World Info files, to and from our lorebook document. Entry fields
 // and their defaults are ST's `newWorldInfoEntryDefinition` (public/scripts/world-info.js);
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
-import { concreteLore, LEGACY_LORE_DEPTH, LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import { Context, type Effect, Predicate } from "effect"
 import { enumByIndex, Fields, isSafeInt, present } from "./fields.ts"
 import {
   assignUids,
   type AuthorNoteLore,
-  type Candidate,
+  DEFAULT_AUTHOR_NOTE_LORE,
+  type StCandidate,
   checkEntryCount,
   isRecursionDelay,
   LOGICS,
@@ -29,7 +30,7 @@ const BOOK_KEYS = new Set(["entries", "name", "extensions", "originalData"])
  * provides it from `settings.json`).
  */
 export const AuthorNoteLorePlace = Context.Reference<AuthorNoteLore>("rp/formats/AuthorNoteLorePlace", {
-  defaultValue: () => LEGACY_LORE_DEPTH
+  defaultValue: () => DEFAULT_AUTHOR_NOTE_LORE
 })
 const ENTRY_KEYS = new Set([
   "uid",
@@ -96,7 +97,7 @@ const wiEntry = (
   source: unknown,
   index: number,
   issues: ReportBuilder
-): Candidate | undefined => {
+): StCandidate | undefined => {
   const path: Path = ["entries", key]
   if (!Predicate.isObject(source)) {
     issues.add("warning", "lorebook.invalid_entry", `Entry ${shownText(key)} isn't an object; it was dropped.`, path)
@@ -168,7 +169,7 @@ export const importLorebook = (
   bytes: Uint8Array,
   fallbackName = "",
   limits: Limits = defaultLimits,
-  authorNote: AuthorNoteLore = LEGACY_LORE_DEPTH
+  authorNote: AuthorNoteLore = DEFAULT_AUTHOR_NOTE_LORE
 ): Effect.Effect<{ lorebook: LorebookDoc; report: ImportReport }, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
@@ -199,7 +200,7 @@ export const importLorebook = (
         token_budget: null,
         recursive_scanning: null,
         extensions: book.object("extensions"),
-        entries: placeAuthorNoteEntries(assignUids(entries, [], issues), authorNote, ["entries"], issues),
+        entries: assignUids(placeAuthorNoteEntries(entries, authorNote, ["entries"], issues), [], issues),
         ...book.unknown(BOOK_KEYS)
       },
       report: issues.build("st-world-info")
@@ -212,7 +213,7 @@ export const importLorebook = (
  * ST's own conversion leaves them out.
  */
 export const exportLorebook = (book: LorebookDoc) => {
-  const entries = book.entries.map(concreteLore).map((entry) => [
+  const entries = book.entries.map((entry) => [
     String(entry.uid),
     {
       ...entry.unknown_fields,
