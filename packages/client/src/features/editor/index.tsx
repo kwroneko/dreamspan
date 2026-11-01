@@ -4,7 +4,7 @@ import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
 import { appTools } from "../shell.tsx"
 import { CardSavedHost } from "./CardSavedHost.tsx"
-import { cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
+import { CARD_LOREBOOK_SECTION, cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
 import { EmbeddedLorebook } from "./EmbeddedLorebook.tsx"
 import { EndOfRequest } from "./EndOfRequest.tsx"
 import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
@@ -35,7 +35,7 @@ export const register = () => {
   libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })
   libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
-  cardEditorSections.register({ id: "card.embedded-lorebook", order: 100, component: EmbeddedLorebook })
+  cardEditorSections.register({ id: CARD_LOREBOOK_SECTION, order: 100, component: EmbeddedLorebook })
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerLorebookTable()

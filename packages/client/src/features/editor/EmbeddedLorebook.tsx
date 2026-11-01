@@ -6,18 +6,23 @@ import type { EditorStore } from "./store.ts"
 
 const BOOK = ["character_book"]
 
-/** Registered card section. Every edit uses the card's existing field drafts. */
+/**
+ * Registered card section (`CARD_LOREBOOK_SECTION`). Every edit uses the card's existing field
+ * drafts. `data-card-lorebook` is where the editor scrolls when it leaves the book's own view.
+ */
 export function EmbeddedLorebook({ store }: { store: EditorStore }) {
   return (
-    <Card>
-      <CardHeader
-        title="Embedded lorebook"
-        description="Travels with this card on export and is used automatically in new chats. Changes are drafts until you save the card."
-      />
-      <div className="flex min-w-0 flex-col gap-4">
-        <LorebookForm store={store} root={BOOK} absent="This card has no embedded lorebook." />
-        <FieldTools store={store} field={valueField(BOOK)} label="Embedded lorebook" />
-      </div>
-    </Card>
+    <div data-card-lorebook className="scroll-mt-[var(--preset-toolbar-height,1rem)]">
+      <Card>
+        <CardHeader
+          title="Embedded lorebook"
+          description="Travels with this card on export and is used automatically in new chats. Changes are drafts until you save the card."
+        />
+        <div className="flex min-w-0 flex-col gap-4">
+          <LorebookForm store={store} root={BOOK} absent="This card has no embedded lorebook." />
+          <FieldTools store={store} field={valueField(BOOK)} label="Embedded lorebook" />
+        </div>
+      </Card>
+    </div>
   )
 }

@@ -7,8 +7,13 @@ import { useAtomValue } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Link, useParams } from "@tanstack/react-router"
-import { lorebookEditorSections } from "./cardSections.ts"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
+import {
+  CARD_LOREBOOK_FOCUS,
+  CARD_LOREBOOK_SECTION,
+  cardEditorSections,
+  lorebookEditorSections
+} from "./cardSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -118,6 +123,17 @@ export function Editor({
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // A card opened on its own lorebook shows that section alone, until "Show the whole card",
+  // which shows the rest and keeps the book in view.
+  const [bookView, setBookView] = useState(focus === CARD_LOREBOOK_FOCUS)
+  const [revealBook, setRevealBook] = useState(false)
+  // Opened again from the panel while open: the new focus decides.
+  const [lastFocus, setLastFocus] = useState(focus)
+  if (focus !== lastFocus) {
+    setLastFocus(focus)
+    setBookView(focus === CARD_LOREBOOK_FOCUS)
+  }
+  const root = useRef<HTMLDivElement>(null)
   // The page shows the state: loads, and fields starting or ending unsaved changes.
   const state = useEditorState(store)
   const toolbar = useRef<HTMLDivElement>(null)
@@ -132,7 +148,33 @@ export function Editor({
     measure()
     return () => observer.disconnect()
   }, [loaded])
-  useTitle(state.snapshot?.ref.label ?? "Editor")
+  const bookOnly = bookView && state.snapshot?.ref.kind === "card"
+  const bookName = useText(store, ["character_book", "name"])?.trim()
+  const bookTitle = bookName || `${state.snapshot?.ref.label ?? ""}'s lorebook`
+  useTitle(bookOnly ? bookTitle : (state.snapshot?.ref.label ?? "Editor"))
+  useEffect(() => {
+    const element = root.current
+    const book = element?.querySelector("[data-card-lorebook]")
+    if (!revealBook || bookView || !element || !book) return
+    // What loads above the book (the definition's editors, the notes) grows after this: the
+    // book is kept in view while it does, until the user scrolls or a moment has passed.
+    const scroll = () => book.scrollIntoView({ block: "start" })
+    scroll()
+    const observer = new ResizeObserver(scroll)
+    observer.observe(element)
+    const stop = () => {
+      observer.disconnect()
+      setRevealBook(false)
+    }
+    const timer = setTimeout(stop, 1500)
+    const events = ["wheel", "touchstart", "keydown", "pointerdown"] as const
+    for (const event of events) window.addEventListener(event, stop, { once: true, capture: true })
+    return () => {
+      clearTimeout(timer)
+      observer.disconnect()
+      for (const event of events) window.removeEventListener(event, stop, { capture: true })
+    }
+  }, [revealBook, bookView])
   const workingName = useText(store, ["name"]) ?? ""
   const workingVersion = useText(store, ["character_version"]) ?? ""
   const nameCheck = useCardNameCheck(workingName, workingVersion, state.snapshot?.ref)
@@ -184,7 +226,7 @@ export function Editor({
 
   return (
     <SearchNavigation value={searchMatch}>
-      <div className="flex flex-col gap-6">
+      <div ref={root} className="flex flex-col gap-6">
         <header className="flex flex-col gap-1">
           {onClose ? null : ref.chatId !== null ? (
             <span className="text-sm">
@@ -196,18 +238,37 @@ export function Editor({
             </Link>
           )}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
-            {ref.kind !== "card" && <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>}
+            <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">
+              {bookOnly ? bookTitle : ref.label}
+            </h1>
+            {(ref.kind !== "card" || bookOnly) && (
+              <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>
+            )}
             {ref.kind !== "card" && ref.refKind !== "upstream" && (
               <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
                 {ref.refKind === "variant" ? "variant" : "edited for this chat"}
               </Badge>
             )}
           </div>
-          {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
-          {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
+          {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
+          {ref.subtitle && !bookOnly && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
           <p className="text-sm text-muted">
-            {ref.kind === "preset" ? (
+            {bookOnly ? (
+              // The book is part of the card's document: saved, versioned and exported with it.
+              <>
+                {ref.label}'s own lorebook. It's part of the card: saving it saves the card.{" "}
+                <button
+                  type="button"
+                  className="text-accent underline-offset-4 hover:underline"
+                  onClick={() => {
+                    setBookView(false)
+                    setRevealBook(true)
+                  }}
+                >
+                  Show the whole card
+                </button>
+              </>
+            ) : ref.kind === "preset" ? (
               "Saving changes this prompt preset in every chat that uses it."
             ) : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
@@ -389,8 +450,11 @@ export function Editor({
           </Alert>
         )}
 
-        {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
-        {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
+        {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
+        {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
+        {ref.kind === "card" && !bookOnly && (
+          <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />
+        )}
         {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
         {ref.kind === "note" && (
           <Card>
@@ -431,5 +495,7 @@ export function Editor({
 
 export function EditorPage() {
   const { refId }: { refId?: string } = useParams({ strict: false })
-  return <Editor key={refId} refId={refId as RefId} />
+  // `?focus=lorebook` opens a card on its own lorebook, as the chat's workspace does.
+  const { focus } = useSearch({ strict: false }) as { focus?: unknown }
+  return <Editor key={refId} refId={refId as RefId} focus={typeof focus === "string" ? focus : undefined} />
 }

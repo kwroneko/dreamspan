@@ -15,9 +15,19 @@ export interface Slot<Props> extends Registry<SlotEntry<Props>> {
 
 export const defineSlot = <Props extends object>(id: string): Slot<Props> => ({ id, ...makeRegistry() })
 
-export function SlotOutlet<Props extends object>({ slot, props }: { slot: Slot<Props>; props: NoInfer<Props> }) {
+/** `only`: just the entry registered under that id, for a screen focused on one section. */
+export function SlotOutlet<Props extends object>({
+  slot,
+  props,
+  only
+}: {
+  slot: Slot<Props>
+  props: NoInfer<Props>
+  only?: string
+}) {
   const snapshot = useSyncExternalStore(slot.subscribe, slot.snapshot, slot.snapshot)
   return [...snapshot.entries]
+    .filter((entry) => only === undefined || entry.id === only)
     .sort((a, b) => a.order - b.order)
     .map((entry) => <entry.component key={entry.id} {...props} />)
 }
