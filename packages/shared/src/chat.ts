@@ -1,5 +1,6 @@
 // The message graph as the rest of the app sees it (DATA-MODEL.md §4).
 import { Schema } from "effect"
+import { AvatarCrop } from "./media.ts"
 import { idSchema } from "./id.ts"
 import { StoredRewrite, VersionRewrite } from "./regexScripts.ts"
 import { ReplySections } from "./replySections.ts"
@@ -319,7 +320,9 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   /** How many entries that lorebook has. */
   lorebookEntries: Schema.optionalKey(Schema.Int),
   /** Its avatar, served at `/library/media?id=`; null without one. */
-  avatarMediaId: Schema.NullOr(Schema.String)
+  avatarMediaId: Schema.NullOr(Schema.String),
+  /** The avatar's chosen cutout (ARCHITECTURE.md §14.5c); absent: the default. */
+  avatarCrop: Schema.optionalKey(AvatarCrop)
 }) {}
 
 /** What the chat list shows of a chat besides its title (DESIGN §2.1). */

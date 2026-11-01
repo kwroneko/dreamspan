@@ -2335,6 +2335,17 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       refused(actor.api.SetRegexApproval({ refId: owner.refId, approved: true, expectedRowVersion: 1 }), "NotFound")
   },
+  SetCardAvatarCrop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetCardAvatarCrop({
+          refId: owner.editor.cardRefId,
+          crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
   PreviewUpdate: {
     probe: (actor, owner) => refused(actor.api.PreviewUpdate({ refId: owner.editor.cardRefId }), "NotFound")
   },

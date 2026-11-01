@@ -7,6 +7,7 @@
 // worker keeps the last computation while the database hasn't changed (`PRAGMA data_version`
 // moves with every commit of another connection, and the writer is one), so a screen's
 // several reads cost one.
+import { avatarCropField } from "@rp/shared/media.ts"
 import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
 import { chatName } from "@rp/shared/chatName.ts"
@@ -163,7 +164,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           -- One parse of the document for the strings (a missing or non-string value reads as empty
           -- below), and the lorebook's type and size without returning its entries.
           json_extract(rev.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
-            '$.character_book.name') AS fields,
+            '$.character_book.name', '$.avatar_crop') AS fields,
           json_type(rev.doc_json, '$.character_book') = 'object' AS book,
           CASE WHEN json_type(rev.doc_json, '$.character_book.entries') = 'array'
             THEN json_array_length(rev.doc_json, '$.character_book.entries') ELSE 0 END AS book_entries,
@@ -175,13 +176,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
       const text = (value: unknown) => (typeof value === "string" ? value : "")
       const metadata = rows.map((row) => {
-        const [name, nickname, subtitle, avatar, bookName] = JSON.parse(row.fields) as Array<unknown>
+        const [name, nickname, subtitle, avatar, bookName, crop] = JSON.parse(row.fields) as Array<unknown>
         return {
           ...row,
           name: text(name),
           nickname: text(nickname),
           subtitle: text(subtitle),
           avatar: typeof avatar === "string" ? avatar : null,
+          crop: avatarCropField(avatar, crop),
           bookName: text(bookName).trim()
         }
       })
@@ -200,7 +202,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               lorebook: m.book === 1,
               ...(m.book === 1 && m.bookName !== "" ? { lorebookName: m.bookName } : {}),
               ...(m.book === 1 ? { lorebookEntries: m.book_entries ?? 0 } : {}),
-              avatarMediaId: m.avatar
+              avatarMediaId: m.avatar,
+              ...m.crop
             },
             trusted
           )
@@ -420,6 +423,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   subtitle: m.subtitle,
                   name: c.name,
                   avatarMediaId: c.avatarMediaId,
+                  ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),
                   chats: used.length,
                   lastMessageAt: spoke[0]?.a.at ?? null,
                   latestChatId: (latest?.chat.id as ChatId) ?? null

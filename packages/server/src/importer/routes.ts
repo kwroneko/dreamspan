@@ -36,7 +36,7 @@ import { readMedia, storeMedia, sweepMedia } from "./mediaFiles.ts"
 import { prepareAvatarThumbnails } from "./prepareThumbnails.ts"
 import { readFile, stat } from "node:fs/promises"
 import { join } from "node:path"
-import { mediaWidth } from "@rp/shared/media.ts"
+import { type AvatarCrop, cropKey, mediaWidth, parseCropKey } from "@rp/shared/media.ts"
 
 /** The largest upload: the parsers' own cap on any file (ARCHITECTURE.md §8). */
 const MAX_UPLOAD_BYTES = defaultLimits.maxFileBytes
@@ -136,13 +136,18 @@ export const layer = Layer.unwrap(
     // Only pending jobs live in memory; completed bytes live on disk. An abandoned HTTP
     // request doesn't cancel a native job and let its replacement generate it twice.
     const thumbnails = new Map<string, ReturnType<typeof formats.thumbnail>>()
-    const thumbnail = Effect.fnUntraced(function* (path: string, width: ReturnType<typeof mediaWidth>) {
-      const key = `${path}:${width}`
+    const thumbnail = Effect.fnUntraced(function* (
+      path: string,
+      width: ReturnType<typeof mediaWidth>,
+      // undefined: the whole image; null: the default cutout; else the chosen one.
+      crop: AvatarCrop | null | undefined
+    ) {
+      const key = `${path}:${width}:${crop === undefined ? "" : cropKey(crop)}`
       let job = thumbnails.get(key)
       if (!job) {
         job = yield* Effect.cached(
           formats
-            .thumbnail({ dataDir: config.dataDir, path, width })
+            .thumbnail({ dataDir: config.dataDir, path, width, ...(crop === undefined ? {} : { crop }) })
             .pipe(Effect.ensuring(Effect.sync(() => thumbnails.delete(key))), Effect.uninterruptible)
         )
         thumbnails.set(key, job)
@@ -483,6 +488,10 @@ export const layer = Layer.unwrap(
       if (!Schema.is(RefId)(refId) || !Number.isSafeInteger(rowVersion)) {
         return jsonError(400, "expected a ref and its row version")
       }
+      // The cutout chosen for the new image (§14.5c), as a thumbnail URL names one; none: the default.
+      const cropQuery = query.get("crop")
+      const crop = cropQuery === null ? null : parseCropKey(cropQuery)
+      if (crop === undefined) return jsonError(400, "crop must name a cutout inside the image")
       // Before the body is read: a refused upload reads and stores nothing.
       const target = yield* reader.GetLibraryRef({ userId: user.id, refId })
       if (target.kind !== "card") return jsonError(409, "only cards have avatars")
@@ -516,11 +525,12 @@ export const layer = Layer.unwrap(
                     userId: user.id,
                     refId,
                     expectedRowVersion: rowVersion,
-                    media: { role: "avatar", uri: "", sha256, byteSize: body.byteLength, ...image }
+                    media: { role: "avatar", uri: "", sha256, byteSize: body.byteLength, ...image },
+                    ...(crop === null ? {} : { crop })
                   })
                 )
               )
-              yield* prepareAvatarThumbnails(formats, config.dataDir, [{ role: "avatar", sha256 }])
+              yield* prepareAvatarThumbnails(formats, config.dataDir, [{ role: "avatar", sha256 }], crop)
               return yield* HttpServerResponse.schemaJson(SavedRef)(
                 new SavedRef({
                   ref: change.ref,
@@ -622,7 +632,13 @@ export const layer = Layer.unwrap(
       if (requested !== null && Option.isNone(width)) {
         return jsonError(400, "w must be a positive pixel width")
       }
-      const derivative = Option.isNone(width) ? null : yield* thumbnail(file.path, mediaWidth(width.value))
+      // A portrait's cutout (§14.5c): `auto` (the default) or the chosen one, as `cropKey` names it.
+      const cropQuery = query.get("crop")
+      const crop = cropQuery === null ? undefined : parseCropKey(cropQuery)
+      if (cropQuery !== null && (crop === undefined || Option.isNone(width))) {
+        return jsonError(400, "crop must name a cutout inside the image, with a width")
+      }
+      const derivative = Option.isNone(width) ? null : yield* thumbnail(file.path, mediaWidth(width.value), crop)
       const path = derivative?.path ?? file.path
       const original = derivative === null || derivative.original
       const headers = {

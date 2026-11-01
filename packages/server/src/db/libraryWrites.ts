@@ -730,6 +730,12 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             // Untouched unless the file brought media or the card kept some of its own.
             if (input.media.length > 0 || keptAvatar || keptAssets > 0) {
               card.avatar_media_id = avatar
+              // The cutout goes with its image (§14.5c): a kept avatar keeps the card's; the file's
+              // own (an export of ours carried it) is bound to the file just stored; else the default.
+              if (keptAvatar && current?.avatar_crop !== undefined) card.avatar_crop = current.avatar_crop
+              else if (!keptAvatar && avatar !== null && Predicate.isObject(card.avatar_crop))
+                card.avatar_crop = { ...card.avatar_crop, media_id: avatar }
+              else delete card.avatar_crop
               if (assets.size > 0) card.asset_media_ids = Object.fromEntries(assets)
               doc = encode(card)
             }

@@ -24,6 +24,7 @@ import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
+import { snapCrop } from "@rp/shared/media.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect, Predicate } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
@@ -342,15 +343,35 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return yield* userEdit(ref, { ...head, regex_approved: approved }, message, null)
       }).pipe(transaction(sql, "SetRegexApproval")),
 
-    SetCardAvatar: ({ userId, refId, expectedRowVersion, media }) =>
+    // The cutout goes with its image (ARCHITECTURE.md §14.5c): a new image takes the one chosen
+    // for it, or none (the default), never the old image's.
+    SetCardAvatar: ({ userId, refId, expectedRowVersion, media, crop }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
         if (ref.kind !== "card") return yield* refused(ref, "Only cards have avatars.")
         yield* steps.checkRowVersion(ref, expectedRowVersion)
-        const head = yield* lib.loadDoc(ref.head_revision_id)
+        const { avatar_crop: _replaced, ...head } = yield* lib.loadDoc(ref.head_revision_id)
         const mediaId = yield* steps.recordMedia(userId, media)
-        return yield* userEdit(ref, { ...head, avatar_media_id: mediaId }, "Changed the avatar", null)
+        const doc = {
+          ...head,
+          avatar_media_id: mediaId,
+          ...(crop === undefined ? {} : { avatar_crop: { media_id: mediaId, ...snapCrop(crop) } })
+        }
+        return yield* userEdit(ref, doc, "Changed the avatar", null)
       }).pipe(transaction(sql, "SetCardAvatar")),
+
+    SetCardAvatarCrop: ({ userId, refId, expectedRowVersion, crop }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        if (ref.kind !== "card") return yield* refused(ref, "Only cards have avatars.")
+        yield* steps.checkRowVersion(ref, expectedRowVersion)
+        const { avatar_crop: _replaced, ...head } = yield* lib.loadDoc(ref.head_revision_id)
+        const mediaId = head.avatar_media_id
+        if (typeof mediaId !== "string") return yield* refused(ref, "This card has no avatar to cut out.")
+        const doc = crop === null ? head : { ...head, avatar_crop: { media_id: mediaId, ...snapCrop(crop) } }
+        const message = crop === null ? "Reset the avatar's cutout" : "Changed the avatar's cutout"
+        return yield* userEdit(ref, doc, message, null)
+      }).pipe(transaction(sql, "SetCardAvatarCrop")),
 
     CreateCardNote: ({ userId, cardRefId, title, link, chatNote }) =>
       Effect.gen(function* () {

@@ -130,6 +130,7 @@ import {
   TokenCounts,
   UsageSource
 } from "@rp/shared/usage.ts"
+import { AvatarCrop } from "@rp/shared/media.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
@@ -2035,8 +2036,21 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.String,
     error: StorageError
   }),
+  /** With `crop`, the cutout chosen for it (ARCHITECTURE.md §14.5c); without, the default. */
   Rpc.make("SetCardAvatar", {
-    payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, media: ImportedMedia },
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      media: ImportedMedia,
+      crop: Schema.optionalKey(AvatarCrop)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** The card's avatar's cutout, chosen again without a new image; null: back to the default. */
+  Rpc.make("SetCardAvatarCrop", {
+    payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, crop: Schema.NullOr(AvatarCrop) },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
