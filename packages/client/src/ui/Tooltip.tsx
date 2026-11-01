@@ -43,7 +43,7 @@ export function Tooltip({
 }
 
 export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
-  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-surface-raised data-popup-open:text-text ${
+  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 
@@ -117,7 +117,7 @@ export function ToggleIconButton({
         disabled={disabled}
         focusableWhenDisabled
         onClick={onClick}
-        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-disabled:cursor-not-allowed ${
+        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus ${
           pressed ? "text-text" : "text-muted"
         } ${className}`}
       >

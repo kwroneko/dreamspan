@@ -22,7 +22,7 @@ export const subscribeCollapses = (listener: () => void) => {
 }
 
 const actionClass =
-  "rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+  "rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
 
 export const registerReasoningActions = () => [
   reasoningActions.register({

@@ -418,7 +418,8 @@ function Browser({ data }: { data: ShellLibrary }) {
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
+      <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
         {grid ? (
           <div className="grid grid-cols-2 gap-2">
             {sortCards(
