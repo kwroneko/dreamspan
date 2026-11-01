@@ -102,6 +102,32 @@ describe("model marks", () => {
     expect(mark("deepseek", "")).toBe("deepseek")
   })
 
+  it("draws the labs Simple Icons has with their logos, the rest with our own, in the text colour", () => {
+    dispose = registerModelMarks()
+    const sources = Object.fromEntries(
+      modelMarks.list().map((entry) => {
+        const svg = renderToStaticMarkup(createElement(entry.component, { size: 14 }))
+        expect(svg).toMatch(/^<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"/)
+        expect(svg).toMatch(/currentColor/)
+        expect(svg).not.toMatch(/#[0-9a-f]{3,6}\b|rgb\(/i)
+        return [entry.id, /data-mark-source="([^"]+)"/.exec(svg)?.[1]]
+      })
+    )
+    expect(sources).toEqual({
+      anthropic: "simple-icons",
+      openai: "drawn",
+      google: "simple-icons",
+      deepseek: "simple-icons",
+      mistral: "simple-icons",
+      meta: "simple-icons",
+      xai: "drawn",
+      qwen: "simple-icons",
+      cohere: "drawn",
+      moonshot: "simple-icons",
+      openrouter: "simple-icons"
+    })
+  })
+
   it("lets a plugin add a lab ahead of the built-in rules, and undo it", () => {
     dispose = registerModelMarks()
     const undo = modelMarks.register({
