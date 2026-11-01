@@ -50,6 +50,7 @@ const copiedFresh = new Set([
   "rollout_id",
   "changeset_id",
   "usage_json",
+  "recorded_generation_json",
   "deleted_at",
   "bin_item_id",
   "purged_at",

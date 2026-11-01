@@ -21,6 +21,7 @@ import type { ChatSession } from "./session.ts"
 
 import { ChatWidthSetting } from "./ChatWidth.tsx"
 import { MessageColorSettings } from "./MessageColors.tsx"
+import { MessageDetailSettings } from "./messageDetails.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
 
@@ -175,6 +176,7 @@ export function DisplaySettings() {
         />
       </Fieldset>
       <MessageColorSettings />
+      <MessageDetailSettings />
       <Fieldset
         legend="Display transformations"
         description="These account choices change what you see in chats. Stored text, editing, copying, and future requests keep the original text. Streaming replies stay as written until they finish."

@@ -18,7 +18,7 @@ import {
 import { pathEvents, pathSegments } from "./pathSegments.ts"
 import { forkImportSlot } from "./stImportFork.ts"
 import { placedInsertions } from "./displayPath.ts"
-import type { ForkRow } from "./rows.ts"
+import { type ForkRow, recordedColumns, StoredGeneration } from "./rows.ts"
 // Write handlers for the ST data folder import (ARCHITECTURE.md §13). Each is one
 // transaction in the writer, and a chat goes in over several: its start, its messages in
 // batches, its state. Nothing here reads a file: the format worker parsed them, and the main
@@ -49,7 +49,9 @@ const Message = Schema.Struct({
       content: Schema.String,
       reasoning: Schema.NullOr(Schema.String),
       sections: Schema.optionalKey(ReplySections),
-      at: Schema.Number
+      at: Schema.Number,
+      /** Its model, times and token count as ST recorded them (formats/stChat.ts; rows.ts `recordedColumns`). */
+      generation: Schema.optionalKey(StoredGeneration)
     })
   )
 })
@@ -522,6 +524,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 origin: "imported",
                 reasoning: version.reasoning,
                 reply_sections: version.sections ? JSON.stringify(version.sections) : null,
+                ...recordedColumns(version.generation),
                 created_at: version.at,
                 updated_at: version.at
               })} RETURNING id`.pipe(Effect.map(([row]) => row!.id))

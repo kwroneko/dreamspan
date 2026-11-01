@@ -28,7 +28,10 @@ export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")
 export const timelineRails = defineSlot<ComponentProps<typeof CoverageRail>>("chat.timeline-rails")
 export const messageRetries = defineSlot<ComponentProps<typeof RetryWith>>("message.retry")
-/** In a message's header, after its name, time, number and model: details such as generation time and tokens. */
+/**
+ * In a message's header, after its name and its message details (messageDetails.tsx: time,
+ * model): badges such as the rewrite mark. A detail the user can hide is a message detail instead.
+ */
 export const messageHeaderDetails = defineSlot<{ entry: PathEntry; session: ChatSession; generating: boolean }>(
   "message.header-details"
 )

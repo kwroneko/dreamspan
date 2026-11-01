@@ -136,6 +136,30 @@ export const MessageImages = Schema.Array(
 ).check(Schema.isMaxLength(32))
 export type MessageImages = typeof MessageImages.Type
 
+/**
+ * How a version was generated, as the app it was imported from recorded it (SillyTavern's
+ * `gen_started`, `gen_finished` and `extra`: `token_count`, `time_to_first_token`,
+ * `reasoning_duration`). Versions this app generates have theirs in the usage ledger instead
+ * (`GetVersionMetrics`, inspectorApi.ts). Each figure is absent where none was recorded.
+ */
+export const RecordedGeneration = Schema.Struct({
+  startedAt: Schema.optionalKey(Schema.Number),
+  finishedAt: Schema.optionalKey(Schema.Number),
+  /** ST's own count of the text with its reasoning, by the tokenizer it had set; not a provider's. */
+  tokens: Schema.optionalKey(Schema.Int),
+  firstTokenMs: Schema.optionalKey(Schema.Number),
+  reasoningMs: Schema.optionalKey(Schema.Number)
+})
+export type RecordedGeneration = typeof RecordedGeneration.Type
+
+/**
+ * Which model wrote a version, as its icon is chosen: the provider (a connection's kind, or
+ * the API SillyTavern recorded, such as "openrouter" or "claude") and the model's key as that
+ * provider names it (either may be empty).
+ */
+export const ModelRef = Schema.Struct({ provider: Schema.String, model: Schema.String })
+export type ModelRef = typeof ModelRef.Type
+
 export class Version extends Schema.Class<Version>("Version")({
   id: VersionId,
   slotId: SlotId,
@@ -156,10 +180,16 @@ export class Version extends Schema.Class<Version>("Version")({
   createdAt: Schema.Number,
   /**
    * The model it was generated with, as "connection · model", when one is recorded: from
-   * the start for "Regenerate with…", otherwise once its context is assembled. Null for
-   * text a person wrote, and for imported versions.
+   * the start for "Regenerate with…", otherwise once its context is assembled. For an
+   * imported version, the API and model SillyTavern recorded, as "API · model" (such as
+   * "OpenRouter · anthropic/claude-3.5-sonnet"): its models aren't the user's connections.
+   * Null for text a person wrote, and where nothing was recorded.
    */
   model: Schema.NullOr(Schema.String),
+  /** The provider and model key behind `model`, for its icon; absent where none is recorded. */
+  modelRef: Schema.optionalKey(ModelRef),
+  /** An imported version's generation figures, as its app recorded them; absent otherwise. */
+  recorded: Schema.optionalKey(RecordedGeneration),
   /** Set on failed versions only. */
   error: Schema.NullOr(VersionError),
   /**
