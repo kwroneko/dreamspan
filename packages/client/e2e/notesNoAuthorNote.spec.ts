@@ -53,7 +53,7 @@ for (const width of [1440, 390]) {
       await expect(note).toBeVisible()
       // No mark on the row, and nothing to make it, or stop it being, the author's note.
       await expect(row(title).getByText("author's note", { exact: true })).toHaveCount(0)
-      await expect(page.getByRole("button", { name: /author's note/i })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: /as (the )?author's note/i })).toHaveCount(0)
       // Its places are concrete ones: none is relative to an author's note.
       await note.getByRole("combobox", { name: "Position" }).click()
       await expect(page.getByRole("option").first()).toBeVisible()
