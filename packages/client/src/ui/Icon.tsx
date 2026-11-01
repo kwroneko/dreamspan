@@ -6,15 +6,29 @@ const paths = {
     "M21.17 6.81a2.82 2.82 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z",
     "m15 5 4 4"
   ],
+  /** Writes something new: a pen over an empty page, apart from edit's lone pencil. */
   write: [
-    "M12 20h9",
-    "M16.38 3.62a2.12 2.12 0 0 1 3 3L7.37 18.64a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z"
+    "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7",
+    "M18.38 2.62a1 1 0 0 1 3 3l-9.01 9.02a2 2 0 0 1-.86.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.86z"
   ],
   regenerate: ["M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5"],
   trash: ["M3 6h18", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"],
+  /** Deletes the whole of something, every version of a message: the bin with its contents. */
+  "trash-all": [
+    "M3 6h18",
+    "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
+    "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+    "M10 11v6",
+    "M14 11v6"
+  ],
   copy: [
     "M8 10a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z",
     "M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"
+  ],
+  /** Copies a text to the clipboard, apart from duplicate's overlapping pages. */
+  clipboard: [
+    "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
+    "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"
   ],
   link: [
     "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71",
@@ -47,6 +61,12 @@ const paths = {
   more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
   /** A line with a plus: a message put in between others. */
   insert: ["M4 6h16", "M4 18h16", "M12 9v6", "M9 12h6"],
+  /** A new message before this one: a plus over the line. */
+  "insert-above": ["M4 19h16", "M12 4v10", "M7 9h10"],
+  /** A new message after this one: a plus under the line. */
+  "insert-below": ["M4 5h16", "M12 10v10", "M7 15h10"],
+  /** The text as it was before scripts changed it: a page with an arrow back. */
+  original: ["M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z", "M14 3v6h6", "m10 12-3 3 3 3", "M7 15h9"],
   duplicate: ["M9 9h11v11H9z", "M5 15H4V4h11v1"],
   left: ["m15 18-6-6 6-6"],
   right: ["m9 18 6-6-6-6"],

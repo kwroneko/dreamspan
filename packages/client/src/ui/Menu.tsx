@@ -1,7 +1,7 @@
 // A menu of actions on a trigger. Base UI carries the keyboard handling, focus and
 // dismissal; this layer carries the look. Items are plain actions, links, or a choice of one.
 import { Menu as BaseMenu } from "@base-ui/react/menu"
-import type { ComponentProps, ReactElement, ReactNode } from "react"
+import { useId, type ComponentProps, type ReactElement, type ReactNode } from "react"
 import { buttonClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Tooltip } from "./Tooltip.tsx"
@@ -119,6 +119,113 @@ export function MenuCheckboxItem({
       </BaseMenu.CheckboxItemIndicator>
       <span className="min-w-0 flex-1">{children}</span>
     </BaseMenu.CheckboxItem>
+  )
+}
+
+/**
+ * An action with a switch beside it, in one row: the action is a menu item that runs and
+ * closes the menu, the switch a separate checkbox item that toggles and leaves it open (to
+ * show the action on the message, say). Arrow keys reach each in turn, and a screen reader
+ * hears two items: the action, described by `description`, then the switch by its own name.
+ * Both show their explanation in a tooltip at the side, clear of the rows below; on a touch
+ * screen the switch is a full-height 44 px target.
+ */
+export function MenuItemWithCheckbox({
+  icon,
+  tone = "default",
+  label,
+  note,
+  description,
+  disabled = false,
+  onSelect,
+  link,
+  checkbox
+}: {
+  icon: IconName
+  tone?: "default" | "danger"
+  label: string
+  /** A line under the label: why it can't be used now, say. */
+  note?: ReactNode
+  /** What it does in full: its tooltip and its accessible description. */
+  description: string
+  disabled?: boolean
+  onSelect?: () => void
+  /** Navigates instead: the link element (a router `Link`) the item renders as. */
+  link?: ReactElement
+  checkbox: {
+    readonly checked: boolean
+    readonly onCheckedChange: (checked: boolean) => void
+    /** Its accessible name, naming the action: "Show Edit on the message". */
+    readonly label: string
+    readonly description: string
+  }
+}) {
+  const id = useId()
+  const content = (
+    <>
+      <Icon name={icon} className="text-muted" />
+      <span className="min-w-0 flex-1">
+        {label}
+        {note !== undefined && <span className="block text-xs text-muted">{note}</span>}
+      </span>
+    </>
+  )
+  const itemClassName = `${itemClass(tone)} min-w-0 flex-1 [@media(pointer:coarse)]:min-h-11`
+  return (
+    <div role="none" className="flex items-stretch gap-0.5">
+      <span id={`${id}-description`} hidden>
+        {description}
+      </span>
+      <span id={`${id}-checkbox`} hidden>
+        {checkbox.description}
+      </span>
+      <Tooltip label={description} side="left">
+        {link ? (
+          <BaseMenu.LinkItem
+            render={link}
+            closeOnClick
+            label={label}
+            aria-describedby={`${id}-description`}
+            className={itemClassName}
+          >
+            {content}
+          </BaseMenu.LinkItem>
+        ) : (
+          <BaseMenu.Item
+            label={label}
+            disabled={disabled}
+            aria-describedby={`${id}-description`}
+            className={itemClassName}
+            {...(onSelect ? { onClick: () => onSelect() } : {})}
+          >
+            {content}
+          </BaseMenu.Item>
+        )}
+      </Tooltip>
+      <Tooltip label={checkbox.description} side="right">
+        <BaseMenu.CheckboxItem
+          checked={checkbox.checked}
+          onCheckedChange={(next) => checkbox.onCheckedChange(next)}
+          closeOnClick={false}
+          // Typing a letter goes to the actions, never to the switches beside them.
+          label=""
+          aria-label={checkbox.label}
+          aria-describedby={`${id}-checkbox`}
+          className="group/pin flex w-9 shrink-0 items-center justify-center rounded-sm outline-none select-none data-highlighted:bg-surface-raised [@media(pointer:coarse)]:w-11"
+        >
+          <span
+            aria-hidden="true"
+            className="flex size-4 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast group-data-checked/pin:border-accent group-data-checked/pin:bg-accent"
+          >
+            {checkbox.checked && (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor">
+                <path d="m2.5 8.5 4 4 7-9" strokeWidth="2" />
+              </svg>
+            )}
+          </span>
+        </BaseMenu.CheckboxItem>
+      </Tooltip>
+    </div>
   )
 }
 

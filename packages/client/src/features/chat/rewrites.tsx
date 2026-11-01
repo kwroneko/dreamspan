@@ -9,9 +9,8 @@ import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { MenuItem } from "../../ui/Menu.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { messageActions, type MessageActionProps } from "./messageActions.tsx"
+import { messageActions, viewOf, type MessageActionProps } from "./messageActions.tsx"
 import { messageDirections, messageHeaderDetails } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
@@ -127,17 +126,19 @@ export const registerRewrites = () => [
   messageDirections.register({ id: "message.rewrite-notes", order: 20, component: RewriteNotes }),
   messageActions.register({
     id: "message.original-text",
-    order: 38,
+    order: 91,
+    group: "context",
     available: ({ entry, generating }) =>
       !generating &&
       (entry.version.rewrite?.raw === true ||
         entry.version.rewrite?.rawReasoning === true ||
         entry.version.rewrite?.rawSections === true),
-    menu: ({ openDialog }) => (
-      <MenuItem icon="eye" onClick={() => openDialog("message.original-text")}>
-        Show the original text
-      </MenuItem>
-    ),
+    describe: viewOf(({ openDialog }) => ({
+      label: "Show the original text",
+      icon: "original",
+      hint: "The text as the model wrote it, before scripts changed it, with a way to restore it as a new version.",
+      onSelect: () => openDialog("message.original-text")
+    })),
     dialog: OriginalText
   })
 ]

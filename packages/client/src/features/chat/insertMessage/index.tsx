@@ -4,8 +4,7 @@
 // slot after its anchor. Every part is a registration, so a plugin can replace or disable it.
 import type { PathEntry } from "@rp/shared/chat.ts"
 import { lazy, Suspense, useSyncExternalStore } from "react"
-import { MenuItem } from "../../../ui/Menu.tsx"
-import { messageActions, type MessageActionContext } from "../messageActions.tsx"
+import { messageActions, viewOf, type MessageActionContext } from "../messageActions.tsx"
 import { editorKey } from "../messageDraft.ts"
 import { messageStream } from "../presentation.tsx"
 import type { ChatSession } from "../session.ts"
@@ -39,25 +38,22 @@ export const duplicateRefusal = ({ entry, generating }: MessageActionContext) =>
       ? "A failed version has nothing to duplicate."
       : null
 
-function Duplicate(context: MessageActionContext) {
+const duplicate = viewOf((context) => {
   const { session, entry, report } = context
   const refusal = duplicateRefusal(context)
-  return (
-    <MenuItem
-      icon="duplicate"
-      disabled={refusal !== null}
-      onClick={async () => {
-        const forkId = session.snapshot().forkId
-        const outcome = await session.insertMessage(entry, { _tag: "Duplicate", versionId: entry.version.id })
-        report(outcome)
-        if (outcome.ok) insertedToast(session, outcome.value.entry.slotId, "Message duplicated", forkId)
-      }}
-    >
-      Duplicate
-      {refusal !== null && <span className="block text-xs text-muted">{refusal}</span>}
-    </MenuItem>
-  )
-}
+  return {
+    label: "Duplicate",
+    icon: "duplicate",
+    hint: "Insert a copy of the version shown right below this message.",
+    ...(refusal !== null ? { disabled: refusal } : {}),
+    onSelect: async () => {
+      const forkId = session.snapshot().forkId
+      const outcome = await session.insertMessage(entry, { _tag: "Duplicate", versionId: entry.version.id })
+      report(outcome)
+      if (outcome.ok) insertedToast(session, outcome.value.entry.slotId, "Message duplicated", forkId)
+    }
+  }
+})
 
 /** The editor in the stream, after its anchor (or before the first message), when it's open. */
 function StreamEditor({ entry, session, place }: { entry: PathEntry; session: ChatSession; place: "above" | "below" }) {
@@ -88,25 +84,29 @@ function GeneratingNote({ entry, place }: { entry: PathEntry; place: "above" | "
 export const register = () => [
   messageActions.register({
     id: "message.insert-above",
-    order: 27,
+    order: 70,
+    group: "place",
     available: isFirst,
-    menu: ({ session }) => (
-      <MenuItem icon="insert" onClick={() => openInsertEditor(session, null)}>
-        Insert message above
-      </MenuItem>
-    )
+    describe: viewOf(({ session }) => ({
+      label: "Insert message above",
+      icon: "insert-above",
+      hint: "Write or generate a new message before this one, at the start of the chat.",
+      onSelect: () => openInsertEditor(session, null)
+    }))
   }),
   messageActions.register({
     id: "message.insert-below",
-    order: 28,
+    order: 71,
+    group: "place",
     run: ({ session, entry }) => openInsertEditor(session, entry),
-    menu: ({ session, entry }) => (
-      <MenuItem icon="insert" onClick={() => openInsertEditor(session, entry)}>
-        Insert message below
-      </MenuItem>
-    )
+    describe: viewOf(({ session, entry }) => ({
+      label: "Insert message below",
+      icon: "insert-below",
+      hint: "Write or generate a new message right after this one.",
+      onSelect: () => openInsertEditor(session, entry)
+    }))
   }),
-  messageActions.register({ id: "message.duplicate", order: 29, menu: Duplicate }),
+  messageActions.register({ id: "message.duplicate", order: 72, group: "place", describe: duplicate }),
   messageStream.register({
     id: "insert.editor",
     order: 10,

@@ -78,7 +78,17 @@ const displayFields = {
   displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   enterSends: Schema.Literals(["automatic", "always", "never"]),
-  guidance: Schema.Boolean
+  guidance: Schema.Boolean,
+  /**
+   * Which message actions show as buttons on a message, by action id: the user's choices
+   * over each action's default. An id no action has is kept and ignored.
+   */
+  messageToolbar: Schema.Record(Schema.String, Schema.Boolean).check(
+    Schema.isMaxProperties(200),
+    Schema.makeFilter((choices: Record<string, boolean>) => Object.keys(choices).every((id) => id.length <= 200), {
+      expected: "action ids of at most 200 characters"
+    })
+  )
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -94,7 +104,9 @@ export const DisplayPrefsChange = Schema.Struct({
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   enterSends: Schema.optionalKey(displayFields.enterSends),
-  guidance: Schema.optionalKey(displayFields.guidance)
+  guidance: Schema.optionalKey(displayFields.guidance),
+  /** Merged by id with what's stored, so a write names only the choices it changes. */
+  messageToolbar: Schema.optionalKey(displayFields.messageToolbar)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -109,7 +121,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   outputMacros: false,
   displayRegex: true,
   enterSends: "automatic",
-  guidance: false
+  guidance: false,
+  messageToolbar: {}
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

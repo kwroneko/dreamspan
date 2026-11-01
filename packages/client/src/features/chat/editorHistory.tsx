@@ -12,7 +12,7 @@ import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { HistoryIcon } from "./icons.tsx"
 import type { MessageDraft } from "./messageDraft.ts"
 import type { SummaryDraft } from "./summaryDraft.ts"
-import { messageActions, type MessageActionProps } from "./messageActions.tsx"
+import { messageActions, viewOf, type MessageActionProps } from "./messageActions.tsx"
 
 export const messageEditorTools = defineSlot<{
   draft: MessageDraft
@@ -230,12 +230,14 @@ export const registerEditorHistory = () => [
   messageActions.register({
     id: "message.amendments",
     order: 15,
+    group: "change",
     available: ({ entry, generating }) => !generating && entry.version.writer === "human",
-    menu: ({ openDialog }) => (
-      <MenuItem icon="edit" onClick={() => openDialog("message.amendments")}>
-        Saved amendment history
-      </MenuItem>
-    ),
+    describe: viewOf(({ openDialog }) => ({
+      label: "Saved amendment history",
+      icon: "history",
+      hint: "The texts this message had before each saved edit changed it in place.",
+      onSelect: () => openDialog("message.amendments")
+    })),
     dialog: Amendments
   })
 ]

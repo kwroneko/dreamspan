@@ -179,13 +179,22 @@ describe("message action contributions", () => {
           yield* scoped(() =>
             messageActions.register({
               ...original,
-              toolbar: ({ entry }) => createElement("p", null, `Synthetic edit: ${entry.versionCount}`)
+              describe: ({ entry }) => createElement("p", null, `Synthetic edit: ${entry.versionCount}`)
             })
           )
           yield* scoped(() =>
-            messageActions.register({ id: "synthetic.peer", order: 0, toolbar: () => createElement("p", null, "Peer") })
+            messageActions.register({
+              id: "synthetic.peer",
+              order: 0,
+              pinned: true,
+              describe: () => createElement("p", null, "Peer")
+            })
           )
-          expect(markup(createElement(MessageActions, { context }))).toBe("<p>Peer</p><p>Synthetic edit: 1</p>")
+          const shown = markup(createElement(MessageActions, { context }))
+          expect(shown).not.toContain('aria-label="Edit"')
+          // Pinned ones show in the menu's order: the peer (order 0) before the edit (10).
+          expect(shown.indexOf("<p>Peer</p>")).toBeGreaterThan(-1)
+          expect(shown.indexOf("<p>Peer</p>")).toBeLessThan(shown.indexOf("<p>Synthetic edit: 1</p>"))
         })
       )
     )
@@ -196,8 +205,7 @@ describe("message action contributions", () => {
 
   it("one inspector registration removes and restores both its menu and toolbar offers", async () => {
     const original = messageActions.get("message.context")!
-    expect(original.toolbar).toBeDefined()
-    expect(original.menu).toBeDefined()
+    expect(original.describe).toBeDefined()
     expect(availableMessageActions(context)).toContain(original)
     await Effect.runPromise(
       Effect.scoped(

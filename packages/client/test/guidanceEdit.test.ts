@@ -1,5 +1,5 @@
 // Guidance on swipes (DESIGN §2.2, owner 2026-10-29): what a new version and Continue are
-// asked with, the guidance editor, its Edit and "Add guidance" entry points, and the bar.
+// asked with, the guidance editor, its "New version…" and "New version with guidance…" entry points, and the bar.
 import type { ChatId, EntityId, ForkId, PathEntry, SlotId, Version, VersionId } from "@rp/shared/chat.ts"
 import { AtomRegistry } from "effect/reactivity"
 import { createElement } from "react"
@@ -171,12 +171,12 @@ describe("guidance on swipes, as registered parts", () => {
     const { s } = session()
     const shown = markup(createElement(MessageDirection, { entry: entry("s2", "Make it rain."), session: s }))
     expect(shown).toContain("Make it rain.")
-    expect(shown).toContain('aria-label="Edit guidance"')
+    expect(shown).toContain('aria-label="New version with this guidance"')
     expect(markup(createElement(MessageDirection, { entry: entry("s2", null), session: s }))).toBe("")
     expect(markup(createElement(MessageDirection, { entry: entry("s2", "Rain.", "human"), session: s }))).toBe("")
   })
 
-  it("offers Add guidance in the menu only for a reply without guidance (rule 3)", () => {
+  it("offers New version with guidance… in the menu only for a reply without guidance (rule 3)", () => {
     const { s } = session()
     const offered = (e: PathEntry, generating = false) =>
       availableMessageActions({ entry: e, session: s, generating } as never).some(
@@ -206,8 +206,8 @@ describe("guidance on swipes, as registered parts", () => {
     expect(availableComposerControls("banner", context).map((c) => c.id)).toEqual(["composer.guidance-edit"])
     expect(bar()).toBe("")
     guidanceEditor(s).open(entry("s2", "Rain."), null)
-    expect(bar()).toContain("Editing guidance for Aria&#x27;s reply")
-    expect(bar()).toContain('aria-label="Stop editing this guidance"')
+    expect(bar()).toContain("Guidance for a new version of Aria&#x27;s reply")
+    expect(bar()).toContain('aria-label="Close: back to new messages"')
     guidanceEditor(s).close()
     expect(bar()).toBe("")
   })

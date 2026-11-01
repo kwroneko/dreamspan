@@ -61,3 +61,39 @@ it.live("Enter sends patches persist per account and do not reset unrelated disp
     assert.strictEqual(Schema.decodeUnknownOption(DisplayPrefsChange)({ enterSends: "sometimes" })._tag, "None")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
+
+it.live("message toolbar choices merge by action id per account, across clients, and stay bounded", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).messageToolbar, {})
+    yield* alice.SetDisplayPrefs({ prefs: { messageToolbar: { "message.edit": false } } })
+    // Another device of the same account, writing only its own change.
+    const phone = yield* client({ "Remote-User": "alice" })
+    yield* phone.SetDisplayPrefs({ prefs: { messageToolbar: { "message.copy-text": true, "plugin.unknown": true } } })
+    yield* alice.SetDisplayPrefs({ prefs: { guidance: true } })
+    assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).messageToolbar, {
+      "message.edit": false,
+      "message.copy-text": true,
+      "plugin.unknown": true
+    })
+    yield* phone.SetDisplayPrefs({ prefs: { messageToolbar: { "message.edit": true } } })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).messageToolbar["message.edit"], true)
+    assert.deepStrictEqual((yield* bob.GetDisplayPrefs({})).messageToolbar, {})
+    // Past the cap the oldest choices go, and the rest of the account's choices still read.
+    for (let batch = 0; batch < 3; batch++)
+      yield* alice.SetDisplayPrefs({
+        prefs: {
+          messageToolbar: Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`plugin.${batch}.${i}`, true]))
+        }
+      })
+    const capped = yield* alice.GetDisplayPrefs({})
+    assert.strictEqual(Object.keys(capped.messageToolbar).length, 200)
+    assert.strictEqual(capped.messageToolbar["plugin.2.99"], true)
+    assert.isUndefined(capped.messageToolbar["message.edit"])
+    assert.strictEqual(capped.guidance, true)
+    const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
+    assert.strictEqual(decode({ messageToolbar: { "message.edit": "yes" } })._tag, "None")
+    assert.strictEqual(decode({ messageToolbar: { ["x".repeat(201)]: true } })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)

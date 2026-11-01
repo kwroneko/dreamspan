@@ -4,7 +4,7 @@ import { Effect, Exit, Scope } from "effect"
 import { createElement } from "react"
 import { chatCommands } from "../../src/features/chat/commands.tsx"
 import { composerControls } from "../../src/features/chat/composerControls.tsx"
-import { messageActions } from "../../src/features/chat/messageActions.tsx"
+import { messageActions, viewOf } from "../../src/features/chat/messageActions.tsx"
 import { cardContributions } from "../../src/features/cardForks/surfaces.tsx"
 import { chatPanels } from "../../src/features/chat/panels.tsx"
 import { libraryItemActions } from "../../src/features/library/itemActions.tsx"
@@ -104,8 +104,14 @@ export const install = async (
       messageActions.register({
         id: "synthetic.action",
         order: 0,
-        toolbar: ({ openDialog }) =>
-          createElement("button", { onClick: () => openDialog("synthetic.action") }, "Plugin message action"),
+        // A plugin's action is pinned like a built-in one: on the message, and in More actions.
+        pinned: true,
+        describe: viewOf(({ openDialog }) => ({
+          label: "Plugin message action",
+          icon: "note",
+          hint: "Opens the plugin's dialog.",
+          onSelect: () => openDialog("synthetic.action")
+        })),
         dialog: () => createElement("div", { role: "dialog", "aria-label": "Plugin dialog" }, "Scoped dialog")
       })
     )

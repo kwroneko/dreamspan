@@ -1,17 +1,17 @@
-// Guidance on swipes (DESIGN §2.2, owner 2026-10-29). The guidance under a reply has an Edit
-// button (a reply without any has "Add guidance" in its menu): it puts that guidance in the
-// composer's box, with a bar above the composer naming the reply. While the bar is up, any
+// Guidance on swipes (DESIGN §2.2, owner 2026-10-29). The guidance under a reply has a
+// "New version…" button (a reply without any has "New version with guidance…" in its menu):
+// it puts that guidance in the composer's box, with a bar above the composer naming the reply.
+// Neither changes the version shown: only a new version uses the text (owner, 2026-11-01). While the bar is up, any
 // submit makes a new version of that reply with the box's text, and the text stays for the
 // next one; that reply's swipes use the box as it is. ✕ gives the box back to new turns, with
 // the draft it held before. The composer's own draft is never written meanwhile (Composer.tsx).
 import type { EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { MenuItem } from "../../ui/Menu.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { nameOf, useCast } from "./cast.ts"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
-import { messageActions } from "./messageActions.tsx"
+import { messageActions, viewOf } from "./messageActions.tsx"
 import { messageDirections } from "./presentation.tsx"
 import type { ChatSession, ChatView, GuidanceRequest } from "./session.ts"
 
@@ -108,7 +108,7 @@ const editGuidance = (session: ChatSession, entry: PathEntry) => {
   document.getElementById("composer")?.focus()
 }
 
-/** The guidance a reply was written with, under it, with Edit. */
+/** The guidance a reply was written with, under it, with New version… to write another with it changed. */
 export function MessageDirection({ entry, session }: { entry: PathEntry; session: ChatSession }) {
   const { version } = entry
   if (version.writer !== "model" || !version.direction) return null
@@ -117,14 +117,16 @@ export function MessageDirection({ entry, session }: { entry: PathEntry; session
       <p className="min-w-0 flex-1 pt-1.5 wrap-break-word">
         <span className="font-medium">Direction:</span> {version.direction}
       </p>
-      <Button
-        variant="ghost"
-        className="h-7! px-2! text-xs"
-        aria-label="Edit guidance"
-        onClick={() => editGuidance(session, entry)}
-      >
-        Edit
-      </Button>
+      <Tooltip label="Puts this guidance in the composer to change it: sending writes a new version of this reply with it. This version and its guidance stay as they are.">
+        <Button
+          variant="ghost"
+          className="h-7! shrink-0 px-2! text-xs"
+          aria-label="New version with this guidance"
+          onClick={() => editGuidance(session, entry)}
+        >
+          New version…
+        </Button>
+      </Tooltip>
     </div>
   )
 }
@@ -142,9 +144,14 @@ function GuidanceEditBar({ session }: ComposerControlContext) {
       className="flex items-center gap-2 rounded-md border border-guidance/50 bg-guidance-surface py-0.5 pr-0.5 pl-3 text-sm"
     >
       <span className="min-w-0 flex-1 truncate text-guidance">
-        Editing guidance for {name ? `${name}'s` : "this"} reply
+        Guidance for a new version of {name ? `${name}'s` : "this"} reply
       </span>
-      <IconButton label="Stop editing this guidance" icon="close" onClick={() => guidanceEditor(session).close()} />
+      <IconButton
+        label="Close: back to new messages"
+        hint="Close: the composer writes new messages again, with the text it had before. The new versions made stay."
+        icon="close"
+        onClick={() => guidanceEditor(session).close()}
+      />
     </div>
   )
 }
@@ -153,13 +160,15 @@ export const registerGuidanceEdit = () => [
   messageDirections.register({ id: "message.direction", order: 10, component: MessageDirection }),
   messageActions.register({
     id: "message.add-guidance",
-    order: 26,
+    order: 40,
+    group: "change",
     available: ({ entry, generating }) => !generating && entry.version.writer === "model" && !entry.version.direction,
-    menu: ({ session, entry }) => (
-      <MenuItem icon="edit" onClick={() => editGuidance(session, entry)}>
-        Add guidance
-      </MenuItem>
-    )
+    describe: viewOf(({ session, entry }) => ({
+      label: "New version with guidance…",
+      icon: "guidance",
+      hint: "Write guidance in the composer for a new version of this reply: sending writes the new version, and this one stays as it is.",
+      onSelect: () => editGuidance(session, entry)
+    }))
   }),
   composerControls.register({
     id: "composer.guidance-edit",

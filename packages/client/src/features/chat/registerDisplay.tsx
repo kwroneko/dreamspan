@@ -4,6 +4,7 @@ import { messageRenderers } from "../../ui/Markdown.tsx"
 import { registerMessageCopy } from "../../ui/messageCopy.tsx"
 import { appTools } from "../shell.tsx"
 import { MessageColorPreferences } from "./MessageColors.tsx"
+import { MessageToolbarPreferences } from "./MessageToolbarPreferences.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
 import { displayTransforms, macroDisplay } from "./displayPipeline.ts"
 import { regexDisplay } from "./displayWorker.ts"
@@ -23,6 +24,8 @@ export const registerDisplay = () => [
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
+  // Which message actions show as buttons, from the account (messageActions.tsx).
+  appTools.register({ id: "display.message-toolbar", order: 0, component: MessageToolbarPreferences }),
   displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),

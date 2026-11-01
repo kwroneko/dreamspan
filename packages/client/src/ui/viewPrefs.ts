@@ -40,10 +40,15 @@ export function useViewPrefs() {
     ready: AsyncResult.isSuccess(result),
     pending: action.pending,
     error: action.error,
-    change: (change: DisplayPrefsChange) =>
+    /**
+     * `change` shows at once; `sent` (by default the same) is what the server is asked to
+     * merge, for a choice it merges by key (the message toolbar's) where the change shown is
+     * the whole map.
+     */
+    change: (change: DisplayPrefsChange, sent: DisplayPrefsChange = change) =>
       writes.change(change, (acknowledge) =>
         action.run(
-          (client) => client("SetDisplayPrefs", { prefs: change }).pipe(Effect.tap(() => Effect.sync(acknowledge))),
+          (client) => client("SetDisplayPrefs", { prefs: sent }).pipe(Effect.tap(() => Effect.sync(acknowledge))),
           ["displayPrefs"]
         )
       )
