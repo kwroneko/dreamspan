@@ -280,7 +280,8 @@ export function EntryDetails({
             <NumberField
               store={store}
               path={[...path, "scan_depth"]}
-              label="Scan depth (empty follows the chat)"
+              label="Scan depth (empty: the book's, else 2)"
+              description="How many of the latest messages it looks for its keys in."
               integer
               nullable
               min={0}
