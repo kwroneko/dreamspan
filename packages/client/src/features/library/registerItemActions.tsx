@@ -147,8 +147,9 @@ export const registerItemActions = () => [
   libraryItemActions.register({
     id: "library.update",
     order: 40,
-    // A newly made fork has no import line to update from.
-    available: ({ entry }) => entry.refKind === "upstream" && (entry.kind !== "card" || entry.hasImport === true),
+    // Presets and lorebooks merge a new version of their file; a card takes one wholesale
+    // through "Import a new version…" (features/cardImport), until cards have a merge too.
+    available: ({ entry }) => entry.refKind === "upstream" && entry.kind !== "card",
     menu: UpdateItem,
     description: "Imports a new version of its file, merged with your own edits."
   }),
