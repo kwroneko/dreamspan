@@ -9,6 +9,7 @@ import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
+import { openCastAdd } from "./support/cast.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -125,21 +126,21 @@ test("History edits doesn't ask for a model before a search", async ({ page }) =
   await expect(tab).toContainText(/re-read about \d+ messages/)
 })
 
-test("Add character at scale: the search keeps its height over a long list, characters before personas", async ({
-  page
-}) => {
+test("Add characters over a long list: the search keeps its height, characters before personas", async ({ page }) => {
   await open(page)
-  const tab = await openPanel(page, "Cast")
-  await tab.getByRole("button", { name: "Add character" }).click()
-  const picker = page.getByRole("dialog", { name: "Add a character to this chat" })
-  const characters = picker.getByRole("list", { name: "Characters", exact: true })
-  await expect(characters.getByRole("button")).toHaveCount(12)
-  // The long list scrolls under the search; it never squeezes the box.
-  const box = await picker.getByRole("searchbox", { name: "Search your cards" }).boundingBox()
+  await openPanel(page, "Cast")
+  const section = await openCastAdd(page)
+  await section.getByRole("searchbox", { name: "Find a character to add" }).fill("lantern")
+  await expect(section.getByRole("button", { name: /^Add Lantern keeper \d+ to this chat$/ })).toHaveCount(12)
+  const box = await section.getByRole("searchbox", { name: "Find a character to add" }).boundingBox()
   expect(box?.height).toBeGreaterThanOrEqual(34)
-  const personas = picker.getByRole("list", { name: "Personas", exact: true })
-  // One of Juniper and Wren is played here (the persona test switches them); the other is offered.
-  await expect(personas.getByRole("button")).toHaveCount(1)
-  const top = async (locator: typeof picker) => (await locator.boundingBox())!.y
-  expect(await top(characters)).toBeLessThan(await top(personas))
+  await section.getByRole("searchbox", { name: "Find a character to add" }).fill("")
+  const personas = section.getByRole("region", { name: "Personas", exact: true })
+  // Juniper and Wren: one is played here (the persona test switches them), so it's marked.
+  await expect(personas.getByRole("button")).toHaveCount(2)
+  await expect(personas.getByRole("button", { name: /: you play them here$/ })).toHaveCount(1)
+  const top = async (locator: typeof section) => (await locator.boundingBox())!.y
+  expect(
+    await top(section.getByRole("button", { name: /^Add Lantern keeper \d+ to this chat$/ }).first())
+  ).toBeLessThan(await top(personas))
 })

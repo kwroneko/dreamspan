@@ -32,6 +32,7 @@ import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
+import { requestCastAdd } from "./castAddState.ts"
 
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
@@ -520,7 +521,17 @@ export function Composer({
     session,
     view,
     onSettings,
-    speaker: { speaker, recent: switcherRecent, onPick, personas, onAddToChat: () => onSettings("cast") },
+    speaker: {
+      speaker,
+      recent: switcherRecent,
+      onPick,
+      personas,
+      onAddToChat: () => {
+        // The Cast tab, its Add characters open with the search focused (castAddState.ts).
+        requestCastAdd()
+        onSettings("cast")
+      }
+    },
     recent: recent.map((id) => ({
       id,
       name: nameOf(castView, id) ?? "?",

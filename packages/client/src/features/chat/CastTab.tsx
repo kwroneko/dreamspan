@@ -3,8 +3,9 @@
 // their tab, where the card is edited), Mute (never picked to reply; the card stays in the
 // context: PHASE1 "Muting and presence") and Speak now. Everything else is under each row's ⋯:
 // write as them, the card's actions (`chatCardActions`, so a plugin's join them), make them the
-// persona, remove them. Any card can be added. Changes to who's here are state events at the
-// leaf shown, so they apply from the latest message on, on this branch.
+// persona, remove them. Under them, Add characters (CastAdd.tsx, a `castSections` entry).
+// Changes to who's here are state events at the leaf shown, so they apply from the latest
+// message on, on this branch.
 import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { CastChange, ChatCard } from "@rp/shared/chatSetupApi.ts"
@@ -14,122 +15,19 @@ import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
-import { shellAtom } from "../characters/shellData.tsx"
-import { addableGroups, castView } from "./cast.ts"
-import { PlusIcon } from "./icons.tsx"
+import { SlotOutlet } from "../../slots.tsx"
+import { castView } from "./cast.ts"
 import { useShowPanel } from "./panels.tsx"
 import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
-import { ChatCardActions } from "./presentation.tsx"
+import { castSections, ChatCardActions } from "./presentation.tsx"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-
-/** A searchable list of the user's cards not in the chat; the one picked joins it (DESIGN §2.1). */
-function AddCharacter({
-  session,
-  participants,
-  onJoin
-}: {
-  session: ChatSession
-  participants: ReadonlyArray<EntityId>
-  onJoin: (card: CastCard) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [all, setAll] = useState<ReadonlyArray<CastCard> | null>(null)
-  const [query, setQuery] = useState("")
-  // The shell's cards carry when each was last in a chat; read while the app runs anyway.
-  const shell = useAtomValue(shellAtom)
-  const recency = useMemo(
-    () =>
-      new Map<string, number>(
-        AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c.recentAt ?? 0]) : []
-      ),
-    [shell]
-  )
-  const openChange = (next: boolean) => {
-    setOpen(next)
-    if (!next) return setQuery("")
-    void session.listCards().then((result) => setAll(result.ok ? result.value : []))
-  }
-  const groups = useMemo(
-    () =>
-      addableGroups(
-        (all ?? []).filter((card) => !participants.includes(card.entityId)),
-        recency,
-        query.trim().toLowerCase()
-      ),
-    [all, participants, recency, query]
-  )
-  const option = ({ card, version }: { card: CastCard; version: string }) => (
-    <li key={card.entityId}>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(false)
-          setQuery("")
-          onJoin(card)
-        }}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">{card.name}</span>
-          {version && <span className="truncate text-xs text-muted">{version}</span>}
-        </span>
-      </button>
-    </li>
-  )
-  const empty = groups.characters.length === 0 && groups.personas.length === 0
-  return (
-    <Popover
-      open={open}
-      onOpenChange={openChange}
-      triggerLabel="Add character"
-      title="Add a character to this chat"
-      side="bottom"
-      align="end"
-      trigger={
-        <>
-          <PlusIcon />
-          Add character
-        </>
-      }
-    >
-      {/* Never squeezed by a long list under it. */}
-      <Input
-        type="search"
-        className="shrink-0"
-        aria-label="Search your cards"
-        placeholder="Search your cards"
-        value={query}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-      />
-      {all === null ? (
-        <p className="px-1 py-2 text-sm text-muted">Loading…</p>
-      ) : empty ? (
-        <p className="px-1 py-2 text-sm text-muted">
-          {query.trim() === "" ? "Every card you have is in this chat." : "No card matches."}
-        </p>
-      ) : (
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
-          {groups.characters.length > 0 && <ul aria-label="Characters">{groups.characters.map(option)}</ul>}
-          {groups.personas.length > 0 && (
-            <section aria-label="Personas" className="flex flex-col gap-1">
-              <h3 className="px-2 pt-1 text-xs font-medium text-muted">Personas</h3>
-              <ul aria-label="Personas">{groups.personas.map(option)}</ul>
-            </section>
-          )}
-        </div>
-      )}
-    </Popover>
-  )
-}
 
 /** The row's ⋯: what's used less, each a button in a panel that stays mounted for the dialogs they open. */
 function MemberMore({
@@ -383,14 +281,9 @@ export function CastTab({ session }: { session: ChatSession }) {
             {plural(characters.length, "character", "characters")}
             {muted > 0 && <span className="font-normal text-muted"> · {muted} muted</span>}
           </h2>
-          <AddCharacter
-            session={session}
-            participants={participants}
-            onJoin={(card) => void change({ _tag: "Join", entityId: card.entityId })}
-          />
         </div>
         {characters.length === 0 ? (
-          <p className="py-2 text-sm text-muted">No one is in this chat. Add a character to start.</p>
+          <p className="py-2 text-sm text-muted">No one is in this chat. Add a character below to start.</p>
         ) : (
           <ul aria-label="Characters in this chat" className="grid gap-x-6 @3xl:grid-cols-2">
             {characters.map((id) => {
@@ -414,6 +307,8 @@ export function CastTab({ session }: { session: ChatSession }) {
           </ul>
         )}
       </div>
+      {/* Add characters, and what a plugin adds (castSections). */}
+      <SlotOutlet slot={castSections} props={{ session }} />
       {AsyncResult.isFailure(infoResult) && (
         <p className="text-sm text-muted">The cards' details couldn't be read; editing them may not work.</p>
       )}
