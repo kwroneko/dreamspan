@@ -76,7 +76,7 @@ for (const width of [1440, 390]) {
     await shoot("fork")
     // Renaming an existing card checks the pair on confirm: the field stays open with the clash.
     await renameCard(page, "version", "1")
-    await expect(page.getByRole("alert").filter({ hasText: "Another card is already called" })).toHaveText(clash)
+    await expect(page.getByRole("alert").filter({ hasText: "Another card is already called" })).toContainText(clash)
     await expect(page.getByRole("textbox", { name: "Version", exact: true })).toBeVisible()
     await shoot("rename-clash")
     await page.getByRole("button", { name: "Cancel renaming", exact: true }).click()

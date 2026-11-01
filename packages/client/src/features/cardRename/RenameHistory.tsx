@@ -118,8 +118,8 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: C
           onClick={() => void replace("all")}
         >
           {yes
-            ? `Yes, in all ${targets?.length ?? "…"} chats with ${change.oldName}`
-            : `In all ${targets?.length ?? "…"} chats`}
+            ? `Yes, in all ${targets?.length ?? "…"} ${all === 1 ? "chat" : "chats"} with ${change.oldName}`
+            : `In all ${targets?.length ?? "…"} ${all === 1 ? "chat" : "chats"}`}
         </Button>
       )}
     </>

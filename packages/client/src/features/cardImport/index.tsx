@@ -36,7 +36,7 @@ export const register = () => [
     order: 40,
     component: ({ card, info }) => (
       <Suspense fallback={null}>
-        <Action entityId={card.entityId} label={card.name} {...(info ? { refId: info.refId } : {})} />
+        <Action entityId={card.entityId} label={card.name} compact {...(info ? { refId: info.refId } : {})} />
       </Suspense>
     )
   }),

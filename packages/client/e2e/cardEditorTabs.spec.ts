@@ -216,7 +216,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await renameDisplay(tab, "Mio T.")
   await expect(dialog).toHaveAccessibleName("Rename Mio Tanaka to Mio T.?")
   await expect(dialog.getByRole("button", { name: "Just change it", exact: true })).toBeVisible()
-  await expect(dialog.getByRole("button", { name: "In all 1 chats", exact: true })).toBeEnabled()
+  await expect(dialog.getByRole("button", { name: "In all 1 chat", exact: true })).toBeEnabled()
   await shoot(page, "rename-display-1440")
   await dialog.getByRole("button", { name: "Keep “Mio Tanaka” in chats", exact: true }).click()
   await expect(tab.getByRole("heading", { name: "Mio T." })).toBeVisible()
@@ -263,7 +263,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
 
   // Display name with no nickname again: rename everywhere replaces in all its chats.
   await renameDisplay(tab, "Mio")
-  await dialog.getByRole("button", { name: "In all 1 chats", exact: true }).click()
+  await dialog.getByRole("button", { name: "In all 1 chat", exact: true }).click()
   await expect(dialog.getByRole("status").filter({ hasText: "No matching text was found" })).toBeVisible()
   await dialog.getByRole("button", { name: "Done", exact: true }).click()
   // Just change it: the new name from now on, the history untouched.

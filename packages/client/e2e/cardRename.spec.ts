@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel } from "./support/panel.ts"
 import { chatNameLine, renameCard } from "./support/cardEditor.ts"
+import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -101,6 +102,14 @@ for (const width of [1440, 390])
       ).toBeEnabled()
       await shot(page, `rename-choices-${width}-${theme}`)
       await prompt(page).getByRole("button", { name: "No. Past messages will keep “Aria”.", exact: true }).click()
+      // The names are live text; saving makes them the card's revision, which the Cast lists by.
+      await saveButton(page).click()
+      await expect(
+        page
+          .getByRole("status")
+          .filter({ hasText: /^Saved as revision \d+$/ })
+          .first()
+      ).toBeVisible()
       expect(await texts(f)).toEqual(Array(3).fill("Aria lights the lantern."))
       // An editor opened from a chat carries exactly that fork, even when another is current.
       await page.goto(`${server().url}/chats/${f.first.chat.id}?fork=${f.first.chat.currentForkId}`)

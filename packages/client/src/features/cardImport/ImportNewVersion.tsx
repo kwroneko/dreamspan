@@ -307,15 +307,32 @@ function useCardRef(entityId: EntityId, refId: RefId | undefined) {
 }
 
 /**
- * The action as a button with its dialog: in the editor's More menu, the card page, a
+ * The action as a button with its dialog: in the editor's header, the card page, a
  * chat's character tab. `refId` when the place knows the card's library entry.
  */
-export function ImportNewVersion({ refId, entityId, label }: { refId?: RefId; entityId: EntityId; label: string }) {
+export function ImportNewVersion({
+  refId,
+  entityId,
+  label,
+  compact = false
+}: {
+  refId?: RefId
+  entityId: EntityId
+  label: string
+  /** A row of ghost actions (the chat's character tab). */
+  compact?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const ref = useCardRef(entityId, refId)
   return (
     <>
-      <Button hint={EXPLAIN.action} disabled={!ref} onClick={() => setOpen(true)}>
+      <Button
+        variant={compact ? "ghost" : "secondary"}
+        className={compact ? "h-8! px-2!" : ""}
+        hint={EXPLAIN.action}
+        disabled={!ref}
+        onClick={() => setOpen(true)}
+      >
         Import a new version…
       </Button>
       {open && ref && <NewVersionDialog refId={ref} label={label} onClose={() => setOpen(false)} />}

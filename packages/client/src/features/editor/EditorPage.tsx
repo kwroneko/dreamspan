@@ -279,7 +279,9 @@ export function Editor({
             !overPreset && title("text-2xl")
           )}
           {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
-          {ref.subtitle && !bookOnly && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
+          {ref.subtitle && ref.kind !== "card" && !bookOnly && (
+            <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>
+          )}
           <p className="text-sm text-muted">
             {bookOnly ? (
               // The book is part of the card's document: saved, versioned and exported with it.
