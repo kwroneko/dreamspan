@@ -103,19 +103,24 @@ for (const width of [1440, 390]) {
     await shots(page, "purge-branches", width)
 
     // A plain click opens the branch at the message, highlighted, in a new tab; the dialog stays.
+    // A new tab loads the whole app cold, which took over 10 s on a loaded host: it gets 30.
+    const loading = { timeout: 30_000 }
     const opened = context.waitForEvent("page")
     await sideLink.click()
     const tab = await opened
     await tab.waitForLoadState()
     const article = tab.locator(`article[data-slot="${shared}"]`)
-    await expect(article).toBeVisible()
+    await expect(article).toBeVisible(loading)
     await expect(article).toHaveClass(/border-accent/)
     await expect(tab.getByTestId("messages").getByText("Down the side road")).toBeVisible()
     await tab.close()
     const above = context.waitForEvent("page")
     await firstEntry.getByRole("link").click()
     const firstTab = await above
-    await expect(firstTab.locator(`article[data-slot="${root}"]`)).toHaveClass(/border-accent/)
+    await firstTab.waitForLoadState()
+    const rootArticle = firstTab.locator(`article[data-slot="${root}"]`)
+    await expect(rootArticle).toBeVisible(loading)
+    await expect(rootArticle).toHaveClass(/border-accent/)
     await expect(firstTab.getByTestId("messages").getByText("Only the first branch has this")).toBeVisible()
     await firstTab.close()
     await expect(dialog).toBeVisible()
