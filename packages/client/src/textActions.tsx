@@ -1,6 +1,6 @@
 // Generic text-command contributions. Editors offer them in their own chrome; features supply
 // the behavior. The browser's own context menu stays everywhere: nothing here replaces it.
-import { useEffect, useSyncExternalStore, type KeyboardEvent } from "react"
+import { useEffect, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from "react"
 import { makeRegistry } from "./registry.ts"
 import { Icon, type IconName } from "./ui/Icon.tsx"
 import { Tooltip } from "./ui/Tooltip.tsx"
@@ -122,6 +122,21 @@ export function EditorTextActions({
       ))}
     </div>
   )
+}
+
+/**
+ * Whether focus is in an editor (its box or its bar), for the wrapper around both. Its selection
+ * counts only then: a box left for elsewhere keeps its selection, unseen, until it's back.
+ */
+export const useEditorFocus = () => {
+  const [focused, setFocused] = useState(false)
+  return {
+    focused,
+    onFocus: () => setFocused(true),
+    onBlur: (event: FocusEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false)
+    }
+  }
 }
 
 /** An editor's Ctrl/Command+Shift shortcut for an action its bar shows now. */

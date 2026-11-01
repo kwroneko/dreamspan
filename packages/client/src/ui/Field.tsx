@@ -2,7 +2,7 @@ import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
 import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
-import { EditorTextActions, runEditorShortcut } from "../textActions.tsx"
+import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -136,6 +136,7 @@ export function Textarea({
   ...props
 }: ComponentProps<"textarea"> & { textActions?: boolean }) {
   const [text, setText] = useState({ value: "", selection: "" })
+  const { focused, onFocus, onBlur } = useEditorFocus()
   if (!textActions || props.disabled)
     return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
   const read = (event: SyntheticEvent<HTMLTextAreaElement>) => {
@@ -144,10 +145,13 @@ export function Textarea({
     if (next.value !== text.value || next.selection !== text.selection) setText(next)
   }
   const value = typeof props.value === "string" ? props.value : text.value
+  const selection = focused ? text.selection : ""
   return (
     <div
       className="group/text flex min-w-0 flex-col gap-0.5"
-      onKeyDown={(event) => runEditorShortcut(event, value, text.selection)}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onKeyDown={(event) => runEditorShortcut(event, value, selection)}
     >
       <BaseField.Control
         render={
@@ -169,7 +173,7 @@ export function Textarea({
           />
         }
       />
-      <EditorTextActions text={value} selection={text.selection} />
+      <EditorTextActions text={value} selection={selection} />
     </div>
   )
 }

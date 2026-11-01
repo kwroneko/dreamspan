@@ -478,10 +478,6 @@ const canEditFrom = (target: EventTarget | null) =>
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
 
-/**
- * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
- * (a CodeMirror editor's contenteditable, any textbox), where a drag moves the caret or selects.
- */
 /** The browser's caret at a point, as a text position. */
 const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | null => {
   const position = document.caretPositionFromPoint?.(x, y)
@@ -493,6 +489,10 @@ const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | 
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
 const TRIPLE_CLICK_MS = 350
 
+/**
+ * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
+ * (a CodeMirror editor's contenteditable, any textbox), where a drag moves the caret or selects.
+ */
 const swipeCanStart = (target: EventTarget | null) =>
   !onControl(target) &&
   !(
@@ -607,11 +607,18 @@ export const Message = memo(function Message({
   // Only the edit it opened starts there: a later Edit opens with the caret at the end.
   const caretTaken = useCallback(() => setCaretAt(undefined), [])
   useEffect(() => () => clearTimeout(pendingEdit.current ?? undefined), [])
-  const onMouseDown = (event: MouseEvent) => {
-    if (event.detail >= 3 && pendingEdit.current !== null) {
-      clearTimeout(pendingEdit.current)
-      pendingEdit.current = null
-    }
+  // What the wait may have changed: the edit opens only on the version double-clicked, still
+  // finished and not already being edited.
+  const now = useRef({ editing, generating, versionId: version.id })
+  useEffect(() => {
+    now.current = { editing, generating, versionId: version.id }
+  })
+  // Any press after the double-click (a triple-click's third, or another action begun within
+  // the wait) is the user doing something else.
+  const onMouseDown = () => {
+    if (pendingEdit.current === null) return
+    clearTimeout(pendingEdit.current)
+    pendingEdit.current = null
   }
   const onDoubleClick = (event: MouseEvent) => {
     if (editing || generating || outside(event) || !canEditFrom(event.target)) return
@@ -621,8 +628,11 @@ export const Message = memo(function Message({
     const mapped = point && sourceOffsetAt(point.node, point.offset)
     const offset = mapped?.text === version.content ? mapped.offset : undefined
     clearTimeout(pendingEdit.current ?? undefined)
+    const versionId = version.id
     pendingEdit.current = setTimeout(() => {
       pendingEdit.current = null
+      const current = now.current
+      if (current.editing || current.generating || current.versionId !== versionId) return
       if (/\s/.test(window.getSelection()?.toString().trim() ?? "")) return
       setCaretAt(offset)
       void invokeMessageAction("message.edit", context, "button")

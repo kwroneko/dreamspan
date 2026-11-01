@@ -1,5 +1,5 @@
 import { registerTextTarget } from "./textTargets.ts"
-import { EditorTextActions, runEditorShortcut } from "../textActions.tsx"
+import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
 import { Compartment, EditorState, Transaction } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
@@ -14,6 +14,8 @@ export default function CodeEditorView(props: CodeEditorProps) {
   const controller = useRef<ReturnType<typeof mountEditor> | null>(null)
   // The selected text, for the bar's selection actions under the box.
   const [selected, setSelected] = useState("")
+  const { focused, onFocus, onBlur } = useEditorFocus()
+  const selection = focused ? selected : ""
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
@@ -37,13 +39,15 @@ export default function CodeEditorView(props: CodeEditorProps) {
   return (
     <div
       className="group/text flex min-w-0 flex-col gap-0.5"
-      onKeyDown={(event) => runEditorShortcut(event, props.value, selected, props.source)}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onKeyDown={(event) => runEditorShortcut(event, props.value, selection, props.source)}
     >
       <div
         ref={host}
         className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
       />
-      <EditorTextActions text={props.value} selection={selected} source={props.source} />
+      <EditorTextActions text={props.value} selection={selection} source={props.source} />
     </div>
   )
 }
