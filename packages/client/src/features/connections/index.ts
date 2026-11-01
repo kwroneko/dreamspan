@@ -19,7 +19,11 @@ export const register = () => {
     parent: "settings",
     path: "connections",
     component: ConnectionsPage,
-    nav: { label: "Connections", order: 10 }
+    nav: {
+      label: "Connections",
+      order: 10,
+      description: "The model providers you use: each API, its address, its key and its models."
+    }
   })
   routes.register({
     id: "settings.connections.new",

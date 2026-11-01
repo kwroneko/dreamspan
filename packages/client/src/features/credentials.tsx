@@ -499,6 +499,6 @@ export const register = () => {
     parent: "settings",
     path: "keys",
     component: CredentialsPage,
-    nav: { label: "Keys", order: 20 }
+    nav: { label: "Keys", order: 20, description: "Your API keys, and the addresses each may be sent to." }
   })
 }

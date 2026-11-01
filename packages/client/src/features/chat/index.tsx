@@ -106,7 +106,11 @@ export const register = () => {
     parent: "settings",
     path: "chats",
     component: ChatDefaultsPage,
-    nav: { label: "Chats", order: 15 }
+    nav: {
+      label: "Chats",
+      order: 15,
+      description: "What every chat starts from: the model, the preset, the refusal judge and summaries."
+    }
   })
   // A chat with a card, before it exists (DESIGN §2.1).
   routes.register({

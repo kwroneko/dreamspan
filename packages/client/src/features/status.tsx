@@ -92,6 +92,6 @@ export const register = () => {
     parent: "settings",
     path: "status",
     component: Status,
-    nav: { label: "Server status", order: 80 }
+    nav: { label: "Server status", order: 80, description: "The server's version, and diagnostics for admins." }
   })
 }

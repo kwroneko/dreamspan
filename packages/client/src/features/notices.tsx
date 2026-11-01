@@ -208,6 +208,10 @@ export const register = () => {
     parent: "settings",
     path: "notifications",
     component: NotificationSettings,
-    nav: { label: "Notifications", order: 45 }
+    nav: {
+      label: "Notifications",
+      order: 45,
+      description: "How you hear of a reply that finishes in a chat you aren't looking at."
+    }
   })
 }

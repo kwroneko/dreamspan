@@ -159,6 +159,6 @@ export const register = () => {
     parent: "settings",
     path: "network",
     component: NetworkPage,
-    nav: { label: "Network", order: 30, adminOnly: true }
+    nav: { label: "Network", order: 30, adminOnly: true, description: "How the server reaches model providers." }
   })
 }
