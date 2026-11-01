@@ -22,4 +22,14 @@ export const trackOpenEditor = (editor: OpenEditor) => {
 
 export const flushOpenEditors = () => Promise.all([...open.keys()].map((editor) => editor.flush()))
 
-export const refreshOpenEditors = () => Promise.all([...open.keys()].map((editor) => editor.refresh()))
+/**
+ * How many times a chat's state changed while editors were open: an editor kept while its tab
+ * was closed (a workspace's store) reads its state again when it's shown, if it missed one.
+ */
+let changes = 0
+export const stateChanges = () => changes
+
+export const refreshOpenEditors = () => {
+  changes++
+  return Promise.all([...open.keys()].map((editor) => editor.refresh()))
+}

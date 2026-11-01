@@ -24,7 +24,7 @@ import {
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
 import { arrange, type HeldChanges, heldText, parseHeld, splitOrder } from "./heldOrder.ts"
-import { trackOpenEditor } from "./openEditors.ts"
+import { stateChanges, trackOpenEditor } from "./openEditors.ts"
 import type { Draft } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
@@ -200,7 +200,11 @@ export class EditorStore {
     return this.snapshot?.doc ?? {}
   }
 
+  /** The chats' state changes (openEditors.ts) this store's state was read after. */
+  seenChanges = 0
+
   async load() {
+    this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
@@ -601,6 +605,7 @@ export class EditorStore {
 
   /** The server's drafts and head again, without losing what's typed here. */
   async refresh() {
+    this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
@@ -991,6 +996,8 @@ export const useLeaveGuard = (store: EditorStore) =>
       flush: () => store.flush(),
       refresh: () => (store.snapshot === null ? Promise.resolve() : store.refresh())
     })
+    // Shown again after a reply cut revisions while it was hidden: read what changed.
+    if (store.snapshot !== null && store.seenChanges < stateChanges()) void store.refresh()
     const warn = (event: BeforeUnloadEvent) => {
       if (!store.isSaving()) return
       event.preventDefault()

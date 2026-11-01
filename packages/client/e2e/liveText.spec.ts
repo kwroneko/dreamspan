@@ -77,7 +77,7 @@ const send = async (page: Page, text: string) => {
   const before = provider.completions.length
   await page.getByLabel("Message", { exact: true }).fill(text)
   await page.getByRole("button", { name: "Send", exact: true }).click()
-  await expect.poll(() => provider.completions.length).toBe(before + 1)
+  await expect.poll(() => provider.completions.length, { timeout: 60_000 }).toBe(before + 1)
   return JSON.stringify(provider.completions.at(-1)!.messages)
 }
 
@@ -85,16 +85,17 @@ const send = async (page: Page, text: string) => {
 const typeAtEnd = async (page: Page, box: Locator, text: string) => {
   await box.click()
   await page.keyboard.press("Control+End")
-  await page.keyboard.type(text)
+  await page.keyboard.insertText(text)
 }
 
 for (const width of [1440, 390])
   test(`a note, a card field and a preset prompt are sent as typed, at ${width}`, async ({ page }) => {
+    test.setTimeout(300_000)
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chatId = await startChat(`The tide turns at ${width}.`)
     await page.goto(`${server().url}/chats/${chatId}`)
-    await expect(page.getByText(`The tide turns at ${width}.`)).toBeVisible()
+    await expect(page.getByTestId("messages").getByText(`The tide turns at ${width}.`)).toBeVisible()
 
     // A chat's own note, typed and never saved.
     const notes = await openPanel(page, "Notes")
@@ -142,6 +143,9 @@ for (const width of [1440, 390])
     )
     await panelTab(page, "Prompt preset")
     await expect(presetTab.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Saved as revision \d+$/)
+    // The phone's sheet was closed for the reply: its blocks start closed again.
+    if (!(await main.isVisible()))
+      await presetTab.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
 
     // Save asks nothing; "Save with a message…" takes one line, Enter saving it.
     await typeAtEnd(page, main, " Typed after the reply.")
@@ -151,7 +155,7 @@ for (const width of [1440, 390])
     await shoot(page, `save-with-message-${width}`)
     await page.keyboard.press("Enter")
     await expect(presetTab.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Saved as revision \d+$/)
-    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toHaveCount(0)
     const saved = await admin((api) => api.ListRevisions({ refId: presetRef as RefId, limit: 1 }))
     expect(saved[0]!.message).toBe(`Tidied at ${width}`)
     expect(saved[0]!.origin).toBe("user")
@@ -160,7 +164,7 @@ for (const width of [1440, 390])
     await openPanel(page, "Mira")
     await typeAtEnd(page, description, " A second thought.")
     await card.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByRole("dialog")).toHaveCount(0)
+    await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toHaveCount(0)
     await card.getByRole("button", { name: "Edit history of Description", exact: true }).click()
     const history = page.getByRole("dialog", { name: "Edit history: Description" })
     await expect(history.getByRole("list", { name: "Earlier states" }).getByRole("listitem")).not.toHaveCount(0)

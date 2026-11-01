@@ -6,7 +6,7 @@
 const isObject = (u: unknown): u is Record<string, unknown> => typeof u === "object" && u !== null && !Array.isArray(u)
 
 /** `forbid_overrides` → "Forbid overrides", `injectionDepth` → "Injection depth". */
-export const humanKey = (key: string) => {
+const humanKey = (key: string) => {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/[_-]+/g, " ")
@@ -16,7 +16,7 @@ export const humanKey = (key: string) => {
 }
 
 /** A value on one line. */
-export const inlineValue = (value: unknown): string => {
+const inlineValue = (value: unknown): string => {
   if (value === undefined || value === null) return "none"
   if (typeof value === "boolean") return value ? "on" : "off"
   if (typeof value === "string") return value === "" ? "(empty)" : value.replace(/\s+/g, " ")

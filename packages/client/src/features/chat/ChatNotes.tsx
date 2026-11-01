@@ -132,7 +132,7 @@ function ChatNoteRow({
               chatNote: position,
               notice: (
                 <Alert title="From here on, on this branch">
-                  <p>Saving applies from the displayed message on, on this branch.</p>
+                  <p>What you change applies from the displayed message on, on this branch.</p>
                 </Alert>
               )
             }
