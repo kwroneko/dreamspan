@@ -119,14 +119,19 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         below(id) AS (
           SELECT t.ref FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id WHERE t.kind = ${SLOT}
           UNION SELECT s.id FROM below b JOIN slots s ON s.parent_slot_id = b.id),
+        -- Each fork written once, from its lowest number (null: every lineage entry holding it),
+        -- so the chat's lineages are read once per fork, not once per row it wrote.
+        written(chat_id, ref, seq) AS (
+          SELECT t.chat_id, t.ref, CASE WHEN count(t.seq) = count(*) THEN min(t.seq) END
+          FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id WHERE t.kind = ${FORK} GROUP BY t.chat_id, t.ref),
         reached(id) AS (
           SELECT t.ref FROM shell_touches t WHERE t.kind IN (${SELF}, ${FORK})
           UNION ALL SELECT f.id FROM kept k JOIN forks f ON f.chat_id = k.chat_id
             WHERE f.tip_slot_id IN (SELECT id FROM below)
-          UNION ALL SELECT f.id FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
-            JOIN forks f ON f.chat_id = t.chat_id CROSS JOIN json_each(f.lineage_json) l
-            WHERE t.kind = ${FORK} AND l.value ->> 0 = t.ref
-              AND (t.seq IS NULL OR l.value ->> 1 IS NULL OR l.value ->> 1 >= t.seq))
+          -- instr first: only the lineages naming the fork are parsed.
+          UNION ALL SELECT f.id FROM written w JOIN forks f ON f.chat_id = w.chat_id AND instr(f.lineage_json, w.ref) > 0
+            CROSS JOIN json_each(f.lineage_json) l
+            WHERE l.value ->> 0 = w.ref AND (w.seq IS NULL OR l.value ->> 1 IS NULL OR l.value ->> 1 >= w.seq))
         UPDATE fork_summaries SET stamp = (SELECT c.shell_stamp FROM chats c WHERE c.id = fork_summaries.chat_id)
         WHERE fork_id IN (
           SELECT s.fork_id FROM kept k JOIN fork_summaries s ON s.chat_id = k.chat_id AND s.stamp = k.stamp
