@@ -224,7 +224,7 @@ const presetRoundTrips = () =>
  * there: our export writes them at a depth, as the harness places them (owner, 2026-11-01), but
  * the gate compares what ST does with ST's own positions to what our import makes of them.
  */
-export const stWorldFile = (book: LorebookDoc) => {
+const stWorldFile = (book: LorebookDoc) => {
   const file = JSON.parse(new TextDecoder().decode(exportLorebook(book))) as {
     entries: Record<string, Record<string, unknown>>
   }

@@ -8,7 +8,6 @@ import {
   chatComposer,
   chatComposerNotes,
   chatCardActions,
-  chatNoteActions,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,

@@ -224,7 +224,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
     for (const change of ["off", "edit", "delete", "other fork"] as const)
       it.effect(`preserves a locally ${change} imported note when ST changes its text`, () =>
         Effect.gen(function* () {
-          const { api, branch, parent, notes, read, reimport } = yield* setup(`note-${change}`)
+          const { api, branch, parent, notes, reimport } = yield* setup(`note-${change}`)
           const note = (yield* notes()).find((n) => n.doc.title === "Author's Note")!
           if (change === "off" || change === "other fork")
             yield* api.ChangeCast({
