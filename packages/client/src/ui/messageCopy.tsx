@@ -174,6 +174,23 @@ function copyStoredSelection(range: Range): CopiedSelection | null {
   return { text, html: html.join("") }
 }
 
+/**
+ * The offset in a message body's source text of a point in its rendered text (a click's
+ * caret, say), with that source text; null outside a mapped body.
+ */
+export function sourceOffsetAt(node: Node, offset: number): { text: string; offset: number } | null {
+  const body = bodyAt(node)
+  const text = body ? bodies.get(body) : undefined
+  const element = (node.nodeType === 1 ? (node as Element) : node.parentElement)?.closest("[data-source-map]")
+  if (!body || text === undefined || !element || !body.contains(element)) return null
+  const map = JSON.parse(element.getAttribute("data-source-map")!) as SourceMap
+  const content = map.code ? element.querySelector("pre code") : element
+  if (!content?.contains(node)) return null
+  const at = map.br ? 0 : textOffset(content, node, offset, map.code)
+  const source = at >= map.length ? map.end : selectedSource(map, at, at + 1)?.[0]
+  return source === undefined ? null : { text, offset: source }
+}
+
 /** Copy and native selection drags share the effective registered handler. */
 export function registerMessageCopy() {
   const dispose = messageCopyHandlers.register({ id: "message.source-copy", order: 0, copy: copyStoredSelection })

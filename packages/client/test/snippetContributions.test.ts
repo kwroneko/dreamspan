@@ -3,7 +3,7 @@ import { register } from "../src/features/snippets/index.tsx"
 import { chatPanels } from "../src/features/chat/panels.tsx"
 import { chatSurfaceProviders } from "../src/features/chat/presentation.tsx"
 import { appTools } from "../src/features/shell.tsx"
-import { textActions } from "../src/textActions.tsx"
+import { editorTextActions, textActions } from "../src/textActions.tsx"
 vi.hoisted(() => {
   vi.stubGlobal("location", { protocol: "http:", host: "127.0.0.1" })
 })
@@ -24,6 +24,18 @@ it("registers the workspace, panel and transfers as individually replaceable con
   const disable = chatPanels.disable("snippets")
   expect(send.available({ text: "A synthetic passage" })).toBe(false)
   disable()
+  // Editors offer the whole text's send, and the selection's only while there is one; never in a snippet's own editor.
+  const offered = (selection: string, source?: "snippet") =>
+    editorTextActions(textActions.snapshot().entries, "Whole text", selection, source).map(({ action, context }) => [
+      action.id,
+      context.text
+    ])
+  expect(offered("")).toEqual([["snippets.send-text", "Whole text"]])
+  expect(offered("text")).toEqual([
+    ["snippets.send-text", "Whole text"],
+    ["snippets.send", "text"]
+  ])
+  expect(offered("text", "snippet")).toEqual([])
   const original = textActions.get("snippets.insert")!
   const replacement = vi.fn()
   const undo = textActions.register({ ...original, label: "Plugin insertion", available: () => true, run: replacement })

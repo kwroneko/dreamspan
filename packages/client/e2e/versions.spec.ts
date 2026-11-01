@@ -1,6 +1,6 @@
 // Versions on every message and the version picker (DESIGN §3.1), against a server with the
 // fake generator: a message the user wrote gets a model-written version from its menu, then
-// Regenerate and the arrows like a reply; the picker stars and hides versions (hidden ones
+// its › and the arrows like a reply; the picker stars and hides versions (hidden ones
 // leave the arrows), filters to the starred and compares two; "Regenerate with…" another
 // model labels the new version with it. On a phone the picker is a sheet.
 import { expect, type Locator, type Page, test } from "@playwright/test"
@@ -38,7 +38,7 @@ const manyVersions = async (page: Page, count = 4) => {
   return reply
 }
 
-test("a message the user wrote gets a version from the model, then Regenerate and arrows", async ({ page }) => {
+test("a message the user wrote gets a version from the model, then its › and arrows", async ({ page }) => {
   await newChat(page, "Harbor")
   const mine = page.getByRole("article", { name: "Your message", exact: true })
   await expect(versions(mine)).toHaveCount(0)
@@ -49,13 +49,19 @@ test("a message the user wrote gets a version from the model, then Regenerate an
   await expect(mine).toHaveAttribute("aria-label", "Your message")
   await expect(mine.getByText("generated", { exact: true })).toBeVisible()
   await showActions(mine)
-  await expect(mine.getByRole("button", { name: "Regenerate", exact: true })).toBeVisible()
+  // No Regenerate in the toolbar: the › past the last version generates another.
+  await expect(
+    mine.getByRole("toolbar", { name: "Message actions" }).getByRole("button", { name: /Regenerate/ })
+  ).toHaveCount(0)
   await versions(mine).getByRole("button", { name: "Generate another version", exact: true }).click()
   await expect(versions(mine)).toContainText("3/3")
   await versions(mine).getByRole("button", { name: "Previous version", exact: true }).click()
   await versions(mine).getByRole("button", { name: "Previous version", exact: true }).click()
   await expect(mine.locator(".markdown")).toHaveText("The lantern swings.")
-  await expect(mine.getByRole("button", { name: "Regenerate", exact: true })).toBeVisible()
+  // Before the last version › steps; More actions still regenerates with a model of choice.
+  await expect(versions(mine).getByRole("button", { name: "Next version", exact: true })).toBeVisible()
+  await messageMenu(mine, "Regenerate with…")
+  await expect(page.getByRole("dialog", { name: "Regenerate with another model" })).toBeVisible()
 })
 
 test("the picker stars and hides versions, filters to the starred, and compares two", async ({ page }) => {

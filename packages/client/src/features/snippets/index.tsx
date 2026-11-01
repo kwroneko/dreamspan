@@ -80,7 +80,8 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   return (
     <section data-text-tool className="flex min-w-0 flex-col gap-3" aria-label="Snippet workspace">
       <p className="text-sm text-muted">
-        Keep text beside your chat. Select text anywhere and press Ctrl+Shift+S to send it here.
+        Keep text beside your chat. Any text editor sends its text here with Send text to snippet, or what you selected
+        in it with Send selection to snippet.
       </p>
       <div className="flex items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">
@@ -136,6 +137,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
             readOnly={state.deleting === item.ref.id}
             onChange={(content) => store.change(item.ref.id, { content })}
             onSelectionChange={setSelection}
+            source="snippet"
           />
           <div className="flex flex-wrap items-center gap-2">
             {insertAction && (
@@ -179,6 +181,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
     </section>
   )
 }
+const canSend = () => chatPanels.get("snippets") !== undefined
 export const register = () => [
   snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
   snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
@@ -191,11 +194,25 @@ export const register = () => [
     order: 75,
     component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets")
   }),
+  // Every editor's bar: its whole text, and its selection while there is one. A snippet's
+  // own editor doesn't offer them: they would append it to itself.
+  textActions.register({
+    id: "snippets.send-text",
+    label: "Send text to snippet",
+    shortLabel: "Text to snippet",
+    icon: "snippet",
+    editor: "text",
+    available: ({ text, source }) => source !== "snippet" && text.trim().length > 0 && canSend(),
+    run: ({ text }) => workspace?.send(text)
+  }),
   textActions.register({
     id: "snippets.send",
-    label: "Send to snippet",
+    label: "Send selection to snippet",
+    shortLabel: "Selection to snippet",
+    icon: "snippet",
+    editor: "selection",
     shortcut: "s",
-    available: ({ text }) => text.length > 0 && chatPanels.get("snippets") !== undefined,
+    available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),
     run: ({ text }) => workspace?.send(text)
   }),
   textActions.register({

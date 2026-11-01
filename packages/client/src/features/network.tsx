@@ -96,7 +96,12 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         label="Bypass list"
         description="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
       >
-        <Textarea value={values.bypass} onChange={(event) => edit({ bypass: event.target.value })} spellCheck={false} />
+        <Textarea
+          value={values.bypass}
+          onChange={(event) => edit({ bypass: event.target.value })}
+          spellCheck={false}
+          textActions={false}
+        />
       </Field>
       <Switch
         checked={values.forceProxy}

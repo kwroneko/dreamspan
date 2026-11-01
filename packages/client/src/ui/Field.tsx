@@ -1,7 +1,8 @@
 import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
-import type { ComponentProps, ReactNode } from "react"
+import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
+import { EditorTextActions, runEditorShortcut } from "../textActions.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -125,8 +126,52 @@ export const formText = (form: HTMLFormElement, name: string) => {
   return typeof value === "string" ? value : ""
 }
 
-export function Textarea({ className = "", ...props }: ComponentProps<"textarea">) {
-  return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
+/**
+ * A text box with the editor's text actions under it (Send to snippet, say); `textActions={false}`
+ * for a box of settings rather than text (a list of URLs).
+ */
+export function Textarea({
+  className = "",
+  textActions = true,
+  ...props
+}: ComponentProps<"textarea"> & { textActions?: boolean }) {
+  const [text, setText] = useState({ value: "", selection: "" })
+  if (!textActions || props.disabled)
+    return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
+  const read = (event: SyntheticEvent<HTMLTextAreaElement>) => {
+    const box = event.currentTarget
+    const next = { value: box.value, selection: box.value.slice(box.selectionStart, box.selectionEnd) }
+    if (next.value !== text.value || next.selection !== text.selection) setText(next)
+  }
+  const value = typeof props.value === "string" ? props.value : text.value
+  return (
+    <div
+      className="group/text flex min-w-0 flex-col gap-0.5"
+      onKeyDown={(event) => runEditorShortcut(event, value, text.selection)}
+    >
+      <BaseField.Control
+        render={
+          <textarea
+            className={`min-h-24 py-2 ${control} ${className}`}
+            {...props}
+            onSelect={(event) => {
+              read(event)
+              props.onSelect?.(event)
+            }}
+            onInput={(event) => {
+              read(event)
+              props.onInput?.(event)
+            }}
+            onFocus={(event) => {
+              read(event)
+              props.onFocus?.(event)
+            }}
+          />
+        }
+      />
+      <EditorTextActions text={value} selection={text.selection} />
+    </div>
+  )
 }
 
 /** A group of related controls with a legend, such as a set of radio buttons. */

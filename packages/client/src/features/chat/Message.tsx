@@ -27,13 +27,13 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { MessageBody } from "../../ui/messageCopy.tsx"
+import { MessageBody, sourceOffsetAt } from "../../ui/messageCopy.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
-import { MessageActions } from "./messageActions.tsx"
+import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
 import { formatWhen } from "./chatTitle.ts"
@@ -147,7 +147,7 @@ function VersionBody({
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
-          A judge model found this reply a refusal. Its text is kept; Regenerate to try again.
+          A judge model found this reply a refusal. Its text is kept; › generates another version to try again.
         </p>
       )}
       {version.status === "failed" && version.error && (
@@ -174,6 +174,8 @@ function Editor({
   source,
   session,
   entry,
+  caret,
+  onCaretTaken,
   onSave,
   onCancel
 }: {
@@ -183,10 +185,18 @@ function Editor({
   source: Version | undefined
   session: ChatSession
   entry: PathEntry
+  /** Where the caret opens (a double-click's place in the text), else at the end. */
+  caret?: number | undefined
+  onCaretTaken: () => void
   onSave: () => void
   onCancel: () => void
 }) {
   const { text, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  // The editor may mount after the saved text loads: it still opens at the first caret.
+  const [initialCaret] = useState(caret)
+  useEffect(() => {
+    if (initialCaret !== undefined) onCaretTaken()
+  }, [initialCaret, onCaretTaken])
   const [original, setOriginal] = useState<Version | undefined>(source)
   useEffect(() => {
     if (draft.target._tag !== "Edit" || source) return
@@ -261,6 +271,7 @@ function Editor({
             value: text,
             base,
             autoFocus: true,
+            caret: initialCaret,
             quietMarkers: true,
             onChange: (value) => draft.setText(value)
           }}
@@ -458,6 +469,11 @@ const useEditor = (session: ChatSession, key: MessageEditorKey) =>
     useCallback(() => session.editor(key), [session, key])
   )
 
+/** Whether a double-click may open Edit here: not on a control, the version arrows or an image. */
+const canEditFrom = (target: EventTarget | null) =>
+  !onControl(target) &&
+  !(target instanceof Element && target.closest("[role='group'][aria-label='Versions'], [data-text-tool], img, label"))
+
 /** Whether a click or tap landed on something that acts on its own. */
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
@@ -466,6 +482,17 @@ const onControl = (target: EventTarget | null) =>
  * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
  * (a CodeMirror editor's contenteditable, any textbox), where a drag moves the caret or selects.
  */
+/** The browser's caret at a point, as a text position. */
+const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | null => {
+  const position = document.caretPositionFromPoint?.(x, y)
+  if (position) return { node: position.offsetNode, offset: position.offset }
+  const range = document.caretRangeFromPoint?.(x, y)
+  return range ? { node: range.startContainer, offset: range.startOffset } : null
+}
+
+/** A third click within this long of a double-click selects a paragraph instead of editing. */
+const TRIPLE_CLICK_MS = 350
+
 const swipeCanStart = (target: EventTarget | null) =>
   !onControl(target) &&
   !(
@@ -542,7 +569,7 @@ export const Message = memo(function Message({
   const side = messageSide(entry, cast.cast, speakerId)
   const model = side === "assistant"
   // A model writes its versions: a reply, or a turn on the user's side the model wrote (an
-  // impersonation), so it has Regenerate and › generates another, written as its speaker.
+  // impersonation), so its › generates another, written as its speaker.
   const generated = model || version.writer === "model" || versions?.at(-1)?.writer === "model"
   const name = speaker?.name ?? (model ? "Model" : "You")
   const deleted = useDeletedToast()
@@ -573,6 +600,34 @@ export const Message = memo(function Message({
         : null
   }
   const onPointerCancel = () => void (swipeStart.current = null)
+  // A double-click opens Edit, with the caret where it landed. It waits out a triple-click,
+  // which selects a paragraph, and a double-click drag, which selects words, to copy them.
+  const pendingEdit = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [caretAt, setCaretAt] = useState<number | undefined>(undefined)
+  // Only the edit it opened starts there: a later Edit opens with the caret at the end.
+  const caretTaken = useCallback(() => setCaretAt(undefined), [])
+  useEffect(() => () => clearTimeout(pendingEdit.current ?? undefined), [])
+  const onMouseDown = (event: MouseEvent) => {
+    if (event.detail >= 3 && pendingEdit.current !== null) {
+      clearTimeout(pendingEdit.current)
+      pendingEdit.current = null
+    }
+  }
+  const onDoubleClick = (event: MouseEvent) => {
+    if (editing || generating || outside(event) || !canEditFrom(event.target)) return
+    const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
+    if (messageActions.get("message.edit")?.available?.(context) === false) return
+    const point = caretFromPoint(event.clientX, event.clientY)
+    const mapped = point && sourceOffsetAt(point.node, point.offset)
+    const offset = mapped?.text === version.content ? mapped.offset : undefined
+    clearTimeout(pendingEdit.current ?? undefined)
+    pendingEdit.current = setTimeout(() => {
+      pendingEdit.current = null
+      if (/\s/.test(window.getSelection()?.toString().trim() ?? "")) return
+      setCaretAt(offset)
+      void invokeMessageAction("message.edit", context, "button")
+    }, TRIPLE_CLICK_MS)
+  }
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
     swipeStart.current = null
@@ -673,6 +728,8 @@ export const Message = memo(function Message({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
     >
       <Avatar
         id={speakerId ?? (model ? "model" : "you")}
@@ -745,6 +802,8 @@ export const Message = memo(function Message({
             draft={editor}
             session={session}
             entry={entry}
+            caret={editing === "edit" ? caretAt : undefined}
+            onCaretTaken={caretTaken}
             source={
               editor.target._tag === "Edit"
                 ? [version, ...(versions ?? [])].find(
