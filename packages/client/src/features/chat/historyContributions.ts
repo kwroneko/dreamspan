@@ -8,6 +8,7 @@ export const registerHistoryCommands = () => [
     // In the menu too: it's also an action, not only a key.
     menu: true,
     label: "Search and replace",
+    description: "Finds text in this branch's messages, swipes and summaries, and replaces it.",
     order: 10,
     icon: "search",
     panel: "history",
@@ -16,6 +17,7 @@ export const registerHistoryCommands = () => [
   chatCommands.register({
     id: "history.edits",
     label: "History edits",
+    description: "What search and replace or a card's rename changed in this branch, to see or undo.",
     order: 20,
     icon: "edit",
     panel: "history",

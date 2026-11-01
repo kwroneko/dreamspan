@@ -19,7 +19,12 @@ export function Resume({ entityId }: { entityId: EntityId }) {
   if (!opened && (!pending || !cardSavedContribution(pending))) return null
   return (
     <>
-      <Button onClick={() => setOpened(pending)}>Resume history replacement</Button>
+      <Button
+        hint="Asks again whether to put the card's new name in place of the old one in past messages."
+        onClick={() => setOpened(pending)}
+      >
+        Resume history replacement
+      </Button>
       {opened && <CardSavedFlow change={opened} onDone={() => setOpened(null)} />}
     </>
   )

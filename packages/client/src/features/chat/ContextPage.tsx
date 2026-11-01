@@ -400,7 +400,16 @@ function Message({
               <Parts message={message} chatId={chatId} />
             )}
             {cut(message) && (
-              <Button variant="ghost" className="h-7 self-start px-2 text-xs" onClick={() => setRaw(!raw)}>
+              <Button
+                variant="ghost"
+                className="h-7 self-start px-2 text-xs"
+                hint={
+                  raw
+                    ? "Splits the message into the parts it was built from, each with its source."
+                    : "The message's whole text, exactly as it was sent."
+                }
+                onClick={() => setRaw(!raw)}
+              >
                 {raw ? "Show by source" : "Show as one text"}
               </Button>
             )}

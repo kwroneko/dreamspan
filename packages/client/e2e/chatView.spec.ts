@@ -107,7 +107,7 @@ test("Branch from here names the branch, shows it at once, keeps the URL, and th
   await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)
   // As ST's "Back to parent chat": the list goes back to the branch it was made from.
   await branches.click()
-  await page.getByRole("button", { name: "Back to “Branch 1”, where it came from", exact: true }).click()
+  await page.getByRole("button", { name: "Back to “Branch 1”", exact: true }).click()
   await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 2 of 3, not the latest/)
   await expect(at).toBeVisible()
 })

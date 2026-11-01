@@ -13,8 +13,8 @@ import { automaticBranchName, forksChanged } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 
 const options = [
-  { value: "then", label: "As it was then" },
-  { value: "now", label: "As it is now" }
+  { value: "then", label: "As it was then", description: "Its text and switch as they were at this message." },
+  { value: "now", label: "As it is now", description: "Its text and switch as they are now, on the branch you're on." }
 ] as const
 type Choice = "then" | "now"
 

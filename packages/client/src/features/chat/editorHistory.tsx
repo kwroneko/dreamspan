@@ -25,6 +25,8 @@ export const summaryEditorTools = defineSlot<{ draft: SummaryDraft; base: string
 export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-editor")
 export const summaryTextEditor = defineSlot<CodeEditorProps>("summary.text-editor")
 
+const EARLIER_DRAFTS = "Every earlier state of this edit as you typed it, to restore one."
+
 function CurrentChanges({ draft, base }: { draft: MessageDraft | SummaryDraft; base: string }) {
   const text = useSyncExternalStore(draft.subscribe, () => draft.snapshot().text)
   return <RevisionComparison label="Compare with saved text" before={base} after={text} />
@@ -34,7 +36,9 @@ function DraftHistory({ draft }: { draft: MessageDraft | SummaryDraft }) {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button onClick={() => setOpen(true)}>Earlier draft text</Button>
+      <Button hint={EARLIER_DRAFTS} onClick={() => setOpen(true)}>
+        Earlier draft text
+      </Button>
       {open && <DraftHistoryDialog draft={draft} onClose={() => setOpen(false)} />}
     </>
   )
@@ -126,9 +130,19 @@ function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string })
           </Tooltip>
         }
       >
-        <MenuItem onClick={() => setOpen("drafts")}>Earlier draft text…</MenuItem>
-        <MenuItem disabled={text === base} onClick={() => setOpen("changes")}>
-          {text === base ? "Compare with saved text (no changes yet)" : "Compare with saved text…"}
+        <MenuItem description={EARLIER_DRAFTS} onClick={() => setOpen("drafts")}>
+          Earlier draft text…
+        </MenuItem>
+        <MenuItem
+          disabled={text === base}
+          description={
+            text === base
+              ? "Nothing to compare yet: the edit matches the saved text."
+              : "This edit beside the saved text, its changes marked."
+          }
+          onClick={() => setOpen("changes")}
+        >
+          Compare with saved text…
         </MenuItem>
       </Menu>
       {open === "drafts" && <DraftHistoryDialog draft={draft} onClose={() => setOpen(null)} />}
@@ -232,7 +246,11 @@ export const registerEditorHistory = () => [
     order: 15,
     available: ({ entry, generating }) => !generating && entry.version.writer === "human",
     menu: ({ openDialog }) => (
-      <MenuItem icon="edit" onClick={() => openDialog("message.amendments")}>
+      <MenuItem
+        icon="edit"
+        description="Earlier saved texts of this message, to compare or restore on this branch."
+        onClick={() => openDialog("message.amendments")}
+      >
         Saved amendment history
       </MenuItem>
     ),

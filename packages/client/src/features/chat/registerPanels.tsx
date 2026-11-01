@@ -18,6 +18,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "model",
     label: "Model",
+    description: "Settings of the model the next reply uses. They apply wherever it's used.",
     order: 20,
     icon: "model",
     component: lazyPanel(
@@ -33,6 +34,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "preset",
     label: "Prompt preset",
+    description: "The prompt preset the next reply is built with, to edit.",
     order: 30,
     icon: "preset",
     component: lazyPanel(
@@ -43,6 +45,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "cast",
     label: "Cast",
+    description: "Who's in this chat: add or remove characters, mute them or make one speak.",
     order: 10,
     icon: "people",
     placement: "cast",
@@ -58,6 +61,7 @@ export const registerPanels = () => [
     id: "chat",
     default: true,
     label: "This chat",
+    description: "This chat's name, who you play, summaries on or off, and more.",
     order: 10,
     icon: "chat",
     component: lazyPanel(
@@ -71,6 +75,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "lorebooks",
     label: "Lorebooks",
+    description: "The lorebooks this chat reads, each with its switch, and where their entries go.",
     order: 50,
     icon: "book",
     component: lazyPanel(
@@ -84,6 +89,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "notes",
     label: "Notes",
+    description: "What the model is sent with this chat: the chat's own notes and its characters'.",
     order: 40,
     icon: "note",
     component: lazyPanel(loadNotes, "notes"),
@@ -94,6 +100,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "summaries",
     label: "Summaries",
+    description: "The summaries that stand in for older messages, and how they're written.",
     order: 60,
     icon: "summary",
     component: lazyPanel(
@@ -117,6 +124,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "history",
     label: "History edits",
+    description: "Search and replace in this branch's messages, and undo past edits.",
     order: 90,
     icon: "history",
     component: lazyPanel(

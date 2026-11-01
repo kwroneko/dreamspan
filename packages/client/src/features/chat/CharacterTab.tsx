@@ -124,6 +124,8 @@ function ChatCharacterPanel({
   )
 }
 
+const FULL_EDITOR = "Every field of the card, not only its description."
+
 /** What's used less: a new chat (a persona's: its full editor), the card's notes. */
 function CardMenu({
   entityId,
@@ -151,24 +153,25 @@ function CardMenu({
       {persona ? (
         refId &&
         (workspace ? (
-          <MenuItem icon="edit" onClick={() => workspace.open(refId)}>
+          <MenuItem icon="edit" description={FULL_EDITOR} onClick={() => workspace.open(refId)}>
             Full editor
           </MenuItem>
         ) : (
-          <MenuLinkItem icon="edit" render={<Link to="/library/$refId" params={{ refId }} />}>
+          <MenuLinkItem icon="edit" description={FULL_EDITOR} render={<Link to="/library/$refId" params={{ refId }} />}>
             Full editor
           </MenuLinkItem>
         ))
       ) : (
         <MenuLinkItem
           icon="chat"
+          description="Starts a chat with only them, from their greeting. It's saved when you first send."
           render={<Link to="/cards/$entityId/chat" params={{ entityId }} search={{ panel: `card:${entityId}` }} />}
         >
           New chat with {card.name}
         </MenuLinkItem>
       )}
       {onNotes && (
-        <MenuItem icon="note" onClick={onNotes}>
+        <MenuItem icon="note" description="Opens the Notes tab at this card's notes." onClick={onNotes}>
           {card.name}'s notes
         </MenuItem>
       )}

@@ -213,6 +213,7 @@ function Revisions({ session, summary }: { session: ChatSession; summary: LcmSum
                 <Button
                   variant="ghost"
                   aria-label={`Use revision ${revision.number}`}
+                  hint="Makes this revision the summary's text on this branch."
                   onClick={() => void use(revision)}
                 >
                   Use this one
@@ -377,6 +378,7 @@ function SummaryRow({
               variant="ghost"
               aria-expanded={mode === "revisions"}
               aria-label={`Revisions of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`}
+              hint="Its earlier texts, to compare or use instead."
               onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
             >
               Revisions ({summary.revisionCount})
@@ -386,6 +388,7 @@ function SummaryRow({
             <Button
               variant="ghost"
               aria-expanded={mode === "children"}
+              hint="The summaries a level down that this one condenses."
               onClick={() => setMode(mode === "children" ? "view" : "children")}
             >
               Condensed from {summary.children.length}
@@ -395,6 +398,11 @@ function SummaryRow({
             variant="ghost"
             aria-pressed={summary.rerun}
             disabled={blockedByManual && !summary.rerun}
+            hint={
+              summary.rerun
+                ? "Keeps it as it is: it isn't written again."
+                : "Writes it again from its messages with your next reply."
+            }
             aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${rangeText(summary.from, summary.to).toLowerCase()} with the next reply`}
             onClick={() => void rerun(!summary.rerun)}
           >
@@ -444,6 +452,7 @@ function JobRow({ session, job, onJump }: { session: ChatSession; job: LcmJob; o
           <Button
             variant="ghost"
             aria-pressed={job.rerun}
+            hint={job.rerun ? "Leaves it failed: it isn't tried again." : "Tries it again with your next reply."}
             aria-label={`${job.rerun ? "Cancel the retry of" : "Retry"} ${rangeText(job.from, job.to).toLowerCase()} with the next reply`}
             onClick={() => void ask(!job.rerun)}
           >
@@ -554,17 +563,31 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
       )}
       <div className="flex flex-wrap gap-2">
         {(backfill.state === "paused" || backfill.state === "capped") && (
-          <Button variant="primary" pending={pending === "continue"} onClick={() => void act("continue")}>
+          <Button
+            variant="primary"
+            pending={pending === "continue"}
+            hint="Goes on summarizing, up to 150% of the estimate for what is left."
+            onClick={() => void act("continue")}
+          >
             Continue
           </Button>
         )}
         {(backfill.state === "waiting" || backfill.state === "running") && (
-          <Button variant="primary" pending={pending === "summarizeNow"} onClick={() => void act("summarizeNow")}>
+          <Button
+            variant="primary"
+            pending={pending === "summarizeNow"}
+            hint="Summarizes the older messages now, rather than with your next reply."
+            onClick={() => void act("summarizeNow")}
+          >
             Summarize now
           </Button>
         )}
         {backfill.state === "running" && (
-          <Button pending={pending === "pause"} onClick={() => void act("pause")}>
+          <Button
+            pending={pending === "pause"}
+            hint="Starts no more of these summaries until you continue."
+            onClick={() => void act("pause")}
+          >
             Pause
           </Button>
         )}

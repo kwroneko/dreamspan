@@ -25,6 +25,12 @@ type Source = "chat" | "account" | "builtin"
 
 const tokens = (n: number) => n.toLocaleString("en-US")
 
+/** What Reset does: a chat's own value goes, or the user's default does. */
+const resetHint = (scope: "chat" | "account") =>
+  scope === "chat"
+    ? "Drops this chat's own value: it follows the account default again."
+    : "Drops your default: chats that follow it use the built-in value."
+
 /** What a write answers: null when it was taken, else the reason to show under the field. */
 export type Write = (change: LcmSettingsChange) => Promise<string | null>
 
@@ -58,7 +64,13 @@ function Origin({
       <span>
         {scope === "chat" ? "This chat's own" : "Your default"}; the {other} is {fallback}.
       </span>
-      <Button variant="ghost" className="h-7 px-2 text-xs" disabled={disabled} onClick={onReset}>
+      <Button
+        variant="ghost"
+        className="h-7 px-2 text-xs"
+        disabled={disabled}
+        hint={resetHint(scope)}
+        onClick={onReset}
+      >
         Reset to {other}
       </Button>
     </span>
@@ -168,7 +180,13 @@ function PairOrigin({
         {scope === "chat" ? "This chat's own" : "Your default"}; the {other} is {tokens(fallback[0])} and{" "}
         {tokens(fallback[1])}.
       </span>
-      <Button variant="ghost" className="h-7 px-2 text-xs" disabled={disabled} onClick={() => void onReset()}>
+      <Button
+        variant="ghost"
+        className="h-7 px-2 text-xs"
+        disabled={disabled}
+        hint={resetHint(scope)}
+        onClick={() => void onReset()}
+      >
         Reset to {other}
       </Button>
     </span>
@@ -293,18 +311,23 @@ export function LcmFields({
     fitted?.chunk ?? chunkSize(resolved.leafInput, { target: resolved.recentTarget, maximum: resolved.recentMax })
   return (
     <div className="flex flex-col gap-5">
-      <Fieldset
-        legend="Send with"
-        description="The full preset sends the chat as the model sees it with the instruction after it, and reads the chat's cache. Instruction and messages only sends the instruction, the earlier summaries and the messages, like ST's Raw."
-      >
+      <Fieldset legend="Send with" description="What each summary request sends the model.">
         <Segmented
           label="Send with"
           wrap
           value={resolved.withPreset ? "preset" : "raw"}
           onValueChange={(value) => void choose({ withPreset: value === "preset" })}
           options={[
-            { value: "preset", label: "The full preset" },
-            { value: "raw", label: "Instruction and messages only" }
+            {
+              value: "preset",
+              label: "The full preset",
+              description: "The chat as the model sees it, the instruction after it. It reads the chat's cache."
+            },
+            {
+              value: "raw",
+              label: "Instruction and messages only",
+              description: "Only the instruction, the earlier summaries and the messages, like ST's Raw."
+            }
           ]}
         />
         <Origin
@@ -372,8 +395,8 @@ export function LcmFields({
           options={[
             {
               value: "after-reply",
-              label: "Right after a reply, while the cache is warm",
-              description: "The summary request reads the reply's cache before it expires."
+              label: "Right after a reply",
+              description: "While the cache is warm: the summary request reads the reply's cache before it expires."
             },
             {
               value: "next-reply",

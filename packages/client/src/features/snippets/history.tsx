@@ -28,7 +28,12 @@ export function SnippetHistory({ store, item }: { store: SnippetWorkspace; item:
       <Button variant="ghost" aria-label={`Undo ${name}`} onClick={() => void store.undo(item.ref.id)}>
         Undo
       </Button>
-      <Button variant="ghost" aria-label={`Earlier text of ${name}`} onClick={() => void load()}>
+      <Button
+        variant="ghost"
+        aria-label={`Earlier text of ${name}`}
+        hint="Every earlier text of this snippet, to restore one."
+        onClick={() => void load()}
+      >
         Earlier text
       </Button>
       <Dialog

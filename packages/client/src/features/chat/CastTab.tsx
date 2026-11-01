@@ -165,19 +165,32 @@ function MemberMore({
         className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
         onClickCapture={() => setOpen(false)}
       >
-        <Button variant="ghost" onClick={() => writeAs(session, card.entityId)}>
+        <Button
+          variant="ghost"
+          hint={`The composer writes as ${name}: what you send is their message.`}
+          onClick={() => writeAs(session, card.entityId)}
+        >
           Write as {name}
         </Button>
-        <Button variant="ghost" onClick={() => showPanel(`card:${card.entityId}`)}>
+        <Button
+          variant="ghost"
+          hint="Opens their card's fields in this panel."
+          onClick={() => showPanel(`card:${card.entityId}`)}
+        >
           Edit the card here
         </Button>
         <ChatCardActions session={session} card={card} info={info} />
-        <Button variant="ghost" onClick={onPersona}>
+        <Button
+          variant="ghost"
+          hint={`You play ${name} from the latest message on, on this branch: {{user}} is them.`}
+          onClick={onPersona}
+        >
           Use as my persona
         </Button>
         <Button
           variant="ghost"
           className="text-danger!"
+          hint="They leave from the latest message on, on this branch. Earlier messages stay."
           onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
         >
           Remove from chat

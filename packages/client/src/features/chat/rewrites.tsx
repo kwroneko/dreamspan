@@ -113,6 +113,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
           variant="primary"
           pending={pending}
           disabled={raw === null || (raw.content === null && raw.reasoning === null && raw.sections === null)}
+          hint="Adds it as a new version of the message, which scripts don't change."
           onClick={() => void restore()}
         >
           Restore it
@@ -134,7 +135,11 @@ export const registerRewrites = () => [
         entry.version.rewrite?.rawReasoning === true ||
         entry.version.rewrite?.rawSections === true),
     menu: ({ openDialog }) => (
-      <MenuItem icon="eye" onClick={() => openDialog("message.original-text")}>
+      <MenuItem
+        icon="eye"
+        description="The text as it was before regex scripts changed it, to see or restore."
+        onClick={() => openDialog("message.original-text")}
+      >
         Show the original text
       </MenuItem>
     ),

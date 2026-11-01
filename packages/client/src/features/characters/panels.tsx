@@ -6,6 +6,7 @@ export const registerCharacterPanels = () =>
   chatPanels.register({
     id: "character",
     label: "Character",
+    description: "A character's card, its fields edited right here.",
     order: 100,
     icon: "people",
     header: false,

@@ -56,6 +56,7 @@ export function ChangeContextSize({
     <>
       <Button
         variant={primary || origins.context === "assumed" ? "primary" : "secondary"}
+        hint="Opens the model's settings at its context size: how many tokens it takes in all."
         onClick={() => setOpen(true)}
       >
         {origins.context === "assumed" ? "Set the context size" : "Change the context size"}

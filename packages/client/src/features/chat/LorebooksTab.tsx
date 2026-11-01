@@ -138,8 +138,16 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
         value={on ? "below" : "positions"}
         onValueChange={(next) => onChange(next === "below")}
         options={[
-          { value: "below", label: "Below the history" },
-          { value: "positions", label: "Where each entry says" }
+          {
+            value: "below",
+            label: "Below the history",
+            description: "Every matching entry goes in one block just after the history, so the history stays cached."
+          },
+          {
+            value: "positions",
+            label: "Where each entry says",
+            description: "Each entry goes where its own position puts it, as SillyTavern places them."
+          }
         ]}
       />
       <p className="text-sm text-muted">For every book in this chat.</p>
@@ -157,6 +165,8 @@ interface BookRow {
   /** The library entry its Open button edits: the book, or the card holding it. */
   readonly ref: LibraryRef | undefined
   readonly openLabel: string
+  /** What Open does, when it isn't plain from the row: a card's own book opens its card. */
+  readonly openHint?: string
   readonly menu: ReadonlyArray<ActionMenuItem>
 }
 
@@ -174,6 +184,7 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
           variant="ghost"
           className="h-8 shrink-0 px-2"
           aria-label={row.openLabel}
+          {...(row.openHint ? { hint: row.openHint } : {})}
           onClick={() => onOpen(row.ref!)}
         >
           Open
@@ -255,6 +266,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
   }
   const globalItem = (id: string, global: boolean): ActionMenuItem => ({
     label: "Use in every chat",
+    description: "Makes it one of your global books, which every chat reads unless it's switched off there.",
     checked: global,
     onCheckedChange: (next) => void setGlobal(id as LibraryRef["id"], next)
   })
@@ -272,6 +284,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
         ref: library?.cards.get(card.entityId),
         openLabel: `Open ${card.name}'s card, where its book is edited`,
+        openHint: `Opens ${card.name}'s card: its book is edited there.`,
         menu: []
       }
     }),
@@ -308,6 +321,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             ? [
                 {
                   label: "Also added to this chat",
+                  description: "It was added here before it was global. Either way, its entries are sent.",
                   checked: attached.includes(id as LibraryRef["id"]),
                   onCheckedChange: (next: boolean) => detach(id, next)
                 }
