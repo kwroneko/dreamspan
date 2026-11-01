@@ -114,8 +114,13 @@ for (const width of [1440, 390]) {
     await expect(line).toContainText(/chat|Never used/)
     if (width === 1440) {
       // Each choice says what it orders by (the one just clicked keeps its tooltip shut).
-      await sort.getByRole("button", { name: "Created", exact: true }).hover()
-      await expect(page.getByText(/^By when the card was made: for a SillyTavern import/)).toBeVisible()
+      // The tooltip, and the option's description (a hidden copy of the same text).
+      const created = sort.getByRole("button", { name: "Created", exact: true })
+      await created.hover()
+      await expect(
+        page.getByText(/^By when the card was made: for a SillyTavern import/).filter({ visible: true })
+      ).toBeVisible()
+      await expect(created).toHaveAccessibleDescription(/^By when the card was made: for a SillyTavern import/)
     }
     await shoot(page, `characters-added-${width}`)
     await main.getByRole("button", { name: "Order: Newest first", exact: true }).click()
