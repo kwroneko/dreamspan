@@ -58,6 +58,7 @@ import {
   versionFailureActions
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { popupOpen } from "../../ui/openPopups.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -256,7 +257,7 @@ function Editor({
           event.key === "Escape" &&
           event.currentTarget.contains(event.target as Node) &&
           !event.defaultPrevented &&
-          !document.querySelector('[role="dialog"], [role="alertdialog"]')
+          !popupOpen()
         )
           onCancel()
       }}

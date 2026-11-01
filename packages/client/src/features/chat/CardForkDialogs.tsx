@@ -15,6 +15,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { ChatSession } from "./session.ts"
 
 export interface ChatCardActionProps {
@@ -210,6 +211,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
   )
   const result = useAtomValue(query)
   const userId = useSession().user.id
+  const portraits = usePortraitViewer()
   const [position] = useState(() => ({ forkId: session.snapshot().forkId }))
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -246,6 +248,13 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
                   setPending(false)
                   if (!outcome.ok) return setError(outcome.error.message)
                   const used = outcome.value.cards.find((c) => c.entityId === member.entityId)
+                  // A portrait shown of the card swapped out shows the one swapped in.
+                  if (used)
+                    portraits?.replace(card.entityId, {
+                      id: used.entityId,
+                      name: used.name,
+                      mediaId: used.avatarMediaId
+                    })
                   const change: CardSaved = {
                     entityId: member.entityId,
                     oldName: card.modelName ?? card.name,

@@ -31,6 +31,12 @@ export const CastContext = createContext<CastView>(castView(null))
 
 export const useCast = () => useContext(CastContext)
 
+/** A cast card's portrait as the cast has it now: its name and image (ui/Portrait.tsx). */
+export const castPortrait = (view: CastView, id: string) => {
+  const card = view.cards.get(id)
+  return card ? { id, name: card.name, mediaId: card.avatarMediaId } : null
+}
+
 export const nameOf = (view: CastView, id: EntityId | null) => (id === null ? null : (view.cards.get(id)?.name ?? null))
 
 /** Cast membership determines a turn's side; its original writer is only a fallback. */

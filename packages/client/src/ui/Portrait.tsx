@@ -21,7 +21,10 @@ interface PortraitViewer {
   readonly open: (portrait: Portrait) => void
   /** Shows a portrait, the one shown or not. */
   readonly show: (portrait: Portrait) => void
+  /** Shows `portrait` in place of the one with id `from`, when that one is shown (a card swapped for another). */
+  readonly replace: (from: string, portrait: Portrait) => void
   readonly close: () => void
+  /** The one shown, as `current` reads it now: its name and image follow the card's. */
   readonly shown: Portrait | null
 }
 const Context = createContext<PortraitViewer | null>(null)
@@ -29,13 +32,25 @@ const Context = createContext<PortraitViewer | null>(null)
 /**
  * Where avatars marked `preview` open their whole image: a click on one, from any of them.
  * `inline` says a host shows it beside the page (the chat's column); otherwise it's a
- * full-screen viewer over the page.
+ * full-screen viewer over the page. `current` reads a portrait's name and image as they are
+ * now (the chat's cast), so an edited card's shows without reopening it; without it, or when
+ * it doesn't know the portrait, the one clicked shows as it was.
  */
-export function PortraitProvider({ inline, children }: { inline: boolean; children: ReactNode }) {
-  const [shown, setShown] = useState<Portrait | null>(null)
+export function PortraitProvider({
+  inline,
+  current,
+  children
+}: {
+  inline: boolean
+  current?: (portrait: Portrait) => Portrait | null
+  children: ReactNode
+}) {
+  const [clicked, setShown] = useState<Portrait | null>(null)
+  const shown = clicked && (current?.(clicked) ?? clicked)
   const viewer: PortraitViewer = {
     open: (portrait) => setShown((current) => (current?.id === portrait.id ? null : portrait)),
     show: setShown,
+    replace: (from, portrait) => setShown((current) => (current?.id === from ? portrait : current)),
     close: () => setShown(null),
     shown
   }
