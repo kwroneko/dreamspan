@@ -125,6 +125,7 @@ const paths = {
    * 19.25, x 8–16), so a round chip shows it in the middle, which a text "?" sitting on the
    * font's baseline isn't.
    */
+  info: ["M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18", "M12 11v5", "M12 7.75h.01"],
   help: ["M9 8.75a3 3 0 1 1 5.2 2.05C13.3 11.75 12 12.25 12 14.25", "M12 18.25h.01"],
   /** Speak now: the model writes this character's turn. */
   play: ["M6 4v16a1 1 0 0 0 1.5.87l13-8a1 1 0 0 0 0-1.74l-13-8A1 1 0 0 0 6 4z"],

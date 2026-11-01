@@ -5,31 +5,73 @@ import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { LcmSummary, Summary } from "@rp/shared/lcm.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { Badge } from "../../ui/Surface.tsx"
-import { rangeText } from "./lcm.ts"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { rangeText, tokensText } from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
+import { LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 
 type Row = Pick<
   LcmSummary,
-  "id" | "level" | "from" | "to" | "content" | "fresh" | "firstSlotId" | "lastSlotId" | "revisionId"
+  | "id"
+  | "level"
+  | "from"
+  | "to"
+  | "content"
+  | "fresh"
+  | "firstSlotId"
+  | "lastSlotId"
+  | "revisionId"
+  | "origin"
+  | "status"
+  | "tokens"
 >
+
+interface Expansion {
+  readonly target: PathEntry | null
+  readonly open: boolean
+}
+/** Which summaries the viewer opened, and at which link, per chat session. */
+const remembered = new WeakMap<ChatSession, Map<string, Expansion>>()
+const expansions = (session: ChatSession) => {
+  let map = remembered.get(session)
+  if (!map) remembered.set(session, (map = new Map()))
+  return map
+}
 
 export function TimelineSummary({
   session,
   summary,
   renderMessage,
-  target = null
+  target: linked = null,
+  onOpen
 }: {
   session: ChatSession
   summary: Row
   target?: PathEntry | null
   renderMessage: (entry: PathEntry) => ReactNode
+  /** Opens this summary in the Summaries tab. */
+  onOpen?: (summaryId: string) => void
 }) {
+  // A new message link reveals its original even if this summary was collapsed. The link's
+  // message stays the one shown when the window it was read in moves on (a later page read
+  // around the anchor, a refresh): losing it mustn't fold the summary away under the reader.
+  // The choice outlives this row's mount: the list drops rows scrolled far off and mounts them
+  // again, and a summary folded by hand must come back folded, not reopened by its link.
+  const [expansion, setLocal] = useState<Expansion>(() => {
+    const was = expansions(session).get(summary.id)
+    return was && (linked === null || was.target?.slotId === linked.slotId)
+      ? was
+      : { target: linked, open: linked !== null }
+  })
+  const setExpansion = (next: Expansion) => {
+    expansions(session).set(summary.id, next)
+    setLocal(next)
+  }
+  if (linked !== null && linked.slotId !== expansion.target?.slotId) setExpansion({ target: linked, open: true })
+  const target = expansion.target
   const targetId = target?.slotId ?? null
-  const [expansion, setExpansion] = useState({ targetId, open: targetId !== null })
-  // A new message link reveals its original even if this summary was collapsed.
-  if (expansion.targetId !== targetId) setExpansion({ targetId, open: targetId !== null })
   const open = expansion.open
   const pathRevision = useSyncExternalStore(session.subscribe, () => session.snapshot().pathRevision)
   // Keep every page already expanded when an edit, swipe, hide or reconnect invalidates it.
@@ -187,27 +229,81 @@ export function TimelineSummary({
           : null
       )
   }
+  const section = useRef<HTMLElement>(null)
+  const toggle = () => setExpansion({ target, open: !open })
+  // Folding from the end of a long expansion brings the summary back into view. Its header
+  // stays where it was in the list; the list itself keeps its distance from the end as a row
+  // above shrinks, and may drop the row meanwhile, so the scroll position is set on the list.
+  const collapseFromEnd = () => {
+    const element = section.current
+    let list = element?.parentElement ?? null
+    while (list && !/(auto|scroll)/.test(getComputedStyle(list).overflowY)) list = list.parentElement
+    const at =
+      element && list
+        ? list.scrollTop + element.getBoundingClientRect().top - list.getBoundingClientRect().top - 8
+        : null
+    toggle()
+    if (list === null || at === null) return
+    // Held for a moment, while the list measures the rows around it again; the reader
+    // scrolling takes over at once.
+    const scroller = list
+    const until = performance.now() + 800
+    let held = true
+    const release = () => {
+      held = false
+      for (const event of inputs) scroller.removeEventListener(event, release)
+    }
+    const inputs = ["wheel", "touchmove", "keydown", "pointerdown"] as const
+    for (const event of inputs) scroller.addEventListener(event, release, { passive: true })
+    const hold = () => {
+      if (!held) return
+      if (Math.abs(scroller.scrollTop - Math.max(0, at)) > 2) scroller.scrollTop = Math.max(0, at)
+      if (performance.now() < until) requestAnimationFrame(hold)
+      else release()
+    }
+    requestAnimationFrame(hold)
+  }
+  const what = summary.level > 1 ? "the summaries it condenses" : "its messages"
   return (
     <section
+      ref={section}
       data-timeline-summary={summary.id}
       data-level={summary.level}
       aria-label={`Level ${summary.level} summary: ${range}`}
-      className="flex flex-col gap-3 rounded-md border border-accent/40 bg-accent/5 p-3"
+      className="flex flex-col gap-2 rounded-md border border-accent/40 bg-accent/5 px-3 py-2"
     >
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge tone="accent">Level {summary.level}</Badge>
-        <span className="font-medium">{range}</span>
-        {!summary.fresh && <Badge tone="warning">Stale</Badge>}
+      <div className="flex items-start gap-1">
+        <Tooltip label={open ? `Hide ${what}` : `Show ${what}`}>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={`${open ? "Collapse" : "Expand"} ${range.toLowerCase()}`}
+            onClick={toggle}
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 rounded-md px-1 py-1 text-left text-sm outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <Icon
+              name="right"
+              size={14}
+              className={`text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-90" : ""}`}
+            />
+            <span className="font-medium">{range}</span>
+            <span className="text-xs text-muted">{tokensText(summary.tokens)}</span>
+          </button>
+        </Tooltip>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 py-1">
+          <LevelBadge level={summary.level} />
+          <SummaryBadges summary={summary} />
+        </div>
+        {onOpen && (
+          <IconButton
+            icon="summary"
+            label={`Open the summary of ${range.toLowerCase()} in the Summaries tab`}
+            hint="Open in the Summaries tab: edit, revisions, re-summarize"
+            onClick={() => onOpen(summary.id)}
+          />
+        )}
       </div>
       <Markdown text={summary.content ?? ""} streaming={false} />
-      <Button
-        variant="ghost"
-        className="self-start"
-        aria-expanded={open}
-        onClick={() => setExpansion({ targetId, open: !open })}
-      >
-        {open ? "Collapse" : summary.level > 1 ? "Expand to summaries" : "Expand to messages"}
-      </Button>
       {open && (
         <div
           role="region"
@@ -229,6 +325,7 @@ export function TimelineSummary({
                   session={session}
                   summary={child}
                   renderMessage={renderMessage}
+                  {...(onOpen ? { onOpen } : {})}
                   target={
                     target && positionOf(target) >= child.from - 1 && positionOf(target) < child.to ? target : null
                   }
@@ -240,20 +337,30 @@ export function TimelineSummary({
           ) : (
             <>
               {before !== null && (
-                <Button pending={pending} onClick={() => void page("earlier")}>
-                  Load earlier messages in this summary
-                </Button>
+                <Tooltip label="Reads the 100 messages before these, still inside this summary.">
+                  <Button className="self-center" pending={pending} onClick={() => void page("earlier")}>
+                    Earlier messages
+                  </Button>
+                </Tooltip>
               )}
               {messages.map((entry) => (
                 <div key={entry.slotId}>{renderMessage(entry)}</div>
               ))}
               {after !== null && (
-                <Button pending={pending} onClick={() => void page("later")}>
-                  Load later messages in this summary
-                </Button>
+                <Tooltip label="Reads the 100 messages after these, still inside this summary.">
+                  <Button className="self-center" pending={pending} onClick={() => void page("later")}>
+                    Later messages
+                  </Button>
+                </Tooltip>
               )}
             </>
           )}
+          <Tooltip label={`Hide ${what} again`}>
+            <Button variant="ghost" className="h-7 self-start px-2 text-xs" onClick={collapseFromEnd}>
+              <Icon name="down" size={14} className="rotate-180" />
+              Collapse {range.toLowerCase()}
+            </Button>
+          </Tooltip>
         </div>
       )}
     </section>

@@ -120,13 +120,14 @@ export const registerTimelineTransforms = () => [
           from: summary.from - 1,
           to: summary.to - 1,
           lastSlotId: summary.lastSlotId,
-          render: ({ session, anchor, renderMessage }) => (
+          render: ({ session, anchor, renderMessage, onOpenSummaries }) => (
             <SlotOutlet
               slot={timelineSummaries}
               props={{
                 session,
                 summary,
                 renderMessage,
+                onOpen: onOpenSummaries,
                 target:
                   entries.find(
                     (entry) =>

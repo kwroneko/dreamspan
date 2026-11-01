@@ -23,13 +23,17 @@ export function Tooltip({
   label,
   children,
   side = "top",
+  followCursor = false,
   ...props
-}: { label: ReactNode; children: ReactElement; side?: "top" | "bottom" | "left" | "right" } & Omit<
-  ComponentProps<typeof BaseTooltip.Trigger>,
-  "render" | "children"
->) {
+}: {
+  label: ReactNode
+  children: ReactElement
+  side?: "top" | "bottom" | "left" | "right"
+  /** Placed at the pointer's height: for a trigger taller than the screen, as a rail's bar can be. */
+  followCursor?: boolean
+} & Omit<ComponentProps<typeof BaseTooltip.Trigger>, "render" | "children">) {
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root {...(followCursor ? { trackCursorAxis: "y" as const } : {})}>
       <BaseTooltip.Trigger {...props} render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} className="pointer-events-none z-50">

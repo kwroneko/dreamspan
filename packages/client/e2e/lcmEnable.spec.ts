@@ -113,14 +113,13 @@ for (const [name, viewport, chat] of [
 
       const dialog = page.getByRole("dialog", { name: "Summarize older messages" })
       await expect(dialog.getByText(IMPORTED_SUMMARY)).toBeVisible()
-      const keep = dialog.getByRole("radio", {
-        name: /Keep the imported summary as the first level over messages 1–12/
-      })
+      const keep = dialog.getByRole("radio", { name: /^Keep the imported summary/ })
+      await expect(dialog.getByText(/It stands in for messages 1–12/)).toBeVisible()
       await expect(keep).toBeChecked()
       const estimate = dialog.getByRole("group", { name: "Estimate" })
-      await expect(estimate).toContainText("Summaries")
-      await expect(estimate).toContainText("Sent in full")
-      await expect(estimate).toContainText("Spending stops at 150% of this")
+      await expect(estimate).toContainText("Requests")
+      await expect(estimate).toContainText("Tokens sent")
+      await expect(estimate).toContainText("It pauses at 150% of this")
       const kept = await estimate.innerText()
       await noSideways(page)
 
@@ -137,12 +136,12 @@ for (const [name, viewport, chat] of [
 
       const summaries = await openPanel(page, "Summaries")
       await expect(summaries.getByTestId("summary-panel-heading")).toContainText("Older messages: 1 summary")
-      await expect(summaries.getByText("Imported from SillyTavern")).toBeVisible()
+      await expect(summaries.getByText("From SillyTavern", { exact: true })).toBeVisible()
       await expect(summaries.getByText(IMPORTED_SUMMARY)).toBeVisible()
       const backfill = summaries.getByTestId("backfill")
       await expect(backfill).toHaveAttribute("data-state", "waiting")
-      await expect(backfill).toContainText("Starts with your next reply, or now")
-      await expect(backfill.getByTestId("backfill-spent")).toContainText("Spent so far: 0 tokens")
+      await expect(backfill).toContainText("Not started")
+      await expect(backfill.getByTestId("backfill-spent")).toContainText("Spent 0 of")
       await noSideways(page)
 
       // Summarize now: the work runs without a reply, and the section goes when it is done.

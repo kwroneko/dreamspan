@@ -125,9 +125,9 @@ for (const width of [1440, 390])
         node.scrollTop = 0
       })
       await shoot(page, `chat-summaries-${width}-${colorScheme}`)
-      await summary.getByRole("button", { name: "Expand to messages", exact: true }).click()
+      await summary.getByRole("button", { name: "Expand messages 1–120", exact: true }).click()
       await expect(summary.locator("article")).toHaveCount(100)
-      await summary.getByRole("button", { name: "Load earlier messages in this summary" }).click()
+      await summary.getByRole("button", { name: "Earlier messages", exact: true }).click()
       await expect(summary.locator("article")).toHaveCount(120)
       await page.getByTestId("messages").evaluate((node) => {
         node.scrollTop = 0
@@ -138,7 +138,7 @@ for (const width of [1440, 390])
       await page.getByTestId("messages").evaluate((node) => {
         node.scrollTop = 0
       })
-      await summary.getByRole("button", { name: "Collapse", exact: true }).click()
+      await summary.getByRole("button", { name: "Collapse messages 1–120", exact: true }).first().click()
       const panel = await openPanel(page, "Summaries")
       await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toBeChecked()
       await shoot(page, `summaries-tab-${width}-${colorScheme}`)

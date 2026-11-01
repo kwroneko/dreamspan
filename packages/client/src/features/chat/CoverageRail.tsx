@@ -6,6 +6,7 @@ import { positionOf } from "./position.ts"
 import type { PathEntry } from "@rp/shared/chat.ts"
 import type { LcmState, LcmSummary } from "@rp/shared/lcm.ts"
 import { useEffect, useState } from "react"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { healthOf, jobText, rangeText } from "./lcm.ts"
 import type { ChatSession } from "./session.ts"
 
@@ -106,7 +107,7 @@ export function CoverageRail({
       level: summary.level,
       ...at,
       className: barClass(summary, inUse.has(summary.id)),
-      label: `Level ${summary.level}, ${rangeText(summary.from, summary.to).toLowerCase()}${health === "fresh" ? "" : `, ${health}`}${inUse.has(summary.id) ? "" : ", condensed into a higher level"}`,
+      label: `Level ${summary.level}, ${rangeText(summary.from, summary.to).toLowerCase()}${health === "fresh" ? "" : `, ${health}`}${inUse.has(summary.id) ? ", sent to the model" : ", condensed into a higher level"}`,
       open: summary.id
     })
   }
@@ -137,18 +138,18 @@ export function CoverageRail({
       style={{ width: levels * LANE_PX, height: "100%" }}
     >
       {bars.map((bar) => (
-        <button
-          key={bar.key}
-          type="button"
-          data-level={bar.level}
-          aria-label={`${bar.label}. Open the summaries.`}
-          title={bar.label}
-          onClick={() => onOpen(bar.open)}
-          className="pointer-events-auto absolute rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus"
-          style={{ top: bar.top, height: bar.height, left: (bar.level - 1) * LANE_PX, width: LANE_PX - 3 }}
-        >
-          <span className={`block size-full rounded-full ${bar.className}`} />
-        </button>
+        <Tooltip key={bar.key} side="right" followCursor label={`${bar.label}. Click to open it in the Summaries tab.`}>
+          <button
+            type="button"
+            data-level={bar.level}
+            aria-label={`${bar.label}. Open the summaries.`}
+            onClick={() => onOpen(bar.open)}
+            className="pointer-events-auto absolute rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            style={{ top: bar.top, height: bar.height, left: (bar.level - 1) * LANE_PX, width: LANE_PX - 3 }}
+          >
+            <span className={`block size-full rounded-full ${bar.className}`} />
+          </button>
+        </Tooltip>
       ))}
     </div>
   )
