@@ -118,11 +118,12 @@ describe("strip and box placements", () => {
     ])
   })
 
-  it("moves earlier text from the box to the strip on a phone, and keeps the guidance switch in the box", () => {
-    expect(ids("tools", context(false, 1))).toEqual(["composer.history"])
-    expect(ids("strip", context(true, 1))).toContain("composer.history")
-    expect(ids("tools", context(true, 1))).toEqual([])
-    expect(ids("actions", context(true, 1))).toEqual(["composer.guidance", "composer.generate", "composer.send"])
+  it("keeps earlier text and the guidance switch in the box at every width: the text has a row of its own", () => {
+    for (const compact of [false, true]) {
+      expect(ids("tools", context(compact, 1))).toEqual(["composer.history"])
+      expect(ids("strip", context(compact, 1))).not.toContain("composer.history")
+      expect(ids("actions", context(compact, 1))).toEqual(["composer.guidance", "composer.generate", "composer.send"])
+    }
   })
 
   it("takes a plugin's control in a placement it names per context", () => {
@@ -139,7 +140,7 @@ describe("strip and box placements", () => {
       "synthetic.chip",
       "composer.help"
     ])
-    expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip"])
+    expect(ids("tools", context(true, 1))).toEqual(["synthetic.chip", "composer.history"])
     close()
     expect(ids("strip", context(false, 1))).not.toContain("synthetic.chip")
   })
