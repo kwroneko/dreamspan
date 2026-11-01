@@ -41,7 +41,10 @@ export default function CodeEditorView(props: CodeEditorProps) {
       className="group/text flex min-w-0 flex-col gap-0.5"
       onFocus={onFocus}
       onBlur={onBlur}
-      onKeyDown={(event) => runEditorShortcut(event, props.value, selection, props.source)}
+      // A key comes from inside, so the editor has focus: its selection as it is now.
+      onKeyDown={(event) =>
+        runEditorShortcut(event, props.value, controller.current?.selection() ?? selection, props.source)
+      }
     >
       <div
         ref={host}
@@ -188,6 +191,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
   }
   return {
     update,
+    /** The selected text now, which a render may not have caught up with. */
+    selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
     finishComposition() {
       if (deferred !== null) {
         const value = deferred

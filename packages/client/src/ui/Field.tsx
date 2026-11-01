@@ -151,7 +151,11 @@ export function Textarea({
       className="group/text flex min-w-0 flex-col gap-0.5"
       onFocus={onFocus}
       onBlur={onBlur}
-      onKeyDown={(event) => runEditorShortcut(event, value, selection)}
+      // A key comes from inside, so the box has focus: its selection as it is now.
+      onKeyDown={(event) => {
+        const box = event.target instanceof HTMLTextAreaElement ? event.target : null
+        runEditorShortcut(event, value, box ? box.value.slice(box.selectionStart, box.selectionEnd) : selection)
+      }}
     >
       <BaseField.Control
         render={
