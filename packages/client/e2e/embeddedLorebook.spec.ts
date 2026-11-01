@@ -97,7 +97,7 @@ for (const width of [1440, 390]) {
     await entry.getByRole("switch", { name: /^Use secondary keys/ }).click()
     await entry.getByRole("textbox", { name: "Secondary keys" }).fill("storm\nwind")
     await entry.getByRole("combobox", { name: "Logic" }).click()
-    await page.getByRole("option", { name: "NOT ANY: none of them appears", exact: true }).click()
+    await page.getByRole("option", { name: "NOT ANY", exact: true }).click()
     await entry.getByRole("combobox", { name: "Case sensitive", exact: true }).click()
     await page.getByRole("option", { name: "Off", exact: true }).click()
     await expect(page.getByRole("option", { name: "Off", exact: true })).toHaveCount(0)

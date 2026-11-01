@@ -268,17 +268,35 @@ export function Editor({
               </div>
             ))}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-            <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
+            <Button
+              variant="primary"
+              disabled={dirty === 0 || clash !== null}
+              hint="Shows your changes, then saves them all as one revision."
+              onClick={() => setOpen("save")}
+            >
               Save{dirty > 0 ? ` (${dirty})` : ""}
             </Button>
-            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
-            <Button onClick={() => setOpen("history")}>History</Button>
+            {ref.kind !== "preset" && (
+              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
+                Search
+              </Button>
+            )}
+            <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
+              History
+            </Button>
             {ref.kind === "card" && (
               <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
             )}
             {ref.kind === "preset" ? (
               <>
-                {ref.refKind !== "chat_override" && <Button onClick={() => setOpen("fork")}>Make a variant</Button>}
+                {ref.refKind !== "chat_override" && (
+                  <Button
+                    hint="A named copy with its own changes, which still gets this one's updates."
+                    onClick={() => setOpen("fork")}
+                  >
+                    Make a variant
+                  </Button>
+                )}
                 <Button variant="ghost" onClick={() => setOpen("rename")}>
                   Rename
                 </Button>
@@ -309,7 +327,12 @@ export function Editor({
                     <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
                   )}
                   {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
-                    <Button onClick={() => setOpen("fork")}>Make a variant</Button>
+                    <Button
+                      hint="A named copy with its own changes, which still gets this one's updates."
+                      onClick={() => setOpen("fork")}
+                    >
+                      Make a variant
+                    </Button>
                   )}
                   {ref.kind !== "card" && <Button onClick={() => setOpen("rename")}>Rename</Button>}
                 </div>
@@ -331,6 +354,7 @@ export function Editor({
                   className="h-7! shrink-0 px-2!"
                   aria-expanded={searching}
                   aria-controls="preset-search"
+                  hint="Find and replace text anywhere in the preset."
                   onClick={() => setSearching(!searching)}
                 >
                   <Icon name="search" />

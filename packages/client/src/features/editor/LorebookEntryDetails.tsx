@@ -57,16 +57,32 @@ function Keys({ store, path, label, id }: { store: EditorStore; path: FieldPath;
   )
 }
 
-/** Null follows the chat's setting; imported explicit false must remain distinct. */
-export function InheritedSwitch({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) {
+/**
+ * Null is unset: chats use ST's default (`fallback`), and a file keeps it unset; an imported
+ * explicit false must remain distinct.
+ */
+export function InheritedSwitch({
+  store,
+  path,
+  label,
+  fallback,
+  description
+}: {
+  store: EditorStore
+  path: FieldPath
+  label: string
+  /** What chats do when it's unset. */
+  fallback: "on" | "off"
+  description?: string
+}) {
   const value = useValue<boolean | null>(store, path)
   return (
     <div className="flex flex-col gap-1">
-      <Field label={label}>
+      <Field label={label} description={description}>
         <Select
           value={value === null ? "inherit" : String(value)}
           items={[
-            { value: "inherit", label: "Follow chat setting" },
+            { value: "inherit", label: "Default", description: `Not set here: ${fallback}, as in a fresh ST install.` },
             { value: "true", label: "On" },
             { value: "false", label: "Off" }
           ]}
@@ -235,10 +251,10 @@ export function EntryDetails({
                   path={[...path, "selective_logic"]}
                   label="Logic"
                   items={[
-                    { value: "and_any", label: "AND ANY: one of them also appears" },
-                    { value: "and_all", label: "AND ALL: all of them also appear" },
-                    { value: "not_any", label: "NOT ANY: none of them appears" },
-                    { value: "not_all", label: "NOT ALL: not all of them appear" }
+                    { value: "and_any", label: "AND ANY", description: "At least one secondary key also appears." },
+                    { value: "and_all", label: "AND ALL", description: "Every secondary key also appears." },
+                    { value: "not_any", label: "NOT ANY", description: "None of the secondary keys appears." },
+                    { value: "not_all", label: "NOT ALL", description: "At least one secondary key is missing." }
                   ]}
                 />
                 <Keys store={store} path={[...path, "secondary_keys"]} label="Secondary keys" />
@@ -258,8 +274,8 @@ export function EntryDetails({
           <section className={group} aria-label="Matching">
             <h4 className={groupTitle}>Matching</h4>
             <div className="grid gap-4 sm:grid-cols-2">
-              <InheritedSwitch store={store} path={[...path, "case_sensitive"]} label="Case sensitive" />
-              <InheritedSwitch store={store} path={[...path, "match_whole_words"]} label="Whole words" />
+              <InheritedSwitch store={store} path={[...path, "case_sensitive"]} label="Case sensitive" fallback="off" />
+              <InheritedSwitch store={store} path={[...path, "match_whole_words"]} label="Whole words" fallback="on" />
             </div>
             <NumberField
               store={store}
@@ -290,10 +306,27 @@ export function EntryDetails({
               label="Group"
               description="Of the entries in one group that match, only one is sent."
             />
-            <SwitchField store={store} path={[...path, "group_override"]} label="Prioritize this entry in its group" />
+            <SwitchField
+              store={store}
+              path={[...path, "group_override"]}
+              label="Prioritize this entry in its group"
+              description="When several of its group match, this one is chosen."
+            />
             <div className="grid gap-4 sm:grid-cols-2">
-              <NumberField store={store} path={[...path, "group_weight"]} label="Group weight" min={0} />
-              <InheritedSwitch store={store} path={[...path, "use_group_scoring"]} label="Group scoring" />
+              <NumberField
+                store={store}
+                path={[...path, "group_weight"]}
+                label="Group weight"
+                min={0}
+                description="In ST, its chance of being the one chosen. Chats here don't choose by weight."
+              />
+              <InheritedSwitch
+                store={store}
+                path={[...path, "use_group_scoring"]}
+                label="Group scoring"
+                fallback="off"
+                description="Of its group's matches, only those with the most keys found can be chosen."
+              />
             </div>
           </section>
           <section className={group} aria-label="Recursion and budget">
@@ -326,9 +359,33 @@ export function EntryDetails({
               the context inspector lists an entry that has them.
             </p>
             <div className="grid gap-4 sm:grid-cols-3">
-              <NumberField store={store} path={[...path, "sticky"]} label="Sticky" integer nullable min={0} />
-              <NumberField store={store} path={[...path, "cooldown"]} label="Cooldown" integer nullable min={0} />
-              <NumberField store={store} path={[...path, "delay"]} label="Delay" integer nullable min={0} />
+              <NumberField
+                store={store}
+                path={[...path, "sticky"]}
+                label="Sticky"
+                integer
+                nullable
+                min={0}
+                description="Messages it stays in for after it triggers."
+              />
+              <NumberField
+                store={store}
+                path={[...path, "cooldown"]}
+                label="Cooldown"
+                integer
+                nullable
+                min={0}
+                description="Messages it can't trigger again for, after it's been in."
+              />
+              <NumberField
+                store={store}
+                path={[...path, "delay"]}
+                label="Delay"
+                integer
+                nullable
+                min={0}
+                description="Not included until the chat has this many messages."
+              />
             </div>
             <CharacterFilter store={store} path={[...path, "character_filter"]} />
             <TextField store={store} path={[...path, "automation_id"]} label="Automation ID" />

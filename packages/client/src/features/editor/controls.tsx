@@ -10,7 +10,7 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
-import { Select } from "../../ui/Select.tsx"
+import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
@@ -109,13 +109,28 @@ export function FieldTools({ store, field, label }: { store: EditorStore; field:
         />
       )}
       <div className="flex flex-wrap gap-1">
-        <Button variant="ghost" aria-label={`Undo ${label}`} onClick={() => void store.undo(field).then(settle)}>
+        <Button
+          variant="ghost"
+          aria-label={`Undo ${label}`}
+          hint="Takes this field one step back."
+          onClick={() => void store.undo(field).then(settle)}
+        >
           Undo
         </Button>
-        <Button variant="ghost" aria-label={`History of ${label}`} onClick={() => setHistory(true)}>
+        <Button
+          variant="ghost"
+          aria-label={`History of ${label}`}
+          hint="Every state this field had since it was last saved, to restore one."
+          onClick={() => setHistory(true)}
+        >
           History
         </Button>
-        <Button variant="ghost" aria-label={`Revert ${label}`} onClick={() => void store.discard(field).then(settle)}>
+        <Button
+          variant="ghost"
+          aria-label={`Revert ${label}`}
+          hint="Back to the saved version. Your changes go to the bin's recovered texts."
+          onClick={() => void store.discard(field).then(settle)}
+        >
           Revert
         </Button>
       </div>
@@ -267,11 +282,13 @@ export function NumberField({
   max,
   integer = false,
   nullable = false,
-  optional = false
+  optional = false,
+  description
 }: {
   store: EditorStore
   path: FieldPath
   label: string
+  description?: ReactNode
   step?: string
   min?: number
   max?: number
@@ -301,7 +318,7 @@ export function NumberField({
   }
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <Field label={<FieldLabel store={store} field={field} label={label} />}>
+      <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
         <Input
           type="number"
           inputMode="decimal"
@@ -386,7 +403,7 @@ export function SelectField<Value extends string>({
   store: EditorStore
   path: FieldPath
   label: string
-  items: ReadonlyArray<{ readonly value: Value; readonly label: string }>
+  items: ReadonlyArray<SelectItem<Value>>
   /** What an absent value means (a prompt's condition, from its ST triggers). */
   fallback?: Value
 }) {

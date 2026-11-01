@@ -40,7 +40,13 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
             nullable
             min={0}
           />
-          <InheritedSwitch store={store} path={[...root, "recursive_scanning"]} label="Recursive scanning" />
+          <InheritedSwitch
+            store={store}
+            path={[...root, "recursive_scanning"]}
+            label="Recursive scanning"
+            fallback="on"
+            description="Entries' text can trigger other entries."
+          />
         </div>
         <p className="text-sm text-muted">
           {entries.toLocaleString()} {entries === 1 ? "entry" : "entries"}. Chats place lore below the history by

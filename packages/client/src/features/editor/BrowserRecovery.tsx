@@ -39,6 +39,7 @@ export function BrowserRecovery({
     <>
       <Button
         variant="ghost"
+        hint="Text typed in this browser that hasn't reached the server yet."
         onClick={async () => {
           await read()
           setOpen(true)
@@ -102,6 +103,7 @@ export function BrowserRecovery({
           <Button onClick={() => setOpen(false)}>Keep copies</Button>
           <Button
             pending={pending}
+            hint="Sends each copy to the server again. Those that arrive leave this list."
             onClick={async () => {
               setPending(true)
               const result = await flushCopies(userId)
