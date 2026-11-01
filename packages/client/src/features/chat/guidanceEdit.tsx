@@ -7,6 +7,7 @@
 import type { EntityId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
 import { useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
 import { MenuItem } from "../../ui/Menu.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import { nameOf, useCast } from "./cast.ts"
@@ -129,7 +130,7 @@ export function MessageDirection({ entry, session }: { entry: PathEntry; session
   )
 }
 
-/** The bar above the composer while its box holds a reply's guidance. */
+/** The box's header line while it holds a reply's guidance (the composer's `banner`). */
 function GuidanceEditBar({ session }: ComposerControlContext) {
   const edit = useGuidanceEdit(session)
   const castView = useCast()
@@ -139,9 +140,10 @@ function GuidanceEditBar({ session }: ComposerControlContext) {
     <div
       role="status"
       data-testid="guidance-edit-bar"
-      className="flex items-center gap-2 rounded-md border border-guidance/50 bg-guidance-surface py-0.5 pr-0.5 pl-3 text-sm"
+      className="flex items-center gap-2 py-0 pr-0 pl-1.5 text-sm text-guidance"
     >
-      <span className="min-w-0 flex-1 truncate text-guidance">
+      <Icon name="guidance" size={16} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate font-medium">
         Editing guidance for {name ? `${name}'s` : "this"} reply
       </span>
       <IconButton label="Stop editing this guidance" icon="close" onClick={() => guidanceEditor(session).close()} />

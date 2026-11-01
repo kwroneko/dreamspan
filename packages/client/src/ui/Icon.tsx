@@ -120,6 +120,12 @@ const paths = {
     "M12 3v3",
     "M18 6a2 2 0 0 1 1.39.56l2.3 2.22a1 1 0 0 1 0 1.44l-2.3 2.22A2 2 0 0 1 18 13H6a2 2 0 0 1-1.39-.56l-2.3-2.22a1 1 0 0 1 0-1.44l2.3-2.22A2 2 0 0 1 6 6z"
   ],
+  /**
+   * A question mark drawn centred in its box, ink and round caps included (top 4.75, bottom
+   * 19.25, x 8–16), so a round chip shows it in the middle, which a text "?" sitting on the
+   * font's baseline isn't.
+   */
+  help: ["M9 8.75a3 3 0 1 1 5.2 2.05C13.3 11.75 12 12.25 12 14.25", "M12 18.25h.01"],
   /** Speak now: the model writes this character's turn. */
   play: ["M6 4v16a1 1 0 0 0 1.5.87l13-8a1 1 0 0 0 0-1.74l-13-8A1 1 0 0 0 6 4z"],
   volume: [

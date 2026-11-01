@@ -14,7 +14,7 @@ const base = {
 
 export const SendIcon = () => (
   <svg {...base}>
-    <path d="M2.5 8h9M8 3.5 12.5 8 8 12.5" />
+    <path d="M3 8h10M8.5 3.5 13 8 8.5 12.5" />
   </svg>
 )
 

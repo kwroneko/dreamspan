@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest"
-import { DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
+import { CHAT_WIDTH, DEFAULT_DISPLAY_PREFS, DisplayPrefsChange } from "@rp/shared/chatApi.ts"
 import { Effect, Schema } from "effect"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -59,5 +59,24 @@ it.live("Enter sends patches persist per account and do not reset unrelated disp
     assert.strictEqual(prefs.reasoning, "collapsed")
     assert.strictEqual((yield* bob.GetDisplayPrefs({})).enterSends, "always")
     assert.strictEqual(Schema.decodeUnknownOption(DisplayPrefsChange)({ enterSends: "sometimes" })._tag, "None")
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)
+
+it.live("the chat width persists per account, within its range, without resetting other choices", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    const bob = yield* client({ "Remote-User": "bob" })
+    assert.strictEqual((yield* alice.GetDisplayPrefs({})).chatWidth, CHAT_WIDTH.default)
+    yield* alice.SetDisplayPrefs({ prefs: { guidance: true } })
+    yield* alice.SetDisplayPrefs({ prefs: { chatWidth: 1760 } })
+    const reconnect = yield* client({ "Remote-User": "alice" })
+    const prefs = yield* reconnect.GetDisplayPrefs({})
+    assert.strictEqual(prefs.chatWidth, 1760)
+    assert.strictEqual(prefs.guidance, true)
+    assert.strictEqual((yield* bob.GetDisplayPrefs({})).chatWidth, CHAT_WIDTH.default)
+    const decode = Schema.decodeUnknownOption(DisplayPrefsChange)
+    for (const value of [CHAT_WIDTH.min - 1, CHAT_WIDTH.max + 1, 1200.5, "1200px"])
+      assert.strictEqual(decode({ chatWidth: value })._tag, "None")
+    assert.strictEqual(decode({ chatWidth: CHAT_WIDTH.max })._tag, "Some")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )

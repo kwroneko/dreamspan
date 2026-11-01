@@ -170,10 +170,16 @@ export function QueuedMessages({
               <QueueEditor editor={editor} queued={queued} session={session} onRecovered={onRecovered} />
             ) : (
               queued && (
-                <>
-                  <p className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
-                    {queued.kind === "message" ? queued.content : queued.direction}
-                  </p>
+                <p className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
+                  {queued.kind === "message" ? queued.content : queued.direction}
+                </p>
+              )
+            )}
+            {queued && <SlotOutlet slot={queuedPreviews} props={{ queued }} />}
+            {/* Its actions at the end of one row, never stretched across a wide column. */}
+            {queued && (
+              <div className="flex flex-wrap items-center justify-end gap-1">
+                {!editor && (
                   <Button
                     variant="ghost"
                     onClick={() => {
@@ -186,11 +192,10 @@ export function QueuedMessages({
                   >
                     Edit
                   </Button>
-                </>
-              )
+                )}
+                <Withdraw queued={queued} session={session} onRecovered={onRecovered} />
+              </div>
             )}
-            {queued && <SlotOutlet slot={queuedPreviews} props={{ queued }} />}
-            {queued && <Withdraw queued={queued} session={session} onRecovered={onRecovered} />}
           </li>
         )
       })}
@@ -225,7 +230,7 @@ function Withdraw({
         Withdraw
       </Button>
       {error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="basis-full text-sm text-danger">
           {error.message}
         </p>
       )}

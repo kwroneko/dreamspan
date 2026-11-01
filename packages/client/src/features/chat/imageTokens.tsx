@@ -37,7 +37,7 @@ export function ImageEstimate({ image, index }: { image: ContextImage; index: nu
 export function NextImagesNote({ images }: { images: NonNullable<NextContext["imageTokens"]> }) {
   const bases = images.bases.filter((b) => b !== "unknown").map((b) => basisLabel[b])
   return (
-    <p className="mx-auto w-full max-w-3xl py-0.5 text-xs text-muted">
+    <p className="chat-column py-0.5 text-xs text-muted">
       {images.count === 1 ? "1 image" : `${images.count} images`} in the next request: ~{images.tokens.toLocaleString()}{" "}
       tokens
       {bases.length > 0 && ` (${bases.join(", ")})`}.

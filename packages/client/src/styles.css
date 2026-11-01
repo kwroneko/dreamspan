@@ -145,6 +145,21 @@ main:has(> [data-fill]) {
   padding-bottom: 0;
 }
 
+/*
+ * The chat column: the messages, the composer and the notices that line up with them
+ * (features/chat/ChatWidth.tsx). `--chat-width` is the account's Chat width on the root; the
+ * column never exceeds it, fills a narrower space less a 1rem gutter each side, and on a
+ * phone takes the whole width, as before.
+ */
+@utility chat-column {
+  width: 100%;
+  margin-inline: auto;
+  max-width: min(var(--chat-width, 1200px), 100% - 2rem);
+  @media (width < 40rem) {
+    max-width: 100%;
+  }
+}
+
 /* Rows of the message list: each lays out and paints on its own (CLIENT-FRAMEWORK §5). */
 .chat-row {
   contain: layout paint style;

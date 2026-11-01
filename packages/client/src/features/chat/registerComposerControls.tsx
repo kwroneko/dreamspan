@@ -37,7 +37,7 @@ function Help({ hint }: ComposerControlContext) {
       <Popover
         open={open}
         onOpenChange={setOpen}
-        trigger="?"
+        trigger={<Icon name="help" size={14} />}
         triggerLabel="Keyboard shortcuts"
         hint="Keyboard shortcuts"
         title="Keyboard shortcuts"
@@ -154,11 +154,11 @@ export const registerComposerControls = () => [
           aria-label={`Generate ${context.speakerName}`}
           pending={context.busy}
           disabled={context.busy || !context.prefsReady}
-          className="min-w-0 max-w-52 sm:max-w-56"
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
+          {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
           {context.guidance && <GenerateIcon />}
-          <span className="truncate">{context.guidance ? `Generate ${context.speakerName}` : "Generate"}</span>
+          Generate
         </Button>
       )
   }),
@@ -217,8 +217,8 @@ export const registerComposerControls = () => [
   composerControls.register({
     id: "composer.history",
     order: 90,
-    // In the box beside the text; on a phone, at the end of the strip, to leave the box its width.
-    placement: ({ compact }) => (compact ? "strip" : "tools"),
+    // In the box's control row, after the speaker, at every width: the text has a row of its own.
+    placement: "tools",
     component: ({ history }) => history
   }),
   composerControls.register({
@@ -264,7 +264,9 @@ export const registerComposerControls = () => [
     order: 30,
     placement: "actions",
     run: ({ generate }) => generate(),
-    component: ({ guidance, busy, ready, generateHint, generateText, invoke, compact }) =>
+    // Its word only ("Write", or "New version" while a reply's guidance is edited; an icon on a
+    // phone): the speaker's name is on the chip at the row's start, and in this one's name and tooltip.
+    component: ({ guidance, busy, ready, generateHint, generateText, generateWord, invoke, compact }) =>
       compact ? (
         <SquareIconButton
           label={generateText}
@@ -279,15 +281,15 @@ export const registerComposerControls = () => [
       ) : (
         <Tooltip label={generateHint}>
           <Button
-            variant={guidance ? "primary" : "secondary"}
+            variant={guidance ? "primary" : "ghost"}
             pending={guidance && busy}
             aria-label={generateText}
             disabled={busy || !ready}
             onClick={invoke}
-            className={guidance ? "max-w-56" : "max-w-48"}
+            className="px-2.5"
           >
-            {guidance && !busy && <GenerateIcon />}
-            <span className="truncate">{generateText}</span>
+            {!(guidance && busy) && <GenerateIcon />}
+            {generateWord}
           </Button>
         </Tooltip>
       )
