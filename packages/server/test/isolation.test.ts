@@ -818,6 +818,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.ListModels({ connectionId: owner.connectionId, includeHidden: true }), "NotFound")
       })
   },
+  ListModelUse: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListModelUse(), (used) =>
+        assert.isFalse(used.some((row) => row.modelId === owner.modelId || row.connectionId === owner.connectionId))
+      )
+  },
   AddUserModel: {
     probe: (actor, owner) =>
       refused(actor.api.AddUserModel({ connectionId: owner.connectionId, key: "planted", overrides: {} }), "NotFound")
@@ -2330,6 +2336,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
           "NotFound"
         )
       )
+  },
+  SetRefArchived: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.SetRefArchived({ refId: owner.refId, archived: true }), "NotFound")
+        const archived = yield* owner.api.ListLibrary({ kind: "preset", archived: true })
+        assert.isFalse(archived.some((ref) => ref.id === owner.refId))
+      })
   },
   SetRegexApproval: {
     probe: (actor, owner) =>

@@ -66,62 +66,69 @@ describe("archiving a preset", () => {
     }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
   )
 
-  it.live("leaves a preset in use in use, records its last use and the model's, and refuses a chat's copy", () => {
-    const config = testConfig()
-    return Effect.gen(function* () {
-      const mock = yield* mockProvider
-      const api = yield* client()
-      const before = Date.now()
-      const { preset, chat, connection, model } = yield* generateReply(api, {
-        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
-        model: {}
-      })
-      const other = yield* api.CreatePreset({ label: "Never used" })
-      const used = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.id === preset.ref.id)!
-      assert.isAtLeast(used.lastUsedAt!, before)
-      assert.isAtMost(used.lastUsedAt!, Date.now())
-      assert.isNull(other.lastUsedAt)
-      // The model that wrote it, for the model picker's Last used.
-      const use = yield* api.ListModelUse()
-      assert.deepStrictEqual(
-        use.map((row) => [row.connectionId, row.modelId]),
-        [[connection.id, model.id]]
-      )
-      assert.isAtLeast(use[0]!.lastUsedAt, before)
+  it.live(
+    "leaves a preset in use in use, records its last use and the model's, and refuses a chat's copy",
+    () => {
+      const config = testConfig()
+      return Effect.gen(function* () {
+        const mock = yield* mockProvider
+        const api = yield* client()
+        const before = Date.now()
+        const { preset, chat, connection, model } = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+          model: {}
+        })
+        const other = yield* api.CreatePreset({ label: "Never used" })
+        const used = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.id === preset.ref.id)!
+        assert.isAtLeast(used.lastUsedAt!, before)
+        assert.isAtMost(used.lastUsedAt!, Date.now())
+        assert.isNull(other.lastUsedAt)
+        // The model that wrote it, for the model picker's Last used.
+        const use = yield* api.ListModelUse()
+        assert.deepStrictEqual(
+          use.map((row) => [row.connectionId, row.modelId]),
+          [[connection.id, model.id]]
+        )
+        assert.isAtLeast(use[0]!.lastUsedAt, before)
 
-      // Archiving the preset in use keeps it in use: it stays the account's, and replies use it.
-      yield* api.SetRefArchived({ refId: preset.ref.id, archived: true })
-      assert.strictEqual((yield* api.GetGenerationDefaults()).preset, preset.ref.id)
-      const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
-      assert.strictEqual(next.preset?.ref ?? null, preset.ref.id)
+        // Archiving the preset in use keeps it in use: it stays the account's, and replies use it.
+        yield* api.SetRefArchived({ refId: preset.ref.id, archived: true })
+        assert.strictEqual((yield* api.GetGenerationDefaults()).preset, preset.ref.id)
+        const next = yield* api.GetNextContext({ chatId: chat.id, leafSlotId: null })
+        assert.strictEqual(next.preset?.ref ?? null, preset.ref.id)
 
-      // A chat's own copy isn't a library entry to archive.
-      const writer = yield* Writer
-      const userId = (yield* api.Whoami()).id as UserId
-      const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: chat.id })
-      assert.strictEqual(yield* failure(api.SetRefArchived({ refId: override.id, archived: true })), "EditRefused")
-      return { refId: preset.ref.id, at: used.lastUsedAt! }
-    }).pipe(
-      Effect.scoped,
-      withServer(config),
-      // A database from before last use was recorded: the startup migration fills it in from the
-      // generations' context snapshots.
-      Effect.tap(() =>
-        fixtureSql(config.dataDir, [
-          { sql: "UPDATE entity_refs SET last_used_at = NULL" },
-          { sql: "DELETE FROM effect_sql_migrations WHERE name = 'preset_last_used'" }
-        ])
-      ),
-      Effect.flatMap(({ refId, at }) =>
-        Effect.gen(function* () {
-          const api = yield* client()
-          const ref = (yield* api.ListLibrary({ kind: "preset", archived: true })).find((entry) => entry.id === refId)!
-          assert.isNumber(ref.lastUsedAt)
-          assert.isAtMost(Math.abs(ref.lastUsedAt! - at), 1_000)
-        }).pipe(Effect.scoped, withServer(config))
+        // A chat's own copy isn't a library entry to archive.
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id as UserId
+        const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: chat.id })
+        assert.strictEqual(yield* failure(api.SetRefArchived({ refId: override.id, archived: true })), "EditRefused")
+        return { refId: preset.ref.id, at: used.lastUsedAt! }
+      }).pipe(
+        Effect.scoped,
+        withServer(config),
+        // A database from before last use was recorded: the startup migration fills it in from the
+        // generations' context snapshots.
+        Effect.tap(() =>
+          fixtureSql(config.dataDir, [
+            { sql: "UPDATE entity_refs SET last_used_at = NULL" },
+            { sql: "DELETE FROM effect_sql_migrations WHERE name = 'preset_last_used'" }
+          ])
+        ),
+        Effect.flatMap(({ refId, at }) =>
+          Effect.gen(function* () {
+            const api = yield* client()
+            const ref = (yield* api.ListLibrary({ kind: "preset", archived: true })).find(
+              (entry) => entry.id === refId
+            )!
+            assert.isNumber(ref.lastUsedAt)
+            assert.isAtMost(Math.abs(ref.lastUsedAt! - at), 1_000)
+          }).pipe(Effect.scoped, withServer(config))
+        )
       )
-    )
-  })
+      // A reply, then the server started twice: about 5 s idle, over 30 s at a load average of 140.
+    },
+    120_000
+  )
 
   it.live("moves last modified with an edit or a rename, not with archiving", () =>
     Effect.gen(function* () {
