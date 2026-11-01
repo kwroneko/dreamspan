@@ -3,6 +3,7 @@
 // recorded on it. Each handler is one writer transaction, through the library's steps.
 import { cardNameClash } from "@rp/shared/cardNames.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { readNoteCondition } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, RefId } from "@rp/shared/library.ts"
 import { Effect, Schema } from "effect"
@@ -19,6 +20,19 @@ import { transaction } from "./tx.ts"
 
 /** The name drafts a fork's dialog decides, so they stay on the card forked from. */
 const NAME_FIELDS = ["name", "nickname", "character_version"].flatMap((key) => [`["${key}"]`, `=["${key}"]`])
+
+/**
+ * A copied note's condition with the forked card in it changed to the fork, so a note on the
+ * card's own turn is on the fork's (DESIGN §4.1); in the current shape. None to change: nothing.
+ */
+const forkCondition = (noteDoc: Doc, card: string, fork: EntityId) => {
+  if (noteDoc["condition"] === undefined) return {}
+  const condition = readNoteCondition(noteDoc["condition"])
+  if (condition.when === "always" || !condition.cards.includes(card as EntityId)) return {}
+  return {
+    condition: { ...condition, cards: [...new Set(condition.cards.map((c) => (c === card ? fork : c)))] }
+  }
+}
 
 export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
   const { sql, lib } = steps
@@ -110,7 +124,11 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           kind: "note",
           label: note.label,
           subtitle: note.subtitle,
-          doc: steps.encode({ ...noteDoc, owner: { card: fork.entity_id as EntityId } }),
+          doc: steps.encode({
+            ...noteDoc,
+            owner: { card: fork.entity_id as EntityId },
+            ...forkCondition(noteDoc, ref.entity_id, fork.entity_id as EntityId)
+          }),
           schemaVersion: (yield* steps.revision(note.head_revision_id)).schema_version,
           origin: "user",
           originRef: JSON.stringify({ forked: note.head_revision_id }),

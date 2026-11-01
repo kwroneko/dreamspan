@@ -1,8 +1,11 @@
 import { Select as BaseSelect } from "@base-ui/react/select"
+import { useId } from "react"
 
 export interface SelectItem<Value> {
   readonly value: Value
   readonly label: string
+  /** What choosing it means, when the label alone doesn't say: under the label in the list. */
+  readonly description?: string | undefined
 }
 
 /** A single-choice picker. Use inside a `Field` for its label. */
@@ -25,6 +28,7 @@ export function Select<Value>({
   /** What the closed picker shows for a value, when its label is too long for the space. */
   shown?: (value: Value) => string
 }) {
+  const descriptions = useId()
   return (
     <BaseSelect.Root
       items={items as Array<SelectItem<Value>>}
@@ -50,11 +54,12 @@ export function Select<Value>({
         <BaseSelect.Positioner className="z-50 outline-none select-none" sideOffset={4}>
           <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
             <BaseSelect.List>
-              {items.map((item) => (
+              {items.map((item, index) => (
                 <BaseSelect.Item
                   key={String(item.value)}
                   value={item.value}
-                  className="grid grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
+                  {...(item.description ? { "aria-describedby": `${descriptions}-${index}` } : {})}
+                  className="grid grid-cols-[1rem_1fr] items-center gap-x-2 gap-y-0.5 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
                 >
                   <BaseSelect.ItemIndicator className="col-start-1 text-accent">
                     <svg
@@ -69,6 +74,15 @@ export function Select<Value>({
                     </svg>
                   </BaseSelect.ItemIndicator>
                   <BaseSelect.ItemText className="col-start-2">{item.label}</BaseSelect.ItemText>
+                  {item.description && (
+                    <span
+                      id={`${descriptions}-${index}`}
+                      aria-hidden="true"
+                      className="col-start-2 max-w-80 pb-0.5 text-xs text-muted"
+                    >
+                      {item.description}
+                    </span>
+                  )}
                 </BaseSelect.Item>
               ))}
             </BaseSelect.List>

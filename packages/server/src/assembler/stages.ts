@@ -25,7 +25,7 @@ import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
-import { isAuthorNote as isChatAuthorNote, noteCondition } from "@rp/shared/docs/note.ts"
+import { anyOf, isAuthorNote as isChatAuthorNote, noteCondition } from "@rp/shared/docs/note.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -261,15 +261,23 @@ const activeNotes = (events: ReadonlyArray<PositionedEvent>, notes: ReadonlyArra
 const conditioned = (note: NoteInput) => noteCondition(note.doc).when !== "always"
 
 /**
- * Whether a note's condition holds for the message being generated: on a card's turn, when
- * that card is its speaker (a swipe's or continuation's included); while a card isn't muted.
- * A card that isn't in the cast at the leaf holds neither.
+ * Whether a note's condition holds for the message being generated: on the turn of any of its
+ * cards, when the speaker is one of them (a swipe's or continuation's included); while any of
+ * its cards isn't muted. A card that isn't in the cast at the leaf counts for neither.
  */
 const noteConditionHolds = (note: NoteInput, cast: Cast) => {
   const condition = noteCondition(note.doc)
   if (condition.when === "always") return true
-  if (![...cast.characters, ...cast.personas].some((c) => c.entity === condition.card)) return false
-  return condition.when === "turn" ? cast.speaker?.entity === condition.card : !isMuted(cast, condition.card)
+  const named = inCastOf(condition.cards, cast)
+  return condition.when === "turn"
+    ? named.some((card) => cast.speaker?.entity === card.entity)
+    : named.some((card) => !isMuted(cast, card.entity))
+}
+
+/** The cards of `cards` in the cast at the leaf, in their order. */
+const inCastOf = (cards: ReadonlyArray<string>, cast: Cast) => {
+  const members = [...cast.characters, ...cast.personas]
+  return cards.flatMap((entity) => members.find((c) => c.entity === entity) ?? [])
 }
 
 /** Whether a card is muted at the leaf (DESIGN §3.5): unit P1-1's mute is `presence.set`. */
@@ -279,9 +287,12 @@ const isMuted = (cast: Cast, entity: string) => cast.absent.has(entity)
 const conditionText = (note: NoteInput, cast: Cast) => {
   const condition = noteCondition(note.doc)
   if (condition.when === "always") return undefined
-  const card = [...cast.characters, ...cast.personas].find((c) => c.entity === condition.card)
-  const name = card ? modelName(card.doc) : "a card not in the chat"
-  return condition.when === "turn" ? `on ${name}'s turn` : `while ${name} isn't muted`
+  // A card not in the cast never counts, so only the cast's are named, unless none of them is.
+  const inCast = inCastOf(condition.cards, cast)
+  const names = inCast.length > 0 ? inCast.map((c) => modelName(c.doc)) : ["a card not in the chat"]
+  return condition.when === "turn"
+    ? `on ${anyOf(names.map((name) => `${name}'s`))} turn`
+    : `while ${anyOf(names)} isn't muted`
 }
 
 /** The chat's author's note, whose place notes and lore at its top or bottom ride on (shown on the note). */

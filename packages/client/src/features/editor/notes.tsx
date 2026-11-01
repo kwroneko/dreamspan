@@ -4,11 +4,12 @@ import { textActions } from "../../textActions.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import type { NoteCondition, Placement } from "@rp/shared/docs/note.ts"
+import { anyOf, conditionCards, type NoteCondition, type Placement, readNoteCondition } from "@rp/shared/docs/note.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc, LibraryRef } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
+import { Predicate } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -21,6 +22,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { browserEnv } from "./backup.ts"
@@ -108,11 +110,21 @@ const aboveHistory = (placement: Placement | undefined) =>
   placement?.mode === "section" &&
   ["context_start", "card", "before_main_prompt", "after_main_prompt"].includes(placement.section)
 
-/** A condition as its chip says it: "Aria's turn", "While Bram isn't muted". */
-const conditionText = (condition: NoteCondition | undefined, cards: ReadonlyArray<NoteCard>) => {
-  if (condition === undefined || condition.when === "always") return null
-  const name = cards.find((card) => card.entity === condition.card)?.name ?? "A card not in this chat"
-  return condition.when === "turn" ? `${name}'s turn` : `While ${name} isn't muted`
+/**
+ * A condition as its chip says it: "Aria's turn", "Aria's or Bram's turn", "While Bram isn't
+ * muted". A card not in this chat never counts, so only the others are named, unless none is.
+ */
+const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>) => {
+  const condition = readNoteCondition(stored)
+  if (condition.when === "always") return null
+  const named = condition.cards.flatMap((entity) => cards.find((card) => card.entity === entity)?.name ?? [])
+  const names = named.length > 0 ? named : ["A card not in this chat"]
+  // A long list names two, so the chip fits a phone's row.
+  const shown = names.length > 3 ? names.slice(0, 2) : names
+  const others = names.length - shown.length
+  return condition.when === "turn"
+    ? `${anyOf([...shown.map((name) => `${name}'s`), ...(others > 0 ? [`${others} others'`] : [])])} turn`
+    : `While ${anyOf([...shown, ...(others > 0 ? [`${others} others`] : [])])} isn't muted`
 }
 
 /** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
@@ -198,40 +210,81 @@ function PlacementField({
 
 type When = NoteCondition["when"]
 
-const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string }> = [
-  { value: "always", label: "Always" },
-  { value: "turn", label: "On a character's turn" },
-  { value: "not_muted", label: "While a character isn't muted" }
+const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string; readonly description: string }> = [
+  { value: "always", label: "Always", description: "Sent on every turn while it's on." },
+  {
+    value: "turn",
+    label: "On a chosen character's turn",
+    description:
+      "Sent only when one of the chosen characters writes the message, a new version or continuation of theirs included."
+  },
+  {
+    value: "not_muted",
+    label: "While a chosen character isn't muted",
+    description: "Sent while at least one of the chosen characters is in the chat and not muted."
+  }
 ]
 
-/** When a note applies (DESIGN §4.1): always, on a card's turn, or while a card isn't muted. */
+/** What choosing a card means for the condition, said on its option. */
+const cardDescription = (when: Exclude<When, "always">, name: string, offered: boolean) =>
+  !offered
+    ? "Not in this chat, so it never counts here. Remove it, or add the card to the chat."
+    : when === "turn"
+      ? `Sent when ${name} writes the message.`
+      : `Sent while ${name} isn't muted.`
+
+/**
+ * When a note applies (DESIGN §4.1): always, on the turn of any of the chosen cards, or while
+ * any of them isn't muted. The cards are the chat's cast (the card itself in its editor); a
+ * card the condition names that isn't offered here still shows, and can be removed.
+ */
 function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyArray<NoteCard> }) {
-  const condition = useValue<NoteCondition | undefined>(store, ["condition"])
+  const condition = readNoteCondition(useValue<unknown>(store, ["condition"]))
   const placement = useValue<Placement | undefined>(store, ["placement"])
-  const when = condition?.when ?? "always"
-  const named = condition && condition.when !== "always" ? condition.card : null
-  // A card the condition names that isn't one offered here still shows.
-  const choices = [
-    ...cards.map((card) => ({ value: card.entity, label: card.name })),
-    ...(named !== null && !cards.some((card) => card.entity === named)
-      ? [{ value: named, label: "A card not in this chat" }]
-      : [])
+  const owner = useValue<unknown>(store, ["owner"])
+  const when = condition.when
+  const named = conditionCards(condition)
+  const missing = named.filter((entity) => !cards.some((card) => card.entity === entity))
+  const choices = (on: Exclude<When, "always">) => [
+    ...cards.map((card) => ({
+      value: card.entity,
+      label: card.name,
+      description: cardDescription(on, card.name, true)
+    })),
+    ...missing.map((entity, i) => ({
+      value: entity,
+      label: missing.length === 1 ? "A card not in this chat" : `A card not in this chat (${i + 1})`,
+      description: cardDescription(on, "", false),
+      unavailable: true
+    }))
   ]
-  const set = (next: When, card: string | null) =>
-    store.setValue(["condition"], next === "always" || card === null ? undefined : { when: next, card })
+  // A new condition names the note's own card when it's offered, else the first one.
+  const ownCard = Predicate.isObject(owner) && Predicate.isString(owner["card"]) ? owner["card"] : null
+  const first = cards.find((card) => card.entity === ownCard)?.entity ?? cards[0]?.entity
+  const set = (next: When, chosen: ReadonlyArray<string>) =>
+    store.setValue(["condition"], next === "always" || chosen.length === 0 ? undefined : { when: next, cards: chosen })
   return (
     <div className="@container flex min-w-0 flex-col gap-2">
       <div className="grid gap-3 @md:grid-cols-2">
         <Field label="When it applies">
           <Select
-            items={WHEN.filter((w) => w.value === "always" || choices.length > 0)}
+            items={WHEN.filter((w) => w.value === "always" || named.length > 0 || cards.length > 0)}
             value={when}
-            onValueChange={(next) => set(next, named ?? choices[0]?.value ?? null)}
+            onValueChange={(next) => set(next, named.length > 0 ? named : first === undefined ? [] : [first])}
           />
         </Field>
         {when !== "always" && (
-          <Field label="Character">
-            <Select items={choices} value={named} onValueChange={(card) => set(when, card)} />
+          <Field label="Characters">
+            <MultiSelect
+              items={choices(when)}
+              value={named}
+              minimum={1}
+              addLabel="Add"
+              chosenLabel="Chosen characters"
+              listLabel="Choose characters"
+              explanation={WHEN.find((w) => w.value === when)?.description}
+              onValueChange={(next) => set(when, next)}
+            />
           </Field>
         )}
       </div>
@@ -603,7 +656,7 @@ export function NoteRow({
   children: ReactNode
 }) {
   const { title, muted } = rowTitle(doc, label)
-  const condition = conditionText(doc["condition"] as NoteCondition | undefined, cards)
+  const condition = conditionText(doc["condition"], cards)
   const kind = doc["kind"]
   return (
     <li className="flex flex-col gap-2 py-2">

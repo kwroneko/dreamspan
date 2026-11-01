@@ -7,7 +7,7 @@ import type { ChatId, EntityId } from "./chat.ts"
 import { Result, Schema, SchemaIssue } from "effect"
 import { CARD_SCHEMA_VERSION, CardDoc } from "./docs/card.ts"
 import { LorebookDoc } from "./docs/lorebook.ts"
-import { NOTE_SCHEMA_VERSION, NoteDoc } from "./docs/note.ts"
+import { NOTE_SCHEMA_VERSION, NoteDoc, upgradedCondition } from "./docs/note.ts"
 import { withMain } from "./presetOrder.ts"
 import { PresetDoc } from "./docs/preset.ts"
 import type { Doc, EntityKind } from "./library.ts"
@@ -274,13 +274,25 @@ export const validateDoc = (
 }
 
 /**
+ * Values the schema reads in an older shape and keeps in the current one, by kind and path: a
+ * draft holding the older shape (saved before the change) isn't dropped by the rewrite.
+ */
+const OLDER_SHAPES: Partial<Record<EntityKind, ReadonlyArray<{ path: FieldPath; read: (value: unknown) => unknown }>>> =
+  {
+    note: [{ path: ["condition"], read: upgradedCondition }]
+  }
+
+/**
  * Drafts the schema would drop from the document, such as text at a key it doesn't know:
  * saving them would end the draft and keep nothing of it.
  */
-export const droppedDrafts = (applied: Doc, valid: Doc, drafts: ReadonlyArray<DraftContent>) =>
+export const droppedDrafts = (kind: EntityKind, applied: Doc, valid: Doc, drafts: ReadonlyArray<DraftContent>) =>
   drafts.filter(({ field }) => {
     const parsed = parseField(field)
-    return parsed !== null && canonicalJson(getAt(applied, parsed.path)) !== canonicalJson(getAt(valid, parsed.path))
+    if (parsed === null) return false
+    const older = OLDER_SHAPES[kind]?.find((shape) => canonicalJson(shape.path) === canonicalJson(parsed.path))
+    const value = getAt(applied, parsed.path)
+    return canonicalJson(older ? older.read(value) : value) !== canonicalJson(getAt(valid, parsed.path))
   })
 
 /** JSON with object keys sorted, for comparing values whatever their key order. */

@@ -235,13 +235,13 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         const valid = validateDoc(ref.kind, applied.doc)
         if (!valid.ok) return yield* new InvalidDocument({ problems: valid.problems })
         // What the schema would drop (text at a key it doesn't know) is refused, never saved away.
-        const dropped = droppedDrafts(applied.doc, valid.doc, kept)
+        const dropped = droppedDrafts(ref.kind, applied.doc, valid.doc, kept)
         if (dropped.length > 0) {
           return yield* new InvalidDocument({
             problems: dropped.map(({ field }) => `${field}: a ${ref.kind} has no such field, so this can't be saved.`)
           })
         }
-        // A note's condition card and link name only the user's own (§14.3).
+        // A note's condition cards and link name only the user's own (§14.3).
         if (ref.kind === "note") yield* steps.checkReferences(userId, valid.doc)
         const change = yield* chatNote
           ? chatNoteEdit(userId, ref, valid.doc, message, chatNote)
