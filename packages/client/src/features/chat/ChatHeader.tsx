@@ -2,7 +2,7 @@ import { SlotOutlet } from "../../slots.tsx"
 import { chatBranchControls, chatHeaderActions } from "./presentation.tsx"
 // The open chat's header, one row: whose chat it is (the cast's faces, the chat's readable
 // name, never ST's file name, which a click renames in place, and the cast's names under it),
-// then the branch control and the chat's buttons (☆, the side panel, ⋯), which are
+// then the branch control and the chat's buttons (the pin, the side panel, ⋯), which are
 // contributions (`chatBranchControls`, `chatHeaderActions`). On a phone it replaces the app's
 // top bar (shell.tsx), with ← to the chats. While the chat loads it shows placeholders, not
 // a name it doesn't know yet.

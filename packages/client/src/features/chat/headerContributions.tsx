@@ -1,5 +1,5 @@
 // The chat header's built-in parts, each a registration a plugin can override or disable:
-// its buttons (☆, the side panel, ⋯) in `chatHeaderActions`, and the chat-level commands of
+// its buttons (the pin, the side panel, ⋯) in `chatHeaderActions`, and the chat-level commands of
 // its ⋯ menu in `chatCommands` (Rename, Branches…, New chat with this cast, Export, Delete
 // chat; Keyboard shortcuts lists the commands that have keys). What they render loads with
 // the chat (headerParts.tsx, chatExport.tsx), not with the app.

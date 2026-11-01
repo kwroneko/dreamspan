@@ -27,6 +27,8 @@ import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { chatName, formatDay } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
+import { FavouriteStar } from "../characters/cardBrowse.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor } from "./CardEditor.tsx"
@@ -94,6 +96,13 @@ function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string
       {name ? `${name.name}${name.started ? ` (started ${formatDay(name.started)})` : ""}` : "the chat"}
     </Link>
   )
+}
+
+/** A character's favourite star beside its name; a persona (not on the shell's grids) has none. */
+function CardFavourite({ entityId }: { entityId: string }) {
+  const shell = useAtomValue(shellAtom)
+  const card = AsyncResult.isSuccess(shell) ? shell.value.cards.find((c) => c.card.entityId === entityId) : undefined
+  return card ? <FavouriteStar card={card} /> : null
 }
 
 export function Editor({
@@ -244,6 +253,7 @@ export function Editor({
             {(ref.kind !== "card" || bookOnly) && (
               <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>
             )}
+            {ref.kind === "card" && !bookOnly && <CardFavourite entityId={ref.entityId} />}
             {ref.kind !== "card" && ref.refKind !== "upstream" && (
               <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
                 {ref.refKind === "variant" ? "variant" : "edited for this chat"}

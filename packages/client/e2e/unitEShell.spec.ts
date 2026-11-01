@@ -141,7 +141,7 @@ for (const width of [1440, 390]) {
         content: "Synthetic navigation regression: the pinned fork continues."
       })
     )
-    // The chat header's ☆ (a phone's header leaves it to the chat lists' rows).
+    // The chat header's pin (a phone's header leaves it to the chat lists' rows).
     const headerPin = page
       .getByRole("main")
       .locator("header")
