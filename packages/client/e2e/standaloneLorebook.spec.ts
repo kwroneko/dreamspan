@@ -7,6 +7,7 @@ import { asUser } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
+import { openEntry, openSettings } from "./support/lorebook.ts"
 import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
@@ -65,22 +66,24 @@ for (const width of [1440, 390]) {
         return made
       })
     )
-    // From the chat, Open shows the editor over the chat; the chat stays where it was.
+    // From the chat, the book opens below the list, and its Large editor over the chat; the chat
+    // stays where it was.
     await page.goto(`${server().url}/chats/${chat.id}`)
     const panel = await openPanel(page, "Lorebooks")
     const inUse = panel.getByRole("list", { name: "Lorebooks in this chat" })
-    await expect(inUse.getByRole("switch", { name: new RegExp(`^Saltmarsh ${width}`) })).toBeChecked()
-    await inUse.getByRole("button", { name: `Open Saltmarsh ${width}`, exact: true }).click()
+    await expect(inUse.getByRole("switch", { name: `Saltmarsh ${width}`, exact: true })).toBeChecked()
+    await inUse.getByRole("button", { name: new RegExp(`^Saltmarsh ${width}`) }).click()
+    const below = panel.getByRole("region", { name: `Lorebook Saltmarsh ${width}`, exact: true })
+    await expect(below.getByRole("list", { name: "Entries" })).toBeVisible()
+    await below.getByRole("button", { name: "Large editor", exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
-    await expect(
-      page.getByRole("dialog", { name: "Lorebook editor" }).getByRole("list", { name: "Entries" })
-    ).toBeVisible()
+    const overlay = page.getByRole("dialog", { name: "Lorebook editor" })
+    await expect(overlay.getByRole("list", { name: "Entries" })).toBeVisible()
     // A lorebook isn't a preset: its way out says where it goes.
     await page.getByRole("button", { name: "Back to the chat", exact: true }).click()
-    await expect(page.getByRole("list", { name: "Entries" })).toHaveCount(0)
+    await expect(overlay).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)
-    await expect(page.getByRole("switch", { name: /Use in every chat/ })).toBeVisible()
     await expect(page.getByText("Added to 1 chat: what you change here is used there as you type.")).toBeVisible()
     await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("3 entries")
     // One row per entry, highest order first, as ST's Priority sort; rows open to the whole entry.
@@ -95,7 +98,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("group", { name: /^Lorebook entry/ })).toHaveCount(0)
 
     // The search narrows by title, key or text; the filter by enabled; the sort reorders.
-    const search = page.getByRole("searchbox", { name: "Search titles, keys and content" })
+    const search = page.getByRole("searchbox", { name: "Filter by titles, keys and content" })
     await search.fill("lantern")
     await expect.poll(titles).toEqual(["Lamp"])
     await expect(page.getByText("1 of 3 entries")).toBeVisible()
@@ -111,10 +114,12 @@ for (const width of [1440, 390]) {
 
     // Edits in the row and in the opened entry are drafts that survive a reload, then a revision.
     const harbour = page.getByRole("group", { name: "Lorebook entry 0", exact: true })
-    await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
+    await openEntry(page, "Harbour")
     await harbour.getByRole("textbox", { name: "Entry content" }).fill("Boats rock at the old quay.")
     await harbour.getByRole("textbox", { name: "Primary keys" }).fill("harbour\nquay\npier")
     await harbour.getByRole("textbox", { name: "Primary keys" }).blur()
+    // On a phone the row is a compact header: its columns are in the entry's Settings.
+    if (width === 390) await openSettings(harbour)
     await page.getByRole("combobox", { name: "Position of Harbour" }).selectOption("at_depth:user")
     await page.getByRole("spinbutton", { name: "Depth of Harbour" }).fill("2")
     await page.getByRole("spinbutton", { name: "Trigger % of Harbour" }).fill("55")
@@ -126,7 +131,8 @@ for (const width of [1440, 390]) {
       )
       .toBe(6)
     await page.reload()
-    await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
+    // The entry is still open: this browser remembers which are.
+    await expect(page.getByRole("button", { name: "Close Harbour", exact: true })).toBeVisible()
     await expectTextBox(harbour.getByRole("textbox", { name: "Entry content" }), "Boats rock at the old quay.")
     // The opened entry's text has its edit history; settings like Trigger % have no controls of their own.
     await expect(harbour.getByRole("button", { name: "Edit history of Entry content", exact: true })).toBeVisible()
@@ -189,15 +195,23 @@ for (const width of [1440, 390]) {
     expect(otherBook.entries.map((e) => [e.comment, e.content])).toEqual([["Gulls", "Gulls gather on the roofs."]])
     await expect(saved(page)).toBeVisible()
 
-    // Search and replace reaches closed entries and their keys.
-    await page.getByRole("button", { name: "Search", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "Search and replace" })
-    await dialog.getByRole("textbox", { name: "Find", exact: true }).fill("lamp")
-    await dialog.getByRole("textbox", { name: "Replace with", exact: true }).fill("torch")
-    await dialog.getByRole("button", { name: "Find", exact: true }).click()
-    await expect(dialog.getByRole("status")).toHaveText("6 matches.")
-    await dialog.getByRole("button", { name: "Replace all", exact: true }).click()
-    await dialog.press("Escape")
+    // Search and replace, in the toolbar, reaches closed entries and their keys; it looks
+    // everywhere unless told otherwise.
+    const toggle = page.getByRole("button", { name: "Search", exact: true })
+    await toggle.click()
+    await expect(toggle).toHaveAttribute("aria-expanded", "true")
+    const finder = page.getByRole("region", { name: "Search and replace" })
+    await expect(finder.getByRole("button", { name: "Everything", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    )
+    await finder.getByRole("textbox", { name: "Find", exact: true }).fill("lamp")
+    await finder.getByRole("textbox", { name: "Replace with", exact: true }).fill("torch")
+    await finder.getByRole("button", { name: "Find", exact: true }).click()
+    await expect(finder.getByRole("status")).toHaveText("6 matches.")
+    await finder.getByRole("button", { name: "Replace all", exact: true }).click()
+    await toggle.click()
+    await expect(finder).toHaveCount(0)
     await save(page)
     expect((await book()).entries[0]).toMatchObject({ comment: "torch", keys: ["torch", "lantern"] })
     expect((await book()).entries[2]).toMatchObject({ comment: "torch (copy)" })
@@ -222,7 +236,7 @@ for (const width of [1440, 390]) {
       })
     )
     await page.reload()
-    await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
+    await openEntry(page, "Harbour")
     await expectTextBox(harbour.getByRole("textbox", { name: "Entry content" }), "Boats rock at the old quay.")
 
     const dir = process.env.SCREENSHOT_DIR
@@ -251,12 +265,13 @@ test("find results go to a standalone entry's text and keys, even past the entry
   } = await response.json()
   await page.goto(`${server().url}/library/${ref.id}`)
   // Hide the Lamp entry; going to its match must show it again, open.
-  const search = page.getByRole("searchbox", { name: "Search titles, keys and content" })
+  const search = page.getByRole("searchbox", { name: "Filter by titles, keys and content" })
   await search.fill("fog")
   await expect(page.getByRole("textbox", { name: "Title of Lamp" })).toHaveCount(0)
-  const dialog = page.getByRole("dialog", { name: "Search and replace" })
+  // The search stays open in the toolbar between visits.
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  const dialog = page.getByRole("region", { name: "Search and replace" })
   const find = async (text: string, target: RegExp) => {
-    await page.getByRole("button", { name: "Search", exact: true }).click()
     await dialog.getByRole("textbox", { name: "Find", exact: true }).fill(text)
     await dialog.getByRole("button", { name: "Find", exact: true }).click()
     await dialog.getByRole("button", { name: target }).click()
@@ -319,7 +334,7 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("400 entries")
 
   // Find an entry, then change its strategy, position, depth, order and trigger % in its row.
-  await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("key123")
+  await page.getByRole("searchbox", { name: "Filter by titles, keys and content" }).fill("key123")
   await expect(page.getByText("1 of 400 entries")).toBeVisible()
   await page.getByRole("combobox", { name: "Strategy of Place 123" }).selectOption("constant")
   await page.getByRole("combobox", { name: "Position of Place 123" }).selectOption("at_depth:assistant")
@@ -344,7 +359,7 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await page.getByRole("button", { name: "Close Place 123", exact: true }).click()
 
   // A new entry and then a copy of it both lead the table, the newest first.
-  await page.getByRole("searchbox", { name: "Search titles, keys and content" }).fill("")
+  await page.getByRole("searchbox", { name: "Filter by titles, keys and content" }).fill("")
   await page.getByRole("button", { name: "Add entry", exact: true }).click()
   await page.keyboard.type("Lighthouse")
   await page.getByRole("button", { name: "More for Lighthouse", exact: true }).click()

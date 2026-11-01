@@ -9,7 +9,7 @@ import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -124,6 +124,7 @@ function Book({
   onSelect: () => void
   onSwitch: (on: boolean) => void
 }) {
+  const hintId = useId()
   return (
     <li
       className={`flex items-start gap-1 rounded-md px-1 py-1.5 ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
@@ -132,7 +133,7 @@ function Book({
       {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
       <Tooltip label={shown.switchHint}>
         <span className="shrink-0 pt-1.5 pl-1">
-          <Switch checked={row.on} onCheckedChange={onSwitch}>
+          <Switch checked={row.on} onCheckedChange={onSwitch} describedBy={hintId}>
             <span className="sr-only">{shown.name}</span>
           </Switch>
         </span>
@@ -170,7 +171,7 @@ function Book({
             </button>
           </Tooltip>
         )}
-        <p aria-hidden="true" className={`hidden px-1.5 text-xs text-muted ${inlineExplanationClass}`}>
+        <p id={hintId} aria-hidden="true" className={`hidden px-1.5 text-xs text-muted ${inlineExplanationClass}`}>
           {shown.switchHint}
         </p>
       </div>

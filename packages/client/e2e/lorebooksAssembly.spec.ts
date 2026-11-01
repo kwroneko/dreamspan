@@ -135,11 +135,11 @@ for (const width of [1440, 390])
       const shoot = await setUp(page, width, theme)
       await page.goto(`${server().url}/chats/${ariaChat}`)
       const tab = await openPanel(page, "Lorebooks")
-      // Every book the chat reads, in one list; ST's global book is global here.
+      // Every book the chat reads, in one list; ST's global book is sent by ST's selected preset.
       const books = tab.getByRole("list", { name: "Lorebooks in this chat" })
       await expect(books).toContainText("Aria Vance's own lorebook")
       await expect(books.getByRole("switch", { name: /^Harbor Almanac/ })).toBeChecked()
-      await expect(books).toContainText("Global: used in every chat")
+      await expect(books).toContainText("From the preset Celia 4.2")
       // Where entries go: one setting for the chat's books, with its why a click away.
       const placement = tab.getByRole("group", { name: "Where entries go" })
       const below = placement.getByRole("button", { name: "Below the history" })

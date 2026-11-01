@@ -204,6 +204,8 @@ for (const [width, scheme] of [
 
     // Search and replace in the keys only.
     await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
+    // On a phone "Look in" folds behind Options with the other options.
+    if (width < 640) await editor.getByRole("button", { name: /^Options/ }).click()
     await editor.getByRole("button", { name: "Keys", exact: true }).click()
     await editor.getByRole("textbox", { name: "Find" }).fill("lamp")
     await editor.getByRole("textbox", { name: "Replace with" }).fill("torch")

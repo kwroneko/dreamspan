@@ -82,6 +82,7 @@ export function Switch({
   children,
   description,
   hint,
+  describedBy,
   disabled = false
 }: {
   checked: boolean
@@ -90,6 +91,8 @@ export function Switch({
   description?: ReactNode
   /** What switching it on or off does, when the label doesn't say. */
   hint?: string | undefined
+  /** An explanation shown elsewhere (a row's own line), read as its description. */
+  describedBy?: string | undefined
   disabled?: boolean
 }) {
   const id = useId()
@@ -100,7 +103,7 @@ export function Switch({
         disabled={disabled}
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
-        {...(hint ? { "aria-describedby": id } : {})}
+        {...(hint ? { "aria-describedby": id } : describedBy ? { "aria-describedby": describedBy } : {})}
         className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />

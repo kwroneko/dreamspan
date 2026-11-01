@@ -92,10 +92,11 @@ export function SearchDialog({
   const [caseSensitive, setCaseSensitive] = useState(false)
   // On a phone the options fold away, so the sticky bar leaves room for the document.
   const [options, setOptions] = useState(false)
-  const chosen = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
+  const chosenOptions = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
   const [scope, setScope] = useState(() => (scopes ? rememberedScope(scopes) : ""))
+  const chosen = chosenOptions + (scopes && scope !== scopes.initial ? 1 : 0)
   const fieldsOf = (doc: Parameters<typeof searchable>[1], entries?: Parameters<typeof searchable>[2]) =>
     inScope(searchable(store.snapshot!.ref.kind, doc, entries), scopes, scope)
 
@@ -193,7 +194,10 @@ export function SearchDialog({
           <Input value={replace} onChange={(event) => setReplace(event.currentTarget.value)} />
         </Field>
         {scopes && (
-          <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-2">
+          // On a phone it folds behind Options with the others, keeping the sticky bar short.
+          <div
+            className={`col-span-2 min-w-0 flex-wrap items-center gap-2 ${inline ? `${options ? "flex" : "hidden"} sm:flex` : "flex"}`}
+          >
             <span className="text-sm text-muted">Look in</span>
             <Segmented
               label="Look in"
