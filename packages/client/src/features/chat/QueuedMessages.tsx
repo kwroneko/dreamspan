@@ -49,6 +49,7 @@ function QueueEditor({
       )}
       {view.conflict && <ReplayNotice conflict={view.conflict} acknowledge={() => editor.acknowledgeConflict()} />}
       <Textarea
+        textActions
         aria-label="Queued message"
         value={view.text}
         onChange={(event) => editor.setText(event.currentTarget.value)}

@@ -228,6 +228,8 @@ export function TextField({
         ) : (
           <Textarea
             {...props}
+            // Prose has them; a pattern (mono) doesn't.
+            textActions={!mono}
             rows={rows}
             className={`resize-y ${props.className}`}
             onChange={(event) => store.setText(path, event.currentTarget.value)}

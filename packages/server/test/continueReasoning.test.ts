@@ -428,7 +428,7 @@ describe("continue and reasoning", () => {
       assert.strictEqual(last!.role, "user")
       assert.deepStrictEqual(
         last!.sources.map((s) => s.label),
-        ["End of request: when you continue a reply", "End of request: when you give a direction"]
+        ["End of request: when you continue a reply", "End of request: when you give guidance"]
       )
       assert.isNull(partial!.prefill ?? null)
       assert.isFalse(run.issues.some((issue) => issue.kind === "prefill_dropped"))

@@ -348,7 +348,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
           title={`Recovered from ${source}`}
           description="Copy what you need: it isn't put back anywhere by itself."
         >
-          <Textarea aria-label="Recovered text" readOnly rows={10} value={full} />
+          <Textarea textActions aria-label="Recovered text" readOnly rows={10} value={full} />
           <DialogActions>
             <Button onClick={() => setFull(null)}>Close</Button>
             <Button

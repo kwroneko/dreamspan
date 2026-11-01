@@ -130,12 +130,13 @@ export const formText = (form: HTMLFormElement, name: string) => {
 }
 
 /**
- * A text box with the editor's text actions under it (Send to snippet, say); `textActions={false}`
- * for a box of settings rather than text (a list of URLs).
+ * A text box; `textActions` for prose (a message, an instruction, an entry's text) puts the
+ * editor's text actions under it (Send to snippet, say) while it has focus. A box of settings,
+ * keys, tags, patterns or addresses has none (owner, 2026-11-01).
  */
 export function Textarea({
   className = "",
-  textActions = true,
+  textActions = false,
   ...props
 }: ComponentProps<"textarea"> & { textActions?: boolean }) {
   const [text, setText] = useState({ value: "", selection: "" })
@@ -180,7 +181,7 @@ export function Textarea({
           />
         }
       />
-      <EditorTextActions text={value} selection={selection} />
+      <EditorTextActions text={value} selection={selection} shown={focused} />
     </div>
   )
 }

@@ -292,12 +292,7 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
           description="One URL per line. Only the scheme, host and port count."
           error={bad.length > 0 ? `Not a URL: ${bad.join(", ")}` : null}
         >
-          <Textarea
-            value={urls}
-            onChange={(event) => setUrls(event.target.value)}
-            spellCheck={false}
-            textActions={false}
-          />
+          <Textarea value={urls} onChange={(event) => setUrls(event.target.value)} spellCheck={false} />
         </Field>
         <ErrorAlert error={action.error} title="The key wasn't saved" />
         <DialogActions>

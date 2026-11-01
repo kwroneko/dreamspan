@@ -116,7 +116,7 @@ export function MessageDirection({ entry, session }: { entry: PathEntry; session
   return (
     <div className="flex items-start gap-1 text-xs text-muted">
       <p className="min-w-0 flex-1 pt-1.5 wrap-break-word">
-        <span className="font-medium">Direction:</span> {version.direction}
+        <span className="font-medium">Guidance:</span> {version.direction}
       </p>
       <Tooltip label="Puts this guidance in the composer to change it: sending writes a new version of this reply with it. This version and its guidance stay as they are.">
         <Button

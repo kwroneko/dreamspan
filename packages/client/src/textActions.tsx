@@ -75,29 +75,36 @@ export const editorTextActions = (
   })
 
 /**
- * The editor's own text-action bar, under its box. The selection's actions come and go with
- * the selection; on a phone the OS's selection menu floats at the selection, never down here.
+ * The editor's own text-action bar, under its box, only while the editor has focus (`shown`)
+ * or a selection: hidden, it takes no room. It takes the room below the box, so what moves when
+ * it comes and goes is what's under the editor, never the text in it. Only prose editors have one
+ * (the message editor, card text, prompts, notes, summaries; owner, 2026-11-01): a box of
+ * settings, keys, tags, names, patterns, numbers or addresses doesn't. The selection's actions
+ * come and go with the selection; on a phone the OS's selection menu floats at the selection,
+ * never down here.
  */
 export function EditorTextActions({
   text,
   selection,
+  shown,
   source,
   className = ""
 }: {
   text: string
   selection: string
+  shown: boolean
   source?: "snippet" | undefined
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
   const offered = editorTextActions(snapshot.entries, text, selection, source)
-  if (offered.length === 0) return null
+  if (offered.length === 0 || !(shown || selection)) return null
   return (
     <div
       data-text-tool
       role="toolbar"
       aria-label="Text actions"
-      className={`flex flex-wrap items-center justify-end gap-1 ${selection ? "" : "invisible group-focus-within/text:visible group-hover/text:visible"} ${className}`}
+      className={`flex flex-wrap items-center justify-end gap-1 ${className}`}
     >
       {offered.map(({ action, context }) => (
         <Tooltip
