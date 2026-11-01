@@ -34,6 +34,7 @@ import {
   Credential,
   CredentialId,
   Model,
+  ModelUse,
   ModelId,
   ModelOverrides,
   ProviderKind,
@@ -245,6 +246,8 @@ export class AppApi extends RpcGroup.make(
     success: Schema.Array(Model),
     error: Schema.Union([...StorageErrors])
   }),
+  /** When each of the user's models last wrote a reply, for the model picker's Last used. */
+  Rpc.make("ListModelUse", { success: Schema.Array(ModelUse), error: ServerError }),
   Rpc.make("AddUserModel", {
     payload: { connectionId: ConnectionId, key: Schema.String, overrides: ModelOverrides },
     success: Model,

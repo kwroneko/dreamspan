@@ -2,7 +2,7 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { ConnectionForRequest, type ReadOps } from "./ops.ts"
-import type { CredentialId } from "@rp/shared/providers.ts"
+import { type CredentialId, ModelUse } from "@rp/shared/providers.ts"
 import {
   connectionColumns,
   connectionFrom,
@@ -114,6 +114,25 @@ export const makeProviderReadHandlers = Effect.gen(function* () {
           AND (${includeHidden ? 1 : 0} = 1 OR hidden = 0) ORDER BY model_key`
         return rows.map(toModel)
       }).pipe(query("ListModels")),
+
+    // The owner index bounds the rows to the user's own requests.
+    ListModelUse: ({ userId }) =>
+      sql<{ connection_id: string; model_id: string; at: number }>`
+        SELECT connection_id, model_id, max(started_at) AS at FROM llm_requests INDEXED BY llm_requests_owner
+        WHERE owner_user_id = ${userId} AND purpose = 'generation' AND model_id IS NOT NULL
+        GROUP BY connection_id, model_id`.pipe(
+        Effect.map((rows) =>
+          rows.map(
+            (row) =>
+              new ModelUse({
+                connectionId: row.connection_id as ModelUse["connectionId"],
+                modelId: row.model_id as ModelUse["modelId"],
+                lastUsedAt: row.at
+              })
+          )
+        ),
+        query("ListModelUse")
+      ),
 
     GetModel: ({ userId, modelId }) => ownedModel(userId, modelId).pipe(Effect.map(toModel), query("GetModel")),
 

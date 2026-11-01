@@ -292,6 +292,16 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),
+  /**
+   * Archives a library entry, or takes it out of the archive: archived ones are left out of the
+   * lists (an Archived view shows them), nothing is deleted, and one in use stays in use.
+   * `EditRefused` for a chat's own copy.
+   */
+  Rpc.make("SetRefArchived", {
+    payload: { refId: RefId, archived: Schema.Boolean },
+    success: LibraryRef,
+    error: Schema.Union([...Writes])
+  }),
   /** The user allows (or stops) a preset's regex scripts, as ST asks once per preset (ARCHITECTURE.md §9). */
   Rpc.make("SetRegexApproval", {
     payload: { refId: RefId, approved: Schema.Boolean, expectedRowVersion: Schema.Int },

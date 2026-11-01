@@ -6,7 +6,7 @@ interface Used {
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 
 /** "5 minutes ago", "yesterday", "3 weeks ago", "last year". */
-const formatAgo = (at: number, now = Date.now()) => {
+export const formatAgo = (at: number, now = Date.now()) => {
   const elapsed = now - at
   if (elapsed < 60_000) return "just now"
   // Days count calendar days, so last night is "yesterday" this morning.

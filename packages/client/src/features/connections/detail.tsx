@@ -1,4 +1,5 @@
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { selectablePresets } from "../pickers/presetList.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { useEffect } from "react"
@@ -50,9 +51,20 @@ const draftOf = (connection: Connection): SettingsDraft => ({
 
 export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
   const action = useAction()
-  const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
+  const [presets, setPresets] = useState<{ live: ReadonlyArray<LibraryRef>; archived: ReadonlyArray<LibraryRef> }>({
+    live: [],
+    archived: []
+  })
   useEffect(() => {
-    void action.run((client) => Effect.map(client("ListLibrary", { kind: "preset" }), setPresets))
+    void action.run((client) =>
+      Effect.map(
+        Effect.all({
+          live: client("ListLibrary", { kind: "preset" }),
+          archived: client("ListLibrary", { kind: "preset", archived: true })
+        }),
+        setPresets
+      )
+    )
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const durable = useUserDraft(`connection:${connection.id}`, "Settings", JSON.stringify(draftOf(connection)))
   const values: SettingsDraft = JSON.parse(durable.text)
@@ -142,7 +154,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           <Select
             items={[
               { value: "none", label: "No lock" },
-              ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
+              ...selectablePresets(presets.live, presets.archived, values.preset)
             ]}
             value={values.preset}
             onValueChange={(preset) => edit({ preset })}

@@ -53,10 +53,13 @@ it("offers each kind its own actions, a lorebook an Edit, a newly made fork no u
     expect(ids({ ...card, entry: ref({ hasImport: false }) })).not.toContain("library.update")
     // Every kind opens in its editor's page, a lorebook too.
     expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])
+    // A preset has its archive button beside Edit, as in the preset pickers.
     expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "variant" }) })).toEqual([
       "library.edit",
+      "library.archive",
       "library.export"
     ])
+    expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "chat_override" }) })).not.toContain("library.archive")
   } finally {
     for (const undo of dispose) undo()
   }

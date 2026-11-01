@@ -63,6 +63,13 @@ export class NotContinuable extends Schema.TaggedError<NotContinuable>()("NotCon
 export const ReasoningDisplay = Schema.Literals(["expanded", "collapsed"])
 export type ReasoningDisplay = typeof ReasoningDisplay.Type
 
+/**
+ * The sorts of a preset list: by name (A–Z), last modified, last used. The list's fourth view,
+ * Archived, isn't one: it always sorts by most recently archived and is never remembered.
+ */
+export const PresetSort = Schema.Literals(["name", "modified", "used"])
+export type PresetSort = typeof PresetSort.Type
+
 /** The user's display choices that follow them across devices (`user_prefs`). */
 const messageColor = Schema.NullOr(Schema.String.check(Schema.isPattern(/^#[\da-f]{6}$/i)))
 const displayFields = {
@@ -78,7 +85,11 @@ const displayFields = {
   displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   enterSends: Schema.Literals(["automatic", "always", "never"]),
-  guidance: Schema.Boolean
+  guidance: Schema.Boolean,
+  /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
+  presetSort: PresetSort,
+  /** How model lists sort (the composer's picker and the Model tab's). */
+  modelSort: Schema.Literals(["name", "used"])
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -94,7 +105,9 @@ export const DisplayPrefsChange = Schema.Struct({
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   enterSends: Schema.optionalKey(displayFields.enterSends),
-  guidance: Schema.optionalKey(displayFields.guidance)
+  guidance: Schema.optionalKey(displayFields.guidance),
+  presetSort: Schema.optionalKey(displayFields.presetSort),
+  modelSort: Schema.optionalKey(displayFields.modelSort)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -109,7 +122,9 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   outputMacros: false,
   displayRegex: true,
   enterSends: "automatic",
-  guidance: false
+  guidance: false,
+  presetSort: "name",
+  modelSort: "name"
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

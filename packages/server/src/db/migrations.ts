@@ -10,10 +10,36 @@ const runAll = (statements: ReadonlyArray<string>) =>
     for (const statement of statements) yield* sql.unsafe(statement)
   })
 
-// Migrations run in the writer worker, before any reader connection is opened.
-// While no one uses the app the schema is edited in the baseline and the deploy starts fresh.
+/**
+ * When each preset was last used for a reply (`entity_refs.last_used_at`, which `StartRollout`
+ * records from then on), from the generations already made: the latest whose context snapshot
+ * names the ref, and for a chat's own copy the entry it follows too. Data only: the column is
+ * in the baseline, so a database kept across deploys takes it.
+ */
+const presetLastUsed = [
+  `WITH used AS (
+     SELECT json_extract(p.context_snapshot_json, '$.inputs.preset.ref') AS ref_id, r.created_at, c.owner_user_id
+     FROM rollouts r JOIN rollout_payloads p ON p.rollout_id = r.id JOIN chats c ON c.id = r.chat_id
+     WHERE r.kind = 'generation' AND p.context_snapshot_json IS NOT NULL
+   ), targets AS (
+     SELECT u.ref_id AS id, u.created_at, u.owner_user_id FROM used u WHERE u.ref_id IS NOT NULL
+     UNION ALL
+     SELECT o.follows_ref_id, u.created_at, u.owner_user_id FROM used u
+     JOIN entity_refs o ON o.id = u.ref_id AND o.ref_kind = 'chat_override'
+   ), latest AS (
+     SELECT t.id, max(t.created_at) AS at FROM targets t
+     JOIN entity_refs r ON r.id = t.id JOIN entities e ON e.id = r.entity_id AND e.owner_user_id = t.owner_user_id
+     GROUP BY t.id
+   )
+   UPDATE entity_refs SET last_used_at = (SELECT at FROM latest WHERE latest.id = entity_refs.id)
+   WHERE id IN (SELECT id FROM latest) AND (last_used_at IS NULL OR last_used_at < (SELECT at FROM latest WHERE latest.id = entity_refs.id))`
+]
+
+// Migrations run in the writer worker, before any reader connection is opened. The baseline is
+// the schema; databases are kept across deploys, so what comes after it must apply to one.
 export const migrations = {
-  "0001_baseline": runAll(baseline)
+  "0001_baseline": runAll(baseline),
+  "0002_preset_last_used": runAll(presetLastUsed)
 }
 
 /**
