@@ -366,7 +366,7 @@ describe("the insertion editor's lines and speaker", () => {
       preset: null,
       lorebooks: [],
       cardLorebooksOff: [],
-      globalLorebooksOff: [],
+      listedLorebooks: [],
       loreBelowHistory: true,
       macroBindings: {},
       macroNames: { user: "Tobin", char: "Mira" },

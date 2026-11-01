@@ -752,6 +752,19 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
               doc = encode(card)
             }
           }
+          // ST's global World Info books, sent with the preset ST had selected (§13): the user's
+          // live library lorebooks among them, in the order given, each on.
+          const lorebookIds = kind === "preset" ? [...new Set(input.presetLorebooks ?? [])] : []
+          if (lorebookIds.length > 0) {
+            const live = new Set(
+              (yield* sql<{ id: string }>`
+                SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+                WHERE ${sql.in("r.id", lorebookIds)} AND e.owner_user_id = ${userId} AND e.kind = 'lorebook'
+                  AND e.deleted_at IS NULL AND r.ref_kind <> 'chat_override'`).map((row) => row.id)
+            )
+            const lorebooks = lorebookIds.filter((id) => live.has(id)).map((id) => ({ id, enabled: true }))
+            if (lorebooks.length > 0) doc = encode({ ...(JSON.parse(doc.json) as Doc), lorebooks })
+          }
           const source: ImportSource = {
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
             sourcePath: input.sourceName,

@@ -946,22 +946,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
       })
   },
-  GetGlobalLorebooks: {
+  LorebookPresets: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        assert.include(yield* owner.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), owner.loreRefId)
-        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
-      })
-  },
-  SetGlobalLorebook: {
-    probe: (actor, owner) =>
-      Effect.gen(function* () {
-        const before = yield* owner.api.GetGlobalLorebooks()
-        yield* refused(actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), "NotFound")
-        // Taking another user's book off the caller's own list touches nothing of theirs.
-        yield* actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: false })
-        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
-        assert.deepStrictEqual(yield* owner.api.GetGlobalLorebooks(), before)
+        // The owner's preset lists the owner's book; asked by another user, no preset of theirs shows.
+        const listed = (presets: ReadonlyArray<{ readonly refId: string }>) => presets.map((p) => p.refId)
+        assert.include(listed(yield* owner.api.LorebookPresets({ ref: owner.loreRefId })), owner.refId)
+        assert.deepStrictEqual(yield* actor.api.LorebookPresets({ ref: owner.loreRefId }), [])
+        assert.notInclude(listed(yield* actor.api.LorebookPresets({ ref: actor.loreRefId })), owner.refId)
       })
   },
   GetGlobalRegex: {
@@ -1908,6 +1900,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
             }),
             "NotFound"
           )
+        yield* refused(
+          actor.api.ChangeCast({
+            chatId: actor.chat.chatId,
+            slotId: null,
+            change: { _tag: "RemoveLorebook", ref: owner.loreRefId }
+          }),
+          "NotFound"
+        )
         // Their chat's note, or their card's, turned on in the actor's own chat.
         for (const note of [owner.chat.noteEntityId, owner.editor.noteEntityId]) {
           yield* refused(
@@ -3084,22 +3084,23 @@ const seed = Effect.gen(function* () {
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
       // No RPC writes these yet.
-      const { ref } = yield* writer.CreateEntity({
-        userId: user.id,
-        kind: "preset",
-        label: "Preset",
-        subtitle: "",
-        doc: presetDoc(),
-        schemaVersion: 1,
-        origin: "user",
-        sourcePath: null
-      })
       const lore = yield* writer.CreateEntity({
         userId: user.id,
         kind: "lorebook",
         label: "Lore",
         subtitle: "",
         doc: docFor("lorebook", "Lore"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      // The preset lists the user's lorebook (`LorebookPresets`).
+      const { ref } = yield* writer.CreateEntity({
+        userId: user.id,
+        kind: "preset",
+        label: "Preset",
+        subtitle: "",
+        doc: { ...presetDoc(), lorebooks: [{ id: lore.ref.id, enabled: true }] },
         schemaVersion: 1,
         origin: "user",
         sourcePath: null

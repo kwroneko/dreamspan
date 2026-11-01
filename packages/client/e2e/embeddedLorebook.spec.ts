@@ -6,6 +6,7 @@ import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
 import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openEntry, openSettings } from "./support/lorebook.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
@@ -63,7 +64,8 @@ for (const width of [1440, 390]) {
     const entry = page.getByRole("group", { name: "Lorebook entry 7", exact: true })
     // Rows stay closed until opened; large books do not mount every text editor.
     await expect(page.getByRole("group", { name: /^Lorebook entry/ })).toHaveCount(0)
-    const open = (title: string) => page.getByRole("button", { name: `Open ${title}`, exact: true }).click()
+    // A reload keeps open the entries that were: this browser remembers them.
+    const open = (title: string) => openEntry(page, title)
     await open("Tides")
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     await open("Lamp")
@@ -97,6 +99,8 @@ for (const width of [1440, 390]) {
     await expect(history).toHaveCount(0)
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     await entry.getByRole("textbox", { name: "Entry content" }).fill("The tide turns at dawn.")
+    // Everything but the text and primary keys is under the entry's Settings.
+    await openSettings(entry)
     await entry.getByRole("switch", { name: /^Use secondary keys/ }).click()
     await entry.getByRole("textbox", { name: "Secondary keys" }).fill("storm\nwind")
     await entry.getByRole("combobox", { name: "Logic" }).click()
@@ -136,6 +140,8 @@ for (const width of [1440, 390]) {
     await page.getByRole("textbox", { name: "Title of Untitled entry", exact: true }).fill("Gulls")
     await added.getByRole("textbox", { name: "Primary keys" }).fill("gull")
     await added.getByRole("textbox", { name: "Entry content" }).fill("Gulls gather on the quay.")
+    // On a phone the row is a compact header: its columns are in the entry's Settings.
+    if (width === 390) await openSettings(added)
     await page.getByRole("combobox", { name: "Strategy of Gulls", exact: true }).selectOption("constant")
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).fill("37")
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).blur()

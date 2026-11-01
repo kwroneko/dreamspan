@@ -15,7 +15,7 @@ import { tempDir } from "./support/tempDir.ts"
 
 describe("assembly over a realistic ST folder", () => {
   it.live(
-    "marks ST's global book global, and fills one-card and group chats with the card prompts the preset allows",
+    "attaches ST's global book to ST's selected preset, and fills one-card and group chats with the card prompts the preset allows",
     () =>
       Effect.gen(function* () {
         const root = tempDir("st-realistic-assembly")
@@ -56,14 +56,22 @@ describe("assembly over a realistic ST folder", () => {
         const reader = yield* Reader
         const me = yield* api.Whoami()
         const userId = me.id as UserId
-        // ST's globalSelect: the book is the user's global, which its switch shows; the report
-        // names only the book that wasn't in the folder (DESIGN §1.4).
+        // ST's globalSelect: the book goes with the preset ST had selected, which the report
+        // says, and names the book that wasn't in the folder (DESIGN §1.4).
         const books = yield* api.ListLibrary({ kind: "lorebook" })
         const almanac = books.find((b) => b.label === "Harbor Almanac")!
-        assert.deepStrictEqual([...(yield* api.GetGlobalLorebooks())], [almanac.id])
+        assert.deepStrictEqual(
+          (yield* api.LorebookPresets({ ref: almanac.id })).map((p) => [p.label, p.enabled]),
+          [["Celia 4.2", true]]
+        )
         assert.deepStrictEqual(
           report.issues.filter((i) => i.path === "settings.json").map((i) => [i.level, i.code, i.message]),
           [
+            [
+              "info",
+              "st.global_worlds_attached",
+              "Attached ST's global World Info book “Harbor Almanac” to the preset “Celia 4.2”."
+            ],
             [
               "warning",
               "st.global_world_missing",

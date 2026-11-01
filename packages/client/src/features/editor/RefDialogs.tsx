@@ -147,7 +147,16 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
  * A library entry's name, renamed in place (pencil, then the field with Save and Cancel): the
  * library label of a preset, lorebook or note. A card's name is its revision's own field.
  */
-export function RefName({ store, children }: { store: EditorStore; children?: ReactNode }) {
+export function RefName({
+  store,
+  children,
+  onRenamed
+}: {
+  store: EditorStore
+  children?: ReactNode
+  /** After the rename: a lorebook's document takes the name too, as a change of the book. */
+  onRenamed?: (label: string) => void
+}) {
   const ref = useEditorState(store).snapshot!.ref
   const action = useAction()
   return (
@@ -166,7 +175,10 @@ export function RefName({ store, children }: { store: EditorStore; children?: Re
               }),
             ["library"]
           )
-          if (result.ok) await store.refresh()
+          if (result.ok) {
+            onRenamed?.(label)
+            await store.refresh()
+          }
           return result.ok
         }}
       >

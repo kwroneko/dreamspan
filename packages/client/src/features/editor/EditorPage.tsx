@@ -42,8 +42,12 @@ import { SaveRevision } from "./SaveRevision.tsx"
 import { revisionState } from "../../ui/SaveControls.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
+import { lorebookScopes, presetScopes } from "./searchScopes.ts"
+import { BookName } from "./LorebookPanelEditor.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
 import { UpdateDialog } from "./UpdateDialog.tsx"
+
+const CARD_BOOK = ["character_book"]
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
 
@@ -60,8 +64,8 @@ const usedBy = (chats: number, some: string | null) =>
       : `Used by ${chats} chats: what you change here is used in all of them as you type.${some ? ` To change it in some only, ${some}.` : ""}`
 
 /**
- * A lorebook's line: the chats it was added to. A global one is read in every chat besides,
- * which its "Use in every chat" switch just below says (`LorebookUse`).
+ * A lorebook's line: the chats it was added to. The presets that send it are listed just below
+ * it (`LorebookUse`).
  */
 const addedTo = (chats: number) =>
   chats === 0
@@ -223,13 +227,33 @@ export function Editor({
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
 
+  /**
+   * A preset's and a lorebook's search sits in the sticky bar, with what it looks in (owner,
+   * 2026-11-01: text, names or keys, or both); other editors use the dialog.
+   */
+  const scopes =
+    ref.kind === "preset"
+      ? presetScopes
+      : ref.kind === "lorebook"
+        ? lorebookScopes([])
+        : bookOnly
+          ? lorebookScopes(CARD_BOOK)
+          : undefined
   /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
   const overPreset = onClose !== undefined && ref.kind === "preset"
   /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
   const title = (size: string) => (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
-        {bookOnly ? bookTitle : ref.kind === "card" ? ref.label : <RefName store={store} />}
+        {bookOnly ? (
+          <BookName store={store} root={CARD_BOOK} fallback={`${ref.label}'s lorebook`} />
+        ) : ref.kind === "card" ? (
+          ref.label
+        ) : ref.kind === "lorebook" ? (
+          <BookName store={store} root={[]} fallback={ref.label} />
+        ) : (
+          <RefName store={store} />
+        )}
       </h1>
       {(ref.kind !== "card" || bookOnly) && <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>}
       {ref.kind === "card" && !bookOnly && <CardFavourite entityId={ref.entityId} />}
@@ -344,7 +368,7 @@ export function Editor({
               compact
               onSaved={(saved) => setNotice(savedNotice(saved))}
             />
-            {ref.kind !== "preset" && (
+            {!scopes && (
               <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
                 Search
               </Button>
@@ -397,13 +421,17 @@ export function Editor({
               <p role="status" className="text-sm text-muted">
                 {state.saving ? "Keeping your changes…" : revisionState(store.revisionNumber, dirty > 0)}
               </p>
-              {ref.kind === "preset" && (
+              {scopes && (
                 <Button
                   variant="ghost"
                   className="h-7! shrink-0 px-2!"
                   aria-expanded={searching}
                   aria-controls="preset-search"
-                  hint="Find and replace text anywhere in the preset."
+                  hint={
+                    ref.kind === "preset"
+                      ? "Find and replace in the prompts' text, their names, or anywhere in the preset."
+                      : "Find and replace in the entries' text, their keys, or anywhere in the book."
+                  }
                   onClick={() => setSearching(!searching)}
                 >
                   <Icon name="search" />
@@ -418,9 +446,9 @@ export function Editor({
             </p>
           )}
           {ref.kind === "preset" && <HeldChangesBar store={store} />}
-          {ref.kind === "preset" && searching && (
+          {scopes && searching && (
             <div id="preset-search">
-              <SearchDialog store={store} inline onReveal={setSearchMatch} />
+              <SearchDialog store={store} inline scopes={scopes} onReveal={setSearchMatch} />
             </div>
           )}
         </div>

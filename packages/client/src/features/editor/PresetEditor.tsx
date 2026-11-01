@@ -4,6 +4,7 @@
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
 import { useState } from "react"
 import { PromptDocument } from "./PromptDocument.tsx"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { DocumentRegexScripts } from "./RegexScripts.tsx"
 import { presetEditorSections, presetEditorWarnings } from "./presetSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -67,6 +68,7 @@ export function PresetEditor({
   focus?: string | undefined
 }) {
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
+  const workspace = usePresetWorkspace()
   return (
     <>
       <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
@@ -75,7 +77,13 @@ export function PresetEditor({
           title="Prompts"
           description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
         />
-        <PromptDocument store={store} context={context} focus={focus} goTo={goTo} />
+        <PromptDocument
+          store={store}
+          context={context}
+          focus={focus}
+          goTo={goTo}
+          onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
+        />
       </Card>
       <PresetSettings store={store} call={call} />
     </>

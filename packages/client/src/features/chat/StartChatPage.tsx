@@ -325,7 +325,7 @@ function Pending({
     preset: null,
     lorebooks: [],
     cardLorebooksOff: [],
-    globalLorebooksOff: [],
+    listedLorebooks: [],
     loreBelowHistory: true,
     macroBindings: {},
     macroNames: {

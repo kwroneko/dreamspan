@@ -58,7 +58,7 @@ import {
   toModel
 } from "./providers.ts"
 import type { GenerationDefaults } from "@rp/shared/generation.ts"
-import { globalLorebookRefs, readDefaults, readGlobalRegex } from "./generationSettings.ts"
+import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { displayHistoryRevision, historyRevision } from "./historyChanges.ts"
 import { previousStartIn } from "./historyStart.ts"
 import {
@@ -360,7 +360,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
     history: [] as Array<SourcePins["history"][number]>,
     cards: [] as Array<SourcePins["cards"][number]>,
     lorebooks: [] as Array<NonNullable<SourcePins["lorebooks"]>[number]>,
-    globalLorebooks: [] as Array<string>,
     globalRegex: [] as NonNullable<SourcePins["globalRegex"]>,
     notes: [] as Array<SourcePins["notes"][number]>,
     messageCount: [] as Array<NonNullable<SourcePins["messageCount"]>[number]>,
@@ -676,10 +675,6 @@ export const sqlSources = (sql: SqlClient.SqlClient, settings: Settings, replay?
         }
       ),
 
-    globalLorebooks: Effect.map(globalLorebookRefs(sql, userId), (refs) => {
-      pins.globalLorebooks = [...refs]
-      return refs
-    }),
     globalRegex: Effect.map(readGlobalRegex(sql, userId), ({ scripts }) => {
       pins.globalRegex = [...scripts]
       return scripts
@@ -1034,8 +1029,6 @@ const replaySources = (
         )
       }),
 
-    // Absent in snapshots from before global books: there were none.
-    globalLorebooks: Effect.succeed(pins.globalLorebooks ?? []),
     globalRegex: Effect.succeed(pins.globalRegex ?? []),
 
     lorebooks: (refs) =>

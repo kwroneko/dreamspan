@@ -1,13 +1,17 @@
 // A lorebook's entries as a table, as SillyTavern's World Info editor shows them: one row per
 // entry with its switch, title and keys, and the registered columns (strategy, position,
-// depth, order, trigger %) edited in place; a row opens to the whole entry (EntryDetails).
-// Rows are virtualized, so a book of hundreds of entries stays fast; the order is fixed when
-// the search, filter or sort changes, so a row never jumps away while it's edited.
+// depth, order, trigger %) edited in place; a row opens to its text and keys, with the rest
+// under its Settings (EntryDetails). In the side panel and on a narrow screen a row is a compact
+// header instead: the keys under the title and a few badges for what matters most, the columns
+// moving into the entry's Settings. Rows are virtualized, so a book of hundreds of entries
+// stays fast; the order is fixed when the search, filter or sort changes, so a row never
+// jumps away while it's edited.
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { type FieldPath, getAt, parseField, valueField } from "@rp/shared/editing.ts"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   memo,
+  type ReactNode,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -18,14 +22,18 @@ import {
 } from "react"
 import type { Registry } from "../../registry.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
+import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { iconButtonClass } from "../../ui/Tooltip.tsx"
+import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { EntryDetails } from "./LorebookEntryDetails.tsx"
+import { EXPLAIN } from "./lorebookExplain.ts"
+import { applyMassChange, enableAllEdits } from "./lorebookMass.ts"
+import { MassEditDialog } from "./LorebookMassEdit.tsx"
+import { useOpenEntries } from "./lorebookOpen.ts"
 import {
   addEntry,
   arrangeEntries,
@@ -38,6 +46,8 @@ import {
   type LorebookEntryContext,
   lorebookEntryActions,
   lorebookSorts,
+  POSITIONS,
+  positionValue,
   uidOf
 } from "./lorebookTable.ts"
 import { SearchNavigation, useSearchMatch } from "./searchNavigation.ts"
@@ -69,8 +79,9 @@ function TitleCell({
   entry,
   title,
   uid,
-  onKeys
-}: LorebookEntryContext & { uid: number; onKeys: () => void }) {
+  onKeys,
+  badges
+}: LorebookEntryContext & { uid: number; onKeys: () => void; badges?: ReactNode }) {
   const titlePath = [...path, "comment"]
   const text = useText(store, titlePath)
   const match = useSearchMatch(titlePath)
@@ -96,21 +107,77 @@ function TitleCell({
         onChange={(event) => store.setText(titlePath, event.currentTarget.value)}
         onBlur={() => void store.save(JSON.stringify(titlePath))}
       />
-      <button
-        type="button"
-        onClick={onKeys}
-        className="mt-0.5 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-        aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
-      >
-        {keys ||
-          (entry.constant
-            ? "No keys · always included"
-            : entry.vectorized
-              ? "No keys · by similarity"
-              : "No keys · never matched")}
-      </button>
+      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+        <Tooltip label="Its primary keys: one appearing in the chat sends it. Click to open the entry at them.">
+          <button
+            type="button"
+            onClick={onKeys}
+            className="max-w-full min-w-0 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+            aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
+          >
+            {keys ||
+              (entry.constant
+                ? "No keys · always included"
+                : entry.vectorized
+                  ? "No keys · by similarity"
+                  : "No keys · never matched")}
+          </button>
+        </Tooltip>
+        {badges}
+      </div>
     </div>
   )
+}
+
+/** A short fact about an entry beside its keys, explained on hover. */
+function Chip({ label, hint, tone = "muted" }: { label: string; hint: string; tone?: "muted" | "accent" }) {
+  return (
+    <Tooltip label={hint}>
+      <span
+        className={`inline-flex h-5 max-w-full shrink-0 items-center truncate rounded-full border px-1.5 text-[11px] leading-none ${
+          tone === "accent" ? "border-accent/40 text-accent" : "border-border text-muted"
+        }`}
+      >
+        {label}
+      </span>
+    </Tooltip>
+  )
+}
+
+/**
+ * The essentials a compact header shows (owner, 2026-11-01: "minimal and/or clever"): a strategy
+ * that isn't the usual key match, where it goes (with its depth and, if not system, its role),
+ * a trigger % that isn't 100, and secondary keys only when they're used. Order, matching,
+ * groups, recursion and timing wait in the entry's Settings.
+ */
+function EntryBadges({ entry }: { entry: LorebookEntry }) {
+  const position = POSITIONS.find((item) => item.value === positionValue(entry))
+  const chips: Array<ReactNode> = []
+  if (entry.constant) chips.push(<Chip key="s" label="Constant" tone="accent" hint={EXPLAIN.constant} />)
+  else if (entry.vectorized) chips.push(<Chip key="s" label="Vector" tone="accent" hint={EXPLAIN.vectorized} />)
+  if (position)
+    chips.push(
+      <Chip
+        key="p"
+        label={
+          entry.position === "at_depth"
+            ? `@D ${entry.depth}${entry.role === "system" ? "" : ` ${entry.role}`}`
+            : position.short
+        }
+        hint={`${position.label}: ${position.description} ${EXPLAIN.position}`}
+      />
+    )
+  if (entry.use_probability && entry.probability < 100)
+    chips.push(<Chip key="t" label={`${entry.probability}%`} hint={EXPLAIN.probability} />)
+  if (entry.selective && entry.secondary_keys.length > 0)
+    chips.push(
+      <Chip
+        key="k"
+        label={`${entry.selective_logic.replace("_", " ").toUpperCase()}: ${entry.secondary_keys.join(", ")}`}
+        hint={EXPLAIN.selective_logic}
+      />
+    )
+  return chips.length > 0 ? <>{chips}</> : null
 }
 
 /**
@@ -170,12 +237,34 @@ interface RowProps {
   uid: number
   open: boolean
   wide: boolean
+  /** A compact header (the side panel, a narrow screen): badges, and the columns in Settings. */
+  compact: boolean
   card: boolean
   template: string
   columns: ReadonlyArray<LorebookColumn>
   actions: ReadonlyArray<LorebookEntryAction>
+  /** Selection mode: each row has its checkbox. */
+  selecting: boolean
+  selected: boolean
+  onSelect: (uid: number, selected: boolean) => void
   onToggle: (uid: number, open: boolean, focus?: "keys") => void
   onAction: (uid: number, action: LorebookEntryAction) => void
+}
+
+/** The row's columns, labelled, where its header doesn't show them: in the entry's Settings. */
+function Essentials({ columns, context }: { columns: ReadonlyArray<LorebookColumn>; context: LorebookEntryContext }) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-2">
+      {columns.map((column) => (
+        <label key={column.id} className="flex min-w-0 flex-col gap-0.5 text-xs text-muted">
+          {column.header}
+          <span style={{ width: column.width }} className="block text-sm text-text">
+            <column.cell {...context} />
+          </span>
+        </label>
+      ))}
+    </div>
+  )
 }
 
 const EntryRow = memo(function EntryRow({
@@ -184,10 +273,14 @@ const EntryRow = memo(function EntryRow({
   uid,
   open,
   wide,
+  compact,
   card,
   template,
   columns,
   actions,
+  selecting,
+  selected,
+  onSelect,
   onToggle,
   onAction
 }: RowProps) {
@@ -199,31 +292,57 @@ const EntryRow = memo(function EntryRow({
   const context: LorebookEntryContext = { store, root, entry, path, title }
   const toggleLabel = open ? `Close ${title}` : `Open ${title}`
   const chevron = (
-    <button
-      type="button"
-      aria-label={toggleLabel}
-      title={toggleLabel}
-      aria-expanded={open}
-      className={iconButtonClass()}
-      onClick={() => onToggle(uid, !open)}
-    >
-      <Icon name="down" className={`transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} />
-    </button>
+    <Tooltip label={open ? "Close the entry" : "Open the entry: its text and keys, and its settings below them"}>
+      <button
+        type="button"
+        aria-label={toggleLabel}
+        aria-expanded={open}
+        className={iconButtonClass()}
+        onClick={() => onToggle(uid, !open)}
+      >
+        <Icon
+          name="down"
+          className={`transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+    </Tooltip>
   )
+  // Explained on hover and focus only: a phone would otherwise repeat it under every entry.
   const enabled = (
-    <Switch checked={entry.enabled} onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}>
-      <span className="sr-only">{`${title} enabled`}</span>
-    </Switch>
+    <Tooltip label={EXPLAIN.enabled}>
+      <span className="inline-flex">
+        <Switch checked={entry.enabled} onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}>
+          <span className="sr-only">{`${title} enabled`}</span>
+        </Switch>
+      </span>
+    </Tooltip>
   )
-  const titleCell = <TitleCell {...context} uid={uid} onKeys={() => onToggle(uid, true, "keys")} />
+  const select = selecting && (
+    <Tooltip label="Selected entries change together: Change for selected…">
+      <span className="inline-flex pt-1.5">
+        <Checkbox checked={selected} onCheckedChange={(next) => onSelect(uid, next)}>
+          <span className="sr-only">{`Select ${title}`}</span>
+        </Checkbox>
+      </span>
+    </Tooltip>
+  )
+  const titleCell = (
+    <TitleCell
+      {...context}
+      uid={uid}
+      onKeys={() => onToggle(uid, true, "keys")}
+      badges={compact ? <EntryBadges entry={entry} /> : undefined}
+    />
+  )
   const menu = <RowActions context={context} actions={actions} onPick={(action) => onAction(uid, action)} />
   return (
     <div
-      className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""}`}
+      className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
-      {wide ? (
+      {!compact ? (
         <div className="grid items-start gap-2 px-1" style={{ gridTemplateColumns: template }}>
           <div className="flex items-center gap-1 pt-0.5">
+            {select}
             {chevron}
             <span className="pt-1">{enabled}</span>
           </div>
@@ -236,28 +355,24 @@ const EntryRow = memo(function EntryRow({
           <div className="flex justify-end">{menu}</div>
         </div>
       ) : (
-        <div className="flex flex-col gap-1.5 px-1">
-          <div className="flex items-start gap-1">
-            {chevron}
-            <span className="pt-1.5">{enabled}</span>
-            <div className="min-w-0 flex-1">{titleCell}</div>
-            {menu}
-          </div>
-          <div className="flex flex-wrap gap-x-2 gap-y-1.5 pl-9">
-            {columns.map((column) => (
-              <label key={column.id} className="flex min-w-0 flex-col gap-0.5 text-xs text-muted">
-                {column.header}
-                <span style={{ width: column.width }} className="block text-sm text-text">
-                  <column.cell {...context} />
-                </span>
-              </label>
-            ))}
-          </div>
+        <div className="flex items-start gap-1 px-1">
+          {select}
+          {chevron}
+          <span className="pt-1.5">{enabled}</span>
+          <div className="min-w-0 flex-1">{titleCell}</div>
+          {menu}
         </div>
       )}
       {open && (
         <div className="px-2 pt-3 pb-4 sm:px-3">
-          <EntryDetails store={store} root={root} uid={uid} wide={wide} card={card} />
+          <EntryDetails
+            store={store}
+            root={root}
+            uid={uid}
+            wide={wide && !compact}
+            card={card}
+            essentials={compact ? <Essentials columns={columns} context={context} /> : undefined}
+          />
         </div>
       )}
     </div>
@@ -276,7 +391,8 @@ function Rows({
   onFocused,
   searching,
   row,
-  opened
+  opened,
+  selected
 }: {
   uids: ReadonlyArray<number>
   scroller: HTMLElement | null
@@ -285,15 +401,16 @@ function Rows({
   onFocused: () => void
   /** A search visit focuses its own field. */
   searching: boolean
-  row: Omit<RowProps, "uid" | "open">
+  row: Omit<RowProps, "uid" | "open" | "selected">
   opened: ReadonlySet<number>
+  selected: ReadonlySet<number>
 }) {
   "use no memo"
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({
     count: uids.length,
     getScrollElement: () => scroller,
-    estimateSize: () => (row.wide ? 63 : 112),
+    estimateSize: () => (row.compact ? 66 : 63),
     overscan: 10,
     scrollMargin: margin,
     getItemKey: (index) => uids[index]!
@@ -326,7 +443,12 @@ function Rows({
           className="absolute top-0 left-0 w-full [contain:layout_style]"
           style={{ transform: `translateY(${item.start - margin}px)` }}
         >
-          <EntryRow {...row} uid={uids[item.index]!} open={opened.has(uids[item.index]!)} />
+          <EntryRow
+            {...row}
+            uid={uids[item.index]!}
+            open={opened.has(uids[item.index]!)}
+            selected={selected.has(uids[item.index]!)}
+          />
         </div>
       ))}
     </div>
@@ -379,13 +501,19 @@ export function LorebookTable({
   store,
   root,
   book,
-  added = null
+  added = null,
+  panel = false,
+  tools
 }: {
   store: EditorStore
   root: FieldPath
   book: LorebookDoc
   /** An entry added before the table showed (a card's first, which makes its book): shown open. */
   added?: number | null
+  /** The side panel's narrow column: compact headers, the toolbar folded tighter. */
+  panel?: boolean
+  /** Extra toolbar controls (the panel's search and replace toggle). */
+  tools?: ReactNode
 }) {
   const columns = useRegistry(lorebookColumns)
   const sorts = useRegistry(lorebookSorts)
@@ -394,7 +522,7 @@ export function LorebookTable({
   const [query, setQuery] = useState("")
   const [enabled, setEnabled] = useState<EnabledFilter>("all")
   const [sortId, setSortId] = useState("order")
-  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set(added === null ? [] : [added]))
+  const [opened, setOpened] = useOpenEntries(store.refId, root, added)
   // Entries just added or duplicated lead the table, newest first, until the search, filter
   // or sort changes: a second one doesn't push the first away to its sorted place.
   const [pinned, setPinned] = useState<ReadonlyArray<number>>(added === null ? [] : [added])
@@ -402,6 +530,11 @@ export function LorebookTable({
     added === null ? null : { uid: added, at: "title" }
   )
   const [dialog, setDialog] = useState<{ uid: number; action: ComponentType<LorebookActionProps> } | null>(null)
+  // Selection mode, for "Change for selected…".
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
+  const [massEdit, setMassEdit] = useState(false)
+  const [busy, setBusy] = useState(false)
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
 
   // The order is worked out when what decides it changes, not on every edit.
@@ -467,8 +600,9 @@ export function LorebookTable({
     measure()
     return () => observer.disconnect()
   }, [])
-  const wide = width === 0 || width >= WIDE
-  const template = `4.5rem minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 2.25rem`
+  const wide = width === 0 ? !panel : width >= WIDE
+  const compact = panel || !wide
+  const template = `${selecting ? "6.25rem" : "4.5rem"} minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 2.25rem`
 
   const toggle = (uid: number, open: boolean, at?: "keys") => {
     setOpened((set) => {
@@ -494,6 +628,25 @@ export function LorebookTable({
     const title = store.text([...path, "comment"]) || "Untitled entry"
     action.run?.({ store, root, entry, path, title, book: store.value(root) as LorebookDoc, reveal })
   }
+  const select = (uid: number, next: boolean) =>
+    setSelected((set) => {
+      const copy = new Set(set)
+      if (next) copy.add(uid)
+      else copy.delete(uid)
+      return copy
+    })
+  /** Every entry's own switch at once: the book itself stays on (owner, 2026-11-01). */
+  const switchAll = async (on: boolean) => {
+    setBusy(true)
+    const edits = enableAllEdits(store, root, on)
+    const count = new Set(edits.map((edit) => String(edit.path.at(-2)))).size
+    await applyMassChange(
+      store,
+      `${on ? "Enabled" : "Disabled"} ${count === book.entries.length ? "all " : ""}${entriesLabel(count)}`,
+      edits
+    )
+    setBusy(false)
+  }
 
   const savedUids = ((getAt(store.head, [...root, "entries"]) ?? []) as ReadonlyArray<LorebookEntry>).map(
     (entry) => entry.uid
@@ -501,6 +654,8 @@ export function LorebookTable({
   const removed = savedUids.filter((uid) => !book.entries.some((entry) => entry.uid === uid))
   const dialogEntry = dialog ? (store.value(entryPath(root, dialog.uid)) as LorebookEntry | undefined) : undefined
   const filtered = query.trim() !== "" || enabled !== "all"
+  const live = book.entries.filter((entry) => selected.has(entry.uid)).map((entry) => entry.uid)
+  const small = panel ? "h-8! px-2!" : "h-8! px-2.5!"
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -508,6 +663,8 @@ export function LorebookTable({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
+            className={panel ? small : ""}
+            hint="A new entry at the top, open, with its title ready to type."
             onClick={() => {
               const uid = addEntry(store, root, book)
               reveal(uid)
@@ -517,18 +674,22 @@ export function LorebookTable({
             Add entry
           </Button>
           {/* Wide enough for its placeholder: on a phone it takes its own line. */}
-          <div className="min-w-[16rem] flex-1">
-            <Input
-              type="search"
-              aria-label="Search titles, keys and content"
-              placeholder="Search titles, keys and content"
-              value={query}
-              onChange={(event) => {
-                setPinned([])
-                setQuery(event.currentTarget.value)
-              }}
-            />
+          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} flex-1`}>
+            <Tooltip label="Shows only the entries whose title, keys or text have every word typed. Search and replace changes text.">
+              <Input
+                type="search"
+                aria-label="Filter by titles, keys and content"
+                placeholder={panel ? "Filter entries" : "Filter by titles, keys and content"}
+                className={panel ? "h-8!" : ""}
+                value={query}
+                onChange={(event) => {
+                  setPinned([])
+                  setQuery(event.currentTarget.value)
+                }}
+              />
+            </Tooltip>
           </div>
+          {tools}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented
@@ -539,14 +700,14 @@ export function LorebookTable({
               setEnabled(next)
             }}
             options={[
-              { value: "all", label: "All" },
-              { value: "on", label: "Enabled" },
-              { value: "off", label: "Disabled" }
+              { value: "all", label: "All", description: "Every entry." },
+              { value: "on", label: "Enabled", description: "Only entries whose switch is on." },
+              { value: "off", label: "Disabled", description: "Only entries whose switch is off." }
             ]}
           />
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted">Sort by</span>
-            <div className="w-44">
+            <span className={panel ? "sr-only" : "text-sm text-muted"}>Sort by</span>
+            <div className={panel ? "w-36" : "w-44"}>
               <Select
                 ariaLabel="Sort entries by"
                 items={sorts.map((s) => ({ value: s.id, label: s.label, description: s.description }))}
@@ -559,13 +720,8 @@ export function LorebookTable({
             </div>
           </div>
           <span className="flex-1" />
-          {opened.size > 0 && (
-            <Button variant="ghost" className="h-8!" onClick={() => setOpened(new Set())}>
-              Close all
-            </Button>
-          )}
           {/* A standalone book's header has its count; here it's how many the search leaves. */}
-          {(filtered || card) && (
+          {(filtered || card || panel) && (
             <p role="status" className="text-sm text-muted">
               {filtered
                 ? `${uids.length.toLocaleString()} of ${entriesLabel(book.entries.length)}`
@@ -573,11 +729,123 @@ export function LorebookTable({
             </p>
           )}
         </div>
+        <div
+          role="toolbar"
+          aria-label="All entries"
+          className={`flex flex-wrap items-center ${panel ? "gap-0.5" : "gap-1.5"}`}
+        >
+          <Button
+            variant="ghost"
+            className={small}
+            disabled={uids.length === 0}
+            hint="Opens every entry shown, to read them one after another. Their settings stay folded."
+            onClick={() => setOpened((set) => new Set([...set, ...uids]))}
+          >
+            Expand all
+          </Button>
+          <Button
+            variant="ghost"
+            className={small}
+            disabled={opened.size === 0}
+            hint="Closes every entry to its one-line header."
+            onClick={() => setOpened(new Set())}
+          >
+            Collapse all
+          </Button>
+          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
+          <Button
+            variant="ghost"
+            className={small}
+            pending={busy}
+            disabled={book.entries.length === 0 || book.entries.every((entry) => entry.enabled)}
+            hint="Switches every entry on, the hidden ones too. Saved as a revision of its own (what was changed before it first), so Undo or History takes it back."
+            onClick={() => void switchAll(true)}
+          >
+            Enable all
+          </Button>
+          <Button
+            variant="ghost"
+            className={small}
+            pending={busy}
+            disabled={book.entries.length === 0 || book.entries.every((entry) => !entry.enabled)}
+            hint="Switches every entry off, to turn a few back on. The book stays in the chat. Saved as a revision of its own, so Undo or History takes it back."
+            onClick={() => void switchAll(false)}
+          >
+            Disable all
+          </Button>
+          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
+          <Button
+            variant="ghost"
+            className={small}
+            aria-pressed={selecting}
+            disabled={book.entries.length === 0}
+            hint={
+              selecting
+                ? "Ends selecting: the checkboxes go."
+                : "A checkbox on each entry, to change one setting on the selected ones at once."
+            }
+            onClick={() => {
+              setSelecting(!selecting)
+              setSelected(new Set())
+            }}
+          >
+            <Icon name="check" />
+            {selecting ? "Done selecting" : "Select"}
+          </Button>
+        </div>
+        {selecting && (
+          <div
+            role="region"
+            aria-label="Selected entries"
+            className="flex flex-wrap items-center gap-1.5 rounded-md border border-accent/40 bg-accent/5 px-2 py-1.5 text-sm"
+          >
+            <span role="status" className="px-1 font-medium">
+              {live.length.toLocaleString()} selected
+            </span>
+            <Button
+              variant="ghost"
+              className={small}
+              hint="Every entry in the book, those the filter hides too."
+              onClick={() => setSelected(new Set(book.entries.map((entry) => entry.uid)))}
+            >
+              All {book.entries.length.toLocaleString()}
+            </Button>
+            {filtered && (
+              <Button
+                variant="ghost"
+                className={small}
+                hint="The entries the filter and Show leave, adding them to the selection."
+                onClick={() => setSelected((set) => new Set([...set, ...uids]))}
+              >
+                The {uids.length.toLocaleString()} shown
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              className={small}
+              disabled={live.length === 0}
+              hint="Clears the selection."
+              onClick={() => setSelected(new Set())}
+            >
+              None
+            </Button>
+            <span className="flex-1" />
+            <Button
+              variant="primary"
+              className={small}
+              disabled={live.length === 0}
+              hint="Pick one setting and its value for the selected entries; their other settings stay as they are."
+              onClick={() => setMassEdit(true)}
+            >
+              Change for selected…
+            </Button>
+          </div>
+        )}
         <Removed store={store} root={root} uids={removed} />
       </div>
 
       <div ref={list} className="min-w-0 rounded-lg border border-border bg-canvas">
-        {wide && uids.length > 0 && (
+        {!compact && uids.length > 0 && (
           <div
             aria-hidden="true"
             className="grid gap-2 border-b border-border px-1 py-1.5 text-xs font-medium text-muted"
@@ -605,8 +873,22 @@ export function LorebookTable({
             focus={focus}
             onFocused={() => setFocus(null)}
             searching={match !== null}
-            row={{ store, root, wide, card, template, columns, actions, onToggle: toggle, onAction: runAction }}
+            row={{
+              store,
+              root,
+              wide,
+              compact,
+              card,
+              template,
+              columns,
+              actions,
+              selecting,
+              onSelect: select,
+              onToggle: toggle,
+              onAction: runAction
+            }}
             opened={opened}
+            selected={selecting ? selected : EMPTY}
           />
         )}
       </div>
@@ -622,6 +904,9 @@ export function LorebookTable({
           onClose={() => setDialog(null)}
         />
       )}
+      {massEdit && <MassEditDialog store={store} root={root} uids={live} onClose={() => setMassEdit(false)} />}
     </div>
   )
 }
+
+const EMPTY: ReadonlySet<number> = new Set()
