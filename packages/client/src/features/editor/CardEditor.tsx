@@ -543,8 +543,25 @@ export function CardEditor({
   const root = useRef<HTMLDivElement>(null)
   const mounted = useRef(false)
   useEffect(() => {
-    if (mounted.current || reveal) root.current?.scrollIntoView({ block: "start" })
+    const element = root.current
+    const show = mounted.current || reveal
     mounted.current = true
+    if (!show || !element) return
+    // The tab's panel loads after this and the page grows: it's kept in view while it does,
+    // until the user scrolls or a moment has passed.
+    const scroll = () => element.scrollIntoView({ block: "start" })
+    scroll()
+    const observer = new ResizeObserver(scroll)
+    observer.observe(element)
+    const stop = () => observer.disconnect()
+    const timer = setTimeout(stop, 1500)
+    const events = ["wheel", "touchstart", "keydown", "pointerdown"] as const
+    for (const event of events) window.addEventListener(event, stop, { once: true, capture: true })
+    return () => {
+      clearTimeout(timer)
+      stop()
+      for (const event of events) window.removeEventListener(event, stop, { capture: true })
+    }
   }, [lastInitial, reveal])
   // Search's Go to opens the tab that holds the field it goes to.
   const match = useContext(SearchNavigation)
