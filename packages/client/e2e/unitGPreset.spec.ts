@@ -21,6 +21,9 @@ let provider: FakeProvider
 
 test.setTimeout(240_000)
 test.beforeAll(async ({ browser }) => {
+  // The hook has its own timeout (the config's 60 s): importing the realistic ST folder alone
+  // can take longer than that on a loaded host.
+  test.setTimeout(300_000)
   mkdirSync(shots, { recursive: true })
   const page = await browser.newPage()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
