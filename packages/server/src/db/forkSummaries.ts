@@ -17,7 +17,7 @@ import { shellEventsQuery, shellSlotsQuery } from "./shellQueries.ts"
 import { withoutPurged } from "./stateRefs.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-export const FORK_SUMMARY_FORMAT = 1
+export const FORK_SUMMARY_FORMAT = 2
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -30,6 +30,12 @@ export interface ForkSummary {
   readonly messages: number
   readonly leaf: string | null
   readonly endAt: number | null
+  /**
+   * Where it parts from the fork it was made from (owner, 2026-11-01): `at`, its first own
+   * message's time, else its making; `after`, how many shown messages it shares before it.
+   * Null for a chat's first fork, and one whose parent and base are gone.
+   */
+  readonly split: { readonly at: number; readonly after: number } | null
   readonly cast: ReadonlyArray<string>
   readonly joined: ReadonlyArray<string>
   readonly departed: ReadonlyArray<string>
@@ -165,8 +171,21 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
       let endpoint: Slot | undefined
       let messages = 0
+      // What it shares: its parent's path while that's live, else the history up to its base.
+      const parent = record.parent_fork_id === null ? undefined : slotsByFork.get(record.parent_fork_id)
+      const baseDepth = record.base_slot_id === null ? undefined : map?.get(record.base_slot_id)?.depth
+      const shared =
+        record.parent_fork_id === null
+          ? null
+          : parent !== undefined
+            ? (s: Slot) => parent.has(s.id)
+            : baseDepth !== undefined
+              ? (s: Slot) => s.depth <= baseDepth
+              : null
+      let split: ForkSummary["split"] = null
       for (const s of path) {
         if (s.deleted_at !== null) continue
+        if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
         endpoint = s
         state = foldState(positional.get(s.id) ?? [], state)
@@ -191,6 +210,7 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
         messages,
         leaf: endpoint?.id ?? null,
         endAt: endpoint?.at ?? null,
+        split: shared === null ? null : (split ?? { at: record.created_at, after: messages }),
         // Every card, binned or not: the read keeps those it can show.
         cast: state.participants.filter((id) => !state.playedByMe.includes(id)),
         joined: [...joined],
@@ -206,6 +226,42 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
       })
     }
     return summaries
+  })
+
+/**
+ * Where each of chat `chatId`'s live forks `records` parts from its parent and when its last
+ * message is, for a read: the stored summaries while they're all valid, else computed now (a
+ * reader stores nothing; the shell's next read stores them).
+ */
+export const chatForkSummaries = (
+  sql: SqlClient.SqlClient,
+  userId: string,
+  chatId: string,
+  records: ReadonlyArray<ForkRow>
+) =>
+  Effect.gen(function* () {
+    const userStamp = yield* summaryStamps(sql, userId)
+    const stored = yield* sql<{
+      fork_id: string
+      end_at: number | null
+      split_at: number | null
+      split_after: number | null
+    }>`SELECT s.fork_id, s.end_at, s.split_at, s.split_after FROM fork_summaries s JOIN chats c ON c.id = s.chat_id
+      WHERE s.chat_id = ${chatId} AND s.format = ${FORK_SUMMARY_FORMAT} AND s.stamp = c.shell_stamp
+        AND s.user_stamp = ${userStamp}`
+    const byFork = new Map<string, Pick<ForkSummary, "endAt" | "split">>(
+      stored.map((row) => [
+        row.fork_id,
+        {
+          endAt: row.end_at,
+          split: row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after }
+        }
+      ])
+    )
+    if (records.every((record) => byFork.has(record.id))) return byFork
+    return new Map<string, Pick<ForkSummary, "endAt" | "split">>(
+      (yield* computeForkSummaries(sql, records)).map((s) => [s.forkId, { endAt: s.endAt, split: s.split }])
+    )
   })
 
 /** A chat's summaries as a read computed them, with the stamps it read (`ChatSummariesAt` in ops.ts). */
@@ -240,9 +296,10 @@ export const storeSummaries = (sql: SqlClient.SqlClient, userId: string, chats: 
       SELECT f.id FROM json_each(${JSON.stringify(kept.map((c) => c.chatId))}) j CROSS JOIN forks f ON f.chat_id = j.value)`
     const rows = `[${kept.map((c) => `[${JSON.stringify(c.chatId)},${c.stamp},${c.userStamp},${c.forks}]`).join(",")}]`
     yield* sql`INSERT OR REPLACE INTO fork_summaries (fork_id, chat_id, format, stamp, user_stamp, preview, messages,
-        leaf, end_at, cast_json, joined_json, departed_json, activity_json)
+        leaf, end_at, split_at, split_after, cast_json, joined_json, departed_json, activity_json)
       SELECT f.id, f.chat_id, ${FORK_SUMMARY_FORMAT}, c.value ->> 1, c.value ->> 2, s.value ->> 'preview',
-        s.value ->> 'messages', s.value ->> 'leaf', s.value ->> 'endAt', s.value -> 'cast', s.value -> 'joined',
+        s.value ->> 'messages', s.value ->> 'leaf', s.value ->> 'endAt', s.value ->> '$.split.at',
+        s.value ->> '$.split.after', s.value -> 'cast', s.value -> 'joined',
         s.value -> 'departed', s.value -> 'activity'
       FROM json_each(${rows}) c CROSS JOIN json_each(c.value, '$[3]') s
       CROSS JOIN forks f ON f.id = s.value ->> 'forkId' AND f.chat_id = c.value ->> 0`

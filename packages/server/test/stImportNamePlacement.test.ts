@@ -46,7 +46,7 @@ const snapshot = Effect.fnUntraced(function* (api: Api, source: string) {
   return { record, fork, path, name: rows![0]! }
 })
 
-layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })("ST names belong to forks", (it) => {
+layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" })("ST file names never name forks (owner, 2026-11-01)", (it) => {
   for (const filename of ["Named road", "雪の道 [a.*]", "main - Branch #1", "Branch #42"])
     for (const choice of [undefined, "Local name", ""])
       for (const change of ["swipe", "writer"] as const)
@@ -68,8 +68,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
               [source, child()]
             ])
             const initial = yield* snapshot(api, source)
-            const expectedImported = filename === "main - Branch #1" ? null : filename
-            assert.deepStrictEqual(initial.name, { name: expectedImported, name_user: 0 })
+            assert.deepStrictEqual(initial.name, { name: null, name_user: 0 })
             if (choice !== undefined) yield* api.NameFork({ forkId: initial.record.forkId, name: choice })
             const before = yield* snapshot(api, source)
             const parentBefore = yield* snapshot(api, mainSource)
@@ -123,12 +122,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             yield* run([[renamed, child()]])
             const moved = yield* snapshot(api, renamed)
             assert.notStrictEqual(moved.record.forkId, after.record.forkId)
-            assert.deepStrictEqual(moved.name, { name: "Renamed road", name_user: 0 })
+            assert.deepStrictEqual(moved.name, { name: null, name_user: 0 })
             assert.deepStrictEqual((yield* snapshot(api, source)).name, after.name)
           })
         )
 
-  it.effect("checkpoint files sharing the same tip each have a name and independent selections", () =>
+  it.effect("checkpoint files sharing the same tip are unnamed forks with independent selections", () =>
     Effect.gen(function* () {
       const lines = [msg("Checkpoint greeting", 0), msg("Checkpoint user", 1)]
       const main = "chats/Checkpoint/main.jsonl"
@@ -144,7 +143,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(new Set(checkpoints.map((c) => c.fork.tipSlotId)).size, 1)
       assert.deepStrictEqual(
         checkpoints.map((c) => c.fork.name),
-        [null, "Before duel", "After duel"]
+        [null, null, null]
       )
       const slot = checkpoints[1]!.path.entries[0]!
       yield* api.EditVersion({

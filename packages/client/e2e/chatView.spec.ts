@@ -49,19 +49,19 @@ test("the header names the chat as people do and switches branches from anywhere
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Harbor")
   await expect(page.getByRole("main").getByText("started Apr 3, 2026", { exact: true })).toBeVisible()
   await expect(page).toHaveTitle(/Harbor/)
-  // The newest branch is shown; the header says so and offers the other.
+  // The newest branch is shown, named by where it splits off; the header offers the other.
   const branches = page.getByRole("button", { name: /switch branch/ })
-  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 1 of 2/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 1 of 2/)
   await branches.click()
   const list = page.getByRole("list", { name: "Branches" })
   await expect(list.getByRole("listitem")).toHaveCount(2)
   await list.getByRole("button", { name: /^Original/ }).click()
   await expect(message(page, "The fog rolls in.")).toBeVisible()
   await expect(message(page, "We wait for the tide.")).toHaveCount(0)
-  await expect(branches).toHaveAccessibleName(/Branch: Original, 2 of 2, not the latest/)
+  await expect(branches).toHaveAccessibleName(/Branch: Original, 2 of 2, not the one the chat opens on/)
 })
 
-test("Branch from here names the branch, shows it at once, keeps the URL, and the chat stays on top", async ({
+test("Branch from here makes an unnamed branch, shows it at once, keeps the URL, and the chat stays on top", async ({
   page
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -76,16 +76,17 @@ test("Branch from here names the branch, shows it at once, keeps the URL, and th
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}?panel=history`)
   const branches = page.getByRole("button", { name: /switch branch/ })
-  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 1 of 2/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 1 of 2/)
   const chats = page.getByRole("complementary").first().getByRole("region", { name: "Chats", exact: true })
   const rows = chats.getByRole("button", { name: /^Open chat/ })
   await expect(rows.first()).toHaveAttribute("data-chat-id", /./)
   expect(await rows.first().getAttribute("data-chat-id")).not.toBe(chatId)
-  // The shown branch is the current one: Branch from here at message #2 makes "From #2".
+  // The shown branch is the current one: Branch from here at message #1 splits there, unnamed,
+  // last by its last message (the one it was made at).
   const at = message(page, "We wait for the tide.")
   const slot = await page.locator("article[data-slot]").first().getAttribute("data-slot")
   await messageMenu(page.locator("article[data-slot]").first(), "Branch from here")
-  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 3 of 3/)
   await expect.poll(() => new URL(page.url()).searchParams.get("slot")).toBe(slot)
   expect(new URL(page.url()).searchParams.get("panel")).toBe("history")
   expect(new URL(page.url()).searchParams.get("fork")).toBeNull()
@@ -93,22 +94,22 @@ test("Branch from here names the branch, shows it at once, keeps the URL, and th
   // The chat is on top of All chats now, listed once, with its branches counted.
   await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)
   await expect(chats.locator(`[data-chat-id="${chatId}"]`)).toHaveCount(1)
-  await expect(rows.first()).toContainText("3 branches")
-  // Back returns to the branch it came from, which is no longer the latest; Forward and a
+  await expect(chats.getByRole("button", { name: /^3 branches of Harbor/ })).toBeVisible()
+  // Back returns to the branch it came from, which the chat no longer opens on; Forward and a
   // reload come back to the new one.
   await page.goBack()
-  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 2 of 3, not the latest/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 1 of 3, not the one the chat opens on/)
   expect(new URL(page.url()).searchParams.get("fork")).not.toBeNull()
   await expect(at).toBeVisible()
   await page.goForward()
-  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 3 of 3/)
   await page.reload()
-  await expect(branches).toHaveAccessibleName(/Branch: From #1, 1 of 3/)
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 3 of 3/)
   await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)
   // As ST's "Back to parent chat": the list goes back to the branch it was made from.
   await branches.click()
-  await page.getByRole("button", { name: "Back to “Branch 1”", exact: true }).click()
-  await expect(branches).toHaveAccessibleName(/Branch: Branch 1, 2 of 3, not the latest/)
+  await page.getByRole("button", { name: /^Back to “Split .+ at #1”$/ }).click()
+  await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 1 of 3, not the one the chat opens on/)
   await expect(at).toBeVisible()
 })
 

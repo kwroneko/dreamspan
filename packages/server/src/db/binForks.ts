@@ -157,6 +157,14 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
       const chatTitle = titles.get(chatId) ?? ""
       const { forks, current } = yield* forksOf(chatId)
       const byId = new Map(forks.map((fork) => [fork.id, fork]))
+      // Where each parts from its parent, as the chat's branch list names it; a binned one has none stored.
+      const splits = new Map(
+        (yield* sql<{ fork_id: string; split_at: number | null; split_after: number | null }>`
+          SELECT fork_id, split_at, split_after FROM fork_summaries WHERE chat_id = ${chatId}`).map((row) => [
+          row.fork_id,
+          row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after }
+        ])
+      )
       const entry = (
         fork: ForkRow,
         state: BinBranch["state"],
@@ -174,6 +182,8 @@ export const binItemBranches = (sql: SqlClient.SqlClient, userId: UserId, itemId
               name: fork.name,
               original: fork.parent_fork_id === null,
               number: numberOf(forks, fork),
+              split: splits.get(fork.id) ?? null,
+              createdAt: fork.created_at,
               tipExcerpt,
               current: fork.id === current,
               state,

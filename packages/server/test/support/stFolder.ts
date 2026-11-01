@@ -14,10 +14,13 @@ export const card = (
   name: string,
   firstMes: string,
   extensions: Record<string, unknown> = {},
-  more: Record<string, unknown> = {}
+  more: Record<string, unknown> = {},
+  /** ST's own fields beside `data`: `chat` (the chat ST opens it on), `create_date`. */
+  root: Record<string, unknown> = {}
 ) =>
   png(
     cardChunk("chara", {
+      ...root,
       name,
       spec: "chara_card_v2",
       spec_version: "2.0",
@@ -199,7 +202,11 @@ export const stFolder = (prefix = ""): ReadonlyMap<string, Uint8Array> =>
         ["settings.json", encode(settings)],
         ["User Avatars/user.png", png()],
         ["User Avatars/other.png", png()],
-        ["characters/Alice.png", card("Alice", "Hello {{user}}, I am Alice.", { world: "Hollow" })],
+        // ST opens Alice on her main chat, though its branch has the latest message.
+        [
+          "characters/Alice.png",
+          card("Alice", "Hello {{user}}, I am Alice.", { world: "Hollow" }, {}, { chat: ALICE_MAIN })
+        ],
         ["characters/Bob.png", card("Bob", "Bob waves.")],
         ["characters/Mira_new.png", card("Mira", "Where is my map?")],
         ["characters/Wren.png", card("Wren", "The lamp needs oil, {{user}}.")],
