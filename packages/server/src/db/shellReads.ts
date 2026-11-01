@@ -297,13 +297,14 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             departed: [],
             activity: []
           })
-      const stale = new Set(records.flatMap((r) => (stored.has(r.id) ? [] : [r.chat_id])))
-      // A stale chat's walk needs its forks' full rows.
+      // Each fork's summary is valid or not on its own (db/summaryValidity.ts): only the
+      // stale ones are walked, and their walks need their full rows.
+      const stale = records.flatMap((r) => (stored.has(r.id) ? [] : [r.id]))
       const staleRecords =
-        stale.size === 0
+        stale.length === 0
           ? []
-          : yield* sql<ForkRow>`SELECT f.* FROM json_each(${JSON.stringify([...stale])}) j
-                CROSS JOIN forks f ON f.chat_id = j.value WHERE f.deleted_at IS NULL`
+          : yield* sql<ForkRow>`SELECT f.* FROM json_each(${JSON.stringify(stale)}) j
+                CROSS JOIN forks f ON f.id = j.value WHERE f.deleted_at IS NULL`
       const computed = yield* computeForkSummaries(sql, staleRecords)
       const fresh = new Map<string, Array<ForkSummary>>()
       for (const summary of computed) {

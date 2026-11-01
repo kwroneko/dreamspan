@@ -26,6 +26,7 @@ import { makeProviderWriteHandlers } from "./providerWrites.ts"
 import { makeWriteHandlers } from "./writes.ts"
 import { makeStImportWriteHandlers } from "./stImportWrites.ts"
 import { makeStImportJobWriteHandlers } from "./stImportJobWrites.ts"
+import { trackSummaryTouches } from "./summaryValidity.ts"
 
 const {
   dbPath,
@@ -41,6 +42,8 @@ RpcServer.layer(WriteOps, { concurrency: 1 }).pipe(
   Layer.provide(
     WriteOps.toLayer(
       Effect.gen(function* () {
+        // After the migrations, which make the tables it watches.
+        yield* trackSummaryTouches(yield* SqlClient.SqlClient)
         // One bin (and draft store) for every handler group.
         const bin = makeBin(
           yield* SqlClient.SqlClient,
