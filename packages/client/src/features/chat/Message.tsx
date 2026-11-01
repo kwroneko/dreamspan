@@ -58,6 +58,7 @@ import {
   versionFailureActions
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { popupOpen } from "../../ui/openPopups.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
@@ -254,7 +255,7 @@ function Editor({
           event.key === "Escape" &&
           event.currentTarget.contains(event.target as Node) &&
           !event.defaultPrevented &&
-          !document.querySelector('[role="dialog"], [role="alertdialog"]')
+          !popupOpen()
         )
           onCancel()
       }}
@@ -471,7 +472,7 @@ const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | 
 }
 
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
-const TRIPLE_CLICK_MS = 350
+const TRIPLE_CLICK_MS = 450
 
 /**
  * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor

@@ -246,7 +246,13 @@ export function SummaryDefaults({
           label="Summarization instruction"
           description="The default for new chats, which copy it when they're made; a chat's own instruction takes precedence. Use {{words}} for the summary's length; leave empty for the built-in instruction."
         >
-          <Textarea value={tail} onChange={(event) => type(event.target.value)} rows={5} disabled={!defaults} />
+          <Textarea
+            textActions
+            value={tail}
+            onChange={(event) => type(event.target.value)}
+            rows={5}
+            disabled={!defaults}
+          />
         </Field>
         <UserDraftNotices draft={instructionDraft} />
         <div className="flex flex-wrap items-center gap-3">

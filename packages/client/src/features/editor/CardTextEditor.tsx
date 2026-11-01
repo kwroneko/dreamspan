@@ -70,6 +70,8 @@ export function CardTextEditor({
         minHeight={minHeight}
         fullHeight={fullHeight}
         mono={mono}
+        // Prose has text actions; a pattern or a template's markers (mono) doesn't.
+        textActions={!mono}
         readOnly={readOnly}
         onChange={onChange}
         onBlur={onBlur}

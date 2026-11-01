@@ -107,7 +107,7 @@ for (const width of [1440, 390]) {
       // A draft of the user's own next message, there before Edit.
       const draft = "Sam waves at the lighthouse keeper."
       await box(page).fill(draft)
-      const reply = page.getByRole("article").filter({ hasText: "Direction: Aria looks out to sea." })
+      const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
       await reply.getByRole("button", { name: "New version with this guidance" }).click()
 
       // The bar names the reply; the box holds its guidance, as guidance, toggle on meanwhile.
@@ -139,7 +139,7 @@ for (const width of [1440, 390]) {
         "Aria spots a ship on the horizon.",
         "Aria hums an old sailors' song."
       ])
-      await expect(page.getByRole("article").last()).toContainText("Direction: Aria hums an old sailors' song.")
+      await expect(page.getByRole("article").last()).toContainText("Guidance: Aria hums an old sailors' song.")
       await expect(box(page)).toHaveValue("Aria hums an old sailors' song.")
       expect(await pathLength(chatId)).toBe(turns)
       await expect
@@ -215,7 +215,7 @@ for (const width of [1440, 390]) {
     await expect(toggle(page)).toBeEnabled()
     const draft = "The next turn's original guidance."
     await box(page).fill(draft)
-    const reply = page.getByRole("article").filter({ hasText: "Direction: Aria looks out to sea." })
+    const reply = page.getByRole("article").filter({ hasText: "Guidance: Aria looks out to sea." })
     await reply.getByRole("button", { name: "New version with this guidance" }).click()
     await box(page).fill("Live unsaved guidance.")
     await showActions(reply)
@@ -223,7 +223,7 @@ for (const width of [1440, 390]) {
     await settled(slotId, 2)
     expect((await versions(slotId)).at(-1)!.direction).toBe("Live unsaved guidance.")
     // Regenerating the other reply doesn't take the text currently in the box.
-    const other = page.getByRole("article").filter({ hasText: "Direction: A different reply's guidance." })
+    const other = page.getByRole("article").filter({ hasText: "Guidance: A different reply's guidance." })
     await showActions(other)
     await other.getByRole("button", { name: "Generate another version", exact: true }).click()
     await settled(secondId, 2)

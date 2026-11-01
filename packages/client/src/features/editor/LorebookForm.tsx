@@ -27,7 +27,8 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
           <NumberField
             store={store}
             path={[...root, "scan_depth"]}
-            label="Scan depth (empty follows the chat)"
+            label="Scan depth (empty: 2)"
+            description="How many of the latest messages its entries look for their keys in, unless an entry sets its own."
             integer
             nullable
             min={0}
@@ -35,7 +36,8 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
           <NumberField
             store={store}
             path={[...root, "token_budget"]}
-            label="Token budget (empty follows the chat)"
+            label="Token budget (empty: none of its own)"
+            description="Most tokens this book's entries may take. All books together stay within the lorebook budget: a quarter of the context, less the reply's room."
             integer
             nullable
             min={0}

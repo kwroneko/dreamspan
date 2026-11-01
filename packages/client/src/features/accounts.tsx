@@ -299,13 +299,18 @@ export const register = () => {
     parent: "settings",
     path: "account",
     component: AccountPage,
-    nav: { label: "Account", order: 40 }
+    nav: { label: "Account", order: 40, description: "Your account and your password." }
   })
   routes.register({
     id: "settings.users",
     parent: "settings",
     path: "users",
     component: UsersPage,
-    nav: { label: "Users", order: 50, adminOnly: true }
+    nav: {
+      label: "Users",
+      order: 50,
+      adminOnly: true,
+      description: "Everyone's accounts. There's no sign-up: an admin creates each one."
+    }
   })
 }

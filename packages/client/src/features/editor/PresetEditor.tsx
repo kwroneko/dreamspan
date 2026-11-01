@@ -14,10 +14,10 @@ import { SelectField, SwitchField, TextField } from "./controls.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
 const POSTFIXES = [
-  { value: "", label: "Nothing" },
-  { value: " ", label: "A space" },
-  { value: "\n", label: "A new line" },
-  { value: "\n\n", label: "Two new lines" }
+  { value: "", label: "Nothing", description: "The new text follows straight on, mid-word if it starts there." },
+  { value: " ", label: "A space", description: "As if the message went on in the same sentence." },
+  { value: "\n", label: "A new line", description: "The new text starts on the next line." },
+  { value: "\n\n", label: "Two new lines", description: "The new text starts a new paragraph." }
 ] as const
 
 /**
@@ -120,11 +120,17 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             label="Start of a reply written as you"
             rows={3}
           />
-          <SwitchField store={store} path={["prefill", "continue"]} label="Continue by prefilling the message" />
+          <SwitchField
+            store={store}
+            path={["prefill", "continue"]}
+            label="Continue by prefilling the message"
+            description="SillyTavern's continue prefill, kept for exports. Here Continue always sends the reply so far as the start of the model's reply when the model takes a prefill, and as its last message, with the continue text after it, when it doesn't."
+          />
           <SelectField
             store={store}
             path={["prefill", "continue_postfix"]}
             label="After a continued message"
+            description="For a model that takes no prefill: what goes between the reply so far and what Continue writes, unless the reply already ends in a space or a line break."
             items={POSTFIXES}
           />
         </div>

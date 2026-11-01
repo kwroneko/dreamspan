@@ -4,7 +4,9 @@
 // every shape (support/shapes.ts). PORTRAIT_SHOTS=<dir> saves screenshots of each, in both themes.
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
+import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
 import { addToCast } from "./support/cast.ts"
@@ -187,6 +189,56 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
     await column(shape.name).getByRole("button", { name: "Fit", exact: true }).click()
   }
   await column("Huge").getByRole("button", { name: "Close the portrait" }).click()
+  await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
+})
+
+test("the column follows its card's name when another version is swapped in; Escape from the chat page closes it", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const chatId = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const root = yield* api.CreateCard({ label: "Pilot", name: "Pilot" })
+      yield* api.ForkCard({
+        refId: root.id,
+        name: "Pilot Storm",
+        nickname: "Pilot",
+        characterVersion: "Storm",
+        moveDrafts: false
+      })
+      const chat = yield* api.CreateChat({ title: "The harbor" })
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: root.entityId } })
+      return chat.id
+    })
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/chats/${chatId}`)
+  const column = (name: string) => page.getByRole("complementary", { name: `${name}'s portrait`, exact: true })
+  const cast = await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Pilot's portrait" }).click()
+  await expect(column("Pilot")).toBeVisible()
+
+  // Swapped for another of its family, the shown portrait is the one swapped in.
+  const tab = await openPanel(page, "Pilot")
+  await tab.getByRole("button", { name: "Use another version: Pilot", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Use another version", exact: true })
+    .getByRole("button", { name: /Pilot Storm · Storm/ })
+    .click()
+  const rename = page.getByRole("dialog", { name: "Replace the name in past messages?", exact: true })
+  if (await rename.isVisible().catch(() => false)) await rename.getByRole("button", { name: /^No\./ }).click()
+  await expect(column("Pilot Storm")).toBeVisible()
+  await expect(column("Pilot Storm").getByRole("heading", { name: "Pilot Storm", exact: true })).toBeVisible()
+  await expect(page.locator("[data-portrait-column]")).toHaveCount(1)
+
+  // Escape while typing is the text's; from elsewhere on the page it closes the column.
+  const message = page.getByLabel("Message", { exact: true })
+  await message.click()
+  await page.keyboard.press("Escape")
+  await expect(column("Pilot Storm")).toBeVisible()
+  await message.blur()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
 })
 

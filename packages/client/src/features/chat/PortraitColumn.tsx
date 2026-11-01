@@ -3,10 +3,11 @@
 // sendable beside it. Its width follows the image (all of it at the column's height, a small
 // one enlarged at most MAX_UPSCALE times) unless the user resized it, and gives way with the
 // other columns so the messages keep their minimum (ui/columnLayout.ts).
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useSession } from "../../session.ts"
 import { MAX_UPSCALE, type NaturalSize } from "../../ui/ImageViewer.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
+import { popupOpen } from "../../ui/openPopups.ts"
 import { PortraitView, usePortraitViewer } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
@@ -50,6 +51,20 @@ function Column() {
       live = false
     }
   }, [portrait.mediaId])
+  // Escape closes it from anywhere on the chat page, after anything focused has had it (a
+  // menu, a popup, an editor's own Escape), and never while typing or over a dialog.
+  const close = viewer.close
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return
+      if (popupOpen(["dialog", "alertdialog", "menu", "listbox"])) return
+      close()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [close])
   const natural = useNatural(portrait.mediaId)
   const fitted = Math.round(
     height !== null && shape
@@ -66,10 +81,6 @@ function Column() {
       data-portrait-column
       style={{ width }}
       className="relative flex shrink-0 flex-col border-r border-border bg-surface"
-      // Escape closes it while focus is in it; elsewhere Escape is the chat's.
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && !event.defaultPrevented) viewer.close()
-      }}
     >
       <ResizeHandle
         label="Resize the portrait"

@@ -156,27 +156,49 @@ for (const width of [1440, 390])
       await expect(editor).toHaveCount(0)
     })
 
-// A plain text box (ui/Field.tsx's Textarea) has the same bar: its selection's button shows
-// only while it has a selection and focus, since a box left keeps its selection unseen.
+// A prose text box (ui/Field.tsx's Textarea with `textActions`) has the same bar, only while it
+// has focus or a selection, taking no room otherwise; its selection's button shows only while
+// it has a selection and focus, since a box left keeps its selection unseen. A box of patterns
+// (a regex script's lines) has none (owner, 2026-11-01).
 for (const width of [1440, 390])
-  test(`a text box's selection button comes and goes ${width}`, async ({ page }) => {
+  test(`a text box's bar shows only while it's in use, and only under prose ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/settings/regex`)
     await page.getByRole("button", { name: "Add a script", exact: true }).click()
     const item = page.getByRole("list", { name: "Global regex scripts" }).getByRole("listitem").last()
-    const box = item.getByRole("textbox", { name: /^Remove from each match/ })
+    const lines = item.getByRole("textbox", { name: /^Remove from each match/ })
+    await lines.fill("alpha\nbeta")
+    await expect(lines).toBeFocused()
+    await expect(item.getByRole("toolbar", { name: "Text actions" })).toHaveCount(0)
+
+    await page.goto(`${server().url}/settings/chats`)
+    const box = page.getByRole("textbox", { name: "Summarization instruction", exact: true })
+    await expect(box).toBeEditable()
     const bar = box.locator("xpath=ancestor::div[contains(@class, 'group/text')][1]")
+    const toolbar = bar.getByRole("toolbar", { name: "Text actions" })
     const sendSelection = bar.getByRole("button", { name: "Send selection to snippet" })
+    // Not in use, it isn't there and takes no room: the wrapper is the box's height.
+    await expect(toolbar).toHaveCount(0)
+    expect((await bar.boundingBox())!.height - (await box.boundingBox())!.height).toBeLessThan(1)
+    // Where the box sits in what holds it: the page may scroll to it, but nothing above it moves.
+    const field = bar.locator("..")
+    const offset = async () => (await box.boundingBox())!.y - (await field.boundingBox())!.y
+    const top = await offset()
     await box.fill("alpha\nbeta")
+    // It comes below the box: the text being edited doesn't move.
     await expect(bar.getByRole("button", { name: "Send text to snippet" })).toBeVisible()
+    const shown = (await box.boundingBox())!
+    expect(await offset()).toBe(top)
+    expect((await toolbar.boundingBox())!.y).toBeGreaterThanOrEqual(shown.y + shown.height - 1)
     await expect(sendSelection).toHaveCount(0)
     for (let i = 0; i < 4; i++) await box.press("Shift+ArrowLeft")
     await expect(sendSelection).toBeVisible()
-    await item.getByRole("textbox", { name: "Name", exact: true }).focus()
-    await expect(sendSelection).toHaveCount(0)
+    await box.blur()
+    await expect(toolbar).toHaveCount(0)
     await box.focus()
     await expect(sendSelection).toBeVisible()
     await box.press("ArrowRight")
     await expect(sendSelection).toHaveCount(0)
+    await expect(bar.getByRole("button", { name: "Send text to snippet" })).toBeVisible()
   })

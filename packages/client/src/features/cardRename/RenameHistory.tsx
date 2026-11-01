@@ -11,6 +11,7 @@ import { Select } from "../../ui/Select.tsx"
 import { useCaller } from "../editor/caller.ts"
 import type { CardSaved } from "../editor/cardSaved.ts"
 import { readableChatTitle } from "../chat/chatTitle.ts"
+import { branchLabel } from "../chat/forks.ts"
 
 type Target = NonNullable<CardSaved["current"]> & { label: string }
 
@@ -40,7 +41,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             const fork = forks.find((f) => f.id === target.forkId)
             result.push({
               ...target,
-              label: `${readableChatTitle(chat.title)} · ${fork?.name || (fork?.current ? "Current fork" : `Fork ${forks.findIndex((f) => f.id === target.forkId) + 1}`)} · ${fork?.tipExcerpt || "Before the first message"}`
+              label: `${readableChatTitle(chat.title)} · ${fork ? branchLabel(fork) : "Branch"} · ${fork?.tipExcerpt || "Before the first message"}`
             })
           }
         }
@@ -126,7 +127,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             Replace “{change.oldName}” with “{change.newName}” in past messages?
           </p>
           <p className="text-sm text-muted">
-            Includes swipes and summaries. Forks count as separate chats. The name save is complete; a failed history
+            Includes swipes and summaries. Branches count as separate chats. The name save is complete; a failed history
             replacement can be retried here.
           </p>
           {error && (
@@ -181,7 +182,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             >
               Yes, only in this chat.
             </Button>
-            <p className="text-xs text-muted">Does not touch any forks of this chat or any other chats.</p>
+            <p className="text-xs text-muted">Does not touch this chat’s other branches or any other chats.</p>
             {!change.onlyThis && (
               <Button
                 className="h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"

@@ -22,9 +22,12 @@ export interface RouteEntry {
   /**
    * Listed in the parent's navigation. Admin-only entries are hidden from others; the server
    * still decides. `group`: the heading it sits under, in a navigation that has them (settings).
+   * `description`: what the screen is for, in a sentence, where the navigation explains its links
+   * (settings: under the label on a phone, its tooltip beside the list on a wide screen).
    */
   readonly nav?: {
     readonly label: string
+    readonly description?: string
     readonly order: number
     readonly adminOnly?: boolean
     readonly group?: string

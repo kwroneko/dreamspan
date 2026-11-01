@@ -281,7 +281,7 @@ test("emptying the bin rejects items added after its confirmation opened", async
     })
   )
   await dialog.getByRole("button", { name: "Empty the bin", exact: true }).click()
-  await expect(dialog).toContainText("The bin or affected forks changed")
+  await expect(dialog).toContainText("The bin or affected branches changed")
   expect((await admin((api) => api.ListBin({ limit: 500, before: null }))).map((i) => i.id)).toEqual(
     expect.arrayContaining([first.id, late.id])
   )
