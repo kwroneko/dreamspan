@@ -54,7 +54,7 @@ const pair = {
   participants: ["mira", "oren"],
   target: { speaker: "mira" }
 } satisfies Partial<AssemblyFixture>
-const whileOren = { condition: { when: "not_muted", card: "oren" as never } } as const
+const whileOren = { condition: { when: "not_muted", cards: ["oren" as never] } } as const
 const oren = (present: boolean) => ({
   depth: null,
   event: { scope: null, data: { key: "presence.set" as const, value: { entity: "oren" as never, present } } }

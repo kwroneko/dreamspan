@@ -1,7 +1,7 @@
 // The note document (DATA-MODEL §3.3, §6; DESIGN §4.1). A note slot belongs to a card or a
 // chat; a shared named note (`owner: { shared: "global" }`) is the text a slot can link to.
 // ST's Character's Note, Character Author's Note and author's note import as notes (§13).
-import { Schema } from "effect"
+import { Option, Schema, SchemaTransformation } from "effect"
 import { ChatId, EntityId, SlotId } from "../chat.ts"
 import { LoreRole } from "./lorebook.ts"
 
@@ -51,14 +51,43 @@ export const Placement = Schema.Union([
 ])
 export type Placement = typeof Placement.Type
 
+/** The most cards a note's condition names. */
+const MAX_CONDITION_CARDS = 100
+
+/** A conditioned note's cards: one or more, each once. */
+const ConditionCards = Schema.Array(EntityId).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_CONDITION_CARDS),
+  Schema.isUnique()
+)
+
+/** The conditions that name cards: on the turn of one of them, or while one of them isn't muted. */
+const CardCondition = Schema.Struct({ when: Schema.Literals(["turn", "not_muted"]), cards: ConditionCards })
+
 /**
- * When a note applies (DESIGN §4.1): always; only on a card's turn (the speaker of the
- * message being generated); or while a card isn't muted. Absent is always.
+ * The shape from before a condition named several cards (`card`, one), still in stored notes:
+ * read as a list of that one card, and written as the list from then on.
+ */
+const SingleCard = Schema.Struct({ when: Schema.Literals(["turn", "not_muted"]), card: EntityId })
+const SingleCardCondition = SingleCard.pipe(
+  Schema.decodeTo(
+    CardCondition,
+    SchemaTransformation.transform<typeof CardCondition.Encoded, typeof SingleCard.Type>({
+      decode: ({ when, card }) => ({ when, cards: [card] }),
+      encode: ({ when, cards }) => ({ when, card: cards[0] as EntityId })
+    })
+  )
+)
+
+/**
+ * When a note applies (DESIGN §4.1): always; on the turn of any of its cards (the speaker of
+ * the message being generated is one of them); or while any of its cards is in the chat and
+ * not muted. Absent is always. A stored `{ when, card }` reads as `{ when, cards: [card] }`.
  */
 export const NoteCondition = Schema.Union([
   Schema.Struct({ when: Schema.Literal("always") }),
-  Schema.Struct({ when: Schema.Literal("turn"), card: EntityId }),
-  Schema.Struct({ when: Schema.Literal("not_muted"), card: EntityId })
+  CardCondition,
+  SingleCardCondition
 ])
 export type NoteCondition = typeof NoteCondition.Type
 
@@ -137,3 +166,24 @@ export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAut
 
 /** A note's condition, absent read as always. */
 export const noteCondition = (doc: Pick<NoteDoc, "condition">): NoteCondition => doc.condition ?? { when: "always" }
+
+const decodeCondition = Schema.decodeUnknownOption(NoteCondition)
+
+/**
+ * A condition as stored, either shape, read as the current one: for a document that hasn't
+ * been decoded (the editor's). Absent, or not a condition, is always.
+ */
+export const readNoteCondition = (raw: unknown): NoteCondition =>
+  Option.getOrElse(decodeCondition(raw), (): NoteCondition => ({ when: "always" }))
+
+/** A stored condition in the single-card shape, and nothing else, as the list; any other value as it is. */
+export const upgradedCondition = (value: unknown): unknown =>
+  Schema.is(SingleCard)(value) && Object.keys(value).length === 2 ? { when: value.when, cards: [value.card] } : value
+
+/** Names as a sentence lists them, any one of them: "Aria", "Aria or Bram", "Aria, Bram or Cato". */
+export const anyOf = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`
+
+/** The cards a condition names: none for always. */
+export const conditionCards = (condition: NoteCondition): ReadonlyArray<EntityId> =>
+  condition.when === "always" ? [] : condition.cards

@@ -428,8 +428,8 @@ describe("the context assembler", () => {
     const main = "system: Write Mira's next reply in a fictional chat between Mira and Tobin."
     // A condition that never holds here (Oren isn't in the cast), and a group whose turns
     // alternate a note on Mira's turn between due (Mira speaks) and not (Oren does).
-    const never = { condition: { when: "turn", card: "oren" } } as Partial<NoteDoc>
-    const onMirasTurn = { condition: { when: "turn", card: "mira" } } as Partial<NoteDoc>
+    const never = { condition: { when: "turn", cards: ["oren" as never] } } as Partial<NoteDoc>
+    const onMirasTurn = { condition: { when: "turn", cards: ["mira" as never] } } as Partial<NoteDoc>
     const turnOf = (due: boolean): Partial<AssemblyFixture> => ({
       participants: ["mira", "oren"],
       target: { speaker: due ? "mira" : "oren" }
@@ -2774,7 +2774,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
         ...note("The blue coat.", 1, "system").doc,
         owner: { card: "oren" as never },
         placement: { mode: "section", section: "after_main_prompt", role: "system" },
-        ...(when === "turn" ? { condition: { when: "turn", card: "oren" as never } } : {})
+        ...(when === "turn" ? { condition: { when: "turn", cards: ["oren" as never] } } : {})
       }
     })
     const definitions = (snapshot: ContextSnapshot) =>

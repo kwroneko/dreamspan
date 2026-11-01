@@ -446,10 +446,10 @@ test("a card's notes are collapsed rows, and the card has no modules section (DE
   await expect(page.getByRole("region", { name: "Note Scarf" })).toBeVisible()
   // In the card editor, a note's condition can name the card itself.
   await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()
-  await page.getByRole("option", { name: "On a character's turn" }).click()
+  await page.getByRole("option", { name: "On a chosen character's turn" }).click()
   await expect(
-    page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "Character" })
-  ).toContainText("Rows")
+    page.getByRole("region", { name: "Note Scarf" }).getByRole("toolbar").getByText("Rows", { exact: true })
+  ).toBeVisible()
 })
 
 test("a send that failed as the page went is sent again the next time it goes", async ({ page }) => {

@@ -156,7 +156,7 @@ describe("note positions (DESIGN §4.1)", () => {
 })
 
 describe("note conditions (DESIGN §4.1)", () => {
-  const turn = chatNote("turn", "ARIA'S OUTFIT", { condition: { when: "turn", card: "aria" as never } })
+  const turn = chatNote("turn", "ARIA'S OUTFIT", { condition: { when: "turn", cards: ["aria" as never] } })
 
   it("sends a note on a card's turn only, the swipe's speaker included", async () => {
     const aria = await assembled(chat({ notes: [turn], events: on("turn"), target: { speaker: "aria" } }))
@@ -174,13 +174,13 @@ describe("note conditions (DESIGN §4.1)", () => {
       expect(sends(swipe, "ARIA'S OUTFIT")).toBe(sent)
     }
     // The user writing as Tobin is Tobin's turn (owner question 8).
-    const tobin = chatNote("tobin", "TOBIN'S HAT", { condition: { when: "turn", card: "tobin" as never } })
+    const tobin = chatNote("tobin", "TOBIN'S HAT", { condition: { when: "turn", cards: ["tobin" as never] } })
     const impersonated = await assembled(chat({ notes: [tobin], events: on("tobin"), target: { speaker: "tobin" } }))
     expect(sends(impersonated, "TOBIN'S HAT")).toBe(true)
   })
 
   it("sends a note while a card isn't muted, reading the mute at the leaf", async () => {
-    const present = chatNote("present", "BRAM IS HERE", { condition: { when: "not_muted", card: "bram" as never } })
+    const present = chatNote("present", "BRAM IS HERE", { condition: { when: "not_muted", cards: ["bram" as never] } })
     const unmuted = await assembled(chat({ notes: [present], events: on("present") }))
     expect(sends(unmuted, "BRAM IS HERE")).toBe(true)
     const silenced = await assembled(chat({ notes: [present], events: [...on("present"), muted("bram", 1)] }))
@@ -192,17 +192,56 @@ describe("note conditions (DESIGN §4.1)", () => {
 
   it("holds neither condition for a card that isn't in the cast", async () => {
     const notes = [
-      chatNote("cato-turn", "CATO TURN", { condition: { when: "turn", card: "cato" as never } }),
-      chatNote("cato-here", "CATO HERE", { condition: { when: "not_muted", card: "cato" as never } })
+      chatNote("cato-turn", "CATO TURN", { condition: { when: "turn", cards: ["cato" as never] } }),
+      chatNote("cato-here", "CATO HERE", { condition: { when: "not_muted", cards: ["cato" as never] } })
     ]
     const snapshot = await assembled(chat({ notes, events: on("cato-turn", "cato-here") }))
     expect(sends(snapshot, "CATO TURN")).toBe(false)
     expect(sends(snapshot, "CATO HERE")).toBe(false)
   })
 
+  it("sends a note on the turn of any of its cards, and on no one else's", async () => {
+    const shared = chatNote("shared", "ARIA AND TOBIN", {
+      condition: { when: "turn", cards: ["aria" as never, "tobin" as never, "cato" as never] }
+    })
+    const turnOf = (speaker: string) => assembled(chat({ notes: [shared], events: on("shared"), target: { speaker } }))
+    for (const speaker of ["aria", "tobin"]) expect(sends(await turnOf(speaker), "ARIA AND TOBIN")).toBe(true)
+    const bram = await turnOf("bram")
+    expect(sends(bram, "ARIA AND TOBIN")).toBe(false)
+    // Cato isn't in the cast: named, never the speaker.
+    expect(decision(bram, "shared")).toMatchObject({
+      condition: "on Aria's or Tobin's turn",
+      due: false
+    })
+  })
+
+  it("sends a note while any of its cards isn't muted, and none once all of them are", async () => {
+    const either = chatNote("either", "SOMEONE IS HERE", {
+      condition: { when: "not_muted", cards: ["aria" as never, "bram" as never] }
+    })
+    const sent = (...mutedCards: ReadonlyArray<string>) =>
+      assembled(chat({ notes: [either], events: [...on("either"), ...mutedCards.map((card) => muted(card, 1))] })).then(
+        (snapshot) => sends(snapshot, "SOMEONE IS HERE")
+      )
+    expect(await sent()).toBe(true)
+    expect(await sent("aria")).toBe(true)
+    expect(await sent("bram")).toBe(true)
+    expect(await sent("aria", "bram")).toBe(false)
+    const silenced = await assembled(
+      chat({ notes: [either], events: [...on("either"), muted("aria", 1), muted("bram", 1)] })
+    )
+    expect(decision(silenced, "either")).toMatchObject({ condition: "while Aria or Bram isn't muted", due: false })
+    // A card not in the cast never counts as unmuted.
+    const absent = chatNote("absent", "CATO OR BRAM", {
+      condition: { when: "not_muted", cards: ["cato" as never, "bram" as never] }
+    })
+    const bramMuted = await assembled(chat({ notes: [absent], events: [...on("absent"), muted("bram", 1)] }))
+    expect(sends(bramMuted, "CATO OR BRAM")).toBe(false)
+  })
+
   it("expands a skipped note's macros nowhere: no variable it would set is set", async () => {
     const writer = chatNote("writer", "{{setvar::mood::grim}}MOOD", {
-      condition: { when: "turn", card: "bram" as never }
+      condition: { when: "turn", cards: ["bram" as never] }
     })
     const snapshot = await assembled(chat({ notes: [writer], events: on("writer"), target: { speaker: "aria" } }))
     expect(snapshot.effects).toEqual([])
@@ -213,7 +252,7 @@ describe("note conditions (DESIGN §4.1)", () => {
     const summary = chatNote("summary", "THE STORY SO FAR", {
       kind: "imported_summary",
       placement: { mode: "none" },
-      condition: { when: "turn", card: "aria" as never }
+      condition: { when: "turn", cards: ["aria" as never] }
     })
     const story = preset({
       prompts: [{ identifier: "main", role: "system", content: "MAIN [{{summary}}]", system_prompt: true }]
@@ -246,7 +285,7 @@ describe("conditioned notes and the cache (DESIGN §4.1, §5.5)", () => {
           chat({
             messages: longHistory,
             notes: [
-              chatNote("turn", "ON ARIA'S TURN", { placement, condition: { when: "turn", card: "aria" as never } })
+              chatNote("turn", "ON ARIA'S TURN", { placement, condition: { when: "turn", cards: ["aria" as never] } })
             ],
             events: on("turn"),
             target: { speaker }
@@ -333,7 +372,7 @@ describe("the lorebook scan switch (DESIGN §4.1)", () => {
       lorebooks: [{ id: "book", entity: "book", revision: "book-rev", doc: keyed.document }]
     })
     expect(sends(snapshot, "LORE: Aria at the window.")).toBe(true)
-    const skipped = chatNote("Skipped", "The lighthouse.", { condition: { when: "turn", card: "bram" as never } })
+    const skipped = chatNote("Skipped", "The lighthouse.", { condition: { when: "turn", cards: ["bram" as never] } })
     const notDue = await assembled({ ...fixture(true, [skipped]), target: { speaker: "aria" } })
     expect(sends(notDue, "LORE: the lamp")).toBe(false)
   })

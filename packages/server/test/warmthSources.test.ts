@@ -121,7 +121,7 @@ it.effect("a conditioned note preserves a held prefix until the maximum forces h
         owner: { chat: "chat-1" as ChatId },
         placement: { mode: "depth", depth: 0, role: "system" },
         exportable: false,
-        condition: { when: "turn", card: "mira" as EntityId }
+        condition: { when: "turn", cards: ["mira" as EntityId] }
       }
     }
     // Two characters taking turns: the note goes on Mira's, not on Oren's.

@@ -146,7 +146,7 @@ describe("what the drafts can't do", () => {
       { field: textField(["a"]), content: "kept" },
       { field: textField(["unknown"]), content: "My irreplaceable text" }
     ]
-    expect(droppedDrafts(applied, { a: "kept" }, drafts).map((d) => d.field)).toEqual([textField(["unknown"])])
+    expect(droppedDrafts("card", applied, { a: "kept" }, drafts).map((d) => d.field)).toEqual([textField(["unknown"])])
   })
 
   it("removes a key for a side that deleted it, rather than setting it null", () => {

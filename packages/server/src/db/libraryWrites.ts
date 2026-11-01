@@ -4,7 +4,7 @@ import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
 import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { conditionCards, NOTE_SCHEMA_VERSION, type NoteDoc, readNoteCondition } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
@@ -166,7 +166,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
 
     /**
      * Media, cards and shared notes a document names that aren't the user's, as NotFound: a
-     * note's owner card and condition card, and the shared note a slot links to (§14.3).
+     * note's owner card and condition cards, and the shared note a slot links to (§14.3).
      */
     const checkReferences = (userId: string, doc: Doc) =>
       Effect.gen(function* () {
@@ -188,7 +188,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         }
         const cards = [
           Predicate.isObject(doc.owner) ? doc.owner.card : undefined,
-          Predicate.isObject(doc.condition) ? doc.condition.card : undefined
+          ...(doc.condition === undefined ? [] : conditionCards(readNoteCondition(doc.condition)))
         ].filter((card) => card !== undefined)
         for (const card of cards) {
           const [owned] = yield* sql<{ n: number }>`

@@ -5,7 +5,7 @@
 import { assert, layer } from "@effect/vitest"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { textField } from "@rp/shared/editing.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
@@ -243,6 +243,28 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         [parent.entityId, head.ref.headRevisionId, null, forked.id, "live"]
       )
       assert.isNumber(member.forkedAt)
+    })
+  )
+
+  it.effect("a copied note's condition names the fork where it named the card, and keeps the others", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const parent = yield* card(api, "Ethan")
+      const other = yield* card(api, "Mira")
+      const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Outfit" })
+      yield* draft(
+        api,
+        note.id,
+        valueField(["condition"]),
+        JSON.stringify({ when: "turn", cards: [parent.entityId, other.entityId] })
+      )
+      yield* commit(api, note.id)
+      const forked = yield* fork(api, parent.ref.id, "winter")
+      const [copy] = yield* api.ListCardNotes({ cardRefId: forked.id })
+      assert.deepStrictEqual(copy!.doc["condition"], { when: "turn", cards: [forked.entityId, other.entityId] })
+      // The parent's note still names the parent.
+      const [own] = yield* api.ListCardNotes({ cardRefId: parent.ref.id })
+      assert.deepStrictEqual(own!.doc["condition"], { when: "turn", cards: [parent.entityId, other.entityId] })
     })
   )
 
