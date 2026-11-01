@@ -1,3 +1,4 @@
+import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
@@ -566,8 +567,10 @@ export const makeReadHandlers = Effect.gen(function* () {
         return yield* drafts.history(draft, limit)
       }).pipe(query("ComposerHistory")),
 
-    DraftHistory: ({ userId, key, limit }) =>
-      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit)).pipe(query("DraftHistory")),
+    DraftHistory: ({ userId, key, limit, before }) =>
+      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit, before)).pipe(
+        query("DraftHistory")
+      ),
 
     GetDraftState: ({ userId, key, seq }) =>
       Effect.flatMap(drafts.get(userId, key), (draft) => drafts.stateAt(draft, seq)).pipe(
@@ -609,9 +612,11 @@ export const makeReadHandlers = Effect.gen(function* () {
           id: string
           parents: string
           origin: Revision["origin"]
+          origin_ref: string | null
           message: string | null
           doc_hash: string
           created_at: number
+          n: number
         }>`
           WITH RECURSIVE history(id, n) AS (
             SELECT ${start}, 1
@@ -619,19 +624,26 @@ export const makeReadHandlers = Effect.gen(function* () {
             SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
             WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}
           )
-          SELECT r.id, r.parents, r.origin, r.message, r.doc_hash, r.created_at
+          SELECT r.id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n
           FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
-        return rows.map(
-          (row) =>
+        const first = start === null ? 0 : yield* revisionNumber(sql, start)
+        const out = []
+        for (const row of rows) {
+          const usedBy = row.origin === "generation" ? yield* revisionUse(sql, userId, row.origin_ref) : null
+          out.push(
             new Revision({
               id: row.id as RevisionId,
               parents: JSON.parse(row.parents) as Array<RevisionId>,
               origin: row.origin,
               message: row.message,
               docHash: row.doc_hash,
-              createdAt: row.created_at
+              createdAt: row.created_at,
+              number: first - row.n + 1,
+              ...(usedBy ? { usedBy } : {})
             })
-        )
+          )
+        }
+        return out
       }).pipe(query("RefHistory")),
 
     PreviewMerge: ({ userId, refId }) =>

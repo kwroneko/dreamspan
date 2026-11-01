@@ -1,3 +1,4 @@
+import { revisionNumber } from "./revisionNumbers.ts"
 import { inFork } from "./forkState.ts"
 import { readSnippet, snippetFork, snippetKey } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
@@ -80,6 +81,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           doc: editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))),
           usedByChats,
           drafts: draftRows.map((row) => drafts.toDraft(row)),
+          revisionNumber: yield* revisionNumber(sql, ref.head_revision_id),
           variants: variants.map(toLibraryRef)
         })
       }).pipe(query("OpenEditor")),

@@ -425,7 +425,7 @@ export const serverWith = <E>(
   generator: Layer.Layer<
     Generator,
     E,
-    AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer
+    AppConfig | Database.Reader | Database.Writer | Providers.Providers | Summarizer | ChatHub
   >,
   summaries = Summarizer.layer,
   formats = FormatsLive

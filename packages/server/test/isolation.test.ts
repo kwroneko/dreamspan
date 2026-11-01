@@ -2109,6 +2109,35 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  EditorDraftState: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditorDraftState({ refId: owner.editor.cardRefId, field: owner.editor.field, seq: 0 }),
+        "NotFound"
+      )
+  },
+  SetRevisionMessage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref, and another's revision through one's own ref, are both not found.
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: owner.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: actor.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+      })
+  },
   RestoreEditorDraft: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

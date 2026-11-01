@@ -2,7 +2,7 @@ import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
-// many chats the change reaches, and the state you're in: saved, or changes kept as drafts.
+// many chats the change reaches, and the state you're in: "Saved as revision N", or "Changed since revision N": what's typed is used as it's typed.
 import { useAtomValue } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
@@ -37,7 +37,9 @@ import { NoteFields } from "./notes.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
-import { SaveRevert } from "./SaveRevert.tsx"
+import { HeldChangesBar } from "./SaveRevert.tsx"
+import { SaveRevision } from "./SaveRevision.tsx"
+import { revisionState } from "../../ui/SaveControls.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
@@ -54,8 +56,8 @@ const usedBy = (chats: number, some: string | null) =>
   chats === 0
     ? "No chat uses it yet."
     : chats === 1
-      ? `Used by 1 chat: saving changes it there.`
-      : `Used by ${chats} chats: saving changes it in all of them.${some ? ` To change it in some only, ${some}.` : ""}`
+      ? `Used by 1 chat: what you change here is used there as you type.`
+      : `Used by ${chats} chats: what you change here is used in all of them as you type.${some ? ` To change it in some only, ${some}.` : ""}`
 
 /**
  * A lorebook's line: the chats it was added to. A global one is read in every chat besides,
@@ -65,8 +67,8 @@ const addedTo = (chats: number) =>
   chats === 0
     ? "Not added to any chat yet."
     : chats === 1
-      ? "Added to 1 chat: saving changes it there."
-      : `Added to ${chats} chats: saving changes it in all of them. To change it in some only, make a variant.`
+      ? "Added to 1 chat: what you change here is used there as you type."
+      : `Added to ${chats} chats: what you change here is used in all of them as you type. To change it in some only, make a variant.`
 
 /** What saving did to the refs that follow this one. */
 const savedNotice = (saved: SavedRef) => {
@@ -273,7 +275,7 @@ export function Editor({
                 </button>
               </>
             ) : ref.kind === "preset" ? (
-              "Saving changes this prompt preset in every chat that uses it."
+              "What you change here is used by every chat with this prompt preset, as you type."
             ) : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
               <>
@@ -335,10 +337,10 @@ export function Editor({
               </div>
             ))}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-            <SaveRevert
+            <SaveRevision
               store={store}
               current={current}
-              saveDisabled={clash !== null}
+              showState={false}
               onSaved={(saved) => setNotice(savedNotice(saved))}
             />
             {ref.kind !== "preset" && (
@@ -392,11 +394,7 @@ export function Editor({
                 the line under them holds both (unitGPreset keeps the sticky bar under 400 px). */}
             <div className="flex min-w-0 items-center justify-between gap-2 max-sm:w-full sm:ml-auto">
               <p role="status" className="text-sm text-muted">
-                {state.saving
-                  ? "Keeping your changes…"
-                  : dirty === 0
-                    ? "Everything is saved."
-                    : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
+                {state.saving ? "Keeping your changes…" : revisionState(store.revisionNumber, dirty > 0)}
               </p>
               {ref.kind === "preset" && (
                 <Button
@@ -418,6 +416,7 @@ export function Editor({
               {clash}
             </p>
           )}
+          {ref.kind === "preset" && <HeldChangesBar store={store} />}
           {ref.kind === "preset" && searching && (
             <div id="preset-search">
               <SearchDialog store={store} inline onReveal={setSearchMatch} />

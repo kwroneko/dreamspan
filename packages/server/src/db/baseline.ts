@@ -105,6 +105,8 @@ export const baseline: ReadonlyArray<string> = [
     images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)),
     -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key.
     base_revision TEXT,
+    -- A library field's session a save or checkpoint ended: the revision now holding its text.
+    committed_revision TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     UNIQUE (user_id, target_kind, target_id, field)
@@ -199,7 +201,7 @@ export const baseline: ReadonlyArray<string> = [
     doc_json TEXT NOT NULL CHECK (json_valid(doc_json)),
     doc_hash TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge')),
+    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge', 'generation')),
     origin_ref TEXT,
     message TEXT,
     -- Plain text extracted from doc_json for full-text search.
@@ -497,7 +499,7 @@ export const baseline: ReadonlyArray<string> = [
     SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id JOIN changeset_groups g ON g.id = NEW.group_id
     WHERE f.id = NEW.fork_id AND c.id = NEW.chat_id AND c.owner_user_id = g.owner_user_id)
     BEGIN SELECT RAISE(ABORT, 'changeset fork and group must belong to its chat owner'); END`,
-  `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE ON entity_revisions
+  `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE OF seq, id, entity_id, parents, doc_json, doc_hash, schema_version, origin, origin_ref, search_text, created_at ON entity_revisions
     BEGIN SELECT RAISE(ABORT, 'entity revisions are immutable'); END`,
   `CREATE TRIGGER rollout_snapshot_frozen BEFORE UPDATE OF context_snapshot_json ON rollout_payloads
     WHEN OLD.context_snapshot_json IS NOT NULL AND NEW.context_snapshot_json IS NOT OLD.context_snapshot_json
@@ -566,7 +568,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE draft_history (
     draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL CHECK (seq >= 1),
-    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore')),
+    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore', 'revision')),
     first_at INTEGER NOT NULL,
     at INTEGER NOT NULL,
     start INTEGER NOT NULL CHECK (start >= 0),

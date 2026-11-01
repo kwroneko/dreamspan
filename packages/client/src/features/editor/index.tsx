@@ -1,3 +1,5 @@
+import { replyHooks } from "../chat/replyHooks.ts"
+import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
 import { NewCardButton } from "./NewCard.tsx"
@@ -44,6 +46,12 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  // Live text is what's sent: open editors flush before a reply, and read again after one cut revisions.
+  replyHooks.register({
+    id: "editor.live-text",
+    beforeReply: flushOpenEditors,
+    stateChanged: () => void refreshOpenEditors()
+  })
   registerUserDraftNotices()
   cutoutChoosers.register({ id: CUTOUT_CHOOSER, component: LazyCutoutChooser })
   libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })

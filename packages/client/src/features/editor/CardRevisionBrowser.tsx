@@ -3,20 +3,45 @@ import { Effect } from "effect"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // Compare immutable revisions with their first parent or the live working document.
-import type { Doc, Revision } from "@rp/shared/library.ts"
+import { type Doc, Revision } from "@rp/shared/library.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import { Link } from "@tanstack/react-router"
+import { readableChatTitle } from "../chat/chatTitle.ts"
+import { ReadableDiff, readableLines } from "../../ui/ReadableDiff.tsx"
+import { RevisionEntry } from "../../ui/RevisionEntry.tsx"
+import { promptLabel } from "./promptLabel.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { Button } from "../../ui/Button.tsx"
 import { RadioGroup } from "../../ui/Choice.tsx"
-import { Badge } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { ValueDiff } from "./diff.tsx"
 import { changedFields, fieldLabel, type FieldChange } from "./fields.ts"
 import { type EditorStore, useEditorState, useWorkingDoc } from "./store.ts"
 
-function FieldComparison({ label, change }: { label: string; change: FieldChange }) {
+/** Text compares as text; a setting (a number, a switch, the prompt order) reads in words, never JSON. */
+const isText = (value: unknown) => value === undefined || typeof value === "string"
+
+/** A preset's order, by its prompts' names: "3. Main Prompt · on". */
+const orderLines = (doc: Doc) => (value: unknown) => {
+  if (!Array.isArray(value)) return readableLines(value)
+  const prompts = new Map(
+    ((doc.prompts as ReadonlyArray<PresetPrompt> | undefined) ?? []).map((p) => [
+      p.identifier,
+      p.marker ? p.name : promptLabel(p.name, p.content).text
+    ])
+  )
+  return (value as ReadonlyArray<PromptOrderEntry>).map(
+    (entry, index) =>
+      `${index + 1}. ${prompts.get(entry.identifier) ?? entry.identifier} · ${entry.enabled ? "on" : "off"}`
+  )
+}
+
+function FieldComparison({ label, change, doc }: { label: string; change: FieldChange; doc: Doc }) {
   const [open, setOpen] = useState(false)
+  const text = isText(change.before) && isText(change.after)
+  const order = change.path.length === 1 && change.path[0] === "order"
   return (
     <details
       className="min-w-0 rounded-md border border-border p-2"
@@ -25,11 +50,44 @@ function FieldComparison({ label, change }: { label: string; change: FieldChange
       <summary className="cursor-pointer text-sm font-medium [overflow-wrap:anywhere]">{label}</summary>
       {open && (
         <div className="mt-2">
-          <ValueDiff before={change.before} after={change.after} rich />
+          {text ? (
+            <ValueDiff before={change.before} after={change.after} rich />
+          ) : (
+            <ReadableDiff before={change.before} after={change.after} {...(order ? { lines: orderLines(doc) } : {})} />
+          )}
         </div>
       )}
     </details>
   )
+}
+
+/** What made a revision, in words: the reply that used its text (linked), a Save, an import. */
+function RevisionTitle({ revision }: { revision: Revision }) {
+  const use = revision.usedBy
+  if (revision.origin === "generation" && use)
+    return (
+      <>
+        Used by a reply ·{" "}
+        <Link
+          to="/chats/$chatId"
+          params={{ chatId: use.chatId }}
+          search={use.forkId ? { fork: use.forkId, slot: use.slotId } : { slot: use.slotId }}
+          className="text-accent underline-offset-4 hover:underline"
+        >
+          {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
+        </Link>{" "}
+        · message {use.message}
+      </>
+    )
+  const origins: Record<Revision["origin"], string> = {
+    user: "Saved",
+    generation: "Used by a reply",
+    import: "Imported",
+    merge: "Took an update",
+    agent: "Changed by the agent",
+    changeset: "Changed"
+  }
+  return <>{origins[revision.origin]}</>
 }
 
 function RevisionComparison({ store, call, revision }: { store: EditorStore; call: Caller; revision: Revision }) {
@@ -87,7 +145,7 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
         onValueChange={setMode}
         options={[
           { value: "parent", label: "Parent revision" },
-          { value: "current", label: "Current draft / head" }
+          { value: "current", label: "As it is now" }
         ]}
       />
       <p className="text-xs text-muted">
@@ -95,7 +153,7 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
           ? revision.parents.length === 0
             ? "First revision, compared with an empty document."
             : "Before: first parent. After: selected revision."
-          : "Before: selected revision. After: current draft, or the saved head when unchanged."}
+          : "Before: selected revision. After: the text as it is now, which replies use."}
       </p>
       <ErrorAlert error={error} />
       {changes === null ? (
@@ -106,15 +164,26 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
         <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
           {changes.map((change) => {
             const label = fieldLabel(state.snapshot!.ref.kind, mode === "parent" ? docs!.doc : current, change.path)
-            return <FieldComparison key={JSON.stringify(change.path)} label={label} change={change} />
+            return (
+              <FieldComparison
+                key={JSON.stringify(change.path)}
+                label={label}
+                change={change}
+                doc={mode === "parent" ? docs!.doc : current}
+              />
+            )
           })}
         </div>
       )}
-      {revision.id !== state.snapshot!.ref.headRevisionId && (
+      {(revision.id !== state.snapshot!.ref.headRevisionId || state.dirty > 0) && (
         <div>
           <Button
             disabled={!docs || clash !== null}
-            hint="Saves this revision's content as a new revision. Nothing in between is lost."
+            hint={
+              revision.id === state.snapshot!.ref.headRevisionId
+                ? "Puts every field back to this revision. What you typed since stays in each field's edit history."
+                : "Saves this revision's content as a new revision, and the fields take it. Nothing in between is lost."
+            }
             onClick={() => void restore()}
           >
             Restore
@@ -161,17 +230,32 @@ export function CardRevisionBrowser({ store, call }: { store: EditorStore; call:
       <ErrorAlert error={error} />
       <ol aria-label="Revisions" className="flex flex-col divide-y divide-border">
         {revisions.map((revision) => (
-          <li key={revision.id} className="flex min-w-0 flex-col gap-1 py-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="ghost" aria-pressed={selected?.id === revision.id} onClick={() => setSelected(revision)}>
-                {new Date(revision.createdAt).toLocaleString()}
-              </Button>
-              <Badge>{revision.origin}</Badge>
-              {revision.id === head && <Badge tone="accent">saved version</Badge>}
-            </div>
-            {revision.message && (
-              <span className="text-sm text-muted [overflow-wrap:anywhere]">{revision.message}</span>
-            )}
+          <li key={revision.id} className="py-2">
+            <RevisionEntry
+              number={revision.number}
+              createdAt={revision.createdAt}
+              title={<RevisionTitle revision={revision} />}
+              message={revision.message}
+              current={revision.id === head}
+              selected={selected?.id === revision.id}
+              onSelect={() => setSelected(revision)}
+              onMessage={async (message) => {
+                const result = await call(
+                  (client) => client("SetRevisionMessage", { refId: store.refId, revisionId: revision.id, message }),
+                  ["library"]
+                )
+                if (!result.ok) {
+                  setError(result.error)
+                  return false
+                }
+                setRevisions((list) =>
+                  list.map((r) =>
+                    r.id === revision.id ? new Revision({ ...r, message: message === "" ? null : message }) : r
+                  )
+                )
+                return true
+              }}
+            />
           </li>
         ))}
       </ol>

@@ -442,7 +442,7 @@ function Block({
             icon="trash"
             tone="danger"
             onClick={remove}
-            description="Takes it out of the preset; Revert brings it back until you save"
+            description="Takes it out of the preset when you save the new order; until then Revert brings it back"
           >
             Delete the prompt
           </MenuItem>
@@ -829,9 +829,8 @@ export function PromptDocument({
                   }}
                   remove={() => {
                     if (entry.identifier === "main") return
-                    // The prompt goes first: the order would otherwise list it again, off, at the end.
-                    void store.removeItem(at(entry.identifier))
-                    setOrder(order.filter((e) => e.identifier !== entry.identifier))
+                    // Held behind the unsaved bar with moves (owner, 2026-11-01): sent until Save.
+                    store.deletePrompt(entry.identifier)
                   }}
                 />
               </div>

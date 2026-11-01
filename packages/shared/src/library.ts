@@ -52,13 +52,33 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   lastUsedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
 }) {}
 
+/**
+ * The reply a `generation` revision was cut for (owner, 2026-11-01): the text it used had
+ * changed since the last revision. `message` is the reply's number in its chat, from 1.
+ */
+export const RevisionUse = Schema.Struct({
+  chatId: Schema.String,
+  /** The chat's title as it is now; null when the chat is gone or has none. */
+  chatTitle: Schema.NullOr(Schema.String),
+  forkId: Schema.NullOr(Schema.String),
+  slotId: Schema.String,
+  versionId: Schema.String,
+  message: Schema.Int
+})
+export type RevisionUse = typeof RevisionUse.Type
+
 export class Revision extends Schema.Class<Revision>("Revision")({
   id: RevisionId,
   parents: Schema.Array(RevisionId),
-  origin: Schema.Literals(["import", "user", "agent", "changeset", "merge"]),
+  /** `generation`: cut when a reply used text changed since the last revision (`usedBy`). */
+  origin: Schema.Literals(["import", "user", "agent", "changeset", "merge", "generation"]),
+  /** A label, not content: added or changed later with `SetRevisionMessage`. */
   message: Schema.NullOr(Schema.String),
   docHash: Schema.String,
-  createdAt: Schema.Number
+  createdAt: Schema.Number,
+  /** Its place along the ref's first-parent line, from 1 for the first revision. */
+  number: Schema.optionalKey(Schema.Int),
+  usedBy: Schema.optionalKey(RevisionUse)
 }) {}
 
 export const MergeOutcome = Schema.Literals(["up_to_date", "fast_forward", "merged", "conflicts"])
