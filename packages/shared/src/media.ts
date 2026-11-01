@@ -12,7 +12,7 @@ export const mediaWidth = (pixels: number) => MEDIA_WIDTHS.find((width) => width
 const Fraction = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 
 /** Steps a cutout is stored and addressed in: 1/10000 of the original's width or height. */
-export const CUTOUT_STEPS = 10_000
+const CUTOUT_STEPS = 10_000
 
 export const AvatarCrop = Schema.Struct({
   x: Fraction,
@@ -121,7 +121,7 @@ export const avatarCropOf = (avatarMediaId: unknown, stored: unknown): AvatarCro
 }
 
 /** The same from the JSON text a SQL read extracts (`json_extract(doc_json, '$.avatar_crop')`). */
-export const avatarCropFromJson = (avatarMediaId: unknown, json: unknown): AvatarCrop | null => {
+const avatarCropFromJson = (avatarMediaId: unknown, json: unknown): AvatarCrop | null => {
   if (typeof json !== "string") return null
   try {
     return avatarCropOf(avatarMediaId, JSON.parse(json))
