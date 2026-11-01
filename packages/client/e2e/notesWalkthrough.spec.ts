@@ -313,7 +313,9 @@ for (const width of [1440, 390])
       await expect(characterNote).toBeVisible()
       // ST put it at the author's note: here it's where ST's default note is, a depth like any
       // (owner, 2026-11-01), and nothing about it but the name it was imported with says "author's note".
-      await expect(characterNote.getByText(/author's note/).filter({ hasNotText: "Character author's note" })).toHaveCount(0)
+      await expect(
+        characterNote.getByText(/author's note/).filter({ hasNotText: "Character author's note" })
+      ).toHaveCount(0)
       await shoot("card-note-open")
       // A card's note "with the definitions" goes inside its card's part.
       await characterNote.getByRole("combobox", { name: "Position" }).click()

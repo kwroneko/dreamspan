@@ -16,6 +16,7 @@ import { AsyncView, ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Switch } from "../../ui/Choice.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
 import { NoteList, type NoteListEntry, NoteListControls, useNoteBlocks } from "../editor/NoteList.tsx"
@@ -171,18 +172,21 @@ export function NotesTab({
               doc: note.doc,
               sharedBinned: note.linked?.binned === true,
               generation: generations.get(note.ref.id) ?? 0,
+              // Its explanation is a tooltip, never inline under it: the header has no room for that.
               control: (
-                <Switch
-                  checked={note.active}
-                  onCheckedChange={(active) => void toggle(note, active)}
-                  hint={
+                <Tooltip
+                  label={
                     note.active
                       ? "On: sent with the chat from the latest message on, on this branch. Switch it off to stop."
                       : "Off: not sent. Switch it on to send it from the latest message on, on this branch."
                   }
                 >
-                  <span className="sr-only">{titleOf(note)}: on in this chat</span>
-                </Switch>
+                  <span className="inline-flex">
+                    <Switch checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
+                      <span className="sr-only">{titleOf(note)}: on in this chat</span>
+                    </Switch>
+                  </span>
+                </Tooltip>
               ),
               detail:
                 note.doc["kind"] === "imported_summary" && (summaryFill || summarizing) ? (

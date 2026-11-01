@@ -204,13 +204,13 @@ function PlacementField({
   return (
     // Side by side while they fit, each at its own width, wrapping only when the panel is narrow.
     <>
-      <div className="w-52 max-w-full">
+      <div className="min-w-40 flex-[3]">
         <Field label={label}>
           <Select items={items} value={placeOf(placement)} onValueChange={(place) => set(place)} />
         </Field>
       </div>
       {placement.mode === "depth" && (
-        <div className="w-24">
+        <div className="w-20">
           <Field label="Depth">
             <Tooltip label="Messages back from the newest: at 0 it follows the newest.">
               <Input
@@ -234,7 +234,7 @@ function PlacementField({
         </div>
       )}
       {(placement.mode === "depth" || placement.mode === "tail" || placement.mode === "section") && (
-        <div className="w-36">
+        <div className="w-28">
           <Field label="Role">
             <Select items={ROLES} value={role} onValueChange={(next) => set(placeOf(placement), { role: next })} />
           </Field>
@@ -304,7 +304,7 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
     store.setValue(["condition"], next === "always" || chosen.length === 0 ? undefined : { when: next, cards: chosen })
   return (
     <>
-      <div className="w-64 max-w-full">
+      <div className="min-w-52 flex-[3]">
         <Field label="When it applies">
           <Select
             items={WHEN.filter((w) => w.value === "always" || named.length > 0 || cards.length > 0)}
@@ -314,7 +314,7 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
         </Field>
       </div>
       {when !== "always" && (
-        <div className="min-w-56 flex-1">
+        <div className="min-w-48 flex-[4]">
           <Field label="Characters">
             <MultiSelect
               items={choices(when)}

@@ -96,7 +96,8 @@ export const slotMessage = (sql: SqlClient.SqlClient, slotId: string | null) =>
 
 /**
  * Whether another live branch (fork) of the chat has a version of the note of its own: unsaved
- * text there, or another note at its latest message than `here` (by content, not revision id).
+ * text there, or a change bound there that makes it differ at its latest message from `here`
+ * (by content, not revision id). A branch that never changed it isn't counted.
  */
 export const otherBranches = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
@@ -120,7 +121,9 @@ export const otherBranches = Effect.fnUntraced(function* (
     const there = yield* noteAt(sql, lib, userId, ref, { chatId, forkId: fork.id, slotId: fork.tip }).pipe(
       Effect.catchTag("NotFound", () => Effect.succeed(null))
     )
-    if (there && (yield* hash(there.ref.head_revision_id)) !== mine) return true
+    // A branch that never changed it (its library head, as made) has no version of its own.
+    if (there === null || there.ref.head_revision_id === ref.head_revision_id) continue
+    if ((yield* hash(there.ref.head_revision_id)) !== mine) return true
   }
   return false
 })
