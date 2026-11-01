@@ -191,6 +191,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         const draft = yield* api.SaveEditorDraft({
           refId: note.ref.id,
           field,
+          // A chat's own note's drafts are its branch's.
+          scope: opened.chatNote!.scope,
           draftId: null,
           content: "Only this fork's note",
           expectedRowVersion: null,
@@ -241,6 +243,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
             const draft = yield* api.SaveEditorDraft({
               refId: note.ref.id,
               field,
+              scope: opened.chatNote!.scope,
               draftId: null,
               content: "Local note text",
               expectedRowVersion: null,
