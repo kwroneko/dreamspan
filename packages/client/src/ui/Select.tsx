@@ -1,8 +1,33 @@
+// Pickers. An item's `description` explains it beside the highlighted option, or under its
+// label on touch screens and narrow windows (`Explanation.tsx`), so the label can stay short.
 import { Select as BaseSelect } from "@base-ui/react/select"
+import { useState } from "react"
+import { HighlightExplanation, useItemExplanation } from "./Explanation.tsx"
 
 export interface SelectItem<Value> {
   readonly value: Value
   readonly label: string
+  /** What choosing it means, when the label alone doesn't say. */
+  readonly description?: string | undefined
+}
+
+function SelectOption<Value>({ item }: { item: SelectItem<Value> }) {
+  const explanation = useItemExplanation(item.description)
+  return (
+    <BaseSelect.Item
+      value={item.value}
+      {...explanation.describedBy}
+      className="grid grid-cols-[1rem_1fr] items-center gap-x-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
+    >
+      <BaseSelect.ItemIndicator className="col-start-1 row-start-1 text-accent">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="m2.5 8.5 4 4 7-9" strokeWidth="1.5" />
+        </svg>
+      </BaseSelect.ItemIndicator>
+      <BaseSelect.ItemText className="col-start-2 row-start-1">{item.label}</BaseSelect.ItemText>
+      {explanation.parts && <span className="col-start-2 flex flex-col">{explanation.parts}</span>}
+    </BaseSelect.Item>
+  )
 }
 
 /** A single-choice picker. Use inside a `Field` for its label. */
@@ -25,6 +50,7 @@ export function Select<Value>({
   /** What the closed picker shows for a value, when its label is too long for the space. */
   shown?: (value: Value) => string
 }) {
+  const [popup, setPopup] = useState<HTMLElement | null>(null)
   return (
     <BaseSelect.Root
       items={items as Array<SelectItem<Value>>}
@@ -48,31 +74,17 @@ export function Select<Value>({
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
         <BaseSelect.Positioner className="z-50 outline-none select-none" sideOffset={4}>
-          <BaseSelect.Popup className="max-h-[var(--available-height)] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
+          <BaseSelect.Popup
+            ref={setPopup}
+            className="max-h-[var(--available-height)] max-w-[min(24rem,calc(100vw-1rem))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+          >
             <BaseSelect.List>
               {items.map((item) => (
-                <BaseSelect.Item
-                  key={String(item.value)}
-                  value={item.value}
-                  className="grid grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
-                >
-                  <BaseSelect.ItemIndicator className="col-start-1 text-accent">
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path d="m2.5 8.5 4 4 7-9" strokeWidth="1.5" />
-                    </svg>
-                  </BaseSelect.ItemIndicator>
-                  <BaseSelect.ItemText className="col-start-2">{item.label}</BaseSelect.ItemText>
-                </BaseSelect.Item>
+                <SelectOption key={String(item.value)} item={item} />
               ))}
             </BaseSelect.List>
           </BaseSelect.Popup>
+          <HighlightExplanation popup={popup} />
         </BaseSelect.Positioner>
       </BaseSelect.Portal>
     </BaseSelect.Root>
@@ -82,7 +94,8 @@ export function Select<Value>({
 /**
  * The browser's own picker, for a dense table where hundreds of rows each have one: far
  * lighter than `Select`, and the phone's native list. `shown` is the closed picker's text,
- * when the labels are too long for the space; the open list shows the labels.
+ * when the labels are too long for the space; the open list shows the labels. The browser's
+ * list can't show an explanation beside an option: an item's `description` is its title.
  */
 export function NativeSelect<Value extends string>({
   items,
@@ -129,7 +142,7 @@ export function NativeSelect<Value extends string>({
         className="absolute inset-0 w-full cursor-pointer appearance-none rounded-md bg-transparent text-transparent outline-none [&>option]:bg-surface [&>option]:text-text"
       >
         {items.map((item) => (
-          <option key={item.value} value={item.value}>
+          <option key={item.value} value={item.value} title={item.description}>
             {item.label}
           </option>
         ))}

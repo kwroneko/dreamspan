@@ -36,9 +36,17 @@ export interface NoteCard {
 }
 
 const ROLES = [
-  { value: "system", label: "System" },
-  { value: "user", label: "User" },
-  { value: "assistant", label: "Assistant" }
+  {
+    value: "system",
+    label: "System",
+    description: "Sent as a system message: an instruction, from no one in the story."
+  },
+  { value: "user", label: "User", description: "Sent as a user message, as if you had written it." },
+  {
+    value: "assistant",
+    label: "Assistant",
+    description: "Sent as an assistant message, as if the model had written it."
+  }
 ] as const
 
 type Role = (typeof ROLES)[number]["value"]
@@ -47,20 +55,66 @@ type Section = Extract<Placement, { mode: "section" }>["section"]
 
 /**
  * Where a note goes: the five places relative to the preset's own sections (DESIGN §4.1),
- * then older and imported places, which show only on a note already there.
+ * then older and imported places, which show only on a note already there. The tail is what
+ * the preset sends after the chat history.
  */
 const PLACES = [
-  { value: "section:context_start", label: "Start of context" },
-  { value: "section:after_main_prompt", label: "With the definitions (after the main prompt)" },
-  { value: "depth", label: "In the history, at a depth" },
-  { value: "section:tail_start", label: "Start of the tail" },
-  { value: "section:tail_end", label: "End of the tail" },
-  { value: "tail", label: "After the newest message (older notes)" },
-  { value: "section:card", label: "Beside the card's definition (older notes)" },
-  { value: "section:before_main_prompt", label: "Before the main prompt (older notes)" },
-  { value: "section:author_note_top", label: "Just before the chat's author's note (imported from ST)" },
-  { value: "section:author_note_bottom", label: "Just after the chat's author's note (imported from ST)" },
-  { value: "none", label: "Not placed: only a macro reads it" }
+  {
+    value: "section:context_start",
+    label: "Start of context",
+    description: "The very first thing sent, before everything in the preset."
+  },
+  {
+    value: "section:after_main_prompt",
+    label: "With the definitions",
+    description: "Right after the preset's main prompt."
+  },
+  {
+    value: "depth",
+    label: "In the history",
+    description: "Among the chat's messages, the depth you set back from the newest. At 0 it follows the newest."
+  },
+  {
+    value: "section:tail_start",
+    label: "Start of the tail",
+    description: "Right after the chat history and the newest message, before the preset's prompts that follow."
+  },
+  {
+    value: "section:tail_end",
+    label: "End of the tail",
+    description:
+      "Last of the preset's prompts after the history: only the closing instruction, and the newest message if the preset puts it last, follow."
+  },
+  {
+    value: "tail",
+    label: "After the newest message",
+    description: "An older place: in the history at depth 0, as ST puts it. Pick another to move it."
+  },
+  {
+    value: "section:card",
+    label: "Beside the card",
+    description: "An older place: at the top of its card's part of the definitions. A chat's note here isn't sent."
+  },
+  {
+    value: "section:before_main_prompt",
+    label: "Before the main prompt",
+    description: "An older place: right before the preset's main prompt."
+  },
+  {
+    value: "section:author_note_top",
+    label: "Before the author's note",
+    description: "Imported from ST: joins the chat's author's note, just above its text."
+  },
+  {
+    value: "section:author_note_bottom",
+    label: "After the author's note",
+    description: "Imported from ST: joins the chat's author's note, just below its text."
+  },
+  {
+    value: "none",
+    label: "Not placed",
+    description: "Never sent by itself: only a macro that reads it sends its text."
+  }
 ] as const
 
 type Place = (typeof PLACES)[number]["value"]
@@ -116,7 +170,7 @@ const conditionText = (condition: NoteCondition | undefined, cards: ReadonlyArra
 }
 
 /** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
-const CARD_DEFINITIONS = "With the definitions (in the card's part)"
+const CARD_DEFINITIONS = "At the top of this card's own part of the definitions, inside its wrapper."
 
 /** What a place at the author's note means, said where it's chosen: nothing about it is hidden. */
 const AUTHOR_NOTE_PLACE =
@@ -152,7 +206,7 @@ function PlacementField({
   }
   // An older or imported place still shows, when the note is there already.
   const items = PLACES.filter((p) => DECIDED.includes(p.value) || p.value === placeOf(placement)).map((p) =>
-    card && p.value === "section:after_main_prompt" ? { ...p, label: CARD_DEFINITIONS } : p
+    card && p.value === "section:after_main_prompt" ? { ...p, description: CARD_DEFINITIONS } : p
   )
   return (
     // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
@@ -198,10 +252,18 @@ function PlacementField({
 
 type When = NoteCondition["when"]
 
-const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string }> = [
-  { value: "always", label: "Always" },
-  { value: "turn", label: "On a character's turn" },
-  { value: "not_muted", label: "While a character isn't muted" }
+const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string; readonly description: string }> = [
+  { value: "always", label: "Always", description: "Sent with every reply." },
+  {
+    value: "turn",
+    label: "On a character's turn",
+    description: "Sent only when the character you pick is the one replying."
+  },
+  {
+    value: "not_muted",
+    label: "While a character isn't muted",
+    description: "Sent with every reply while the character you pick isn't muted, whoever replies."
+  }
 ]
 
 /** When a note applies (DESIGN §4.1): always, on a card's turn, or while a card isn't muted. */
@@ -538,12 +600,21 @@ export function NoteEditor({
           }
         >
           {shareable && (
-            <MenuItem icon="link" onClick={() => void relink("share")}>
+            <MenuItem
+              icon="link"
+              description="Makes its text a shared note this one shows, so other cards and chats can use it too."
+              onClick={() => void relink("share")}
+            >
               Save as shared note
             </MenuItem>
           )}
           {onDeleted && (
-            <MenuItem icon="trash" tone="danger" onClick={() => void remove()}>
+            <MenuItem
+              icon="trash"
+              tone="danger"
+              description="Moves it to the bin, where it can be restored."
+              onClick={() => void remove()}
+            >
               Delete the note
             </MenuItem>
           )}
@@ -744,10 +815,14 @@ export function AddNoteMenu({
         </Button>
       }
     >
-      <MenuItem icon="write" onClick={onNew}>
+      <MenuItem icon="write" description="An empty note of its own here." onClick={onNew}>
         New note
       </MenuItem>
-      <MenuItem icon="link" onClick={onPick}>
+      <MenuItem
+        icon="link"
+        description="A note that shows a shared note's text: editing it changes it everywhere it's used."
+        onClick={onPick}
+      >
         Pick a shared note…
       </MenuItem>
     </Menu>
