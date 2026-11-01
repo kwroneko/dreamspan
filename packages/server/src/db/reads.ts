@@ -1,3 +1,4 @@
+import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
 import { composerImages } from "./composerImages.ts"
@@ -6,7 +7,8 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, ForkId, MessageImages, SlotId, VersionId } from "@rp/shared/chat.ts"
+import { type ChatId, Fork, type ForkId, type MessageImages, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { chatForkSummaries } from "./forkSummaries.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -43,6 +45,7 @@ import {
 import { pathSegments } from "./pathSegments.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
+import { noteAt, noteChangedAt } from "./noteAt.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
   versionExtras,
@@ -566,8 +569,10 @@ export const makeReadHandlers = Effect.gen(function* () {
         return yield* drafts.history(draft, limit)
       }).pipe(query("ComposerHistory")),
 
-    DraftHistory: ({ userId, key, limit }) =>
-      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit)).pipe(query("DraftHistory")),
+    DraftHistory: ({ userId, key, limit, before }) =>
+      Effect.flatMap(drafts.get(userId, key), (draft) => drafts.history(draft, limit, before)).pipe(
+        query("DraftHistory")
+      ),
 
     GetDraftState: ({ userId, key, seq }) =>
       Effect.flatMap(drafts.get(userId, key), (draft) => drafts.stateAt(draft, seq)).pipe(
@@ -594,10 +599,16 @@ export const makeReadHandlers = Effect.gen(function* () {
         return { ref: toLibraryRef(ref), doc: yield* lib.loadDoc(ref.head_revision_id) }
       }).pipe(query("GetRef")),
 
-    RefHistory: ({ userId, refId, limit, before }) =>
+    RefHistory: ({ userId, refId, limit, before, chatNote }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        let start: string | null = ref.head_revision_id
+        // A chat's own note: its line as the branch at that position has it.
+        const head = yield* lib.loadDoc(ref.head_revision_id)
+        const resolved =
+          chatNote && (head.owner as { chat?: string } | undefined)?.chat === chatNote.chatId
+            ? yield* noteAt(sql, lib, userId, ref, chatNote)
+            : null
+        let start: string | null = resolved?.ref.head_revision_id ?? ref.head_revision_id
         if (before !== undefined) {
           const [cursor] = yield* sql<{ parent: string | null }>`
             SELECT json_extract(parents, '$[0]') AS parent FROM entity_revisions
@@ -609,9 +620,11 @@ export const makeReadHandlers = Effect.gen(function* () {
           id: string
           parents: string
           origin: Revision["origin"]
+          origin_ref: string | null
           message: string | null
           doc_hash: string
           created_at: number
+          n: number
         }>`
           WITH RECURSIVE history(id, n) AS (
             SELECT ${start}, 1
@@ -619,19 +632,36 @@ export const makeReadHandlers = Effect.gen(function* () {
             SELECT json_extract(r.parents, '$[0]'), h.n + 1 FROM entity_revisions r JOIN history h ON r.id = h.id
             WHERE json_extract(r.parents, '$[0]') IS NOT NULL AND h.n < ${limit}
           )
-          SELECT r.id, r.parents, r.origin, r.message, r.doc_hash, r.created_at
+          SELECT r.id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n
           FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
-        return rows.map(
-          (row) =>
+        const first = start === null ? 0 : yield* revisionNumber(sql, start)
+        const changedAt = resolved
+          ? yield* noteChangedAt(
+              sql,
+              chatNote!.chatId,
+              resolved.fork,
+              rows.map((row) => row.id)
+            )
+          : null
+        const out = []
+        for (const row of rows) {
+          const at = changedAt?.get(row.id)
+          const usedBy = row.origin === "generation" ? yield* revisionUse(sql, userId, row.origin_ref) : null
+          out.push(
             new Revision({
               id: row.id as RevisionId,
               parents: JSON.parse(row.parents) as Array<RevisionId>,
               origin: row.origin,
               message: row.message,
               docHash: row.doc_hash,
-              createdAt: row.created_at
+              createdAt: row.created_at,
+              number: first - row.n + 1,
+              ...(usedBy ? { usedBy } : {}),
+              ...(at ? { changedAt: at } : {})
             })
-        )
+          )
+        }
+        return out
       }).pipe(query("RefHistory")),
 
     PreviewMerge: ({ userId, refId }) =>
@@ -807,7 +837,13 @@ export const makeReadHandlers = Effect.gen(function* () {
           SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
         // Each fork's tip text is the last message it shows (an inserted one can follow the tip).
-        return (yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))).map(toFork)
+        const ends = yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))
+        // Where each parts from its parent and its last message's time, as the shell lists them.
+        const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
+        return ends.map((row) => {
+          const s = summaries.get(row.id)
+          return new Fork({ ...toFork(row), split: s?.split ?? null, endAt: s?.endAt ?? null })
+        })
       }).pipe(query("ListForks")),
 
     // The siblings SwitchBranch counts, in its order, with each one's name and first words.

@@ -257,7 +257,9 @@ describe("prompt scripts from every list", () => {
           ]
         }),
         lorebooks: [book],
-        globalLorebooks: [book.id]
+        events: [
+          { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: book.id as never } } } }
+        ]
       })
     )
     const sent = JSON.stringify(snapshot.request.messages)

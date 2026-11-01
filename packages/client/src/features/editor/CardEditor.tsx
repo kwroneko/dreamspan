@@ -12,7 +12,8 @@ import { Field, Fieldset, Input } from "../../ui/Field.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, TextField } from "./controls.tsx"
-import { AddNoteMenu, NoteEditor, NoteRow, SharedNotePicker } from "./notes.tsx"
+import { AddNoteMenu, SharedNotePicker } from "./notes.tsx"
+import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
 import { type EditorStore, useEditorState, useValue } from "./store.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
@@ -113,8 +114,8 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
   const [notes, setNotes] = useState<ReadonlyArray<NoteEntry> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [version, setVersion] = useState(0)
-  const [open, setOpen] = useState<string | null>(null)
   const [picking, setPicking] = useState(false)
+  const { blocks, settings } = useNoteBlocks(notes?.length ?? 0)
   const name = useValue<string>(store, ["name"]) || "This card"
   const entity = useEditorState(store).snapshot?.ref.entityId
   useEffect(() => {
@@ -129,7 +130,7 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
       ["library"]
     )
     if (!result.ok) return setError(result.error)
-    setOpen(result.value.id)
+    blocks.setOpen(result.value.id, true)
     setVersion(version + 1)
   }
   // A card's notes can only be conditioned on the card itself here; a chat offers its cast.
@@ -146,28 +147,23 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
         </EmptyState>
       )}
       {notes && notes.length > 0 && (
-        <ul aria-label="The card's notes" className="flex flex-col">
-          {notes.map((entry) => (
-            <NoteRow
-              key={entry.ref.id}
-              doc={entry.doc}
-              label={entry.ref.label}
-              cards={cards}
-              open={open === entry.ref.id}
-              onOpenChange={(next) => setOpen(next ? entry.ref.id : null)}
-              keepMounted
-            >
-              <NoteEditor
-                key={`${entry.ref.id}:${version}`}
-                noteRef={entry.ref}
-                call={call}
-                cards={cards}
-                onDeleted={() => setVersion(version + 1)}
-                onRelinked={() => setVersion(version + 1)}
-              />
-            </NoteRow>
-          ))}
-        </ul>
+        <>
+          <NoteListControls ids={notes.map((entry) => entry.ref.id)} blocks={blocks} />
+          <NoteList
+            label="The card's notes"
+            entries={notes.map((entry) => ({
+              ref: entry.ref,
+              doc: entry.doc,
+              generation: version,
+              onDeleted: () => setVersion(version + 1)
+            }))}
+            cards={cards}
+            call={call}
+            blocks={blocks}
+            settings={settings}
+            onRelinked={() => setVersion(version + 1)}
+          />
+        </>
       )}
       <div>
         <AddNoteMenu onNew={() => void add()} onPick={() => setPicking(true)} />

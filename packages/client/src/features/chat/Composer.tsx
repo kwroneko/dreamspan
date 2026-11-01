@@ -32,6 +32,7 @@ import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { type ComposerDraft, type ComposerSource, type Sent } from "./composerDraft.ts"
 import { composerGuidance, editStillShown, guidanceEditor, useGuidanceEdit } from "./guidanceEdit.tsx"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
+import { requestCastAdd } from "./castAddState.ts"
 
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
@@ -520,7 +521,17 @@ export function Composer({
     session,
     view,
     onSettings,
-    speaker: { speaker, recent: switcherRecent, onPick, personas, onAddToChat: () => onSettings("cast") },
+    speaker: {
+      speaker,
+      recent: switcherRecent,
+      onPick,
+      personas,
+      onAddToChat: () => {
+        // The Cast tab, its Add characters open with the search focused (castAddState.ts).
+        requestCastAdd()
+        onSettings("cast")
+      }
+    },
     recent: recent.map((id) => ({
       id,
       name: nameOf(castView, id) ?? "?",
@@ -538,8 +549,8 @@ export function Composer({
       editing !== null
         ? `Guidance for ${editedName ? `${editedName}'s` : "this"} reply: each submit (${submitHint}) makes a new version of it with this text, and so does its › past the last version; the versions it has keep their own. ✕ above goes back to your draft.`
         : guidance
-          ? `A one-turn direction for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
-          : `${generateText} doesn't use this text: turn guidance on to direct the next message with it.`,
+          ? `One-turn guidance for ${name ? `${name}'s` : "the"} next message (${submitHint}) or Continue. It leaves the box when you submit it; a new version of a reply uses that reply's own guidance.`
+          : `${generateText} doesn't use this text: turn guidance on to guide the next message with it.`,
     reply: {
       candidates: faces,
       muted: cast?.absent ?? [],
@@ -634,7 +645,7 @@ export function Composer({
               : !textReady
                 ? "Loading…"
                 : guidance
-                  ? "Direction for the next message…"
+                  ? "Guidance for the next message…"
                   : leafGenerating
                     ? "Queue…"
                     : "Message…"

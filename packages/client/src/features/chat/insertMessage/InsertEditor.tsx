@@ -193,7 +193,7 @@ export function InsertEditor({
           data-testid="insert-text"
           autoFocus
           value={text}
-          placeholder={`What ${name} says, or a direction for Generate…`}
+          placeholder={`What ${name} says, or guidance for Generate…`}
           onChange={(event) => editor.setText(event.currentTarget.value)}
         />
       </div>

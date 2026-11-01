@@ -104,12 +104,7 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         label="Bypass list"
         description="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
       >
-        <Textarea
-          value={values.bypass}
-          onChange={(event) => edit({ bypass: event.target.value })}
-          spellCheck={false}
-          textActions={false}
-        />
+        <Textarea value={values.bypass} onChange={(event) => edit({ bypass: event.target.value })} spellCheck={false} />
       </Field>
       <Switch
         checked={values.forceProxy}
@@ -159,6 +154,6 @@ export const register = () => {
     parent: "settings",
     path: "network",
     component: NetworkPage,
-    nav: { label: "Network", order: 30, adminOnly: true }
+    nav: { label: "Network", order: 30, adminOnly: true, description: "How the server reaches model providers." }
   })
 }

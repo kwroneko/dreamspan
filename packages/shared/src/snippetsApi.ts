@@ -1,36 +1,27 @@
-// Snippets and shared named notes are the same library entities. These operations edit
-// their continuously saved text; chat text uses the fork's revision binding.
+// Snippets and shared named notes are the same library entities (DESIGN §4.1). A snippet is for
+// "All chats" or for one chat, every branch of it; its text edits as every library field does
+// (the editor's drafts, edit history and revisions), so these are only the list, creating one
+// and its scope.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { ChatId, ForkId } from "./chat.ts"
-import { Draft, DraftHistoryPolicy, DraftState } from "./drafts.ts"
+import { ChatId } from "./chat.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
-import { LibraryRef, RefId, RevisionId } from "./library.ts"
+import { LibraryRef, RefId } from "./library.ts"
 import { EditRefused } from "./editorApi.ts"
 
-export const SnippetContext = { chatId: Schema.NullOr(ChatId), forkId: Schema.NullOr(ForkId) }
 export class Snippet extends Schema.Class<Snippet>("Snippet")({
   ref: LibraryRef,
+  /** The live name and text: what's typed, saved as a revision or not. */
   title: Schema.String,
   content: Schema.String,
-  global: Schema.Boolean,
-  revision: RevisionId,
-  draft: Schema.NullOr(Draft)
+  /** For all chats; otherwise for the chat it was made in, every branch of it. */
+  global: Schema.Boolean
 }) {}
+/** The chat shown (null outside a chat): its snippets are listed with the ones for all chats. */
+export const SnippetContext = { chatId: Schema.NullOr(ChatId) }
 export const CreateSnippetFields = { ...SnippetContext, title: Schema.String, content: Schema.String }
-export const SaveSnippetFields = {
-  ...CreateSnippetFields,
-  refId: RefId,
-  expectedRevision: RevisionId
-}
-export const GlobalSnippetFields = { ...SnippetContext, refId: RefId, expectedRevision: RevisionId }
-export const SnippetHistoryFields = {
-  ...SnippetContext,
-  refId: RefId,
-  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
-}
-/** Restores state `seq` of the snippet's text history and saves it as the snippet's text. */
-export const RestoreSnippetFields = { ...GlobalSnippetFields, seq: Schema.Int }
+/** For all chats (`global`), or only the chat shown. */
+export const SnippetScopeFields = { ...SnippetContext, refId: RefId, global: Schema.Boolean }
 export class SnippetsApi extends RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: { ...SnippetContext, query: Schema.optionalKey(Schema.String) },
@@ -42,24 +33,12 @@ export class SnippetsApi extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, ServerError, EditRefused])
   }),
-  Rpc.make("SaveSnippet", {
-    payload: SaveSnippetFields,
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, ServerError, EditRefused])
-  }),
-  Rpc.make("MakeSnippetGlobal", {
-    payload: GlobalSnippetFields,
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, ServerError])
-  }),
-  /** The snippet's texts, newest first. A current library revision not yet in its draft has seq -1; only earlier states are restore targets. */
-  Rpc.make("SnippetHistory", {
-    payload: SnippetHistoryFields,
-    success: Schema.Array(DraftState),
-    error: Schema.Union([NotFound, ServerError])
-  }),
-  Rpc.make("RestoreSnippet", {
-    payload: RestoreSnippetFields,
+  /**
+   * Moves a snippet between "This chat" and "All chats". Narrowing one that a card's note or
+   * another chat's note shows is refused: they'd lose it.
+   */
+  Rpc.make("SetSnippetScope", {
+    payload: SnippetScopeFields,
     success: Snippet,
     error: Schema.Union([NotFound, StaleWrite, ServerError, EditRefused])
   })

@@ -117,7 +117,11 @@ test("breadcrumbs say what the URL says: home none, a character its card, a chat
   await page.getByRole("link", { name: "Show in the left panel" }).click()
   await expect(crumbs(page)).toContainText("Lamp story")
   await expect(crumbs(page)).not.toContainText("Wren")
-  await expect(sidebar(page).getByRole("region", { name: "Latest branch", exact: true })).toBeVisible()
+  await expect(
+    sidebar(page)
+      .getByRole("region", { name: /^(Named and pinned|Branches)$/ })
+      .first()
+  ).toBeVisible()
   expect(path(page)).toBe(chatPath)
   // Moving around the chat keeps the panel on it.
   await page.reload()

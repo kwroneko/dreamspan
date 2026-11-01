@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel } from "./support/panel.ts"
 
@@ -82,7 +83,7 @@ for (const width of [1440, 390]) {
     await shoot("fork")
     // Existing card rename also checks the pair before Save.
     await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("1")
-    await expect(page.getByRole("button", { name: /^Save(?: \(|$)/ })).toBeDisabled()
+    await expect(saveButton(page)).toBeDisabled()
     await expect(page.getByRole("status").filter({ hasText: "Another card is already called" })).toHaveText(clash)
     await shoot("rename-clash")
     await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`fork-${width}`)
@@ -113,10 +114,8 @@ for (const width of [1440, 390]) {
     expect(duplicates.filter((ref) => ref.label === "Aria Vance" && ref.subtitle === "1").length).toBeGreaterThan(1)
     await page.goto(`${server().url}/library/${aria.id}`)
     await page.getByRole("textbox", { name: "Description", exact: true }).fill(`Synthetic edit ${width}`)
-    await expect(page.getByRole("button", { name: /^Save(?: \(|$)/ })).toBeEnabled()
-    await page.getByRole("button", { name: /^Save(?: \(|$)/ }).click()
-    await expect(page.getByRole("button", { name: "Save revision", exact: true })).toBeEnabled()
-    await page.getByRole("button", { name: "Save revision", exact: true }).click()
+    await expect(saveButton(page)).toBeEnabled()
+    await saveRevision(page)
     await expect(page.getByRole("dialog")).toHaveCount(0)
     // Keep the greeting / cast names visibly different from the model name.
     await admin((api) =>
@@ -157,11 +156,7 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/library/${aria.id}`)
     await page.getByRole("textbox", { name: /^Display name/ }).fill(`Aria revised ${width}`)
     await page.getByRole("textbox", { name: /^Version \(shown as subtitle\)/ }).fill(`revised-${width}`)
-    await page.getByRole("button", { name: "Save (2)", exact: true }).click()
-    await page
-      .getByRole("dialog", { name: "Save a revision" })
-      .getByRole("button", { name: "Save revision", exact: true })
-      .click()
+    await saveButton(page).click()
     await expect(page.getByRole("dialog")).toHaveCount(0)
     if (width === 1440) {
       // The shell's left panel lists cards with their versions under Characters (unit E).
@@ -177,7 +172,12 @@ for (const width of [1440, 390]) {
     await shoot("sidebar-save")
     await page.getByRole("button", { name: "History", exact: true }).click()
     const history = page.getByRole("dialog", { name: "History" })
-    await history.getByRole("list", { name: "Revisions" }).getByRole("listitem").last().getByRole("button").click()
+    await history
+      .getByRole("list", { name: "Revisions" })
+      .getByRole("listitem")
+      .last()
+      .getByRole("button", { name: /^Revision \d+ / })
+      .click()
     await expect(history.getByRole("status")).toContainText("Another card is already called Aria Vance · 1")
     await expect(history.getByRole("button", { name: "Restore", exact: true })).toBeDisabled()
     await history.getByRole("status").scrollIntoViewIfNeeded()

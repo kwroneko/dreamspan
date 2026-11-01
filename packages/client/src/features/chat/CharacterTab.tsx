@@ -10,7 +10,7 @@ import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { lazy, Suspense, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
@@ -18,6 +18,7 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { TabPortrait } from "../editor/PortraitControls.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { SaveRevision } from "../editor/SaveRevision.tsx"
 import { Menu, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { useCaller } from "../editor/caller.ts"
@@ -31,8 +32,6 @@ import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import type { CastCard } from "@rp/shared/chat.ts"
 import type { ChatSession, ChatView } from "./session.ts"
-
-const SaveDialog = lazy(() => import("../editor/SaveDialog.tsx").then((m) => ({ default: m.SaveDialog })))
 
 /** The definition fields ST's panel shows, in its order; the rest are in the full editor. */
 const FIELDS: ReadonlyArray<{ path: string; label: string; rows: number }> = [
@@ -252,15 +251,12 @@ function CardFields({
   const store = useCardStore(info.refId)
   const workspace = usePresetWorkspace()
   const state = useEditorState(store)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
   useEffect(() => {
     if (store.snapshot === null) void store.load()
   }, [store])
   useLeaveGuard(store)
   if (state.loadError) return <ErrorAlert error={state.loadError} />
   if (!state.snapshot) return <p className="text-sm text-muted">Loading the card…</p>
-  const { dirty } = state
   const others = info.usedByChats - 1
   return (
     <div className="flex flex-col gap-4">
@@ -273,36 +269,18 @@ function CardFields({
         {/* The consequence, once, where it matters (DESIGN §6.2). */}
         <p className="text-sm">
           {info.binding === "revision"
-            ? `This chat uses an earlier version of ${card.name}: saving changes the card, not what this chat uses.`
+            ? `This chat uses an earlier version of ${card.name}: editing changes the card, not what this chat uses.`
             : persona
-              ? `Saving changes ${card.name} in every chat where you play them.`
+              ? `What you change is used for ${card.name} as you type, in every chat where you play them.`
               : others === 0
-                ? `Saving changes ${card.name} for this chat; no other chat uses it.`
-                : `Saving changes ${card.name} in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
+                ? `What you change is used for ${card.name} as you type; no other chat uses it.`
+                : `What you change is used for ${card.name} as you type, in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
         </p>
         {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
       </div>
-      {/* Save stays in sight while a field further down is edited: drafts reach the chat only once saved. */}
+      {/* Save stays in sight while a field further down is edited; what's typed is used as it's typed. */}
       <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">
-        <Button
-          variant="primary"
-          disabled={dirty === 0}
-          onClick={() => {
-            setSaved(false)
-            setSaving(true)
-          }}
-        >
-          Save{dirty > 0 ? ` (${dirty})` : ""}
-        </Button>
-        <p role="status" className="text-sm text-muted">
-          {state.saving
-            ? "Keeping your changes…"
-            : dirty === 0
-              ? saved
-                ? "Saved."
-                : "Everything is saved."
-              : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save.`}
-        </p>
+        <SaveRevision store={store} current={{ chatId: session.id, forkId: view.forkId }} />
       </div>
       {state.saveError && (
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
@@ -336,19 +314,6 @@ function CardFields({
             .
           </p>
         </Alert>
-      )}
-      {saving && (
-        <Suspense fallback={null}>
-          <SaveDialog
-            store={store}
-            current={{ chatId: session.id, forkId: view.forkId }}
-            onClose={() => setSaving(false)}
-            onSaved={() => {
-              setSaving(false)
-              setSaved(true)
-            }}
-          />
-        </Suspense>
       )}
     </div>
   )

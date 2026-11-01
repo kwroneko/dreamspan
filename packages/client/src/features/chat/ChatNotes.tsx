@@ -1,13 +1,13 @@
 // A chat's notes (DESIGN §4.1): its own, made here, then each cast card's (the cards the user
-// plays included: a persona note is a card's note), each collapsed to a row with its switch,
-// turned on or off at the leaf shown, so from there on, on this branch (§3.4). Every note
-// edits through its drafts and saves as a revision, like any library entry (ARCHITECTURE
-// §14); a card's note is the card's, in every chat.
+// plays included: a persona note is a card's note), as blocks (`NoteList`): each with its switch,
+// turned on or off from the latest message on, on this branch (§3.4). What's typed is used as it's
+// typed, a revision is cut by Save or by a reply that uses it (§6.2); a chat's own note is tied
+// to its branch, and a card's note is the card's, in every chat.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
-import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
+import type { SharedNote } from "@rp/shared/editorApi.ts"
 import type { SummaryFill } from "@rp/shared/inspectorApi.ts"
 import type { Placement } from "@rp/shared/docs/note.ts"
 import { AsyncResult } from "effect/reactivity"
@@ -16,10 +16,11 @@ import { AsyncView, ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
 import { Switch } from "../../ui/Choice.tsx"
-import { Alert } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
-import { AddNoteMenu, type NoteCard, NoteEditor, NoteRow, SharedNotePicker } from "../editor/notes.tsx"
+import { NoteList, type NoteListEntry, NoteListControls, useNoteBlocks } from "../editor/NoteList.tsx"
+import { AddNoteMenu, type NoteCard, SharedNotePicker } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
 import { chatNoteActions } from "./presentation.tsx"
@@ -50,7 +51,7 @@ function SummaryMacroLine({
         : null,
     summarizing && note.active && (macro || placement !== "none") ? "Also sent beside the summaries." : null
   ].filter((line) => line !== null)
-  return lines.length ? <p className="pl-12 text-sm text-muted">{lines.join(" ")}</p> : null
+  return lines.length ? <p className="px-2 pb-1 pl-12 text-xs text-muted">{lines.join(" ")}</p> : null
 }
 
 const titleOf = (note: ChatNote) => (note.doc["title"] as string | undefined) || note.ref.label
@@ -60,98 +61,10 @@ const cardRefs = AppClient.query("ListLibrary", { kind: "card" }, { reactivityKe
 /** Where a note is added: the chat's own, or a card's (by its library entry). */
 type Group = { readonly card: null } | { readonly card: EntityId; readonly name: string }
 
-function ChatNoteRow({
-  note,
-  cards,
-  card,
-  open,
-  position,
-  onOpenChange,
-  onToggle,
-  onDeleted,
-  onRelinked,
-  summary,
-  summarizing,
-  session,
-  onChanged
-}: {
-  note: ChatNote
-  session: ChatSession
-  /** Reads the notes again after an action changed them. */
-  onChanged: () => void
-  cards: ReadonlyArray<NoteCard>
-  /** What `{{summary}}` fills in for the next reply, for a summary note's line about it. */
-  summary: SummaryFill | undefined
-  /** Whether the chat summarizes: a summary note that's on is then sent beside the summaries. */
-  summarizing: boolean
-  /** The card's name, for a card's note. */
-  card: string | null
-  open: boolean
-  position: ChatNotePosition
-  onOpenChange: (open: boolean) => void
-  onToggle: (active: boolean) => void
-  onDeleted: (item: BinItem) => void
-  onRelinked: () => void
-}) {
-  const call = useCaller()
-  const title = titleOf(note)
-  // A relink changes what the note is: its editor starts again from the saved note.
-  const [generation, setGeneration] = useState(0)
-  return (
-    <NoteRow
-      doc={note.doc}
-      label={note.ref.label}
-      cards={cards}
-      open={open}
-      onOpenChange={onOpenChange}
-      shared={note.linked}
-      detail={
-        note.doc["kind"] === "imported_summary" && (summary || summarizing) ? (
-          <SummaryMacroLine note={note} summary={summary} summarizing={summarizing} />
-        ) : null
-      }
-      control={
-        <Switch checked={note.active} onCheckedChange={onToggle}>
-          <span className="sr-only">{title}: on in this chat</span>
-        </Switch>
-      }
-    >
-      <SlotOutlet slot={chatNoteActions} props={{ note, session, onChanged }} />
-      <NoteEditor
-        key={`${position.forkId ?? ""}:${card === null ? (position.slotId ?? "start") : note.ref.id}:${generation}`}
-        noteRef={note.ref}
-        call={call}
-        cards={cards}
-        onRelinked={() => {
-          setGeneration(generation + 1)
-          onRelinked()
-        }}
-        {...(card === null
-          ? {
-              onDeleted,
-              chatNote: position,
-              notice: (
-                <Alert title="From here on, on this branch">
-                  <p>Saving applies from the displayed message on, on this branch.</p>
-                </Alert>
-              )
-            }
-          : {
-              // A card's note is the card's: it's deleted from the card, not from a chat.
-              notice: (
-                <Alert title={`${card}'s note`}>
-                  <p>It belongs to the card: saving it changes it in the library, in every chat with {card}.</p>
-                </Alert>
-              )
-            })}
-      />
-    </NoteRow>
-  )
-}
-
 /**
- * The side panel's Notes tab: the chat's notes at the leaf shown, grouped by owner, to turn on
- * and off, add (new or a shared note), edit and delete. `focusCard` scrolls to a card's group.
+ * The side panel's Notes tab: the chat's notes at the latest message of the branch shown,
+ * grouped by owner, to turn on and off, add (new or a shared note), edit and delete.
+ * `focusCard` scrolls to a card's group.
  */
 export function NotesTab({
   session,
@@ -175,20 +88,25 @@ export function NotesTab({
     [chatId, view.forkId, leafSlotId]
   )
   const refresh = useAtomRefresh(atom)
+  const listed = useAtomValue(atom)
   const refs = useAtomValue(cardRefs)
   const call = useCaller()
   const deleted = useDeletedToast()
   const cast = useCast()
-  const [open, setOpen] = useState<string | null>(null)
   const [picking, setPicking] = useState<Group | null>(null)
   const [error, setError] = useState<AppError | null>(null)
+  // A relink changes what a note is: its editor starts again from the saved note.
+  const [generations, setGenerations] = useState<ReadonlyMap<string, number>>(new Map())
   const summaryFill = view.history?.presetContext?.summary
   const summarizing = view.lcm?.enabled === true
   const sections = useRef(new Map<string, HTMLElement>())
+  const count = AsyncResult.isSuccess(listed) ? listed.value.length : 0
+  const { blocks, settings } = useNoteBlocks(count)
   useEffect(() => {
     if (focusCard !== null) sections.current.get(focusCard)?.scrollIntoView({ block: "start", behavior: "smooth" })
   }, [focusCard])
 
+  const position = { chatId, forkId: view.forkId, slotId: leafSlotId }
   const toggle = async (note: ChatNote, active: boolean) => {
     const outcome = await session.changeCast({ _tag: "Note", entityId: note.ref.entityId, active })
     setError(outcome.ok ? null : outcome.error)
@@ -198,7 +116,7 @@ export function NotesTab({
     AsyncResult.isSuccess(refs)
       ? refs.value.find((ref) => ref.entityId === card && ref.refKind === "upstream")?.id
       : undefined
-  // A note made here is for here: it's on from the leaf shown (DESIGN §4.1).
+  // A note made here is for here: it's on from the latest message (DESIGN §4.1), and open.
   const add = async (group: Group, shared?: SharedNote) => {
     const link = shared ? { link: shared.ref.entityId } : {}
     const refId = group.card === null ? null : cardRef(group.card)
@@ -211,13 +129,7 @@ export function NotesTab({
       })
     const made = refId
       ? await call(
-          (client) =>
-            client("CreateCardNote", {
-              cardRefId: refId,
-              title: "Note",
-              chatNote: { chatId, forkId: view.forkId, slotId: leafSlotId },
-              ...link
-            }),
+          (client) => client("CreateCardNote", { cardRefId: refId, title: "Note", chatNote: position, ...link }),
           ["library"]
         )
       : await call(
@@ -227,19 +139,19 @@ export function NotesTab({
     if (!made.ok) return setError(made.error)
     const on = await session.changeCast({ _tag: "Note", entityId: made.value.entityId, active: true })
     setError(on.ok ? null : on.error)
-    setOpen(made.value.id)
+    blocks.setOpen(made.value.id, true)
     refresh()
   }
   const onDeleted = (item: BinItem) => {
     deleted(item)
-    setOpen(null)
+    refresh()
+  }
+  const relinked = (refId: string) => {
+    setGenerations(new Map(generations).set(refId, (generations.get(refId) ?? 0) + 1))
+    refresh()
   }
   return (
-    <div className="flex flex-col gap-4">
-      <p className="max-w-[52rem] text-sm text-muted">
-        Notes are sent with the chat where each says. Switching one on or off applies from the latest message on, on
-        this branch.
-      </p>
+    <div className="flex flex-col gap-3">
       <AsyncView atom={atom} loading="Loading the notes…">
         {(notes) => {
           // Every cast card has a group, with notes or not, then any other card a note belongs to.
@@ -254,71 +166,113 @@ export function NotesTab({
             entity,
             name: cast.cards.get(entity)?.name ?? "A card"
           }))
-          const rows = (list: ReadonlyArray<ChatNote>, card: string | null) => (
-            <ul aria-label="Notes" className="flex flex-col">
-              {list.map((note) => (
-                <ChatNoteRow
-                  key={note.ref.id}
-                  note={note}
-                  cards={named}
-                  card={card}
-                  open={open === note.ref.id}
-                  position={{ chatId, forkId: view.forkId, slotId: leafSlotId }}
-                  onOpenChange={(next) => setOpen(next ? note.ref.id : null)}
-                  onToggle={(active) => void toggle(note, active)}
-                  onDeleted={onDeleted}
-                  onRelinked={refresh}
-                  summary={summaryFill}
-                  summarizing={summarizing}
-                  session={session}
-                  onChanged={refresh}
-                />
-              ))}
-            </ul>
-          )
+          const entries = (list: ReadonlyArray<ChatNote>, own: boolean): ReadonlyArray<NoteListEntry> =>
+            list.map((note) => ({
+              ref: note.ref,
+              doc: note.doc,
+              sharedBinned: note.linked?.binned === true,
+              generation: generations.get(note.ref.id) ?? 0,
+              // Its explanation is a tooltip, never inline under it: the header has no room for that.
+              control: (
+                <Tooltip
+                  label={
+                    note.active
+                      ? "On: sent with the chat from the latest message on, on this branch. Switch it off to stop."
+                      : "Off: not sent. Switch it on to send it from the latest message on, on this branch."
+                  }
+                >
+                  <span className="inline-flex">
+                    <Switch checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
+                      <span className="sr-only">{titleOf(note)}: on in this chat</span>
+                    </Switch>
+                  </span>
+                </Tooltip>
+              ),
+              detail:
+                note.doc["kind"] === "imported_summary" && (summaryFill || summarizing) ? (
+                  <SummaryMacroLine note={note} summary={summaryFill} summarizing={summarizing} />
+                ) : null,
+              extra: <SlotOutlet slot={chatNoteActions} props={{ note, session, onChanged: refresh }} />,
+              // A chat's own note is edited on its branch; a card's note is the card's, deleted from the card.
+              ...(own ? { chatNote: position, onDeleted } : {})
+            }))
           const own = notes.filter((n) => n.card === null)
           return (
-            // The chat's and each card's notes side by side as the panel widens (26rem each at least).
-            <div className="grid gap-5 @4xl:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] @4xl:gap-x-8">
-              <section aria-label="This chat's notes" className="flex flex-col gap-1">
-                <h3 className="text-sm font-semibold">This chat</h3>
-                {own.length === 0 ? (
-                  <p className="text-sm text-muted">No notes yet. A note here is like ST's author's note.</p>
-                ) : (
-                  rows(own, null)
-                )}
-                <div className="pt-1">
-                  <AddNoteMenu onNew={() => void add({ card: null })} onPick={() => setPicking({ card: null })} />
-                </div>
-              </section>
-              {named.map(({ entity, name }) => {
-                const theirs = notes.filter((n) => n.card === entity)
-                const group: Group = { card: entity as EntityId, name }
-                return (
-                  <section
-                    key={entity}
-                    ref={(element) => {
-                      if (element) sections.current.set(entity, element)
-                      else sections.current.delete(entity)
-                    }}
-                    aria-label={`${name}'s notes`}
-                    className="flex scroll-mt-2 flex-col gap-1"
-                  >
-                    <h3 className="text-sm font-semibold">{name}</h3>
-                    {theirs.length === 0 ? <p className="text-sm text-muted">No notes yet.</p> : rows(theirs, name)}
-                    <div className="pt-1">
-                      <AddNoteMenu onNew={() => void add(group)} onPick={() => setPicking(group)} />
-                    </div>
-                  </section>
-                )
-              })}
-            </div>
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="max-w-[52rem] min-w-0 flex-1 basis-60 text-sm text-muted">
+                  Notes are sent with the chat where each says, as you type. A switch turns one on or off from the
+                  latest message on, on this branch.
+                </p>
+                <NoteListControls ids={notes.map((n) => n.ref.id)} blocks={blocks} />
+              </div>
+              {/* The chat's and each card's notes side by side as the panel widens (26rem each at least). */}
+              <div className="grid gap-5 @4xl:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] @4xl:gap-x-8">
+                <section aria-label="This chat's notes" className="flex flex-col gap-1.5">
+                  <h3 className="text-sm font-semibold">This chat</h3>
+                  {own.length === 0 ? (
+                    <p className="text-sm text-muted">No notes yet. A note here is like ST's author's note.</p>
+                  ) : (
+                    <NoteList
+                      label="Notes"
+                      entries={entries(own, true)}
+                      cards={named}
+                      call={call}
+                      blocks={blocks}
+                      settings={settings}
+                      onRelinked={(entry) => relinked(entry.ref.id)}
+                    />
+                  )}
+                  <div>
+                    <AddNoteMenu onNew={() => void add({ card: null })} onPick={() => setPicking({ card: null })} />
+                  </div>
+                </section>
+                {named.map(({ entity, name }) => {
+                  const theirs = notes.filter((n) => n.card === entity)
+                  const group: Group = { card: entity as EntityId, name }
+                  return (
+                    <section
+                      key={entity}
+                      ref={(element) => {
+                        if (element) sections.current.set(entity, element)
+                        else sections.current.delete(entity)
+                      }}
+                      aria-label={`${name}'s notes`}
+                      className="flex scroll-mt-2 flex-col gap-1.5"
+                    >
+                      <h3 className="text-sm font-semibold">{name}</h3>
+                      {theirs.length === 0 ? (
+                        <p className="text-sm text-muted">No notes yet.</p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-muted">
+                            The card's own: what you change here changes them in every chat with {name}.
+                          </p>
+                          <NoteList
+                            label="Notes"
+                            entries={entries(theirs, false)}
+                            cards={named}
+                            call={call}
+                            blocks={blocks}
+                            settings={settings}
+                            onRelinked={(entry) => relinked(entry.ref.id)}
+                          />
+                        </>
+                      )}
+                      <div>
+                        <AddNoteMenu onNew={() => void add(group)} onPick={() => setPicking(group)} />
+                      </div>
+                    </section>
+                  )
+                })}
+              </div>
+            </>
           )
         }}
       </AsyncView>
       <ErrorAlert error={error} />
       <SharedNotePicker
-        chatNote={{ chatId, forkId: view.forkId, slotId: leafSlotId }}
+        chatNote={position}
         open={picking !== null}
         onOpenChange={(next) => !next && setPicking(null)}
         call={call}

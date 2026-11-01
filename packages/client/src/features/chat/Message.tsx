@@ -1,6 +1,7 @@
 import { messageEditorTools, messageTextEditor } from "./editorHistory.tsx"
-// One message: who wrote it (avatar, name, time, its number on the path, the model of a
-// generated version), its versions (swipe through them, pick one in the version picker, or
+// One message: who wrote it (avatar and name, with the registered message details: time and
+// model in the header, number, generation time and tokens under the portrait;
+// messageDetails.tsx), its versions (swipe through them, pick one in the version picker, or
 // generate another, on any message: DESIGN §3.1), its text, whether it's sent to the
 // model and why not, and what can be done with it. The actions show on hover or focus on
 // a wide screen, and on a tap of the message on a narrow one. Rows only re-render when
@@ -11,7 +12,6 @@ import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ForkId, PathEntry, SlotId, Version } from "@rp/shared/chat.ts"
 import {
-  type ComponentProps,
   memo,
   type MouseEvent,
   type PointerEvent,
@@ -36,7 +36,7 @@ import { messageSide, useCast } from "./cast.ts"
 import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
-import { formatWhen } from "./chatTitle.ts"
+import { MessageDetails, useMessageDetails } from "./messageDetails.tsx"
 import type { MessageDraft, MessageEditorKey } from "./messageDraft.ts"
 import { useMountedTracking, useRenderCount } from "./perf.ts"
 import { type ChatSession, liveText, type Outcome, waitingCache } from "./session.ts"
@@ -58,11 +58,10 @@ import {
   versionFailureActions
 } from "./presentation.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { popupOpen } from "../../ui/openPopups.ts"
 
 /** A horizontal drag this long on a message swipes to the next or previous version. */
 const SWIPE_PX = 60
-
-const fullTime = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" })
 
 /** Why a message isn't sent to the model, as the list works it out (null: it is). */
 export interface ContextMark {
@@ -256,7 +255,7 @@ function Editor({
           event.key === "Escape" &&
           event.currentTarget.contains(event.target as Node) &&
           !event.defaultPrevented &&
-          !document.querySelector('[role="dialog"], [role="alertdialog"]')
+          !popupOpen()
         )
           onCancel()
       }}
@@ -448,26 +447,6 @@ function Mark({
   )
 }
 
-/**
- * "connection · model" (Version.model) in a narrow header: the connection's name gives way
- * first, down to nothing, so the model's own name is what stays readable. The model's part
- * doesn't shrink (shrinking is shared out, so it would lose a pixel and its end to an ellipsis
- * while the connection's name still showed); it's cut only when it alone is wider than the label.
- */
-function ModelLabel({ model, ...props }: { model: string } & ComponentProps<"span">) {
-  const at = model.indexOf(" · ")
-  return (
-    <span
-      {...props}
-      tabIndex={0}
-      className="flex min-w-0 text-xs whitespace-nowrap text-muted outline-none sm:max-w-64"
-    >
-      {at > 0 && <span className="mr-1 min-w-0 truncate">{model.slice(0, at)}&nbsp;· </span>}
-      <span className="max-w-full shrink-0 truncate">{at > 0 ? model.slice(at + 3) : model}</span>
-    </span>
-  )
-}
-
 /** The session's editor at `key`; the row re-renders only when that one opens or closes. */
 const useEditor = (session: ChatSession, key: MessageEditorKey) =>
   useSyncExternalStore(
@@ -493,7 +472,7 @@ const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | 
 }
 
 /** A third click within this long of a double-click selects a paragraph instead of editing. */
-const TRIPLE_CLICK_MS = 350
+const TRIPLE_CLICK_MS = 450
 
 /**
  * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
@@ -693,6 +672,8 @@ export const Message = memo(function Message({
         : null
 
   const actionContext = { entry, session, branchFork, generated, generating, hidden, report, toast }
+  const details = useMessageDetails()
+  const detailProps = { entry, session, generating, reply: model }
 
   let marks: ReactNode = null
   if (hidden)
@@ -746,38 +727,39 @@ export const Message = memo(function Message({
       onMouseDown={onMouseDown}
       onDoubleClick={onDoubleClick}
     >
-      <Avatar
-        id={speakerId ?? (model ? "model" : "you")}
-        name={name}
-        mediaId={speaker?.avatarMediaId ?? null}
-        crop={speaker?.avatarCrop}
-        size="chat"
-        preview
-        className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
-      />
+      {/* The portrait, with its number, generation time and tokens under it, as in ST. */}
+      <div className="flex shrink-0 flex-col items-center gap-1.5">
+        <Avatar
+          id={speakerId ?? (model ? "model" : "you")}
+          name={name}
+          mediaId={speaker?.avatarMediaId ?? null}
+          crop={speaker?.avatarCrop}
+          size="chat"
+          preview
+          className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
+        />
+        <div
+          data-portrait-details
+          className={`flex w-(--chat-portrait-width,60px) flex-col items-center gap-0.5 text-center text-[11px] leading-tight text-muted tabular-nums empty:hidden [overflow-wrap:anywhere] ${
+            hidden ? "opacity-60" : ""
+          }`}
+        >
+          <MessageDetails details={details.portrait} {...detailProps} />
+        </div>
+      </div>
       <div className={`flex min-w-0 flex-1 flex-col gap-1 ${hidden ? "opacity-60" : ""}`}>
         <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
           <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
             {name}
           </span>
-          <Tooltip label={fullTime.format(version.createdAt)}>
-            <time
-              tabIndex={0}
-              dateTime={new Date(version.createdAt).toISOString()}
-              className="shrink-0 text-xs text-muted outline-none"
-            >
-              {formatWhen(version.createdAt)}
-            </time>
-          </Tooltip>
-          <span className="shrink-0 text-xs text-muted tabular-nums">#{positionOf(entry) + 1}</span>
-          {version.writer === "model" && version.model !== null ? (
-            <Tooltip label={`Generated with ${version.model}`}>
-              <ModelLabel model={version.model} />
-            </Tooltip>
-          ) : (
+          {/* Its time and model (messageDetails.tsx), as the user chose to show them. */}
+          <MessageDetails details={details.header} {...detailProps} />
+          {
             // A turn on the user's side the model wrote says so, as a reply the user wrote does.
-            version.writer === "model" && !model && <span className="shrink-0 text-xs text-muted">generated</span>
-          )}
+            version.writer === "model" && version.model === null && !model && (
+              <span className="shrink-0 text-xs text-muted">generated</span>
+            )
+          }
           {version.origin === "edited" && <span className="shrink-0 text-xs text-muted">edited</span>}
           {version.origin === "user_written" && model && (
             <span className="shrink-0 text-xs text-muted">written by you</span>

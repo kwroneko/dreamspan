@@ -180,7 +180,7 @@ export const CONDITION_LABELS: Readonly<Record<PromptCondition, string>> = {
   always: "Always",
   as_character: "When writing as a character",
   as_user: "When writing as {{user}}",
-  with_direction: "When there's a direction"
+  with_direction: "When there's guidance"
 }
 
 /**

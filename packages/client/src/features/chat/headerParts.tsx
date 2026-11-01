@@ -61,11 +61,15 @@ export function ShortcutsDialog({ onClose }: ChatCommandDialogProps) {
           .filter((command) => command.shortcut)
           .sort((a, b) => a.order - b.order)
           .map((command) => {
-            // Most labels name their keys already; the others get them beside.
+            // A label that names its keys keeps them; the others get them beside. What it
+            // does in detail, and where the keys work, is its description, under it.
             const keys = shortcutText(command.shortcut!)
             return (
               <li key={command.id} className="flex items-baseline justify-between gap-3">
-                <span>{command.label}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span>{command.label}</span>
+                  {command.description && <span className="text-xs text-muted">{command.description}</span>}
+                </span>
                 {!command.label.includes(keys) && (
                   <kbd className="shrink-0 rounded border border-border px-1.5 font-mono text-xs text-muted">
                     {keys}

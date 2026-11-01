@@ -170,8 +170,13 @@ it.live("an offline copy restored after a newer server save must retain its base
       store.setText(["description"], stale + " plus")
       await store.flush()
       await store.commit(null)
-      const recovered = await Effect.runPromise(api.ListRecoveredTexts({ limit: 10, before: null }))
-      assert.isTrue(recovered.some((x) => x.content === other))
+      // The text it went over stays a state of the field's edit history, past the commit.
+      const texts = await Effect.runPromise(
+        Effect.flatMap(api.EditorDraftHistory({ refId: card.id, field, limit: 1000 }), (states) =>
+          Effect.forEach(states, (state) => api.EditorDraftState({ refId: card.id, field, seq: state.seq }))
+        )
+      )
+      assert.include(texts, other)
     })
   }).pipe(Effect.scoped, withServer(testConfig()))
 )

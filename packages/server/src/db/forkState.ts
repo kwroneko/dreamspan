@@ -248,7 +248,6 @@ interface OverrideValue {
     | "hide"
     | "suppress_event"
     | "image_exclude"
-    | "snippet_revision"
     | "summary_revision"
     | "summary_choice"
     | "summary_rerun"
@@ -407,7 +406,8 @@ export const insertFork = (
 export const shownVersionColumns = `v.id, v.slot_id, o.ordinal, v.status, v.speaker_entity_id, v.writer, v.content,
   v.macro_mode, v.origin, v.source_version_id, v.direction, coalesce(pf.flag, v.hidden) AS hidden,
   coalesce(sf.flag, v.starred) AS starred, v.created_at, v.error_json, v.mark, v.frozen_macros, v.rollout_id,
-  v.reasoning, v.reply_sections, v.rewrite_json, v.raw_content IS NOT NULL AS raw_kept,
+  v.reasoning, v.reply_sections, v.rewrite_json, v.recorded_model_json,
+  v.recorded_generation_json, v.raw_content IS NOT NULL AS raw_kept,
   v.raw_reasoning IS NOT NULL AS raw_reasoning_kept, v.raw_sections IS NOT NULL AS raw_sections_kept,
   ${versionExtras("v")}`
 

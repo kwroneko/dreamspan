@@ -1,4 +1,3 @@
-import { TextActionHost } from "../textActions.tsx"
 import { defineSlot, SlotOutlet } from "../slots.tsx"
 export const appTools = defineSlot<Record<string, never>>("app.tools")
 /**
@@ -430,7 +429,6 @@ function Main() {
 }
 
 export const register = () => {
-  appTools.register({ id: "text-actions", order: 10, component: TextActionHost })
   routes.register({ id: "app", parent: "root", component: AppShell })
   sidebarToggle.register({ id: "sidebar-toggle", order: 10, component: SidebarToggle })
 }

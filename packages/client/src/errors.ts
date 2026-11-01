@@ -54,14 +54,14 @@ const describeError = (error: unknown): AppError => {
   if (error instanceof ForkNotesChanged) return make("ForkNotesChanged", error.message)
   if (error instanceof LcmEstimateChanged) return make("LcmEstimateChanged", error.message)
   if (error instanceof CannotDeleteLastFork)
-    return make("CannotDeleteLastFork", "A chat keeps at least one fork, so this one can't be deleted.")
+    return make("CannotDeleteLastFork", "A chat keeps at least one branch, so this one can't be deleted.")
   if (error instanceof Unauthorized) return make("Unauthorized", "Your session has ended. Log in again.")
   if (error instanceof RpcClientError.RpcClientError)
     return make("RpcClientError", "Can't reach the server. Check that it's running.")
   if (error instanceof BinChanged)
     return make(
       "BinChanged",
-      "The bin or affected forks changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
+      "The bin or affected branches changed since you opened this confirmation. Close it to reload the bin, then check and confirm again."
     )
   if (error instanceof NotFound)
     return make(

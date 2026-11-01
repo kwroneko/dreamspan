@@ -122,12 +122,32 @@ export function makeSummarizer(pool: boolean) {
           // A broken unselected strategy must not block the selected one. Missing
           // instructions fail clearly only if the worker selects that strategy.
           const instructions = Object.fromEntries(instructionEntries.flat())
-          const assembled = yield* reader.AssembleSummary({
+          const assemble = reader.AssembleSummary({
             userId: job.userId,
             jobId: job.id,
             attempt: job.epoch,
             instructions
           })
+          let assembled = yield* assemble
+          // A summary request is a generation too (owner, 2026-11-01): library text it uses that
+          // changed since its last revision gets a revision labelled with it, and it's
+          // assembled again from that, as a reply is (ContextGenerator).
+          for (let round = 0; round < 3; round++) {
+            const { cut } = yield* writer.CheckpointLiveText({
+              userId: job.userId,
+              chatId: job.chatId,
+              forkId: job.forkId,
+              slotId: job.lastSlotId,
+              versionId: null,
+              summary: { from: assembled.from, to: assembled.to },
+              leafSlotId: job.lastSlotId,
+              message: assembled.to,
+              used: assembled.used
+            })
+            if (cut === 0) break
+            hub.publish(job.chatId, { _tag: "State" })
+            assembled = yield* assemble
+          }
           const snapshot = JSON.parse(assembled.snapshot) as ContextSnapshot,
             generation = JSON.parse(assembled.generation) as Generation
           frozenInputs = snapshot.summaryJob

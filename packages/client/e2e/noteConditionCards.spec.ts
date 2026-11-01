@@ -9,6 +9,8 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { valueField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { noteSettings, noteToggle } from "./support/notes.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -68,11 +70,10 @@ for (const width of [1440, 390]) {
       ]
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}?panel=notes`)
-    const row = page.getByRole("button", { name: /^Outfit/ })
-    // The row names only the cast's cards: Pell never counts here.
+    const row = noteToggle(page, "Outfit")
+    // The header names only the cast's cards: Pell never counts here.
     await expect(row).toContainText("Ethan's turn")
-    await row.click()
-    const note = page.getByRole("region", { name: "Note Outfit" })
+    const note = await noteSettings(page, "Outfit")
     await expect(note.getByRole("combobox", { name: "When it applies" })).toContainText("On a chosen character's turn")
     const chips = note.getByRole("toolbar", { name: "Chosen characters" })
     await expect(chips.getByText("Ethan", { exact: true })).toBeVisible()
@@ -116,14 +117,14 @@ for (const width of [1440, 390]) {
     await shoot(page, `note-condition-chosen-${width}`)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
 
-    await note.getByRole("button", { name: "Save the note" }).click()
-    await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+    await saveRevision(note)
     await expect.poll(stored).toEqual({ when: "turn", cards: [ids["Ethan"], ids["Mira"], ids["Oren"]] })
     await expect(row).toContainText("Ethan's, Mira's or Oren's turn")
 
     // A reload shows the same three.
     await page.reload()
-    await page.getByRole("button", { name: /^Outfit/ }).click()
+    // The note and its settings stay open: each remembers.
+    await noteSettings(page, "Outfit")
     const reloaded = page
       .getByRole("region", { name: "Note Outfit" })
       .getByRole("toolbar", { name: "Chosen characters" })

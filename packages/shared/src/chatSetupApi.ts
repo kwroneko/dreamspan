@@ -11,6 +11,7 @@ import {
   ChatId,
   EntityId,
   ForkId,
+  ForkSplit,
   FrozenMacros,
   PathEntry,
   QueuedMessage,
@@ -60,7 +61,12 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   avatarCrop: Schema.optionalKey(AvatarCrop),
   /** Chats it has joined, group chats included; chats in the bin don't count. */
   chats: Schema.Int,
-  /** The last message in any of them. */
+  /**
+   * In the shell read (`ShellCard.card`, what the home grid and the library show): the last
+   * message the card itself spoke, so a card the user played has none. `ListCardUsage` gives the
+   * last message in any of its chats instead. (A card's Recent is
+   * `ShellCard.recentAt`.)
+   */
   lastMessageAt: Schema.NullOr(Schema.Number),
   /** The one of them with the latest message (else the newest): what Continue opens. */
   latestChatId: Schema.NullOr(ChatId)
@@ -136,7 +142,13 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   current: Schema.Boolean,
   named: Schema.Boolean,
   pinned: Schema.Boolean,
+  /** The chat's first fork: made from no other. */
+  original: Schema.Boolean,
+  /** Where it parts from the fork it was made from (`ForkSplit`); null for the original. */
+  split: Schema.NullOr(ForkSplit),
   createdAt: Schema.Number,
+  /** Its last shown message's time; null without one. */
+  endAt: Schema.NullOr(Schema.Number),
   /** Its last shown message (else its chat's start), or its making when it was branched from another. */
   recentAt: Schema.Number,
   /** Its chat's Recent: the latest `recentAt` of the chat's live forks. */
@@ -176,7 +188,8 @@ export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
  * - `pinned`: the pinned ones, by `sort`;
  * - `chats`: each chat once, by its current fork, the most recent chat first (All chats);
  * - `just`, `with`, `was`: the scope card's chats, once each, by how it is in them, its latest turn first;
- * - `current`, `peers`, `other`: a chat's current fork, its pinned and named ones, the rest;
+ * - `current`, `peers`, `other`: a chat's current fork; its pinned and named ones, the current
+ *   one among them when it is; the rest; the last two by their last message, newest first;
  * - `groups`: chats of two or more characters, once each, by `sort`;
  * - `card`: each chat the scope card joined, once, its latest turn first, then newest;
  * - `all`: every fork in scope, newest first.
@@ -248,8 +261,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   lorebooks: Schema.Array(RefId),
   /** Cards whose own lorebook this chat has turned off. */
   cardLorebooksOff: Schema.Array(EntityId),
-  /** Global lorebooks this chat has turned off. */
-  globalLorebooksOff: Schema.Array(RefId),
+  /** Every lorebook attached to the chat and not removed, on or off, in the order first attached. */
+  listedLorebooks: Schema.Array(Schema.Struct({ ref: RefId, on: Schema.Boolean })),
   /** Lorebook entries only below the history (DESIGN §1.3); on unless the chat turned it off. */
   loreBelowHistory: Schema.Boolean,
   /** Explicit prompt-name pins; an empty string is a pin too. */
@@ -298,13 +311,17 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("Lorebook", { ref: RefId, active: Schema.Boolean }),
   /** A card's own lorebook on or off (`lorebook.embedded`). */
   Schema.TaggedStruct("CardLorebook", { entityId: EntityId, on: Schema.Boolean }),
-  /** A global lorebook on or off for this chat (`lorebook.global`). */
-  Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
+  /** An attached lorebook taken out of the chat's list (`lorebook.remove`). */
+  Schema.TaggedStruct("RemoveLorebook", { ref: RefId }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
+
+/** A preset that lists a lorebook (`PresetDoc.lorebooks`), and whether it's on there. */
+export const LorebookPreset = Schema.Struct({ refId: RefId, label: Schema.String, enabled: Schema.Boolean })
+export type LorebookPreset = typeof LorebookPreset.Type
 
 /** The shared note a slot links to (DESIGN §4.1): in the bin, the slot sends nothing. */
 export const LinkedNote = Schema.Struct({
@@ -521,13 +538,10 @@ export class ChatSetupApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([...Errors, EditRefused])
   }),
-  /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */
-  /** The user's global lorebooks (DESIGN §5.0), in every chat unless a chat turns one off. */
-  Rpc.make("GetGlobalLorebooks", { success: Schema.Array(RefId), error: Schema.Union([...Errors]) }),
-  /** Marks a lorebook of the user's global, or not; returns the list as it is now. */
-  Rpc.make("SetGlobalLorebook", {
-    payload: { ref: RefId, global: Schema.Boolean },
-    success: Schema.Array(RefId),
+  /** The user's live presets whose current revision lists the lorebook `ref`, with its switch there. */
+  Rpc.make("LorebookPresets", {
+    payload: { ref: RefId },
+    success: Schema.Array(LorebookPreset),
     error: Schema.Union([...Errors])
   }),
   /** The account's global regex scripts (ST's "Global scripts"), which run in every chat. */
@@ -540,6 +554,7 @@ export class ChatSetupApi extends RpcGroup.make(
   }),
   /** What the preset in use does with a card's own prompts, for the card editor. */
   Rpc.make("GetCardPromptUse", { success: CardPromptUse, error: Schema.Union([...Errors]) }),
+  /** Changes the cast or a setting from `slotId` on, on that branch (DESIGN §3.4). */
   Rpc.make("ChangeCast", {
     payload: {
       chatId: ChatId,

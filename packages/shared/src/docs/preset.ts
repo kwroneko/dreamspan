@@ -152,6 +152,13 @@ const ordersNamePrompts = () =>
     }
   )
 
+/**
+ * A lorebook sent with the preset, by its library ref id, with its own switch. The
+ * assembler reads it like a chat's attached lorebook, as the preset owner's (ARCHITECTURE §15).
+ */
+export const PresetLorebook = Schema.Struct({ id: Schema.String, enabled: Schema.Boolean })
+export type PresetLorebook = typeof PresetLorebook.Type
+
 export const LegacyPresetDoc = Schema.Struct({
   schema_version: Schema.Literal(PRESET_SCHEMA_VERSION),
   prompts: Schema.Array(PresetPrompt).check(
@@ -191,6 +198,10 @@ export const LegacyPresetDoc = Schema.Struct({
    */
   reply_sections: Schema.optionalKey(ReplySectionSettings),
   regex: Schema.Array(RegexScript).check(Schema.makeFilter(uniqueBy((r: RegexScript) => r.id, "id"))),
+  /** Lorebooks sent with the preset, in order; absent is none. ST has no such field. */
+  lorebooks: Schema.optionalKey(
+    Schema.Array(PresetLorebook).check(Schema.makeFilter(uniqueBy((l: PresetLorebook) => l.id, "id")))
+  ),
   /**
    * The user allowed this preset's regex scripts to run, as ST asks once per preset. No script
    * from `regex`, prompt or display, runs until this is true. An import always sets it false,

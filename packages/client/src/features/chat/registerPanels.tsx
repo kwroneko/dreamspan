@@ -95,7 +95,9 @@ export const registerPanels = () => [
     component: lazyPanel(
       () =>
         import("./LorebooksTab.tsx").then((m) => ({
-          default: ({ session, active }: PanelProps) => <m.LorebooksTab session={session} active={active} />
+          default: ({ session, view, active }: PanelProps) => (
+            <m.LorebooksTab session={session} view={view} active={active} />
+          )
         })),
       "lorebooks"
     )

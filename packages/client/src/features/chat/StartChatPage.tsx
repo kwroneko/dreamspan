@@ -325,7 +325,7 @@ function Pending({
     preset: null,
     lorebooks: [],
     cardLorebooksOff: [],
-    globalLorebooksOff: [],
+    listedLorebooks: [],
     loreBelowHistory: true,
     macroBindings: {},
     macroNames: {
@@ -645,7 +645,7 @@ function Pending({
             data-testid="composer"
             value={text}
             // Short, so it fits one line on a phone, as the chat's composer does.
-            placeholder={guidance ? "Direction for the next message…" : "Message…"}
+            placeholder={guidance ? "Guidance for the next message…" : "Message…"}
             aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
             onKeyDown={(event) =>
               composerKeyDown(async () => {
@@ -665,7 +665,7 @@ function Pending({
         {(guidance || text.trim() !== "") && (
           <p id="composer-hint" className="text-xs text-muted">
             {guidance
-              ? `Guidance: a one-turn direction for ${speakerName}'s first reply. It leaves the box when you submit it.`
+              ? `Guidance: one-turn guidance for ${speakerName}'s first reply. It leaves the box when you submit it.`
               : "Generate doesn't use this text: turn guidance on to direct the reply with it."}
           </p>
         )}

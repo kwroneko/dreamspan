@@ -14,6 +14,7 @@ import { SqlClient } from "effect/sql"
 import { AssemblySources } from "../assembler/pipeline.ts"
 import { WorkerAssembler } from "../assembler/assembler.ts"
 import { AssemblyFailed, generationOf, type ContextSnapshot } from "../assembler/types.ts"
+import { usedEntries } from "./usedEntries.ts"
 import { wireContext } from "../assembler/wire.ts"
 import { estimateImage } from "../assembler/imageTokens.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
@@ -331,7 +332,10 @@ export const makeLcmPlanningHandlers = Effect.gen(function* () {
           generation: JSON.stringify({
             ...generationOf(taken),
             inspection: yield* inspectionInputs(sql, userId, taken, assembler)
-          })
+          }),
+          used: usedEntries(taken),
+          from: chain[0]!.position + 1,
+          to: chain.at(-1)!.position + 1
         }
       }).pipe(inJobFork(sql, jobId), query("AssembleSummary"), (effect) => withAssemblyModules(assembler, effect))
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>

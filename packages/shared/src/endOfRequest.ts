@@ -61,8 +61,8 @@ export const END_OF_REQUEST: ReadonlyArray<EndOfRequestText> = [
   },
   {
     identifier: DIRECTION_PROMPT,
-    label: "When you give a direction",
-    hint: "Sent on a new line after the turn text when you give a direction; {{direction}} is your text.",
+    label: "When you give guidance",
+    hint: "Sent on a new line after the turn text when you give guidance; {{direction}} is your guidance's text.",
     content: DIRECTION_TEXT
   }
 ]

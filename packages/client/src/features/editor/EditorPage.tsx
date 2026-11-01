@@ -2,7 +2,7 @@ import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
-// many chats the change reaches, and the state you're in: saved, or changes kept as drafts.
+// many chats the change reaches, and the state you're in: "Saved as revision N", or "Changed since revision N": what's typed is used as it's typed.
 import { useAtomValue } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
@@ -37,11 +37,17 @@ import { NoteFields } from "./notes.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
-import { SaveRevert } from "./SaveRevert.tsx"
+import { HeldChangesBar } from "./SaveRevert.tsx"
+import { SaveRevision } from "./SaveRevision.tsx"
+import { revisionState } from "../../ui/SaveControls.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
+import { lorebookScopes, presetScopes } from "./searchScopes.ts"
+import { BookName } from "./LorebookPanelEditor.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
 import { UpdateDialog } from "./UpdateDialog.tsx"
+
+const CARD_BOOK = ["character_book"]
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
 
@@ -54,19 +60,19 @@ const usedBy = (chats: number, some: string | null) =>
   chats === 0
     ? "No chat uses it yet."
     : chats === 1
-      ? `Used by 1 chat: saving changes it there.`
-      : `Used by ${chats} chats: saving changes it in all of them.${some ? ` To change it in some only, ${some}.` : ""}`
+      ? `Used by 1 chat: what you change here is used there as you type.`
+      : `Used by ${chats} chats: what you change here is used in all of them as you type.${some ? ` To change it in some only, ${some}.` : ""}`
 
 /**
- * A lorebook's line: the chats it was added to. A global one is read in every chat besides,
- * which its "Use in every chat" switch just below says (`LorebookUse`).
+ * A lorebook's line: the chats it was added to. The presets that send it are listed just below
+ * it (`LorebookUse`).
  */
 const addedTo = (chats: number) =>
   chats === 0
     ? "Not added to any chat yet."
     : chats === 1
-      ? "Added to 1 chat: saving changes it there."
-      : `Added to ${chats} chats: saving changes it in all of them. To change it in some only, make a variant.`
+      ? "Added to 1 chat: what you change here is used there as you type."
+      : `Added to ${chats} chats: what you change here is used in all of them as you type. To change it in some only, make a variant.`
 
 /** What saving did to the refs that follow this one. */
 const savedNotice = (saved: SavedRef) => {
@@ -221,13 +227,33 @@ export function Editor({
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
 
+  /**
+   * A preset's and a lorebook's search sits in the sticky bar, with what it looks in (owner,
+   * 2026-11-01: text, names or keys, or both); other editors use the dialog.
+   */
+  const scopes =
+    ref.kind === "preset"
+      ? presetScopes
+      : ref.kind === "lorebook"
+        ? lorebookScopes([])
+        : bookOnly
+          ? lorebookScopes(CARD_BOOK)
+          : undefined
   /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
   const overPreset = onClose !== undefined && ref.kind === "preset"
   /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
   const title = (size: string) => (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
-        {bookOnly ? bookTitle : ref.kind === "card" ? ref.label : <RefName store={store} />}
+        {bookOnly ? (
+          <BookName store={store} root={CARD_BOOK} fallback={`${ref.label}'s lorebook`} />
+        ) : ref.kind === "card" ? (
+          ref.label
+        ) : ref.kind === "lorebook" ? (
+          <BookName store={store} root={[]} fallback={ref.label} />
+        ) : (
+          <RefName store={store} />
+        )}
       </h1>
       {(ref.kind !== "card" || bookOnly) && <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>}
       {ref.kind === "card" && !bookOnly && <CardFavourite entityId={ref.entityId} />}
@@ -273,7 +299,7 @@ export function Editor({
                 </button>
               </>
             ) : ref.kind === "preset" ? (
-              "Saving changes this prompt preset in every chat that uses it."
+              "What you change here is used by every chat with this prompt preset, as you type."
             ) : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
               <>
@@ -335,13 +361,14 @@ export function Editor({
               </div>
             ))}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-            <SaveRevert
+            <SaveRevision
               store={store}
               current={current}
-              saveDisabled={clash !== null}
+              showState={false}
+              compact
               onSaved={(saved) => setNotice(savedNotice(saved))}
             />
-            {ref.kind !== "preset" && (
+            {!scopes && (
               <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
                 Search
               </Button>
@@ -392,19 +419,19 @@ export function Editor({
                 the line under them holds both (unitGPreset keeps the sticky bar under 400 px). */}
             <div className="flex min-w-0 items-center justify-between gap-2 max-sm:w-full sm:ml-auto">
               <p role="status" className="text-sm text-muted">
-                {state.saving
-                  ? "Keeping your changes…"
-                  : dirty === 0
-                    ? "Everything is saved."
-                    : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
+                {state.saving ? "Keeping your changes…" : revisionState(store.revisionNumber, dirty > 0)}
               </p>
-              {ref.kind === "preset" && (
+              {scopes && (
                 <Button
                   variant="ghost"
                   className="h-7! shrink-0 px-2!"
                   aria-expanded={searching}
                   aria-controls="preset-search"
-                  hint="Find and replace text anywhere in the preset."
+                  hint={
+                    ref.kind === "preset"
+                      ? "Find and replace in the prompts' text, their names, or anywhere in the preset."
+                      : "Find and replace in the entries' text, their keys, or anywhere in the book."
+                  }
                   onClick={() => setSearching(!searching)}
                 >
                   <Icon name="search" />
@@ -418,9 +445,10 @@ export function Editor({
               {clash}
             </p>
           )}
-          {ref.kind === "preset" && searching && (
+          {ref.kind === "preset" && <HeldChangesBar store={store} />}
+          {scopes && searching && (
             <div id="preset-search">
-              <SearchDialog store={store} inline onReveal={setSearchMatch} />
+              <SearchDialog store={store} inline scopes={scopes} onReveal={setSearchMatch} />
             </div>
           )}
         </div>

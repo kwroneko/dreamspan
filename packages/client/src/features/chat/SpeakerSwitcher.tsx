@@ -363,7 +363,10 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         aria-label="Speak as, or your persona"
         className="flex min-h-0 flex-col overflow-y-auto"
       >
-        <div role="group" aria-label="Speak as" className="flex flex-col">
+        <div role="group" aria-label="Speak as" aria-describedby={`${listId}-speak-as`} className="flex flex-col">
+          <p id={`${listId}-speak-as`} className="px-2 pb-1 text-xs text-muted">
+            Who your next message is from: anyone in this chat.
+          </p>
           {shown.length === 0 ? (
             <p className="flex flex-wrap gap-x-1.5 px-2 py-1.5 text-sm text-muted">
               <span>{empty}</span>
@@ -388,10 +391,14 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
         <div
           role="group"
           aria-labelledby={`${listId}-personas`}
+          aria-describedby={`${listId}-personas-about`}
           className="mt-2 flex flex-col border-t border-border pt-2"
         >
-          <p id={`${listId}-personas`} className="px-2 pb-1 text-sm font-semibold">
+          <p id={`${listId}-personas`} className="px-2 text-sm font-semibold">
             Your persona
+          </p>
+          <p id={`${listId}-personas-about`} className="px-2 pb-1 text-xs text-muted">
+            Who you are in this chat, {"{{user}}"}: it takes the place of the one you play now.
           </p>
           {personaShown.length === 0 ? (
             <p className="px-2 py-1.5 text-sm text-muted">

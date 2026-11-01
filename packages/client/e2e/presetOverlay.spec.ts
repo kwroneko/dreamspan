@@ -8,6 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
@@ -117,9 +118,7 @@ for (const [width, height] of [
       await scroll.evaluate((e) => {
         e.scrollTop = e.scrollHeight / 2
       })
-      const bar = overlay
-        .getByRole("button", { name: /^Save/ })
-        .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       const above = await bar.evaluate((element) => {
         const box = element.getBoundingClientRect()
         const scroller = element.closest("[data-preset-scroll]")!
@@ -209,9 +208,7 @@ for (const width of [1440, 390])
           )
         )
         .toBe("narrate")
-      const bar = overlay
-        .getByRole("button", { name: /^Save/ })
-        .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect
         .poll(
           async () => (await main.boundingBox())!.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)
@@ -231,7 +228,7 @@ for (const width of [1440, 390])
           )
         )
         .toBe("narrate")
-      await expect(overlay.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+      await expect(overlay.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
     })
 
 for (const width of [1440, 390])
@@ -250,7 +247,7 @@ for (const width of [1440, 390])
       const close = overlay.getByRole("button", { name: "Close preset editor", exact: true })
       const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect(bar.getByText(name, { exact: true })).toBeVisible()
-      await expect(bar.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+      await expect(bar.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
       const box = (await close.boundingBox())!
       expect(box.y).toBeGreaterThanOrEqual(0)
       expect(box.y + box.height).toBeLessThan(900)
@@ -258,7 +255,7 @@ for (const width of [1440, 390])
       await page.screenshot({ path: join(shots, `sticky-close-${width}-${theme}.png`) })
       const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
       await main.fill("A draft kept while closing the preset.")
-      await expect(bar.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+      await expect(bar.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
       await close.click()
       await expect(overlay).toHaveCount(0)
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
@@ -288,9 +285,7 @@ for (const width of [1440, 390])
       await expect(marker).toBeFocused()
       await expect(marker.locator("mark")).toHaveText("History")
       await page.screenshot({ path: join(shots, `marker-navigation-${width}-${theme}.png`) })
-      const bar = overlay
-        .getByRole("button", { name: /^Save/ })
-        .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+      const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect
         .poll(
           async () =>
@@ -353,9 +348,7 @@ test("Find reveals an offscreen range inside a long prompt", async ({ page }) =>
   await overlay.getByRole("button", { name: "Find", exact: true }).click()
   await overlay.getByRole("button", { name: "Go to Prompt “Main Prompt”: Content", exact: true }).click()
   await expect(main).toBeFocused()
-  const bar = overlay
-    .getByRole("button", { name: /^Save/ })
-    .locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
+  const bar = saveButton(overlay).locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
   await expect
     .poll(async () => {
       const selected = await main.evaluate((e) => {

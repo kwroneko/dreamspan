@@ -1,11 +1,9 @@
 // Form controls bound to an editor's fields: each reads its own field from the store and
 // writes it as a draft, so every change is on the server within a second, with its history.
-import type { DraftState } from "@rp/shared/drafts.ts"
-import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
+import { EditHistory, type Loaded } from "../../ui/EditHistory.tsx"
+import { type FieldPath, parseField, textField, valueField } from "@rp/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
-import { ErrorAlert } from "../../actions.tsx"
-import type { AppError } from "../../errors.ts"
+import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -18,7 +16,7 @@ import { ReplayNotice } from "./ReplayNotice.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import type { CallResult } from "./caller.ts"
 import { draftLabel } from "./fields.ts"
-import { type EditorStore, useDirty, useEditorKind, useEditorState, useText, useValue } from "./store.ts"
+import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistory, useText, useValue } from "./store.ts"
 
 /** "Edited" while the field has changes, with its undo, history and revert. */
 function FieldLabel({ store, field, label }: { store: EditorStore; field: string; label: string }) {
@@ -31,74 +29,33 @@ function FieldLabel({ store, field, label }: { store: EditorStore; field: string
   )
 }
 
-const when = (at: number) => new Date(at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "medium" })
+/** What a store call gave, as `ui/EditHistory` takes it. */
+const loaded = <A,>(result: CallResult<A>): Loaded<A> =>
+  result.ok ? { ok: true, value: result.value } : { ok: false, error: { message: result.error.message } }
 
-/** A field's undo history: every state it had in this drafting session, restorable. */
-function HistoryDialog({
-  store,
-  field,
-  label,
-  onClose
-}: {
-  store: EditorStore
-  field: string
-  label: string
-  onClose: () => void
-}) {
-  const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
-  const [error, setError] = useState<AppError | null>(null)
-  useEffect(() => {
-    void store.history(field).then((result) => (result.ok ? setStates(result.value) : setError(result.error)))
-  }, [store, field])
-  const restore = async (seq: number) => {
-    const result = await store.restore(field, seq)
-    if (result.ok) onClose()
-    else setError(result.error)
-  }
-  return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} title={`History of ${label}`}>
-      <ErrorAlert error={error} />
-      {states === null && error === null && <p className="text-sm text-muted">Loading…</p>}
-      {states !== null && (
-        <ol aria-label="Earlier states" className="flex flex-col divide-y divide-border">
-          {states.map((state, index) => (
-            <li key={state.seq} className="flex flex-col gap-1 py-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 flex-col text-sm">
-                <span className="font-medium">
-                  {index === 0 ? "Now" : state.kind === "initial" ? "As saved" : when(state.at)} · {state.length}{" "}
-                  characters
-                </span>
-                {state.kind !== "initial" && (
-                  <span className="text-muted [overflow-wrap:anywhere]">
-                    {state.kind === "restore" ? "Restored. " : ""}
-                    {state.removed && <del>{state.removed}</del>} {state.inserted && <ins>{state.inserted}</ins>}
-                  </span>
-                )}
-              </div>
-              {index > 0 && (
-                <Button variant="ghost" onClick={() => void restore(state.seq)}>
-                  Restore
-                </Button>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
-    </Dialog>
-  )
+/**
+ * A text field's edit history control (`ui/EditHistory`, owner 2026-11-01): every state it had,
+ * from any device, past its revisions; picking one puts it in the box as the newest state.
+ * Shown once the field was typed into. The box's own Ctrl+Z is the everyday undo.
+ */
+function FieldEditHistory({ store, field, label }: { store: EditorStore; field: string; label: string }) {
+  const has = useHasHistory(store, field)
+  const load = useCallback(async (before?: number) => loaded(await store.history(field, 50, before)), [store, field])
+  const read = useCallback(async (seq: number) => loaded(await store.stateText(field, seq)), [store, field])
+  const restore = useCallback(async (seq: number) => loaded(await store.restore(field, seq)), [store, field])
+  if (!has) return null
+  return <EditHistory label={label} load={load} read={read} restore={restore} />
 }
 
-/** Undo, history and revert for a field with changes. */
+/**
+ * Beside a field: a text field's edit history, and a copy from this browser that went over
+ * another tab's text. Settings (values) have neither Undo nor History of their own (owner,
+ * 2026-11-01): they apply as changed, and History shows them in its revisions.
+ */
 export function FieldTools({ store, field, label }: { store: EditorStore; field: string; label: string }) {
-  const dirty = useDirty(store, field)
   const conflict = useSyncExternalStore(store.subscribe(field), () => store.conflict(field))
-  const [history, setHistory] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
-  if (!dirty && conflict === null) return null
-  const settle = (result: CallResult<unknown> | undefined) => setError(result && !result.ok ? result.error : null)
+  const text = parseField(field)?.kind === "text"
+  if (!text && conflict === null) return null
   return (
     <div className="flex flex-col gap-1">
       {conflict && (
@@ -108,34 +65,11 @@ export function FieldTools({ store, field, label }: { store: EditorStore; field:
           switchText={() => store.switchConflict(field)}
         />
       )}
-      <div className="flex flex-wrap gap-1">
-        <Button
-          variant="ghost"
-          aria-label={`Undo ${label}`}
-          hint="Takes this field one step back."
-          onClick={() => void store.undo(field).then(settle)}
-        >
-          Undo
-        </Button>
-        <Button
-          variant="ghost"
-          aria-label={`History of ${label}`}
-          hint="Every state this field had since it was last saved, to restore one."
-          onClick={() => setHistory(true)}
-        >
-          History
-        </Button>
-        <Button
-          variant="ghost"
-          aria-label={`Revert ${label}`}
-          hint="Back to the saved version. Your changes go to the bin's recovered texts."
-          onClick={() => void store.discard(field).then(settle)}
-        >
-          Revert
-        </Button>
-      </div>
-      <ErrorAlert error={error} />
-      {history && <HistoryDialog store={store} field={field} label={label} onClose={() => setHistory(false)} />}
+      {text && (
+        <div className="flex flex-wrap justify-end gap-1">
+          <FieldEditHistory store={store} field={field} label={label} />
+        </div>
+      )}
     </div>
   )
 }
@@ -150,7 +84,8 @@ export function TextField({
   mono = false,
   readOnly = false,
   expandable = false,
-  labelHidden = false
+  labelHidden = false,
+  source
 }: {
   store: EditorStore
   path: FieldPath
@@ -163,6 +98,8 @@ export function TextField({
   expandable?: boolean
   /** The label is for assistive technology only (a prompt's text, named in its block's header). */
   labelHidden?: boolean
+  /** A snippet's own text: its editor offers no sending to a snippet. */
+  source?: "snippet" | undefined
 }) {
   const [large, setLarge] = useState(false)
   const match = useSearchMatch(path)
@@ -222,12 +159,15 @@ export function TextField({
             fullHeight={kind === "preset"}
             mono={mono}
             readOnly={readOnly}
+            source={source}
             onChange={(value) => store.setText(path, value)}
             onBlur={props.onBlur}
           />
         ) : (
           <Textarea
             {...props}
+            // Prose has them; a pattern (mono) doesn't.
+            textActions={!mono}
             rows={rows}
             className={`resize-y ${props.className}`}
             onChange={(event) => store.setText(path, event.currentTarget.value)}
@@ -350,18 +290,26 @@ export function SwitchField({
   path,
   label,
   description,
+  hint,
   checkbox = false
 }: {
   store: EditorStore
   path: FieldPath
   label: string
   description?: ReactNode
+  /** What switching it does, on hover and focus (explain): when the label doesn't say. */
+  hint?: string
   checkbox?: boolean
 }) {
   const value = useValue<boolean | undefined>(store, path) === true
   const Control = checkbox ? Checkbox : Switch
   return (
-    <Control checked={value} onCheckedChange={(checked) => store.setValue(path, checked)} description={description}>
+    <Control
+      checked={value}
+      onCheckedChange={(checked) => store.setValue(path, checked)}
+      description={description}
+      hint={hint}
+    >
       {label}
     </Control>
   )
@@ -404,12 +352,14 @@ export function SelectField<Value extends string>({
   store,
   path,
   label,
+  description,
   items,
   fallback
 }: {
   store: EditorStore
   path: FieldPath
   label: string
+  description?: ReactNode
   items: ReadonlyArray<SelectItem<Value>>
   /** What an absent value means (a prompt's condition, from its ST triggers). */
   fallback?: Value
@@ -417,7 +367,7 @@ export function SelectField<Value extends string>({
   const value = useValue<Value>(store, path)
   const field = valueField(path)
   return (
-    <Field label={<FieldLabel store={store} field={field} label={label} />}>
+    <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
       <Select items={items} value={value ?? fallback ?? null} onValueChange={(next) => store.setValue(path, next)} />
     </Field>
   )

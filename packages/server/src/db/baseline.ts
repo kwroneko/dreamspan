@@ -40,6 +40,10 @@ const shellSummaries: ReadonlyArray<string> = [
     messages INTEGER NOT NULL,
     leaf TEXT,
     end_at INTEGER,
+    -- Where it parts from the fork it was made from: its first own message's time (else its
+    -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first.
+    split_at INTEGER,
+    split_after INTEGER,
     -- Entity ids only: names and avatars are read with the summary.
     cast_json TEXT NOT NULL CHECK (json_valid(cast_json)),
     joined_json TEXT NOT NULL CHECK (json_valid(joined_json)),
@@ -98,13 +102,15 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE drafts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id),
-    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'snippet', 'entity_field', 'summary_edit', 'user_field', 'queue_edit', 'insert')),
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('composer', 'version_edit', 'scratchpad', 'entity_field', 'summary_edit', 'user_field', 'queue_edit', 'insert')),
     target_id TEXT NOT NULL,
     field TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL,
     images_json TEXT CHECK (images_json IS NULL OR json_valid(images_json)),
     -- Compressed edit history: survives a refresh and recovers from Ctrl-A plus a stray key.
     base_revision TEXT,
+    -- A library field's session a save or checkpoint ended: the revision now holding its text.
+    committed_revision TEXT,
     row_version INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'committed', 'discarded')), created_at INTEGER NOT NULL DEFAULT 0, session INTEGER NOT NULL DEFAULT 1, text_version INTEGER NOT NULL DEFAULT 1, speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, reply_from_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL,
     UNIQUE (user_id, target_kind, target_id, field)
@@ -199,7 +205,7 @@ export const baseline: ReadonlyArray<string> = [
     doc_json TEXT NOT NULL CHECK (json_valid(doc_json)),
     doc_hash TEXT NOT NULL,
     schema_version INTEGER NOT NULL,
-    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge')),
+    origin TEXT NOT NULL CHECK (origin IN ('import', 'user', 'agent', 'changeset', 'merge', 'generation')),
     origin_ref TEXT,
     message TEXT,
     -- Plain text extracted from doc_json for full-text search.
@@ -336,6 +342,10 @@ export const baseline: ReadonlyArray<string> = [
     model_id TEXT REFERENCES models(id),
     error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
     usage_json TEXT CHECK (usage_json IS NULL OR json_valid(usage_json)),
+    -- An imported version's model, and its times and token count, as its app recorded them
+    -- (rows.ts); null for none and for this app's own generations (model_id, usage_json).
+    recorded_model_json TEXT CHECK (recorded_model_json IS NULL OR json_valid(recorded_model_json)),
+    recorded_generation_json TEXT CHECK (recorded_generation_json IS NULL OR json_valid(recorded_generation_json)),
     starred INTEGER NOT NULL DEFAULT 0 CHECK (starred IN (0, 1)),
     hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1)),
     changeset_id TEXT REFERENCES changesets(id) DEFERRABLE INITIALLY DEFERRED,
@@ -497,7 +507,7 @@ export const baseline: ReadonlyArray<string> = [
     SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id JOIN changeset_groups g ON g.id = NEW.group_id
     WHERE f.id = NEW.fork_id AND c.id = NEW.chat_id AND c.owner_user_id = g.owner_user_id)
     BEGIN SELECT RAISE(ABORT, 'changeset fork and group must belong to its chat owner'); END`,
-  `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE ON entity_revisions
+  `CREATE TRIGGER entity_revisions_immutable BEFORE UPDATE OF seq, id, entity_id, parents, doc_json, doc_hash, schema_version, origin, origin_ref, search_text, created_at ON entity_revisions
     BEGIN SELECT RAISE(ABORT, 'entity revisions are immutable'); END`,
   `CREATE TRIGGER rollout_snapshot_frozen BEFORE UPDATE OF context_snapshot_json ON rollout_payloads
     WHEN OLD.context_snapshot_json IS NOT NULL AND NEW.context_snapshot_json IS NOT OLD.context_snapshot_json
@@ -566,7 +576,7 @@ export const baseline: ReadonlyArray<string> = [
   `CREATE TABLE draft_history (
     draft_id TEXT NOT NULL REFERENCES drafts(id) ON DELETE CASCADE,
     seq INTEGER NOT NULL CHECK (seq >= 1),
-    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore')),
+    kind TEXT NOT NULL CHECK (kind IN ('edit', 'restore', 'revision')),
     first_at INTEGER NOT NULL,
     at INTEGER NOT NULL,
     start INTEGER NOT NULL CHECK (start >= 0),
@@ -586,7 +596,8 @@ export const baseline: ReadonlyArray<string> = [
       DELETE FROM drafts WHERE target_kind = 'composer' AND target_id = OLD.chat_id AND field = OLD.id;
     END`,
   `CREATE TRIGGER drafts_gc_ref AFTER DELETE ON entity_refs
-    BEGIN DELETE FROM drafts WHERE target_kind IN ('entity_field', 'snippet') AND target_id = OLD.id; END`,
+    BEGIN DELETE FROM drafts WHERE target_kind = 'entity_field'
+      AND (target_id = OLD.id OR (target_id > OLD.id || '/' AND target_id < OLD.id || '0')); END`,
   `CREATE INDEX slots_bin_item ON slots(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE INDEX versions_bin_item ON versions(bin_item_id) WHERE bin_item_id IS NOT NULL`,
   `CREATE TABLE recovered_texts (
@@ -1549,7 +1560,7 @@ export const baseline: ReadonlyArray<string> = [
     -- The chat's state_seq when written; a row updated in place takes the newer one.
     seq INTEGER NOT NULL CHECK (seq > 0),
     kind TEXT NOT NULL CHECK (kind IN ('select', 'replace', 'delete_slot', 'delete_version', 'hide', 'hide_range', 'star',
-      'picker_hide', 'snippet_revision', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event',
+      'picker_hide', 'summary_revision', 'summary_choice', 'summary_rerun', 'summary_superseded', 'suppress_event',
       'insert', 'image_exclude')),
     -- image_exclude: the message's own version and an image of it, "<version id>:<media id>".
     target_id TEXT NOT NULL,
@@ -1565,20 +1576,6 @@ export const baseline: ReadonlyArray<string> = [
     -- then overrules: stImportWrites.ts).
     origin TEXT NOT NULL DEFAULT 'user' CHECK (origin IN ('user', 'import'))
   ) STRICT`,
-  `CREATE TRIGGER fork_overrides_snippet BEFORE INSERT ON fork_overrides
-    WHEN NEW.kind = 'snippet_revision' AND NOT EXISTS (
-      SELECT 1 FROM entity_revisions r JOIN entities e ON e.id = r.entity_id JOIN chats c ON c.id = NEW.chat_id
-      WHERE r.id = NEW.value_id AND e.id = NEW.target_id AND e.kind = 'note' AND e.owner_user_id = c.owner_user_id
-        AND json_extract(r.doc_json, '$.owner.shared') = NEW.chat_id)
-    BEGIN SELECT RAISE(ABORT, 'a snippet binding names its chat note revision'); END`,
-  `CREATE TRIGGER fork_overrides_snippet_update BEFORE UPDATE OF value_id ON fork_overrides
-    WHEN NEW.kind = 'snippet_revision' AND NOT EXISTS (
-      SELECT 1 FROM entity_revisions r JOIN entities e ON e.id = r.entity_id JOIN chats c ON c.id = NEW.chat_id
-      WHERE r.id = NEW.value_id AND e.id = NEW.target_id AND e.kind = 'note' AND e.owner_user_id = c.owner_user_id
-        AND json_extract(r.doc_json, '$.owner.shared') = NEW.chat_id)
-    BEGIN SELECT RAISE(ABORT, 'a snippet binding names its chat note revision'); END`,
-  `CREATE TRIGGER snippet_bindings_gc AFTER DELETE ON entity_revisions
-    BEGIN DELETE FROM fork_overrides WHERE target_id = OLD.entity_id AND kind = 'snippet_revision' AND value_id = OLD.id; END`,
   `CREATE INDEX fork_overrides_chat ON fork_overrides(chat_id, kind)`,
   `CREATE INDEX fork_overrides_point ON fork_overrides(fork_id, kind, target_id, seq)`,
   `CREATE INDEX fork_overrides_window ON fork_overrides(fork_id, slot_depth, seq)`,

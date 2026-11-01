@@ -46,6 +46,7 @@ import { positionOf } from "./position.ts"
 import type { ComposerSource } from "./composerDraft.ts"
 import { type Copy, copiesOf, pendingOf } from "../editor/backup.ts"
 import { editorKey, MessageDraft, messageCopies, type MessageEditorKey, targetOf } from "./messageDraft.ts"
+import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 
 /** How many slots one read asks for. */
 const PAGE = 60
@@ -920,6 +921,7 @@ export class ChatSession {
       case "State":
         this.forgetPositions()
         this.scheduleLcm()
+        chatStateChanged(this.chatId)
         return void this.refreshCast()
       case "Lcm":
         return this.scheduleLcm()
@@ -1230,6 +1232,8 @@ export class ChatSession {
     readonly draft: SendResult["draft"]
     readonly recovered: number
   }> {
+    // What you see is what's sent: typing in open editors reaches the server first.
+    if (reply) await beforeReply()
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("SendMessage", {
@@ -1271,6 +1275,7 @@ export class ChatSession {
     direction = "",
     composer?: ComposerSource
   ): Promise<Outcome<SendResult>> {
+    await beforeReply()
     const result = await this.queueSnapshot(
       this.call((client) =>
         client("Generate", {
@@ -1376,6 +1381,7 @@ export class ChatSession {
     entry: PathEntry,
     model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
   ): Promise<Outcome<unknown>> {
+    await beforeReply()
     const direction = this.guidance({ slotId: entry.slotId, kind: "version" })
     return this.slotWrite(entry.slotId, (client) =>
       client("Regenerate", {
@@ -1395,6 +1401,7 @@ export class ChatSession {
    * its direction.
    */
   async continueVersion(entry: PathEntry, useComposerGuidance = true): Promise<Outcome<unknown>> {
+    await beforeReply()
     const direction = useComposerGuidance ? (this.guidance({ slotId: entry.slotId, kind: "continue" }) ?? "") : ""
     return this.slotWrite(entry.slotId, (client) =>
       client("ContinueVersion", {
@@ -1535,6 +1542,7 @@ export class ChatSession {
     const forkId = this.view.forkId ?? this.view.chat?.currentForkId ?? null
     if (forkId === null)
       return { ok: false, error: { tag: "NotFound", message: "The chat isn't open yet.", problems: [], reason: null } }
+    if (body._tag === "Generate") await beforeReply()
     const result = await this.call((client) =>
       client("InsertMessage", {
         chatId: this.chatId,

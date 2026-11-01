@@ -8,7 +8,7 @@ import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import { ExportFormat as ExportFormatSchema, ImportResult } from "@rp/shared/libraryImport.ts"
 import { RefId } from "@rp/shared/library.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
 import { ComposerBeacon } from "@rp/shared/composerApi.ts"
 import { Notices } from "../chat/Notices.ts"
@@ -696,7 +696,11 @@ export const layer = Layer.unwrap(
         if (parseField(draft.field) === null) return jsonError(400, "that isn't a field of a document")
         const saved = yield* writer.SaveDraft({
           userId: user.id,
-          key: new DraftKey({ targetKind: "entity_field", targetId: draft.refId, field: draft.field }),
+          key: new DraftKey({
+            targetKind: "entity_field",
+            targetId: entityDraftTarget(draft.refId, draft.scope),
+            field: draft.field
+          }),
           draftId: draft.draftId,
           content: draft.content,
           expectedRowVersion: draft.expectedRowVersion,

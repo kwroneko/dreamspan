@@ -8,7 +8,10 @@
 // - a slot's shown fields (`slots` columns, its versions): the forks whose tip is it or below it.
 //   A new slot reaches none (no fork's path holds it until a fork's tip moves, below);
 //   a new version neither (it's shown only once a selection or replacement names it).
-// - a fork's row (tip, lineage, deletion): that fork.
+// - a fork's row (tip, lineage, deletion): that fork. Where a fork splits off reads its
+//   parent's path too: a fork's tip moving reaches its children whose tips are below a slot
+//   one of its paths holds and the other doesn't (the slots between the two tips and their
+//   common ancestor); its deletion, restore or removal, or a tip from or to none, all its children.
 // - an override or a state event a fork wrote, at its sequence number: the forks whose lineage
 //   holds that fork up to at least that number. A snapshot of a fork: every fork whose
 //   lineage holds it.
@@ -23,6 +26,10 @@ const SELF = "self"
 const FORK = "fork"
 const SLOT = "slot"
 const CHAT = "chat"
+/** A fork's tip moved: `ref` the fork, `from` and `to` the tips. */
+const TIP = "tip"
+/** Every child of fork `ref`. */
+const KIN = "kin"
 
 /** Notes a touch: `kind`, the chat, the row it names and a sequence number (SQL expressions), when `when` holds. */
 const touch = (kind: string, chat: string, ref = "NULL", seq = "NULL", when = "1") =>
@@ -41,7 +48,8 @@ const forkChat = (fork: string) => `(SELECT chat_id FROM forks WHERE id = ${fork
 
 const statements: ReadonlyArray<string> = [
   `CREATE TEMP TABLE IF NOT EXISTS shell_moved (chat_id TEXT PRIMARY KEY, stamp INTEGER NOT NULL)`,
-  `CREATE TEMP TABLE IF NOT EXISTS shell_touches (kind TEXT NOT NULL, chat_id TEXT, ref TEXT, seq INTEGER)`,
+  `CREATE TEMP TABLE IF NOT EXISTS shell_touches (kind TEXT NOT NULL, chat_id TEXT, ref TEXT, seq INTEGER,
+    from_slot TEXT, to_slot TEXT)`,
   // The stamp each chat had when this transaction's writes began moving it. Not OR IGNORE: an
   // outer statement's conflict policy replaces a trigger statement's.
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_moved_chat BEFORE UPDATE OF shell_stamp ON main.chats
@@ -80,9 +88,20 @@ const statements: ReadonlyArray<string> = [
     BEGIN ${touch(SELF, "NEW.chat_id", "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_update AFTER UPDATE OF chat_id, parent_fork_id, tip_slot_id,
     deleted_at, purged_at, lineage_json ON main.forks
-    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(SELF, "NEW.chat_id", "NEW.id")} END`,
+    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(SELF, "NEW.chat_id", "NEW.id")}
+    INSERT INTO shell_touches (kind, chat_id, ref, from_slot, to_slot) SELECT '${TIP}', NEW.chat_id, NEW.id,
+      OLD.tip_slot_id, NEW.tip_slot_id WHERE OLD.tip_slot_id IS NOT NEW.tip_slot_id
+        AND OLD.tip_slot_id IS NOT NULL AND NEW.tip_slot_id IS NOT NULL AND OLD.chat_id IS NEW.chat_id;
+    ${touch(
+      KIN,
+      "OLD.chat_id",
+      "OLD.id",
+      "NULL",
+      `OLD.chat_id IS NOT NEW.chat_id OR OLD.deleted_at IS NOT NEW.deleted_at
+      OR OLD.purged_at IS NOT NEW.purged_at OR ((OLD.tip_slot_id IS NULL) <> (NEW.tip_slot_id IS NULL))`
+    )} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_fork_delete AFTER DELETE ON main.forks
-    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} END`,
+    BEGIN ${touch(SELF, "OLD.chat_id", "OLD.id")} ${touch(KIN, "OLD.chat_id", "OLD.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_snapshot_insert AFTER INSERT ON main.fork_event_snapshots
     BEGIN ${touch(FORK, forkChat("NEW.fork_id"), "NEW.fork_id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_snapshot_delete AFTER DELETE ON main.fork_event_snapshots
@@ -124,8 +143,29 @@ export const settleSummaries = (sql: SqlClient.SqlClient) =>
         written(chat_id, ref, seq) AS (
           SELECT t.chat_id, t.ref, CASE WHEN count(t.seq) = count(*) THEN min(t.seq) END
           FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id WHERE t.kind = ${FORK} GROUP BY t.chat_id, t.ref),
+        -- A tip's move, walked up from both ends to their common ancestor: the deeper end (both
+        -- at one depth) of each pair is on one path and not the other.
+        moved(fork, a, ad, b, bd) AS (
+          SELECT t.ref, sa.id, sa.depth, sb.id, sb.depth FROM shell_touches t JOIN kept k ON k.chat_id = t.chat_id
+            JOIN slots sa ON sa.id = t.from_slot JOIN slots sb ON sb.id = t.to_slot WHERE t.kind = ${TIP}
+          UNION SELECT m.fork,
+            CASE WHEN m.ad >= m.bd THEN pa.id ELSE m.a END, CASE WHEN m.ad >= m.bd THEN pa.depth ELSE m.ad END,
+            CASE WHEN m.bd >= m.ad THEN pb.id ELSE m.b END, CASE WHEN m.bd >= m.ad THEN pb.depth ELSE m.bd END
+          FROM moved m JOIN slots sa ON sa.id = m.a JOIN slots sb ON sb.id = m.b
+            LEFT JOIN slots pa ON pa.id = sa.parent_slot_id AND pa.depth < sa.depth
+            LEFT JOIN slots pb ON pb.id = sb.parent_slot_id AND pb.depth < sb.depth
+          WHERE m.a <> m.b AND (m.ad < m.bd OR pa.id IS NOT NULL) AND (m.bd < m.ad OR pb.id IS NOT NULL)),
+        shifted(fork, id) AS (
+          SELECT fork, a FROM moved WHERE a <> b AND ad >= bd
+          UNION SELECT fork, b FROM moved WHERE a <> b AND bd >= ad
+          UNION SELECT h.fork, s.id FROM shifted h JOIN slots s ON s.parent_slot_id = h.id),
         reached(id) AS (
           SELECT t.ref FROM shell_touches t WHERE t.kind IN (${SELF}, ${FORK})
+          UNION ALL SELECT f.id FROM shell_touches t JOIN forks f ON f.parent_fork_id = t.ref
+            WHERE t.kind = ${KIN} OR (t.kind = ${TIP} AND EXISTS (
+              -- Paths in a chat with insertions aren't the tree's.
+              SELECT 1 FROM fork_overrides o WHERE o.chat_id = t.chat_id AND o.kind = 'insert'))
+          UNION ALL SELECT f.id FROM shifted h JOIN forks f ON f.parent_fork_id = h.fork AND f.tip_slot_id = h.id
           UNION ALL SELECT f.id FROM kept k JOIN forks f ON f.chat_id = k.chat_id
             WHERE f.tip_slot_id IN (SELECT id FROM below)
           -- instr first: only the lineages naming the fork are parsed.

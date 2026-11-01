@@ -1,10 +1,10 @@
 import { assert, it } from "@effect/vitest"
-import { Effect, Exit } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { NewVersion } from "@rp/shared/chat.ts"
 import { textField, valueField } from "@rp/shared/editing.ts"
 import { emptyBook, emptyEntry } from "../../../client/src/features/editor/lorebookDefaults.ts"
-import { Writer } from "../../src/db/Database.ts"
-import { client, posted, post, testConfig, withServer, takenFrom, typeInto } from "../support/config.ts"
+import { DraftClock, Writer } from "../../src/db/Database.ts"
+import { client, posted, post, serverLayer, testConfig, withServer, takenFrom, typeInto } from "../support/config.ts"
 import { FakeIndexedDb } from "./fakeIndexedDb.ts"
 const idb = new FakeIndexedDb()
 globalThis.indexedDB = idb as unknown as IDBFactory
@@ -261,8 +261,13 @@ it.live(
 
 it.live(
   "editor saves, restores and keepalive propagate history-retention recovery",
-  () =>
-    Effect.gen(function* () {
+  () => {
+    // A library field keeps its last 200 states or its last 30 days, whichever is more: the
+    // writer's clock steps past both before anything is dropped.
+    const clock = new SharedArrayBuffer(8)
+    const time = new BigInt64Array(clock)
+    Atomics.store(time, 0, BigInt(Date.now()))
+    return Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Retention metadata", name: "Synthetic" })
       const field = textField(["description"])
@@ -284,9 +289,17 @@ it.live(
         baseRevisionId: card.headRevisionId
       }
       let latest = initial
-      for (let index = 1; index < 1003; index++)
+      for (let index = 1; index < 205; index++) {
+        Atomics.add(time, 0, 6_000n)
         latest = yield* api.SaveEditorDraft({ ...payload, content: `stale ${index}` })
+      }
+      // Within 30 days, past 200 states: everything is kept.
+      assert.strictEqual(latest.recovered, 0)
+      assert.lengthOf(yield* api.EditorDraftHistory({ refId: card.id, field, limit: 1000 }), 206)
+      Atomics.add(time, 0, BigInt(31 * 86_400_000))
+      latest = yield* api.SaveEditorDraft({ ...payload, content: "stale late" })
       assert.isAbove(latest.recovered, 0)
+      assert.lengthOf(yield* api.EditorDraftHistory({ refId: card.id, field, limit: 1000 }), 201)
       const states = yield* api.EditorDraftHistory({ refId: card.id, field, limit: 2 })
       const restored = yield* api.RestoreEditorDraft({
         refId: card.id,
@@ -302,7 +315,11 @@ it.live(
       })
       assert.strictEqual(response.status, 204)
       assert.isAbove(Number(response.headers.get("x-drafts-recovered")), 0)
-    }).pipe(Effect.scoped, withServer(testConfig())),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(serverLayer(testConfig()).pipe(Layer.provide(Layer.succeed(DraftClock)(clock))))
+    )
+  },
   { timeout: 60_000, tags: ["slow"] }
 )
 

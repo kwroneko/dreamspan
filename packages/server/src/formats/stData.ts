@@ -233,6 +233,8 @@ export interface StGroup {
   readonly disabledMembers: ReadonlyArray<string>
   /** Its chats' ids, which name the files in `group chats/`. */
   readonly chats: ReadonlyArray<string>
+  /** The chat ST opens the group on (`chat_id`): the one last opened. */
+  readonly chatId: string | null
 }
 
 export const parseStGroup = (bytes: Uint8Array, fileName: string, issues: ReportBuilder): StGroup => {
@@ -246,7 +248,8 @@ export const parseStGroup = (bytes: Uint8Array, fileName: string, issues: Report
     name: typeof group.name === "string" && group.name !== "" ? bounded(group.name) : id,
     members: strings(group.members, stDataLimits.maxGroupMembers),
     disabledMembers: strings(group.disabled_members, stDataLimits.maxGroupMembers),
-    chats
+    chats,
+    chatId: typeof group.chat_id === "string" && group.chat_id !== "" ? bounded(group.chat_id) : null
   }
 }
 

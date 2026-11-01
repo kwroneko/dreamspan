@@ -14,6 +14,7 @@ import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, openPresetAt } from "./support/panel.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 
 // Replies go to the synthetic provider (not the fake generator), so the inspector has a captured request.
 const server = serverPerFile(withAdmin)
@@ -134,11 +135,11 @@ for (const width of [1440, 390])
       const shoot = await setUp(page, width, theme)
       await page.goto(`${server().url}/chats/${ariaChat}`)
       const tab = await openPanel(page, "Lorebooks")
-      // Every book the chat reads, in one list; ST's global book is global here.
+      // Every book the chat reads, in one list; ST's global book is sent by ST's selected preset.
       const books = tab.getByRole("list", { name: "Lorebooks in this chat" })
       await expect(books).toContainText("Aria Vance's own lorebook")
       await expect(books.getByRole("switch", { name: /^Harbor Almanac/ })).toBeChecked()
-      await expect(books).toContainText("Global: used in every chat")
+      await expect(books).toContainText("From the preset Celia 4.2")
       // Where entries go: one setting for the chat's books, with its why a click away.
       const placement = tab.getByRole("group", { name: "Where entries go" })
       const below = placement.getByRole("button", { name: "Below the history" })
@@ -194,11 +195,7 @@ test("a prompt that forbids overrides says so in both editors; entries by positi
   // The switch is among the prompt's options, folded under its header.
   await overlay.locator('[data-prompt="main"]').getByRole("button", { name: "Options of Main Prompt" }).click()
   await overlay.locator('[data-prompt="main"]').getByRole("switch", { name: "A card can't replace it" }).click()
-  await overlay.getByRole("button", { name: /^Save \(/ }).click()
-  await page
-    .getByRole("dialog", { name: "Save a revision", exact: true })
-    .getByRole("button", { name: "Save revision" })
-    .click()
+  await saveRevision(overlay)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {

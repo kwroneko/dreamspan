@@ -102,7 +102,10 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
       (needle === "" ||
         [f.name, f.chatName, ...f.cast.flatMap((c) => [c.label, c.name])].some((n) => n.toLowerCase().includes(needle)))
   )
-  const peer = (f: Fork) => f.current || f.pinned || f.named
+  // A chat's branches by their last message, newest first (owner, 2026-11-01).
+  const byLast = (list: ReadonlyArray<Fork>) =>
+    [...list].sort((a, b) => (b.endAt ?? b.createdAt) - (a.endAt ?? a.createdAt) || b.createdAt - a.createdAt)
+  const peer = (f: Fork) => f.pinned || f.named
   switch (id) {
     case "pinned":
       return sortBy(
@@ -125,9 +128,9 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
     case "current":
       return scoped.filter((f) => f.current)
     case "peers":
-      return scoped.filter((f) => !f.current && (f.pinned || f.named))
+      return byLast(scoped.filter(peer))
     case "other":
-      return scoped.filter((f) => !peer(f))
+      return byLast(scoped.filter((f) => !peer(f)))
     case "groups": {
       // The home grid's direction toggle turns the order round (oldest first, Z to A).
       const sorted = sortBy(perChat(scoped.filter((f) => f.cast.length > 1)), view.sort, "chat")
@@ -234,12 +237,15 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         messages: number | null
         leaf: string | null
         end_at: number | null
+        split_at: number | null
+        split_after: number | null
+        parent_fork_id: string | null
         lists: string | null
       }>`
-          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, c.title, c.current_fork_id,
-            c.created_at AS chat_created_at,
+          SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id,
+            c.title, c.current_fork_id, c.created_at AS chat_created_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
-            s.messages, s.leaf, s.end_at,
+            s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
               THEN '[' || s.cast_json || ',' || s.joined_json || ',' || s.departed_json || ',' || s.activity_json || ']' END AS lists
           FROM chats c CROSS JOIN forks f ON f.chat_id = c.id LEFT JOIN fork_summaries s ON s.fork_id = f.id
@@ -284,6 +290,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             messages: row.messages ?? 0,
             leaf: row.leaf,
             endAt: row.end_at,
+            split:
+              row.split_at === null || row.split_after === null ? null : { at: row.split_at, after: row.split_after },
             cast,
             joined,
             departed,
@@ -300,6 +308,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             messages: 0,
             leaf: null,
             endAt: null,
+            split: null,
             cast: [],
             joined: [],
             departed: [],
@@ -347,7 +356,10 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           named: record.name !== null,
           current: record.id === row.current_fork_id,
           pinned: record.pinned_at !== null,
+          original: record.parent_fork_id === null,
+          split: s.split,
           createdAt: record.created_at,
+          endAt: s.endAt,
           recentAt,
           chatRecentAt: 0,
           branches: 0,

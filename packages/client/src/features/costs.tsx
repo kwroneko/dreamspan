@@ -288,5 +288,9 @@ export const register = () =>
     parent: "settings",
     path: "costs",
     component: CostPage,
-    nav: { label: "Costs", order: 25 }
+    nav: {
+      label: "Costs",
+      order: 25,
+      description: "Your prices for model requests, for counting what replies and summaries cost."
+    }
   })

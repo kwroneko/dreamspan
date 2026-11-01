@@ -23,8 +23,15 @@ test("beside the page: the groups, the first page at /settings, and a link lands
     ["Admin", ["Server status"]]
   ] as const) {
     const section = nav.getByRole("region", { name: group })
+    // What's shown: each page's description is its tooltip here, not a line under it.
     await expect(section.getByRole("link")).toHaveText([...pages])
   }
+  const keys = nav.getByRole("link", { name: "Keys", exact: true })
+  await expect(keys).toHaveAccessibleDescription("Your API keys, and the addresses each may be sent to.")
+  await keys.hover()
+  await expect(
+    page.getByText("Your API keys, and the addresses each may be sent to.", { exact: true }).filter({ visible: true })
+  ).toBeVisible()
 
   await page.goto(`${server().url}/settings/chats`)
   await expect(nav.getByRole("link", { name: "Chats", exact: true })).toHaveAttribute("aria-current", "page")
@@ -43,7 +50,11 @@ test("on a phone: the list, a page alone under the way back, and back to the lis
   await page.goto(`${server().url}/settings`)
   await expect(main.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible()
   await expect(page).toHaveURL(/\/settings$/)
-  await main.getByRole("link", { name: "Chats", exact: true }).click()
+  // Each page's description under its name.
+  const chats = main.getByRole("link", { name: "Chats", exact: true })
+  await expect(chats).toContainText("What every chat starts from")
+  await expect(chats).toHaveAccessibleDescription(/^What every chat starts from/)
+  await chats.click()
   await expect(page).toHaveURL(/\/settings\/chats$/)
   await expect(main.getByRole("navigation", { name: "Settings" })).toBeHidden()
   await expect(main.getByRole("heading", { level: 1, name: "Chats" })).toBeVisible()

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { RefId } from "@rp/shared/library.ts"
+import { noteSettings } from "./support/notes.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
@@ -54,7 +55,7 @@ test.beforeAll(async ({ playwright }) => {
     })
   )
   chatId = started.chat.id
-  // A book added to the chat, whose ⋯ offers "Use in every chat".
+  // A book added to the chat, whose ⋯ offers "Remove from this chat".
   const request = await playwright.request.newContext()
   await apiLogin(request, server(), ADMIN.handle, ADMIN.password)
   const book = {
@@ -91,8 +92,7 @@ const beside = async (list: Locator, box: Locator) => {
 const openOutfit = async (page: Page) => {
   const notes = page.getByRole("tabpanel", { name: "Notes" })
   const hers = notes.getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: /^Outfit/ }).click()
-  return { notes, note: hers.getByRole("region", { name: "Note Outfit" }) }
+  return { notes, note: await noteSettings(hers, "Outfit") }
 }
 
 for (const theme of ["light", "dark"] as const) {
@@ -186,12 +186,12 @@ for (const theme of ["light", "dark"] as const) {
     await page.keyboard.press("Escape")
 
     // A choice: the chosen one's explanation under the row, as nothing hovers; a book's
-    // switch and its ⋯ items say what they do, "global" included.
+    // switch and its ⋯ items say what they do.
     await panelTab(page, "Lorebooks")
-    await expect(page.getByText(/^Off takes the book out of this chat/)).toBeVisible()
+    await expect(page.getByText(/^Off stops the book in this chat/)).toBeVisible()
     await page.getByRole("button", { name: "More for Saltmarsh" }).tap()
     await expect(
-      page.getByRole("menuitemcheckbox", { name: "Use in every chat" }).getByText(/Makes it global: every chat/)
+      page.getByRole("menuitem", { name: "Remove from this chat" }).getByText(/^Takes it off this chat's list/)
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `lorebook-menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")
@@ -223,14 +223,15 @@ for (const theme of ["light", "dark"] as const) {
 
     // The owner's example: a book's ⋯ item and its switch say what they do.
     await lore.getByRole("button", { name: "More for Saltmarsh" }).click()
-    await page.getByRole("menuitemcheckbox", { name: "Use in every chat" }).hover()
-    await expect(explanation(page)).toHaveText(/^Makes it global: every chat of yours reads it/)
+    await page.getByRole("menuitem", { name: "Remove from this chat" }).hover()
+    await expect(explanation(page)).toHaveText(/^Takes it off this chat's list, from the latest message on/)
     await page.screenshot({ path: join(shots, `lorebook-menu-1440-${theme}.png`) })
     await page.keyboard.press("Escape")
+    // The row's switch: its explanation as its description, and in a tooltip on hover.
     const book = lore.getByRole("switch", { name: /^Saltmarsh/ })
-    await expect(book).toHaveAccessibleDescription(/^Off takes the book out of this chat/)
+    await expect(book).toHaveAccessibleDescription(/^Off stops the book in this chat/)
     await book.hover()
-    await expect(page.getByText(/^Off takes the book out of this chat/).last()).toBeVisible()
+    await expect(page.getByText(/^Off stops the book in this chat/).last()).toBeVisible()
 
     // The chat's menu: its commands, explained beside them.
     await page.getByRole("button", { name: "Chat actions" }).click()

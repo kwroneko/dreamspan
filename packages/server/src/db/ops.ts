@@ -1,15 +1,7 @@
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
-import {
-  Snippet,
-  SnippetContext,
-  CreateSnippetFields,
-  SaveSnippetFields,
-  GlobalSnippetFields,
-  SnippetHistoryFields,
-  RestoreSnippetFields
-} from "@rp/shared/snippetsApi.ts"
+import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
@@ -142,11 +134,20 @@ import {
   ChatCard,
   ChatGroup,
   FirstTurn,
-  LinkedNote
+  LinkedNote,
+  LorebookPreset
 } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
+
+/** A library entry an assembly read: its entity, the ref (null: the entity's upstream) and the revision read. */
+export const UsedEntry = Schema.Struct({
+  entity: Schema.String,
+  ref: Schema.NullOr(Schema.String),
+  revision: Schema.String
+})
+export type UsedEntry = typeof UsedEntry.Type
 
 /** A disabled user, refused before it can act. */
 export class UserDisabled extends Schema.TaggedError<UserDisabled>()("UserDisabled", { handle: Schema.String }) {}
@@ -448,20 +449,11 @@ export class WriteOps extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
-  Rpc.make("SaveSnippet", {
-    payload: { userId: UserId, ...SaveSnippetFields },
+  /** A snippet for all chats, or only the chat shown; narrowing one shown elsewhere is refused. */
+  Rpc.make("SetSnippetScope", {
+    payload: { userId: UserId, ...SnippetScopeFields },
     success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
-  }),
-  Rpc.make("MakeSnippetGlobal", {
-    payload: { userId: UserId, ...GlobalSnippetFields },
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
-  }),
-  Rpc.make("RestoreSnippet", {
-    payload: { userId: UserId, ...RestoreSnippetFields },
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
@@ -1449,7 +1441,12 @@ export class WriteOps extends RpcGroup.make(
       /** The card's other notes, without their owner, each matched to an earlier import's by `module_id`. */
       notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
       /** ST scans its notes for lorebook entries (`allowWIScan`): so does the card's Character's Note. */
-      characterNoteScan: Schema.optionalKey(Schema.Boolean)
+      characterNoteScan: Schema.optionalKey(Schema.Boolean),
+      /**
+       * A preset's lorebooks (`PresetDoc.lorebooks`), each on, from an ST folder's global World
+       * Info books (§13); ids that aren't the user's live library lorebooks are left out.
+       */
+      presetLorebooks: Schema.optionalKey(Schema.Array(RefId))
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -1909,16 +1906,16 @@ export class WriteOps extends RpcGroup.make(
       lastMessageAt: Schema.NullOr(Schema.Number),
       sha256: Schema.String,
       stateJson: Schema.String,
+      /** A branch's parent file's record. An ST file's name never names its fork (owner, 2026-11-01). */
+      fork: Schema.NullOr(Schema.Struct({ parentRecordId: Schema.String })),
       /**
-       * A branch's parent and optional ST name. Automatic names still need placement
-       * context so local names and explicit clears follow replacement paths.
+       * ST opens the file's card or group on it (`chat`, `chat_id`): the chat opens on its fork
+       * here, unless the user has chatted or branched in the chat since it was imported.
        */
-      fork: Schema.NullOr(Schema.Struct({ name: Schema.NullOr(Schema.String), parentRecordId: Schema.String }))
+      stCurrent: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({
-      notes: Schema.Record(Schema.String, EntityId),
-      /** What became of `fork`: set, kept (the slot had a name), or no slot of its own. */
-      fork: Schema.NullOr(Schema.Literals(["named", "kept", "same"]))
+      notes: Schema.Record(Schema.String, EntityId)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),
@@ -1970,9 +1967,58 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, EditConflict, InvalidDocument, StorageError])
   }),
+  /**
+   * Live text is what's sent (owner, 2026-11-01): before a reply is assembled, the library
+   * entries the assembly read (`used`, as `AssembleContext` reported them) whose fields
+   * changed since their last revision get a revision of their live text, labelled with the
+   * reply (`usedBy`, origin `generation`), in one transaction. `cut`: how many were cut; the
+   * reply is assembled again when any was. Drafts that wouldn't make a valid document stay
+   * as they are (the head is sent); the held structural changes never go in.
+   */
+  Rpc.make("CheckpointLiveText", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      slotId: SlotId,
+      /** The version a reply writes; null for a summary. */
+      versionId: Schema.NullOr(VersionId),
+      /** A summary request: the messages it covers, by number (`slotId` is the last). */
+      summary: Schema.optionalKey(Schema.Struct({ from: Schema.Int, to: Schema.Int })),
+      /** The message the reply's history ends at, where a chat's note is edited from. */
+      leafSlotId: Schema.NullOr(SlotId),
+      /** The reply's number in the chat, from 1. */
+      message: Schema.Int,
+      used: Schema.Array(UsedEntry)
+    },
+    success: Schema.Struct({ cut: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Every field changed since the ref's last revision (a chat's note: the revision bound where
+   * it's edited) back to that revision's value, each as a new state of its edit history, so the
+   * text there now stays one state back; no revision is written. The held changes aside.
+   */
+  Rpc.make("RevertEditorDrafts", {
+    payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: Schema.Struct({ reverted: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A revision's message (a label, never content), owned revisions of the ref's entity only. */
+  Rpc.make("SetRevisionMessage", {
+    payload: { userId: UserId, refId: RefId, revisionId: RevisionId, message: Schema.NullOr(Schema.String) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A new revision on the head with an earlier revision's content. */
   Rpc.make("RestoreRevision", {
-    payload: { userId: UserId, refId: RefId, revisionId: RevisionId, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      revisionId: RevisionId,
+      expectedRowVersion: Schema.Int,
+      chatNote: Schema.optionalKey(ChatNotePosition)
+    },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
@@ -2192,15 +2238,6 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError])
   }),
-  /**
-   * Marks a lorebook of the user's global (DESIGN §5.0) or not, in `lorebooks.global`;
-   * NotFound when it isn't a live library lorebook of the user's. Returns the list as stored.
-   */
-  Rpc.make("SetGlobalLorebook", {
-    payload: { userId: UserId, ref: RefId, global: Schema.Boolean },
-    success: Schema.Array(RefId),
-    error: Schema.Union([NotFound, StorageError])
-  }),
   /** Replaces the account's global regex scripts, at the revision the caller read (StaleWrite otherwise). */
   Rpc.make("SetGlobalRegex", {
     payload: { userId: UserId, scripts: GlobalScripts, expectedRevision: Schema.Int },
@@ -2274,11 +2311,6 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ListSnippets", {
     payload: { userId: UserId, ...SnippetContext, query: Schema.optionalKey(Schema.String) },
     success: Schema.Array(Snippet),
-    error: Schema.Union([NotFound, StorageError])
-  }),
-  Rpc.make("SnippetHistory", {
-    payload: { userId: UserId, ...SnippetHistoryFields },
-    success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
   }),
   Rpc.make("PreviewForkNotes", {
@@ -2505,7 +2537,8 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 })),
+      before: Schema.optionalKey(Schema.Int)
     },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
@@ -2580,7 +2613,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       refId: RefId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.optionalKey(RevisionId)
+      before: Schema.optionalKey(RevisionId),
+      chatNote: Schema.optionalKey(ChatNotePosition)
     },
     success: Schema.Array(Revision),
     error: Schema.Union([NotFound, StorageError])
@@ -2935,7 +2969,14 @@ export class ReadOps extends RpcGroup.make(
       /** Data from the attempt's registered strategies, applied before budget checks. */
       instructions: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
     },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    success: Schema.Struct({
+      snapshot: Schema.String,
+      generation: Schema.String,
+      /** The library entries it read (`CheckpointLiveText`), and the messages it covers by number. */
+      used: Schema.Array(UsedEntry),
+      from: Schema.Int,
+      to: Schema.Int
+    }),
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
@@ -2954,7 +2995,13 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
     },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    success: Schema.Struct({
+      snapshot: Schema.String,
+      generation: Schema.String,
+      /** The library entries it read, for `CheckpointLiveText`; message number in `message`. */
+      used: Schema.Array(UsedEntry),
+      message: Schema.Int
+    }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /**
@@ -3051,8 +3098,12 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
-  /** The user's global lorebooks: live library lorebooks of theirs, in the order marked. */
-  Rpc.make("GetGlobalLorebooks", { payload: { userId: UserId }, success: Schema.Array(RefId), error: StorageError }),
+  /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */
+  Rpc.make("LorebookPresets", {
+    payload: { userId: UserId, ref: RefId },
+    success: Schema.Array(LorebookPreset),
+    error: StorageError
+  }),
   Rpc.make("GetGlobalRegex", { payload: { userId: UserId }, success: GlobalRegex, error: StorageError }),
   /** A version's text, reasoning and reply sections from before regex scripts rewrote them (null: unchanged). */
   Rpc.make("RawVersionText", {

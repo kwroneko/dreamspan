@@ -1,3 +1,5 @@
+import { replyHooks } from "../chat/replyHooks.ts"
+import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 import { registerUserDraftNotices } from "./userDraft.tsx"
 import { libraryActions } from "../library/slots.ts"
 import { NewCardButton } from "./NewCard.tsx"
@@ -15,6 +17,7 @@ import { CardRegexScripts } from "./RegexScripts.tsx"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
 import { LorebookUse, StandaloneLorebook } from "./StandaloneLorebook.tsx"
 import { registerLorebookTable } from "./lorebookColumns.tsx"
+import { registerLorebookMassSettings } from "./lorebookMassDefaults.ts"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -44,6 +47,12 @@ function LazyEditorPage() {
 }
 
 export const register = () => {
+  // Live text is what's sent: open editors flush before a reply, and read again after one cut revisions.
+  replyHooks.register({
+    id: "editor.live-text",
+    beforeReply: flushOpenEditors,
+    stateChanged: () => void refreshOpenEditors()
+  })
   registerUserDraftNotices()
   cutoutChoosers.register({ id: CUTOUT_CHOOSER, component: LazyCutoutChooser })
   libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })
@@ -53,6 +62,7 @@ export const register = () => {
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerLorebookTable()
+  registerLorebookMassSettings()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()

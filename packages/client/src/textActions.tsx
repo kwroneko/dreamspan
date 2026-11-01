@@ -1,10 +1,9 @@
 // Generic text-command contributions. Editors offer them in their own chrome; features supply
 // the behavior. The browser's own context menu stays everywhere: nothing here replaces it.
-import { useEffect, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from "react"
+import { useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from "react"
 import { makeRegistry } from "./registry.ts"
 import { Icon, type IconName } from "./ui/Icon.tsx"
 import { Tooltip } from "./ui/Tooltip.tsx"
-import { textSelection, type TextSelection } from "./ui/textTargets.ts"
 
 interface TextActionContext {
   readonly text: string
@@ -30,33 +29,6 @@ export interface TextAction {
   readonly run: (context: TextActionContext) => void
 }
 export const textActions = makeRegistry<TextAction>()
-let destination: TextSelection | null = null
-export const hasTextDestination = () => destination !== null
-export const insertText = (text: string) => {
-  if (!destination) return false
-  destination.insert(text)
-  return true
-}
-
-/** Remembers the last field the user worked in, where Insert puts text. */
-export function TextActionHost() {
-  useEffect(() => {
-    const isTool = (e: Event) =>
-      e.composedPath().some((node) => node instanceof HTMLElement && node.hasAttribute("data-text-tool"))
-    const capture = (e: Event) => {
-      if (isTool(e)) return
-      const target = textSelection(e)
-      if (target && target.editable !== false) destination = target
-    }
-    const events = ["focusin", "keyup", "pointerup", "select"]
-    for (const name of events) document.addEventListener(name, capture)
-    return () => {
-      for (const name of events) document.removeEventListener(name, capture)
-      destination = null
-    }
-  }, [])
-  return null
-}
 
 const shortcutLabel = (key: string) =>
   `${typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Command" : "Ctrl"}+Shift+${key.toUpperCase()}`
@@ -75,29 +47,36 @@ export const editorTextActions = (
   })
 
 /**
- * The editor's own text-action bar, under its box. The selection's actions come and go with
- * the selection; on a phone the OS's selection menu floats at the selection, never down here.
+ * The editor's own text-action bar, under its box, only while the editor has focus (`shown`)
+ * or a selection: hidden, it takes no room. It takes the room below the box, so what moves when
+ * it comes and goes is what's under the editor, never the text in it. Only prose editors have one
+ * (the message editor, card text, prompts, notes, summaries; owner, 2026-11-01): a box of
+ * settings, keys, tags, names, patterns, numbers or addresses doesn't. The selection's actions
+ * come and go with the selection; on a phone the OS's selection menu floats at the selection,
+ * never down here.
  */
 export function EditorTextActions({
   text,
   selection,
+  shown,
   source,
   className = ""
 }: {
   text: string
   selection: string
+  shown: boolean
   source?: "snippet" | undefined
   className?: string
 }) {
   const snapshot = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
   const offered = editorTextActions(snapshot.entries, text, selection, source)
-  if (offered.length === 0) return null
+  if (offered.length === 0 || !(shown || selection)) return null
   return (
     <div
       data-text-tool
       role="toolbar"
       aria-label="Text actions"
-      className={`flex flex-wrap items-center justify-end gap-1 ${selection ? "" : "invisible group-focus-within/text:visible group-hover/text:visible"} ${className}`}
+      className={`flex flex-wrap items-center justify-end gap-1 ${className}`}
     >
       {offered.map(({ action, context }) => (
         <Tooltip
@@ -132,17 +111,42 @@ export function EditorTextActions({
   )
 }
 
+/** Whether a pointer is pressed anywhere: a press that takes focus from an editor isn't over yet. */
+let pressed = false
+let tracking = false
+const trackPresses = () => {
+  if (tracking || typeof document === "undefined") return
+  tracking = true
+  document.addEventListener("pointerdown", () => (pressed = true), true)
+  for (const name of ["pointerup", "pointercancel"])
+    document.addEventListener(name, () => setTimeout(() => (pressed = false)), true)
+}
+
 /**
  * Whether focus is in an editor (its box or its bar), for the wrapper around both. Its selection
- * counts only then: a box left for elsewhere keeps its selection, unseen, until it's back.
+ * counts only then: a box left for elsewhere keeps its selection, unseen, until it's back. Left by
+ * a press (a click on the editor's own Save or Cancel, under its bar), it counts as focused until
+ * the press ends and its click has landed: the bar going away moves what's below it, which would
+ * otherwise move the button out from under the pointer before the click.
  */
 export const useEditorFocus = () => {
   const [focused, setFocused] = useState(false)
+  trackPresses()
   return {
     focused,
     onFocus: () => setFocused(true),
     onBlur: (event: FocusEvent<HTMLElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false)
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+      if (!pressed) return setFocused(false)
+      const wrapper = event.currentTarget
+      const release = () => {
+        document.removeEventListener("pointerup", release, true)
+        document.removeEventListener("pointercancel", release, true)
+        // After the click the release makes, unless focus came back meanwhile.
+        setTimeout(() => !wrapper.contains(document.activeElement) && setFocused(false))
+      }
+      document.addEventListener("pointerup", release, true)
+      document.addEventListener("pointercancel", release, true)
     }
   }
 }

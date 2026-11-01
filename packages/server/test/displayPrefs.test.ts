@@ -116,3 +116,22 @@ it.live("message toolbar choices merge by action id per account, across clients,
     assert.strictEqual(decode({ messageToolbar: { ["x".repeat(201)]: true } })._tag, "None")
   }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
 )
+
+it.live("message detail choices merge by detail id, apart from the toolbar's", () =>
+  Effect.gen(function* () {
+    const alice = yield* client({ "Remote-User": "alice" })
+    assert.deepStrictEqual((yield* alice.GetDisplayPrefs({})).messageDetails, {})
+    yield* alice.SetDisplayPrefs({ prefs: { messageDetails: { "message.tokens": false } } })
+    const phone = yield* client({ "Remote-User": "alice" })
+    yield* phone.SetDisplayPrefs({ prefs: { messageDetails: { "message.model-icon": false } } })
+    yield* phone.SetDisplayPrefs({ prefs: { messageToolbar: { "message.edit": false } } })
+    const prefs = yield* alice.GetDisplayPrefs({})
+    assert.deepStrictEqual(prefs.messageDetails, { "message.tokens": false, "message.model-icon": false })
+    assert.deepStrictEqual(prefs.messageToolbar, { "message.edit": false })
+    yield* alice.SetDisplayPrefs({ prefs: { messageDetails: { "message.tokens": true } } })
+    assert.deepStrictEqual((yield* phone.GetDisplayPrefs({})).messageDetails, {
+      "message.model-icon": false,
+      "message.tokens": true
+    })
+  }).pipe(Effect.scoped, withServer(testConfig({ authMode: "proxy" })))
+)

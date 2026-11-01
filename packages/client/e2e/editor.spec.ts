@@ -1,6 +1,8 @@
+import { closeNoteBlock, noteBlock, noteSettings, noteText, noteToggle } from "./support/notes.ts"
 import { expectTextBox } from "./support/textbox.ts"
 // The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
-// server: edits kept as drafts, saved as revisions, undone, restored, forked, reordered,
+// server: edits used as typed, saved as revisions, put back from a field's edit history,
+// restored, forked, reordered,
 // approved, searched and resolved. Every card and preset here is made up.
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -9,6 +11,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -64,23 +67,26 @@ const savedCard = (name: string, fields: Record<string, string>) =>
 const open = async (page: Page, refId: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${refId}`)
-  await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+  // The card's state line, first: an open note has its own.
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: /^Saved as revision \d+$/ })
+      .first()
+  ).toBeVisible()
 }
 
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
 
 /** Opens a card's note from its collapsed row (DESIGN §4.1). */
-const openNote = (page: Page, title: string) =>
-  page
-    .getByRole("list", { name: "The card's notes" })
-    .getByRole("button", { name: new RegExp(`^${title}`) })
-    .click()
-const state = (page: Page) => page.getByRole("status").filter({ hasText: /saved|changes|Keeping/ })
+const openNote = (page: Page, title: string) => noteText(page.getByRole("list", { name: "The card's notes" }), title)
+const state = (page: Page) =>
+  page.getByRole("status").filter({ hasText: /^(Saved as revision|Changed since revision|Keeping your changes)/ })
 
-/** Waits until what was typed is kept on the server as a draft. */
+/** Waits until what was typed is kept on the server. */
 const kept = async (page: Page) => {
   await expect(state(page)).toHaveText("Keeping your changes…")
-  await expect(state(page)).toContainText("kept as drafts")
+  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
 }
 
 /** At phone and desktop width: nothing scrolls sideways; with SCREENSHOT_DIR set, saved there. */
@@ -96,7 +102,7 @@ const shoot = async (page: Page, name: string) => {
   }
 }
 
-test("a new card's fields save as a revision, after a diff, and survive a reload", async ({ page }) => {
+test("a new card's fields save as a revision with a message, and survive a reload", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library`)
   await page.getByRole("button", { name: "New card" }).click()
@@ -109,22 +115,12 @@ test("a new card's fields save as a revision, after a diff, and survive a reload
   await kept(page)
   await field(page, "Scenario").fill("A storm is coming.")
   await kept(page)
-  await expect(state(page)).toHaveText("2 fields have changes, kept as drafts until you save a revision.")
+  await expect(state(page)).toHaveText("Changed since revision 1")
   await shoot(page, "card-editor")
 
-  await page.getByRole("button", { name: "Save (2)" }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  const changes = dialog.getByRole("list", { name: "Changes" })
-  await expect(changes.getByRole("listitem")).toHaveCount(2)
-  await expect(changes.getByRole("listitem").first()).toContainText("Description")
-  await expectTextBox(
-    changes.getByRole("textbox", { name: "After", exact: true }).first(),
-    "A lighthouse keeper who talks to gulls."
-  )
-  await dialog.getByRole("textbox", { name: "What changed (optional)" }).fill("First pass")
-  await dialog.getByRole("button", { name: "Save revision" }).click()
+  await saveRevision(page, "First pass")
   await expect(page.getByText("Saved a revision.")).toBeVisible()
-  await expect(state(page)).toHaveText("Everything is saved.")
+  await expect(state(page)).toHaveText("Saved as revision 2")
 
   await page.reload()
   await expectTextBox(field(page, "Description"), "A lighthouse keeper who talks to gulls.")
@@ -132,10 +128,23 @@ test("a new card's fields save as a revision, after a diff, and survive a reload
   const revisions = page.getByRole("list", { name: "Revisions" }).getByRole("listitem")
   await expect(revisions).toHaveCount(2)
   await expect(revisions.first()).toContainText("First pass")
-  await expect(revisions.first()).toContainText("saved version")
+  await expect(revisions.first()).toContainText("latest")
+  await expect(revisions.first()).toContainText("Saved")
+  // What the save changed, in History's comparison with its parent: both fields, the text as typed.
+  await revisions
+    .first()
+    .getByRole("button", { name: /^Revision 2 / })
+    .click()
+  const changes = page.getByRole("dialog").getByLabel("Revision changes")
+  await expect(changes.locator("summary")).toHaveText(["Description", "Scenario"])
+  await changes.getByText("Description", { exact: true }).click()
+  await expectTextBox(
+    changes.getByRole("textbox", { name: "After", exact: true }).first(),
+    "A lighthouse keeper who talks to gulls."
+  )
 })
 
-test("undo brings a field's text back after select-all and a stray key", async ({ page }) => {
+test("a field's edit history brings its text back after select-all and a stray key", async ({ page }) => {
   const refId = await savedCard("Undo", {})
   await open(page, refId)
   const greeting = field(page, "First message")
@@ -143,16 +152,23 @@ test("undo brings a field's text back after select-all and a stray key", async (
   await kept(page)
   await greeting.fill("x")
   await kept(page)
-  await page.getByRole("button", { name: "Undo First message" }).click()
+  await page.getByRole("button", { name: "Edit history of First message" }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit history: First message" })
+  // The state before the wipe is picked to begin with; putting it back makes it the newest.
+  await expect(dialog.getByLabel("Text of the state")).toHaveText(
+    "The lamp needs oil before the storm comes in from the west."
+  )
+  await dialog.getByRole("button", { name: "Put this text in the box" }).click()
+  await expect(dialog).toHaveCount(0)
   await expectTextBox(greeting, "The lamp needs oil before the storm comes in from the west.")
-  // The history: the text as first saved, the wipe, and the undo, which can be undone too.
-  await page.getByRole("button", { name: "History of First message" }).click()
-  const states = page.getByRole("list", { name: "Earlier states" }).getByRole("listitem")
-  await expect(states).toHaveCount(3)
-  await expect(states.first()).toContainText("Restored.")
+  // The history: the text put back is the newest state, after the wipe, which stays in the list.
+  await page.getByRole("button", { name: "Edit history of First message" }).click()
+  const states = dialog.getByRole("list", { name: "Earlier states" }).getByRole("listitem")
+  await expect(states.first()).toContainText("Put back from this list")
+  await expect(states.nth(1)).toContainText("1 characters")
 })
 
-test("a field another tab typed on meanwhile keeps that tab's text, recovered once saved", async ({ page }) => {
+test("a field another tab typed on meanwhile keeps that tab's text in its edit history", async ({ page }) => {
   const refId = (await savedCard("Two tabs", {})) as RefId
   await open(page, refId)
   const greeting = field(page, "First message")
@@ -176,15 +192,11 @@ test("a field another tab typed on meanwhile keeps that tab's text, recovered on
   )
   await greeting.fill("hello from this tab")
   await kept(page)
-  await page.getByRole("button", { name: "Save (1)" }).click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(state(page)).toHaveText("Everything is saved.")
-  const recovered = await admin((api) =>
-    Effect.flatMap(api.ListRecoveredTexts({ limit: 10, before: null }), (texts) =>
-      Effect.succeed(texts.map((t) => t.content))
-    )
-  )
-  expect(recovered).toContain("hello from the other tab")
+  await saveRevision(page)
+  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
+  const texts = await admin((api) => editHistoryTexts(api, refId, textField(["first_mes"])))
+  expect(texts[0]).toBe("hello from this tab")
+  expect(texts).toContain("hello from the other tab")
 })
 
 test("an earlier revision restores as a new one", async ({ page }) => {
@@ -216,8 +228,11 @@ test("an earlier revision restores as a new one", async ({ page }) => {
   await page.getByRole("button", { name: "History", exact: true }).click()
   const revisions = page.getByRole("list", { name: "Revisions" }).getByRole("listitem")
   await expect(revisions).toHaveCount(3)
-  await revisions.nth(1).getByRole("button").click()
-  await page.getByRole("dialog").getByRole("radio", { name: "Current draft / head" }).click()
+  await revisions
+    .nth(1)
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
+  await page.getByRole("dialog").getByRole("radio", { name: "As it is now" }).click()
   await page.getByRole("dialog").getByText("Scenario", { exact: true }).click()
   await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "Before", exact: true }), "A storm.")
   await expectTextBox(page.getByRole("dialog").getByRole("textbox", { name: "After", exact: true }), "A calm sea.")
@@ -244,7 +259,7 @@ test("forking a card is one action, and takes the unsaved changes along", async 
   await page.goto(`${server().url}/library/${refId}`)
   await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
   await expectTextBox(field(page, "Description"), "A keeper.")
-  await expect(state(page)).toHaveText("Everything is saved.")
+  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
 })
 
 test("a preset's prompts reorder by dragging and by keyboard, and toggle", async ({ page }) => {
@@ -276,14 +291,17 @@ test("a preset's prompts reorder by dragging and by keyboard, and toggle", async
   await expect(order.getByRole("button", { name: "Move Main Prompt" })).toBeFocused()
   expect((await names()).slice(0, 3)).toEqual(["Persona Description", "World Info (before)", "Main Prompt"])
 
+  // The new order waits behind the unsaved bar; the switch is live.
+  const held = page.getByRole("region", { name: "Unsaved changes" })
+  await expect(held).toContainText("new order")
   await page.getByRole("switch", { name: "Send Chat Examples" }).click()
-  await kept(page)
+  await expect(page.getByRole("switch", { name: "Send Chat Examples" })).not.toBeChecked()
+  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
   await shoot(page, "preset-editor")
-  await page.getByRole("button", { name: "Save (1)" }).click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByText("Saved a revision.")).toBeVisible()
+  await held.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(held).toHaveCount(0)
   await page.reload()
-  await expect(state(page)).toHaveText("Everything is saved.")
+  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
   expect((await names()).slice(0, 3)).toEqual(["Persona Description", "World Info (before)", "Main Prompt"])
   await expect(page.getByRole("switch", { name: "Send Chat Examples" })).not.toBeChecked()
 })
@@ -311,7 +329,7 @@ test("search and replace runs across fields, and a pattern that backtracks forev
     personality: `${"a".repeat(34)}!`
   })
   await open(page, refId)
-  await page.getByRole("button", { name: "Search" }).click()
+  await page.getByRole("button", { name: "Search", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Search and replace" })
   await dialog.getByRole("textbox", { name: "Find" }).fill("keeper")
   await dialog.getByRole("button", { name: "Find" }).click()
@@ -414,7 +432,7 @@ test("note text typed just before closing the tab is kept, with a warning first"
   await open(page, card.id)
   await recordBeacons(page)
   await openNote(page, "Outfit")
-  const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Content/ })
+  const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Text of/ })
   await content.fill("A grey coat, typed in the last moment.")
   const warned = await page.evaluate(() => {
     const event = new Event("beforeunload", { cancelable: true })
@@ -434,16 +452,17 @@ test("note text typed just before closing the tab is kept, with a warning first"
     .toEqual(["A grey coat, typed in the last moment."])
 })
 
-test("a card's notes are collapsed rows, and the card has no modules section (DESIGN §5.0)", async ({ page }) => {
+test("a card's notes are blocks, and the card has no modules section (DESIGN §5.0)", async ({ page }) => {
   const refId = await savedCard("Rows", {})
   await admin((api) => api.CreateCardNote({ cardRefId: refId as RefId, title: "Scarf" }))
   await open(page, refId)
   await expect(page.getByRole("button", { name: "Add a module" })).toHaveCount(0)
-  const row = page.getByRole("list", { name: "The card's notes" }).getByRole("button", { name: /^Scarf/ })
-  await expect(row).toContainText("End of tail")
-  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeHidden()
-  await row.click()
-  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeVisible()
+  const list = page.getByRole("list", { name: "The card's notes" })
+  // Its header says where it goes, open or closed; its settings are folded under its text.
+  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await closeNoteBlock(noteBlock(list, "Scarf"), "Scarf")
+  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await noteSettings(list, "Scarf")
   // In the card editor, a note's condition can name the card itself.
   await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()
   await page.getByRole("option", { name: "On a chosen character's turn" }).click()
@@ -475,7 +494,7 @@ test("text too long to send as the page goes: the warning stops a close, and a r
   )
   await open(page, card.id)
   await openNote(page, "Long")
-  const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Content/ })
+  const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Text of/ })
   const saved = async () => {
     const opened = await admin((api) => api.OpenEditor({ refId: note.id }))
     return opened.drafts.filter((d) => d.status === "active").map((d) => d.content.length)
@@ -606,7 +625,7 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   await open(page, card.id)
   const field = textField(["content"])
   await openNote(page, "Gone")
-  await page.getByRole("button", { name: "More actions for Gone" }).click()
+  await page.getByRole("button", { name: "Actions for Gone" }).click()
   await page.getByRole("menuitem", { name: "Delete the note" }).click()
   await expect(page.getByRole("region", { name: "Note Gone" })).toHaveCount(0)
   // A copy of the note left behind: kept while the note is in the bin, saved once it's back.
@@ -619,7 +638,7 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   await page.reload()
   await openNote(page, "Gone")
   await expectTextBox(
-    page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ }),
+    page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Text of/ }),
     "Unsent."
   )
   await expect.poll(async () => (await storedCopies(page)).filter((c) => c.refId === note.id)).toEqual([])
@@ -653,8 +672,11 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
   await expect(send).not.toBeChecked()
   await main.getByRole("button", { name: "Move Main Prompt" }).press("ArrowDown")
   await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
-  await expect(page.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
+  // The switch is live; the move waits behind the unsaved bar, kept on the server like typing.
+  await expect(page.getByRole("region", { name: "Unsaved changes" })).toContainText("new order")
+  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
   await page.reload()
+  await expect(page.getByRole("region", { name: "Unsaved changes" })).toContainText("new order")
   await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
   await expect(main.getByRole("switch", { name: "Send Main Prompt" })).not.toBeChecked()
   await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)

@@ -25,41 +25,28 @@ export const stem = (file: string) => file.replace(/\.[^.]*$/, "")
 /** ST's humanized date in a file name: `2024-7-12@01h31m37s123ms`, older ones without ms. */
 const ST_DATE = String.raw`\d{4}-\d{1,2}-\d{1,2} ?@\d{1,2}h ?\d{1,2}m ?\d{1,2}s(?: ?\d{1,3}ms)?`
 /**
- * The names ST gives a fork file the user didn't name (`bookmarks.js`): `<chat> - Branch #<n>`
- * and `<chat> - Checkpoint #<n>` now, `Branch #<message> - <date>`, `Checkpoint #<n> - <date>`
- * and `Bookmark #<n> - <date>` in older versions.
+ * The names ST gives a fork file: `<chat> - Branch #<n>` and `<chat> - Checkpoint #<n>` now,
+ * `Branch #<message> - <date>`, `Checkpoint #<n> - <date>` and `Bookmark #<n> - <date>` in
+ * older versions.
  */
 const AUTOMATIC_FORK = new RegExp(String.raw`^(?:Branch|Checkpoint|Bookmark) #\d+ - ${ST_DATE}$`, "u")
-const CURRENT_FORK = / - (Branch|Checkpoint) #[1-9]\d*$/u
-const DATE_SUFFIX = new RegExp(String.raw` - ${ST_DATE}$`, "u")
-/** As long as a branch name the user types here may be (`chatApi.ts`). */
-const MAX_BRANCH_NAME = 100
+const FORK_SUFFIX = / - (?:Branch|Checkpoint) #[1-9]\d*$/u
 
 /**
- * The name the user gave a fork in ST, from its file's name without `.jsonl`: a checkpoint
- * they named (older versions add ` - <date>`, which goes) or a file they renamed in ST's chat
- * list. Null for a name ST made up.
+ * The title of the chat a chat file starts (owner, 2026-11-01): never a branch file's name. A
+ * file's name is no name of a fork, which only the user gives here, nor of the chat: the
+ * family's root is the file, or, for a branch whose parent chat wasn't imported, the main chat
+ * its header names, without the branch suffix ST adds; a name ST made up for a branch says
+ * nothing and goes. A group chat is the group's, with the root's name after it (`chatName`
+ * shows the group's name and the day ST's stamp says); a solo chat is the root's name, else
+ * empty, which shows its cast's names.
  */
-export const stForkName = (fileName: string, parentName: string | null = null): string | null => {
-  if (AUTOMATIC_FORK.test(fileName)) return null
-  // ST 1.19 bookmarks.js:88–110, 209–217 strips only the matching kind from the
-  // actual parent. A suffix on an unrelated prefix, or without a known parent, is a name.
-  const current = CURRENT_FORK.exec(fileName)
-  if (parentName !== null && current !== null) {
-    const kind = current[1]!
-    const base = parentName
-      .replace(new RegExp(` - ${kind} #\\d+$`, "u"), "")
-      .replace(new RegExp(`^${kind} #\\d+ - `, "u"), "")
-    if (fileName === `${base}${current[0]}`) return null
-  }
-  const name = cleanName(fileName.replace(DATE_SUFFIX, ""))
-  if (name === "") return null
-  let kept = ""
-  for (const char of name) {
-    if (kept.length + char.length > MAX_BRANCH_NAME) break
-    kept += char
-  }
-  return kept.trim()
+export const stChatTitle = (fileName: string, mainChat: string | null, group: string | null): string => {
+  let root = cleanName(mainChat ?? fileName)
+  while (FORK_SUFFIX.test(root)) root = root.replace(FORK_SUFFIX, "")
+  if (AUTOMATIC_FORK.test(root)) root = ""
+  if (group !== null) return root === "" ? group : `${group}: ${root}`
+  return root
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
@@ -79,6 +66,8 @@ export interface CardInfo {
   readonly book: boolean
   /** Its Character Author's Note from ST's settings, when the import made one and ST applies it. */
   readonly characterNote?: EntityId | null
+  /** The chat file ST opens it on (the card's `chat`), without `.jsonl`: the one last opened. */
+  readonly lastChat?: string | null
 }
 
 export interface Link {

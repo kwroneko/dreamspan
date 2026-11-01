@@ -1,3 +1,10 @@
+// Snippets (DESIGN §4.1; owner, 2026-11-01): text kept beside your chats, never sent by itself.
+// Each is a block as a note is (ui/Block): its name renamed in place, Copy, and its text, saved as
+// it's typed with its edit history, Save cutting a revision; for this chat (every branch of it)
+// or all chats, by a switch. A note can show one; any editor sends its text to one.
+import type { RefId } from "@rp/shared/library.ts"
+import { textField } from "@rp/shared/editing.ts"
+import type { Snippet } from "@rp/shared/snippetsApi.ts"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { appTools } from "../shell.tsx"
 import { useSession } from "../../session.ts"
@@ -5,24 +12,31 @@ import { useCaller } from "../editor/caller.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { chatPanels, lazyPanel } from "../chat/panels.tsx"
 import { chatSurfaceProviders, type ChatSurfaceProps } from "../chat/presentation.tsx"
-import { textActions, insertText, hasTextDestination } from "../../textActions.tsx"
-import { CodeEditor } from "../../ui/CodeEditor.tsx"
+import { textActions } from "../../textActions.tsx"
+import { copy } from "../chat/copy.ts"
+import { Block, BlockBody, BlockHeader, BlockToggle, ExpandCollapseAll } from "../../ui/Block.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Switch } from "../../ui/Choice.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { InlineRename } from "../../ui/InlineRename.tsx"
+import { useOpenBlocks } from "../../ui/openBlocks.ts"
 import { Sheet } from "../../ui/Sheet.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
+import { TextField } from "../editor/controls.tsx"
+import { SaveRevision } from "../editor/SaveRevision.tsx"
+import { useEditorState, useLeaveGuard, useText } from "../editor/store.ts"
 import { DeleteSnippet } from "./delete.tsx"
 import { SnippetHistory } from "./history.tsx"
 import { snippetTools } from "./slots.ts"
 import { SnippetWorkspace } from "./workspace.ts"
 
 let workspace: SnippetWorkspace | null = null
-function Scope({ session, view, onOpenPanel, children }: ChatSurfaceProps) {
-  const fork = view.forkId
+function Scope({ session, onOpenPanel, children }: ChatSurfaceProps) {
   useEffect(() => {
-    workspace?.setScope({ chatId: session.id, forkId: fork })
-    return () => workspace?.setScope({ chatId: null, forkId: null })
-  }, [session.id, fork])
+    workspace?.setChat(session.id)
+    return () => workspace?.setChat(null)
+  }, [session.id])
   useEffect(() => {
     workspace?.setOpener(() => onOpenPanel("snippets"))
     return () => workspace?.setOpener(null)
@@ -44,153 +58,213 @@ function Tools() {
   }, [store])
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot)
   return (
-    <>
-      <Sheet
-        open={state.floating}
-        onOpenChange={(open) => {
-          if (!open) store.close()
-        }}
-        title="Snippets"
-      >
-        <div className="min-h-0 overflow-y-auto p-4">
-          <Workspace store={store} />
-        </div>
-      </Sheet>
-    </>
+    <Sheet
+      open={state.floating}
+      onOpenChange={(open) => {
+        if (!open) store.close()
+      }}
+      title="Snippets"
+    >
+      <div className="min-h-0 overflow-y-auto p-4">
+        <Workspace store={store} />
+      </div>
+    </Sheet>
   )
 }
 function SnippetsPanel() {
   return workspace ? <Workspace store={workspace} /> : <p>Opening snippets…</p>
 }
+
+const firstLine = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line !== "") ?? ""
+
+/** One snippet as a block: its header always shown, its text when open. */
+function SnippetBlock({
+  workspace,
+  item,
+  open,
+  onOpenChange
+}: {
+  workspace: SnippetWorkspace
+  item: Snippet
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const state = useSyncExternalStore(workspace.subscribe, workspace.snapshot, workspace.snapshot)
+  const store = workspace.store(item.ref.id)
+  const loaded = useEditorState(store).snapshot !== null
+  useLeaveGuard(store)
+  const typedTitle = useText(store, ["title"])
+  const typedContent = useText(store, ["content"])
+  const title = (loaded ? typedTitle : item.title) || "Untitled snippet"
+  const content = loaded ? typedContent : item.content
+  const scope = item.global ? "All chats" : "This chat"
+  const detail = (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted">
+      <span>{scope}</span>
+      {!open && firstLine(content) !== "" && (
+        <span className="line-clamp-1 min-w-0 [overflow-wrap:anywhere]">· {firstLine(content)}</span>
+      )}
+    </span>
+  )
+  const toggle = (
+    <BlockToggle
+      open={open}
+      onToggle={() => {
+        if (!open) workspace.select(item.ref.id)
+        onOpenChange(!open)
+      }}
+      label={title}
+      name={title}
+      detail={detail}
+      hint={open ? "Hide the snippet's text" : "Show the snippet's text"}
+    />
+  )
+  return (
+    <li>
+      <Block aria-label={`Snippet ${title}`} className="bg-canvas">
+        <BlockHeader>
+          {loaded ? (
+            <InlineRename
+              value={typedTitle}
+              label={title}
+              className="min-w-0 flex-1"
+              onRename={(next) => {
+                store.setText(["title"], next)
+                void store.save(textField(["title"]))
+              }}
+            >
+              {toggle}
+            </InlineRename>
+          ) : (
+            <span className="flex min-w-0 flex-1">{toggle}</span>
+          )}
+          <IconButton
+            label={`Copy ${title}`}
+            hint="Copies its text, to paste anywhere"
+            icon="copy"
+            disabled={content === ""}
+            onClick={() => void copy(content, "Snippet")}
+          />
+        </BlockHeader>
+        {open && (
+          <>
+            <BlockBody>
+              {loaded ? (
+                <div
+                  onFocus={() => {
+                    if (state.selected !== item.ref.id) workspace.select(item.ref.id)
+                  }}
+                >
+                  <TextField
+                    store={store}
+                    path={["content"]}
+                    label={`Text of ${title}`}
+                    labelHidden
+                    rows={Math.min(10, Math.max(3, content.split("\n").length))}
+                    source="snippet"
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-muted">Loading the snippet…</p>
+              )}
+            </BlockBody>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-2 py-1.5">
+              <Switch
+                checked={item.global}
+                disabled={item.global && state.chatId === null}
+                onCheckedChange={(global) => void workspace.setGlobal(item.ref.id, global)}
+                hint={
+                  item.global
+                    ? state.chatId === null
+                      ? "In every chat. Open a chat to make it that chat's own."
+                      : "In every chat. Switch it off to keep it only in this chat, every branch of it."
+                    : "Only in this chat, every branch of it. Switch it on to have it in every chat."
+                }
+              >
+                All chats
+              </Switch>
+              {loaded && <SaveRevision store={store} compact />}
+              <span className="flex flex-wrap items-center gap-1">
+                <SlotOutlet slot={snippetTools} props={{ store: workspace, item }} />
+              </span>
+            </div>
+          </>
+        )}
+      </Block>
+    </li>
+  )
+}
+
 function Workspace({ store }: { store: SnippetWorkspace }) {
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot)
+  const user = useSession().user.id
   const [query, setQuery] = useState("")
-  const [selection, setSelection] = useState("")
-  const [notice, setNotice] = useState("")
-  const actions = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
-  const insertAction = actions.entries.find((action) => action.id === "snippets.insert")
-  const item = state.items.find((i) => i.ref.id === state.selected)
-  const insert = () => {
-    if (!item) return
-    const action = textActions.get("snippets.insert")
-    const context = { text: selection || item.content, source: "snippet" as const }
-    if (action?.available(context)) action.run(context)
-    else setNotice("Focus a field first, then return here to insert at its cursor.")
-  }
+  const blocks = useOpenBlocks(`rp.snippetBlocks.${user}`, state.items.length)
+  const shown = state.items.filter((i) =>
+    `${i.title} ${i.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  )
+  // A snippet just made or sent to opens, and shows.
+  useEffect(() => {
+    if (state.selected === null || state.reveal === 0) return
+    blocks.setOpen(state.selected, true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.reveal])
+  const ids = shown.map((item) => item.ref.id)
   return (
-    <section data-text-tool className="flex min-w-0 flex-col gap-3" aria-label="Snippet workspace">
+    <section className="flex min-w-0 flex-col gap-3" aria-label="Snippets">
       <p className="text-sm text-muted">
-        Keep text beside your chat. Any text editor sends its text here with Send text to snippet, or what you selected
-        in it with Send selection to snippet.
+        Text you keep beside your chats: lines to reuse, passages from a swipe, ideas. A snippet is never sent to the
+        model by itself; a note can show one (Add note, then Pick a shared note). Copy one to paste it anywhere, and add
+        to the one open last from any editor with Send text to snippet.
       </p>
       <div className="flex items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">
           <Input value={query} onChange={(e) => setQuery(e.currentTarget.value)} placeholder="Name or text" />
         </Field>
         <Button
-          onClick={() => {
-            setSelection("")
-            void store.create()
-          }}
+          hint={
+            state.chatId === null
+              ? "An empty snippet for all chats"
+              : "An empty snippet for this chat, every branch of it; its switch makes it one for all chats"
+          }
+          onClick={() => void store.create()}
         >
           New snippet
         </Button>
       </div>
-      <ul
-        aria-label="Snippets"
-        className="max-h-44 overflow-y-auto rounded-md border border-border divide-y divide-border"
-      >
-        {state.items
-          .filter((i) => `${i.title} ${i.content}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
-          .map((snippet) => (
-            <li key={snippet.ref.id}>
-              <button
-                type="button"
-                aria-pressed={snippet.ref.id === state.selected}
-                className="flex w-full flex-col gap-1 px-3 py-2 text-left hover:bg-surface-raised aria-pressed:bg-surface-raised"
-                onClick={() => {
-                  store.select(snippet.ref.id)
-                  setSelection("")
-                }}
-              >
-                <span className="text-sm font-medium">{snippet.title || "Untitled snippet"}</span>
-                <span className="line-clamp-1 text-xs text-muted">
-                  {snippet.global ? "Global" : "This chat and future forks"} · {snippet.content || "Empty"}
-                </span>
-              </button>
-            </li>
+      {shown.length > 0 && (
+        <ExpandCollapseAll
+          compact
+          anyOpen={ids.some((id) => blocks.isOpen(id))}
+          allOpen={ids.every((id) => blocks.isOpen(id))}
+          expandHint="Show every snippet's text"
+          collapseHint="Fold every snippet to its name"
+          onExpand={() => blocks.setAll(ids, true)}
+          onCollapse={() => blocks.setAll(ids, false)}
+        />
+      )}
+      {state.items.length === 0 ? (
+        <p className="text-sm text-muted">No snippets yet. Make one, or send text here from an editor.</p>
+      ) : shown.length === 0 ? (
+        <p className="text-sm text-muted">No snippet has that in its name or text.</p>
+      ) : (
+        <ul aria-label="Snippet list" className="flex flex-col gap-1.5">
+          {shown.map((item) => (
+            <SnippetBlock
+              key={item.ref.id}
+              workspace={store}
+              item={item}
+              open={blocks.isOpen(item.ref.id)}
+              onOpenChange={(open) => blocks.setOpen(item.ref.id as RefId, open)}
+            />
           ))}
-      </ul>
-      {state.items.length === 0 && (
-        <p className="text-sm text-muted">No snippets yet. Create one or send selected text here.</p>
+        </ul>
       )}
-      {item && (
-        <fieldset className="flex min-w-0 flex-col gap-3" key={item.ref.id} disabled={state.deleting === item.ref.id}>
-          <Field label="Snippet name">
-            <Input value={item.title} onChange={(e) => store.change(item.ref.id, { title: e.currentTarget.value })} />
-          </Field>
-          <CodeEditor
-            label="Snippet text"
-            value={item.content}
-            base={item.content}
-            rows={10}
-            readOnly={state.deleting === item.ref.id}
-            onChange={(content) => store.change(item.ref.id, { content })}
-            onSelectionChange={setSelection}
-            source="snippet"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {insertAction && (
-              <Button
-                variant="primary"
-                hint="Puts its text, or the part selected, at the cursor of the field you were last typing in."
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={insert}
-              >
-                {insertAction.label}
-                {selection ? " selection" : ""}
-              </Button>
-            )}
-            {!item.global && (
-              <Button
-                hint="Makes it a snippet of every chat, not only this one and its later branches."
-                onClick={() => void store.makeGlobal(item.ref.id)}
-              >
-                Make global
-              </Button>
-            )}
-            <SlotOutlet slot={snippetTools} props={{ store, item }} />
-            <span role="status" className="text-xs text-muted">
-              {state.error
-                ? "Not saved"
-                : state.deleting === item.ref.id
-                  ? "Deleting…"
-                  : state.saving
-                    ? "Saving…"
-                    : "Saved continuously"}
-            </span>
-          </div>
-          {state.error && (
-            <>
-              <p role="alert" className="text-sm text-danger">
-                {state.error}
-              </p>
-              <Button
-                hint="Keeps the text here as a new snippet, since this one couldn't be saved."
-                onClick={() => void store.create(item.content)}
-              >
-                Save as new snippet
-              </Button>
-            </>
-          )}
-        </fieldset>
-      )}
-      {notice && (
-        <p role="status" className="text-sm text-muted">
-          {notice}
-        </p>
-      )}
-      {!item && state.error && (
+      {state.error && (
         <p role="alert" className="text-sm text-danger">
           {state.error}
         </p>
@@ -207,7 +281,7 @@ export const register = () => [
   chatPanels.register({
     id: "snippets",
     label: "Snippets",
-    description: "Text kept beside the chat: send it here from any editor, and insert it back.",
+    description: "Text kept beside your chats, never sent by itself: copy it, or send text here from any editor.",
     icon: "snippet",
     order: 75,
     component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets")
@@ -218,22 +292,22 @@ export const register = () => [
     id: "snippets.send-text",
     label: "Send text to snippet",
     shortLabel: "Text to snippet",
-    description: "Adds this editor's whole text to the end of the snippet open in Snippets, or to a new one.",
+    description: "Adds this editor's whole text to the end of the snippet open last in Snippets, or to a new one.",
     icon: "snippet",
     editor: "text",
     available: ({ text, source }) => source !== "snippet" && text.trim().length > 0 && canSend(),
-    run: ({ text }) => workspace?.send(text)
+    run: ({ text }) => void workspace?.send(text)
   }),
   textActions.register({
     id: "snippets.send",
     label: "Send selection to snippet",
     shortLabel: "Selection to snippet",
-    description: "Adds the selected text to the end of the snippet open in Snippets, or to a new one.",
+    description: "Adds the selected text to the end of the snippet open last in Snippets, or to a new one.",
     icon: "snippet",
     editor: "selection",
     shortcut: "s",
     available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),
-    run: ({ text }) => workspace?.send(text)
+    run: ({ text }) => void workspace?.send(text)
   }),
   textActions.register({
     id: "snippets.open",
@@ -241,17 +315,8 @@ export const register = () => [
     description: "Opens it in the Snippets panel, beside the chat.",
     available: ({ source, refId }) => source === "note" && refId !== undefined,
     run: ({ refId }) => {
-      if (refId) workspace?.select(refId as import("@rp/shared/library.ts").RefId)
+      if (refId) workspace?.select(refId as RefId)
       workspace?.open()
-    }
-  }),
-  textActions.register({
-    id: "snippets.insert",
-    label: "Insert",
-    description: "Puts the text at the cursor of the field you were last typing in.",
-    available: ({ text, source }) => source === "snippet" && text.length > 0 && hasTextDestination(),
-    run: ({ text }) => {
-      insertText(text)
     }
   })
 ]

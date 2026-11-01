@@ -2037,7 +2037,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       expect(contents(directed).at(-1)).toBe(
         "user: [Write Tobin's next message. Write only for Tobin.]\n[What happens next: Tobin hesitates.]"
       )
-      expect(describe(directed, "preset:directionPrompt")).toBe("End of request: when you give a direction")
+      expect(describe(directed, "preset:directionPrompt")).toBe("End of request: when you give guidance")
       // Each part keeps its own source, in the one message.
       const last = directed.request.messages.length - 1
       for (const id of ["preset:impersonationPrompt", "preset:directionPrompt"])
@@ -2234,7 +2234,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       const snapshot = await assembled(
         chat({
           lorebooks: [book],
-          globalLorebooks: ["book"],
+          preset: { ...preset(), lorebooks: [{ id: "book", enabled: true }] },
           notes: [note],
           events: [activate(note)]
         })
@@ -2848,7 +2848,7 @@ describe("card definitions the way the preset says (DESIGN §5.0)", () => {
   })
 })
 
-describe("lorebooks: global books, placement and pins (DESIGN §1.3)", () => {
+describe("lorebooks: preset books, placement and pins (DESIGN §1.3)", () => {
   const book = (id: string, entries: ReadonlyArray<ReturnType<typeof loreEntry>>, revision = `${id}-rev`) => ({
     id,
     entity: `${id}-entity`,
@@ -2857,19 +2857,21 @@ describe("lorebooks: global books, placement and pins (DESIGN §1.3)", () => {
   })
   const attach = (ref: string) => at(null, { key: "lorebook.attach", value: { ref: ref as never } })
 
-  it("reads global books unless the chat turns one off, and once when it's also attached", async () => {
-    const world = book("world", [loreEntry({ constant: true, content: "GLOBAL_FACT" })])
-    const f = chat({ lorebooks: [world], globalLorebooks: ["world"] })
-    expect(contents(await assembled(f)).join("\n")).toContain("GLOBAL_FACT")
-    const off = { ...f, events: [at(null, { key: "lorebook.global", value: { ref: "world" as never, on: false } })] }
-    expect(contents(await assembled(off)).join("\n")).not.toContain("GLOBAL_FACT")
+  it("reads a preset's books while on, after the chat's, and once when the chat attached it too", async () => {
+    const world = book("world", [loreEntry({ constant: true, content: "PRESET_FACT" })])
+    const withBooks = (enabled: boolean) => ({ ...preset(), lorebooks: [{ id: "world", enabled }] })
+    const f = chat({ lorebooks: [world], preset: withBooks(true) })
+    expect(contents(await assembled(f)).join("\n")).toContain("PRESET_FACT")
+    expect(contents(await assembled({ ...f, preset: withBooks(false) })).join("\n")).not.toContain("PRESET_FACT")
+    expect(contents(await assembled({ ...f, preset: preset() })).join("\n")).not.toContain("PRESET_FACT")
     const both = { ...f, events: [attach("world")] }
     expect(
       contents(await assembled(both))
         .join("\n")
-        .match(/GLOBAL_FACT/g)
+        .match(/PRESET_FACT/g)
     ).toHaveLength(1)
-    expect(contents(await assembled({ ...f, globalLorebooks: [] })).join("\n")).not.toContain("GLOBAL_FACT")
+    // Switched off in the preset but attached to the chat: the chat's switch decides.
+    expect(contents(await assembled({ ...both, preset: withBooks(false) })).join("\n")).toContain("PRESET_FACT")
   })
 
   const positions = book("positions", [

@@ -129,8 +129,8 @@ for (const width of [1440, 390]) {
       await page.getByRole("button", { name: "Close", exact: true }).click()
     await openLeft()
     await expect(crumbs).toContainText(group.name)
-    await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
-    await expect(page.getByRole("region", { name: "Latest branch", exact: true })).toContainText(group.name)
+    // Scoped to the chat, its pinned branches lead its own list, not a separate Pinned chats.
+    await expect(page.getByRole("region", { name: "Named and pinned", exact: true })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
@@ -172,13 +172,13 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/chats/${group.chat.id}?fork=${newFork}`)
     await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
     await expect(page.getByRole("button", { name: /switch branch/ })).toBeVisible()
-    await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /not the one the chat opens on/ })).toHaveCount(0)
     await page.goto(`${server().url}/chats/${group.chat.id}?fork=${await forkEndingAt(appended.entry.slotId)}`)
-    await page.getByRole("button", { name: /not the latest/ }).click()
-    await page.getByRole("button", { name: "Back to the latest branch", exact: true }).click()
+    await page.getByRole("button", { name: /not the one the chat opens on/ }).click()
+    await page.getByRole("button", { name: "Back to the branch the chat opens on", exact: true }).click()
     // The link names no fork: the chat's current one, which is where the newest branch went.
     await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
-    await expect(page.getByRole("button", { name: /not the latest/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /not the one the chat opens on/ })).toHaveCount(0)
     data = await admin((api) => api.GetShellLibrary())
   })
 

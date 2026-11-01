@@ -9,7 +9,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
-import { automaticBranchName, forksChanged } from "./forks.ts"
+import { forksChanged } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 
 const options = [
@@ -61,7 +61,8 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
       comparison: canonicalJson(reviewed),
       choices: reviewed.map((note) => ({ note: note.note, choice: choices[note.note] ?? "then" }))
     }
-    const made = await session.branchFrom(entry.slotId, selection, source, automaticBranchName(entry))
+    // Unnamed: a branch is named by where it splits off until the user names it (`forkLabel`).
+    const made = await session.branchFrom(entry.slotId, selection, source)
     report(made)
     setPending(false)
     if (!made.ok) {

@@ -30,11 +30,11 @@ export const lorebooksStage: AssemblerStage = {
       const sources = yield* AssemblySources
       const cast = need(assembly, "cast")
       const state = need(assembly, "state")
-      // The chat's own books, then the user's global ones the chat didn't turn off.
-      const globals = (yield* sources.globalLorebooks).filter(
-        (ref) => !state.lorebooks.includes(ref) && state.globalLorebooks[ref] !== false
+      // The chat's own books, then the preset's enabled ones the chat hasn't attached (read once).
+      const withPreset = (need(assembly, "preset").doc.lorebooks ?? []).flatMap((book) =>
+        book.enabled && !state.lorebooks.includes(book.id) ? [book.id] : []
       )
-      const attached = yield* sources.lorebooks([...state.lorebooks, ...globals])
+      const attached = yield* sources.lorebooks([...state.lorebooks, ...withPreset])
       const embedded: Array<LorebookInput> = [...cast.characters, ...cast.personas].flatMap((card) =>
         card.doc.character_book &&
         // Turned off for this chat: an ST import of a card whose book ST never imported.

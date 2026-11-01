@@ -105,30 +105,7 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
   await expect(lantern).not.toBeChecked()
   expect(await send(page, "And the lantern now?")).not.toContain("The watch lights seven lanterns.")
 
-  // A book that's both added here and global is listed once, as global, with the switch for this
-  // chat; the separate attachment is under its ⋯.
-  await lantern.click()
-  await expect(lantern).toBeChecked()
-  const menu = async (item: string) => {
-    await tab.getByRole("button", { name: "More for Lantern lore" }).click()
-    await page.getByRole("menuitemcheckbox", { name: item }).click()
-  }
-  const attachedHere = async () => {
-    await tab.getByRole("button", { name: "More for Lantern lore" }).click()
-    const checked = await page.getByRole("menuitemcheckbox", { name: "Also added to this chat" }).isChecked()
-    await page.keyboard.press("Escape")
-    return checked
-  }
-  await menu("Use in every chat")
-  await expect(inChat).toContainText("Global: used in every chat")
-  await expect(lantern).toBeChecked()
-  await expect(tab.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toHaveCount(1)
-  expect(await attachedHere()).toBe(true)
-  expect(await send(page, "The lantern, again?")).toContain("The watch lights seven lanterns.")
-  // Global use never changes the separate attachment.
-  await lantern.click()
-  await expect(lantern).not.toBeChecked()
-  await expect(tab.getByRole("switch", { name: /^Lantern lore(?: |$)/ })).toHaveCount(1)
+  // Switched off, the book stays listed, off, in its place; on again, it's sent again.
   const book = (await admin((api) => api.ListLibrary({ kind: "lorebook" })))[0]!
   const cast = () =>
     admin((api) =>
@@ -137,19 +114,29 @@ test("attach a lorebook, send a keyword, and detach it from the provider request
         return yield* api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId, forkId: chat.currentForkId })
       })
     )
-  expect((await cast()).lorebooks).toContain(book.id)
-  expect(await send(page, "The lantern, global off but attached?")).toContain("The watch lights seven lanterns.")
-  await menu("Also added to this chat")
-  expect(await send(page, "The lantern, both off?")).not.toContain("The watch lights seven lanterns.")
+  await expect(inChat).toContainText("Off in this chat")
+  await expect(inChat.getByRole("switch")).toHaveCount(1)
+  await expect.poll(async () => (await cast()).listedLorebooks).toEqual([{ ref: book.id, on: false }])
   await lantern.click()
   await expect(lantern).toBeChecked()
+  await expect(inChat).toContainText("Added to this chat")
+  await expect.poll(async () => (await cast()).lorebooks).toContain(book.id)
+  expect(await send(page, "The lantern, again?")).toContain("The watch lights seven lanterns.")
+  // Remove from this chat takes it off the list; Add a lorebook brings it back.
+  await tab.getByRole("button", { name: "More for Lantern lore" }).click()
+  await page.getByRole("menuitem", { name: "Remove from this chat" }).click()
+  await expect(inChat).toHaveCount(0)
+  await expect(tab.getByText("No lorebook is in this chat.")).toBeVisible()
+  await expect.poll(async () => (await cast()).listedLorebooks).toEqual([])
+  expect(await send(page, "The lantern, removed?")).not.toContain("The watch lights seven lanterns.")
+  await tab.getByRole("button", { name: "Add a lorebook" }).click()
+  await tab.getByRole("searchbox").fill("lantern")
+  await tab
+    .getByRole("list", { name: "Lorebooks to add" })
+    .getByRole("button", { name: /Lantern lore/ })
+    .click()
+  await expect(lantern).toBeChecked()
   expect(await send(page, "The lantern, on?")).toContain("The watch lights seven lanterns.")
-  expect((await cast()).lorebooks).not.toContain(book.id)
-  await menu("Also added to this chat")
-  expect((await cast()).lorebooks).toContain(book.id)
-  await lantern.click()
-  expect((await cast()).lorebooks).toContain(book.id)
-  await lantern.click()
   expect((await cast()).lorebooks).toContain(book.id)
   if (process.env.SCREENSHOT_DIR) {
     mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })

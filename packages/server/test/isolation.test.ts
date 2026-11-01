@@ -946,22 +946,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetGenerationDefaults(), before)
       })
   },
-  GetGlobalLorebooks: {
+  LorebookPresets: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        assert.include(yield* owner.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), owner.loreRefId)
-        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
-      })
-  },
-  SetGlobalLorebook: {
-    probe: (actor, owner) =>
-      Effect.gen(function* () {
-        const before = yield* owner.api.GetGlobalLorebooks()
-        yield* refused(actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: true }), "NotFound")
-        // Taking another user's book off the caller's own list touches nothing of theirs.
-        yield* actor.api.SetGlobalLorebook({ ref: owner.loreRefId, global: false })
-        assert.notInclude(yield* actor.api.GetGlobalLorebooks(), owner.loreRefId)
-        assert.deepStrictEqual(yield* owner.api.GetGlobalLorebooks(), before)
+        // The owner's preset lists the owner's book; asked by another user, no preset of theirs shows.
+        const listed = (presets: ReadonlyArray<{ readonly refId: string }>) => presets.map((p) => p.refId)
+        assert.include(listed(yield* owner.api.LorebookPresets({ ref: owner.loreRefId })), owner.refId)
+        assert.deepStrictEqual(yield* actor.api.LorebookPresets({ ref: owner.loreRefId }), [])
+        assert.notInclude(listed(yield* actor.api.LorebookPresets({ ref: actor.loreRefId })), owner.refId)
       })
   },
   GetGlobalRegex: {
@@ -1908,6 +1900,14 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
             }),
             "NotFound"
           )
+        yield* refused(
+          actor.api.ChangeCast({
+            chatId: actor.chat.chatId,
+            slotId: null,
+            change: { _tag: "RemoveLorebook", ref: owner.loreRefId }
+          }),
+          "NotFound"
+        )
         // Their chat's note, or their card's, turned on in the actor's own chat.
         for (const note of [owner.chat.noteEntityId, owner.editor.noteEntityId]) {
           yield* refused(
@@ -2108,6 +2108,48 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         actor.api.EditorDraftHistory({ refId: owner.editor.cardRefId, field: owner.editor.field, limit: 10 }),
         "NotFound"
       )
+  },
+  EditorDraftState: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditorDraftState({ refId: owner.editor.cardRefId, field: owner.editor.field, seq: 0 }),
+        "NotFound"
+      )
+  },
+  RevertEditorDrafts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref is not found, and its typing stays as it was.
+        const before = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        yield* refused(actor.api.RevertEditorDrafts({ refId: owner.editor.cardRefId }), "NotFound")
+        const after = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        assert.deepStrictEqual(
+          after.map((d) => [d.id, d.rowVersion, d.content]),
+          before.map((d) => [d.id, d.rowVersion, d.content])
+        )
+      })
+  },
+  SetRevisionMessage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref, and another's revision through one's own ref, are both not found.
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: owner.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: actor.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+      })
   },
   RestoreEditorDraft: {
     probe: (actor, owner) =>
@@ -2439,74 +2481,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListSnippets: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(actor.api.ListSnippets({ chatId: owner.chat.chatId, forkId: null }), "NotFound")
-        const mine = yield* actor.api.ListSnippets({ chatId: null, forkId: null })
+        yield* refused(actor.api.ListSnippets({ chatId: owner.chat.chatId }), "NotFound")
+        const mine = yield* actor.api.ListSnippets({ chatId: null })
         assert.isFalse(mine.some((n) => n.ref.id === owner.editor.sharedRefId))
       })
   },
   CreateSnippet: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.CreateSnippet({ chatId: owner.chat.chatId, forkId: null, title: "Taken", content: "Planted" }),
-        "NotFound"
-      )
+      refused(actor.api.CreateSnippet({ chatId: owner.chat.chatId, title: "Taken", content: "Planted" }), "NotFound")
   },
-  SaveSnippet: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.SaveSnippet({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId,
-          title: "Taken",
-          content: "Planted"
-        }),
-        "NotFound"
-      )
-  },
-  MakeSnippetGlobal: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.MakeSnippetGlobal({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId
-        }),
-        "NotFound"
-      )
-  },
-  SnippetHistory: {
+  SetSnippetScope: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
         yield* refused(
-          actor.api.SnippetHistory({
-            chatId: owner.chat.chatId,
-            forkId: null,
-            refId: owner.editor.sharedRefId,
-            limit: 5
-          }),
+          actor.api.SetSnippetScope({ chatId: null, refId: owner.editor.sharedRefId, global: true }),
           "NotFound"
         )
         yield* refused(
-          actor.api.SnippetHistory({ chatId: null, forkId: null, refId: owner.editor.sharedRefId, limit: 5 }),
+          actor.api.SetSnippetScope({ chatId: owner.chat.chatId, refId: owner.editor.sharedRefId, global: false }),
           "NotFound"
         )
       })
-  },
-  RestoreSnippet: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.RestoreSnippet({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId,
-          seq: 0
-        }),
-        "NotFound"
-      )
   },
   ListSharedNotes: {
     probe: (actor, owner) =>
@@ -3042,22 +3037,23 @@ const seed = Effect.gen(function* () {
         defaults: { model: { connection: connection.id, model: model.id }, preset: null }
       })
       // No RPC writes these yet.
-      const { ref } = yield* writer.CreateEntity({
-        userId: user.id,
-        kind: "preset",
-        label: "Preset",
-        subtitle: "",
-        doc: presetDoc(),
-        schemaVersion: 1,
-        origin: "user",
-        sourcePath: null
-      })
       const lore = yield* writer.CreateEntity({
         userId: user.id,
         kind: "lorebook",
         label: "Lore",
         subtitle: "",
         doc: docFor("lorebook", "Lore"),
+        schemaVersion: 1,
+        origin: "user",
+        sourcePath: null
+      })
+      // The preset lists the user's lorebook (`LorebookPresets`).
+      const { ref } = yield* writer.CreateEntity({
+        userId: user.id,
+        kind: "preset",
+        label: "Preset",
+        subtitle: "",
+        doc: { ...presetDoc(), lorebooks: [{ id: lore.ref.id, enabled: true }] },
         schemaVersion: 1,
         origin: "user",
         sourcePath: null

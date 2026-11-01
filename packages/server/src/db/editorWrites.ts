@@ -1,16 +1,17 @@
-import { snippetFork } from "./snippets.ts"
+import { chatFork } from "./snippets.ts"
 import { inFork } from "./forkState.ts"
 import { makeSnippetWrites } from "./snippetWrites.ts"
 // The editors' write handlers (ARCHITECTURE.md "Editing the library"). They run in the
 // writer worker, each as one transaction, through the library's own steps (libraryWrites.ts),
 // so every change flows on to the refs that follow the edited one.
 import { NOTE_SCHEMA_VERSION } from "@rp/shared/docs/note.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import {
   applyDrafts,
   canonicalJson,
   droppedDrafts,
   getAt,
+  isHeldField,
   keepsRegexApproval,
   newCardNote,
   newChatNote,
@@ -28,7 +29,7 @@ import { snapCrop } from "@rp/shared/media.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect, Predicate } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
-import type { makeDraftStore } from "./drafts.ts"
+import { fieldContent, type makeDraftStore } from "./drafts.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
 import { noteAt } from "./noteAt.ts"
 import { sharedNote } from "./sharedNotes.ts"
@@ -50,7 +51,7 @@ export interface LibrarySteps {
     readonly schemaVersion: number
     readonly doc: EncodedDoc
     readonly parents: ReadonlyArray<string>
-    readonly origin: "import" | "user" | "merge"
+    readonly origin: "import" | "user" | "merge" | "generation"
     readonly originRef: string | null
     readonly message: string | null
   }) => Sql<string>
@@ -92,7 +93,13 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
   const { sql, lib, drafts } = steps
 
   /** The user's own change to a ref: a new revision on its head, passed on to its followers. */
-  const userEdit = (ref: RefRow, doc: Doc, message: string | null, originRef: string | null) =>
+  const userEdit = (
+    ref: RefRow,
+    doc: Doc,
+    message: string | null,
+    originRef: string | null,
+    origin: "user" | "generation" = "user"
+  ) =>
     Effect.gen(function* () {
       const current = yield* steps.revision(ref.head_revision_id)
       const encoded = steps.encode(doc)
@@ -103,7 +110,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         schemaVersion: current.schema_version,
         doc: encoded,
         parents: [ref.head_revision_id],
-        origin: "user",
+        origin,
         originRef,
         message
       })
@@ -116,7 +123,17 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
    * event from there on, on that branch (DESIGN §3.4), leaving the library head and sibling
    * branches as they are.
    */
-  const chatNoteEdit = (userId: UserId, ref: RefRow, doc: Doc, message: string | null, position: ChatNotePosition) =>
+  const chatNoteEdit = (
+    userId: UserId,
+    ref: RefRow,
+    doc: Doc,
+    message: string | null,
+    position: ChatNotePosition,
+    origin: "user" | "generation" = "user",
+    originRef: string | null = null,
+    /** Where it's edited, as `noteAt` resolved it: at an earlier message than the branch's latest, the later messages keep what they had. */
+    at: { readonly fork: string; readonly tip: string | null; readonly latest: boolean } | null = null
+  ) =>
     Effect.gen(function* () {
       const current = yield* steps.revision(ref.head_revision_id)
       // The binding supplies applicability for an edit; the import's source no longer does.
@@ -128,19 +145,50 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         schemaVersion: current.schema_version,
         doc: encoded,
         parents: [ref.head_revision_id],
-        origin: "user",
-        originRef: null,
+        origin,
+        originRef,
         message
       })
-      yield* makeGraphWrites(sql, drafts).insertStateEvent(
+      // Edited at an earlier message: the message after it on this branch is bound to what it
+      // has now, so only the messages from here up to there take the change (owner, 2026-11-01).
+      let later: { readonly slot: string; readonly revision: string } | null = null
+      if (at !== null && !at.latest && at.tip !== null && position.slotId !== null) {
+        const [child] = yield* sql<{ id: string }>`
+          WITH RECURSIVE up(id, parent) AS (
+            SELECT id, parent_slot_id FROM slots WHERE id = ${at.tip}
+            UNION ALL
+            SELECT s.id, s.parent_slot_id FROM slots s JOIN up ON s.id = up.parent
+          )
+          SELECT id FROM up WHERE parent = ${position.slotId} LIMIT 1`
+        if (child) {
+          const kept = yield* noteAt(sql, lib, userId, ref, {
+            ...position,
+            forkId: at.fork as never,
+            slotId: child.id as never
+          })
+          later = { slot: child.id, revision: kept.ref.head_revision_id }
+        }
+      }
+      const graph = makeGraphWrites(sql, drafts)
+      yield* graph.insertStateEvent(
         userId,
         position.chatId,
         position.slotId,
         null,
         null,
         { key: "note.binding", value: { note: ref.entity_id as EntityId, revision: revision as never } },
-        position.forkId ?? null
+        at?.fork ?? position.forkId ?? null
       )
+      if (later !== null)
+        yield* graph.insertStateEvent(
+          userId,
+          position.chatId,
+          later.slot,
+          null,
+          null,
+          { key: "note.binding", value: { note: ref.entity_id as EntityId, revision: later.revision as never } },
+          at!.fork
+        )
       return new RefChange({ ref: toLibraryRef({ ...ref, head_revision_id: revision }), followers: [] })
     })
 
@@ -158,7 +206,9 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       const ref = resolved?.ref ?? owned
       const doc = resolved?.doc ?? head
       const write = (next: Doc, message: string) =>
-        resolved && position ? chatNoteEdit(userId, ref, next, message, position) : userEdit(ref, next, message, null)
+        resolved && position
+          ? chatNoteEdit(userId, ref, next, message, position, "user", null, resolved)
+          : userEdit(ref, next, message, null)
       return { ref, doc, write }
     })
 
@@ -169,6 +219,27 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       WHERE id = ${revisionId} AND entity_id = ${ref.entity_id}`.pipe(Effect.map(([row]) => row ?? null))
 
   const refused = (ref: RefRow, reason: string) => new RefOperationRefused({ refId: ref.id, reason })
+
+  /** A ref's fields changed since its last revision, the held structural changes aside. */
+  const liveDrafts = (userId: UserId, target: string) =>
+    Effect.gen(function* () {
+      const fields = yield* sql<{ field: string }>`SELECT field FROM drafts WHERE user_id = ${userId}
+        AND target_kind = 'entity_field' AND target_id = ${target} AND status = 'active' ORDER BY field`
+      const rows = []
+      for (const { field } of fields) {
+        if (isHeldField(field)) continue
+        const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: target, field }))
+        if (row !== null) rows.push(row)
+      }
+      return rows
+    })
+
+  /** An entity's upstream ref, the user's own; null if there's none. */
+  const upstreamRef = (userId: UserId, entity: string) =>
+    sql<{ id: string }>`SELECT r.id FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      WHERE r.entity_id = ${entity} AND e.owner_user_id = ${userId} AND r.ref_kind = 'upstream' LIMIT 1`.pipe(
+      Effect.map(([row]) => row?.id ?? null)
+    )
 
   /** A new slot linked to a shared note takes its title; the shared note must be the user's, live. */
   const linkTitle = (userId: UserId, link: EntityId | undefined) =>
@@ -186,12 +257,15 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         const owned = yield* lib.ownedRef(userId, refId)
         const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
         const ref = resolved?.ref ?? owned
+        // A chat's own note's drafts are its branch's.
+        const target = entityDraftTarget(refId, resolved?.scope)
         for (const { draftId } of fields) yield* drafts.checkIdentity(userId, draftId)
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const head = editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)))
         const rows = []
-        for (const { field, draftId, expectedRowVersion: expected } of fields) {
-          const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: refId, field }))
+        // The held structural changes go in only as the bar's Save applies them, as other fields.
+        for (const { field, draftId, expectedRowVersion: expected } of fields.filter((f) => !isHeldField(f.field))) {
+          const row = yield* drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: target, field }))
           // Another tab typed on since, ended it, or it's another draft (that one moved to a
           // variant): the client reads it again.
           if (row === null || row.id !== draftId || row.status !== "active" || row.row_version !== expected) {
@@ -245,13 +319,13 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         // A note's condition cards and link name only the user's own (§14.3).
         if (ref.kind === "note") yield* steps.checkReferences(userId, valid.doc)
         const change = yield* chatNote
-          ? chatNoteEdit(userId, ref, valid.doc, message, chatNote)
+          ? chatNoteEdit(userId, ref, valid.doc, message, chatNote, "user", null, resolved)
           : userEdit(ref, valid.doc, message, null)
         let recovered = 0
         const recoveredFields: Array<string> = []
         for (const row of rows) {
           const orphan = orphans.has(row.field)
-          const ended = yield* drafts.end(row, orphan ? "discarded" : "committed")
+          const ended = yield* drafts.end(row, orphan ? "discarded" : "committed", change.ref.headRevisionId)
           // A set-aside draft is reported as such; what the others' sessions lost is counted.
           if (!orphan && ended.recovered > 0) {
             recovered += ended.recovered
@@ -261,16 +335,19 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return new RefChange({ ...change, setAside: [...orphans], recovered, recoveredFields })
       }).pipe(transaction(sql, "CommitEditorDrafts")),
 
-    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion }) =>
+    RestoreRevision: ({ userId, refId, revisionId, expectedRowVersion, chatNote }) =>
       Effect.gen(function* () {
-        const ref = yield* lib.ownedRef(userId, refId)
+        const owned = yield* lib.ownedRef(userId, refId)
+        // A chat's own note is restored on its branch, from the position on, as its Save writes.
+        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const ref = resolved?.ref ?? owned
         yield* steps.checkRowVersion(ref, expectedRowVersion)
         const earlier = yield* entityRevision(ref, revisionId)
         if (earlier === null) return yield* new NotFound({ entity: "revision", id: revisionId })
         if (earlier.schema_version !== (yield* steps.revision(ref.head_revision_id)).schema_version) {
           return yield* refused(ref, "That revision is of another schema version, and documents can't be migrated yet.")
         }
-        const head = yield* lib.loadDoc(ref.head_revision_id)
+        const head = resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id))
         // A permission revoked since doesn't come back with the old revision.
         let doc = withoutGrantedAgentEdits(ref.kind, head, JSON.parse(earlier.doc_json) as Doc)
         // An old revision's scripts, an import's say, don't come back approved.
@@ -278,13 +355,110 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           if (!keepsRegexApproval(head, doc)) doc = { ...doc, regex_approved: false }
         }
         const saved = new Date(earlier.created_at).toISOString().replace("T", " ").slice(0, 16)
-        return yield* userEdit(
-          ref,
-          doc,
-          `Restored the revision of ${saved} UTC`,
-          JSON.stringify({ restored: revisionId })
-        )
+        const message = `Restored the revision of ${saved} UTC`
+        const origin = JSON.stringify({ restored: revisionId })
+        const change =
+          resolved && chatNote
+            ? yield* chatNoteEdit(userId, ref, doc, message, chatNote, "user", origin, resolved)
+            : yield* userEdit(ref, doc, message, origin)
+        // Live text is what's shown and sent: the fields changed since their last revision take
+        // the restored text too, as a new state of their edit history, so nothing typed is lost.
+        const restored = editedDoc(ref.kind, doc)
+        for (const row of yield* liveDrafts(userId, entityDraftTarget(refId, resolved?.scope))) {
+          const content = fieldContent(restored, row.field)
+          if (content !== null) yield* drafts.settleOn(row, content, change.ref.headRevisionId)
+        }
+        return change
       }).pipe(transaction(sql, "RestoreRevision")),
+
+    RevertEditorDrafts: ({ userId, refId, chatNote }) =>
+      Effect.gen(function* () {
+        const owned = yield* lib.ownedRef(userId, refId)
+        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const ref = resolved?.ref ?? owned
+        const head = editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)))
+        let reverted = 0
+        for (const row of yield* liveDrafts(userId, entityDraftTarget(refId, resolved?.scope))) {
+          const content = fieldContent(head, row.field)
+          if (content === null) continue
+          yield* drafts.settleOn(row, content, ref.head_revision_id)
+          reverted++
+        }
+        return { reverted }
+      }).pipe(transaction(sql, "RevertEditorDrafts")),
+
+    CheckpointLiveText: ({ userId, chatId, forkId, slotId, versionId, summary, leafSlotId, message, used }) =>
+      Effect.gen(function* () {
+        const usedBy = JSON.stringify({
+          usedBy: { chatId, forkId, slotId, versionId, message, ...(summary ? { summary } : {}) }
+        })
+        const seen = new Set<string>()
+        let cut = 0
+        for (const entry of used) {
+          const refId = entry.ref ?? (yield* upstreamRef(userId, entry.entity))
+          if (refId === null || seen.has(refId)) continue
+          seen.add(refId)
+          // Nothing typed (on any branch): nothing to cut, without reading the entry.
+          const [typed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM drafts WHERE user_id = ${userId}
+            AND target_kind = 'entity_field' AND status = 'active'
+            AND (target_id = ${refId} OR (target_id > ${refId} || '/' AND target_id < ${refId} || '0')) LIMIT 1`
+          if (!typed) continue
+          const owned = yield* lib.ownedRef(userId, refId).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
+          if (owned === null) continue
+          const ownedHead = yield* lib.loadDoc(owned.head_revision_id)
+          const position: ChatNotePosition = { chatId, forkId, slotId: leafSlotId }
+          const chatNote =
+            owned.kind === "note" && Predicate.isObject(ownedHead.owner) && ownedHead.owner.chat === chatId
+          const resolved = chatNote
+            ? yield* noteAt(sql, lib, userId, owned, position).pipe(
+                Effect.catchTag("NotFound", () => Effect.succeed(null))
+              )
+            : null
+          const ref = resolved?.ref ?? owned
+          // A chat's own note's live text is its branch's (typed at its latest message; what's
+          // typed at an earlier message is saved there by its Save).
+          const rows = yield* liveDrafts(userId, entityDraftTarget(refId, resolved?.fork))
+          if (rows.length === 0) continue
+          // It read the entry as it is now: one a chat pinned to an earlier revision isn't live.
+          if (ref.head_revision_id !== entry.revision) continue
+          const head = editedDoc(ref.kind, resolved?.doc ?? ownedHead)
+          // What's in something gone (a deleted prompt's text) waits for the editor's Save to set it aside.
+          const orphans = new Set(
+            applyDrafts(ref.kind, head, rows)
+              .problems.filter((problem) => problem.orphan)
+              .map((problem) => problem.field)
+          )
+          const kept = rows.filter((row) => !orphans.has(row.field))
+          const applied = applyDrafts(ref.kind, head, kept)
+          if (applied.problems.length > 0) continue
+          const valid = validateDoc(ref.kind, applied.doc)
+          // A draft that wouldn't make a valid document leaves the entry as saved: Save says why.
+          if (!valid.ok || droppedDrafts(ref.kind, applied.doc, valid.doc, kept).length > 0) continue
+          if (ref.kind === "note") {
+            const checked = yield* steps.checkReferences(userId, valid.doc).pipe(
+              Effect.as(true),
+              Effect.catchTag("NotFound", () => Effect.succeed(false))
+            )
+            if (!checked) continue
+          }
+          const change = resolved
+            ? yield* chatNoteEdit(userId, ref, valid.doc, null, position, "generation", usedBy)
+            : yield* userEdit(ref, valid.doc, null, usedBy, "generation")
+          if (change.ref.headRevisionId !== ref.head_revision_id) cut++
+          for (const row of kept) yield* drafts.end(row, "committed", change.ref.headRevisionId)
+        }
+        return { cut }
+      }).pipe(transaction(sql, "CheckpointLiveText")),
+
+    SetRevisionMessage: ({ userId, refId, revisionId, message }) =>
+      Effect.gen(function* () {
+        const ref = yield* lib.ownedRef(userId, refId)
+        const [row] = yield* sql<{ id: string }>`SELECT id FROM entity_revisions
+          WHERE id = ${revisionId} AND entity_id IN (${ref.entity_id}, coalesce((SELECT forked_from_entity_id FROM entities WHERE id = ${ref.entity_id}), ''))`
+        if (!row) return yield* new NotFound({ entity: "revision", id: revisionId })
+        const label = message?.trim() ?? ""
+        yield* sql`UPDATE entity_revisions SET message = ${label === "" ? null : label} WHERE id = ${revisionId}`
+      }).pipe(transaction(sql, "SetRevisionMessage")),
 
     ForkWithDrafts: ({ userId, refId, label, subtitle, moveDrafts }) =>
       Effect.gen(function* () {
@@ -377,7 +551,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
       Effect.gen(function* () {
         const card = yield* lib.ownedRef(userId, cardRefId)
         if (card.kind !== "card") return yield* new NotFound({ entity: "card", id: cardRefId })
-        if (chatNote) yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
+        if (chatNote) yield* chatFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
         const linkedTitle = yield* linkTitle(userId, link).pipe(
           chatNote ? inFork(sql, chatNote.chatId, chatNote.forkId, chatNote.slotId) : (effect) => effect
         )

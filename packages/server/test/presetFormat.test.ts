@@ -371,6 +371,18 @@ describe("exporting to an ST chat-completion preset", () => {
   // ST ignores a regex depth below these bounds, as it does a missing one.
   const stDepth = (v: unknown, min: number) => (typeof v === "number" && v >= min ? v : null)
 
+  it("leaves out the preset's lorebooks, which ST has no field for, and an ST file never sets them", () => {
+    const { doc } = load(fixture("default"))
+    expect(doc.lorebooks).toBeUndefined()
+    const file = exportStPreset({ ...doc, lorebooks: [{ id: "book-ref", enabled: true }] })
+    expect(file).not.toHaveProperty("lorebooks")
+    expect(JSON.stringify(file)).not.toContain("book-ref")
+    // A file with a top-level `lorebooks` keeps it only as a field ST's export gives back.
+    expect(
+      load({ ...JSON.parse(fixture("default")), lorebooks: [{ id: "x", enabled: true }] }).doc.lorebooks
+    ).toBeUndefined()
+  })
+
   it.each(["default", "full"])("gives back every field ST reads from %s, with the same value", (name) => {
     const original = JSON.parse(fixture(name)) as Item
     const file = exportStPreset(load(original).doc)

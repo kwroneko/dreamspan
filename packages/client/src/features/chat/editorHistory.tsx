@@ -184,7 +184,7 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
       wide
       onOpenChange={(open) => !open && closeDialog()}
       title="Saved amendment history"
-      description="Earlier saved text and images of this human-written version. Restoring changes only this fork and keeps the current version in history."
+      description="Earlier saved text and images of this human-written version. Restoring changes only this branch and keeps the current version in history."
     >
       {error && (
         <p role="alert" className="text-sm text-danger">

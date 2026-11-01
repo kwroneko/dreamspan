@@ -84,6 +84,12 @@ const commit = (api: Api, refId: RefId, message: string | null = null) =>
 
 const doc = (api: Api, refId: RefId) => Effect.map(api.OpenEditor({ refId }), (opened) => opened.doc)
 
+/** Every text a field's edit history holds, newest first: what its Edit history control can bring back. */
+const fieldTexts = (api: Api, refId: RefId, field: string) =>
+  Effect.flatMap(api.EditorDraftHistory({ refId, field, limit: 1000 }), (states) =>
+    Effect.forEach(states, (state) => api.EditorDraftState({ refId, field, seq: state.seq }))
+  )
+
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("editing the library", (it) => {
   it.effect("restoring a legacy preset without Main materializes a disabled first slot", () =>
     Effect.gen(function* () {
@@ -265,19 +271,15 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         baseRevisionId: card.headRevisionId
       })
       assert.strictEqual(stale.id, b.id)
-      // B's text is one step back, and the commit sends it to the recovered texts.
+      // B's text is one step back, and stays in the field's edit history past the commit.
       const saved = yield* api.CommitEditorDrafts({
         refId: card.id,
         expectedRowVersion: card.rowVersion,
         fields: [{ field, draftId: stale.id, expectedRowVersion: stale.rowVersion }],
         message: null
       })
-      assert.strictEqual(saved.recovered, 1)
-      const recovered = yield* api.ListRecoveredTexts({ limit: 100, before: null })
-      assert.include(
-        recovered.map((text) => text.content),
-        "base B"
-      )
+      assert.strictEqual(saved.recovered, 0)
+      assert.include(yield* fieldTexts(api, card.id, field), "base B")
       // A, in the variant, is as it was; and committing it by its old id here is stale.
       assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).drafts[0]!.content, "base A")
       assert.strictEqual(
@@ -357,8 +359,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       assert.deepStrictEqual(opened.doc.modules, [
         { ...module, content: "A grey coat.", placement: { mode: "depth", depth: 2, role: "system" } }
       ])
-      // The drafts ended with the commit, which emptied them.
-      assert.isTrue(opened.drafts.every((d) => d.status === "committed" && d.content === ""))
+      // The drafts' sessions ended with the commit; each keeps its text and its edit history.
+      assert.isTrue(opened.drafts.every((d) => d.status === "committed"))
+      assert.strictEqual(
+        opened.drafts.find((d) => d.key.field === textField(["description"]))!.content,
+        "A lighthouse keeper."
+      )
+      assert.includeMembers(yield* fieldTexts(api, card.id, textField(["description"])), ["", "A lighthouse keeper."])
       const revisions = yield* api.ListRevisions({ refId: card.id, limit: 10 })
       const firstPage = yield* api.ListRevisions({ refId: card.id, limit: 1 })
       const nextPage = yield* api.ListRevisions({ refId: card.id, limit: 1, before: firstPage[0]!.id })
@@ -888,7 +895,9 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
           if (closing) assert.strictEqual((yield* post("/library/drafts", { drafts: [stale] })).status, 204)
           else yield* api.SaveEditorDraft(stale)
           yield* commit(api, refId)
-          assert.include(yield* recovered(), `${kind} hello B${closing ? " closing" : ""}`)
+          // Kept in the field's edit history, which a commit no longer ends.
+          assert.include(yield* fieldTexts(api, refId, field), `${kind} hello B${closing ? " closing" : ""}`)
+          assert.notInclude(yield* recovered(), `${kind} hello B${closing ? " closing" : ""}`)
         }
       }
     })

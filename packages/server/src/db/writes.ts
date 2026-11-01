@@ -12,7 +12,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { Effect } from "effect"
 import { SqlClient, type SqlError } from "effect/sql"
 import { cleanName, renamedTitle } from "@rp/shared/chatName.ts"
-import { composerKey, type DraftKey } from "@rp/shared/drafts.ts"
+import { composerKey, type DraftKey, parseDraftTarget } from "@rp/shared/drafts.ts"
 import type { Bin } from "./bin.ts"
 import { NotAmendable } from "@rp/shared/chatApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
@@ -50,6 +50,7 @@ const copiedFresh = new Set([
   "rollout_id",
   "changeset_id",
   "usage_json",
+  "recorded_generation_json",
   "deleted_at",
   "bin_item_id",
   "purged_at",
@@ -113,15 +114,20 @@ export const makeWriteHandlers = (bin: Bin) =>
           AND v.deleted_at IS NULL AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
       scratchpad: (userId, key) => sql`SELECT count(*) AS n FROM slots s JOIN chats c ON c.id = s.chat_id
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
-      entity_field: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-        WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`,
-      snippet: (userId, key) => sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
-        JOIN entity_revisions h ON h.id = r.head_revision_id WHERE r.id = ${key.targetId}
-        AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.deleted_at IS NULL
-        AND ((json_extract(h.doc_json, '$.owner.shared') = 'global' AND ${key.field} = '') OR EXISTS (
-          SELECT 1 FROM forks f JOIN chats c ON c.id = f.chat_id WHERE f.id = ${key.field}
-          AND c.owner_user_id = ${userId} AND f.chat_id = json_extract(h.doc_json, '$.owner.shared')
-          AND f.deleted_at IS NULL AND c.deleted_at IS NULL))`,
+      entity_field: (userId, key) => {
+        const target = parseDraftTarget(key.targetId)
+        // A chat's own note's branch: a fork of its chat, and a message of that chat.
+        return target.fork === null
+          ? sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`
+          : sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+        JOIN entity_revisions h ON h.id = r.head_revision_id
+        JOIN forks f ON f.id = ${target.fork} AND f.chat_id = json_extract(h.doc_json, '$.owner.chat')
+        JOIN chats c ON c.id = f.chat_id AND c.owner_user_id = ${userId}
+        WHERE r.id = ${target.refId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL AND e.kind = 'note'
+          AND f.deleted_at IS NULL AND c.deleted_at IS NULL
+          AND (${target.slot} IS NULL OR EXISTS (SELECT 1 FROM slots s WHERE s.id = ${target.slot} AND s.chat_id = c.id))`
+      },
       // The chat owns an edit even after its queue entry posts or is withdrawn.
       queue_edit: (userId, key) => sql`SELECT count(*) AS n FROM chats c
         WHERE c.id = ${key.targetId} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`,

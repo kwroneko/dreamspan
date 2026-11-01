@@ -298,9 +298,15 @@ describe("shell fork summaries", () => {
       })
       yield* walks("state event in one fork", ["atB"])
       yield* writer.DeleteMessage({ userId, slotId: b.slotId, forkId: main })
-      yield* walks("delete on a shared slot", ["main"])
+      yield* walks("delete on a shared slot", ["atB", "main"])
+      // main's tip moves on to a new slot, which neither branch's path holds.
+      yield* t.append(harbor.id, a.slotId, "main goes on.", mira.entityId, main)
+      yield* walks("append in a parent", ["main"])
       yield* writer.DeleteFork({ userId, forkId: atA })
       yield* walks("fork deleted", [])
+      // atB now splits off at its base, b, rather than where main's path leaves it.
+      yield* writer.DeleteFork({ userId, forkId: main })
+      yield* walks("parent deleted", ["atB"])
     }).pipe(Effect.provide(database()))
   )
 

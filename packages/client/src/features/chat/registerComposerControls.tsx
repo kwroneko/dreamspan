@@ -127,7 +127,7 @@ export const registerComposerControls = () => [
         guidance={guidance}
         prefsReady={prefsReady}
         changeGuidance={changeGuidance}
-        hint={`A one-turn direction for ${speakerName}'s first reply`}
+        hint={`One-turn guidance for ${speakerName}'s first reply`}
       />
     )
   }),

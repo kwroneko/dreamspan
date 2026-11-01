@@ -36,12 +36,14 @@ it("registers the workspace, panel and transfers as individually replaceable con
     ["snippets.send", "text"]
   ])
   expect(offered("text", "snippet")).toEqual([])
-  const original = textActions.get("snippets.insert")!
+  // No Insert (owner, 2026-11-01: copy and paste); a plugin can still replace a transfer.
+  expect(textActions.get("snippets.insert")).toBeUndefined()
+  const original = textActions.get("snippets.send")!
   const replacement = vi.fn()
-  const undo = textActions.register({ ...original, label: "Plugin insertion", available: () => true, run: replacement })
-  textActions.get("snippets.insert")!.run({ text: "Selected", source: "snippet" })
-  expect(replacement).toHaveBeenCalledWith({ text: "Selected", source: "snippet" })
-  expect(textActions.get("snippets.insert")!.label).toBe("Plugin insertion")
+  const undo = textActions.register({ ...original, label: "Plugin send", available: () => true, run: replacement })
+  textActions.get("snippets.send")!.run({ text: "Selected" })
+  expect(replacement).toHaveBeenCalledWith({ text: "Selected" })
+  expect(textActions.get("snippets.send")!.label).toBe("Plugin send")
   undo()
-  expect(textActions.get("snippets.insert")).toBe(original)
+  expect(textActions.get("snippets.send")).toBe(original)
 })

@@ -17,6 +17,8 @@ export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
+/** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
+export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
 /** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
   "chat.note-actions"
@@ -28,7 +30,10 @@ export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")
 export const timelineRails = defineSlot<ComponentProps<typeof CoverageRail>>("chat.timeline-rails")
 export const messageRetries = defineSlot<ComponentProps<typeof RetryWith>>("message.retry")
-/** In a message's header, after its name, time, number and model: details such as generation time and tokens. */
+/**
+ * In a message's header, after its name and its message details (messageDetails.tsx: time,
+ * model): badges such as the rewrite mark. A detail the user can hide is a message detail instead.
+ */
 export const messageHeaderDetails = defineSlot<{ entry: PathEntry; session: ChatSession; generating: boolean }>(
   "message.header-details"
 )

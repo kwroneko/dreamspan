@@ -65,6 +65,8 @@ const seeded = () =>
         const draft = yield* api.SaveEditorDraft({
           refId,
           field: textField(["content"]),
+          // A chat's own note's drafts are its branch's.
+          scope: opened.chatNote!.scope,
           draftId: null,
           content,
           expectedRowVersion: null,

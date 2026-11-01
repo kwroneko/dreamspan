@@ -18,6 +18,7 @@ export function CardTextEditor({
   fullHeight,
   mono,
   readOnly,
+  source,
   onChange,
   onBlur
 }: {
@@ -31,6 +32,8 @@ export function CardTextEditor({
   minHeight?: string | undefined
   mono?: boolean | undefined
   readOnly?: boolean | undefined
+  /** A snippet's own text: it offers no sending to a snippet. */
+  source?: "snippet" | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -70,7 +73,10 @@ export function CardTextEditor({
         minHeight={minHeight}
         fullHeight={fullHeight}
         mono={mono}
+        // Prose has text actions; a pattern or a template's markers (mono) doesn't.
+        textActions={!mono}
         readOnly={readOnly}
+        source={source}
         onChange={onChange}
         onBlur={onBlur}
       />

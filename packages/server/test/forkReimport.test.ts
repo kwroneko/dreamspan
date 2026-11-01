@@ -69,11 +69,11 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         )
       const branches = yield* api.ListBranches({ slotId: own.id })
       const index = branches.findIndex((b) => b.slotId === own.id)
+      const opened = (yield* api.GetChat({ chatId })).currentForkId
       const side = (yield* api.SwitchBranch({ chatId, slotId: own.id, index })).fork.id
       assert.strictEqual(yield* last(side), "own reply")
-      // The user keeps chatting on the main line: it stays current.
-      const chat = yield* api.GetChat({ chatId })
-      assert.notStrictEqual(chat.currentForkId, side)
+      // Looking at a branch doesn't make it the one the chat opens on.
+      assert.strictEqual((yield* api.GetChat({ chatId })).currentForkId, opened)
 
       yield* importRun(files(2))
       const again = (yield* api.SwitchBranch({ chatId, slotId: own.id, index })).fork.id

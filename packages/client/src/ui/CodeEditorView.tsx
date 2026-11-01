@@ -1,4 +1,3 @@
-import { registerTextTarget } from "./textTargets.ts"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
 import { Compartment, EditorState, Transaction } from "@codemirror/state"
@@ -50,7 +49,9 @@ export default function CodeEditorView(props: CodeEditorProps) {
         ref={host}
         className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
       />
-      <EditorTextActions text={props.value} selection={selection} source={props.source} />
+      {props.textActions !== false && (
+        <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
+      )}
     </div>
   )
 }
@@ -102,23 +103,6 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         })
       ]
     })
-  })
-  const unregister = registerTextTarget(host, () => {
-    const range = view.state.selection.main
-    return {
-      text: view.state.sliceDoc(range.from, range.to),
-      editable: !props.readOnly,
-      insert: (text) => {
-        if (!host.isConnected || props.readOnly) return
-        const target = view.state.selection.main
-        view.dispatch({
-          changes: { from: target.from, to: target.to, insert: text },
-          selection: { anchor: target.from + text.length },
-          userEvent: "input"
-        })
-        view.focus()
-      }
-    }
   })
   const replace = (value: string) => {
     value = view.state.toText(value).toString()
@@ -201,7 +185,6 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
-      unregister()
       view.destroy()
     }
   }

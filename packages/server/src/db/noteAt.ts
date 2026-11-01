@@ -6,6 +6,8 @@ import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { makeLibraryQueries, RefRow } from "./library.ts"
+import type { ForkId, SlotId } from "@rp/shared/chat.ts"
+import { entityDraftTarget } from "@rp/shared/drafts.ts"
 import { SUMMARY_HISTORY, summaryOnPath } from "../assembler/summary.ts"
 import { noteHistory } from "./noteHistory.ts"
 import { NotFound } from "./ops.ts"
@@ -32,6 +34,7 @@ export const noteAt = Effect.fnUntraced(function* (
   const head = yield* lib.loadDoc(ref.head_revision_id)
   // A binding attached to a version applies where the fork in view shows it.
   const fork = yield* viewAt(sql, chatId, slotId).pipe(inFork(sql, chatId, position.forkId, slotId))
+  if (fork === null) return yield* new NotFound({ entity: "fork", id: chatId })
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
@@ -76,5 +79,78 @@ export const noteAt = Effect.fnUntraced(function* (
     doc = found?.doc ?? { ...current, content: "" }
     selected = found?.revision ?? revision.id
   }
-  return { ref: { ...ref, head_revision_id: selected }, doc }
+  const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork}`
+  // Its drafts are this branch's: the fork's, or at an earlier message than its latest, that message's.
+  const latest = slotId === null || slotId === (tip?.tip ?? null)
+  const scope = latest ? fork : `${fork}@${slotId}`
+  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: tip?.tip ?? null, latest, scope }
+})
+
+/** A slot's message number (its depth, from 1); null before the first message. */
+export const slotMessage = (sql: SqlClient.SqlClient, slotId: string | null) =>
+  slotId === null
+    ? Effect.succeed(null)
+    : sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${slotId}`.pipe(
+        Effect.map(([row]) => (row ? row.depth + 1 : null))
+      )
+
+/**
+ * Whether another live branch (fork) of the chat has a version of the note of its own: unsaved
+ * text there, or a change bound there that makes it differ at its latest message from `here`
+ * (by content, not revision id). A branch that never changed it isn't counted.
+ */
+export const otherBranches = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  lib: ReturnType<typeof makeLibraryQueries>,
+  userId: UserId,
+  ref: RefRow,
+  chatId: ChatNotePosition["chatId"],
+  here: { readonly fork: string; readonly ref: RefRow }
+) {
+  const hash = (revision: string) =>
+    sql<{ hash: string }>`SELECT doc_hash AS hash FROM entity_revisions WHERE id = ${revision}`.pipe(
+      Effect.map(([row]) => row?.hash ?? revision)
+    )
+  const mine = yield* hash(here.ref.head_revision_id)
+  const forks = yield* sql<{ id: ForkId; tip: SlotId | null }>`
+    SELECT id, tip_slot_id AS tip FROM forks WHERE chat_id = ${chatId} AND deleted_at IS NULL AND id <> ${here.fork}`
+  for (const fork of forks) {
+    const [typed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM drafts WHERE user_id = ${userId}
+      AND target_kind = 'entity_field' AND target_id = ${entityDraftTarget(ref.id, fork.id)} AND status = 'active' LIMIT 1`
+    if (typed) return true
+    const there = yield* noteAt(sql, lib, userId, ref, { chatId, forkId: fork.id, slotId: fork.tip }).pipe(
+      Effect.catchTag("NotFound", () => Effect.succeed(null))
+    )
+    // A branch that never changed it (its library head, as made) has no version of its own.
+    if (there === null || there.ref.head_revision_id === ref.head_revision_id) continue
+    if ((yield* hash(there.ref.head_revision_id)) !== mine) return true
+  }
+  return false
+})
+
+/**
+ * Where each of a chat note's revisions took effect: the messages its bindings are at, and
+ * whether each applies on `fork` (the branch shown) or on another branch only.
+ */
+export const noteChangedAt = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  chatId: string,
+  fork: string,
+  revisions: ReadonlyArray<string>
+) {
+  const rows = yield* sql<{ revision: string; depth: number | null; here: number }>`
+    SELECT json_extract(e.value_json, '$.revision') AS revision, s.depth AS depth,
+      ${eventApplies(sql, fork, "e")} AS here
+    FROM state_events e LEFT JOIN slots s ON s.id = e.slot_id
+    WHERE e.chat_id = ${chatId} AND e.key = 'note.binding' AND e.superseded_by_changeset IS NULL
+      AND json_extract(e.value_json, '$.revision') IN (SELECT value FROM json_each(${JSON.stringify(revisions)}))
+    ORDER BY e.seq`
+  const out = new Map<string, Array<{ message: number | null; thisBranch: boolean }>>()
+  for (const row of rows) {
+    const list = out.get(row.revision) ?? []
+    const at = { message: row.depth === null ? null : row.depth + 1, thisBranch: row.here === 1 }
+    if (!list.some((seen) => seen.message === at.message && seen.thisBranch === at.thisBranch)) list.push(at)
+    out.set(row.revision, list)
+  }
+  return out
 })

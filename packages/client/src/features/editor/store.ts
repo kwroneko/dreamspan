@@ -15,11 +15,17 @@ import {
   canonicalJson,
   type FieldPath,
   getAt,
+  HELD_FIELD,
+  isHeldField,
   parseField,
   textField,
   valueField
 } from "@rp/shared/editing.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import { presetOrder } from "@rp/shared/presetOrder.ts"
+import { arrange, type HeldChanges, heldText, parseHeld, splitOrder } from "./heldOrder.ts"
+import { stateChanges, trackOpenEditor } from "./openEditors.ts"
+import { type Draft, entityDraftTarget } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useMemo, useSyncExternalStore } from "react"
@@ -83,8 +89,13 @@ export class EditorStore {
   private readonly listeners = new Map<string, Set<() => void>>()
   private readonly versions = new Map<string, number>()
   private readonly subscribers = new Map<string, (listener: () => void) => () => void>()
-  /** The head with the value drafts applied: what fields read when they have no draft of their own. */
+  /**
+   * The head with the value drafts applied, and a preset's held moves and deletions shown
+   * (heldOrder.ts): what fields read when they have no draft of their own.
+   */
   private valueDoc: Doc = {}
+  /** The same without the held changes: what the next reply uses. */
+  private liveDoc: Doc = {}
   private readonly revisionDocs = new Map<RevisionId, Doc>()
   private readonly revisionReads = new Map<RevisionId, Promise<Doc>>()
 
@@ -93,7 +104,21 @@ export class EditorStore {
   private readonly userId: string
   private readonly call: Caller
   private readonly env: PageEnv
-  private readonly chatNote: ChatNotePosition | undefined
+  /** A chat's own note: the position it's edited at (its branch, and the message shown). */
+  readonly chatNote: ChatNotePosition | undefined
+  /** A chat's own note's branch (`EditorSnapshot.chatNote`): its drafts are that branch's. */
+  private get scope() {
+    return this.snapshot?.chatNote?.scope
+  }
+  /** Where a draft call goes: the field's ref, and a chat's own note's branch. */
+  private get target() {
+    const scope = this.scope
+    return { refId: this.refId, ...(scope === undefined ? {} : { scope }) }
+  }
+  /** This browser's copies are kept per draft target, so each branch's are its own. */
+  private get copyTarget() {
+    return entityDraftTarget(this.refId, this.scope)
+  }
 
   constructor(refId: RefId, userId: string, call: Caller, env: PageEnv = browserEnv, chatNote?: ChatNotePosition) {
     this.userId = userId
@@ -189,7 +214,11 @@ export class EditorStore {
     return this.snapshot?.doc ?? {}
   }
 
+  /** The chats' state changes (openEditors.ts) this store's state was read after. */
+  seenChanges = 0
+
   async load() {
+    this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
@@ -222,7 +251,7 @@ export class EditorStore {
 
   /** Replay every copy with its original base: only the writer decides a stale save. */
   private async restoreCopies() {
-    for (const copy of [...(await copiesOf(this.userId, this.refId))].sort((a, b) => a.at - b.at)) {
+    for (const copy of [...(await copiesOf(this.userId, this.copyTarget))].sort((a, b) => a.at - b.at)) {
       const pending = pendingOf(copy)
       if (pending?.kind !== "editor") continue
       const payload = pending.payload
@@ -304,7 +333,110 @@ export class EditorStore {
         const content = this.current(key)
         return content === null ? [] : [{ field: key, content }]
       })
-    this.valueDoc = applyDrafts(kind, this.head, values).doc
+    this.liveDoc = applyDrafts(kind, this.head, values).doc
+    const held = this.held()
+    this.valueDoc =
+      held === null
+        ? this.liveDoc
+        : {
+            ...this.liveDoc,
+            prompts: this.livePrompts().filter((p) => !held.deleted.includes(p.identifier)),
+            order: arrange(this.liveOrder(), held)
+          }
+  }
+
+  /** A preset's moves and deletions waiting for the unsaved bar's Save; null when there are none. */
+  held(): HeldChanges | null {
+    return this.snapshot?.ref.kind === "preset" ? parseHeld(this.current(HELD_FIELD)) : null
+  }
+
+  private livePrompts() {
+    return (getAt(this.liveDoc, ["prompts"]) as ReadonlyArray<PresetPrompt> | undefined) ?? []
+  }
+
+  private liveOrder() {
+    return presetOrder(this.livePrompts(), (getAt(this.liveDoc, ["order"]) as PromptOrderEntry[] | undefined) ?? [])
+  }
+
+  /** The working document with the held changes shown, for the unsaved bar to describe. */
+  arranged(): Doc {
+    const held = this.held()
+    const working = this.working().doc
+    if (held === null) return working
+    const prompts = (getAt(working, ["prompts"]) as ReadonlyArray<PresetPrompt> | undefined) ?? []
+    const order = presetOrder(prompts, (getAt(working, ["order"]) as PromptOrderEntry[] | undefined) ?? [])
+    return {
+      ...working,
+      prompts: prompts.filter((p) => !held.deleted.includes(p.identifier)),
+      order: arrange(order, held)
+    }
+  }
+
+  /** Deletes a preset's prompt behind the unsaved bar: it's gone from view, and sent until Save. */
+  deletePrompt(identifier: string) {
+    const held = this.held()
+    this.change(
+      HELD_FIELD,
+      heldText({
+        order: held?.order ?? [],
+        deleted: [...new Set([...(held?.deleted ?? []), identifier])]
+      })
+    )
+    this.rebuild()
+    this.bump(STRUCTURE)
+  }
+
+  /** Throws the held moves and deletions away: the order and prompts are the live ones again. */
+  revertHeld() {
+    if (this.held() === null) return
+    this.change(HELD_FIELD, "")
+    this.rebuild()
+    this.bump(STRUCTURE)
+  }
+
+  /**
+   * Every field changed since the last revision back to it (Revert): the held changes go,
+   * and the server puts each changed field's revision text back as its newest state, the
+   * text there now one state back in its edit history. No revision is written.
+   */
+  async revert() {
+    this.revertHeld()
+    await this.flush()
+    if (this.unsavedFields().length > 0) return this.notSaved()
+    const chatNote = this.chatNote
+    const result = await this.call((client) =>
+      client("RevertEditorDrafts", { refId: this.refId, ...(chatNote ? { chatNote } : {}) })
+    )
+    if (result.ok) await this.refresh()
+    return result
+  }
+
+  /**
+   * An earlier revision as a new one (`RestoreRevision`): the fields changed since take it too.
+   * A change to many lorebook entries undoes itself this way (lorebookMass.ts).
+   */
+  async restoreRevision(revisionId: RevisionId) {
+    const result = await this.call((client) =>
+      client("RestoreRevision", {
+        refId: this.refId,
+        revisionId,
+        expectedRowVersion: this.snapshot!.ref.rowVersion
+      })
+    )
+    if (result.ok || result.error.tag === "StaleWrite") await this.refresh()
+    return result
+  }
+
+  /** Applies the held changes to the live document, for a save: the order as arranged, the prompts deleted. */
+  private async applyHeld() {
+    const held = this.held()
+    if (held === null) return
+    const order = arrange(this.liveOrder(), held)
+    this.change(valueField(["order"]), JSON.stringify(order))
+    this.change(HELD_FIELD, "")
+    this.rebuild()
+    this.bump(STRUCTURE)
+    for (const identifier of held.deleted) await this.removeItem(["prompts", `identifier=${identifier}`])
   }
 
   text(path: FieldPath): string {
@@ -376,6 +508,27 @@ export class EditorStore {
   }
 
   setValue(path: FieldPath, value: unknown) {
+    // A preset's order as the user made it: switches and additions live, moves held (heldOrder.ts).
+    if (this.snapshot?.ref.kind === "preset" && path.length === 1 && path[0] === "order" && Array.isArray(value)) {
+      const held = this.held()
+      // The order as stored: a prompt just added, which the shown order lists at the end until
+      // it has a place, is new to it, and goes live where it was put.
+      const stored = new Set(
+        ((getAt(this.liveDoc, ["order"]) as PromptOrderEntry[] | undefined) ?? []).map((e) => e.identifier)
+      )
+      const split = splitOrder(
+        this.liveOrder().filter((e) => stored.has(e.identifier) || e.identifier === "main"),
+        value as ReadonlyArray<PromptOrderEntry>,
+        held?.deleted ?? []
+      )
+      const live = JSON.stringify(split.live)
+      if (live !== JSON.stringify(this.liveOrder())) this.change(valueField(path), live)
+      const text = heldText(split.held)
+      if (text !== heldText(held)) this.change(HELD_FIELD, text)
+      this.rebuild()
+      this.bump(STRUCTURE)
+      return
+    }
     this.change(valueField(path), JSON.stringify(value) ?? "undefined")
   }
 
@@ -408,7 +561,7 @@ export class EditorStore {
       before?.kind === "editor"
         ? { ...before.payload, content }
         : {
-            refId: this.refId,
+            ...this.target,
             field: key,
             draftId: field.draftId,
             content,
@@ -421,7 +574,7 @@ export class EditorStore {
     if (previous === null && field.local === null) field.baseRevision = payload.baseRevisionId
     const copy = makeCopy(
       this.userId,
-      this.refId,
+      this.copyTarget,
       key,
       { kind: "editor", payload },
       this.env.now(),
@@ -508,6 +661,7 @@ export class EditorStore {
 
   /** The server's drafts and head again, without losing what's typed here. */
   async refresh() {
+    this.seenChanges = stateChanges()
     const result = await this.call((client) =>
       client("OpenEditor", { refId: this.refId, ...(this.chatNote ? { chatNote: this.chatNote } : {}) })
     )
@@ -517,9 +671,17 @@ export class EditorStore {
     }
   }
 
+  /** Changed since the last revision; the held moves and deletions are counted apart (`held`). */
   isDirty(key: string) {
+    if (isHeldField(key)) return false
     const field = this.fields.get(key)
     return field !== undefined && (field.saved !== null || field.local !== null)
+  }
+
+  /** Whether the field has an edit history on the server: it was ever typed into. */
+  hasHistory(key: string) {
+    const field = this.fields.get(key)
+    return field !== undefined && (field.draftId !== null || field.local !== null)
   }
 
   /** Fields with changes, saved or not. */
@@ -547,11 +709,17 @@ export class EditorStore {
    * as they are: an entry copied into another lorebook, without that book's own drafts.
    */
   async commit(message: string | null, only?: ReadonlyArray<string>) {
+    // An explicit save takes the held moves and deletions too.
+    if (only === undefined) await this.applyHeld()
     await this.flush()
     if (this.unsavedFields().length > 0) return this.notSaved()
     const snapshot = this.snapshot!
     const fields = [...this.fields].flatMap(([field, draft]) =>
-      (only && !only.includes(field)) || draft.saved === null || draft.rowVersion === null || draft.draftId === null
+      (only && !only.includes(field)) ||
+      isHeldField(field) ||
+      draft.saved === null ||
+      draft.rowVersion === null ||
+      draft.draftId === null
         ? []
         : [{ field, draftId: draft.draftId, expectedRowVersion: draft.rowVersion }]
     )
@@ -604,7 +772,7 @@ export class EditorStore {
     if (field.saved === null || field.rowVersion === null || field.draftId === null) return
     const { draftId, rowVersion } = field
     const result = await this.call((client) =>
-      client("DiscardEditorDraft", { refId: this.refId, field: key, draftId, expectedRowVersion: rowVersion })
+      client("DiscardEditorDraft", { ...this.target, field: key, draftId, expectedRowVersion: rowVersion })
     )
     if (result.ok) await this.settle(key, result.value)
     return result
@@ -632,8 +800,25 @@ export class EditorStore {
       this.acknowledgeConflict(key)
   }
 
-  history(key: string, limit = 50) {
-    return this.call((client) => client("EditorDraftHistory", { refId: this.refId, field: key, limit }))
+  history(key: string, limit = 50, before?: number) {
+    return this.call((client) =>
+      client("EditorDraftHistory", {
+        ...this.target,
+        field: key,
+        limit,
+        ...(before === undefined ? {} : { before })
+      })
+    )
+  }
+
+  /** One state of a field's edit history, whole. */
+  stateText(key: string, seq: number) {
+    return this.call((client) => client("EditorDraftState", { ...this.target, field: key, seq }))
+  }
+
+  /** The head's revision number: "changed since revision N". */
+  get revisionNumber(): number {
+    return this.snapshot?.revisionNumber ?? 1
   }
 
   async restore(key: string, seq: number, content?: string) {
@@ -645,7 +830,7 @@ export class EditorStore {
     const { draftId, rowVersion } = field
     const result = await this.call((client) =>
       client("RestoreEditorDraft", {
-        refId: this.refId,
+        ...this.target,
         field: key,
         draftId: draftId ?? "",
         seq,
@@ -705,7 +890,7 @@ export class EditorStore {
     if (this.current(key) !== picked) return changed()
     const result = await this.call((client) =>
       client("SaveEditorDraft", {
-        refId: this.refId,
+        ...this.target,
         field: key,
         draftId: field.draftId,
         content,
@@ -845,6 +1030,14 @@ export const useWorkingDoc = (store: EditorStore) => {
 export const useDirty = (store: EditorStore, field: string) =>
   useSyncExternalStore(store.subscribe(field), () => store.isDirty(field))
 
+/** A preset's held moves and deletions as JSON, "" when there are none (heldOrder.ts). */
+export const useHeld = (store: EditorStore) =>
+  useSyncExternalStore(store.subscribe(STRUCTURE, HELD_FIELD), () => heldText(store.held()))
+
+/** Whether a field has an edit history to show (it was ever typed into). */
+export const useHasHistory = (store: EditorStore, field: string) =>
+  useSyncExternalStore(store.subscribe(field), () => store.hasHistory(field))
+
 /** What the page shows: the documents, how many fields have changes, saving or not. */
 export const useEditorState = (store: EditorStore) => useSyncExternalStore(store.subscribe(DRAFTS), store.state)
 
@@ -854,6 +1047,13 @@ export const useEditorState = (store: EditorStore) => useSyncExternalStore(store
  */
 export const useLeaveGuard = (store: EditorStore) =>
   useEffect(() => {
+    // Flushed before a reply and read again after one (openEditors.ts).
+    const untrack = trackOpenEditor({
+      flush: () => store.flush(),
+      refresh: () => (store.snapshot === null ? Promise.resolve() : store.refresh())
+    })
+    // Shown again after a reply cut revisions while it was hidden: read what changed.
+    if (store.snapshot !== null && store.seenChanges < stateChanges()) void store.refresh()
     const warn = (event: BeforeUnloadEvent) => {
       if (!store.isSaving()) return
       event.preventDefault()
@@ -864,6 +1064,7 @@ export const useLeaveGuard = (store: EditorStore) =>
     addEventListener("beforeunload", warn)
     addEventListener("pagehide", leave)
     return () => {
+      untrack()
       removeEventListener("beforeunload", warn)
       removeEventListener("pagehide", leave)
       void store.flush()

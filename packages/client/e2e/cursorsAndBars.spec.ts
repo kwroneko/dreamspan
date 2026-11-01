@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { showActions } from "./support/message.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { nextReply } from "./support/strip.ts"
 
@@ -231,7 +232,7 @@ for (const theme of ["light", "dark"] as const)
     await page.goto(`${server().url}/library/${cardIds[theme === "light" ? 0 : 1]}`)
     const description = page.getByRole("textbox", { name: "Description", exact: true })
     // A disabled button: Save, with nothing changed yet.
-    const save = page.getByRole("button", { name: /^Save(?: \(|$)/ })
+    const save = saveButton(page)
     await expect(save).toBeDisabled()
     expect(await cursor(save)).toBe("default")
     await description.click()

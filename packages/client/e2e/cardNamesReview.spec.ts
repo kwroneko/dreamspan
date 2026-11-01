@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { apiLogin, serverPerFile, withAdmin, ADMIN } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton, saveRevision } from "./support/saveRevision.ts"
 const server = serverPerFile(withAdmin)
 test("another tab creating the same pair must disable Create in the waiting tab", async ({ context, page }) => {
   test.setTimeout(120000)
@@ -80,11 +81,7 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
   await expect(sidebar.getByRole("button", { name: "Open Cache original · 1", exact: true })).toBeVisible()
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Cache renamed")
   await page.getByRole("textbox", { name: "Version (shown as subtitle)", exact: true }).fill("2")
-  await page.getByRole("button", { name: "Save (2)", exact: true }).click()
-  await page
-    .getByRole("dialog", { name: "Save a revision" })
-    .getByRole("button", { name: "Save revision", exact: true })
-    .click()
+  await saveButton(page).click()
   await expect(page.getByRole("heading", { name: "Cache renamed", exact: true })).toBeVisible()
   // The card has a chat, so the save offers to rename it in past messages; that dialog keeps
   // the rest of the page out of reach until it's answered.
@@ -106,19 +103,15 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
   ]
   for (const [name, value] of fields)
     await page.getByRole("textbox", { name: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).fill(value)
-  await expect(page.getByRole("status").filter({ hasText: "4 fields have changes, kept as drafts" })).toBeVisible()
+  await expect(page.getByRole("status").filter({ hasText: "Changed since revision 1" })).toBeVisible()
   await page.reload()
   for (const [name, value] of fields)
     await expectTextBox(
       page.getByRole("textbox", { name: new RegExp("^" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }),
       value
     )
-  await page.getByRole("button", { name: "Save (4)", exact: true }).click()
-  const save = page.getByRole("dialog", { name: "Save a revision" })
-  const changes = save.getByRole("list", { name: "Changes" })
-  for (const label of ["Display name", "Name the model sees", "Version (shown as subtitle)", "Description"])
-    await expect(changes).toContainText(label)
-  await save.getByRole("button", { name: "Save revision", exact: true }).click()
+  // Save asks nothing; History's comparison below names the four fields it saved.
+  await saveRevision(page)
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.CreateCard({ label: "History original", name: "History original", version: "1" })
@@ -128,11 +121,17 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
   const history = page.getByRole("dialog", { name: "History" })
   const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
   await expect(revisions).toHaveCount(2)
-  await revisions.first().getByRole("button").click()
+  await revisions
+    .first()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
   const diff = history.getByLabel("Revision changes", { exact: true })
   for (const label of ["Display name", "Name the model sees", "Version (shown as subtitle)", "Description"])
     await expect(diff).toContainText(label)
-  await revisions.last().getByRole("button").click()
+  await revisions
+    .last()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
   const restore = history.getByRole("button", { name: "Restore", exact: true })
   await expect(restore).toBeDisabled()
   await expect(history.getByRole("status")).toContainText("Another card is already called History original · 1")
@@ -193,15 +192,14 @@ test("Save rechecks names and disables the action after an unannounced collision
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${original.id}`)
   await page.getByRole("textbox", { name: "Display name", exact: true }).fill("Late target")
-  await page.getByRole("button", { name: "Save (1)", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  const save = dialog.getByRole("button", { name: "Save revision", exact: true })
+  const save = saveButton(page)
   await expect(save).toBeEnabled()
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     api.CreateCard({ label: "Late target", name: "Late target", version: "1" })
   )
+  // Save asks nothing, so the recheck happens on the click itself.
   await save.click()
-  await expect(dialog.getByRole("status")).toContainText("Another card is already called Late target · 1")
+  await expect(page.getByText("Another card is already called Late target · 1").first()).toBeVisible()
   await expect(save).toBeDisabled()
   const refs = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListLibrary({ kind: "card" }))
   expect(refs.find((ref) => ref.id === original.id)?.label).toBe("Late save")

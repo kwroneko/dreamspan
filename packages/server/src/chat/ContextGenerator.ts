@@ -12,6 +12,7 @@ import { Reader, Writer } from "../db/Database.ts"
 import { Providers } from "../providers/Providers.ts"
 import { GenerationFailed, type GenerationRequest, Generator } from "./Generator.ts"
 import { throughParse } from "./replySections.ts"
+import { ChatHub } from "./ChatHub.ts"
 
 /** What a failed storage or worker call says on the version: the details stay in the log. */
 const serverFailure = (operation: string) => (error: unknown) =>
@@ -30,6 +31,7 @@ export const layer = Layer.effect(
     const writer = yield* Writer
     const providers = yield* Providers
     const config = yield* AppConfig
+    const hub = yield* ChatHub
 
     // Rollouts a previous process left running ended with it; their versions were
     // interrupted the same way (Generations).
@@ -54,7 +56,7 @@ export const layer = Layer.effect(
                 ...(forkId === null ? {} : { forkId })
               })
             : false
-          const assembled = yield* reader
+          const assemble = reader
             .AssembleContext({
               userId,
               chatId,
@@ -78,6 +80,30 @@ export const layer = Layer.effect(
               ),
               Effect.catchTag(["StorageError", "RpcClientError"], serverFailure("AssembleContext"))
             )
+          let assembled = yield* assemble
+          // Live text is what's sent (owner, 2026-11-01): what the assembly read and has changed
+          // since its last revision gets a revision labelled with this reply, and the reply is
+          // assembled again from it. A new revision can bring in another entry (a note's link),
+          // so a few rounds, each only when something was cut.
+          for (let round = 0; round < 3; round++) {
+            const { cut } = yield* writer
+              .CheckpointLiveText({
+                userId,
+                chatId,
+                forkId,
+                slotId,
+                versionId,
+                leafSlotId: (JSON.parse(assembled.generation) as Generation).leafSlotId as SlotId | null,
+                message: assembled.message,
+                used: assembled.used
+              })
+              .pipe(
+                Effect.catchTag(["StorageError", "RpcClientError", "NotFound"], serverFailure("CheckpointLiveText"))
+              )
+            if (cut === 0) break
+            hub.publish(chatId, { _tag: "State" })
+            assembled = yield* assemble
+          }
           const generation = JSON.parse(assembled.generation) as Generation
           const { model } = generation
           if (model === null) {

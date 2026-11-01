@@ -1,4 +1,4 @@
-import { chatName, formatDay } from "../chat/chatTitle.ts"
+import { chatName, formatDay, formatWhen } from "../chat/chatTitle.ts"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
@@ -13,11 +13,16 @@ import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
+import { Badge } from "../../ui/Surface.tsx"
 import { browseCards, useCardBrowse } from "./cardBrowse.tsx"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
+import { sidebarFoot } from "./homeSlots.ts"
+import { SlotOutlet } from "../../slots.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import {
   CharacterGrid,
@@ -125,82 +130,219 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
     </div>
   )
 }
+/** A shell row as `forkLabel` reads it. */
+const shellBranchLabel = (fork: ShellFork) =>
+  forkLabel({
+    name: fork.named ? fork.name : null,
+    original: fork.original,
+    split: fork.split,
+    createdAt: fork.createdAt
+  })
+
+/**
+ * "⑂ 12" at a chat row's end (owner, 2026-11-01): replaces the panel's list with the chat's
+ * branches, opening nothing in the middle.
+ */
+function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: EntityId | null }) {
+  const { setScope } = useShellNavigation()
+  if (fork.branches < 2) return null
+  return (
+    <Tooltip label={`Lists this chat's ${fork.branches} branches here, without opening one.`}>
+      <button
+        type="button"
+        aria-label={`${fork.branches} branches of ${fork.chatName}: list them`}
+        data-branches-button
+        onClick={() => setScope({ entity, chat: fork.chat.id })}
+        className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted tabular-nums outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        <Icon name="branch" size={14} />
+        {fork.branches.toLocaleString()}
+      </button>
+    </Tooltip>
+  )
+}
+
 export function ForkRow({
   fork,
   scopeChat = false,
   details = false,
   here = false,
-  perFork = false
+  perFork = false,
+  branchOnly = false,
+  entity = null
 }: {
   fork: ShellFork
   scopeChat?: boolean
   details?: boolean
   /** The row is this fork (a chat's branches, pins), not its chat (a list of chats). */
   perFork?: boolean
+  /** Among its chat's branches only: the branch's own label, without the chat's name or faces. */
+  branchOnly?: boolean
   /** The fork open in the middle: marked, so the list says where you are. */
   here?: boolean
+  /** The character the list is scoped to, kept when "⑂ 12" lists a chat's branches. */
+  entity?: EntityId | null
 }) {
   const open = useOpenFork(fork, scopeChat)
-  // A row for a chat shows its name; one for a fork, the branch's name after it.
-  const title = perFork && fork.named ? `${fork.chatName} › ${fork.name}` : fork.chatName
+  const label = shellBranchLabel(fork)
+  // A row for a chat shows its name; one among its chat's branches, the branch's label. Where
+  // rows of several chats mix, as pins do, the chat's name, with a named branch's name after it
+  // and an unnamed one's label under it once the chat has more than one.
+  const title = branchOnly ? label : perFork && fork.named ? `${fork.chatName} › ${fork.name}` : fork.chatName
+  const branchLine = !branchOnly && perFork && !fork.named && fork.branches > 1 ? label : null
+  const last = perFork ? (fork.endAt ?? fork.createdAt) : fork.chatRecentAt
+  // The branch its chat opens on, among several, as the header's list marks it.
+  const opensHere = perFork && fork.current && fork.branches > 1
   return (
     <div
       className={`flex min-w-0 items-center gap-1 rounded-md border p-1 hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
-      <button
-        type="button"
-        onClick={open}
-        aria-label={`Open chat ${title}`}
-        aria-current={here ? "page" : undefined}
-        data-chat-id={fork.chat.id}
-        className="flex min-w-0 flex-1 items-center gap-2 p-1 text-left"
+      <Tooltip
+        label={
+          perFork
+            ? `Opens this branch${here ? ", shown now" : ""}.${opensHere ? ` ${OPENS_HERE_HINT}` : ""}`
+            : "Opens the chat on the branch you last used."
+        }
       >
-        <span className="flex shrink-0 gap-0.5">
-          {fork.cast.slice(0, 2).map((c) => (
-            <Avatar
-              key={c.entityId}
-              id={c.entityId}
-              name={c.name}
-              mediaId={c.avatarMediaId}
-              crop={c.avatarCrop}
-              size="md"
-            />
-          ))}
-        </span>
-        <span className="flex min-w-0 flex-col">
-          {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
-          <span className="line-clamp-2 text-sm font-medium [overflow-wrap:anywhere]" title={title}>
-            {title}
-          </span>
-          {details && fork.cast.length > 1 && (
-            <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
-              with {fork.cast.map((c) => c.label).join(", ")}
+        <button
+          type="button"
+          onClick={open}
+          aria-label={`Open ${branchOnly ? "branch" : "chat"} ${title}`}
+          aria-current={here ? "page" : undefined}
+          data-chat-id={fork.chat.id}
+          data-fork-id={fork.forkId}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded p-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          {!branchOnly && (
+            <span className="flex shrink-0 gap-0.5">
+              {fork.cast.slice(0, 2).map((c) => (
+                <Avatar
+                  key={c.entityId}
+                  id={c.entityId}
+                  name={c.name}
+                  mediaId={c.avatarMediaId}
+                  crop={c.avatarCrop}
+                  size="md"
+                />
+              ))}
             </span>
           )}
-          {details && (
-            <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
-              started{" "}
-              {formatDay(chatName(importState(fork.chat.title).title, fork.cast).started ?? new Date(fork.createdAt))} ·{" "}
-              {fork.messages} messages
+          <span className="flex min-w-0 flex-col">
+            {/* Two lines: beside the portraits one line leaves imported names unrecognizable. */}
+            <span className="text-sm [overflow-wrap:anywhere]">
+              <span className="font-medium">{title}</span>
+              {opensHere && (
+                <>
+                  {" "}
+                  <Badge>opens here</Badge>
+                </>
+              )}
             </span>
-          )}
-          {fork.preview && (
-            <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
-          )}
-          <span className="text-xs text-muted">
-            {perFork
-              ? fork.current && fork.branches > 1
-                ? "Latest branch · "
-                : ""
-              : fork.branches > 1
-                ? `${fork.branches} branches · `
-                : ""}
-            {new Date(perFork ? fork.recentAt : fork.chatRecentAt).toLocaleDateString()}
+            {branchLine !== null && <span className="text-xs [overflow-wrap:anywhere]">{branchLine}</span>}
+            {details && fork.cast.length > 1 && (
+              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
+                with {fork.cast.map((c) => c.label).join(", ")}
+              </span>
+            )}
+            {details && (
+              <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
+                started{" "}
+                {formatDay(chatName(importState(fork.chat.title).title, fork.cast).started ?? new Date(fork.createdAt))}{" "}
+                · {fork.messages} messages
+              </span>
+            )}
+            {fork.preview && (
+              <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">{fork.preview}</span>
+            )}
+            <span data-row-when className="text-xs text-muted">
+              {perFork ? "Last message " : ""}
+              {perFork ? formatMoment(last) : formatWhen(last)}
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+      </Tooltip>
+      {!perFork && <BranchesButton fork={fork} entity={entity} />}
       <PinButton fork={fork} />
     </div>
+  )
+}
+
+const OPEN_BRANCHES_KEY = (userId: string) => `rp.openChatBranches.${userId}`
+
+/**
+ * The open chat's branches at the bottom of the left panel, below whatever it lists (owner,
+ * 2026-11-01): switch branches without leaving the list above; its header lists them as the
+ * panel's list instead. Collapsed or expanded per device.
+ */
+export function OpenChatBranches() {
+  const params = useParams({ strict: false }) as { chatId?: string }
+  const shown = (useSearch({ strict: false }) as { fork?: string }).fork
+  const { scope, setScope, grid } = useShellNavigation()
+  const userId = useSession().user.id
+  const [expanded, setExpanded] = useState(() => {
+    try {
+      return localStorage.getItem(OPEN_BRANCHES_KEY(userId)) !== "collapsed"
+    } catch {
+      return true
+    }
+  })
+  const chatId = (params.chatId ?? null) as ChatId | null
+  const forks = useShellForks({
+    entity: null,
+    chat: chatId,
+    search: "",
+    sort: "recent",
+    sections: [
+      { id: "peers", limit: 5000 },
+      { id: "other", limit: 5000 }
+    ]
+  })
+  if (chatId === null || grid || scope.chat === chatId) return null
+  const rows = [...forks.section("peers").rows, ...forks.section("other").rows]
+  if (rows.length < 2) return null
+  const toggle = () => {
+    setExpanded(!expanded)
+    try {
+      localStorage.setItem(OPEN_BRANCHES_KEY(userId), expanded ? "collapsed" : "open")
+    } catch {
+      // Remembered only where the browser keeps it.
+    }
+  }
+  const chatLabel = rows[0]!.chatName
+  return (
+    <section
+      aria-label="Branches of the open chat"
+      className="flex max-h-[45%] min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
+    >
+      <div className="flex min-w-0 items-center gap-1">
+        <Tooltip label={expanded ? "Hides the open chat's branches." : "Shows the open chat's branches here."}>
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={toggle}
+            className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-1 text-left text-xs font-semibold text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <Icon name={expanded ? "down" : "right"} size={14} className="shrink-0" />
+            <span className="truncate">
+              Branches of {chatLabel} ({rows.length.toLocaleString()})
+            </span>
+          </button>
+        </Tooltip>
+        <IconButton
+          label="List these branches in the panel"
+          hint="Shows these branches as the panel's list, with a way back to all chats."
+          icon="expand"
+          onClick={() => setScope({ entity: null, chat: chatId })}
+        />
+      </div>
+      {expanded && (
+        <div className="-mr-1 flex min-h-0 flex-col gap-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
+          {rows.map((f) => (
+            <ForkRow key={f.forkId} fork={f} perFork branchOnly here={shown ? f.forkId === shown : f.current} />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -299,10 +441,11 @@ const SECTIONS = {
     ["with", "With others"],
     ["was", "Was in"]
   ],
+  // Named and pinned first, then the rest, each by last message; the one the chat opens on is
+  // marked where it is (owner, 2026-11-01).
   chat: [
-    ["current", "Latest branch"],
-    ["peers", "Named and pinned branches"],
-    ["other", "Other branches"]
+    ["peers", "Named and pinned"],
+    ["other", "Branches"]
   ]
 } as const satisfies Record<string, ReadonlyArray<readonly [ShellSection, string]>>
 
@@ -339,17 +482,10 @@ function Browser({ data }: { data: ShellLibrary }) {
     sort: "recent",
     sections: sections.map(([id]) => ({ id, limit: limitOf(id) }))
   })
-  // A chat by its current fork's name; inside it, the fork shown in the middle when that's another.
+  // The chat by its name, which all its branches share.
   const chatRows = scope.chat ? sections.flatMap(([id]) => forks.section(id).rows) : []
-  const chat = forks.section("current").rows[0] ?? chatRows[0]
-  const open = params.chatId === scope.chat ? chatRows.find((f) => f.forkId === shown) : undefined
-  const chatLabel = !chat
-    ? forks.loading
-      ? "…"
-      : "Chat not found"
-    : open && open.forkId !== chat.forkId && open.name !== chat.chatName
-      ? `${chat.chatName} › ${open.name}`
-      : chat.chatName
+  const chat = chatRows[0]
+  const chatLabel = !chat ? (forks.loading ? "…" : "Chat not found") : chat.chatName
   const section = (id: ShellSection, title: string) => {
     const { rows, total } = forks.section(id)
     return (
@@ -363,6 +499,8 @@ function Browser({ data }: { data: ShellLibrary }) {
               key={`${f.chat.id}/${f.forkId}`}
               fork={f}
               perFork={kind === "chat"}
+              branchOnly={kind === "chat"}
+              entity={scope.entity}
               here={f.chat.id === params.chatId && (kind !== "chat" || (shown ? f.forkId === shown : f.current))}
             />
           ))}
@@ -385,27 +523,30 @@ function Browser({ data }: { data: ShellLibrary }) {
       />
       {!grid && (scope.entity || scope.chat) && (
         <nav aria-label="Chat breadcrumbs" className="flex min-w-0 items-center gap-1 text-sm">
-          <button
-            type="button"
-            className="shrink-0 text-accent hover:underline"
-            onClick={() => setScope({ entity: null, chat: null })}
-          >
-            All chats
-          </button>
+          <Tooltip label="Back to the list of all your chats.">
+            <button
+              type="button"
+              className="shrink-0 text-accent hover:underline"
+              onClick={() => setScope({ entity: null, chat: null })}
+            >
+              All chats
+            </button>
+          </Tooltip>
           {scope.entity && (
             <>
               <span aria-hidden className="shrink-0 text-muted">
                 ›
               </span>
               {scope.chat ? (
-                <button
-                  type="button"
-                  title={cardLabel}
-                  className="min-w-0 truncate text-accent hover:underline"
-                  onClick={() => setScope({ entity: scope.entity, chat: null })}
-                >
-                  {cardLabel}
-                </button>
+                <Tooltip label={`Back to ${cardLabel}'s chats.`}>
+                  <button
+                    type="button"
+                    className="min-w-0 truncate text-accent hover:underline"
+                    onClick={() => setScope({ entity: scope.entity, chat: null })}
+                  >
+                    {cardLabel}
+                  </button>
+                </Tooltip>
               ) : (
                 <span aria-current="location" className="min-w-0 truncate font-medium" title={cardLabel}>
                   {cardLabel}
@@ -452,7 +593,8 @@ function Browser({ data }: { data: ShellLibrary }) {
           )
         ) : (
           <>
-            <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} chat={scope.chat as ChatId | null} />
+            {/* A chat's own pins are among its named and pinned branches. */}
+            {kind !== "chat" && <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} />}
             {sections.map(([id, title]) =>
               section(id, id === "just" ? `Just ${card?.card.label ?? "this character"}` : title)
             )}
@@ -462,6 +604,7 @@ function Browser({ data }: { data: ShellLibrary }) {
           </>
         )}
       </div>
+      <SlotOutlet slot={sidebarFoot} props={{}} />
     </div>
   )
 }

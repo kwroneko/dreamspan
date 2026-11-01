@@ -4,17 +4,16 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
+import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { openEntry, openSettings } from "./support/lorebook.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 const save = async (page: Page) => {
-  await page.getByRole("button", { name: /^Save \(/ }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  await expect(dialog.getByText("Some changes no longer fit the document")).toHaveCount(0)
-  await dialog.getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+  await saveRevision(page)
+  await expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
 }
 
 for (const width of [1440, 390]) {
@@ -65,7 +64,8 @@ for (const width of [1440, 390]) {
     const entry = page.getByRole("group", { name: "Lorebook entry 7", exact: true })
     // Rows stay closed until opened; large books do not mount every text editor.
     await expect(page.getByRole("group", { name: /^Lorebook entry/ })).toHaveCount(0)
-    const open = (title: string) => page.getByRole("button", { name: `Open ${title}`, exact: true }).click()
+    // A reload keeps open the entries that were: this browser remembers them.
+    const open = (title: string) => openEntry(page, title)
     await open("Tides")
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     await open("Lamp")
@@ -91,9 +91,16 @@ for (const width of [1440, 390]) {
     await open("Harbour tides")
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide turns at dawn.")
     await expect(entry.getByRole("textbox", { name: "Primary keys" })).toHaveValue("harbour\n/tide,a/iu")
-    await entry.getByRole("button", { name: "Revert Entry content", exact: true }).click()
+    // The entry's text as saved is the state before the one typed, in its edit history.
+    await entry.getByRole("button", { name: "Edit history of Entry content", exact: true }).click()
+    const history = page.getByRole("dialog", { name: "Edit history: Entry content" })
+    await expect(history.getByLabel("Text of the state")).toHaveText("The tide is low.")
+    await history.getByRole("button", { name: "Put this text in the box", exact: true }).click()
+    await expect(history).toHaveCount(0)
     await expectTextBox(entry.getByRole("textbox", { name: "Entry content" }), "The tide is low.")
     await entry.getByRole("textbox", { name: "Entry content" }).fill("The tide turns at dawn.")
+    // Everything but the text and primary keys is under the entry's Settings.
+    await openSettings(entry)
     await entry.getByRole("switch", { name: /^Use secondary keys/ }).click()
     await entry.getByRole("textbox", { name: "Secondary keys" }).fill("storm\nwind")
     await entry.getByRole("combobox", { name: "Logic" }).click()
@@ -133,6 +140,8 @@ for (const width of [1440, 390]) {
     await page.getByRole("textbox", { name: "Title of Untitled entry", exact: true }).fill("Gulls")
     await added.getByRole("textbox", { name: "Primary keys" }).fill("gull")
     await added.getByRole("textbox", { name: "Entry content" }).fill("Gulls gather on the quay.")
+    // On a phone the row is a compact header: its columns are in the entry's Settings.
+    if (width === 390) await openSettings(added)
     await page.getByRole("combobox", { name: "Strategy of Gulls", exact: true }).selectOption("constant")
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).fill("37")
     await page.getByRole("spinbutton", { name: "Order of Gulls", exact: true }).blur()
@@ -221,49 +230,72 @@ test("an absent embedded book can be authored, including an empty book after rem
   expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])
 })
 
-for (const target of ["book", "entry"] as const) {
-  for (const action of ["Revert", "Undo"] as const) {
-    test(`${action} a new ${target} recovers its field drafts and permits later card saves`, async ({ page }) => {
-      const name = `${action} lore ${target}`
-      const card = await admin((api) => api.CreateCard({ label: name, name }))
-      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await page.goto(`${server().url}/library/${card.id}`)
-      await page.getByRole("button", { name: "Add entry", exact: true }).click()
-      await page.getByText("Book settings").click()
-      await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Draft book")
-      if (target === "entry") {
-        await page.getByRole("button", { name: "More for Untitled entry", exact: true }).click()
-        await page.getByRole("menuitem", { name: "Delete" }).click()
-        await save(page)
-        await page.getByRole("button", { name: "Add entry", exact: true }).click()
-      }
-      const text = `Recover this lore: ${name}`
-      await page.getByRole("textbox", { name: "Entry content", exact: true }).fill(text)
-      await page
-        .getByRole("button", {
-          name: `${action} ${target === "book" ? "Embedded lorebook" : "Untitled entry"}`,
-          exact: true
-        })
-        .click()
-      await expect(
-        page.getByText(target === "book" ? "This card has no embedded lorebook." : "No entries yet.")
-      ).toBeVisible()
-      await expect
-        .poll(async () =>
-          (await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))).some((r) => r.content === text)
-        )
-        .toBe(true)
-      await page.getByRole("textbox", { name: "Creator", exact: true }).fill("Synthetic creator")
+// A new book goes with History's Restore of the latest revision (fields have no Revert or Undo
+// of their own any more); a new entry with its Delete.
+for (const target of ["book", "entry"] as const)
+  test(`${target === "book" ? "Restoring the latest revision past" : "Deleting"} a new ${target} keeps its typed text and permits later card saves`, async ({
+    page
+  }) => {
+    const name = `${target === "book" ? "Restore" : "Delete"} lore ${target}`
+    const card = await admin((api) => api.CreateCard({ label: name, name }))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/library/${card.id}`)
+    await page.getByRole("button", { name: "Add entry", exact: true }).click()
+    await page.getByText("Book settings").click()
+    await page.getByRole("textbox", { name: "Lorebook name", exact: true }).fill("Draft book")
+    if (target === "entry") {
+      await page.getByRole("button", { name: "More for Untitled entry", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Delete" }).click()
       await save(page)
-      await page.reload()
-      const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
-      if (target === "book") expect(opened.doc.character_book).toBeUndefined()
-      else expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])
-      expect(opened.doc.creator).toBe("Synthetic creator")
-      expect(opened.drafts.filter((draft) => draft.status === "active")).toEqual([])
-    })
-  }
-}
+      await page.getByRole("button", { name: "Add entry", exact: true }).click()
+    }
+    const text = `Recover this lore: ${name}`
+    await page.getByRole("textbox", { name: "Entry content", exact: true }).fill(text)
+    // Kept on the server before it goes.
+    await expect
+      .poll(async () =>
+        (await admin((api) => api.OpenEditor({ refId: card.id }))).drafts.some((d) => d.content === text)
+      )
+      .toBe(true)
+    const field = (await admin((api) => api.OpenEditor({ refId: card.id }))).drafts.find((d) => d.content === text)!.key
+      .field
+    if (target === "book") {
+      await page.getByRole("button", { name: "History", exact: true }).click()
+      const history = page.getByRole("dialog", { name: "History", exact: true })
+      await history
+        .getByRole("list", { name: "Revisions" })
+        .getByRole("listitem")
+        .first()
+        .getByRole("button", { name: /^Revision \d+ / })
+        .click()
+      await history.getByRole("button", { name: "Restore", exact: true }).click()
+      await history.getByRole("button", { name: "Close", exact: true }).click()
+    } else {
+      await page.getByRole("button", { name: "More for Untitled entry", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Delete" }).click()
+    }
+    await expect(
+      page.getByText(target === "book" ? "This card has no embedded lorebook." : "No entries yet.")
+    ).toBeVisible()
+    // The text typed is still there: in the bin (a deleted entry's) or the field's edit history.
+    await expect
+      .poll(async () => {
+        const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
+        const history = await admin((api) => editHistoryTexts(api, card.id, field)).catch(
+          (): ReadonlyArray<string> => []
+        )
+        return recovered.some((r) => r.content === text) || history.includes(text)
+      })
+      .toBe(true)
+    await page.getByRole("textbox", { name: "Creator", exact: true }).fill("Synthetic creator")
+    await save(page)
+    await page.reload()
+    const opened = await admin((api) => api.OpenEditor({ refId: card.id }))
+    if (target === "book") expect(opened.doc.character_book).toBeUndefined()
+    else expect((opened.doc.character_book as LorebookDoc).entries).toEqual([])
+    expect(opened.doc.creator).toBe("Synthetic creator")
+    expect(opened.drafts.filter((draft) => draft.status === "active")).toEqual([])
+  })
 
 test("card search and replace includes embedded lore and keys in closed entries", async ({ page }) => {
   const card = await admin((api) => api.CreateCard({ label: "Search lore", name: "Search lore" }))

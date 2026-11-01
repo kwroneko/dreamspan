@@ -4,6 +4,7 @@
 import { CARD_JOIN_PREFIX, CARD_JOIN_SUFFIX } from "@rp/shared/docs/preset.ts"
 import { useState } from "react"
 import { PromptDocument } from "./PromptDocument.tsx"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
 import { DocumentRegexScripts } from "./RegexScripts.tsx"
 import { presetEditorSections, presetEditorWarnings } from "./presetSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -14,10 +15,10 @@ import { SelectField, SwitchField, TextField } from "./controls.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
 const POSTFIXES = [
-  { value: "", label: "Nothing" },
-  { value: " ", label: "A space" },
-  { value: "\n", label: "A new line" },
-  { value: "\n\n", label: "Two new lines" }
+  { value: "", label: "Nothing", description: "The new text follows straight on, mid-word if it starts there." },
+  { value: " ", label: "A space", description: "As if the message went on in the same sentence." },
+  { value: "\n", label: "A new line", description: "The new text starts on the next line." },
+  { value: "\n\n", label: "Two new lines", description: "The new text starts a new paragraph." }
 ] as const
 
 /**
@@ -67,6 +68,7 @@ export function PresetEditor({
   focus?: string | undefined
 }) {
   const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
+  const workspace = usePresetWorkspace()
   return (
     <>
       <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
@@ -75,7 +77,13 @@ export function PresetEditor({
           title="Prompts"
           description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
         />
-        <PromptDocument store={store} context={context} focus={focus} goTo={goTo} />
+        <PromptDocument
+          store={store}
+          context={context}
+          focus={focus}
+          goTo={goTo}
+          onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
+        />
       </Card>
       <PresetSettings store={store} call={call} />
     </>
@@ -120,11 +128,17 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             label="Start of a reply written as you"
             rows={3}
           />
-          <SwitchField store={store} path={["prefill", "continue"]} label="Continue by prefilling the message" />
+          <SwitchField
+            store={store}
+            path={["prefill", "continue"]}
+            label="Continue by prefilling the message"
+            description="SillyTavern's continue prefill, kept for exports. Here Continue always sends the reply so far as the start of the model's reply when the model takes a prefill, and as its last message, with the continue text after it, when it doesn't."
+          />
           <SelectField
             store={store}
             path={["prefill", "continue_postfix"]}
             label="After a continued message"
+            description="For a model that takes no prefill: what goes between the reply so far and what Continue writes, unless the reply already ends in a space or a line break."
             items={POSTFIXES}
           />
         </div>

@@ -83,7 +83,7 @@ const builtinDescription = (source: Source, labels: SourceLabels): SourceDescrip
       }
     }
     case "direction":
-      return { label: "One-turn direction", slotId: null }
+      return { label: "One-turn guidance", slotId: null }
     case "assembler":
       return {
         label: source.what.charAt(0).toUpperCase() + source.what.slice(1),
