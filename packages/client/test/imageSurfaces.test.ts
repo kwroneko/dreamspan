@@ -25,5 +25,11 @@ it("keeps image pixels in the stock img surfaces covered by root CSS", () => {
       expect(source).toContain("data-image-fallback")
     }
   }
-  expect(images.sort()).toEqual(["ui/Avatar.tsx", "ui/ContentImage.tsx", "ui/CutoutChooser.tsx", "ui/ImageViewer.tsx"])
+  expect(images.sort()).toEqual([
+    "features/cardImport/ImportNewVersion.tsx",
+    "ui/Avatar.tsx",
+    "ui/ContentImage.tsx",
+    "ui/CutoutChooser.tsx",
+    "ui/ImageViewer.tsx"
+  ])
 })

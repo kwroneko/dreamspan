@@ -77,7 +77,14 @@ function Picture({ plan }: { plan: VersionPlan }) {
         {picture._tag === "Same" ? "The picture is the same as the card's." : "The file has no picture."}
       </p>
     )
-  const frame = "flex h-40 w-28 items-center justify-center overflow-hidden rounded-md border border-border bg-canvas"
+  const frame =
+    "relative flex h-40 w-28 items-center justify-center overflow-hidden rounded-md border border-border bg-canvas"
+  // With images hidden in public (ui/imagePrefs.ts), a word shows in the picture's place.
+  const hidden = (
+    <span data-image-fallback className="absolute inset-0 items-center justify-center text-sm text-muted">
+      Picture hidden
+    </span>
+  )
   return (
     <div className="flex flex-wrap gap-4" aria-label="Picture">
       <figure className="flex flex-col gap-1">
@@ -91,6 +98,7 @@ function Picture({ plan }: { plan: VersionPlan }) {
           ) : (
             <span className="text-sm text-muted">None</span>
           )}
+          {picture.before && hidden}
         </div>
         <figcaption className="text-sm text-muted">Now</figcaption>
       </figure>
@@ -101,6 +109,7 @@ function Picture({ plan }: { plan: VersionPlan }) {
           ) : (
             <span className="p-2 text-center text-sm text-muted">Too large to show here</span>
           )}
+          {picture.after && hidden}
         </div>
         <figcaption className="text-sm text-muted">From the file</figcaption>
       </figure>
