@@ -54,7 +54,7 @@ export function Select<Value>({
                 <BaseSelect.Item
                   key={String(item.value)}
                   value={item.value}
-                  className="grid cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
+                  className="grid grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1.5 pr-4 pl-2 text-sm outline-none select-none data-highlighted:bg-surface-raised"
                 >
                   <BaseSelect.ItemIndicator className="col-start-1 text-accent">
                     <svg

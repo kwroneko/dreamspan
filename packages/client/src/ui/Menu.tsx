@@ -55,7 +55,7 @@ export function Menu({
 }
 
 const itemClass = (tone: "default" | "danger") =>
-  `flex min-h-9 cursor-default items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:opacity-50 data-highlighted:bg-surface-raised ${
+  `flex min-h-9 items-center gap-2.5 rounded-sm px-2.5 py-1.5 text-sm outline-none select-none data-disabled:opacity-50 data-highlighted:bg-surface-raised ${
     tone === "danger" ? "text-danger" : ""
   }`
 

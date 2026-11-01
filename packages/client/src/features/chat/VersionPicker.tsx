@@ -412,7 +412,7 @@ export function VersionPicker({
     />
   )
   const counterClass =
-    "h-8 min-w-9 rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
+    "h-8 min-w-9 rounded-md px-1 text-xs text-muted tabular-nums outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-hover"
   let picker: ReactNode
   if (narrow)
     picker = (
