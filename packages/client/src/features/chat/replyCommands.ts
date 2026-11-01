@@ -87,7 +87,8 @@ const stepLast = (context: ChatCommandContext, direction: -1 | 1) => {
 export const registerReplyCommands = () => [
   chatCommands.register({
     id: "reply.continue",
-    label: "Continue latest reply (Alt+Enter)",
+    label: "Continue latest reply",
+    description: "Writes more of the latest reply, from the page or the composer.",
     order: 30,
     icon: "continue",
     shortcut: { key: "Enter", mod: false, alt: true },
@@ -101,7 +102,8 @@ export const registerReplyCommands = () => [
   }),
   chatCommands.register({
     id: "reply.edit-last",
-    label: "Edit last message (ArrowUp in empty composer)",
+    label: "Edit last message",
+    description: "From an empty composer: edits the chat's last message.",
     order: 31,
     icon: "edit",
     shortcut: { key: "ArrowUp", mod: false },
@@ -111,7 +113,8 @@ export const registerReplyCommands = () => [
   }),
   chatCommands.register({
     id: "reply.edit-own",
-    label: "Edit your last message (Ctrl+ArrowUp)",
+    label: "Edit your last message",
+    description: "Edits the last message you wrote, from an empty composer or anywhere but a text field.",
     order: 32,
     icon: "edit",
     shortcut: { key: "ArrowUp", mod: true },
@@ -126,10 +129,11 @@ export const registerReplyCommands = () => [
   ...([-1, 1] as const).map((direction) =>
     chatCommands.register({
       id: direction === -1 ? "reply.previous-version" : "reply.next-version",
-      label:
+      label: direction === -1 ? "Previous version of last reply" : "Next version of last reply",
+      description:
         direction === -1
-          ? "Previous version of last reply (ArrowLeft)"
-          : "Next version of last reply (ArrowRight; generates past last)",
+          ? "Shows the latest reply's version before the one shown."
+          : "Shows the latest reply's next version; past its last, writes a new one.",
       order: direction === -1 ? 33 : 34,
       icon: direction === -1 ? ("left" as const) : ("right" as const),
       shortcut: { key: direction === -1 ? "ArrowLeft" : "ArrowRight", mod: false },
@@ -142,7 +146,8 @@ export const registerReplyCommands = () => [
   ),
   chatCommands.register({
     id: "message.save",
-    label: "Save message edit (Ctrl+Enter)",
+    label: "Save message edit",
+    description: "Saves the message being edited.",
     order: 35,
     icon: "edit",
     shortcut: { key: "Enter", mod: true },

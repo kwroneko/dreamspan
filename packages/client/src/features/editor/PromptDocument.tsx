@@ -50,7 +50,7 @@ const conditions = (["always", "as_character", "as_user", "with_direction"] as c
 const conditionBadges = {
   as_character: "as a character",
   as_user: "as {{user}}",
-  with_direction: "with a direction"
+  with_direction: "with guidance"
 } as const
 
 const NEW_PROMPT_HINT = "An empty prompt of your own, placed here"

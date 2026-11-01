@@ -12,6 +12,7 @@ import type { IconName } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { popupOpen } from "../../ui/openPopups.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export interface ChatCommandContext {
@@ -150,7 +151,7 @@ export const invokeChatCommand = (id: string, context: ChatCommandContext) => {
 /** Keyboard invocation resolves the same effective, available command as the menu. */
 export const runCommandShortcut = (event: CommandKeyEvent, context: ChatCommandContext) => {
   if (event.defaultPrevented || event.isComposing || event.repeat || event.shiftKey) return false
-  if (typeof document !== "undefined" && document.querySelector('[role="dialog"], [role="alertdialog"]')) return false
+  if (popupOpen()) return false
   const command = availableCommands(context).find(
     (entry) =>
       entry.shortcut &&

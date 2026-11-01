@@ -1917,16 +1917,16 @@ export class WriteOps extends RpcGroup.make(
       lastMessageAt: Schema.NullOr(Schema.Number),
       sha256: Schema.String,
       stateJson: Schema.String,
+      /** A branch's parent file's record. An ST file's name never names its fork (owner, 2026-11-01). */
+      fork: Schema.NullOr(Schema.Struct({ parentRecordId: Schema.String })),
       /**
-       * A branch's parent and optional ST name. Automatic names still need placement
-       * context so local names and explicit clears follow replacement paths.
+       * ST opens the file's card or group on it (`chat`, `chat_id`): the chat opens on its fork
+       * here, unless the user has chatted or branched in the chat since it was imported.
        */
-      fork: Schema.NullOr(Schema.Struct({ name: Schema.NullOr(Schema.String), parentRecordId: Schema.String }))
+      stCurrent: Schema.optionalKey(Schema.Boolean)
     },
     success: Schema.Struct({
-      notes: Schema.Record(Schema.String, EntityId),
-      /** What became of `fork`: set, kept (the slot had a name), or no slot of its own. */
-      fork: Schema.NullOr(Schema.Literals(["named", "kept", "same"]))
+      notes: Schema.Record(Schema.String, EntityId)
     }),
     error: Schema.Union([NotFound, ImportLeaseLost, StorageError])
   }),

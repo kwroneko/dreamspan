@@ -15,6 +15,7 @@ import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
 import type { CardSort } from "./cardRecency.ts"
 
@@ -183,27 +184,56 @@ export function useOpenCharacter() {
 }
 
 /**
+ * What a tile does when it isn't opening the character's chat (the Cast's Add characters),
+ * given the tile's status (a word from the grid's `status`, undefined for none): `label`, its
+ * accessible name; `hint`, its tooltip; `state`, how it stands: `mark`, a badge over its
+ * picture ("In chat"), `done` dims it and makes a click do nothing (it stays focusable, so its
+ * tooltip can say why), `pending` while the pick is under way. A tile gets only its own status,
+ * so a change re-renders only the tiles it changes.
+ */
+export interface TilePick {
+  readonly onPick: (card: ShellCard) => void
+  readonly label: (card: ShellCard, status: string | undefined) => string
+  readonly hint: (card: ShellCard, status: string | undefined) => ReactNode
+  readonly state: (status: string | undefined) => TileState
+}
+export interface TileState {
+  readonly mark?: ReactNode
+  readonly done?: boolean
+  readonly pending?: boolean
+}
+
+/**
  * Characters as tiles, in the order given (`browseCards`), each with the date `sort` orders
- * by. `onPick`: what a tile does, else open the character's chat. `children` follow the tiles
+ * by. `pick`: what a tile does, else open the character's chat, and `status` each tile's
+ * status for it, by entity id. `children` follow the tiles
  * (an empty state). `className` sets the columns for where it's shown.
  */
 export function CharacterGrid({
   cards,
   sort,
-  onPick,
+  pick,
+  status,
   className,
   children
 }: {
   cards: ReadonlyArray<ShellCard>
   sort: CardSort
-  onPick?: (card: ShellCard) => void
+  pick?: TilePick
+  status?: ReadonlyMap<string, string>
   className: string
   children?: ReactNode
 }) {
   return (
     <div aria-label="Characters" className={className}>
       {cards.map((c) => (
-        <CharacterTile key={c.card.entityId} card={c} sort={sort} {...(onPick ? { onPick } : {})} />
+        <CharacterTile
+          key={c.card.entityId}
+          card={c}
+          sort={sort}
+          {...(pick ? { pick } : {})}
+          status={status?.get(c.card.entityId)}
+        />
       ))}
       {children}
     </div>
@@ -212,48 +242,61 @@ export function CharacterGrid({
 
 /**
  * A character's tile: its picture, names and use, with the favourite star over the picture.
- * `sort`: a date sort's date ends the last line. `onPick`: what a click does, else open its chat.
+ * `sort`: a date sort's date ends the last line. `pick`: what a click does, else open its chat.
  */
 function CharacterTile({
   card,
   sort = "name",
-  onPick
+  pick,
+  status
 }: {
   card: ShellCard
   sort?: CardSort
-  onPick?: (card: ShellCard) => void
+  pick?: TilePick
+  status: string | undefined
 }) {
   const open = useOpenCharacter()
   const c = card.card
+  const state = pick?.state(status) ?? {}
+  const button = (
+    // Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1).
+    <button
+      type="button"
+      onClick={() => {
+        if (!pick) return open(c.entityId)
+        if (!state.done && !state.pending) pick.onPick(card)
+      }}
+      aria-label={pick ? pick.label(card, status) : `Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
+      {...(state.done || state.pending ? { "aria-disabled": true } : {})}
+      {...(state.pending ? { "aria-busy": true } : {})}
+      className={`group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${state.done || state.pending ? "cursor-default" : "hover:border-focus"}`}
+    >
+      <span className={`aspect-[2/3] w-full overflow-hidden ${state.done ? "opacity-50" : ""}`}>
+        <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
+      </span>
+      <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
+        {/* A pick's tooltip names it already. */}
+        <span className="truncate text-sm font-medium" {...(pick ? {} : { title: c.label })}>
+          {c.label}
+        </span>
+        {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
+        {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
+        <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
+          <span className="shrink-0">{c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}</span>
+          <SortDate card={card} sort={sort} />
+        </span>
+      </span>
+    </button>
+  )
   return (
     <div className="relative flex min-w-0 flex-col">
-      {/* Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1). */}
-      <button
-        type="button"
-        onClick={() => (onPick ? onPick(card) : open(c.entityId))}
-        aria-label={`Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
-        className="group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none hover:border-focus focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <span className="aspect-[2/3] w-full overflow-hidden">
-          <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
-        </span>
-        <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
-          <span className="truncate text-sm font-medium" title={c.label}>
-            {c.label}
-          </span>
-          {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
-          {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
-          <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
-            <span className="shrink-0">
-              {c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}
-            </span>
-            <SortDate card={card} sort={sort} />
-          </span>
-        </span>
-      </button>
+      {pick ? <Tooltip label={pick.hint(card, status)}>{button}</Tooltip> : button}
       <span className="absolute top-1 left-1 rounded-md bg-surface/85">
         <FavouriteStar card={card} />
       </span>
+      {state.mark && (
+        <span className="pointer-events-none absolute top-1.5 right-1.5 max-w-[calc(100%-3rem)]">{state.mark}</span>
+      )}
       <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
     </div>
   )

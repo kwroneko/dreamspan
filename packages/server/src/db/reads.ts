@@ -7,7 +7,8 @@ export { stateEventsOnPath } from "./stateRead.ts"
 import { chatCast } from "./cards.ts"
 import { contextExcluded } from "./lcmVisibility.ts"
 // Read operation handlers. They run inside the reader workers on read-only connections.
-import type { ChatId, ForkId, MessageImages, SlotId, VersionId } from "@rp/shared/chat.ts"
+import { type ChatId, Fork, type ForkId, type MessageImages, type SlotId, type VersionId } from "@rp/shared/chat.ts"
+import { chatForkSummaries } from "./forkSummaries.ts"
 import { Branch, type PathRange, PathWindow } from "@rp/shared/chatApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { MergePreview, Revision, type RevisionId } from "@rp/shared/library.ts"
@@ -819,7 +820,13 @@ export const makeReadHandlers = Effect.gen(function* () {
           SELECT ${sql.literal(forkColumns("f"))} FROM forks f WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
           ORDER BY ${sql.literal(forkRecency("f"))} DESC, f.id DESC`
         // Each fork's tip text is the last message it shows (an inserted one can follow the tip).
-        return (yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))).map(toFork)
+        const ends = yield* Effect.forEach(rows, (row) => withDisplayEnd(sql, row))
+        // Where each parts from its parent and its last message's time, as the shell lists them.
+        const summaries = yield* chatForkSummaries(sql, userId, chatId, rows)
+        return ends.map((row) => {
+          const s = summaries.get(row.id)
+          return new Fork({ ...toFork(row), split: s?.split ?? null, endAt: s?.endAt ?? null })
+        })
       }).pipe(query("ListForks")),
 
     // The siblings SwitchBranch counts, in its order, with each one's name and first words.

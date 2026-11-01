@@ -87,9 +87,7 @@ for (const [width, height] of [
       // The chips are always shown, a phone's too: who's next, and Auto naming them.
       await expect(nextChip(page)).toHaveAccessibleName(nextName("Tobin"))
       await nextChip(page).click()
-      await expect(
-        whoReplies(page).getByRole("radio", { name: "Auto: Tobin, next in turn", exact: true })
-      ).toBeChecked()
+      await expect(whoReplies(page).getByRole("radio", { name: "Auto: Tobin", exact: true })).toBeChecked()
       await page.keyboard.press("Escape")
       await expect(whoReplies(page)).toHaveCount(0)
       if (turns > 60) await expect(page.getByText("Mira's earlier turn", { exact: true })).toHaveCount(0)
@@ -158,7 +156,7 @@ test("Next: the next in turn, a pick for one reply, and an empty Send", async ({
   await expect(whoReplies(page).getByRole("radio")).toHaveCount(4)
   await expect(whoReplies(page).getByRole("radio", { name: /^(Mira|Tobin|Wren)$/ })).toHaveCount(3)
   await expect(whoReplies(page).getByRole("radio", { name: "Ana", exact: true })).toHaveCount(0)
-  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira, next in turn", exact: true })).toBeChecked()
+  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira", exact: true })).toBeChecked()
   await page.keyboard.press("Escape")
   await expect(whoReplies(page)).toHaveCount(0)
 
@@ -175,9 +173,7 @@ test("Next: the next in turn, a pick for one reply, and an empty Send", async ({
   await expect(nextChip(page)).toHaveAccessibleName(nextName("Wren"))
   await nextChip(page).click()
   await expect(whoReplies(page).getByRole("radio", { name: "Wren", exact: true })).toBeChecked()
-  await expect(
-    whoReplies(page).getByRole("radio", { name: "Auto: Tobin, next in turn", exact: true })
-  ).not.toBeChecked()
+  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Tobin", exact: true })).not.toBeChecked()
   await page.keyboard.press("Escape")
   // With nothing typed, Send asks for that reply alone.
   await page.getByRole("button", { name: "Wren replies", exact: true }).click()
@@ -186,7 +182,7 @@ test("Next: the next in turn, a pick for one reply, and an empty Send", async ({
   // The pick is used up: Auto again, the next after Wren.
   await expect(nextChip(page)).toHaveAccessibleName(nextName("Mira"))
   await nextChip(page).click()
-  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira, next in turn", exact: true })).toBeChecked()
+  await expect(whoReplies(page).getByRole("radio", { name: "Auto: Mira", exact: true })).toBeChecked()
   await page.keyboard.press("Escape")
 
   // Generate says whose turn it writes: the persona's, for the user.

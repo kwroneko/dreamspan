@@ -19,8 +19,15 @@ import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
-import { formatWhen } from "./chatTitle.ts"
-import { branchActivity, branchLabel, useBranchesRequest, forksChanged, useChatForks } from "./forks.ts"
+import {
+  branchLabel,
+  branchLastAt,
+  formatMoment,
+  OPENS_HERE_HINT,
+  useBranchesRequest,
+  forksChanged,
+  useChatForks
+} from "./forks.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 import { useNarrow } from "./VersionPicker.tsx"
 
@@ -100,7 +107,7 @@ function BranchRow({
       <button
         type="button"
         aria-current={shown || undefined}
-        aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", latest" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
+        aria-label={`${label}${shown ? ", shown" : ""}${fork.current ? ", the chat opens here" : ""}: ${fork.tipExcerpt.slice(0, 80) || "no messages"}`}
         onClick={onSwitch}
         className="flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
@@ -108,11 +115,15 @@ function BranchRow({
           <span className="min-w-0 truncate font-medium">{label}</span>
           {shown && <span className="text-xs font-medium text-accent">shown</span>}
           {fork.current && (
-            <Badge tone="neutral">
-              <span title="The chat opens on it; sending in another branch makes that one the latest">latest</span>
-            </Badge>
+            <Tooltip label={OPENS_HERE_HINT}>
+              <span tabIndex={0} className="rounded outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                <Badge tone="neutral">opens here</Badge>
+              </span>
+            </Tooltip>
           )}
-          <span className="ml-auto text-xs text-muted tabular-nums">{formatWhen(branchActivity(fork))}</span>
+          <span className="ml-auto text-xs text-muted tabular-nums" title="Its last message">
+            {formatMoment(branchLastAt(fork))}
+          </span>
         </span>
         <span className="line-clamp-2 text-xs text-muted [overflow-wrap:anywhere]">
           {fork.tipExcerpt || "No messages yet"}
@@ -165,6 +176,8 @@ function BranchList({
   const keepPanel = search.panel ? { panel: search.panel } : {}
   if (forks === null) return <p className="px-1 py-2 text-sm text-muted">Loading the branches…</p>
   const live = forks.length
+  // By their last message, newest first, as the left panel lists them.
+  const ordered = [...forks].sort((a, b) => branchLastAt(b) - branchLastAt(a))
   const open = (fork: Fork) => {
     onDone()
     if (fork.id === shown?.id) return
@@ -201,11 +214,11 @@ function BranchList({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <ol aria-label="Branches" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
-        {forks.map((fork) => (
+        {ordered.map((fork) => (
           <BranchRow
             key={fork.id}
             fork={fork}
-            label={branchLabel(fork, forks)}
+            label={branchLabel(fork)}
             shown={fork.id === shown?.id}
             only={live <= 1}
             onSwitch={() => open(fork)}
@@ -216,16 +229,16 @@ function BranchList({
       </ol>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
         {latest !== undefined && shown !== undefined && latest.id !== shown.id && (
-          <Tooltip label="The one the chat opens on: the branch you sent in last.">
+          <Tooltip label={OPENS_HERE_HINT}>
             <button type="button" className="text-accent hover:underline" onClick={() => open(latest)}>
-              Back to the latest branch
+              Back to the branch the chat opens on
             </button>
           </Tooltip>
         )}
         {parent !== undefined && parent.id !== latest?.id && (
           <Tooltip label="The branch this one was made from.">
             <button type="button" className="text-accent hover:underline" onClick={() => open(parent)}>
-              Back to “{branchLabel(parent, forks)}”
+              Back to “{branchLabel(parent)}”
             </button>
           </Tooltip>
         )}
@@ -279,10 +292,11 @@ export function BranchControl(props: BranchControlProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read again each time it opens
   }, [open])
   const many = forks !== null && forks.length > 1
-  const label = shown ? branchLabel(shown, forks ?? []) : "Branch"
-  // Sending in a branch that isn't the latest makes it the latest; the header says which it is.
+  const label = shown ? branchLabel(shown) : "Branch"
+  // Sending in a branch that isn't the one the chat opens on makes it that; the header says which it is.
   const off = shown !== undefined && !shown.current
-  const place = `${shown && forks ? `${forks.indexOf(shown) + 1} of ${forks.length}` : ""}${off ? ", not the latest" : ""}`
+  const ordered = forks === null ? [] : [...forks].sort((a, b) => branchLastAt(b) - branchLastAt(a))
+  const place = `${shown && forks ? `${ordered.indexOf(shown) + 1} of ${forks.length}` : ""}${off ? ", not the one the chat opens on" : ""}`
   const title = "Branches of this chat"
   const body = <BranchList {...props} forks={forks} shown={shown} onDone={() => setOpen(false)} />
   if (narrow || !many)
@@ -319,7 +333,7 @@ export function BranchControl(props: BranchControlProps) {
           <Icon name="branch" size={14} className="shrink-0" />
           <span className="truncate">
             <span className="text-muted">Branch:</span> {label}
-            {off && <span className="text-xs text-muted"> · not the latest</span>}
+            {off && <span className="text-xs text-muted"> · not where it opens</span>}
           </span>
           <Icon name="down" size={14} className="shrink-0 text-muted" />
         </>

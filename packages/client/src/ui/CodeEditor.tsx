@@ -15,6 +15,8 @@ export interface CodeEditorProps {
   caret?: number | undefined
   /** The snippet editor's own text: its text actions don't offer sending it to a snippet. */
   source?: "snippet" | undefined
+  /** False: no text actions under it, for text that isn't prose (a pattern, a template's markers). */
+  textActions?: boolean | undefined
   /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
   quietMarkers?: boolean | undefined
   rows?: number | undefined

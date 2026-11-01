@@ -492,10 +492,16 @@ export function ModelSettingsEditor({
             >
               <Select items={triItems(model.upstream.vision)} value={vision} onValueChange={setVision} />
             </Field>
-            <Field label="Reasoning">
+            <Field
+              label="Reasoning"
+              description="Whether it thinks before replying. Yes sends thinking settings in the form its provider takes, such as the reasoning effort, and on OpenAI's APIs sends the instructions as developer messages."
+            >
               <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
             </Field>
-            <Field label="Tools">
+            <Field
+              label="Tools"
+              description="Whether it can call tools. Nothing here asks a model to call one yet, so this changes no request; Continue through a tool schema follows Prefill instead."
+            >
               <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
             </Field>
             <Field

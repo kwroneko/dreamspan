@@ -41,11 +41,15 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
       title="Who replies next"
       chip={<ChipText>Next: {who}</ChipText>}
       choices={[
-        { value: AUTO, label: next === null ? "Auto" : `Auto: ${name(next.id)}, next in turn` },
+        {
+          value: AUTO,
+          label: next === null ? "Auto" : `Auto: ${name(next.id)}`,
+          detail: next === null ? "Whoever is next in turn replies" : "Next in turn: turns go round the cast"
+        },
         ...candidates.map((id) => ({
           value: id,
           label: name(id),
-          ...(muted.includes(id) ? { detail: "Muted: replies only when picked" } : {})
+          detail: muted.includes(id) ? "Muted: replies only when picked" : "Replies next, for one reply"
         }))
       ]}
       value={picked ?? AUTO}

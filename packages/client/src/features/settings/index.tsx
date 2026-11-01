@@ -2,10 +2,11 @@
 // the groups are a column beside the open page; on a phone /settings is the list and each page
 // opens on its own, with a way back to the list.
 import { Link, Navigate, Outlet, useLocation } from "@tanstack/react-router"
-import { useSyncExternalStore } from "react"
-import { fullPath, routes } from "../../routes.tsx"
+import { useId, useSyncExternalStore } from "react"
+import { fullPath, routes, type RouteEntry } from "../../routes.tsx"
 import { useSession } from "../../session.ts"
 import { Icon } from "../../ui/Icon.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useTitle } from "../shell.tsx"
 import { settingsGroups, settingsNav } from "./groups.ts"
 
@@ -25,8 +26,48 @@ const useSettingsNav = () => {
   return settingsNav(session.user.role === "admin")
 }
 
+/**
+ * A page's link: its description under its label on a phone; on a wide screen its tooltip,
+ * beside the list, with a hidden copy outside the link as its description, so the link's text
+ * stays its label.
+ */
+function NavLink({ entry, wide }: { entry: RouteEntry; wide: boolean }) {
+  const { label, description } = entry.nav!
+  const id = useId()
+  // Hidden from its name, and still its description: a reference reads hidden text.
+  const explanation = description && (
+    <span id={id} aria-hidden="true" className={wide ? "hidden" : "pt-0.5 text-xs text-muted"}>
+      {description}
+    </span>
+  )
+  const link = (
+    <Link
+      to={fullPath(entry)}
+      {...(description ? { "aria-describedby": id } : {})}
+      className="flex items-center gap-2 px-4 py-3 text-text hover:bg-surface-raised md:rounded-md md:px-3 md:py-1.5 md:text-sm md:text-muted md:hover:text-text md:data-[status=active]:bg-surface-raised md:data-[status=active]:font-medium md:data-[status=active]:text-text"
+    >
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{label}</span>
+        {!wide && explanation}
+      </span>
+      <Icon name="right" className="text-muted md:hidden" />
+    </Link>
+  )
+  return description && wide ? (
+    <>
+      <Tooltip label={description} side="right">
+        {link}
+      </Tooltip>
+      {explanation}
+    </>
+  ) : (
+    link
+  )
+}
+
 function SettingsNavigation() {
   const sections = useSettingsNav()
+  const wide = useWide()
   return (
     <nav aria-label="Settings" className="flex flex-col gap-5 md:gap-4">
       {sections.map(({ group, pages }) => (
@@ -38,13 +79,7 @@ function SettingsNavigation() {
           <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface md:divide-y-0 md:rounded-none md:border-0 md:bg-transparent">
             {pages.map((entry) => (
               <li key={entry.id}>
-                <Link
-                  to={fullPath(entry)}
-                  className="flex items-center gap-2 px-4 py-3 text-text hover:bg-surface-raised md:rounded-md md:px-3 md:py-1.5 md:text-sm md:text-muted md:hover:text-text md:data-[status=active]:bg-surface-raised md:data-[status=active]:font-medium md:data-[status=active]:text-text"
-                >
-                  <span className="min-w-0 flex-1 truncate">{entry.nav!.label}</span>
-                  <Icon name="right" className="text-muted md:hidden" />
-                </Link>
+                <NavLink entry={entry} wide={wide} />
               </li>
             ))}
           </ul>

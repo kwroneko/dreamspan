@@ -170,6 +170,62 @@ interface StVersion {
   /** ST's reasoning it parsed out of the text (`reasoning_type: "parsed"`), as a reply section. */
   readonly sections?: ReplySections
   readonly at: number
+  /** Who generated it and how long it took, as ST recorded them (`stGenerationOf`); absent for none. */
+  readonly generation?: StGeneration
+}
+
+/**
+ * What ST records about a generation, on the message for the swipe it shows and in
+ * `swipe_info[i]` for each swipe (public/script.js: `saveReply`, `syncMesToSwipe`):
+ * `extra.api` and `extra.model` (the API and model it was generated with, rewritten by a
+ * Continue, which extends the swipe in place), `gen_started` and `gen_finished` (a Continue
+ * moves the start back by the time already spent, so the span covers every part),
+ * `extra.token_count` (ST's own count of the text and reasoning, only with its token counter
+ * on; dropped from swipes generated together in one request), `extra.time_to_first_token` and
+ * `extra.reasoning_duration` in milliseconds. User messages have a send date and a token
+ * count at most. An edit in ST (`updateMessage`) keeps the model and times.
+ */
+interface StGeneration {
+  readonly api?: string
+  readonly model?: string
+  readonly startedAt?: number
+  readonly finishedAt?: number
+  readonly tokens?: number
+  readonly firstTokenMs?: number
+  readonly reasoningMs?: number
+}
+
+const MAX_API_CHARS = 64
+const MAX_MODEL_CHARS = 256
+const MAX_TOKENS = 100_000_000
+const MAX_DURATION_MS = 7 * 24 * 3600 * 1000
+
+/** A message's or swipe's recorded generation: `holder` has the dates, `extra` the rest. */
+const stGenerationOf = (holder: unknown, extra: unknown): StGeneration | undefined => {
+  const dates = Predicate.isObject(holder) ? holder : {}
+  const x = Predicate.isObject(extra) ? extra : {}
+  const name = (value: unknown, max: number) =>
+    typeof value === "string" && value.trim() !== "" ? bounded(value.trim(), max) : undefined
+  const whole = (value: unknown, max: number) =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 && value <= max ? Math.round(value) : undefined
+  const startedAt = parseStDate(dates.gen_started) ?? undefined
+  const finishedAt = parseStDate(dates.gen_finished) ?? undefined
+  const generation: StGeneration = {
+    ...(name(x.api, MAX_API_CHARS) !== undefined ? { api: name(x.api, MAX_API_CHARS)! } : {}),
+    ...(name(x.model, MAX_MODEL_CHARS) !== undefined ? { model: name(x.model, MAX_MODEL_CHARS)! } : {}),
+    // Both or neither: one alone gives no time, and a finish before its start is no span.
+    ...(startedAt !== undefined && finishedAt !== undefined && finishedAt >= startedAt
+      ? { startedAt, finishedAt }
+      : {}),
+    ...(whole(x.token_count, MAX_TOKENS) !== undefined ? { tokens: whole(x.token_count, MAX_TOKENS)! } : {}),
+    ...(whole(x.time_to_first_token, MAX_DURATION_MS) !== undefined
+      ? { firstTokenMs: whole(x.time_to_first_token, MAX_DURATION_MS)! }
+      : {}),
+    ...(whole(x.reasoning_duration, MAX_DURATION_MS) !== undefined
+      ? { reasoningMs: whole(x.reasoning_duration, MAX_DURATION_MS)! }
+      : {})
+  }
+  return Object.keys(generation).length === 0 ? undefined : generation
 }
 
 /** A message as the writer takes it: a slot with its versions. */
@@ -376,8 +432,21 @@ export const parseStChatPart = (
     let versions: Array<StVersion>
     let selected = 0
     const swipes = Array.isArray(value.swipes) ? value.swipes.filter((s): s is string => typeof s === "string") : []
+    const generationOf = (holder: unknown, source: unknown) => {
+      const generation = stGenerationOf(holder, source)
+      return generation ? { generation } : {}
+    }
+    // The shown swipe's are the message's own, as ST shows them (ST keeps its swipe_info a
+    // copy); its swipe_info's only where the message has none. Never a mix of the two.
+    const ownGeneration = (info: unknown) => {
+      const generation =
+        stGenerationOf(value, extra) ?? (Predicate.isObject(info) ? stGenerationOf(info, info.extra) : undefined)
+      return generation ? { generation } : {}
+    }
     if (swipes.length === 0) {
-      versions = [{ content: mes, reasoning: reasoningOf(extra), ...sectionsOf(extra), at: sentAt }]
+      versions = [
+        { content: mes, reasoning: reasoningOf(extra), ...sectionsOf(extra), at: sentAt, ...ownGeneration(null) }
+      ]
     } else {
       if (swipes.length > stChatLimits.maxSwipes) {
         issues.add(
@@ -393,14 +462,21 @@ export const parseStChatPart = (
           content,
           reasoning: reasoningOf(info.extra),
           ...sectionsOf(info.extra),
-          at: parseStDate(info.send_date) ?? sentAt
+          at: parseStDate(info.send_date) ?? sentAt,
+          ...generationOf(info, info.extra)
         }
       })
       const swipeId = typeof value.swipe_id === "number" && Number.isSafeInteger(value.swipe_id) ? value.swipe_id : 0
       // `mes` is what ST shows and sends; the swipe it came from is normally swipe_id.
       selected = kept[swipeId] === mes ? swipeId : kept.indexOf(mes)
       if (selected < 0) {
-        versions.push({ content: mes, reasoning: reasoningOf(extra), ...sectionsOf(extra), at: sentAt })
+        versions.push({
+          content: mes,
+          reasoning: reasoningOf(extra),
+          ...sectionsOf(extra),
+          at: sentAt,
+          ...ownGeneration(null)
+        })
         selected = versions.length - 1
       } else {
         // The shown swipe has the message's own time and reasoning.
@@ -409,7 +485,8 @@ export const parseStChatPart = (
           content: mes,
           reasoning: reasoningOf(extra) ?? own.reasoning,
           ...(own.sections ? { sections: own.sections } : {}),
-          at: sentAt
+          at: sentAt,
+          ...ownGeneration(swipeInfo[selected])
         }
       }
     }

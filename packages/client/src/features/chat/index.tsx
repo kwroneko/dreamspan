@@ -10,6 +10,8 @@ import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
 import { registerReasoningPanels } from "./Reasoning.tsx"
 import { registerVersionMetrics } from "./versionMetrics.tsx"
+import { registerMessageDetails } from "./messageDetails.tsx"
+import { registerModelMarks } from "./modelMarks.tsx"
 import { registerReplyCommands } from "./replyCommands.ts"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
@@ -72,6 +74,8 @@ export const register = () => {
   registerGuidanceEdit()
   registerReasoningActions()
   registerReasoningPanels()
+  registerMessageDetails()
+  registerModelMarks()
   registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()
@@ -106,7 +110,11 @@ export const register = () => {
     parent: "settings",
     path: "chats",
     component: ChatDefaultsPage,
-    nav: { label: "Chats", order: 15 }
+    nav: {
+      label: "Chats",
+      order: 15,
+      description: "What every chat starts from: the model, the preset, the refusal judge and summaries."
+    }
   })
   // A chat with a card, before it exists (DESIGN §2.1).
   routes.register({

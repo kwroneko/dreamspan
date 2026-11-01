@@ -20,7 +20,7 @@ import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { usageLine } from "../characters/data.ts"
-import { FavouriteStar } from "../characters/cardBrowse.tsx"
+import { FavouriteStar, SortDirection } from "../characters/cardBrowse.tsx"
 import { shellAtom, type ShellLibrary } from "../characters/shellData.tsx"
 import { useTitle } from "../shell.tsx"
 import { PRESET_VIEWS, type PresetView, presetDetail, presetsInView } from "../pickers/presetList.ts"
@@ -31,15 +31,17 @@ import { libraryActions } from "./slots.ts"
 
 type Kind = (typeof LISTED)[number]["kind"]
 type Show = "all" | "characters" | "personas"
-type Sort = "used" | "name" | "chats" | "changed"
+type Sort = "used" | "name" | "chats" | "changed" | "added"
 type View = "list" | "grid"
 interface Prefs {
   readonly kind: Kind
   readonly show: Show
   readonly sort: Sort
+  /** The sort the other way round: oldest or fewest first, Z to A. */
+  readonly reversed: boolean
   readonly view: View
 }
-const DEFAULTS: Prefs = { kind: "card", show: "all", sort: "used", view: "list" }
+const DEFAULTS: Prefs = { kind: "card", show: "all", sort: "used", reversed: false, view: "list" }
 
 /** The page's choices, remembered per account in this browser. */
 function usePrefs() {
@@ -95,14 +97,28 @@ interface Item {
 type ShellCard = ShellLibrary["cards"][number]
 const persona = (item: Item) => item.card?.persona === true
 
-const SORTS: Record<Sort, (a: Item, b: Item) => number> = {
-  used: (a, b) => (b.usage?.lastMessageAt ?? -1) - (a.usage?.lastMessageAt ?? -1),
-  name: () => 0,
-  chats: (a, b) => (b.usage?.chats ?? -1) - (a.usage?.chats ?? -1),
-  changed: (a, b) => b.entry.updatedAt - a.entry.updatedAt
+/** What a sort orders by, largest (newest, most) first; null: nothing to order by, last either way. */
+const SORTS: Record<Exclude<Sort, "name">, (item: Item) => number | null> = {
+  used: (item) => item.usage?.lastMessageAt ?? null,
+  chats: (item) => item.usage?.chats ?? null,
+  changed: (item) => item.entry.updatedAt,
+  added: (item) => item.shell?.addedAt ?? null
 }
 const byName = (a: Item, b: Item) =>
   a.entry.label.localeCompare(b.entry.label) || a.entry.subtitle.localeCompare(b.entry.subtitle)
+/**
+ * Largest first and names A to Z; `reversed`, the other way round, as the other character
+ * surfaces sort (characters/cardRecency.ts). A card never used comes last either way; name
+ * breaks ties.
+ */
+const compareItems = (sort: Sort, reversed: boolean) => (a: Item, b: Item) => {
+  const turn = reversed ? -1 : 1
+  if (sort === "name") return turn * byName(a, b)
+  const x = SORTS[sort](a)
+  const y = SORTS[sort](b)
+  if (x === null || y === null) return x === y ? byName(a, b) : x === null ? 1 : -1
+  return turn * (y - x) || byName(a, b)
+}
 
 const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
   texts.some((text) => text?.toLowerCase().includes(needle))
@@ -322,7 +338,7 @@ function Section({
       }))
     : shown
         .filter((item) => matches(needle, item.entry.label, item.entry.subtitle, item.entry.modelName))
-        .sort((a, b) => (cards ? SORTS[prefs.sort](a, b) : 0) || byName(a, b))
+        .sort(cards ? compareItems(prefs.sort, prefs.reversed) : byName)
   const personas = all.filter(persona).length
   const noun = presets && presetView === "archived" ? `archived ${title.toLowerCase()}` : title.toLowerCase()
   const total = presets && presetView === "archived" ? archived.length : all.length
@@ -391,15 +407,33 @@ function Section({
             <Field label={<span className="sr-only">Sort cards</span>} className="w-36 shrink-0">
               <Select<Sort>
                 items={[
-                  { value: "used", label: "Last used" },
-                  { value: "name", label: "Name" },
-                  { value: "chats", label: "Most chats" },
-                  { value: "changed", label: "Recently changed" }
+                  {
+                    value: "used",
+                    label: "Last used",
+                    description: "By the last message the character itself wrote, in any chat; never used come last"
+                  },
+                  { value: "name", label: "Name", description: "By name" },
+                  { value: "chats", label: "Most chats", description: "By how many chats it's in" },
+                  {
+                    value: "changed",
+                    label: "Recently changed",
+                    description: "By when the card last changed: saved, imported, updated or renamed"
+                  },
+                  {
+                    value: "added",
+                    label: "Added",
+                    description: "By when it came into this app, imported or written here"
+                  }
                 ]}
                 value={prefs.sort}
                 onValueChange={(sort) => setPrefs({ sort })}
               />
             </Field>
+            <SortDirection
+              order={prefs.sort === "name" ? "name" : prefs.sort === "chats" ? "count" : "date"}
+              reversed={prefs.reversed}
+              onToggle={() => setPrefs({ reversed: !prefs.reversed })}
+            />
             <Segmented
               label="View"
               value={prefs.view}

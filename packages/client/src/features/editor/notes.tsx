@@ -453,7 +453,7 @@ export function NoteFields({
   if (owner?.shared !== undefined && owner.shared !== "global")
     return (
       <Alert title="A chat snippet">
-        <p>Open this snippet beside its chat to edit the text for that fork.</p>
+        <p>Open this snippet beside its chat to edit the text for that branch.</p>
         <Link
           to="/chats/$chatId"
           params={{ chatId: owner.shared }}

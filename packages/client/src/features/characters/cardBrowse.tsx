@@ -167,9 +167,39 @@ const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {
   name: { label: "Name", hint: "By name" }
 }
 
-/** "Newest first", or for Name "A to Z"; `reversed`, the other way round. */
-const orderName = (sort: CardSort, reversed: boolean) =>
-  sort === "name" ? (reversed ? "Z to A" : "A to Z") : reversed ? "Oldest first" : "Newest first"
+/** What a sort orders by: dates, names or counts. */
+export type SortOrder = "date" | "name" | "count"
+const ORDER_NAMES: Record<SortOrder, readonly [string, string]> = {
+  date: ["Newest first", "Oldest first"],
+  name: ["A to Z", "Z to A"],
+  count: ["Most first", "Fewest first"]
+}
+/** "Newest first", "A to Z" or "Most first"; `reversed`, the other way round. */
+const orderName = (order: SortOrder, reversed: boolean) => ORDER_NAMES[order][reversed ? 1 : 0]
+
+/**
+ * A sort's direction: newest first or oldest, A to Z or Z to A. Every character surface's sort
+ * has it beside its choice (the library's list too).
+ */
+export function SortDirection({
+  order: kind,
+  reversed,
+  onToggle
+}: {
+  order: SortOrder
+  reversed: boolean
+  onToggle: () => void
+}) {
+  const order = orderName(kind, reversed)
+  return (
+    <IconButton
+      label={`Order: ${order}`}
+      hint={`${order}. Click for ${orderName(kind, !reversed).toLowerCase()}`}
+      icon={reversed ? "sortUp" : "sortDown"}
+      onClick={onToggle}
+    />
+  )
+}
 
 /** The sort choice and its direction. `compact`: a small menu button, for a narrow panel. */
 export function CardSortControl({
@@ -185,13 +215,11 @@ export function CardSortControl({
   compact?: boolean
   label?: string
 }) {
-  const order = orderName(sort, reversed)
   const direction = (
-    <IconButton
-      label={`Order: ${order}`}
-      hint={`${order}. Click for ${orderName(sort, !reversed).toLowerCase()}`}
-      icon={reversed ? "sortUp" : "sortDown"}
-      onClick={() => onChange({ reversed: !reversed })}
+    <SortDirection
+      order={sort === "name" ? "name" : "date"}
+      reversed={reversed}
+      onToggle={() => onChange({ reversed: !reversed })}
     />
   )
   return (

@@ -7,7 +7,7 @@ import type { BinBranch } from "@rp/shared/bin.ts"
 import { Icon } from "../../ui/Icon.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
-import { branchName } from "../chat/forks.ts"
+import { forkLabel } from "../chat/forks.ts"
 
 /** The chat at that branch and message, as Copy link makes it, always naming the branch. */
 const branchHref = (branch: BinBranch, slotId: string) => {
@@ -46,7 +46,7 @@ const where = (branch: BinBranch, withChat: boolean) => {
 
 function Entry({ branch, withChat }: { branch: BinBranch; withChat: boolean }) {
   const live = branch.state === "shown"
-  const name = branchName(branch)
+  const name = forkLabel(branch)
   const body = (
     <>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">

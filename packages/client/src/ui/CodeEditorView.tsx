@@ -50,7 +50,9 @@ export default function CodeEditorView(props: CodeEditorProps) {
         ref={host}
         className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
       />
-      <EditorTextActions text={props.value} selection={selection} source={props.source} />
+      {props.textActions !== false && (
+        <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
+      )}
     </div>
   )
 }

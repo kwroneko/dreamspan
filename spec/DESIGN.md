@@ -186,6 +186,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 
 ### 3.2 Branches
 - **[D]** A branch is an explicit fork of the path. It's what you choose when you want the continuation to differ, and it never happens as a side effect of swiping.
+- **[D]** A named branch is one the user promoted into its own identity; an ST file's name never names one (owner, 2026-11-01). An unnamed branch, imported or made here, is labelled by where it splits off, the time first ("Split 12 Jan 2025, 21:40 at #14"), with its last message's time and preview beside it; the chat's own name is its group's or its root chat's, never a branch file's. An imported chat opens on the branch ST last had open, else the one with the latest message. The left panel lists each chat once, "⑂ 12" listing its branches in the panel (crumbs back), named and pinned first, then by last message; the open chat's branches sit at the panel's foot, collapsible, for switching without leaving the list; no accordion rows. Implemented in ARCHITECTURE §12 and §13.
 
 ### 3.3 Threads and merges (the architecture must allow them now; the UX comes later)
 - **[D]** Parallel threads in one conversation that fork and **merge**, with the ability to send one message to several threads at once (same or different speaker, and the speaker can be any card).

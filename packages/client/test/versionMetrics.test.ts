@@ -1,8 +1,16 @@
 import type { VersionId } from "@rp/shared/chat.ts"
 import { versionMetricsOf, type RequestFigures } from "@rp/shared/inspectorApi.ts"
-import { afterEach, describe, expect, it } from "vitest"
-import { messageHeaderDetails } from "../src/features/chat/presentation.tsx"
-import { metricsDetails, metricsSummary, registerVersionMetrics } from "../src/features/chat/versionMetrics.tsx"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { DEFAULT_DISPLAY_PREFS } from "@rp/shared/chatApi.ts"
+
+vi.mock("../src/ui/viewPrefs.ts", () => ({ useViewPrefs: () => ({ prefs: DEFAULT_DISPLAY_PREFS }) }))
+import { messageDetails } from "../src/features/chat/messageDetails.tsx"
+import {
+  metricsDetails,
+  metricsSummary,
+  recordedFigures,
+  registerVersionMetrics
+} from "../src/features/chat/versionMetrics.tsx"
 
 const id = "01900000-0000-7000-8000-000000000001" as VersionId
 const request = (overrides: Partial<RequestFigures> = {}): RequestFigures => ({
@@ -25,9 +33,25 @@ describe("version metrics display", () => {
     dispose = []
   })
 
-  it("registers as a header contribution a plugin can replace", () => {
+  it("registers as two message details under the portrait a plugin can replace", () => {
     dispose = registerVersionMetrics()
-    expect([...messageHeaderDetails.snapshot().entries].map((entry) => entry.id)).toEqual(["message.metrics"])
+    expect([...messageDetails.snapshot().entries].map((entry) => [entry.id, entry.place])).toEqual([
+      ["message.timer", "portrait"],
+      ["message.tokens", "portrait"]
+    ])
+  })
+
+  it("shows what SillyTavern recorded for an imported version, as ST writes it", () => {
+    const figures = recordedFigures({ startedAt: 0, finishedAt: 12_400, tokens: 384, firstTokenMs: 900 })
+    expect([figures.time, figures.tokens, figures.summary]).toEqual(["12.4s", "384t", "12.4 s · 384 tokens"])
+    expect(Object.fromEntries(figures.rows)).toMatchObject({
+      "Generation time": "12.4 s",
+      "Time to first token": "0.9 s",
+      Speed: "31.0 tokens/s"
+    })
+    // A user's message: only ST's count; no time is made up.
+    const counted = recordedFigures({ tokens: 4 })
+    expect([counted.time, counted.tokens]).toEqual([null, "4t"])
   })
 
   it("shows elapsed seconds and output tokens, details in the tooltip", () => {

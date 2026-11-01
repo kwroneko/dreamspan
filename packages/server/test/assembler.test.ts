@@ -2037,7 +2037,7 @@ describe("conditioned prompts, {{speaker}} and {{direction}} (DESIGN §2.2)", ()
       expect(contents(directed).at(-1)).toBe(
         "user: [Write Tobin's next message. Write only for Tobin.]\n[What happens next: Tobin hesitates.]"
       )
-      expect(describe(directed, "preset:directionPrompt")).toBe("End of request: when you give a direction")
+      expect(describe(directed, "preset:directionPrompt")).toBe("End of request: when you give guidance")
       // Each part keeps its own source, in the one message.
       const last = directed.request.messages.length - 1
       for (const id of ["preset:impersonationPrompt", "preset:directionPrompt"])

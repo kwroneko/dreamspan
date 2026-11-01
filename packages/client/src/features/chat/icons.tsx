@@ -31,12 +31,6 @@ export const ChevronIcon = ({ up = false }: { up?: boolean }) => (
   </svg>
 )
 
-export const PlusIcon = () => (
-  <svg {...base}>
-    <path d="M8 3v10M3 8h10" />
-  </svg>
-)
-
 /** Generating with guidance: a spark, not Send's arrow, so guidance never looks like a message going out. */
 export const GenerateIcon = () => (
   <svg {...base}>

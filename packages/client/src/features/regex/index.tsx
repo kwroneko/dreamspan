@@ -9,5 +9,5 @@ export const register = () =>
     parent: "settings",
     path: "regex",
     component: GlobalRegexPage,
-    nav: { label: "Regex scripts", order: 22 }
+    nav: { label: "Regex scripts", order: 22, description: "Your own find-and-replace rules for every chat." }
   })

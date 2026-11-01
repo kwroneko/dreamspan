@@ -275,9 +275,18 @@ describe("image token estimates", () => {
     return Effect.gen(function* () {
       const api = yield* client()
       const image = yield* upload(sized(1000, 1000))
-      const mock = yield* mockProvider((request, res) => {
-        if (request.path === "/v1/messages/count_tokens")
+      // The chat is watched from before the send. When Generate comes more than 2 s after it (a
+      // busy machine; REPLY_EXPECTED_MS in chat/CacheWarmth.ts), the hold on the next request's
+      // estimate lapses and the estimate asks for a count, which could land before the reply's
+      // assembly and be used there (2026-11-01: 1300 for 1296 in a full check under load; a 4 s
+      // pause before Generate reproduces it). The counts' answers wait until the reply is written.
+      let replied!: () => void
+      const written = new Promise<void>((resolve) => (replied = resolve))
+      const mock = yield* mockProvider(async (request, res) => {
+        if (request.path === "/v1/messages/count_tokens") {
+          await written
           return json(res, 200, { input_tokens: JSON.stringify(request.body).includes('"image"') ? 1311 : 11 })
+        }
         anthropicSse(res, [
           {
             type: "message_start",
@@ -312,6 +321,7 @@ describe("image token estimates", () => {
         tokens: 1296,
         basis: "formula"
       })
+      replied()
 
       const events: Array<ChatEvent> = []
       yield* api.SubscribeChat({ chatId: generated.chat.id }).pipe(

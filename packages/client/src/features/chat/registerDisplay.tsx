@@ -21,7 +21,11 @@ export const registerDisplay = () => [
     parent: "settings",
     path: "display",
     component: DisplaySettings,
-    nav: { label: "Display", order: 20 }
+    nav: {
+      label: "Display",
+      order: 20,
+      description: "How chats look and send: their width, what Enter does, and how messages show."
+    }
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),

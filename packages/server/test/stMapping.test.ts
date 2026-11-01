@@ -165,7 +165,14 @@ describe("ST's notes on import (DESIGN §4.1)", () => {
   ])
 
   it("switches a card's own author's note off in a group chat, as ST ignores it there, once", () => {
-    const group = { id: "g", name: "Both", members: ["aria.png", "bram.png"], disabledMembers: [], chats: [] }
+    const group = {
+      id: "g",
+      name: "Both",
+      members: ["aria.png", "bram.png"],
+      disabledMembers: [],
+      chats: [],
+      chatId: null
+    }
     const first = mapped({}, {}, { cards }, { card: null, group })
     expect(first.events).toContainEqual({ key: "note.deactivate", value: { note: "note-aria" } })
     expect(first.state.characterNotesOff).toEqual(["note-aria"])
