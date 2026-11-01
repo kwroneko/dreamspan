@@ -20,8 +20,7 @@ export interface ModelPickerProps extends PickerBodyProps {
 /** The registered model picker body (`model.picker`); a plugin may replace or add to it. */
 export const modelPickers = defineSlot<ModelPickerProps>("model.picker")
 
-const CONNECTIONS_HINT =
-  "Open Settings → Connections to add a connection or change one; Back returns to this chat"
+const CONNECTIONS_HINT = "Open Settings → Connections to add a connection or change one; Back returns to this chat"
 
 /** Where models come from: Settings → Connections, in this tab, so Back returns to the chat. */
 export function ConnectionsLink({ className, children }: { className: string; children: ReactNode }) {
