@@ -20,7 +20,7 @@ let provider: FakeProvider
 
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 
-test.beforeAll(async () => {
+test.beforeAll(async ({ playwright }) => {
   mkdirSync(shots, { recursive: true })
   provider = await startProvider()
   const connection = await admin((api) =>
@@ -54,6 +54,24 @@ test.beforeAll(async () => {
     })
   )
   chatId = started.chat.id
+  // A book added to the chat, whose ⋯ offers "Use in every chat".
+  const request = await playwright.request.newContext()
+  await apiLogin(request, server(), ADMIN.handle, ADMIN.password)
+  const book = {
+    entries: { 0: { uid: 0, key: ["lamp"], comment: "Lamp", content: "The lamp burns blue at night.", order: 10 } }
+  }
+  const response = await request.post(`${server().url}/library/import?name=Saltmarsh.json`, {
+    headers: { "content-type": "application/octet-stream", origin: server().url },
+    data: Buffer.from(JSON.stringify(book))
+  })
+  expect(response.status()).toBe(200)
+  const {
+    library: { ref }
+  } = await response.json()
+  await request.dispose()
+  await admin((api) =>
+    api.ChangeCast({ chatId: chatId as never, slotId: null, change: { _tag: "Lorebook", ref: ref.id, active: true } })
+  )
 })
 test.afterAll(async () => {
   await provider.stop()
@@ -167,8 +185,16 @@ for (const theme of ["light", "dark"] as const) {
     await page.screenshot({ path: join(shots, `menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")
 
-    // A choice: the chosen one's explanation under the row, as nothing hovers.
+    // A choice: the chosen one's explanation under the row, as nothing hovers; a book's
+    // switch and its ⋯ items say what they do, "global" included.
     await panelTab(page, "Lorebooks")
+    await expect(page.getByText(/^Off takes the book out of this chat/)).toBeVisible()
+    await page.getByRole("button", { name: "More for Saltmarsh" }).tap()
+    await expect(
+      page.getByRole("menuitemcheckbox", { name: "Use in every chat" }).getByText(/Makes it global: every chat/)
+    ).toBeVisible()
+    await page.screenshot({ path: join(shots, `lorebook-menu-390-${theme}.png`) })
+    await page.keyboard.press("Escape")
     const where = page.getByRole("group", { name: "Where entries go" })
     await expect(where.locator("..").locator("p")).toHaveText(/one block just after the history/)
     await page.screenshot({ path: join(shots, `choice-390-${theme}.png`) })
@@ -194,6 +220,17 @@ for (const theme of ["light", "dark"] as const) {
     await below.hover()
     await expect(page.getByText(/one block just after the history, so the history stays cached/).last()).toBeVisible()
     await page.screenshot({ path: join(shots, `choice-1440-${theme}.png`) })
+
+    // The owner's example: a book's ⋯ item and its switch say what they do.
+    await lore.getByRole("button", { name: "More for Saltmarsh" }).click()
+    await page.getByRole("menuitemcheckbox", { name: "Use in every chat" }).hover()
+    await expect(explanation(page)).toHaveText(/^Makes it global: every chat of yours reads it/)
+    await page.screenshot({ path: join(shots, `lorebook-menu-1440-${theme}.png`) })
+    await page.keyboard.press("Escape")
+    const book = lore.getByRole("switch", { name: /^Saltmarsh/ })
+    await expect(book).toHaveAccessibleDescription(/^Off takes the book out of this chat/)
+    await book.hover()
+    await expect(page.getByText(/^Off takes the book out of this chat/).last()).toBeVisible()
 
     // The chat's menu: its commands, explained beside them.
     await page.getByRole("button", { name: "Chat actions" }).click()

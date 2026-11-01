@@ -76,7 +76,7 @@ for (const width of [1440, 390])
       await dialog.getByRole("textbox", { name: "In-character name", exact: true }).fill("Captain Aria")
       await dialog.getByRole("button", { name: "Fork card", exact: true }).click()
       await expect(page).not.toHaveURL(`${server().url}/library/${parent.id}`)
-      await expect(page.getByText("Forked from", { exact: false }).first()).toBeVisible()
+      await expect(page.getByText(/^Forked from/).first()).toBeVisible()
       const childUrl = page.url()
       await expect(page.getByRole("list", { name: "Forks tree" })).toContainText(version)
       await shot("editor")
@@ -184,7 +184,7 @@ test("chat provenance and deleted family members remain visible", async ({ page 
     `/chats/${seed.chat.id}`
   )
   await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("in the bin")
-  await expect(page.getByText("Forked from").locator("..")).toContainText("Deleted parent")
+  await expect(page.getByText(/^Forked from/).locator("..")).toContainText("Deleted parent")
   await (await more(page, "Compare with parent")).click()
   await expect(page.getByRole("dialog", { name: "Compare with parent", exact: true })).toContainText(
     "Restore it from the bin"
@@ -228,7 +228,7 @@ test("the parent picker finds archived cards by their in-character name", async 
   await picker.getByRole("textbox", { name: "Find a parent card" }).fill("captain searchable")
   await picker.getByRole("button", { name: "Library title · old", exact: true }).click()
   await expect(picker).not.toBeVisible()
-  await expect(page.getByText("Forked from").locator("..")).toContainText("Library title")
+  await expect(page.getByText(/^Forked from/).locator("..")).toContainText("Library title")
   await expect(page.getByRole("list", { name: "Forks tree" })).toContainText("archived")
 })
 

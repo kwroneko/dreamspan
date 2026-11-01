@@ -146,7 +146,8 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
           {
             value: "positions",
             label: "Where each entry says",
-            description: "Each entry goes where its own position puts it, as SillyTavern places them."
+            description:
+              "Each entry goes where its own position says, as in SillyTavern. One above the history can make the provider read the whole history again."
           }
         ]}
       />
@@ -162,6 +163,8 @@ interface BookRow {
   readonly from: string
   readonly on: boolean
   readonly onChange: (on: boolean) => void
+  /** What its switch does, which differs by where the book comes from. */
+  readonly switchHint: string
   /** The library entry its Open button edits: the book, or the card holding it. */
   readonly ref: LibraryRef | undefined
   readonly openLabel: string
@@ -175,7 +178,7 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
   return (
     <li className="flex items-start gap-1 py-2.5">
       <div className="min-w-0 flex-1">
-        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from}>
+        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from} hint={row.switchHint}>
           {row.name}
         </Switch>
       </div>
@@ -184,7 +187,10 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
           variant="ghost"
           className="h-8 shrink-0 px-2"
           aria-label={row.openLabel}
-          {...(row.openHint ? { hint: row.openHint } : {})}
+          hint={
+            row.openHint ??
+            "Opens the book's editor over the chat. What you save there changes it in every chat that reads it."
+          }
           onClick={() => onOpen(row.ref!)}
         >
           Open
@@ -266,7 +272,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
   }
   const globalItem = (id: string, global: boolean): ActionMenuItem => ({
     label: "Use in every chat",
-    description: "Makes it one of your global books, which every chat reads unless it's switched off there.",
+    description:
+      "Makes it global: every chat of yours reads it, as ST's globally selected World Info, unless a chat switches it off. Ticked while it is.",
     checked: global,
     onCheckedChange: (next) => void setGlobal(id as LibraryRef["id"], next)
   })
@@ -282,6 +289,7 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         ].join(" · "),
         on,
         onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
+        switchHint: `Off stops ${card.name}'s own book in this chat only, from the latest message on. The card keeps it, and its other chats still read it.`,
         ref: library?.cards.get(card.entityId),
         openLabel: `Open ${card.name}'s card, where its book is edited`,
         openHint: `Opens ${card.name}'s card: its book is edited there.`,
@@ -299,6 +307,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         ].join(" · "),
         on,
         onChange: (next) => detach(id, next),
+        switchHint:
+          "Off takes the book out of this chat, from the latest message on. Add a lorebook puts it back once this tab is closed.",
         ref: byId.get(id),
         openLabel: `Open ${name}`,
         menu: byId.has(id) ? [globalItem(id, false)] : []
@@ -312,6 +322,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         from: on ? "Global: used in every chat" : "Global, but off in this chat",
         on,
         onChange: (next) => void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next }),
+        switchHint:
+          "A global book is read by every chat of yours. Off stops it in this chat only, from the latest message on; other chats still read it.",
         ref: byId.get(id),
         openLabel: `Open ${name}`,
         menu: [
@@ -321,7 +333,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             ? [
                 {
                   label: "Also added to this chat",
-                  description: "It was added here before it was global. Either way, its entries are sent.",
+                  description:
+                    "Added to this chat on its own too, so it stays here if it stops being global. Its entries are sent once either way.",
                   checked: attached.includes(id as LibraryRef["id"]),
                   onCheckedChange: (next: boolean) => detach(id, next)
                 }
@@ -360,7 +373,11 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
           />
         ) : (
           <div className="pt-1">
-            <Button onClick={() => setAdding(true)} disabled={library === null}>
+            <Button
+              onClick={() => setAdding(true)}
+              disabled={library === null}
+              hint="Picks a book from your library for this chat to read, from the latest message on."
+            >
               Add a lorebook
             </Button>
           </div>
