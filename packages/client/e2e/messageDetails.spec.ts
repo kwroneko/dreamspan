@@ -76,6 +76,22 @@ const portrait = (message: Locator) => message.locator("[data-portrait-details]"
 /** A tooltip showing this text (its hidden description copy left out). */
 const tip = (page: Page, text: string | RegExp) => page.getByText(text).filter({ visible: true }).last()
 
+/**
+ * A lab's mark in a header: the logo from Simple Icons or our own drawing, named for its lab,
+ * monochrome in the header's muted text colour (filled, or stroked for a drawing).
+ */
+const expectMark = async (head: Locator, id: string, lab: string, source: "simple-icons" | "drawn") => {
+  const mark = head.locator(`[data-model-mark="${id}"]`)
+  await expect(mark).toBeVisible()
+  await expect(head.getByRole("img", { name: `${lab} model` })).toBeVisible()
+  await expect(mark.locator("svg")).toHaveAttribute("data-mark-source", source)
+  const paint = await mark.evaluate((span) => {
+    const svg = getComputedStyle(span.querySelector("svg")!)
+    return { color: getComputedStyle(span).color, fill: svg.fill, stroke: svg.stroke }
+  })
+  expect(source === "simple-icons" ? paint.fill : paint.stroke).toBe(paint.color)
+}
+
 const themes = async (page: Page, each: (width: number, theme: string) => Promise<void>) => {
   for (const width of [1440, 390])
     for (const theme of ["light", "dark"] as const) {
@@ -145,8 +161,9 @@ test("a message shows its model with its lab's mark, its date and time, and its 
 
   const reply = lastReply(page)
   const head = reply.locator("header")
-  // The shown swipe: Anthropic's model, written a minute ago (the time alone), 8 s and 214 tokens.
-  await expect(head.locator('[data-model-mark="anthropic"]')).toBeVisible()
+  // The shown swipe: Anthropic's model (its Simple Icons logo), written a minute ago (the time
+  // alone), 8 s and 214 tokens.
+  await expectMark(head, "anthropic", "Anthropic", "simple-icons")
   await expect(head).toContainText("claude-3-opus-20240229")
   await expect(head.locator("time")).toHaveText(/^\d{1,2}[:.]\d{2}/)
   await expect(head.locator("time")).not.toContainText(String(new Date().getFullYear()))
@@ -177,14 +194,15 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   await reply.hover()
   await reply.getByRole("button", { name: "Previous version" }).click()
   await expect(reply).toContainText("We go over, not around.")
-  await expect(head.locator('[data-model-mark="openai"]')).toBeVisible()
+  // OpenAI isn't in Simple Icons: our own drawing.
+  await expectMark(head, "openai", "OpenAI", "drawn")
   await expect(head).toContainText("OpenAI · gpt-4o")
   await expect(portrait(reply)).toHaveText(/#3\s*12\.0s\s*380t/)
   await shoot(page, "02-swiped-1440")
 
   await themes(page, async (width, theme) => {
     const shown = lastReply(page)
-    await expect(shown.locator('header [data-model-mark="openai"]')).toBeVisible()
+    await expectMark(shown.locator("header"), "openai", "OpenAI", "drawn")
     await expect(portrait(shown)).toBeVisible()
     // Under the portrait, never wider than it.
     const column = (await portrait(shown).boundingBox())!
@@ -192,6 +210,14 @@ test("a message shows its model with its lab's mark, its date and time, and its 
     expect(column.width).toBeLessThanOrEqual(face.width + 1)
     expect(column.y).toBeGreaterThan(face.y + face.height - 1)
     await shoot(page, `03-details-${width}-${theme}`)
+    // The other swipe's logo in this theme, then back to where the loop found it.
+    await shown.hover()
+    await shown.getByRole("button", { name: "Next version" }).click()
+    await expectMark(shown.locator("header"), "anthropic", "Anthropic", "simple-icons")
+    await shoot(page, `03-logo-${width}-${theme}`)
+    await shown.hover()
+    await shown.getByRole("button", { name: "Previous version" }).click()
+    await expect(shown).toContainText("We go over, not around.")
   })
 
   // A version generated here: its connection and model, and its time and tokens from the ledger.
