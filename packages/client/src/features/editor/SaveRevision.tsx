@@ -101,6 +101,13 @@ export function SaveRevision({
     return false
   }
 
+  /** Revert: every changed field back to the last revision, its text now kept in its edit history. */
+  const revert = async () => {
+    setError(null)
+    const result = await store.revert()
+    if (!result.ok) setError(result.error)
+  }
+
   /** Puts each pick back as the field's draft, on the saved version, then saves again. */
   const resolve = async () => {
     if (conflicts === null) return
@@ -143,6 +150,7 @@ export function SaveRevision({
         showState={showState}
         compact={compact}
         onSave={save}
+        onRevert={revert}
       />
       {error && <ErrorAlert error={error} />}
       {conflicts !== null && (

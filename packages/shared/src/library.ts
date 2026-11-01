@@ -53,7 +53,7 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
 }) {}
 
 /**
- * The reply a `generation` revision was cut for (owner, 2026-11-01): the text it used had
+ * The reply or summary a `generation` revision was cut for (owner, 2026-11-01): the text it used had
  * changed since the last revision. `message` is the reply's number in its chat, from 1.
  */
 export const RevisionUse = Schema.Struct({
@@ -62,8 +62,11 @@ export const RevisionUse = Schema.Struct({
   chatTitle: Schema.NullOr(Schema.String),
   forkId: Schema.NullOr(Schema.String),
   slotId: Schema.String,
-  versionId: Schema.String,
-  message: Schema.Int
+  /** The version a reply wrote; null for a summary. */
+  versionId: Schema.NullOr(Schema.String),
+  message: Schema.Int,
+  /** A summary request: the messages it covered, by number (`slotId` the last). */
+  summary: Schema.optionalKey(Schema.Struct({ from: Schema.Int, to: Schema.Int }))
 })
 export type RevisionUse = typeof RevisionUse.Type
 

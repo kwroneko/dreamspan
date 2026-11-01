@@ -67,7 +67,7 @@ function RevisionTitle({ revision }: { revision: Revision }) {
   if (revision.origin === "generation" && use)
     return (
       <>
-        Used by a reply ·{" "}
+        {use.summary ? "Used by a summary" : "Used by a reply"} ·{" "}
         <Link
           to="/chats/$chatId"
           params={{ chatId: use.chatId }}
@@ -76,7 +76,7 @@ function RevisionTitle({ revision }: { revision: Revision }) {
         >
           {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
         </Link>{" "}
-        · message {use.message}
+        · {use.summary ? `messages ${use.summary.from}–${use.summary.to}` : `message ${use.message}`}
       </>
     )
   const origins: Record<Revision["origin"], string> = {

@@ -18,6 +18,7 @@ export function SaveControls({
   pending = false,
   blocked = null,
   onSave,
+  onRevert,
   showState = true,
   compact = false
 }: {
@@ -32,10 +33,16 @@ export function SaveControls({
   blocked?: string | null
   /** Saves a revision with this message (null: none); false keeps the message field open. */
   onSave: (message: string | null) => Promise<boolean>
+  /**
+   * Puts every changed field back to the head revision; shown while something changed. The
+   * text there now stays in each field's edit history, so it asks nothing.
+   */
+  onRevert?: (() => Promise<unknown>) | undefined
   /** The state line beside the buttons; off where the editor shows it elsewhere. */
   showState?: boolean
 }) {
   const [writing, setWriting] = useState(false)
+  const [reverting, setReverting] = useState(false)
   const next = revision + 1
   const disabled = !changed || blocked !== null
   const why = blocked ?? (changed ? null : `Nothing changed since revision ${revision}.`)
@@ -93,6 +100,22 @@ export function SaveControls({
               "Save with a message…"
             )}
           </Button>
+          {onRevert && changed && (
+            <Button
+              variant="ghost"
+              pending={reverting}
+              aria-label={`Revert to revision ${revision}`}
+              className={compact ? "max-sm:px-2!" : ""}
+              hint={`Puts every field back to revision ${revision}. What's there now stays in each field's edit history.`}
+              onClick={() => {
+                setReverting(true)
+                void onRevert().finally(() => setReverting(false))
+              }}
+            >
+              <Icon name="undo" />
+              <span className={compact ? "max-sm:hidden" : ""}>Revert to revision {revision}</span>
+            </Button>
+          )}
         </>
       )}
     </span>

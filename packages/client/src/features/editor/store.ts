@@ -380,6 +380,23 @@ export class EditorStore {
     this.bump(STRUCTURE)
   }
 
+  /**
+   * Every field changed since the last revision back to it (Revert): the held changes go,
+   * and the server puts each changed field's revision text back as its newest state, the
+   * text there now one state back in its edit history. No revision is written.
+   */
+  async revert() {
+    this.revertHeld()
+    await this.flush()
+    if (this.unsavedFields().length > 0) return this.notSaved()
+    const chatNote = this.chatNote
+    const result = await this.call((client) =>
+      client("RevertEditorDrafts", { refId: this.refId, ...(chatNote ? { chatNote } : {}) })
+    )
+    if (result.ok) await this.refresh()
+    return result
+  }
+
   /** Applies the held changes to the live document, for a save: the order as arranged, the prompts deleted. */
   private async applyHeld() {
     const held = this.held()

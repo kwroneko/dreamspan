@@ -12,6 +12,7 @@ import { importStPreset } from "../src/formats/preset.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, finished, generateReply } from "./support/generation.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
+import { lcmHarness, lcmTest } from "./support/lcmHarness.ts"
 
 type Api = Effect.Success<ReturnType<typeof client>>
 
@@ -244,5 +245,66 @@ describe("live text", () => {
       })
       assert.strictEqual(yield* bin(), inBin)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("Revert puts every changed field back to the last revision, keeping the typing in edit history", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const card = yield* api.CreateCard({ label: "Revert", name: "Revert" })
+      const description = textField(["description"])
+      yield* type(api, card.id, description, "Saved text.")
+      const opened = yield* api.OpenEditor({ refId: card.id })
+      const draft = opened.drafts.find((d) => d.key.field === description)!
+      yield* api.CommitEditorDrafts({
+        refId: card.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        fields: [{ field: description, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+        message: null
+      })
+      const revisions = (yield* api.ListRevisions({ refId: card.id, limit: 50 })).length
+      yield* type(api, card.id, description, "Saved text. Typed since, then thrown away.")
+      yield* type(api, card.id, valueField(["tags"]), '["thrown"]')
+      assert.strictEqual((yield* api.RevertEditorDrafts({ refId: card.id })).reverted, 2)
+      const reverted = yield* api.OpenEditor({ refId: card.id })
+      // Nothing changed since the revision now, and no revision was written.
+      assert.isTrue(reverted.drafts.every((d) => d.status !== "active"))
+      assert.strictEqual(reverted.doc.description, "Saved text.")
+      assert.lengthOf(yield* api.ListRevisions({ refId: card.id, limit: 50 }), revisions)
+      // The typing is one state back, the revision's text the newest.
+      const texts = yield* fieldTexts(api, card.id, description)
+      assert.strictEqual(texts[0], "Saved text.")
+      assert.include(texts, "Saved text. Typed since, then thrown away.")
+      // Typing on starts from the revision, with no conflict at Save.
+      const again = yield* type(api, card.id, description, "Saved text. Again.")
+      const reopened = yield* api.OpenEditor({ refId: card.id })
+      yield* api.CommitEditorDrafts({
+        refId: card.id,
+        expectedRowVersion: reopened.ref.rowVersion,
+        fields: [{ field: description, draftId: again.id, expectedRowVersion: again.rowVersion }],
+        message: null
+      })
+      assert.strictEqual((yield* api.OpenEditor({ refId: card.id })).doc.description, "Saved text. Again.")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  lcmTest("a summary request sends the live text and cuts a revision labelled with its messages", (server) =>
+    Effect.gen(function* () {
+      const h = yield* lcmHarness(server)
+      const preset = h.preset.ref.id as RefId
+      yield* type(h.api, preset, MAIN, "SUMMARY-LIVE-TEXT for the summarizer.")
+      const before = (yield* h.api.ListRevisions({ refId: preset, limit: 50 })).length
+      yield* h.enqueue(0, 3)
+      assert.isNotNull(yield* h.runNext)
+      const sent = h.mock.requests().map((r) => JSON.stringify(r.body?.messages ?? []))
+      assert.isTrue(sent.some((body) => body.includes("SUMMARY-LIVE-TEXT for the summarizer.")))
+      const revisions = yield* h.api.ListRevisions({ refId: preset, limit: 50 })
+      assert.lengthOf(revisions, before + 1)
+      assert.strictEqual(revisions[0]!.origin, "generation")
+      assert.deepInclude(revisions[0]!.usedBy!, { chatId: h.chat.id, versionId: null, summary: { from: 1, to: 4 } })
+      // The same text again: nothing new to checkpoint.
+      yield* h.enqueue(4, 7)
+      yield* h.runNext
+      assert.lengthOf(yield* h.api.ListRevisions({ refId: preset, limit: 50 }), before + 1)
+    })
   )
 })

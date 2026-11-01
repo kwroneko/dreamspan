@@ -2116,6 +2116,19 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  RevertEditorDrafts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref is not found, and its typing stays as it was.
+        const before = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        yield* refused(actor.api.RevertEditorDrafts({ refId: owner.editor.cardRefId }), "NotFound")
+        const after = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        assert.deepStrictEqual(
+          after.map((d) => [d.id, d.rowVersion, d.content]),
+          before.map((d) => [d.id, d.rowVersion, d.content])
+        )
+      })
+  },
   SetRevisionMessage: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

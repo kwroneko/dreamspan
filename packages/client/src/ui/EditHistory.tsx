@@ -29,7 +29,7 @@ const kindLabel: Record<EditState["kind"], string> = {
   initial: "First kept state",
   edit: "Typed",
   restore: "Put back from this list",
-  revision: "Text of a restored or updated revision"
+  revision: "A revision's text put back (Revert, Restore, an update)"
 }
 
 export function EditHistory({

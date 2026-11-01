@@ -208,6 +208,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("EditorDraftState")
       ),
 
+    RevertEditorDrafts: ({ refId, chatNote }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.RevertEditorDrafts({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })
+      ).pipe(settle("RevertEditorDrafts")),
+
     SetRevisionMessage: ({ refId, revisionId, message }) =>
       Effect.flatMap(userId, (id) => writer.SetRevisionMessage({ userId: id, refId, revisionId, message })).pipe(
         settle("SetRevisionMessage")

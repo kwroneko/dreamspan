@@ -1992,7 +1992,10 @@ export class WriteOps extends RpcGroup.make(
       chatId: ChatId,
       forkId: Schema.NullOr(ForkId),
       slotId: SlotId,
-      versionId: VersionId,
+      /** The version a reply writes; null for a summary. */
+      versionId: Schema.NullOr(VersionId),
+      /** A summary request: the messages it covers, by number (`slotId` is the last). */
+      summary: Schema.optionalKey(Schema.Struct({ from: Schema.Int, to: Schema.Int })),
       /** The message the reply's history ends at, where a chat's note is edited from. */
       leafSlotId: Schema.NullOr(SlotId),
       /** The reply's number in the chat, from 1. */
@@ -2000,6 +2003,16 @@ export class WriteOps extends RpcGroup.make(
       used: Schema.Array(UsedEntry)
     },
     success: Schema.Struct({ cut: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Every field changed since the ref's last revision (a chat's note: the revision bound where
+   * it's edited) back to that revision's value, each as a new state of its edit history, so the
+   * text there now stays one state back; no revision is written. The held changes aside.
+   */
+  Rpc.make("RevertEditorDrafts", {
+    payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: Schema.Struct({ reverted: Schema.Int }),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A revision's message (a label, never content), owned revisions of the ref's entity only. */
@@ -2974,7 +2987,14 @@ export class ReadOps extends RpcGroup.make(
       /** Data from the attempt's registered strategies, applied before budget checks. */
       instructions: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
     },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    success: Schema.Struct({
+      snapshot: Schema.String,
+      generation: Schema.String,
+      /** The library entries it read (`CheckpointLiveText`), and the messages it covers by number. */
+      used: Schema.Array(UsedEntry),
+      from: Schema.Int,
+      to: Schema.Int
+    }),
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),

@@ -996,7 +996,7 @@ export const makeDraftStore = (
    */
   const settleOn = (draft: DraftRow, content: string, revision: string) =>
     Effect.gen(function* () {
-      yield* update(draft, content, "restore", revision)
+      yield* update(draft, content, "revision", revision)
       return yield* end((yield* byId(draft.id))!, "committed", revision)
     })
 

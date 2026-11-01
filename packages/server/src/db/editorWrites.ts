@@ -331,9 +331,27 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
         return change
       }).pipe(transaction(sql, "RestoreRevision")),
 
-    CheckpointLiveText: ({ userId, chatId, forkId, slotId, versionId, leafSlotId, message, used }) =>
+    RevertEditorDrafts: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
-        const usedBy = JSON.stringify({ usedBy: { chatId, forkId, slotId, versionId, message } })
+        const owned = yield* lib.ownedRef(userId, refId)
+        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const ref = resolved?.ref ?? owned
+        const head = editedDoc(ref.kind, resolved?.doc ?? (yield* lib.loadDoc(ref.head_revision_id)))
+        let reverted = 0
+        for (const row of yield* liveDrafts(userId, refId)) {
+          const content = fieldContent(head, row.field)
+          if (content === null) continue
+          yield* drafts.settleOn(row, content, ref.head_revision_id)
+          reverted++
+        }
+        return { reverted }
+      }).pipe(transaction(sql, "RevertEditorDrafts")),
+
+    CheckpointLiveText: ({ userId, chatId, forkId, slotId, versionId, summary, leafSlotId, message, used }) =>
+      Effect.gen(function* () {
+        const usedBy = JSON.stringify({
+          usedBy: { chatId, forkId, slotId, versionId, message, ...(summary ? { summary } : {}) }
+        })
         const seen = new Set<string>()
         let cut = 0
         for (const entry of used) {

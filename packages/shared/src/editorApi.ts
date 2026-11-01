@@ -248,6 +248,15 @@ export class EditorApi extends RpcGroup.make(
     success: Doc,
     error: Schema.Union([...Errors])
   }),
+  /**
+   * Every field changed since the last revision back to it, each as a new state of its edit
+   * history (the text there now stays one state back); no revision is written.
+   */
+  Rpc.make("RevertEditorDrafts", {
+    payload: { refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: Schema.Struct({ reverted: Schema.Int }),
+    error: Schema.Union([...Errors])
+  }),
   /** A revision's message, a label: added, changed or (empty) removed at any time. */
   Rpc.make("SetRevisionMessage", {
     payload: {
