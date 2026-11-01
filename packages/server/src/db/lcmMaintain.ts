@@ -239,10 +239,12 @@ export const maintain = (
     )
     // Legacy/imported leaves can span more than the new slot cap. Continue their explicit
     // request over bounded parts even after its queue row was consumed by the first part.
+    // Only a leaf is cut into parts: a condensation is one job whatever its range, so
+    // forcing it again after it completed would condense the same parts without end.
     if (options.reason === "completion")
       for (const [id, ask] of Object.entries(previous?.largeRequests ?? {})) {
         const source = byId.get(id)
-        if (source && previous?.signatures[id] === signatures[id]) {
+        if (source && source.level === 1 && previous?.signatures[id] === signatures[id]) {
           forced.set(id, ask)
           chains.set(id, path.slice(source.from - 1, source.to))
         }
@@ -382,7 +384,10 @@ export const maintain = (
               signatures,
               askModels,
               largeRequests: Object.fromEntries(
-                [...forced].filter(([id]) => (byId.get(id)?.slotCount ?? 0) > MAX_CHUNK_SLOTS)
+                [...forced].filter(([id]) => {
+                  const source = byId.get(id)
+                  return source?.level === 1 && source.slotCount > MAX_CHUNK_SLOTS
+                })
               ),
               explicit: [...explicit],
               asks: [...forced.values(), ...retries.map((r) => r.ask)].map((a) => a.id)

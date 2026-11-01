@@ -186,8 +186,21 @@ function MessageList({
   )
 
   // A new window opens at the asked-for message, or at the bottom.
+  // With summaries in the chat, a link waits for the layer: placed among the originals first,
+  // the list would keep that offset when the layer replaces them, far from the summary that
+  // holds the message, which then never renders, so never expands to it.
+  // A layer that can't be read doesn't hold the link for long.
+  const layerPending =
+    summaries && anchor !== null && (view.lcm === null || (view.lcm.enabled && view.lcm.leafSlotId !== view.leafSlotId))
+  const [waitedFor, setWaitedFor] = useState(0)
+  useEffect(() => {
+    if (!layerPending) return
+    const timer = setTimeout(() => setWaitedFor(view.opened), 3000)
+    return () => clearTimeout(timer)
+  }, [layerPending, view.opened])
   useLayoutEffect(() => {
     if (view.opened === positioned.current || entries.length === 0) return
+    if (layerPending && waitedFor !== view.opened) return
     positioned.current = view.opened
     settled.current = false
     const requested = anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)

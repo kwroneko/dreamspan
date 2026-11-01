@@ -421,21 +421,27 @@ function Mark({
   name,
   label,
   reason,
-  className = ""
+  className = "",
+  compact = false
 }: {
   icon: IconName
   name: string
   label: string
   reason: string
   className?: string
+  /** Only the icon: for a mark most messages of a long chat carry, which the edge already shows. */
+  compact?: boolean
 }) {
   return (
     <Tooltip label={reason}>
-      <span tabIndex={0} className={`inline-flex shrink-0 items-center gap-1 text-xs outline-none ${className}`}>
+      <span
+        tabIndex={0}
+        className={`inline-flex shrink-0 items-center gap-1 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus ${className}`}
+      >
         <span role="img" aria-label={name}>
           <Icon name={icon} size={14} />
         </span>
-        <span>{label}</span>
+        <span className={compact ? "sr-only" : undefined}>{label}</span>
         <span className="sr-only">: {reason}</span>
       </span>
     </Tooltip>
@@ -699,6 +705,7 @@ export const Message = memo(function Message({
         label="Summarized"
         reason={context.reason}
         className="text-accent"
+        compact
       />
     )
   else if (context?.kind === "dropped")

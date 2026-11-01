@@ -73,7 +73,7 @@ for (const width of [1440, 390])
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
       await page.goto(`${server().url}/chats/${chat.id}`)
       const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
-      await summary.getByRole("button", { name: "Expand to messages", exact: true }).click()
+      await summary.getByRole("button", { name: /^Expand messages/ }).click()
       const message = page.locator(`article[data-slot="${chat.entries[0]!.slotId}"]`)
       await expect(message.locator(".markdown")).toHaveText("Original 1")
       await showActions(message)
@@ -114,9 +114,9 @@ test("expanded pages refresh originals outside the main window without losing ea
     })
     await expect(summary).toBeVisible({ timeout: 1000 })
   }).toPass({ timeout: 10_000 })
-  await summary.getByRole("button", { name: "Expand to messages", exact: true }).click()
+  await summary.getByRole("button", { name: /^Expand messages/ }).click()
   await expect(summary.locator("article")).toHaveCount(100)
-  await summary.getByRole("button", { name: "Load earlier messages in this summary" }).click()
+  await summary.getByRole("button", { name: "Earlier messages", exact: true }).click()
   await expect(summary.locator("article")).toHaveCount(120)
   const original = chat.entries[0]!
   const message = page.locator(`article[data-slot="${original.slotId}"]`)
@@ -174,7 +174,7 @@ for (const width of [1440, 390])
     await expect(message(1)).toBeInViewport()
     await expect(message(1)).toHaveClass(/border-accent/)
     await expect(summary.locator("article")).toHaveCount(100)
-    await summary.getByRole("button", { name: "Load later messages in this summary" }).click()
+    await summary.getByRole("button", { name: "Later messages", exact: true }).click()
     await expect(summary.locator("article")).toHaveCount(120)
     // Navigate within the mounted chat, then follow a range link from its summary panel.
     await page.evaluate((url) => {
@@ -197,7 +197,7 @@ for (const width of [1440, 390])
     await page.goto(`${server().url}/chats/${chat.id}?slot=${chat.entries[1]!.slotId}`)
     const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
     await expect(summary.locator("article")).toHaveCount(100)
-    const later = summary.getByRole("button", { name: "Load later messages in this summary" })
+    const later = summary.getByRole("button", { name: "Later messages", exact: true })
     await expect(later).toHaveCount(1)
     // Another tab selects a new version: the refresh reads backwards from the last loaded original.
     const original = chat.entries[1]!
@@ -259,7 +259,7 @@ test("a delayed page response cannot land in another link's page", async ({ page
   await page.goto(`${base}?slot=${chat.entries[1]!.slotId}`)
   const summary = page.locator(`[data-timeline-summary="${chat.summary.id}"]`)
   await expect(summary.locator("article")).toHaveCount(100)
-  await summary.getByRole("button", { name: "Load later messages in this summary" }).click()
+  await summary.getByRole("button", { name: "Later messages", exact: true }).click()
   await expect.poll(() => release !== null).toBe(true)
   // Follow a link to another page of the same summary while the old page is still on its way.
   await page.evaluate((url) => {
@@ -273,7 +273,7 @@ test("a delayed page response cannot land in another link's page", async ({ page
   await expect.poll(() => answered).toBe(true)
   // Responses arrive in order, so once the next page has rendered the stale one has been handled.
   // The new page pages on from its own window, without the old page appended.
-  await summary.getByRole("button", { name: "Load earlier messages in this summary" }).click()
+  await summary.getByRole("button", { name: "Earlier messages", exact: true }).click()
   await expect(summary.locator("article")).toHaveCount(200)
   expect(await slots()).toEqual(chat.entries.slice(40, 240).map((entry) => entry.slotId))
 })

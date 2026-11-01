@@ -10,10 +10,14 @@ import type { AppError } from "../../errors.ts"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { RevisionComparison } from "../../ui/RevisionDiff.tsx"
-import { Alert, Badge } from "../../ui/Surface.tsx"
+import { Alert, Disclosure } from "../../ui/Surface.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { EstimateList } from "./EnableLcmDialog.tsx"
-import { boundaryText, countText, healthOf, jobText, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import { boundaryText, countText, failureText, healthOf, moneyText, originText, rangeText, tokensText } from "./lcm.ts"
+import { ClampedText, HintBadge, LevelBadge, SummaryBadges } from "./summaryParts.tsx"
 import type { ChatSession } from "./session.ts"
 import { TimelineToggle } from "./TimelineToggle.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -26,22 +30,6 @@ function Problem({ error }: { error: AppError | null }) {
       {error.message}
     </p>
   ) : null
-}
-
-function StateBadges({ summary }: { summary: LcmSummary }) {
-  const health = healthOf(summary)
-  return (
-    <>
-      {health === "stale" && <Badge tone="warning">Stale</Badge>}
-      {health === "failed" && <Badge tone="danger">Failed</Badge>}
-      {health === "resolved" && <Badge>Resolved failure</Badge>}
-      {summary.origin === "user" && <Badge>Edited</Badge>}
-      {summary.origin === "imported" && <Badge>Imported from SillyTavern</Badge>}
-      {summary.status === "truncated" && <Badge>Cut short</Badge>}
-      {summary.replacementAvailable && <Badge>Replacement available in Revisions</Badge>}
-      {summary.rerun && <Badge tone="accent">Re-summarizes with the next reply</Badge>}
-    </>
-  )
 }
 
 /** The text of a summary being edited, saved as a draft while typing and as a revision on Save. */
@@ -126,12 +114,14 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
             ? "Not on the server yet: kept in this browser, and sent again when you open this edit."
             : "Keeping your text…"
           : view.changed
-            ? "Your text is kept as a draft."
+            ? "Draft kept. Save to use it."
             : "Unchanged."}
-        {summary.fresh ? "" : " It stays as you write it even though the messages changed."}
+        {summary.fresh ? "" : " Once saved, it stays as you write it, though its messages changed."}
       </p>
       {view.outdated && (
-        <Alert tone="warning">The draft started from an older revision than the one in use. Saving replaces it.</Alert>
+        <Alert tone="warning">
+          This draft started from an older text than the one in use. Saving replaces that one.
+        </Alert>
       )}
       {view.displaced !== null && (
         <Alert tone="warning">Another tab had typed here too; its text is one step back in the undo history.</Alert>
@@ -154,15 +144,21 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
       )}
       <Problem error={view.error} />
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant="primary" pending={pending} disabled={!view.changed || view.text.trim() === ""}>
-          Save revision
-        </Button>
-        <Button onClick={() => void store.undo()} disabled={view.loading}>
-          Undo
-        </Button>
-        <Button onClick={() => void finish(() => store.discard())} pending={pending} aria-label="Cancel the edit">
-          Cancel
-        </Button>
+        <Tooltip label="Uses this text for the summary from now on, as a new revision.">
+          <Button type="submit" variant="primary" pending={pending} disabled={!view.changed || view.text.trim() === ""}>
+            Save
+          </Button>
+        </Tooltip>
+        <Tooltip label="Takes back the last change to the text.">
+          <Button onClick={() => void store.undo()} disabled={view.loading}>
+            Undo
+          </Button>
+        </Tooltip>
+        <Tooltip label="Closes the edit and keeps the summary as it was. What you typed goes to the bin's recovered texts.">
+          <Button onClick={() => void finish(() => store.discard())} pending={pending} aria-label="Discard the edit">
+            Discard
+          </Button>
+        </Tooltip>
       </div>
     </form>
   )
@@ -202,29 +198,37 @@ function Revisions({ session, summary }: { session: ChatSession; summary: LcmSum
       <ol aria-label="Revisions" className="flex flex-col divide-y divide-border rounded-md border border-border">
         {revisions.map((revision) => (
           <li key={revision.id} className="flex flex-col gap-1 p-2">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <span className="font-medium">Revision {revision.number}</span>
-              <span className="text-muted">
+              <span className="text-xs text-muted">
                 {originText(revision.origin)}, {tokensText(revision.tokens)}
               </span>
-              {revision.selected ? (
-                <Badge tone="accent">In use</Badge>
-              ) : (
-                <Button
-                  variant="ghost"
-                  aria-label={`Use revision ${revision.number}`}
-                  hint="Makes this revision the summary's text on this branch."
-                  onClick={() => void use(revision)}
-                >
-                  Use this one
-                </Button>
-              )}
+              <span className="ml-auto">
+                {revision.selected ? (
+                  <HintBadge tone="accent" hint="The text the model is sent for these messages.">
+                    In use
+                  </HintBadge>
+                ) : (
+                  <Tooltip label="Makes this text the summary again. The one in use stays among the revisions.">
+                    <Button
+                      variant="ghost"
+                      className="h-7 px-2"
+                      aria-label={`Use revision ${revision.number}`}
+                      onClick={() => void use(revision)}
+                    >
+                      Use
+                    </Button>
+                  </Tooltip>
+                )}
+              </span>
             </div>
-            <RevisionComparison
-              label={`Compare revision ${revision.number} with saved text`}
-              before={revision.content}
-              after={summary.content ?? ""}
-            />
+            {!revision.selected && (
+              <RevisionComparison
+                label={`Compare revision ${revision.number} with the text in use`}
+                before={revision.content}
+                after={summary.content ?? ""}
+              />
+            )}
           </li>
         ))}
       </ol>
@@ -255,18 +259,23 @@ function Children({
   }, [session, summary])
   if (rows === null) return <p className="text-sm text-muted">Loading…</p>
   return (
-    <ul aria-label={`Summaries condensed into level ${summary.level}`} className="flex flex-col gap-1 pl-3">
+    <ul
+      aria-label={`Summaries condensed into level ${summary.level}`}
+      className="flex flex-col gap-1 border-l-2 border-border pl-3"
+    >
       {rows.map((child) => (
         <li key={child.id} className="flex flex-wrap items-center gap-2 text-sm">
-          <Badge>Level {child.level}</Badge>
-          <button
-            type="button"
-            className="text-accent underline-offset-2 hover:underline"
-            onClick={() => onJump(child.firstSlotId)}
-          >
-            {rangeText(child.from, child.to)}
-          </button>
-          <StateBadges summary={child} />
+          <LevelBadge level={child.level} />
+          <Tooltip label="Shows its first message in the chat.">
+            <button
+              type="button"
+              className="rounded-sm text-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={() => onJump(child.firstSlotId)}
+            >
+              {rangeText(child.from, child.to)}
+            </button>
+          </Tooltip>
+          <SummaryBadges summary={child} />
         </li>
       ))}
     </ul>
@@ -321,31 +330,126 @@ function SummaryRow({
     )
     setError(result.ok ? null : result.error)
   }
+  const range = rangeText(summary.from, summary.to)
+  const failed = health === "failed"
+  const retryBlocked = blockedByManual && !summary.rerun
   return (
     <li
       ref={ref}
       data-summary={summary.id}
       data-level={summary.level}
       data-health={health}
-      className={`flex flex-col gap-2 py-3 first:pt-0 last:pb-0 ${focused ? "rounded-md ring-2 ring-accent/60" : ""}`}
+      className={`flex flex-col gap-2 rounded-md border bg-surface px-3 py-2 ${
+        focused ? "border-accent ring-2 ring-accent/40" : failed ? "border-danger/40" : "border-border"
+      }`}
     >
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge tone="accent">Level {summary.level}</Badge>
-        <button
-          type="button"
-          className="font-medium text-accent underline-offset-2 hover:underline"
-          aria-label={`${rangeText(summary.from, summary.to)}: show the first message`}
-          onClick={() => onJump(summary.firstSlotId)}
-        >
-          {rangeText(summary.from, summary.to)}
-        </button>
-        <span className="text-muted">{tokensText(summary.tokens)}</span>
-        <StateBadges summary={summary} />
+      <div className="flex items-start gap-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm">
+          <LevelBadge level={summary.level} />
+          <Tooltip label="Shows its first message in the chat.">
+            <button
+              type="button"
+              className="rounded-sm font-medium text-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={`${range}: show the first message`}
+              onClick={() => onJump(summary.firstSlotId)}
+            >
+              {range}
+            </button>
+          </Tooltip>
+          {!failed && <span className="text-xs text-muted">{tokensText(summary.tokens)}</span>}
+          <SummaryBadges summary={summary} />
+        </div>
+        {mode !== "edit" && (
+          <div className="flex shrink-0 items-center">
+            {failed ? (
+              <Tooltip
+                label={
+                  retryBlocked
+                    ? "Your own summary of these messages is used instead, so trying again changes nothing. Re-summarize that one to replace it."
+                    : summary.rerun
+                      ? "Leaves it failed: it isn't tried again."
+                      : "Tries it again with your next reply."
+                }
+              >
+                <Button
+                  variant="ghost"
+                  className="h-8 px-2"
+                  aria-pressed={summary.rerun}
+                  disabled={retryBlocked}
+                  focusableWhenDisabled
+                  aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
+                  onClick={() => void rerun(!summary.rerun)}
+                >
+                  {summary.rerun ? "Cancel retry" : "Retry"}
+                </Button>
+              </Tooltip>
+            ) : (
+              <IconButton
+                icon="edit"
+                label={`Edit the summary of ${range.toLowerCase()}`}
+                hint="Edit the text"
+                onClick={() => setMode("edit")}
+              />
+            )}
+            <SlotOutlet slot={summaryPreviews} props={{ summary, session }} />
+            {!failed && (
+              <Menu
+                label={`Actions for the summary of ${range.toLowerCase()}`}
+                trigger={
+                  <Button
+                    variant="ghost"
+                    className="size-8 shrink-0 px-0!"
+                    aria-label={`Actions for the summary of ${range.toLowerCase()}`}
+                  >
+                    <Icon name="more" />
+                  </Button>
+                }
+              >
+                {summary.revisionCount > 1 && (
+                  <MenuItem
+                    icon="history"
+                    description="Its earlier texts, to compare or use instead."
+                    aria-label={`Revisions of the summary of ${range.toLowerCase()}`}
+                    onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
+                  >
+                    {mode === "revisions" ? "Hide revisions" : `Revisions (${summary.revisionCount})`}
+                  </MenuItem>
+                )}
+                {summary.level > 1 && (
+                  <MenuItem
+                    icon="layers"
+                    description="The summaries a level down that this one condenses."
+                    onClick={() => setMode(mode === "children" ? "view" : "children")}
+                  >
+                    {mode === "children" ? "Hide its parts" : `Condensed from ${summary.children.length}`}
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon="regenerate"
+                  disabled={retryBlocked}
+                  description={
+                    retryBlocked
+                      ? "Your own summary over these messages is used instead. Re-summarize that one."
+                      : summary.rerun
+                        ? "Keeps it as it is: it isn't written again."
+                        : summary.origin === "generated"
+                          ? "Writes it again from its messages with your next reply."
+                          : "Writes it again with your next reply. Your text stays in use; the new one waits in Revisions."
+                  }
+                  aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${range.toLowerCase()} with the next reply`}
+                  onClick={() => void rerun(!summary.rerun)}
+                >
+                  {summary.rerun ? "Cancel re-summarize" : "Re-summarize"}
+                </MenuItem>
+              </Menu>
+            )}
+          </div>
+        )}
       </div>
-      {summary.error && <p className="text-sm text-danger">{summary.error}</p>}
+      {summary.error && failed && <p className="text-sm text-danger">{failureText(summary.error)}</p>}
       {blockedByManual && (
-        <p className="text-sm text-muted">
-          Edit or re-summarize the covering summary to change this part of the context.
+        <p className="text-xs text-muted">
+          Your own summary over these messages is used instead, so this one isn&apos;t sent.
         </p>
       )}
       {mode === "edit" ? (
@@ -356,59 +460,7 @@ function SummaryRow({
           onDone={() => setMode("view")}
         />
       ) : (
-        content !== null &&
-        content !== "" && (
-          <p className="max-h-48 overflow-y-auto text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{content}</p>
-        )
-      )}
-      {mode !== "edit" && <SlotOutlet slot={summaryPreviews} props={{ summary, session }} />}
-      {mode !== "edit" && (
-        <div className="flex flex-wrap gap-1">
-          {summary.status !== "failed" && (
-            <Button
-              variant="ghost"
-              aria-label={`Edit the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`}
-              onClick={() => setMode("edit")}
-            >
-              Edit
-            </Button>
-          )}
-          {summary.revisionCount > 1 && (
-            <Button
-              variant="ghost"
-              aria-expanded={mode === "revisions"}
-              aria-label={`Revisions of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`}
-              hint="Its earlier texts, to compare or use instead."
-              onClick={() => setMode(mode === "revisions" ? "view" : "revisions")}
-            >
-              Revisions ({summary.revisionCount})
-            </Button>
-          )}
-          {summary.level > 1 && (
-            <Button
-              variant="ghost"
-              aria-expanded={mode === "children"}
-              hint="The summaries a level down that this one condenses."
-              onClick={() => setMode(mode === "children" ? "view" : "children")}
-            >
-              Condensed from {summary.children.length}
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            aria-pressed={summary.rerun}
-            disabled={blockedByManual && !summary.rerun}
-            hint={
-              summary.rerun
-                ? "Keeps it as it is: it isn't written again."
-                : "Writes it again from its messages with your next reply."
-            }
-            aria-label={`${summary.rerun ? "Cancel re-summarizing" : "Re-summarize"} ${rangeText(summary.from, summary.to).toLowerCase()} with the next reply`}
-            onClick={() => void rerun(!summary.rerun)}
-          >
-            {summary.rerun ? "Cancel re-summarize" : health === "failed" ? "Retry" : "Re-summarize"}
-          </Button>
-        </div>
+        content !== null && content !== "" && <ClampedText text={content} />
       )}
       {mode === "revisions" && <Revisions session={session} summary={summary} />}
       {mode === "children" && <Children session={session} summary={summary} onJump={onJump} />}
@@ -430,47 +482,76 @@ function JobRow({ session, job, onJump }: { session: ChatSession; job: LcmJob; o
     )
     setError(result.ok ? null : result.error)
   }
+  const range = rangeText(job.from, job.to)
+  const status =
+    job.status === "failed"
+      ? {
+          label: "Failed",
+          tone: "danger" as const,
+          hint: "Given up on after its retries. Its messages are sent as they are while they fit."
+        }
+      : job.status === "processing"
+        ? { label: "Writing", tone: "accent" as const, hint: "Being written now." }
+        : { label: "Queued", tone: "accent" as const, hint: "Waiting its turn: written after the ones before it." }
   return (
-    <li data-job={job.id} data-status={job.status} className="flex flex-col gap-1 py-2 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge tone={job.status === "failed" ? "danger" : "accent"}>
-          {job.status === "failed" ? "Failed" : job.status === "processing" ? "Running" : "Queued"}
-        </Badge>
-        <button
-          type="button"
-          className="text-accent underline-offset-2 hover:underline"
-          aria-label={`${rangeText(job.from, job.to)}: show the first message`}
-          onClick={() => onJump(job.firstSlotId)}
-        >
-          {jobText(job)}
-        </button>
-        {job.rerun && <Badge tone="accent">Retries with the next reply</Badge>}
-      </div>
-      {job.error && <p className="text-sm break-words text-danger">{job.error}</p>}
-      {job.status === "failed" && (
-        <div>
-          <Button
-            variant="ghost"
-            aria-pressed={job.rerun}
-            hint={job.rerun ? "Leaves it failed: it isn't tried again." : "Tries it again with your next reply."}
-            aria-label={`${job.rerun ? "Cancel the retry of" : "Retry"} ${rangeText(job.from, job.to).toLowerCase()} with the next reply`}
-            onClick={() => void ask(!job.rerun)}
-          >
-            {job.rerun ? "Cancel retry" : "Retry"}
-          </Button>
+    <li
+      data-job={job.id}
+      data-status={job.status}
+      className={`flex flex-col gap-1 rounded-md border bg-surface px-3 py-2 ${job.status === "failed" ? "border-danger/40" : "border-border"}`}
+    >
+      <div className="flex items-start gap-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm">
+          <LevelBadge level={job.level} />
+          <Tooltip label="Shows its first message in the chat.">
+            <button
+              type="button"
+              className="rounded-sm text-accent underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={`${range}: show the first message`}
+              onClick={() => onJump(job.firstSlotId)}
+            >
+              {range}
+            </button>
+          </Tooltip>
+          <HintBadge tone={status.tone} hint={status.hint}>
+            {status.label}
+          </HintBadge>
+          {job.rerun && (
+            <HintBadge tone="accent" hint="You asked for it to be tried again. That happens with your next reply.">
+              Retry next reply
+            </HintBadge>
+          )}
         </div>
-      )}
+        {job.status === "failed" && (
+          <Tooltip
+            label={job.rerun ? "Leaves it failed: it isn't tried again." : "Tries it again with your next reply."}
+          >
+            <Button
+              variant="ghost"
+              className="h-8 shrink-0 px-2"
+              aria-pressed={job.rerun}
+              aria-label={`${job.rerun ? "Cancel the retry of" : "Retry"} ${range.toLowerCase()} with the next reply`}
+              onClick={() => void ask(!job.rerun)}
+            >
+              {job.rerun ? "Cancel retry" : "Retry"}
+            </Button>
+          </Tooltip>
+        )}
+      </div>
+      {job.error && <p className="text-sm break-words text-danger">{failureText(job.error)}</p>}
       <Problem error={error} />
     </li>
   )
 }
 
-const backfillStates: Record<LcmBackfill["state"], string> = {
-  waiting: "Starts with your next reply, or now",
-  running: "In progress",
-  paused: "Paused",
-  capped: "Stopped at the spending limit",
-  done: "Done"
+const backfillStates: Record<LcmBackfill["state"], { label: string; hint: string }> = {
+  waiting: { label: "Not started", hint: "Starts with your next reply, or now with Summarize now." },
+  running: { label: "In progress", hint: "The older messages are being summarized." },
+  paused: { label: "Paused", hint: "You paused it. Nothing more starts until you continue." },
+  capped: {
+    label: "At the spending limit",
+    hint: "The next request could pass the limit, so nothing more starts until you continue."
+  },
+  done: { label: "Done", hint: "Every older message is summarized." }
 }
 
 /**
@@ -540,58 +621,74 @@ function Backfill({ session, lcm }: { session: ChatSession; lcm: LcmState }) {
   }
   if (backfill === null || backfill.state === "done") return <Problem error={error} />
   const jobs = backfill.remaining.l1Jobs + backfill.remaining.condensations
+  const state = backfillStates[backfill.state]
+  const money = (amount: number | null) =>
+    amount !== null && backfill.currency ? ` (${moneyText(amount, backfill.currency)})` : ""
   return (
-    <section aria-label="Backfill" data-testid="backfill" data-state={backfill.state} className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-medium">Older messages</span>
-        <Badge tone={backfill.state === "capped" ? "warning" : "accent"}>{backfillStates[backfill.state]}</Badge>
+    <section
+      aria-label="Catching up"
+      data-testid="backfill"
+      data-state={backfill.state}
+      className="flex flex-col gap-2 rounded-md border border-border bg-surface px-3 py-2"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm">
+        <Tooltip label="Summarizing the messages the chat had when summaries were turned on.">
+          <span
+            tabIndex={0}
+            className="rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            Catching up
+          </span>
+        </Tooltip>
+        <HintBadge tone={backfill.state === "capped" ? "warning" : "accent"} hint={state.hint}>
+          {state.label}
+        </HintBadge>
+        {jobs > 0 && <span className="text-xs text-muted">{backfill.remaining.messages} messages left</span>}
       </div>
-      {jobs > 0 && <EstimateList estimate={backfill.remaining} title="What is left" />}
-      <p className="text-sm text-muted" data-testid="backfill-spent">
-        Spent so far: {countText(backfill.spentTokens)} tokens
-        {backfill.spentCost !== null && backfill.currency
-          ? ` (${moneyText(backfill.spentCost, backfill.currency)})`
-          : ""}
-        , of up to {countText(backfill.capTokens)}
-        {backfill.capCost !== null && backfill.currency ? ` (${moneyText(backfill.capCost, backfill.currency)})` : ""}.
-      </p>
+      <Tooltip
+        label={`Spending stops at ${countText(backfill.capTokens)} tokens${money(backfill.capCost)}, 150% of the estimate, until you continue. Each request counts at the most it could cost before it's sent.`}
+      >
+        <p
+          tabIndex={0}
+          className="self-start rounded-sm text-xs text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          data-testid="backfill-spent"
+        >
+          Spent {countText(backfill.spentTokens)} of {countText(backfill.capTokens)} tokens{money(backfill.spentCost)}
+        </p>
+      </Tooltip>
       {backfill.state === "capped" && (
         <Alert tone="warning">
-          Spending reached the limit, 150% of the estimate. Nothing more starts until you continue; the limit then
-          becomes 150% of what is left.
+          Paused at the spending limit. Continue allows up to 150% of the estimate for what is left.
         </Alert>
       )}
       <div className="flex flex-wrap gap-2">
         {(backfill.state === "paused" || backfill.state === "capped") && (
-          <Button
-            variant="primary"
-            pending={pending === "continue"}
-            hint="Goes on summarizing, up to 150% of the estimate for what is left."
-            onClick={() => void act("continue")}
-          >
-            Continue
-          </Button>
+          <Tooltip label="Goes on summarizing, up to 150% of the estimate for what is left.">
+            <Button variant="primary" pending={pending === "continue"} onClick={() => void act("continue")}>
+              Continue
+            </Button>
+          </Tooltip>
         )}
         {(backfill.state === "waiting" || backfill.state === "running") && (
-          <Button
-            variant="primary"
-            pending={pending === "summarizeNow"}
-            hint="Summarizes the older messages now, rather than with your next reply."
-            onClick={() => void act("summarizeNow")}
-          >
-            Summarize now
-          </Button>
+          <Tooltip label="Summarizes the rest now, one request after another, instead of with your replies.">
+            <Button variant="primary" pending={pending === "summarizeNow"} onClick={() => void act("summarizeNow")}>
+              Summarize now
+            </Button>
+          </Tooltip>
         )}
         {backfill.state === "running" && (
-          <Button
-            pending={pending === "pause"}
-            hint="Starts no more of these summaries until you continue."
-            onClick={() => void act("pause")}
-          >
-            Pause
-          </Button>
+          <Tooltip label="Starts no more of these summaries until you continue.">
+            <Button pending={pending === "pause"} onClick={() => void act("pause")}>
+              Pause
+            </Button>
+          </Tooltip>
         )}
       </div>
+      {jobs > 0 && (
+        <Disclosure title="Estimate for what is left">
+          <EstimateList estimate={backfill.remaining} title="What is left" />
+        </Disclosure>
+      )}
       <Problem error={error} />
     </section>
   )
@@ -638,9 +735,16 @@ export function SummaryPanel({
       live = false
     }
   }, [session, wanted, version])
+  // Under the user's own summary of a wider range, a request changes nothing the model reads.
+  // One over the same range (a failed redo of it) is offered beside it in Revisions, so it stays.
   const blockedByManual = (s: LcmSummary) =>
     lcm.layer.some(
-      (parent) => parent.id !== s.id && parent.origin !== "generated" && parent.from <= s.from && parent.to >= s.to
+      (parent) =>
+        parent.id !== s.id &&
+        parent.origin !== "generated" &&
+        parent.from <= s.from &&
+        parent.to >= s.to &&
+        (parent.level > s.level || parent.from !== s.from || parent.to !== s.to)
     )
   const extra = wanted !== null && fetched?.id === wanted ? fetched : null
   const unfinished = lcm.jobs.filter(
@@ -648,72 +752,106 @@ export function SummaryPanel({
       job.status !== "failed" ||
       !lcm.failed.some((s) => s.level === job.level && s.from === job.from && s.to === job.to)
   )
+  const heading = (label: string, hint: string) => (
+    <Tooltip label={hint}>
+      <h3
+        tabIndex={0}
+        className="self-start rounded-sm text-xs font-medium tracking-wide text-muted uppercase outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {label}
+      </h3>
+    </Tooltip>
+  )
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted">
-        What stands in for older messages on this branch. Nothing here runs until your next reply, except Summarize now.
-      </p>
-      <p className="text-sm font-medium" data-testid="summary-panel-heading">
-        {boundaryText(lcm)}
-      </p>
-      <TimelineToggle />
-      {viewer.error && <Problem error={viewer.error} />}
-      {lcm.enabled ? (
-        <Switch
-          checked={viewer.prefs.coverageRail}
-          disabled={!viewer.ready || viewer.pending}
-          onCheckedChange={(coverageRail) => void viewer.change({ coverageRail })}
-          description="Bars beside the messages showing which summary covers them. Saved for your account."
-        >
-          Coverage rail
-        </Switch>
-      ) : (
-        <Alert
-          tone="warning"
-          actions={
-            <Button variant="primary" onClick={onEnable}>
-              Enable summaries
-            </Button>
-          }
-        >
-          Summaries are off for this chat.
-        </Alert>
-      )}
+      <div className="flex flex-col gap-2">
+        <Tooltip label="What the model is sent in place of the older messages on this branch. Nothing here is written until your next reply, except with Summarize now.">
+          <p
+            tabIndex={0}
+            className="self-start rounded-sm text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            data-testid="summary-panel-heading"
+          >
+            {boundaryText(lcm)}
+          </p>
+        </Tooltip>
+        {lcm.enabled ? (
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <TimelineToggle />
+            <Tooltip label="Bars beside the messages, one lane per level, showing which summary covers them. Click a bar to open its summary here.">
+              <span className="inline-flex">
+                <Switch
+                  checked={viewer.prefs.coverageRail}
+                  disabled={!viewer.ready || viewer.pending}
+                  onCheckedChange={(coverageRail) => void viewer.change({ coverageRail })}
+                >
+                  Coverage rail
+                </Switch>
+              </span>
+            </Tooltip>
+          </div>
+        ) : (
+          <Alert
+            tone="warning"
+            actions={
+              <Tooltip label="Asks how to start and shows what it costs first.">
+                <Button variant="primary" onClick={onEnable}>
+                  Enable summaries
+                </Button>
+              </Tooltip>
+            }
+          >
+            Summaries are off for this chat.
+          </Alert>
+        )}
+        {viewer.error && <Problem error={viewer.error} />}
+      </div>
       {lcm.enabled && <Backfill session={session} lcm={lcm} />}
       {unfinished.length > 0 && (
-        <ul aria-label="Work in progress" className="flex flex-col divide-y divide-border">
-          {unfinished.map((job) => (
-            <JobRow key={job.id} session={session} job={job} onJump={onJump} />
-          ))}
-        </ul>
+        <section className="flex flex-col gap-2">
+          {heading("Being written", "Summaries queued or being written now.")}
+          <ul aria-label="Work in progress" className="flex flex-col gap-2">
+            {unfinished.map((job) => (
+              <JobRow key={job.id} session={session} job={job} onJump={onJump} />
+            ))}
+          </ul>
+        </section>
       )}
       {lcm.failed.length > 0 && (
-        <ul aria-label="Failed summaries" className="flex flex-col divide-y divide-border">
-          {lcm.failed.map((summary) => (
-            <SummaryRow
-              key={`${session.snapshot().forkId}:${summary.id}`}
-              session={session}
-              summary={summary}
-              focused={summary.id === focus}
-              blockedByManual={blockedByManual(summary)}
-              onJump={onJump}
-            />
-          ))}
-        </ul>
+        <section className="flex flex-col gap-2">
+          {heading("Failed", "Summaries that couldn't be written. Their messages are sent as they are while they fit.")}
+          <ul aria-label="Failed summaries" className="flex flex-col gap-2">
+            {lcm.failed.map((summary) => (
+              <SummaryRow
+                key={`${session.snapshot().forkId}:${summary.id}`}
+                session={session}
+                summary={summary}
+                focused={summary.id === focus}
+                blockedByManual={blockedByManual(summary)}
+                onJump={onJump}
+              />
+            ))}
+          </ul>
+        </section>
       )}
       {lcm.layer.length > 0 ? (
-        <ul aria-label="Summaries in use" className="flex flex-col divide-y divide-border">
-          {lcm.layer.map((summary) => (
-            <SummaryRow
-              key={`${session.snapshot().forkId}:${summary.id}`}
-              session={session}
-              summary={summary}
-              focused={summary.id === focus}
-              blockedByManual={blockedByManual(summary)}
-              onJump={onJump}
-            />
-          ))}
-        </ul>
+        <section className="flex flex-col gap-2">
+          {heading(
+            "Sent to the model",
+            "The summaries the model reads, oldest first, each in place of the messages it covers."
+          )}
+          <ul aria-label="Summaries in use" className="flex flex-col gap-2">
+            {lcm.layer.map((summary) => (
+              <SummaryRow
+                key={`${session.snapshot().forkId}:${summary.id}`}
+                session={session}
+                summary={summary}
+                focused={summary.id === focus}
+                blockedByManual={blockedByManual(summary)}
+                onJump={onJump}
+              />
+            ))}
+          </ul>
+        </section>
       ) : (
         <p className="text-sm text-muted">
           Nothing is summarized yet. Summaries appear as the chat outgrows what the model is sent.
@@ -721,7 +859,10 @@ export function SummaryPanel({
       )}
       {extra !== null && (
         <section aria-label="Not in use" className="flex flex-col gap-2">
-          <p className="text-sm text-muted">This summary is condensed into one above, so it isn't sent itself.</p>
+          {heading(
+            "Not sent itself",
+            "A summary condensed into a higher level: the model reads the higher one instead."
+          )}
           <ul className="flex flex-col">
             <SummaryRow
               session={session}

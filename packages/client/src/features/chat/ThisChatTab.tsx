@@ -221,8 +221,8 @@ export function SummariesSwitch({ session }: { session: ChatSession }) {
         }}
         description={
           <>
-            Older messages are summarized so the chat can go on past what the model takes. Nothing is generated until
-            your next reply. The summaries and how they're written: <PanelLink panel="summaries">Summaries</PanelLink>.
+            Keeps the story in the context as the chat grows. See them and their settings in{" "}
+            <PanelLink panel="summaries">Summaries</PanelLink>.
           </>
         }
       >

@@ -4,8 +4,11 @@ import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { routes } from "../../routes.tsx"
 import { Button } from "../../ui/Button.tsx"
+import { Icon } from "../../ui/Icon.tsx"
+import { Popover } from "../../ui/Popover.tsx"
 import { Alert, Card, CardHeader } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { iconButtonClass } from "../../ui/Tooltip.tsx"
+import { rangeText } from "./lcm.ts"
 import { summaryPreviews } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 import { moneyText } from "./lcm.ts"
@@ -16,7 +19,7 @@ const time = (value: number | null) => (value === null ? "Unknown" : new Date(va
 function Provenance({ details }: { details: Details }) {
   return (
     <div className="flex flex-col gap-2 text-sm" aria-label="Summary generation details">
-      <p className="text-muted">Generation details stay with the original summary after edits.</p>
+      <p className="text-muted">The request that first wrote this summary. Later edits don't change it.</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 [overflow-wrap:anywhere]">
         <dt>Model</dt>
         <dd>{details.model ?? "Unknown"}</dd>
@@ -84,17 +87,20 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
     }
   }, [session, summary.id, open, read])
   return (
-    <div className="flex flex-col gap-2">
-      <Button
-        variant="ghost"
-        aria-expanded={open}
-        hint="How this summary was written: its model, time, tokens and cost."
-        onClick={() => setOpen(!open)}
-      >
-        Details
-      </Button>
-      {open &&
-        (error ? (
+    <Popover
+      open={open}
+      onOpenChange={setOpen}
+      trigger={<Icon name="info" />}
+      triggerLabel={`Details of the summary of ${rangeText(summary.from, summary.to).toLowerCase()}`}
+      triggerClassName={iconButtonClass()}
+      hint="Details: the model, time, tokens and cost of the request that wrote it"
+      title="How it was written"
+      side="bottom"
+      align="end"
+      wide
+    >
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+        {error ? (
           <Alert tone="danger" actions={<Button onClick={() => setRead(read + 1)}>Retry details</Button>}>
             {error}
           </Alert>
@@ -102,23 +108,22 @@ function SummaryProvenance({ session, summary }: { session: ChatSession; summary
           <>
             <Provenance details={details} />
             {details.request ? (
-              <Tooltip label="The request this summary was written from, exactly as it was sent.">
-                <Link
-                  to="/chats/$chatId/summaries/$summaryId/request"
-                  params={{ chatId: session.id, summaryId: summary.id }}
-                  className="self-start text-sm text-accent underline"
-                >
-                  Open request in inspector
-                </Link>
-              </Tooltip>
+              <Link
+                to="/chats/$chatId/summaries/$summaryId/request"
+                params={{ chatId: session.id, summaryId: summary.id }}
+                className="self-start text-sm text-accent underline"
+              >
+                Open request in inspector
+              </Link>
             ) : (
-              <p className="text-sm text-muted">Request capture: unavailable.</p>
+              <p className="text-sm text-muted">The request itself wasn't kept.</p>
             )}
           </>
         ) : (
           <p className="text-sm text-muted">Loading details…</p>
-        ))}
-    </div>
+        )}
+      </div>
+    </Popover>
   )
 }
 
@@ -176,7 +181,7 @@ function SummaryRequestPage() {
               ))}
             </>
           ) : (
-            <p>Request capture: unavailable.</p>
+            <p>The request itself wasn&apos;t kept.</p>
           )}
         </>
       )}
