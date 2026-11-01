@@ -11,15 +11,11 @@ import {
   DEFAULT_LCM,
   DEFAULT_MODEL,
   DEFAULT_PRESET,
-  GLOBAL_LOREBOOKS,
   GLOBAL_REGEX,
-  globalLorebookRefs,
   readGlobalRegex,
-  ownedLorebook,
   ownedModel,
   ownedPreset,
-  readDefaults,
-  readGlobalLorebooks
+  readDefaults
 } from "./generationSettings.ts"
 import { makeDisplayPrefsWriteHandlers } from "./displayPrefs.ts"
 import type { WriteOps } from "./ops.ts"
@@ -262,16 +258,6 @@ export const makeGenerationWriteHandlers = Effect.gen(function* () {
         if (defaults.judge !== undefined) yield* putSetting(userId, DEFAULT_JUDGE, defaults.judge)
         return yield* readDefaults(sql, userId)
       }).pipe(transaction(sql, "SetGenerationDefaults")),
-
-    // Read and written in one transaction, so another tab's change to the list stays.
-    SetGlobalLorebook: ({ userId, ref, global }) =>
-      Effect.gen(function* () {
-        if (global && !(yield* ownedLorebook(sql, userId, ref))) return yield* new NotFound({ entity: "ref", id: ref })
-        const stored = yield* globalLorebookRefs(sql, userId)
-        const next = global ? [...stored.filter((r) => r !== ref), ref] : stored.filter((r) => r !== ref)
-        yield* putSetting(userId, GLOBAL_LOREBOOKS, next.length ? next : null)
-        return yield* readGlobalLorebooks(sql, userId)
-      }).pipe(transaction(sql, "SetGlobalLorebook")),
 
     /** The global regex scripts replaced, if the caller read the revision stored (ST's "Global scripts"). */
     SetGlobalRegex: ({ userId, scripts, expectedRevision }) =>

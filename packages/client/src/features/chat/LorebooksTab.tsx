@@ -1,102 +1,42 @@
-// The side panel's Lorebooks tab (DESIGN §1.3, §5.0): the books this chat reads, first (each
-// member card's own, those added to this chat, the user's global ones), each with its switch,
-// Open (its editor over the chat) and ⋯; then where entries go.
-// Every switch is a state event at the leaf shown, so from there on, on this branch; marking a
-// book global is the user's, for every chat.
+// The side panel's Lorebooks tab (DESIGN §1.3, §5.0): every book this chat reads in one list
+// (lorebookRows.ts: each member card's own, those added to this chat, the preset's), each with
+// its switch; picking a row opens that book below the list to read and edit (owner,
+// 2026-11-01), one at a time; then where entries go.
+// A card's or the chat's switch is a state event at the leaf shown, so from there on, on this
+// branch. It shows at once and is confirmed in the background, put back with a message if it
+// fails. A preset's book is switched in the preset, for every chat using it.
+import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
-import { Link, useNavigate } from "@tanstack/react-router"
-import { Effect } from "effect"
-import { useEffect, useId, useState } from "react"
-import { useAction } from "../../actions.tsx"
-import type { AppError } from "../../errors.ts"
+import type { LibraryRef, RefId } from "@rp/shared/library.ts"
+import { useNavigate } from "@tanstack/react-router"
+import { useEffect, useId, useRef, useState } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
-import { Segmented } from "../../ui/Segmented.tsx"
-import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
-import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { Popover } from "../../ui/Popover.tsx"
-import { Input } from "../../ui/Field.tsx"
+import { Segmented } from "../../ui/Segmented.tsx"
+import { inlineExplanationClass } from "../../ui/Explanation.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
+import { useCardRefs, useLibraryLorebooks } from "../editor/libraryLorebooks.ts"
+import { LorebookPanelEditor } from "../editor/LorebookPanelEditor.tsx"
+import { LorebookPicker } from "../editor/LorebookPicker.tsx"
+import { PRESET_LOREBOOKS_FOCUS } from "../editor/PresetLorebooks.tsx"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { useCaller } from "../editor/caller.ts"
+import { EditorStore, useEditorState, useLeaveGuard, useValue } from "../editor/store.ts"
+import { useSession } from "../../session.ts"
 import { useCast } from "./cast.ts"
-import { lorebookSections } from "./lorebookSections.ts"
-import type { ChatSession } from "./session.ts"
-
-interface Library {
-  readonly lorebooks: ReadonlyArray<LibraryRef>
-  /** Cards' refs by entity, to open a card's own lorebook in the editor. */
-  readonly cards: ReadonlyMap<string, LibraryRef>
-}
-
-/** The library's lorebooks not attached yet, filtered as typed. */
-function Picker({
-  lorebooks,
-  onAttach,
-  onClose
-}: {
-  lorebooks: ReadonlyArray<LibraryRef>
-  onAttach: (ref: LibraryRef) => void
-  onClose: () => void
-}) {
-  const [query, setQuery] = useState("")
-  const id = useId()
-  const words = query.toLowerCase().split(/\s+/).filter(Boolean)
-  const shown = lorebooks.filter((ref) =>
-    words.every((word) => `${ref.label} ${ref.subtitle}`.toLowerCase().includes(word))
-  )
-  return (
-    <section aria-label="Add a lorebook" className="flex flex-col gap-2 rounded-md border border-border p-3">
-      <div className="flex items-center gap-2">
-        <label htmlFor={id} className="text-sm font-medium">
-          Add a lorebook
-        </label>
-        <span className="flex-1" />
-        <Button variant="ghost" className="h-8 px-2" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-      <Input
-        id={id}
-        type="search"
-        placeholder="Search the library's lorebooks"
-        value={query}
-        onChange={(event) => setQuery(event.currentTarget.value)}
-        autoFocus
-      />
-      {lorebooks.length === 0 ? (
-        <p className="text-sm text-muted">
-          Every lorebook in the library is attached already, or there are none:{" "}
-          <Link to="/library" className="text-accent hover:underline">
-            import one in the library
-          </Link>
-          .
-        </p>
-      ) : shown.length === 0 ? (
-        <p className="text-sm text-muted">No lorebook matches “{query}”.</p>
-      ) : (
-        <ul aria-label="Lorebooks to add" className="flex max-h-72 flex-col overflow-y-auto">
-          {shown.map((ref) => (
-            <li key={ref.id}>
-              <button
-                type="button"
-                className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
-                onClick={() => onAttach(ref)}
-              >
-                <span className="font-medium">{ref.label}</span>
-                {ref.subtitle && <span className="text-xs text-muted">{ref.subtitle}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
-}
+import { useChatPreset } from "./chatPreset.ts"
+import { type BookRow, lorebookRows } from "./lorebookRows.ts"
+import type { ChatSession, ChatView } from "./session.ts"
 
 const entries = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
 const heading = "text-xs font-medium tracking-wide text-muted uppercase"
+
+const NO_BOOKS: ReadonlyArray<PresetLorebook> = []
 
 /**
  * Where this chat's entries go (DESIGN §1.3): below the history, or where each entry's position
@@ -157,199 +97,249 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
   )
 }
 
-interface BookRow {
-  readonly key: string
+/** What a row shows and does, worked out from its source. */
+interface Shown {
   readonly name: string
-  /** Where it comes from: a character's, added to this chat, global. */
   readonly from: string
-  readonly on: boolean
-  readonly onChange: (on: boolean) => void
-  /** What its switch does, which differs by where the book comes from. */
   readonly switchHint: string
-  /** The library entry its Open button edits: the book, or the card holding it. */
-  readonly ref: LibraryRef | undefined
-  /** A card's own book: the card's editor opens on it (`CARD_LOREBOOK_FOCUS`), not on the card. */
+  /** "From the preset X": a link into the preset. */
+  readonly presetLink?: { readonly label: string; readonly open: () => void }
+  /** The store and the book's place in it, for the editor below the list. */
+  readonly edit: { readonly ref: RefId; readonly root: ReadonlyArray<string>; readonly note?: string } | null
   readonly focus?: string
-  readonly openLabel: string
-  /** What Open does, when it isn't plain from the row: a card's own book opens its card. */
-  readonly openHint?: string
   readonly menu: ReadonlyArray<ActionMenuItem>
 }
 
-/** A book: its switch in this chat, Open (its editor over the chat) and its ⋯. */
-function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef, focus?: string) => void }) {
+/** A book: its switch, its name (picking it opens the book below the list) and its ⋯. */
+function Book({
+  row,
+  shown,
+  selected,
+  onSelect,
+  onSwitch
+}: {
+  row: BookRow
+  shown: Shown
+  selected: boolean
+  onSelect: () => void
+  onSwitch: (on: boolean) => void
+}) {
+  const hintId = useId()
   return (
-    <li className="flex items-start gap-1 py-2.5">
+    <li
+      className={`flex items-start gap-1 rounded-md px-1 py-1.5 ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
+      data-selected={selected || undefined}
+    >
+      {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
+      <Tooltip label={shown.switchHint}>
+        <span className="shrink-0 pt-1.5 pl-1">
+          <Switch checked={row.on} onCheckedChange={onSwitch} describedBy={hintId}>
+            <span className="sr-only">{shown.name}</span>
+          </Switch>
+        </span>
+      </Tooltip>
       <div className="min-w-0 flex-1">
-        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from} hint={row.switchHint}>
-          {row.name}
-        </Switch>
-      </div>
-      {row.ref && (
-        <Button
-          variant="ghost"
-          className="h-8 shrink-0 px-2"
-          aria-label={row.openLabel}
-          hint={
-            row.openHint ??
-            "Opens the book's editor over the chat. What you save there changes it in every chat that reads it."
+        <Tooltip
+          label={
+            selected
+              ? "Closes the book below the list."
+              : "Opens the book below the list, to read and edit its entries here."
           }
-          onClick={() => onOpen(row.ref!, row.focus)}
         >
-          Open
-        </Button>
-      )}
-      {row.menu.length > 0 ? (
-        <ActionMenu label={`More for ${row.name}`} trigger={<Icon name="more" />} items={row.menu} />
+          <button
+            type="button"
+            aria-pressed={selected}
+            disabled={!shown.edit}
+            onClick={onSelect}
+            className="flex w-full min-w-0 flex-col items-start rounded-md px-1.5 py-0.5 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:hover:bg-transparent"
+          >
+            <span className="text-sm font-medium [overflow-wrap:anywhere]">
+              {shown.name}
+              {row.pending && <span className="sr-only"> (switching)</span>}
+            </span>
+            <span className="text-xs text-muted [overflow-wrap:anywhere]">{shown.from}</span>
+          </button>
+        </Tooltip>
+        {shown.presetLink && (
+          <Tooltip label="Opens the preset at its lorebooks: switching or removing it there changes every chat using the preset.">
+            <button
+              type="button"
+              onClick={shown.presetLink.open}
+              className="px-1.5 text-left text-xs text-accent underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-focus focus-visible:outline-none"
+            >
+              {shown.presetLink.label}
+            </button>
+          </Tooltip>
+        )}
+        <p id={hintId} aria-hidden="true" className={`hidden px-1.5 text-xs text-muted ${inlineExplanationClass}`}>
+          {shown.switchHint}
+        </p>
+      </div>
+      {shown.menu.length > 0 ? (
+        <ActionMenu label={`More for ${shown.name}`} trigger={<Icon name="more" />} items={shown.menu} />
       ) : (
-        // The ⋯'s room, so every row's Open lines up.
         <span aria-hidden="true" className="w-8 shrink-0" />
       )}
     </li>
   )
 }
 
-export function LorebooksTab({ session, active }: { session: ChatSession; active: boolean }) {
-  const { cast, cards } = useCast()
-  const action = useAction()
-  const [error, setError] = useState<AppError | null>(null)
-  const [library, setLibrary] = useState<Library | null>(null)
-  const [globals, setGlobals] = useState<ReadonlyArray<string> | null>(null)
-  const [adding, setAdding] = useState(false)
-  // Books detached while the tab is open stay listed, off, so the switch can bring them back.
-  const [detached, setDetached] = useState<ReadonlyArray<string>>([])
-  const change = async (next: CastChange) => {
-    const outcome = await session.changeCast(next)
-    setError(outcome.ok ? null : outcome.error)
-  }
-  const setGlobal = async (ref: LibraryRef["id"], global: boolean) => {
-    const outcome = await action.run((client) => client("SetGlobalLorebook", { ref, global }))
-    if (outcome.ok) setGlobals(outcome.value)
-  }
-  // The library and the global books, read again each time the tab is shown.
+/**
+ * The preset the chat uses, its books as typed (live), kept loaded and flushed like its tab's.
+ * Without one (yet), a store that's never loaded stands in, so the hooks stay the same.
+ */
+function usePresetBooks(store: EditorStore | null) {
+  const call = useCaller()
+  const userId = useSession().user.id
+  const [none] = useState(() => new EditorStore("" as RefId, userId, call))
+  const used = store ?? none
+  const state = useEditorState(used)
   useEffect(() => {
-    if (!active) return
-    void action
-      .run((client) =>
-        Effect.all({
-          lorebooks: client("ListLibrary", { kind: "lorebook" }),
-          cards: client("ListLibrary", { kind: "card" }),
-          globals: client("GetGlobalLorebooks", undefined)
-        })
-      )
-      .then((result) => {
-        if (!result.ok) return
-        setGlobals(result.value.globals)
-        setLibrary({
-          lorebooks: result.value.lorebooks,
-          // The card's upstream ref, where its own lorebook is edited.
-          cards: new Map(
-            result.value.cards.filter((ref) => ref.refKind === "upstream").map((ref) => [ref.entityId as string, ref])
-          )
-        })
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- each time it's shown
-  }, [active])
-  const attached = cast?.lorebooks ?? []
-  const sections = lorebookSections({
-    attached,
-    detached,
-    globals,
-    globalsOff: cast?.globalLorebooksOff ?? []
-  })
+    if (used !== none && used.snapshot === null) void used.load()
+  }, [used, none])
+  useLeaveGuard(used)
+  const books = useValue<ReadonlyArray<PresetLorebook> | undefined>(used, ["lorebooks"]) ?? NO_BOOKS
+  return { books: state.snapshot ? books : NO_BOOKS, label: state.snapshot?.ref.label ?? null }
+}
+
+export function LorebooksTab({ session, view, active }: { session: ChatSession; view: ChatView; active: boolean }) {
+  const { cast, cards } = useCast()
+  const library = useLibraryLorebooks()
+  const cardRefs = useCardRefs()
+  const workspace = usePresetWorkspace()
+  const navigate = useNavigate()
+  const preset = useChatPreset(session, view)
+  const presetStore = preset.ref && workspace ? workspace.store(preset.ref) : null
+  const { books: presetBooks, label: presetName } = usePresetBooks(presetStore)
+  const [error, setError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [selected, setSelected] = useState<string | null>(null)
+  // Switches not confirmed yet, by row; each with the latest request's number, so an earlier
+  // answer doesn't put a later switch back.
+  const [pending, setPending] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const [requests] = useState(() => new Map<string, number>())
+
+  const send = async (key: string, change: CastChange, on: boolean | null, failure: string) => {
+    const seq = (requests.get(key) ?? 0) + 1
+    requests.set(key, seq)
+    if (on !== null) setPending((map) => new Map(map).set(key, on))
+    const outcome = await session.changeCast(change)
+    if (requests.get(key) !== seq) return
+    setPending((map) => {
+      const next = new Map(map)
+      next.delete(key)
+      return next
+    })
+    setError(outcome.ok ? null : `${failure}: ${outcome.error.message}`)
+  }
+
   const own = (cast?.participants ?? []).flatMap((id) => {
     const card = cards.get(id)
     return card?.lorebook && !card.inBin ? [card] : []
   })
-  const byId = new Map((library?.lorebooks ?? []).map((ref) => [ref.id as string, ref]))
-  const addable = (library?.lorebooks ?? []).filter((ref) => !attached.includes(ref.id))
-  const nameOf = (id: string) => byId.get(id)?.label ?? (library === null ? "…" : "A lorebook no longer in the library")
-  const navigate = useNavigate()
-  const workspace = usePresetWorkspace()
-  // Over the chat, as the preset and card editors open from the panel; a page without one.
-  const openEditor = (ref: LibraryRef, focus?: string) =>
-    workspace
-      ? workspace.open(ref.id, focus)
-      : void navigate({ to: "/library/$refId", params: { refId: ref.id }, search: focus ? { focus } : {} })
-  const detach = (id: string, next: boolean) => {
-    setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
-    void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
-  }
-  const globalItem = (id: string, global: boolean): ActionMenuItem => ({
-    label: "Use in every chat",
-    description:
-      "Makes it global: every chat of yours reads it, as ST's globally selected World Info, unless a chat switches it off. Ticked while it is.",
-    checked: global,
-    onCheckedChange: (next) => void setGlobal(id as LibraryRef["id"], next)
+  const rows = lorebookRows({
+    cards: own.map((card) => card.entityId),
+    cardsOff: cast?.cardLorebooksOff ?? [],
+    listed: cast?.listedLorebooks ?? [],
+    preset: presetBooks,
+    pending
   })
-  const rows: ReadonlyArray<BookRow> = [
-    ...own.map((card): BookRow => {
-      const on = !cast?.cardLorebooksOff.includes(card.entityId)
+  const byId = new Map((library ?? []).map((ref) => [ref.id as string, ref]))
+  const nameOf = (id: string) => byId.get(id)?.label ?? (library === null ? "…" : "A lorebook no longer in the library")
+  const openPreset = () => preset.ref && workspace?.open(preset.ref, PRESET_LOREBOOKS_FOCUS)
+  const presetLabel = presetName ? `From the preset ${presetName}` : "From the preset"
+
+  const shownOf = (row: BookRow): Shown => {
+    if (row.source === "card") {
+      const card = cards.get(row.id)!
+      const name = card.lorebookName ?? `${card.name}'s lorebook`
+      const ref = cardRefs?.get(row.id)
       return {
-        key: `card:${card.entityId}`,
-        name: card.lorebookName ?? `${card.name}'s lorebook`,
+        name,
         from: [
-          on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
+          row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
-        on,
-        onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
         switchHint: `Off stops ${card.name}'s own book in this chat only, from the latest message on. The card keeps it, and its other chats still read it.`,
-        ref: library?.cards.get(card.entityId),
+        edit: ref
+          ? { ref: ref.id, root: ["character_book"], note: `Part of ${card.name}'s card: saving it saves the card.` }
+          : null,
         focus: CARD_LOREBOOK_FOCUS,
-        openLabel: `Open ${card.lorebookName ?? `${card.name}'s lorebook`}`,
-        openHint: `Opens the book alone, in ${card.name}'s card editor: saving it saves the card.`,
         menu: []
       }
-    }),
-    ...sections.added.map(({ id, on }): BookRow => {
-      const name = nameOf(id)
+    }
+    const ref = byId.get(row.id)
+    const name = nameOf(row.id)
+    if (row.source === "preset")
       return {
-        key: `added:${id}`,
         name,
-        from: [
-          on ? "Added to this chat" : "Taken off this chat",
-          ...(byId.get(id)?.subtitle ? [byId.get(id)!.subtitle] : [])
-        ].join(" · "),
-        on,
-        onChange: (next) => detach(id, next),
-        switchHint:
-          "Off takes the book out of this chat, from the latest message on. Add a lorebook puts it back once this tab is closed.",
-        ref: byId.get(id),
-        openLabel: `Open ${name}`,
-        menu: byId.has(id) ? [globalItem(id, false)] : []
+        from: row.on ? "Sent with the preset" : "In the preset, switched off there",
+        switchHint: `Switches it in the preset ${presetName ?? ""}: every chat using that preset, as you switch it.`,
+        presetLink: { label: presetLabel, open: openPreset },
+        edit: ref ? { ref: ref.id, root: [] } : null,
+        menu: []
       }
-    }),
-    ...sections.global.map(({ id, on, attached: alsoAdded }): BookRow => {
-      const name = nameOf(id)
-      return {
-        key: `global:${id}`,
-        name,
-        from: on ? "Global: used in every chat" : "Global, but off in this chat",
-        on,
-        onChange: (next) => void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next }),
-        switchHint:
-          "A global book is read by every chat of yours. Off stops it in this chat only, from the latest message on; other chats still read it.",
-        ref: byId.get(id),
-        openLabel: `Open ${name}`,
-        menu: [
-          globalItem(id, true),
-          // A separate attachment from before it was global: either use sends its entries.
-          ...(alsoAdded
-            ? [
-                {
-                  label: "Also added to this chat",
-                  description:
-                    "Added to this chat on its own too, so it stays here if it stops being global. Its entries are sent once either way.",
-                  checked: attached.includes(id as LibraryRef["id"]),
-                  onCheckedChange: (next: boolean) => detach(id, next)
-                }
-              ]
-            : [])
-        ]
-      }
-    })
-  ]
+    return {
+      name,
+      from: [
+        row.on
+          ? "Added to this chat"
+          : row.presetSends
+            ? "Off in this chat, but the preset sends it"
+            : "Off in this chat",
+        ...(ref?.subtitle ? [ref.subtitle] : [])
+      ].join(" · "),
+      switchHint:
+        "Off stops the book in this chat, from the latest message on; it stays listed here, off, until you remove it.",
+      ...(row.presetSends ? { presetLink: { label: `Also ${presetLabel.toLowerCase()}`, open: openPreset } } : {}),
+      edit: ref ? { ref: ref.id, root: [] } : null,
+      menu: [
+        {
+          label: "Remove from this chat",
+          description: "Takes it off this chat's list, from the latest message on. Add a lorebook brings it back.",
+          tone: "danger",
+          onSelect: () => {
+            if (selected === row.key) setSelected(null)
+            void send(row.key, { _tag: "RemoveLorebook", ref: row.id as RefId }, null, `Couldn't remove ${name}`)
+          }
+        }
+      ]
+    }
+  }
+
+  const switchRow = (row: BookRow, name: string, on: boolean) => {
+    if (row.source === "preset") {
+      presetStore?.setValue(["lorebooks", `id=${row.id}`, "enabled"], on)
+      return
+    }
+    const change: CastChange =
+      row.source === "card"
+        ? { _tag: "CardLorebook", entityId: row.id as never, on }
+        : { _tag: "Lorebook", ref: row.id as RefId, active: on }
+    void send(row.key, change, on, `Couldn't switch ${name} ${on ? "on" : "off"}; it's back as it was`)
+  }
+
+  const chosen = rows.find((row) => row.key === selected)
+  const chosenShown = chosen ? shownOf(chosen) : null
+  // A book picked on a phone opens below the fold: its name is brought into view, the list
+  // staying put when it already shows.
+  const opened = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selected) opened.current?.scrollIntoView({ block: "nearest" })
+  }, [selected])
+  const openLarge = (shown: Shown) => {
+    if (!shown.edit) return
+    if (workspace) workspace.open(shown.edit.ref, shown.focus)
+    else
+      void navigate({
+        to: "/library/$refId",
+        params: { refId: shown.edit.ref },
+        search: shown.focus ? { focus: shown.focus } : {}
+      })
+  }
+  const addable = (library ?? []).filter((ref) => !(cast?.listedLorebooks ?? []).some((book) => book.ref === ref.id))
+  void active
+
   return (
     <div className="flex flex-col gap-5">
       <section aria-labelledby="lore-in-chat" className="flex flex-col gap-1">
@@ -361,19 +351,34 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             {cast === null || library === null ? "Loading…" : "No lorebook is in this chat. Add one below."}
           </p>
         ) : (
-          <ul aria-label="Lorebooks in this chat" className="flex flex-col divide-y divide-border">
-            {rows.map((row) => (
-              <Book key={row.key} row={row} onOpen={openEditor} />
-            ))}
+          <ul aria-label="Lorebooks in this chat" className="flex flex-col gap-0.5">
+            {rows.map((row) => {
+              const shown = shownOf(row)
+              return (
+                <Book
+                  key={row.key}
+                  row={row}
+                  shown={shown}
+                  selected={row.key === selected}
+                  onSelect={() => setSelected(row.key === selected ? null : row.key)}
+                  onSwitch={(on) => switchRow(row, shown.name, on)}
+                />
+              )
+            })}
           </ul>
         )}
         {adding ? (
-          <Picker
+          <LorebookPicker
+            title="Add a lorebook"
             lorebooks={addable}
-            onAttach={(ref) => {
+            onPick={(ref: LibraryRef) => {
               setAdding(false)
-              setDetached((list) => list.filter((d) => d !== ref.id))
-              void change({ _tag: "Lorebook", ref: ref.id, active: true })
+              void send(
+                `chat:${ref.id}`,
+                { _tag: "Lorebook", ref: ref.id, active: true },
+                true,
+                `Couldn't add ${ref.label}`
+              )
             }}
             onClose={() => setAdding(false)}
           />
@@ -388,14 +393,35 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             </Button>
           </div>
         )}
+        {error && (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        )}
       </section>
 
-      <Placement on={cast?.loreBelowHistory ?? true} onChange={(on) => void change({ _tag: "LoreBelowHistory", on })} />
-      <p className="text-sm text-muted">Switches apply from the latest message on, on this branch.</p>
-      {(error ?? action.error) && (
-        <p role="alert" className="text-sm text-danger">
-          {(error ?? action.error)!.message}
-        </p>
+      <Placement
+        on={cast?.loreBelowHistory ?? true}
+        onChange={(on) =>
+          void send("placement", { _tag: "LoreBelowHistory", on }, null, "Couldn't change where entries go")
+        }
+      />
+      <p className="text-sm text-muted">
+        A chat's switches apply from the latest message on, on this branch; a preset's, in every chat using it.
+      </p>
+
+      {chosen && chosenShown?.edit && workspace && (
+        <div ref={opened} className="scroll-mt-2 border-t border-border pt-4">
+          <LorebookPanelEditor
+            key={chosen.key}
+            store={workspace.store(chosenShown.edit.ref)}
+            root={chosenShown.edit.root}
+            fallbackName={chosenShown.name}
+            {...(chosenShown.edit.note ? { note: chosenShown.edit.note } : {})}
+            onClose={() => setSelected(null)}
+            onOpenLarge={() => openLarge(chosenShown)}
+          />
+        </div>
       )}
     </div>
   )

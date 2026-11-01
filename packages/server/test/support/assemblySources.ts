@@ -53,8 +53,6 @@ export interface AssemblyFixture {
   /** More events, by the depth of the message they follow (null: the chat's start). */
   readonly events?: ReadonlyArray<PositionedEvent>
   readonly lorebooks?: ReadonlyArray<LorebookInput>
-  /** The ids of `lorebooks` the user marked global. */
-  readonly globalLorebooks?: ReadonlyArray<string>
   /** The account's global regex scripts. */
   readonly globalRegex?: ReadonlyArray<RegexScript>
   readonly notes?: ReadonlyArray<NoteInput>
@@ -127,7 +125,6 @@ const fixtureSources = (fixture: AssemblyFixture) => {
           .filter((c) => wanted.includes(c.entity))
           .map((c) => ({ entity: c.entity, ref: `ref-${c.entity}`, revision: `rev-${c.entity}`, doc: c.doc }))
       ),
-    globalLorebooks: Effect.succeed(fixture.globalLorebooks ?? []),
     globalRegex: Effect.succeed(fixture.globalRegex ?? []),
     lorebooks: (refs) => Effect.succeed((fixture.lorebooks ?? []).filter((b) => refs.includes(b.id))),
     notes: (cards) =>

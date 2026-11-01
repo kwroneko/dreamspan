@@ -134,7 +134,8 @@ import {
   ChatCard,
   ChatGroup,
   FirstTurn,
-  LinkedNote
+  LinkedNote,
+  LorebookPreset
 } from "@rp/shared/chatSetupApi.ts"
 import { AssemblyFailed } from "../assembler/types.ts"
 
@@ -1440,7 +1441,12 @@ export class WriteOps extends RpcGroup.make(
       /** The card's other notes, without their owner, each matched to an earlier import's by `module_id`. */
       notesDocJson: Schema.optionalKey(Schema.Array(Schema.String)),
       /** ST scans its notes for lorebook entries (`allowWIScan`): so does the card's Character's Note. */
-      characterNoteScan: Schema.optionalKey(Schema.Boolean)
+      characterNoteScan: Schema.optionalKey(Schema.Boolean),
+      /**
+       * A preset's lorebooks (`PresetDoc.lorebooks`), each on, from an ST folder's global World
+       * Info books (§13); ids that aren't the user's live library lorebooks are left out.
+       */
+      presetLorebooks: Schema.optionalKey(Schema.Array(RefId))
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -2230,15 +2236,6 @@ export class WriteOps extends RpcGroup.make(
   Rpc.make("SetGenerationDefaults", {
     payload: { userId: UserId, defaults: GenerationDefaults },
     success: GenerationDefaults,
-    error: Schema.Union([NotFound, StorageError])
-  }),
-  /**
-   * Marks a lorebook of the user's global (DESIGN §5.0) or not, in `lorebooks.global`;
-   * NotFound when it isn't a live library lorebook of the user's. Returns the list as stored.
-   */
-  Rpc.make("SetGlobalLorebook", {
-    payload: { userId: UserId, ref: RefId, global: Schema.Boolean },
-    success: Schema.Array(RefId),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** Replaces the account's global regex scripts, at the revision the caller read (StaleWrite otherwise). */
@@ -3101,8 +3098,12 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
-  /** The user's global lorebooks: live library lorebooks of theirs, in the order marked. */
-  Rpc.make("GetGlobalLorebooks", { payload: { userId: UserId }, success: Schema.Array(RefId), error: StorageError }),
+  /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */
+  Rpc.make("LorebookPresets", {
+    payload: { userId: UserId, ref: RefId },
+    success: Schema.Array(LorebookPreset),
+    error: StorageError
+  }),
   Rpc.make("GetGlobalRegex", { payload: { userId: UserId }, success: GlobalRegex, error: StorageError }),
   /** A version's text, reasoning and reply sections from before regex scripts rewrote them (null: unchanged). */
   Rpc.make("RawVersionText", {

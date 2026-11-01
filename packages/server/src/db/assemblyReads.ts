@@ -29,8 +29,8 @@ import type { RequestImage } from "../assembler/types.ts"
 import { sqlSources, readImageTokenFacts } from "./assemblySources.ts"
 import { previousStartIn } from "./historyStart.ts"
 import { displayThrough } from "./displayPath.ts"
-import { readDefaults, readGlobalLorebooks, readGlobalRegex } from "./generationSettings.ts"
-import { readCardPromptUse } from "./lorebookSettings.ts"
+import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
+import { readCardPromptUse, readLorebookPresets } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
@@ -347,7 +347,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
       }).pipe(query("NextContextAccess")),
 
     GetGenerationDefaults: ({ userId }) => readDefaults(sql, userId).pipe(query("GetGenerationDefaults")),
-    GetGlobalLorebooks: ({ userId }) => readGlobalLorebooks(sql, userId).pipe(query("GetGlobalLorebooks")),
+    LorebookPresets: ({ userId, ref }) => readLorebookPresets(sql, userId, ref).pipe(query("LorebookPresets")),
     GetGlobalRegex: ({ userId }) => readGlobalRegex(sql, userId).pipe(query("GetGlobalRegex")),
 
     RawVersionText: ({ userId, versionId }) =>

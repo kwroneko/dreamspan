@@ -53,8 +53,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: change.active ? "note.activate" : "note.deactivate", value: { note: change.entityId } }
     case "CardLorebook":
       return { key: "lorebook.embedded", value: { entity: change.entityId, on: change.on } }
-    case "GlobalLorebook":
-      return { key: "lorebook.global", value: { ref: change.ref, on: change.on } }
+    case "RemoveLorebook":
+      return { key: "lorebook.remove", value: { ref: change.ref } }
     case "LoreBelowHistory":
       return { key: "lorebook.below_history", value: { on: change.on } }
   }
@@ -142,9 +142,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
           on ? [] : [entity as Cast["cardLorebooksOff"][number]]
         ),
-        globalLorebooksOff: Object.entries(state.globalLorebooks).flatMap(([ref, on]) =>
-          on ? [] : [ref as Cast["globalLorebooksOff"][number]]
-        ),
+        listedLorebooks: state.listedLorebooks as Cast["listedLorebooks"],
         loreBelowHistory: state.loreBelowHistory ?? true,
         macroBindings: state.macroBindings,
         macroNames: {
@@ -201,12 +199,8 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
         internal("SetCardFavourite")
       ),
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
-    GetGlobalLorebooks: () =>
-      Effect.flatMap(userId, (id) => reader.GetGlobalLorebooks({ userId: id })).pipe(internal("GetGlobalLorebooks")),
-    SetGlobalLorebook: ({ ref, global }) =>
-      Effect.flatMap(userId, (id) =>
-        writer.SetGlobalLorebook({ userId: id, ref, global }).pipe(Effect.tap(() => warmth.refreshUser(id)))
-      ).pipe(internal("SetGlobalLorebook")),
+    LorebookPresets: ({ ref }) =>
+      Effect.flatMap(userId, (id) => reader.LorebookPresets({ userId: id, ref })).pipe(internal("LorebookPresets")),
     GetCardPromptUse: () =>
       Effect.flatMap(userId, (id) => reader.GetCardPromptUse({ userId: id })).pipe(internal("GetCardPromptUse")),
     ListCardUsage: () =>

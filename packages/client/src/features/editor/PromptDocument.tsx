@@ -1,6 +1,7 @@
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
 // above its text in the code-editor box. Options fold away per prompt, or all at once.
+import type { RefId } from "@rp/shared/library.ts"
 import { writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
@@ -34,6 +35,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
 import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
+import { PRESET_LOREBOOKS_FOCUS, PresetLorebooks } from "./PresetLorebooks.tsx"
 import { type EditorStore, useText, useValue } from "./store.ts"
 import { presetEditorWarnings } from "./presetSections.ts"
 import { promptLabel } from "./promptLabel.ts"
@@ -565,7 +567,8 @@ export function PromptDocument({
   focus,
   goTo,
   layout = "document",
-  onOpenLarge
+  onOpenLarge,
+  onOpenLorebook
 }: {
   store: EditorStore
   context?: PresetContext | null | undefined
@@ -575,6 +578,8 @@ export function PromptDocument({
   layout?: PromptLayout
   /** The column's way to the large editor, at a prompt. */
   onOpenLarge?: ((identifier: string) => void) | undefined
+  /** Opens a lorebook the preset sends (over the chat); without it, its page. */
+  onOpenLorebook?: ((ref: RefId) => void) | undefined
 }) {
   const column = layout === "column"
   const searchMatch = useContext(SearchNavigation)
@@ -607,7 +612,9 @@ export function PromptDocument({
   const jump = (identifier: string) => {
     reveal(identifier)
     requestAnimationFrame(() => {
-      const target = root.current?.querySelector<HTMLElement>(`[data-prompt="${CSS.escape(identifier)}"]`)
+      const target = root.current?.querySelector<HTMLElement>(
+        identifier === PRESET_LOREBOOKS_FOCUS ? "[data-preset-lorebooks]" : `[data-prompt="${CSS.escape(identifier)}"]`
+      )
       if (!target) return
       const scroll = root.current?.closest<HTMLElement>("[data-preset-scroll]")
       if (scroll) {
@@ -853,6 +860,7 @@ export function PromptDocument({
           )}
         </div>
       )}
+      <PresetLorebooks store={store} column={column} onOpen={onOpenLorebook} />
     </div>
   )
   return (

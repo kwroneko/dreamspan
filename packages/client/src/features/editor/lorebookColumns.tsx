@@ -335,7 +335,8 @@ export const registerLorebookTable = () => {
     id: "delete",
     order: 100,
     label: "Delete",
-    description: "Removed when you save the book. Until then, Restore above the table brings it back.",
+    description:
+      "Out of the book at once: replies stop using it. Until you save, Restore above the entries brings it back.",
     icon: "trash",
     tone: "danger",
     run: ({ store, path }) => void store.removeItem(path)

@@ -1,12 +1,13 @@
 // Everything a lorebook entry holds, as the table's opened row shows it (LorebookTable.tsx):
 // its text, keys, matching, group, recursion and timing. Every edit is a field draft.
-import { useContext, useEffect, useRef } from "react"
+import { type ReactNode, useContext, useEffect, useRef } from "react"
 import { TRIGGERS } from "@rp/shared/presetConditions.ts"
 import { type FieldPath, textField, valueField } from "@rp/shared/editing.ts"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { FieldTools, NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
+import { EXPLAIN } from "./lorebookExplain.ts"
 import { entryPath } from "./lorebookTable.ts"
 import { SearchNavigation, scrollToSearchField } from "./searchNavigation.ts"
 import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
@@ -14,7 +15,19 @@ import { type EditorStore, useDirty, useText, useValue } from "./store.ts"
 const EMPTY_KEYS: ReadonlyArray<string> = []
 
 /** One key per line: commas in a /pattern/flags key must survive unchanged. */
-function Keys({ store, path, label, id }: { store: EditorStore; path: FieldPath; label: string; id?: string }) {
+function Keys({
+  store,
+  path,
+  label,
+  id,
+  description = "One key per line. Regular expressions use /pattern/flags."
+}: {
+  store: EditorStore
+  path: FieldPath
+  label: string
+  id?: string
+  description?: string
+}) {
   const match = useContext(SearchNavigation)
   const target = useRef<HTMLTextAreaElement>(null)
   const revealed = useRef<typeof match>(null)
@@ -40,11 +53,12 @@ function Keys({ store, path, label, id }: { store: EditorStore; path: FieldPath;
   }, [match, pathKey, keys])
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <Field label={label} description="One key per line. Regular expressions use /pattern/flags.">
+      <Field label={label} description={description}>
         <Textarea
           ref={target}
           id={id}
-          rows={2}
+          rows={Math.min(4, Math.max(1, keys.length))}
+          className="min-h-9!"
           value={keys.join("\n")}
           onChange={(event) =>
             store.setValue(path, event.currentTarget.value === "" ? [] : event.currentTarget.value.split("\n"))
@@ -203,214 +217,286 @@ const group = "flex flex-col gap-4 rounded-lg border border-border p-3"
 const groupTitle = "text-sm font-medium"
 
 /**
- * Everything an entry holds besides what its row shows: its text, keys, matching, group,
- * recursion and timing, and the fields only SillyTavern or a card book uses.
+ * An opened entry (owner, 2026-11-01: "only entry content and primary keys should generally be
+ * expanded right away"): its text and primary keys, then everything else folded under Settings,
+ * a second level each entry opens on its own. `essentials` are the row's own settings where the
+ * row doesn't show them (the side panel and narrow screens: strategy, position, depth, order,
+ * trigger %).
  */
 export function EntryDetails({
   store,
   root,
   uid,
   wide,
-  card
+  card,
+  essentials
 }: {
   store: EditorStore
   root: FieldPath
   uid: number
-  /** Two columns side by side. */
+  /** Text and keys side by side, and the settings in two columns. */
   wide: boolean
   /** A card's embedded book, with the card book's own fields. */
   card: boolean
+  essentials?: ReactNode
 }) {
   const path = entryPath(root, uid)
   const title = useText(store, [...path, "comment"]) || "Untitled entry"
   const position = useValue<string>(store, [...path, "position"])
   const selective = useValue<boolean>(store, [...path, "selective"])
   return (
-    <div role="group" aria-label={`Lorebook entry ${uid}`} className="flex min-w-0 flex-col gap-4">
+    <div role="group" aria-label={`Lorebook entry ${uid}`} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap gap-x-6 gap-y-1 empty:hidden">
         <RowFieldChange store={store} path={path} label={title} />
         {ROW_FIELDS.map(([at, label]) => (
           <RowFieldChange key={label} store={store} path={[...path, ...at]} label={label} />
         ))}
       </div>
-      <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""}`}>
-        <div className="flex min-w-0 flex-col gap-4">
-          <TextField store={store} path={[...path, "content"]} label="Entry content" rows={8} expandable />
-          <Keys store={store} path={[...path, "keys"]} label="Primary keys" id={`lore-keys-${uid}`} />
-          <section className={group} aria-label="Secondary keys">
-            <SwitchField
-              store={store}
-              path={[...path, "selective"]}
-              label="Use secondary keys"
-              description="A primary key match also has to pass this filter."
-            />
-            {selective && (
-              <>
-                <SelectField
-                  store={store}
-                  path={[...path, "selective_logic"]}
-                  label="Logic"
-                  items={[
-                    { value: "and_any", label: "AND ANY", description: "At least one secondary key also appears." },
-                    { value: "and_all", label: "AND ALL", description: "Every secondary key also appears." },
-                    { value: "not_any", label: "NOT ANY", description: "None of the secondary keys appears." },
-                    { value: "not_all", label: "NOT ALL", description: "At least one secondary key is missing." }
-                  ]}
-                />
-                <Keys store={store} path={[...path, "secondary_keys"]} label="Secondary keys" />
-              </>
-            )}
-          </section>
-          {position === "outlet" && (
-            <TextField
-              store={store}
-              path={[...path, "outlet_name"]}
-              label="Outlet name"
-              description="Sent where a prompt has {{outlet::this name}}."
-            />
-          )}
-        </div>
-        <div className="flex min-w-0 flex-col gap-4">
-          <section className={group} aria-label="Matching">
-            <h4 className={groupTitle}>Matching</h4>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <InheritedSwitch store={store} path={[...path, "case_sensitive"]} label="Case sensitive" fallback="off" />
-              <InheritedSwitch store={store} path={[...path, "match_whole_words"]} label="Whole words" fallback="on" />
-            </div>
-            <NumberField
-              store={store}
-              path={[...path, "scan_depth"]}
-              label="Scan depth (empty: the book's, else 2)"
-              description="How many of the latest messages it looks for its keys in."
-              integer
-              nullable
-              min={0}
-            />
-            <fieldset className="flex flex-col gap-2">
-              <legend className="mb-2 text-sm">Also look for keys in</legend>
-              {MATCH_SOURCES.map(([key, label]) => (
-                <SwitchField key={key} store={store} path={[...path, key]} label={label} checkbox />
-              ))}
-            </fieldset>
-            <TriggersField
-              store={store}
-              path={[...path, "triggers"]}
-              label="Generation types (none ticked: all)"
-              items={TRIGGERS}
-            />
-          </section>
-          <section className={group} aria-label="Inclusion group">
-            <h4 className={groupTitle}>Inclusion group</h4>
-            <TextField
-              store={store}
-              path={[...path, "group"]}
-              label="Group"
-              description="Of the entries in one group that match, only one is sent."
-            />
-            <SwitchField
-              store={store}
-              path={[...path, "group_override"]}
-              label="Prioritize this entry in its group"
-              description="When several of its group match, this one is chosen."
-            />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <NumberField
-                store={store}
-                path={[...path, "group_weight"]}
-                label="Group weight"
-                min={0}
-                description="In ST, its chance of being the one chosen. Chats here don't choose by weight."
-              />
-              <InheritedSwitch
-                store={store}
-                path={[...path, "use_group_scoring"]}
-                label="Group scoring"
-                fallback="off"
-                description="Of its group's matches, only those with the most keys found can be chosen."
-              />
-            </div>
-          </section>
-          <section className={group} aria-label="Recursion and budget">
-            <h4 className={groupTitle}>Recursion and budget</h4>
-            <SwitchField
-              store={store}
-              path={[...path, "exclude_recursion"]}
-              label="Non-recursable"
-              description="Other entries' text can't trigger it."
-            />
-            <SwitchField
-              store={store}
-              path={[...path, "prevent_recursion"]}
-              label="Prevent further recursion"
-              description="Its text doesn't trigger other entries."
-            />
-            <DelayUntilRecursion store={store} path={[...path, "delay_until_recursion"]} />
-            <SwitchField
-              store={store}
-              path={[...path, "ignore_budget"]}
-              label="Ignore the token budget"
-              description="Still included once the lorebook budget (a quarter of the context, less the reply's room) or this book's own is used up; its text still counts toward them. With entries below the history it still has to fit the room kept for them."
-            />
-            <SwitchField
-              store={store}
-              path={[...path, "use_probability"]}
-              label="Use the trigger %"
-              description="Off, a match always includes it."
-            />
-          </section>
-          <details className={group}>
-            <summary className={`cursor-pointer ${groupTitle}`}>Timing, filters and automation</summary>
-            <p className="text-sm text-muted">
-              Kept as SillyTavern has them. Chats here don't use sticky, cooldown, character filters or automation yet;
-              the context inspector lists an entry that has them.
-            </p>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <NumberField
-                store={store}
-                path={[...path, "sticky"]}
-                label="Sticky"
-                integer
-                nullable
-                min={0}
-                description="Messages it stays in for after it triggers."
-              />
-              <NumberField
-                store={store}
-                path={[...path, "cooldown"]}
-                label="Cooldown"
-                integer
-                nullable
-                min={0}
-                description="Messages it can't trigger again for, after it's been in."
-              />
-              <NumberField
-                store={store}
-                path={[...path, "delay"]}
-                label="Delay"
-                integer
-                nullable
-                min={0}
-                description="Not included until the chat has this many messages."
-              />
-            </div>
-            <CharacterFilter store={store} path={[...path, "character_filter"]} />
-            <TextField store={store} path={[...path, "automation_id"]} label="Automation ID" />
-            <SwitchField
-              store={store}
-              path={[...path, "add_memo"]}
-              label="Add the title as a memo"
-              description="SillyTavern's flag, which its imports set when an entry has a title. Nothing here reads it and it changes nothing sent to the model; it's kept for exports."
-            />
-            {card && (
-              <>
-                <TextField store={store} path={[...path, "name"]} label="Name (card books)" />
-                <NumberField store={store} path={[...path, "priority"]} label="Priority (card books)" optional />
-                <SwitchField store={store} path={[...path, "use_regex"]} label="Keys are regular expressions" />
-              </>
-            )}
-          </details>
-        </div>
+      <div className={`grid min-w-0 gap-3 ${wide ? "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""}`}>
+        <TextField store={store} path={[...path, "content"]} label="Entry content" rows={5} expandable />
+        <Keys
+          store={store}
+          path={[...path, "keys"]}
+          label="Primary keys"
+          id={`lore-keys-${uid}`}
+          description={wide ? EXPLAIN.keys : "One per line; /pattern/flags is a regular expression."}
+        />
       </div>
+      <details className="group/settings min-w-0 rounded-lg border border-border">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium outline-none select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="shrink-0 transition-transform group-open/settings:rotate-90 motion-reduce:transition-none"
+          >
+            <path d="m9 18 6-6-6-6" />
+          </svg>
+          Settings
+          <span className="truncate font-normal text-muted">
+            {essentials ? "strategy, position, " : ""}secondary keys, matching, group, recursion, timing
+          </span>
+        </summary>
+        <div className="flex min-w-0 flex-col gap-4 px-3 pt-1 pb-3">
+          {essentials}
+          <div className={`grid min-w-0 gap-4 ${wide ? "grid-cols-2" : ""}`}>
+            <div className="flex min-w-0 flex-col gap-4">
+              <section className={group} aria-label="Secondary keys">
+                <SwitchField
+                  store={store}
+                  path={[...path, "selective"]}
+                  label="Use secondary keys"
+                  description={EXPLAIN.selective}
+                />
+                {selective && (
+                  <>
+                    <SelectField
+                      store={store}
+                      path={[...path, "selective_logic"]}
+                      label="Logic"
+                      items={[
+                        { value: "and_any", label: "AND ANY", description: "At least one secondary key also appears." },
+                        { value: "and_all", label: "AND ALL", description: "Every secondary key also appears." },
+                        { value: "not_any", label: "NOT ANY", description: "None of the secondary keys appears." },
+                        { value: "not_all", label: "NOT ALL", description: "At least one secondary key is missing." }
+                      ]}
+                    />
+                    <Keys
+                      store={store}
+                      path={[...path, "secondary_keys"]}
+                      label="Secondary keys"
+                      description={EXPLAIN.secondary_keys}
+                    />
+                  </>
+                )}
+              </section>
+              {position === "outlet" && (
+                <TextField
+                  store={store}
+                  path={[...path, "outlet_name"]}
+                  label="Outlet name"
+                  description={EXPLAIN.outlet_name}
+                />
+              )}
+              <section className={group} aria-label="Matching">
+                <h4 className={groupTitle}>Matching</h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <InheritedSwitch
+                    store={store}
+                    path={[...path, "case_sensitive"]}
+                    label="Case sensitive"
+                    fallback="off"
+                    description={EXPLAIN.case_sensitive}
+                  />
+                  <InheritedSwitch
+                    store={store}
+                    path={[...path, "match_whole_words"]}
+                    label="Whole words"
+                    fallback="on"
+                    description={EXPLAIN.match_whole_words}
+                  />
+                </div>
+                <NumberField
+                  store={store}
+                  path={[...path, "scan_depth"]}
+                  label="Scan depth (empty: the book's, else 2)"
+                  description="How many of the latest messages it looks for its keys in."
+                  integer
+                  nullable
+                  min={0}
+                />
+                <fieldset className="flex flex-col gap-2">
+                  <legend className="mb-1 text-sm">Also look for keys in</legend>
+                  <p className="text-sm text-muted">{EXPLAIN.match_sources}</p>
+                  {MATCH_SOURCES.map(([key, label]) => (
+                    <SwitchField key={key} store={store} path={[...path, key]} label={label} checkbox />
+                  ))}
+                </fieldset>
+                <TriggersField
+                  store={store}
+                  path={[...path, "triggers"]}
+                  label="Generation types (none ticked: all)"
+                  items={TRIGGERS}
+                />
+              </section>
+            </div>
+            <div className="flex min-w-0 flex-col gap-4">
+              <section className={group} aria-label="Inclusion group">
+                <h4 className={groupTitle}>Inclusion group</h4>
+                <TextField store={store} path={[...path, "group"]} label="Group" description={EXPLAIN.group} />
+                <SwitchField
+                  store={store}
+                  path={[...path, "group_override"]}
+                  label="Prioritize this entry in its group"
+                  description={EXPLAIN.group_override}
+                />
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <NumberField
+                    store={store}
+                    path={[...path, "group_weight"]}
+                    label="Group weight"
+                    min={0}
+                    description={EXPLAIN.group_weight}
+                  />
+                  <InheritedSwitch
+                    store={store}
+                    path={[...path, "use_group_scoring"]}
+                    label="Group scoring"
+                    fallback="off"
+                    description={EXPLAIN.use_group_scoring}
+                  />
+                </div>
+              </section>
+              <section className={group} aria-label="Recursion and budget">
+                <h4 className={groupTitle}>Recursion and budget</h4>
+                <SwitchField
+                  store={store}
+                  path={[...path, "exclude_recursion"]}
+                  label="Non-recursable"
+                  description="Other entries' text can't trigger it."
+                />
+                <SwitchField
+                  store={store}
+                  path={[...path, "prevent_recursion"]}
+                  label="Prevent further recursion"
+                  description="Its text doesn't trigger other entries."
+                />
+                <DelayUntilRecursion store={store} path={[...path, "delay_until_recursion"]} />
+                <SwitchField
+                  store={store}
+                  path={[...path, "ignore_budget"]}
+                  label="Ignore the token budget"
+                  description="Still included once the lorebook budget (a quarter of the context, less the reply's room) or this book's own is used up; its text still counts toward them. With entries below the history it still has to fit the room kept for them."
+                />
+                <SwitchField
+                  store={store}
+                  path={[...path, "use_probability"]}
+                  label="Use the trigger %"
+                  description="Off, a match always includes it."
+                />
+              </section>
+              <details className={group}>
+                <summary className={`cursor-pointer ${groupTitle}`}>Timing, filters and automation</summary>
+                <p className="text-sm text-muted">
+                  Kept as SillyTavern has them. Chats here don't use sticky, cooldown, character filters or automation
+                  yet; the context inspector lists an entry that has them.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <NumberField
+                    store={store}
+                    path={[...path, "sticky"]}
+                    label="Sticky"
+                    integer
+                    nullable
+                    min={0}
+                    description="Messages it stays in for after it triggers."
+                  />
+                  <NumberField
+                    store={store}
+                    path={[...path, "cooldown"]}
+                    label="Cooldown"
+                    integer
+                    nullable
+                    min={0}
+                    description="Messages it can't trigger again for, after it's been in."
+                  />
+                  <NumberField
+                    store={store}
+                    path={[...path, "delay"]}
+                    label="Delay"
+                    integer
+                    nullable
+                    min={0}
+                    description="Not included until the chat has this many messages."
+                  />
+                </div>
+                <CharacterFilter store={store} path={[...path, "character_filter"]} />
+                <TextField
+                  store={store}
+                  path={[...path, "automation_id"]}
+                  label="Automation ID"
+                  description="ST's Automation ID: a Quick Reply that runs when the entry is sent. Kept for ST; nothing runs it here."
+                />
+                <SwitchField
+                  store={store}
+                  path={[...path, "add_memo"]}
+                  label="Add the title as a memo"
+                  description="SillyTavern's flag, which its imports set when an entry has a title. Nothing here reads it and it changes nothing sent to the model; it's kept for exports."
+                />
+                {card && (
+                  <>
+                    <TextField
+                      store={store}
+                      path={[...path, "name"]}
+                      label="Name (card books)"
+                      description="The card book format's own name for the entry, kept for export."
+                    />
+                    <NumberField
+                      store={store}
+                      path={[...path, "priority"]}
+                      label="Priority (card books)"
+                      description="The card book format's priority, kept for export; Order decides here."
+                      optional
+                    />
+                    <SwitchField
+                      store={store}
+                      path={[...path, "use_regex"]}
+                      label="Keys are regular expressions"
+                      description="The card book format's flag, kept for export."
+                    />
+                  </>
+                )}
+              </details>
+            </div>
+          </div>
+        </div>
+      </details>
     </div>
   )
 }

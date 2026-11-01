@@ -47,11 +47,12 @@ export const StateEventData = Schema.Union([
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
   event("lorebook.attach", Schema.Struct({ ref: RefId })),
+  /** Turns an attached lorebook off; it stays listed until `lorebook.remove`. */
   event("lorebook.detach", Schema.Struct({ ref: RefId })),
+  /** Takes a lorebook out of the chat's list, on or off. */
+  event("lorebook.remove", Schema.Struct({ ref: RefId })),
   /** A card's own lorebook (`character_book`) used or not; on unless a chat turns it off. */
   event("lorebook.embedded", Schema.Struct({ entity: EntityId, on: Schema.Boolean })),
-  /** A global lorebook used in this chat or not; absent is on (DESIGN §5.0). */
-  event("lorebook.global", Schema.Struct({ ref: RefId, on: Schema.Boolean })),
   /** Lorebook entries only below the history, whatever their position; absent is on (DESIGN §1.3). */
   event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
   event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown }))
@@ -137,8 +138,8 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.attach": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.detach": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
+  "lorebook.remove": { ids: { ref: { table: "ref", kind: "lorebook" } }, removes: true },
   "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
-  "lorebook.global": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.below_history": { ids: {} },
   "var.set": { ids: {} }
 }
@@ -340,11 +341,12 @@ export interface ChatState {
   readonly outputContract: "final_text" | "send_message" | "both" | null
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
+  /** The attached lorebooks that are on, in listed order. */
   readonly lorebooks: ReadonlyArray<string>
+  /** Every lorebook attached and not removed, on or off, in the order first attached. */
+  readonly listedLorebooks: ReadonlyArray<{ readonly ref: string; readonly on: boolean }>
   /** Cards whose own lorebook is turned off (false) or back on; absent is on. */
   readonly embeddedLorebooks: Readonly<Record<string, boolean>>
-  /** Global lorebooks this chat turned off (false) or back on; absent is on. */
-  readonly globalLorebooks: Readonly<Record<string, boolean>>
   /** Whether lorebook entries go only below the history; null (no event) is on. */
   readonly loreBelowHistory: boolean | null
   readonly vars: Readonly<Record<string, unknown>>
@@ -371,14 +373,29 @@ const emptyChatState: ChatState = {
   rolloutContinuity: null,
   lorebookBindings: {},
   lorebooks: [],
+  listedLorebooks: [],
   embeddedLorebooks: {},
-  globalLorebooks: {},
   loreBelowHistory: null,
   vars: {}
 }
 
 const add = (list: ReadonlyArray<string>, item: string) => (list.includes(item) ? list : [...list, item])
 const remove = (list: ReadonlyArray<string>, item: string) => list.filter((x) => x !== item)
+
+const withListed = (state: ChatState, listedLorebooks: ChatState["listedLorebooks"]): ChatState => ({
+  ...state,
+  listedLorebooks,
+  lorebooks: listedLorebooks.flatMap((book) => (book.on ? [book.ref] : []))
+})
+
+/** Sets a lorebook on or off, appending it to the list if new and keeping its place if listed. */
+const listLorebook = (state: ChatState, ref: string, on: boolean): ChatState =>
+  withListed(
+    state,
+    state.listedLorebooks.some((book) => book.ref === ref)
+      ? state.listedLorebooks.map((book) => (book.ref === ref ? { ref, on } : book))
+      : [...state.listedLorebooks, { ref, on }]
+  )
 
 const applyCore = (
   state: ChatState,
@@ -470,13 +487,18 @@ const applyCore = (
     case "lorebook.binding":
       return { ...state, lorebookBindings: { ...state.lorebookBindings, [data.value.entity]: data.value.ref } }
     case "lorebook.attach":
-      return { ...state, lorebooks: add(state.lorebooks, data.value.ref) }
+      return listLorebook(state, data.value.ref, true)
     case "lorebook.detach":
-      return { ...state, lorebooks: remove(state.lorebooks, data.value.ref) }
+      return state.listedLorebooks.some((book) => book.ref === data.value.ref)
+        ? listLorebook(state, data.value.ref, false)
+        : state
+    case "lorebook.remove":
+      return withListed(
+        state,
+        state.listedLorebooks.filter((book) => book.ref !== data.value.ref)
+      )
     case "lorebook.embedded":
       return { ...state, embeddedLorebooks: { ...state.embeddedLorebooks, [data.value.entity]: data.value.on } }
-    case "lorebook.global":
-      return { ...state, globalLorebooks: { ...state.globalLorebooks, [data.value.ref]: data.value.on } }
     case "lorebook.below_history":
       return { ...state, loreBelowHistory: data.value.on }
     case "var.set":

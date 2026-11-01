@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { LINEAGE_CAP } from "../src/db/forkState.ts"
 import { client, outcome, serverLayer, testConfig } from "./support/config.ts"
-import { cardDoc } from "./support/docs.ts"
+import { cardDoc, docFor } from "./support/docs.ts"
 import { eventually, generateReply } from "./support/generation.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 import { fixtureSql } from "./support/lcmFixtures.ts"
@@ -439,6 +439,44 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       })
       assert.deepStrictEqual((yield* state(main)).participants, [parent.entityId])
       assert.deepStrictEqual((yield* state(sibling)).participants, [parent.entityId])
+    })
+  )
+
+  it.effect("a lorebook switched off stays listed in its fork until it's removed, and a sibling keeps its own", () =>
+    Effect.gen(function* () {
+      const { api, main, b, fork, writer, userId, chatId } = yield* setup
+      const book = (label: string) =>
+        writer.CreateEntity({
+          userId,
+          kind: "lorebook",
+          label,
+          subtitle: "",
+          doc: docFor("lorebook", label),
+          schemaVersion: 1,
+          origin: "user",
+          sourcePath: null
+        })
+      const one = (yield* book("One")).ref.id
+      const two = (yield* book("Two")).ref.id
+      const change = (forkId: ForkId, cast: Parameters<typeof api.ChangeCast>[0]["change"]) =>
+        api.ChangeCast({ chatId, forkId, slotId: b.slotId, change: cast })
+      yield* change(main, { _tag: "Lorebook", ref: one, active: true })
+      yield* change(main, { _tag: "Lorebook", ref: two, active: true })
+      const sibling = yield* fork(main, b.slotId)
+      yield* change(main, { _tag: "Lorebook", ref: one, active: false })
+      const cast = (forkId: ForkId) => api.GetCast({ chatId, forkId, slotId: b.slotId })
+      const off = yield* cast(main)
+      assert.deepStrictEqual(off.listedLorebooks, [
+        { ref: one, on: false },
+        { ref: two, on: true }
+      ])
+      assert.deepStrictEqual(off.lorebooks, [two])
+      yield* change(main, { _tag: "Lorebook", ref: one, active: true })
+      assert.deepStrictEqual((yield* cast(main)).lorebooks, [one, two])
+      yield* change(main, { _tag: "RemoveLorebook", ref: one })
+      assert.deepStrictEqual((yield* cast(main)).listedLorebooks, [{ ref: two, on: true }])
+      // The fork made before these changes still lists both, on.
+      assert.deepStrictEqual((yield* cast(sibling)).lorebooks, [one, two])
     })
   )
 

@@ -4,7 +4,6 @@
 // and switched is used by the next reply as it's made (live text, owner 2026-11-01), and Save
 // with its message cuts a revision; moving or deleting a prompt is held behind the floating
 // bar's Save and Revert (heldOrder.ts), being easy to do by accident.
-import type { RefId } from "@rp/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"
@@ -22,6 +21,7 @@ import { RefName } from "../editor/RefDialogs.tsx"
 import { HeldChangesBar } from "../editor/SaveRevert.tsx"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
+import { useChatPreset } from "./chatPreset.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 function PresetColumn({ store }: { store: EditorStore }) {
@@ -70,6 +70,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
         layout="column"
         goTo={goTo}
         onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
+        onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
       />
       <Disclosure lazy title="End of request, prefill, utility prompts, regex scripts">
         <PresetSettings store={store} call={call} />
@@ -79,39 +80,11 @@ function PresetColumn({ store }: { store: EditorStore }) {
   )
 }
 
-/**
- * The account's selected preset, the next reply's when the chat has no context estimate yet: a
- * chat without messages has none, so the tab would otherwise wait for a first message.
- */
-function useSelectedPreset(session: ChatSession) {
-  const call = useCaller()
-  const [selected, setSelected] = useState<{ readonly ref: RefId | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    const refresh = () =>
-      void call((client) => client("GetGenerationDefaults", undefined)).then((result) => {
-        if (live && result.ok) setSelected({ ref: result.value.preset })
-      })
-    const unsubscribe = session.subscribeContext(refresh)
-    refresh()
-    return () => {
-      live = false
-      unsubscribe()
-    }
-  }, [session, call])
-  return selected
-}
-
 export function PresetTab({ session, view }: { session: ChatSession; view: ChatView }) {
   const workspace = usePresetWorkspace()
-  const selected = useSelectedPreset(session)
-  // The estimate names the preset the next reply is assembled with (a chat's own copy, say);
-  // until there is one, the account's selection.
-  const estimated = view.history?.preset
-  const ref = estimated ? estimated.ref : selected?.ref
-  const builtin = estimated ? estimated.scope === "builtin" : selected !== null && selected.ref === null
+  const { ref, builtin } = useChatPreset(session, view)
   return ref && workspace ? (
-    <PresetColumn key={ref} store={workspace.store(ref as RefId)} />
+    <PresetColumn key={ref} store={workspace.store(ref)} />
   ) : (
     <p className="text-sm text-muted">
       {builtin ? "SillyTavern's built-in default. Import a preset to edit its prompts." : "Loading the current preset…"}

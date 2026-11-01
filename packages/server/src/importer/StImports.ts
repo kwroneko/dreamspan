@@ -210,6 +210,8 @@ interface Session extends FolderContext {
   readonly records: Map<string, ChatRecord>
   /** Lorebooks already reported missing: once per import, not once per chat naming them. */
   readonly missingWorlds: Set<string>
+  /** ST's global World Info books attached to its selected preset: the preset's name and theirs. */
+  globalAttached: { readonly preset: string; readonly books: ReadonlyArray<string> } | null
   chat: ChatProgress | null
 }
 
@@ -321,6 +323,7 @@ export class StImports extends Context.Service<
             libraryByHash: new Map(),
             records: new Map(),
             missingWorlds: new Set(),
+            globalAttached: null,
             chat: null
           }
           for (const entry of sources.library) {
@@ -383,7 +386,8 @@ export class StImports extends Context.Service<
         path: string,
         countAs: string,
         parsed: ParsedFile,
-        createdAt?: number
+        createdAt?: number,
+        presetLorebooks?: ReadonlyArray<RefId>
       ) =>
         Effect.gen(function* () {
           const { report } = session
@@ -406,7 +410,11 @@ export class StImports extends Context.Service<
             return { outcome: result("skipped", "in the recycle bin"), entity: null, created: false, note: null }
           }
           const same = earlier ?? session.libraryByHash.get(`${library.kind}:${parsed.sha256}`)
-          if (same !== undefined && same.kind === library.kind && same.sourceHash === parsed.sha256) {
+          const unchanged = same !== undefined && same.kind === library.kind && same.sourceHash === parsed.sha256
+          // A preset taking ST's global books goes to the writer even unchanged: the books may be
+          // new. What it stores is the import's line (§3.9), so the same books add no revision.
+          const attaching = presetLorebooks !== undefined && presetLorebooks.length > 0
+          if (unchanged && !attaching) {
             report.count(countAs, "unchanged")
             const note =
               library.noteDocJson === null
@@ -422,7 +430,8 @@ export class StImports extends Context.Service<
               })
               return yield* writer.ImportFile({
                 userId: user.id,
-                intoRefId: earlier?.refId ?? null,
+                intoRefId: (earlier ?? (unchanged ? same : undefined))?.refId ?? null,
+                ...(attaching ? { presetLorebooks } : {}),
                 ...(createdAt === undefined ? {} : { createdAt }),
                 ...library,
                 sourceName: path,
@@ -457,7 +466,12 @@ export class StImports extends Context.Service<
           }
           session.library.set(path, entry)
           session.libraryByHash.set(`${entry.kind}:${parsed.sha256}`, entry)
-          report.count(countAs, imported.created ? "added" : "updated")
+          const counted = imported.created
+            ? "added"
+            : unchanged && imported.outcome === "up_to_date"
+              ? "unchanged"
+              : "updated"
+          report.count(countAs, counted)
           if (imported.outcome === "conflicts") {
             report.issue(
               path,
@@ -467,7 +481,7 @@ export class StImports extends Context.Service<
             )
           }
           return {
-            outcome: result(imported.created ? "added" : "updated"),
+            outcome: result(counted),
             entity: entry,
             created: imported.created,
             note: imported.note?.entityId ?? null
@@ -588,13 +602,27 @@ export class StImports extends Context.Service<
           )
           if (parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries"))
             session.riders = true
-          const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
-          if (imported.entity !== null && kind === "lorebook") {
-            session.worlds.set(name, imported.entity.refId)
-            // ST applies its global books to every chat: here they're the user's global lorebooks.
-            if (session.settings?.globalWorlds.includes(name))
-              yield* writer.SetGlobalLorebook({ userId: user.id, ref: imported.entity.refId, global: true })
-          }
+          // ST applies its global books to every chat: here they go with the preset ST had
+          // selected, the books already imported (lorebooks come before presets, §13).
+          const selected = kind === "preset" && session.settings?.selectedPreset === name
+          const globals = selected
+            ? (session.settings?.globalWorlds ?? []).flatMap((world) => {
+                const ref = session.worlds.get(world)
+                return ref === undefined ? [] : [{ world, ref }]
+              })
+            : []
+          const imported = yield* importLibrary(
+            session,
+            user,
+            path,
+            kind,
+            parsed.parsed,
+            undefined,
+            globals.map((book) => book.ref)
+          )
+          if (imported.entity !== null && kind === "lorebook") session.worlds.set(name, imported.entity.refId)
+          if (imported.entity !== null && globals.length > 0)
+            session.globalAttached = { preset: name, books: globals.map((book) => book.world) }
           // Whether ST sent the summary through `{{summary}}` in the preset it used (DESIGN §8 [P]).
           if (parsed.parsed.library && kind === "preset" && session.settings?.selectedPreset === name)
             session.summaryMacro =
@@ -1191,12 +1219,6 @@ export class StImports extends Context.Service<
                 persona.avatar
               ])
             }
-            if (settings.globalWorlds.length > 0) {
-              for (const name of settings.globalWorlds) {
-                const ref = session.worlds.get(name)
-                if (ref) yield* writer.SetGlobalLorebook({ userId: user.id, ref, global: true })
-              }
-            }
             return result("added")
           })
         ),
@@ -1237,6 +1259,56 @@ export class StImports extends Context.Service<
       ]
       for (const handler of builtins) yield* handlers.register(handler)
 
+      /**
+       * Where ST's global World Info books went, measured on each read: attached to the preset
+       * ST had selected, in the library unattached, or not in the folder.
+       */
+      const globalWorldIssues = (session: Session): ReadonlyArray<StIssue> => {
+        const names = session.settings?.globalWorlds ?? []
+        if (names.length === 0) return []
+        const quoted = (books: ReadonlyArray<string>) => books.map((book) => `“${shownText(book)}”`).join(", ")
+        const attached = session.globalAttached
+        const issues: Array<StIssue> = []
+        if (attached !== null)
+          issues.push(
+            new StIssue({
+              path: "settings.json",
+              level: "info",
+              code: "st.global_worlds_attached",
+              message: `Attached ST's global World Info ${attached.books.length === 1 ? "book" : "books"} ${quoted(attached.books)} to the preset “${shownText(attached.preset)}”.`
+            })
+          )
+        const unattached = names.filter((name) => session.worlds.has(name) && !attached?.books.includes(name))
+        if (unattached.length > 0) {
+          const selected = session.settings?.selectedPreset ?? null
+          const why =
+            selected === null
+              ? "ST had no preset selected"
+              : attached?.preset === selected
+                ? `${unattached.length === 1 ? "it was" : "they were"} imported after the preset “${shownText(selected)}”`
+                : `ST's selected preset “${shownText(selected)}” wasn't imported`
+          issues.push(
+            new StIssue({
+              path: "settings.json",
+              level: "warning",
+              code: "st.global_worlds_unattached",
+              message: `ST applies the World Info ${unattached.length === 1 ? "book" : "books"} ${quoted(unattached)} to every chat; ${unattached.length === 1 ? "it is" : "they are"} in your library but attached to no preset, since ${why}.`
+            })
+          )
+        }
+        // A book ST applies to every chat that the folder didn't hold is used nowhere here.
+        for (const name of names.filter((name) => !session.worlds.has(name) && !session.missingWorlds.has(name)))
+          issues.push(
+            new StIssue({
+              path: "settings.json",
+              level: "warning",
+              code: "st.global_world_missing",
+              message: `ST applies the lorebook “${shownText(name)}” to every chat, but it wasn't in the folder, so it isn't used here.`
+            })
+          )
+        return issues
+      }
+
       return StImports.of({
         start: (user, unsupported) =>
           start(user, unsupported).pipe(
@@ -1247,22 +1319,7 @@ export class StImports extends Context.Service<
             )
           ),
         report: (user, importId) =>
-          Effect.map(sessionOf(user, importId), (session) =>
-            session.report.build(
-              // A book ST applies to every chat that the folder didn't hold is used nowhere here.
-              (session.settings?.globalWorlds ?? [])
-                .filter((name) => !session.worlds.has(name) && !session.missingWorlds.has(name))
-                .map(
-                  (name) =>
-                    new StIssue({
-                      path: "settings.json",
-                      level: "warning",
-                      code: "st.global_world_missing",
-                      message: `ST applies the lorebook “${shownText(name)}” to every chat, but it wasn't in the folder, so it isn't used here.`
-                    })
-                )
-            )
-          ),
+          Effect.map(sessionOf(user, importId), (session) => session.report.build(globalWorldIssues(session))),
         file: (user, importId, path, bytes, request) =>
           file(user, importId, path, bytes, request).pipe(
             Effect.catch((error): Effect.Effect<never, NotFound | StImportFailed> =>

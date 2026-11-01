@@ -139,7 +139,7 @@ const setAt = (root: unknown, path: FieldPath, value: unknown): Refusal | null =
 /** Lists whose elements have ids, by kind: a path names their elements by id, never by index. */
 const IDENTIFIED: Partial<Record<EntityKind, ReadonlyArray<string>>> = {
   card: ["modules", "character_book/entries", "regex"],
-  preset: ["prompts", "order", "regex"]
+  preset: ["prompts", "order", "regex", "lorebooks"]
 }
 
 const IDENTITY_KEYS = ["id", "identifier", "uid"] as const

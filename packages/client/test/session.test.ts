@@ -103,7 +103,7 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
     preset: null,
     lorebooks: [],
     cardLorebooksOff: [],
-    globalLorebooksOff: [],
+    listedLorebooks: [],
     loreBelowHistory: true,
     macroBindings,
     macroNames: { user: macroBindings.user ?? "User", char: macroBindings.char ?? "Mira" },

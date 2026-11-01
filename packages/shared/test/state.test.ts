@@ -108,6 +108,30 @@ describe("foldState", () => {
     expect(state.activeNotes).toEqual([])
     expect(state.noteRevisions).toEqual({ [note]: "r2" })
   })
+
+  it("keeps an attached lorebook listed when it's off, in its place when back on, until it's removed", () => {
+    const attach = (id: string) => e({ key: "lorebook.attach", value: { ref: ref(id) } })
+    const detach = (id: string) => e({ key: "lorebook.detach", value: { ref: ref(id) } })
+    const removed = (id: string) => e({ key: "lorebook.remove", value: { ref: ref(id) } })
+    const off = foldState([attach("a"), attach("b"), attach("c"), detach("a")])
+    expect(off.listedLorebooks).toEqual([
+      { ref: "a", on: false },
+      { ref: "b", on: true },
+      { ref: "c", on: true }
+    ])
+    expect(off.lorebooks).toEqual(["b", "c"])
+    // Back on, it keeps its place; attaching one already on changes nothing.
+    const back = foldState([attach("a"), attach("b")], off)
+    expect(back.listedLorebooks.map((book) => book.ref)).toEqual(["a", "b", "c"])
+    expect(back.lorebooks).toEqual(["a", "b", "c"])
+    // Removed, on or off, it leaves the list; attached again, it goes last.
+    const gone = foldState([detach("b"), removed("b"), removed("c")], back)
+    expect(gone.listedLorebooks).toEqual([{ ref: "a", on: true }])
+    expect(gone.lorebooks).toEqual(["a"])
+    expect(foldState([attach("c")], gone).lorebooks).toEqual(["a", "c"])
+    // Detaching a book that isn't listed lists nothing.
+    expect(foldState([detach("z")]).listedLorebooks).toEqual([])
+  })
 })
 
 describe("state key declarations", () => {
