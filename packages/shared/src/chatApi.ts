@@ -69,6 +69,14 @@ export type ReasoningDisplay = typeof ReasoningDisplay.Type
  * column never exceeds and narrower screens fill: the top of the range is the full width.
  */
 export const CHAT_WIDTH = { min: 480, max: 3840, step: 40, default: 1200 } as const
+
+/**
+ * The sorts of a preset list: by name (A–Z), last modified, last used. The list's fourth view,
+ * Archived, isn't one: it always sorts by most recently archived and is never remembered.
+ */
+export const PresetSort = Schema.Literals(["name", "modified", "used"])
+export type PresetSort = typeof PresetSort.Type
+
 /** The user's display choices that follow them across devices (`user_prefs`). */
 const messageColor = Schema.NullOr(Schema.String.check(Schema.isPattern(/^#[\da-f]{6}$/i)))
 const displayFields = {
@@ -85,7 +93,11 @@ const displayFields = {
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   enterSends: Schema.Literals(["automatic", "always", "never"]),
   guidance: Schema.Boolean,
-  chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max }))
+  chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
+  /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
+  presetSort: PresetSort,
+  /** How model lists sort (the composer's picker and the Model tab's). */
+  modelSort: Schema.Literals(["name", "used"])
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -102,7 +114,9 @@ export const DisplayPrefsChange = Schema.Struct({
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   enterSends: Schema.optionalKey(displayFields.enterSends),
   guidance: Schema.optionalKey(displayFields.guidance),
-  chatWidth: Schema.optionalKey(displayFields.chatWidth)
+  chatWidth: Schema.optionalKey(displayFields.chatWidth),
+  presetSort: Schema.optionalKey(displayFields.presetSort),
+  modelSort: Schema.optionalKey(displayFields.modelSort)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -118,7 +132,9 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   displayRegex: true,
   enterSends: "automatic",
   guidance: false,
-  chatWidth: CHAT_WIDTH.default
+  chatWidth: CHAT_WIDTH.default,
+  presetSort: "name",
+  modelSort: "name"
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

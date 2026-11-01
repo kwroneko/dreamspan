@@ -275,3 +275,10 @@ export class Model extends Schema.Class<Model>("Model")({
   missingSince: Schema.NullOr(Schema.Number),
   rowVersion: Schema.Int
 }) {}
+
+/** When a model last wrote a reply for the user (their generation requests' latest start). */
+export class ModelUse extends Schema.Class<ModelUse>("ModelUse")({
+  connectionId: ConnectionId,
+  modelId: ModelId,
+  lastUsedAt: Schema.Number
+}) {}

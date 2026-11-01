@@ -44,7 +44,12 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   /** Whether this entry has an import line to update from a file. */
   hasImport: Schema.optionalKey(Schema.Boolean),
   rowVersion: Schema.Int,
-  updatedAt: Schema.Number
+  /** When its head last moved or it was renamed: the picker's "edited 3 days ago". */
+  updatedAt: Schema.Number,
+  /** When the user archived it (hidden from lists, nothing deleted); null while it isn't. */
+  archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** When a reply was last generated with it (a preset), null if never since this was recorded. */
+  lastUsedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
 }) {}
 
 export class Revision extends Schema.Class<Revision>("Revision")({

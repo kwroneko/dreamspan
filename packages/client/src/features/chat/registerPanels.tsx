@@ -22,9 +22,12 @@ export const registerPanels = () => [
     icon: "model",
     component: lazyPanel(
       () =>
-        import("./GenerationControls.tsx").then((m) => ({
+        Promise.all([import("./GenerationControls.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
           default: ({ session, view }: PanelProps) => (
-            <m.GenerationSettingsPanel session={session} view={view} kind="model" />
+            <>
+              <p.ModelTabPicker session={session} />
+              <m.GenerationSettingsPanel session={session} view={view} kind="model" />
+            </>
           )
         })),
       "model"
@@ -37,8 +40,14 @@ export const registerPanels = () => [
     icon: "preset",
     component: lazyPanel(
       () =>
-        import("./PresetTab.tsx").then((m) => ({
-          default: ({ session, view }: PanelProps) => <m.PresetTab session={session} view={view} />
+        Promise.all([import("./PresetTab.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
+          // The picker is its own mount above the tab's content (pickers/PanelPickers.tsx).
+          default: ({ session, view }: PanelProps) => (
+            <>
+              <p.PresetTabPicker session={session} />
+              <m.PresetTab session={session} view={view} />
+            </>
+          )
         })),
       "preset"
     )

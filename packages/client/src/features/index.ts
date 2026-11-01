@@ -15,6 +15,7 @@ import * as firstRun from "./firstRun/index.tsx"
 import * as library from "./library/index.ts"
 import * as login from "./login.tsx"
 import * as network from "./network.tsx"
+import * as pickers from "./pickers/index.tsx"
 import * as regex from "./regex/index.tsx"
 import * as notices from "./notices.tsx"
 import * as completionSound from "./completionSoundFeature.tsx"
@@ -33,6 +34,7 @@ export const registerFeatures = () => {
   library.register()
   editor.register()
   chat.register()
+  pickers.register()
   insertMessage.register()
   snippets.register()
   bin.register()

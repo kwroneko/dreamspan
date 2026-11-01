@@ -1,53 +1,37 @@
 // Account selections: the strip's model and preset chips, and their side panel tabs.
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
-import type { LibraryRef } from "@rp/shared/library.ts"
 import type { Model } from "@rp/shared/providers.ts"
 import { Link } from "@tanstack/react-router"
-import { Effect } from "effect"
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState } from "react"
-import { ErrorAlert, useAction } from "../../actions.tsx"
+import { useAction } from "../../actions.tsx"
 import { ModelSettingsEditor } from "../connections/models.tsx"
 import { Editor } from "../editor/EditorPage.tsx"
-import { modelValue, parseModelValue, useModelChoiceList } from "./modelChoices.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 import { useIsPanelTab } from "./panels.tsx"
-import { ChipText, ChoiceChip, LoadingChip, PopoverRow } from "./nextReplyStrip.tsx"
+import { ChipText, chipClass, LoadingChip, PopoverRow } from "./nextReplyStrip.tsx"
+import { ModelPickerPopover } from "../pickers/ModelPicker.tsx"
+import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
+import { useModelSelection } from "../pickers/modelSelection.ts"
+import { usePresetSelection } from "../pickers/presetSelection.ts"
+import { defaultsAtom } from "../pickers/defaults.ts"
 
+/** The account's selections, as the pickers read them (refreshed when the chat's context changes). */
 function useSelections(session: ChatSession) {
   const action = useAction()
-  const [defaults, setDefaults] = useState<GenerationDefaults | null>(null)
-  const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
-  useEffect(() => {
-    let live = true
-    const refresh = () => {
-      void action
-        .run((client) =>
-          Effect.all({
-            defaults: client("GetGenerationDefaults", undefined),
-            presets: client("ListLibrary", { kind: "preset" })
-          })
-        )
-        .then((result) => {
-          if (live && result.ok) {
-            setDefaults(result.value.defaults)
-            setPresets(result.value.presets)
-          }
-        })
-    }
-    const unsubscribe = session.subscribeContext(refresh)
-    refresh()
-    return () => {
-      live = false
-      unsubscribe()
-    }
-  }, [session]) // eslint-disable-line react-hooks/exhaustive-deps
-  return { action, defaults, presets }
+  const result = useAtomValue(defaultsAtom)
+  const refresh = useAtomRefresh(defaultsAtom)
+  useEffect(() => session.subscribeContext(refresh), [session, refresh])
+  const defaults: GenerationDefaults | null = AsyncResult.isSuccess(result) ? result.value : null
+  return { action, defaults }
 }
 
 /**
  * The next-reply strip's model chip: the account's model, which every chat's next reply uses
  * (DESIGN §2.2: switched here, its settings in the side panel). "…" until both it and the
- * model list are read, so "Choose a model" never flashes before the real one.
+ * model list are read, so "Choose a model" never flashes before the real one. Its popover is
+ * the shared model picker (`features/pickers`), as the Model tab's.
  */
 export function ModelChip({
   session,
@@ -59,11 +43,9 @@ export function ModelChip({
   onSettings: (tab: "model") => void
 }) {
   const modelPanel = useIsPanelTab("model", view)
-  const { action, defaults } = useSelections(session)
-  const current = defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
-  const { choices: models, loaded } = useModelChoiceList(true, current)
-  const chosen = models.find((model) => model.value === current)
-  if (view.loading || defaults === null || !loaded) return <LoadingChip label="Model" />
+  const selection = useModelSelection(session)
+  const { current: chosen, value: current, loaded } = selection
+  if (view.loading || !loaded) return <LoadingChip label="Model" />
   // A model no list has (its connection gone, say) says so, and the chip still opens to choose one.
   const short = chosen
     ? chosen.label.slice(chosen.label.indexOf(" · ") + 3)
@@ -71,47 +53,40 @@ export function ModelChip({
       ? "Model not found"
       : "Choose a model"
   return (
-    <>
-      <ChoiceChip
-        label={chosen ? `Model: ${chosen.label}. Change the model` : "Choose a model"}
-        hint={
-          chosen
-            ? `Model for the next reply: ${chosen.label}`
-            : current !== null
-              ? "Your model isn't in any connection's list now: choose another"
-              : "No model chosen yet"
-        }
-        title="Model"
-        chip={<ChipText>{short}</ChipText>}
-        choices={models}
-        value={current ?? ""}
-        onChoose={(value) =>
-          void action.run(
-            (client) => client("ChangeGenerationDefaults", { change: { model: parseModelValue(value) } }),
-            ["settings"]
-          )
-        }
-        {...(modelPanel
-          ? {
-              footer: (close: () => void) => (
-                <PopoverRow
-                  onClick={() => {
-                    close()
-                    onSettings("model")
-                  }}
-                >
-                  Model settings…
-                </PopoverRow>
-              )
-            }
-          : {})}
-      />
-      <ErrorAlert error={action.error} />
-    </>
+    <ModelPickerPopover
+      selection={selection}
+      triggerLabel={chosen ? `Model: ${chosen.label}. Change the model` : "Choose a model"}
+      hint={
+        chosen
+          ? `Model for the next reply: ${chosen.label}`
+          : current !== null
+            ? "Your model isn't in any connection's list now: choose another"
+            : "No model chosen yet"
+      }
+      triggerClassName={chipClass()}
+      trigger={<ChipText>{short}</ChipText>}
+      {...(modelPanel
+        ? {
+            footer: (close: () => void) => (
+              <PopoverRow
+                onClick={() => {
+                  close()
+                  onSettings("model")
+                }}
+              >
+                Model settings…
+              </PopoverRow>
+            )
+          }
+        : {})}
+    />
   )
 }
 
-/** The next-reply strip's prompt preset chip, with "Edit preset…" opening it in the side panel. */
+/**
+ * The next-reply strip's prompt preset chip, with "Edit preset…" opening it in the side panel.
+ * Its popover is the shared preset picker (`features/pickers`), as the Prompt preset tab's.
+ */
 export function PresetChip({
   session,
   view,
@@ -122,49 +97,31 @@ export function PresetChip({
   onSettings: (tab: "preset") => void
 }) {
   const presetPanel = useIsPanelTab("preset", view)
-  const { action, defaults, presets } = useSelections(session)
-  const value = defaults?.preset ?? "builtin"
-  const choices = [
-    { value: "builtin", label: BUILTIN_PRESET_LABEL },
-    ...presets.map((preset) => ({ value: preset.id as string, label: preset.label }))
-  ]
-  const chosen = choices.find((choice) => choice.value === value)
-  if (view.loading || defaults === null || chosen === undefined) return <LoadingChip label="Prompt preset" />
+  const selection = usePresetSelection(session)
+  const label = selection.label
+  if (view.loading || label === null) return <LoadingChip label="Prompt preset" />
   return (
-    <>
-      <ChoiceChip
-        label={`Prompt preset: ${chosen.label}. Change the preset`}
-        hint={`Prompt preset for the next reply: ${chosen.label}`}
-        title="Prompt preset"
-        chip={<ChipText>{chosen.label}</ChipText>}
-        choices={choices}
-        value={value}
-        onChoose={(next) =>
-          void action.run(
-            (client) =>
-              client("ChangeGenerationDefaults", {
-                change: { preset: next === "builtin" ? null : (next as LibraryRef["id"]) }
-              }),
-            ["settings"]
-          )
-        }
-        {...(presetPanel
-          ? {
-              footer: (close: () => void) => (
-                <PopoverRow
-                  onClick={() => {
-                    close()
-                    onSettings("preset")
-                  }}
-                >
-                  Edit preset…
-                </PopoverRow>
-              )
-            }
-          : {})}
-      />
-      <ErrorAlert error={action.error} />
-    </>
+    <PresetPickerPopover
+      selection={selection}
+      triggerLabel={`Prompt preset: ${label}. Change the preset`}
+      hint={`Prompt preset for the next reply: ${label}`}
+      triggerClassName={chipClass()}
+      trigger={<ChipText>{label}</ChipText>}
+      {...(presetPanel
+        ? {
+            footer: (close: () => void) => (
+              <PopoverRow
+                onClick={() => {
+                  close()
+                  onSettings("preset")
+                }}
+              >
+                Edit preset…
+              </PopoverRow>
+            )
+          }
+        : {})}
+    />
   )
 }
 
@@ -189,7 +146,8 @@ export function GenerationSettingsPanel({
     : defaults?.model
       ? { connection: defaults.model.connection, model: defaults.model.model }
       : null
-  const [model, setModel] = useState<Model | null>(null)
+  // Undefined while it's read; null when its connection doesn't list it.
+  const [model, setModel] = useState<Model | null | undefined>(undefined)
   // Bumped after a save, so the name above the form shows what was saved.
   const [saves, setSaves] = useState(0)
   useEffect(() => {
@@ -218,8 +176,16 @@ export function GenerationSettingsPanel({
         to edit your own.
       </p>
     )
-  if (!model || model.id !== target?.model)
-    return <p className="text-sm text-muted">Choose a model in the composer to edit its settings.</p>
+  // With none chosen, the picker above the tab is its content (pickers/PanelPickers.tsx).
+  if (!target) return null
+  if (model === null)
+    return <p className="text-sm text-muted">This model isn't in its connection's list now: choose another above.</p>
+  if (!model || model.id !== target.model)
+    return (
+      <p role="status" className="text-sm text-muted">
+        Loading the model's settings…
+      </p>
+    )
   const connectionName = used?.connectionName ?? null
   return (
     <div className="flex flex-col gap-3">

@@ -546,6 +546,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
         }).pipe(transaction(sql, "SetEntityArchived")),
 
+      SetRefArchived: ({ userId, refId, archived }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind === "chat_override")
+            return yield* new RefOperationRefused({ refId, reason: "A chat's own copy can't be archived." })
+          yield* sql`UPDATE entities
+            SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${Date.now()}) END
+            WHERE id = ${ref.entity_id}`
+          return toLibraryRef(yield* reload(refId))
+        }).pipe(transaction(sql, "SetRefArchived")),
+
       EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
         Effect.gen(function* () {
           const ref = yield* lib.ownedRef(userId, refId)

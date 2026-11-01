@@ -1,4 +1,5 @@
 import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { selectablePresets } from "../pickers/presetList.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { accountSettingSections, summarySettingFields } from "./presentation.tsx"
 // Settings → Chats: what applies to all of the user's chats (DESIGN §5.2, §8): the model and
@@ -37,7 +38,10 @@ export function ChatDefaultsPage() {
     true,
     defaults?.model ? modelValue(defaults.model.connection, defaults.model.model) : null
   )
-  const [presets, setPresets] = useState<ReadonlyArray<LibraryRef>>([])
+  const [presets, setPresets] = useState<{ live: ReadonlyArray<LibraryRef>; archived: ReadonlyArray<LibraryRef> }>({
+    live: [],
+    archived: []
+  })
   const instruction = useUserDraft("Settings → Chats", "Summarization instruction", savedTail(defaults))
   const tail = instruction.text
   const [saved, setSaved] = useState(false)
@@ -46,7 +50,10 @@ export function ChatDefaultsPage() {
       .run((client) =>
         Effect.all({
           defaults: client("GetGenerationDefaults", undefined),
-          presets: client("ListLibrary", { kind: "preset" })
+          presets: Effect.all({
+            live: client("ListLibrary", { kind: "preset" }),
+            archived: client("ListLibrary", { kind: "preset", archived: true })
+          })
         })
       )
       .then((result) => {
@@ -138,7 +145,7 @@ export function ChatDefaultsPage() {
             <Select
               items={[
                 { value: NONE, label: BUILTIN_PRESET_LABEL },
-                ...presets.map((ref) => ({ value: ref.id as string, label: ref.label }))
+                ...selectablePresets(presets.live, presets.archived, defaults?.preset ?? null)
               ]}
               value={defaults ? (defaults.preset ?? NONE) : null}
               placeholder={BUILTIN_PRESET_LABEL}

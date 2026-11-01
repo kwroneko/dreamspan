@@ -1,10 +1,11 @@
 // The library's own item actions. Each is a separate registration, so a plugin can replace
-// or disable one (`library.chat`, `.edit`, `.persona`, `.update`, `.export`).
+// or disable one (`library.chat`, `.edit`, `.archive`, `.persona`, `.update`, `.export`).
 import { Link } from "@tanstack/react-router"
 import { useAction } from "../../actions.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
 import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { showToast } from "../../ui/Toast.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { downloadExport } from "./files.ts"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
@@ -64,6 +65,35 @@ function UpdateItem({ entry }: LibraryItemProps) {
   )
 }
 
+/**
+ * A preset's archive button, as in the preset pickers: archived, it leaves these lists for the
+ * Archived view, nothing deleted; there, the same place takes it back out.
+ */
+function ArchiveAction({ entry }: LibraryItemProps) {
+  const action = useAction()
+  const archived = entry.archivedAt != null
+  return (
+    <IconButton
+      label={`${archived ? "Unarchive" : "Archive"} ${entry.label}`}
+      hint={archived ? "Unarchive: show it in the lists again" : "Archive: hide it from the lists; nothing is deleted"}
+      icon={archived ? "unarchive" : "archive"}
+      disabled={action.pending}
+      onClick={() =>
+        void action
+          .run((client) => client("SetRefArchived", { refId: entry.id, archived: !archived }), ["library"])
+          .then(
+            (result) =>
+              !result.ok &&
+              showToast({
+                title: archived ? `Couldn’t unarchive ${entry.label}` : `Couldn’t archive ${entry.label}`,
+                description: result.error.message
+              })
+          )
+      }
+    />
+  )
+}
+
 function ExportItems({ entry, exportFormats }: LibraryItemProps) {
   const formats = exportFormats.filter((format) => format.kind === entry.kind)
   const exportAs = async (format: (typeof formats)[number]["id"]) => {
@@ -93,6 +123,12 @@ export const registerItemActions = () => [
     order: 20,
     // Every kind's editor is its own page (`/library/$refId`).
     direct: EditAction
+  }),
+  libraryItemActions.register({
+    id: "library.archive",
+    order: 25,
+    available: ({ entry }) => entry.kind === "preset" && entry.refKind !== "chat_override",
+    direct: ArchiveAction
   }),
   libraryItemActions.register({
     id: "library.persona",

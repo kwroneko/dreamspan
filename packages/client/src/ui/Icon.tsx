@@ -111,6 +111,19 @@ const paths = {
     "M10 9H8"
   ],
   history: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"],
+  // A box with its lid: put away (archive), and taken back out (unarchive).
+  archive: [
+    "M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+    "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8",
+    "M10 12h4"
+  ],
+  unarchive: [
+    "M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
+    "M4 8v11a2 2 0 0 0 2 2h2",
+    "M20 8v11a2 2 0 0 1-2 2h-2",
+    "m9 15 3-3 3 3",
+    "M12 12v9"
+  ],
   type: ["M4 7V4h16v3", "M9 20h6", "M12 4v16"],
   snippet: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
   /** Opens something large: a field over the page. */

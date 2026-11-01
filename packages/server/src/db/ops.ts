@@ -112,6 +112,7 @@ import {
   Model,
   ModelId,
   ModelOverrides,
+  ModelUse,
   ModelUpstream,
   ProviderKind,
   ProxyMode
@@ -997,6 +998,16 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Archives or restores the entity of a library entry (an upstream or a variant, never a chat
+   * override): hidden from lists, nothing deleted, in use where it is used. Archiving keeps the
+   * first time it was archived.
+   */
+  Rpc.make("SetRefArchived", {
+    payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /** A new variant following `refId` (an upstream or another variant). */
   Rpc.make("ForkRef", {
@@ -2592,6 +2603,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, connectionId: ConnectionId, includeHidden: Schema.Boolean },
     success: Schema.Array(Model),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** When each of the user's models last wrote a reply: the model picker's Last used. */
+  Rpc.make("ListModelUse", {
+    payload: { userId: UserId },
+    success: Schema.Array(ModelUse),
+    error: StorageError
   }),
   Rpc.make("GetModel", {
     payload: { userId: UserId, modelId: ModelId },

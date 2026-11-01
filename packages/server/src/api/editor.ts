@@ -278,6 +278,11 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("RenameRef")
       ),
 
+    SetRefArchived: ({ refId, archived }) =>
+      Effect.flatMap(userId, (id) => writer.SetRefArchived({ userId: id, refId, archived })).pipe(
+        settle("SetRefArchived")
+      ),
+
     SetRegexApproval: ({ refId, approved, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.SetRegexApproval({ userId: id, refId, approved, expectedRowVersion }).pipe(changed(id))
