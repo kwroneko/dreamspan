@@ -129,8 +129,8 @@ for (const width of [1440, 390]) {
       await page.getByRole("button", { name: "Close", exact: true }).click()
     await openLeft()
     await expect(crumbs).toContainText(group.name)
-    await expect(page.getByRole("region", { name: "Pinned chats" }).first()).toContainText(group.name)
-    await expect(page.getByRole("region", { name: /^(Named and pinned|Branches)$/ }).first()).toBeVisible()
+    // Scoped to the chat, its pinned branches lead its own list, not a separate Pinned chats.
+    await expect(page.getByRole("region", { name: "Named and pinned", exact: true })).toBeVisible()
     if (width === 390) await page.getByRole("button", { name: "Close the menu", exact: true }).click()
     const appended = await admin((api) =>
       api.SendMessage({
