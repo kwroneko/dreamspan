@@ -40,6 +40,8 @@ export const registerPanels = () => [
     description: "The prompt preset the next reply is built with, to choose and edit.",
     order: 30,
     icon: "preset",
+    // Its own layout (the preset's outline and editor).
+    width: "full",
     component: lazyPanel(
       () =>
         Promise.all([import("./PresetTab.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
@@ -104,6 +106,8 @@ export const registerPanels = () => [
     description: "What the model is sent with this chat: the chat's own notes and its characters'.",
     order: 40,
     icon: "note",
+    // Its sections go side by side as the panel widens.
+    width: "full",
     component: lazyPanel(loadNotes, "notes"),
     preload: () => {
       void loadNotes().catch(() => undefined)

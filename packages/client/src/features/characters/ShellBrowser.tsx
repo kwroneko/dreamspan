@@ -426,20 +426,21 @@ function Browser({ data }: { data: ShellLibrary }) {
       />
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
-      <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
+      <div className="@container -mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
         {grid ? (
+          // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (
             <GroupGrid
               needle={needle}
               sort={browse.sort}
               reversed={browse.reversed}
-              className="grid grid-cols-2 gap-2"
+              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
             />
           ) : (
             <CharacterGrid
               cards={browseCards(data.cards, browse, needle)}
               sort={browse.sort}
-              className="grid grid-cols-2 gap-2"
+              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
             />
           )
         ) : (

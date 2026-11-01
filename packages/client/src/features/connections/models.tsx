@@ -498,20 +498,21 @@ export function ModelSettingsEditor({
             <Field label="Tools">
               <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
             </Field>
+            <Field
+              label="Prefill"
+              description="Whether it carries on from text put at the start of its reply, as the preset's prefill and Continue use. Choose Yes if you know it can."
+            >
+              <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
+            </Field>
           </div>
         </div>
-        <Field
-          label="Prefill"
-          description="Whether it carries on from text put at the start of its reply, as the preset's prefill and Continue use. Choose Yes if you know it can."
-        >
-          <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
-        </Field>
       </Section>
       <Section
         title="Your settings for this model"
         description="Used in every chat that uses this model. Empty: the default shown. How much of the window to fill and how long a reply may be stay within its limits above."
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        {/* Numbers: two a row in a narrow panel, more as it widens, none wider than it needs. */}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
           {SETTING_FIELDS.map(([key, label, numeric]) => {
             const value = current?.samplers?.[key]
             return (

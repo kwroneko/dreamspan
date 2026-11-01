@@ -383,7 +383,7 @@ export function CastTab({ session }: { session: ChatSession }) {
         {characters.length === 0 ? (
           <p className="py-2 text-sm text-muted">No one is in this chat. Add a character to start.</p>
         ) : (
-          <ul aria-label="Characters in this chat" className="flex flex-col">
+          <ul aria-label="Characters in this chat" className="grid gap-x-6 @3xl:grid-cols-2">
             {characters.map((id) => {
               const card = view.cards.get(id)
               if (card === undefined) return null

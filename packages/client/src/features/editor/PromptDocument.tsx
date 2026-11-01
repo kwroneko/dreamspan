@@ -17,7 +17,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
-import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
+import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
@@ -541,7 +541,7 @@ const withOpen = (opened: Opened, id: string, open: boolean): Opened => {
 /** The large editor's outline of names, beside the document: resizable, its width kept per browser. */
 function Outline({ children }: { children: ReactNode }) {
   const userId = useSession().user.id
-  const { ref, width, min, max, change, reset } = usePanelWidth(userId, "presetOutline", 240, 140, 560, 480)
+  const { ref, width, min, max, change, reset } = useInnerPanelWidth(userId, "presetOutline", 240, 140, 560, 480)
   return (
     <nav
       ref={ref}

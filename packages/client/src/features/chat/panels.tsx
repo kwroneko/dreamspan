@@ -35,6 +35,12 @@ export interface PanelDescriptor {
    * doesn't fit under More; or "cast", the strip of the chat's characters, apart from the tools.
    */
   readonly placement?: "tools" | "cast"
+  /**
+   * How wide its body goes in a wide panel: "readable" (the default), at most 52rem from the
+   * left, so forms and prose keep a readable line however far the panel is dragged; "full",
+   * the panel's whole width, for a body that lays itself out in columns as it widens.
+   */
+  readonly width?: "readable" | "full"
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
   readonly matches?: (value: string) => boolean
   readonly tabs?: (view: ChatView, selected: string | null) => ReadonlyArray<PanelTabEntry>

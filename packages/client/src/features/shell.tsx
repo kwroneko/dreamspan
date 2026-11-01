@@ -8,12 +8,18 @@ export const appTools = defineSlot<Record<string, never>>("app.tools")
 export const appBanners = defineSlot<Record<string, never>>("app.banners")
 /** Actions in the sidebar's header row; `onNavigate` closes the phone sheet. */
 export const sidebarActions = defineSlot<{ onNavigate: (() => void) | undefined }>("shell.sidebar.actions")
+/**
+ * The desktop sidebar's hide and show buttons: at the end of its header row while it shows
+ * (`sidebar`), at the start of the page's header while it's hidden (`header`: the chat's,
+ * or the bar above any other page).
+ */
+export const sidebarToggle = defineSlot<{ place: "sidebar" | "header" }>("shell.sidebar.toggle")
 // The app shell: it lets nobody past without a session (the server decides; this only
 // routes to login), then renders the sidebar (the chats, then the rest) and the screen.
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../actions.tsx"
 import { BrowserRecovery, RecoveryNotice } from "./editor/BrowserRecovery.tsx"
 import { describeCause } from "../errors.ts"
@@ -24,6 +30,7 @@ import { ImageControls } from "../ui/ImageControls.tsx"
 import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
 import { Loading } from "../ui/Spinner.tsx"
 import { Toasts } from "../ui/Toast.tsx"
+import { IconButton } from "../ui/Tooltip.tsx"
 import { ShellBrowser } from "./characters/ShellBrowser.tsx"
 import { ShellNavigation, useShellNavigation } from "./characters/shellData.tsx"
 import { sidebarSearch } from "./characters/sidebarSearch.ts"
@@ -137,6 +144,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
         <SlotOutlet slot={sidebarActions} props={{ onNavigate }} />
         <ImageControls />
+        {!onNavigate && <SlotOutlet slot={sidebarToggle} props={{ place: "sidebar" }} />}
       </div>
       {onChats ? <div className="flex-1" /> : <ShellBrowser />}
       <Navigation {...(onNavigate ? { onNavigate } : {})} />
@@ -164,6 +172,10 @@ function PhoneBar() {
   const { selection } = useShellNavigation()
   // On a phone, an open chat's header takes this bar's place; its ← opens this menu (ChatHeader.tsx).
   const inChat = useLocation({ select: (location) => /^\/chats\/[^/]+$/.test(location.pathname) })
+  // On the desktop with the sidebar hidden, this bar brings it back (but not over a chat,
+  // whose own header has that button).
+  const [hidden] = useSidebarHidden()
+  const desktop = hidden && !inChat
   const pathname = `${href}/${selection}`
   const [openOn, setOpenOn] = useState<string | null>(null)
   const open = openOn === pathname
@@ -176,14 +188,15 @@ function PhoneBar() {
   return (
     <>
       <div
-        className={`flex items-center gap-2 border-b border-border bg-surface px-3 py-2 lg:hidden ${inChat ? "max-sm:hidden" : ""}`}
+        className={`flex items-center gap-2 border-b border-border bg-surface px-3 py-2 ${desktop ? "" : "lg:hidden"} ${inChat ? "max-sm:hidden" : ""}`}
       >
+        <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <button
           type="button"
           aria-label="Chats and menu"
           aria-expanded={open}
           onClick={() => setOpen(true)}
-          className="rounded-md px-2 py-1 text-lg leading-none hover:bg-surface-raised"
+          className="rounded-md px-2 py-1 text-lg leading-none hover:bg-surface-raised lg:hidden"
         >
           ☰
         </button>
@@ -219,13 +232,101 @@ function PhoneBar() {
   )
 }
 
+// --- Whether the desktop sidebar is hidden: each user's choice in this browser
+// (`rp.sidebarHidden.<user id>`), followed by the browser's other tabs. Phones and tablets
+// don't use it: their sidebar is the menu over the page.
+
+const hiddenKey = (userId: string) => `rp.sidebarHidden.${userId}`
+/** Where storage is off. */
+const hiddenInMemory = new Map<string, boolean>()
+const hiddenListeners = new Set<() => void>()
+const readHidden = (userId: string) => {
+  try {
+    return localStorage.getItem(hiddenKey(userId)) === "1"
+  } catch {
+    return hiddenInMemory.get(userId) ?? false
+  }
+}
+const subscribeHidden = (listener: () => void) => {
+  hiddenListeners.add(listener)
+  addEventListener("storage", listener)
+  return () => {
+    hiddenListeners.delete(listener)
+    removeEventListener("storage", listener)
+  }
+}
+/** The button to focus once the sidebar has hidden or shown, so focus isn't lost with it. */
+let focusNext: "sidebar" | "header" | null = null
+
+function useSidebarHidden(): [boolean, (hidden: boolean) => void] {
+  const userId = useSession().user.id
+  const hidden = useSyncExternalStore(subscribeHidden, () => readHidden(userId))
+  const set = (next: boolean) => {
+    hiddenInMemory.set(userId, next)
+    try {
+      if (next) localStorage.setItem(hiddenKey(userId), "1")
+      else localStorage.removeItem(hiddenKey(userId))
+    } catch {
+      /* In memory when storage is off. */
+    }
+    for (const listener of hiddenListeners) listener()
+  }
+  return [hidden, set]
+}
+
+/** Hides the sidebar from its header row, or shows it again from the page's header. */
+function SidebarToggle({ place }: { place: "sidebar" | "header" }) {
+  const [hidden, setHidden] = useSidebarHidden()
+  const ref = useRef<HTMLButtonElement>(null)
+  const shown = place === "sidebar" ? !hidden : hidden
+  useEffect(() => {
+    // The one on screen: a page can hold another out of view (the tablet bar's, in a chat).
+    if (shown && focusNext === place && ref.current?.checkVisibility()) {
+      focusNext = null
+      ref.current?.focus()
+    }
+  }, [shown, place])
+  if (!shown) return null
+  return place === "sidebar" ? (
+    <IconButton
+      ref={ref}
+      label="Hide the sidebar"
+      hint="Hide the sidebar: the button at the start of the header brings it back"
+      icon="sidebar"
+      onClick={() => {
+        focusNext = "header"
+        setHidden(true)
+      }}
+    />
+  ) : (
+    <IconButton
+      ref={ref}
+      label="Show the sidebar"
+      hint="Show the sidebar: your chats, characters and the menu"
+      icon="sidebar"
+      // A phone's and a tablet's sidebar is the menu over the page; this is the desktop's.
+      className="max-lg:hidden"
+      onClick={() => {
+        focusNext = "sidebar"
+        setHidden(false)
+      }}
+    />
+  )
+}
+
+/** The desktop sidebar, unless the user hid it. */
+function DesktopSidebarColumn() {
+  const [hidden] = useSidebarHidden()
+  return hidden ? null : <DesktopSidebar />
+}
+
 function DesktopSidebar() {
   const userId = useSession().user.id
-  const { ref, width, min, max, change, reset } = usePanelWidth(userId, "sidebar", 320, 220, 420, 700)
+  const { width, min, max, change, reset } = usePanelWidth(userId, "sidebar", 320, 220)
   return (
     <aside
-      ref={ref}
-      style={{ width, minWidth: 220, maxWidth: "calc(100% - 700px)" }}
+      aria-label="Sidebar"
+      style={{ width }}
       className="relative hidden shrink-0 border-r border-border bg-surface lg:block"
     >
       <Sidebar />
@@ -295,7 +396,7 @@ function AppShell() {
         <Toasts>
           <SlotOutlet slot={appTools} props={{}} />
           <div className="flex h-dvh">
-            <DesktopSidebar key={result.value.user.id} />
+            <DesktopSidebarColumn key={result.value.user.id} />
             <div className="flex min-w-0 flex-1 flex-col">
               <PhoneBar />
               <SlotOutlet slot={appBanners} props={{}} />
@@ -331,4 +432,5 @@ function Main() {
 export const register = () => {
   appTools.register({ id: "text-actions", order: 10, component: TextActionHost })
   routes.register({ id: "app", parent: "root", component: AppShell })
+  sidebarToggle.register({ id: "sidebar-toggle", order: 10, component: SidebarToggle })
 }

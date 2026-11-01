@@ -20,7 +20,7 @@ import { NameDialog } from "./NameDialog.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
-import { openAppMenu, useTitle } from "../shell.tsx"
+import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
 import { castCharacters, chatName, formatDay } from "./chatTitle.ts"
 import type { PanelTab } from "./ChatPanels.tsx"
@@ -259,6 +259,8 @@ export function ChatHeader({
   return (
     <TooltipProvider>
       <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-1.5 sm:gap-3 sm:px-4">
+        {/* The desktop's hidden sidebar comes back from here. */}
+        <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <Tooltip label="All chats">
           <Link
             to="/chats"
