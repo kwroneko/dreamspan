@@ -433,11 +433,6 @@ export function PromptDocument({
                   <>
                     <p className="border-y border-border py-1 text-xs font-medium text-accent">History starts</p>
                     {slot("At depth N", (p) => p.mode === "depth")}
-                    {slot("Top of the author's note", (p) => p.mode === "section" && p.section === "author_note_top")}
-                    {slot(
-                      "Bottom of the author's note",
-                      (p) => p.mode === "section" && p.section === "author_note_bottom"
-                    )}
                   </>
                 )}
                 {history >= 0 && order.indexOf(entry) === afterHistory && tailStarts}

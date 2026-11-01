@@ -2,6 +2,8 @@
 // mapping follows ST's `convertCharacterBook` (public/scripts/world-info.js), which keeps
 // its World Info fields in each entry's `extensions`.
 import {
+  concreteLore,
+  LEGACY_LORE_DEPTH,
   LOREBOOK_SCHEMA_VERSION,
   type LorebookDoc,
   type LorebookEntry,
@@ -18,6 +20,7 @@ import { fail, type Limits, type Path } from "./safety.ts"
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
 export const OUR_EXTENSION = "rp_harness"
 
+/** ST's `world_info_position` by its index in ST's files; 2 and 3 are before and after its author's note. */
 export const POSITIONS: ReadonlyArray<LorePosition> = [
   "before_char",
   "after_char",
@@ -253,6 +256,40 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBui
 export const isRecursionDelay = (value: unknown): value is boolean | number =>
   Predicate.isBoolean(value) || isSafeInt(value)
 
+/** Where an entry ST placed before or after its author's note goes: a depth and a role. */
+export interface AuthorNoteLore {
+  readonly depth: number
+  readonly role: LoreRole
+}
+
+/**
+ * Entries ST placed before or after its author's note (positions 2 and 3), at a concrete place
+ * instead, kept (owner, 2026-11-01): `place`, the author's note's depth and role. A file's
+ * book has no chat, so an upload takes ST's default author's note place (depth 4, the system)
+ * and a folder import the folder's default author's note's. The report says so once.
+ */
+export const placeAuthorNoteEntries = (
+  entries: ReadonlyArray<LorebookEntry>,
+  place: AuthorNoteLore,
+  path: Path,
+  issues: ReportBuilder
+): Array<LorebookEntry> => {
+  let moved = 0
+  const placed = entries.map((entry) => {
+    if (entry.position !== "an_top" && entry.position !== "an_bottom") return entry
+    moved++
+    return { ...entry, position: "at_depth" as const, depth: place.depth, role: place.role }
+  })
+  if (moved > 0)
+    issues.add(
+      "info",
+      "lorebook.author_note_entries",
+      `${moved === 1 ? "An entry" : `${moved} entries`} ST placed before or after the author's note ${moved === 1 ? "is" : "are"} at depth ${place.depth} as ${place.role} here, where ST's default author's note is.`,
+      path
+    )
+  return placed
+}
+
 /** A card's `character_book` as our lorebook document. */
 export const lorebookFromCharacterBook = (
   source: Record<string, unknown>,
@@ -271,8 +308,13 @@ export const lorebookFromCharacterBook = (
     token_budget: book.nullableInt("token_budget"),
     recursive_scanning: book.nullableBoolean("recursive_scanning"),
     extensions: book.object("extensions"),
-    entries: assignUids(
-      entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+    entries: placeAuthorNoteEntries(
+      assignUids(
+        entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+        path,
+        issues
+      ),
+      LEGACY_LORE_DEPTH,
       path,
       issues
     ),
@@ -304,7 +346,7 @@ export const characterBookFromLorebook = (book: LorebookDoc) => ({
     recursive_scanning: book.recursive_scanning
   }),
   extensions: book.extensions,
-  entries: book.entries.map((entry) => ({
+  entries: book.entries.map(concreteLore).map((entry) => ({
     ...entry.unknown_fields,
     // An id the import had to replace goes back as it was.
     id: entry.unknown_fields?.id ?? entry.uid,

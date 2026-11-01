@@ -112,7 +112,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         on_by_default: true,
         scan_lore: true
       })
-      // The Character Author's Note: private, on where ST used it, at the chat note's top or bottom.
+      // The Character Author's Note: private, on where ST used it, where the default author's note is.
       assert.deepInclude(aria!, {
         title: "Character author's note",
         kind: "character_author_note",
@@ -120,13 +120,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         exportable: false,
         on_by_default: true,
         scan_lore: true,
-        placement: { mode: "section", section: "author_note_top" }
+        placement: { mode: "depth", depth: 4, role: "system" }
       })
       const [bram] = cardNotes("Bram")
-      assert.deepInclude(bram!, { on_by_default: false, placement: { mode: "section", section: "author_note_bottom" } })
+      assert.deepInclude(bram!, { on_by_default: false, placement: { mode: "depth", depth: 4, role: "system" } })
       // ST's "replace" is kept at the top (owner question 5).
       const [cato] = cardNotes("Cato")
-      assert.deepInclude(cato!, { on_by_default: true, placement: { mode: "section", section: "author_note_top" } })
+      assert.deepInclude(cato!, { on_by_default: true, placement: { mode: "depth", depth: 4, role: "system" } })
 
       const api = yield* client()
       const notesIn = (path: string) =>

@@ -392,8 +392,8 @@ describe("the context assembler", () => {
       { preset: preset({ prompts: [{ identifier: "main", role: "system", content: "Story so far: {{summary}}" }] }) }
     )
     expect(contents(macro)[0]).toMatch(/^system: Story so far: .* lost the ledger in the flood\./)
-    // With the card's definition there is no card to put a chat's note with; at the author's
-    // note's top or bottom it joins the default note a chat without one has.
+    // With the card's definition there is no card to put a chat's note with. An old revision's
+    // place at the author's note's top or bottom is read as ST's default note place, depth 4.
     expect(contents(await imported({ mode: "section", section: "card" })).join("\n")).not.toContain("lost the ledger")
     for (const section of ["author_note_top", "author_note_bottom"] as const) {
       expect(contents(await imported({ mode: "section", section })).join("\n")).toContain("lost the ledger")
@@ -464,7 +464,9 @@ describe("the context assembler", () => {
       expect(contents(stashed).join("\n")).not.toContain("storm")
     })
 
-    it("puts the author's note after the summary and before the cards' notes, as ST orders its extension prompts", async () => {
+    it("puts an imported author's note among the chat's notes, after the summary and before the cards'", async () => {
+      // Nothing about it is special (owner, 2026-11-01): an old revision's `author_note` kind
+      // changes nothing, and it sorts with the chat's other notes by id.
       const summary = chatNote(
         "note-0-summary",
         "The ledger is lost.",
@@ -487,34 +489,9 @@ describe("the context assembler", () => {
         })
       )
       expect(contents(snapshot).slice(-3, -1)).toEqual([
-        "system: [The ledger is lost.]\nTobin is soaked.\nThunder.\nMira never guesses.",
+        "system: [The ledger is lost.]\nThunder.\nTobin is soaked.\nMira never guesses.",
         "user: The road flooded."
       ])
-    })
-
-    it("uses the chosen author's note ahead of an imported kind, and clears that choice explicitly", async () => {
-      const plain = chatNote("note-z-plain", "Last.", { mode: "depth", depth: 0, role: "system" })
-      const named = chatNote("note-zz-named", "First.", { mode: "depth", depth: 0, role: "system" })
-      const imported = chatNote(
-        "note-y-imported",
-        "Imported.",
-        { mode: "depth", depth: 0, role: "system" },
-        { kind: "author_note" }
-      )
-      for (const choice of ["note-zz-named", null]) {
-        const snapshot = await assembled(
-          chat({
-            notes: [plain, named, imported],
-            events: [
-              ...on("note-z-plain", "note-zz-named", "note-y-imported"),
-              at(null, { key: "author_note.set", value: { note: choice as EntityId | null } })
-            ]
-          })
-        )
-        expect(contents(snapshot).at(-2)).toBe(
-          choice === null ? "system: Imported.\nLast.\nFirst." : "system: First.\nImported.\nLast."
-        )
-      }
     })
 
     it("puts a note at the tail at depth 0, with its role", async () => {
@@ -577,33 +554,28 @@ describe("the context assembler", () => {
       const imported = { entity: "tobin", doc: { ...tobin, description: "" } }
       const chat = (fields: Partial<AssemblyFixture> = {}) =>
         chatOf({ cards: [...chatOf().cards.filter((c) => c.entity !== "tobin"), imported], ...fields })
-      const top = persona({ mode: "section", section: "author_note_top" })
-      const bottom = persona({ mode: "section", section: "author_note_bottom" })
       const inChat = { mode: "depth", depth: 1, role: "system" } as const
       const sent = (snapshot: ContextSnapshot) => contents(snapshot).filter((line) => line.includes("draws maps"))
 
-      it("sends it at the top or bottom of the author's note, and not where the persona goes", async () => {
-        for (const [note, expected] of [
-          [top, "system: Tobin draws maps.\nTobin is soaked."],
-          [bottom, "system: Tobin is soaked.\nTobin draws maps."]
-        ] as const) {
-          const snapshot = await assembled(chat({ notes: [note, authorNote(inChat)], events: on("note-z-author") }))
-          expect(sent(snapshot)).toEqual([expected])
-          expect(contents(snapshot).slice(-3, -1)).toEqual([expected, "user: The road flooded."])
-        }
-      })
-
-      it("sends it beside the main prompt when the author's note goes there", async () => {
+      it("sends it at its depth with the chat's notes there, after them, whatever the chat's notes are called", async () => {
+        // What an import makes of ST's persona at the top or bottom of the author's note: the
+        // author's note's depth and role (owner, 2026-11-01). Nothing rides on that note.
         const snapshot = await assembled(
-          chat({
-            notes: [bottom, authorNote({ mode: "section", section: "after_main_prompt", role: "user" })],
-            events: on("note-z-author")
-          })
+          chat({ notes: [persona(inChat), authorNote(inChat)], events: on("note-z-author") })
         )
-        expect(contents(snapshot).slice(0, 2)).toEqual([main, "user: Tobin is soaked.\nTobin draws maps."])
+        expect(sent(snapshot)).toEqual(["system: Tobin is soaked.\nTobin draws maps."])
+        // Off, the chat's note sends nothing, and the persona's note goes as it is.
+        const off = await assembled(chat({ notes: [persona(inChat), authorNote(inChat)] }))
+        expect(sent(off)).toEqual(["system: Tobin draws maps."])
+        expect(contents(off).join("\n")).not.toContain("soaked")
+        // Not due by its condition, the chat's note takes nothing with it.
+        const skipped = await assembled(
+          chat({ notes: [persona(inChat), authorNote(inChat, never)], events: on("note-z-author") })
+        )
+        expect(sent(skipped)).toEqual(["system: Tobin draws maps."])
       })
 
-      it("sends it with ST's default note, in-chat at depth 4, when the chat has none", async () => {
+      it("reads an old revision's place at the author's note's top or bottom as depth 4 as the system", async () => {
         const messages = [
           { side: "assistant", content: "One." },
           { side: "user", content: "Two." },
@@ -612,29 +584,23 @@ describe("the context assembler", () => {
           { side: "assistant", content: "Five." },
           { side: "user", content: "Six." }
         ] as const
-        for (const note of [top, bottom]) {
-          const snapshot = await assembled(chat({ messages: [...messages], notes: [note] }))
-          expect(contents(snapshot).slice(-6, -1)).toEqual([
+        for (const section of ["author_note_top", "author_note_bottom"] as const) {
+          const snapshot = await assembled(
+            chat({
+              messages: [...messages],
+              notes: [persona({ mode: "section", section }), authorNote(inChat)],
+              events: on("note-z-author")
+            })
+          )
+          expect(contents(snapshot).slice(-7, -1)).toEqual([
             "system: Tobin draws maps.",
             "assistant: Three.",
             "user: Four.",
             "assistant: Five.",
+            "system: Tobin is soaked.",
             "user: Six."
           ])
         }
-      })
-
-      it("sends nothing of it while the author's note is not due, and it alone where it sits while it's off", async () => {
-        // Switched off, the note's text goes, but what rides on it doesn't (owner question 6).
-        const off = await assembled(chat({ notes: [top, authorNote(inChat)] }))
-        expect(sent(off)).toEqual(["system: Tobin draws maps."])
-        expect(contents(off).join("\n")).not.toContain("soaked")
-        const skipped = authorNote(inChat, never)
-        expect(sent(await assembled(chat({ notes: [top, skipped], events: on("note-z-author") })))).toEqual([])
-        const due = await assembled(
-          chat({ notes: [top, authorNote(inChat, onMirasTurn)], events: on("note-z-author") })
-        )
-        expect(sent(due)).toEqual(["system: Tobin draws maps.\nTobin is soaked."])
       })
 
       it("sends its note placed with the card inside the persona's part of the Definitions marker", async () => {
@@ -650,53 +616,6 @@ describe("the context assembler", () => {
         )
         expect(sent(deep)).toEqual(["user: Tobin draws maps."])
         expect(contents(deep).join("\n")).not.toContain("<Tobin>")
-      })
-
-      for (const layout of [null, "below the history"] as const) {
-        for (const attachment of [top, bottom]) {
-          it(`switching the author's note off leaves its attachments where it sits ${layout ?? "with lore by position"} at ${attachment.doc.placement.mode === "section" ? attachment.doc.placement.section : ""}`, async () => {
-            const book = loreBook([
-              loreEntry({ content: "LORE_TOP", constant: true, position: "an_top" }, 0),
-              loreEntry({ content: "LORE_BOTTOM", constant: true, position: "an_bottom" }, 1)
-            ])
-            const fixture = (switched: boolean) =>
-              chat({
-                notes: [attachment, authorNote(inChat)],
-                // Below the history all lore is at the tail; by position, these entries ride on the note.
-                lorebooks: layout ? [] : [{ id: "book", entity: "book", revision: "book-rev", doc: book.document }],
-                events: [
-                  ...on("note-z-author"),
-                  at(null, { key: "lorebook.attach", value: { ref: "book" as never } }),
-                  ...(layout ? [] : [loreByPosition]),
-                  ...(switched ? [at(1, { key: "note.deactivate", value: { note: "note-z-author" as never } })] : [])
-                ]
-              })
-            expect(sent(await assembled(fixture(false)))).toHaveLength(1)
-            const snapshot = await assembled(fixture(true))
-            const text = contents(snapshot).join("\n")
-            expect(text).toContain("draws maps")
-            expect(text).not.toContain("is soaked")
-            // By position the lore rides on the note too; below the history it is at the tail anyway.
-            if (!layout) {
-              expect(text).toContain("LORE_TOP")
-              expect(text).toContain("LORE_BOTTOM")
-            }
-            // Not due by its condition, nothing rides on it, as ST's skipped turn.
-            const skipped = await assembled({
-              ...fixture(false),
-              notes: [attachment, authorNote(inChat, never)]
-            })
-            const none = contents(skipped).join("\n")
-            expect(none).not.toContain("draws maps")
-            expect(none).not.toContain("LORE_TOP")
-          })
-        }
-      }
-
-      it("joins the author's note as one piece of the context", async () => {
-        // The lore comes with the other tests; here only that the persona is outside the note.
-        const snapshot = await assembled(chat({ notes: [top, authorNote(inChat)], events: on("note-z-author") }))
-        expect(snapshot.pieces.some((p) => p.id === "lore:author-note")).toBe(true)
       })
 
       it("places it at depth or nowhere by its note", async () => {
@@ -3183,8 +3102,8 @@ describe("cache breakpoints with pinned lore (DESIGN §1.3, §5.5)", () => {
   })
 })
 
-describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
-  it("leaves the author's note beside the main prompt out of the prefix, so (a) holds when its lore goes", async () => {
+describe("an old revision's lore at the author's note, with the setting off (DESIGN §1.3)", () => {
+  it("goes in the chat at depth 4 as the system, where ST's default author's note is, beside nothing", async () => {
     const book = {
       id: "an",
       entity: "an-entity",
@@ -3196,7 +3115,7 @@ describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
       revision: "r",
       doc: {
         schema_version: 1,
-        title: "author",
+        title: "Author's Note",
         content: "{{user}} is soaked.",
         placement: { mode: "section", section: "after_main_prompt" },
         owner: { chat: "chat-1" as never },
@@ -3204,31 +3123,28 @@ describe("author's-note lore with the setting off (DESIGN §1.3)", () => {
         kind: "author_note"
       } as NoteDoc
     }
-    const first = chat({
-      lorebooks: [book],
-      notes: [author],
-      events: [
-        at(null, { key: "lorebook.attach", value: { ref: "an" as never } }),
-        at(null, { key: "note.activate", value: { note: "note-author" as never } }),
-        loreByPosition
-      ]
-    })
-    const one = await assembled(first)
-    expect(contents(one).join("\n")).toContain("AN_LORE")
-    const two = await assembled({
-      ...first,
-      messages: [
-        ...first.messages,
-        { side: "assistant", content: "Then wait." },
-        { side: "user", content: "It's sunny now." }
-      ],
-      historyStart: one.historyStart ?? null
-    })
-    expect(two.historyMove).toBe("unchanged")
-    expect(contents(two).join("\n")).not.toContain("AN_LORE")
-    const prefixAt = one.request.breakpoints.find((b) => b.reason === "prefix")!.message
-    expect(contents(two).slice(0, prefixAt + 1)).toEqual(contents(one).slice(0, prefixAt + 1))
-    expect(contents(one)[prefixAt]).not.toContain("is soaked")
+    const messages = [
+      { side: "assistant", content: "One." },
+      { side: "user", content: "Two." },
+      { side: "assistant", content: "Three." },
+      { side: "user", content: "The road flooded." }
+    ] as const
+    const snapshot = await assembled(
+      chat({
+        messages: [...messages],
+        lorebooks: [book],
+        notes: [author],
+        events: [
+          at(null, { key: "lorebook.attach", value: { ref: "an" as never } }),
+          at(null, { key: "note.activate", value: { note: "note-author" as never } }),
+          loreByPosition
+        ]
+      })
+    )
+    // Depth 4 of four messages is before the first; the chat's note stays beside the main prompt.
+    const lines = contents(snapshot)
+    expect(lines.indexOf("system: AN_LORE")).toBe(lines.indexOf("assistant: One.") - 1)
+    expect(lines.some((line) => line.includes("AN_LORE") && line.includes("soaked"))).toBe(false)
   })
 })
 

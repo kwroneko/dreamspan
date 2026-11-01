@@ -528,7 +528,6 @@ describe("message graph", () => {
         { key: "card.binding", value: { entity: bob.mira, revision: anaMira.headRevisionId } },
         { key: "note.activate", value: { note: anaNote.entityId } },
         { key: "note.binding", value: { note: bobNote.entityId, revision: anaNote.ref.headRevisionId } },
-        { key: "author_note.set", value: { note: anaNote.entityId } },
         { key: "preset.binding", value: { ref: anaPreset.ref.id } },
         { key: "preset.binding", value: { revision: anaPreset.ref.headRevisionId } },
         { key: "lorebook.attach", value: { ref: anaLorebook.ref.id } },

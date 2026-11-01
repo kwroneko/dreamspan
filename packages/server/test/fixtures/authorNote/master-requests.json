@@ -1,0 +1,295 @@
+{
+  "Aria - main :: (unnamed) :: 01a19544-6a03-76ad-8a07-a7e3f523f642": {
+    "tip": "01a19544-6c0a-7561-b324-9503b2260a6a",
+    "fork": "01a19544-6a03-76ad-8a07-a7e3f523f642",
+    "chat": "01a19544-6a03-76ad-8a07-a7e3f523f642",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria's next reply in a fictional chat between Aria and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "The lamp is lit."
+      },
+      {
+        "role": "user",
+        "content": "I came in from the rain."
+      },
+      {
+        "role": "assistant",
+        "content": "Sit by the fire."
+      },
+      {
+        "role": "user",
+        "content": "Thank you."
+      },
+      {
+        "role": "system",
+        "content": "Sam is tall and patient.\nAria hums when nervous.\nLore before the note.\nRain all night.\nLore after the note.\nAria wears a grey coat.\nLore at depth one."
+      },
+      {
+        "role": "assistant",
+        "content": "Good night, then."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Aria - main :: (unnamed) :: 01a19544-6a54-7459-87e3-c11ff526ba83": {
+    "tip": "01a19544-6a64-7616-b233-ab5daf74b283",
+    "fork": "01a19544-6a54-7459-87e3-c11ff526ba83",
+    "chat": "01a19544-6a03-76ad-8a07-a7e3f523f642",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria's next reply in a fictional chat between Aria and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "The lamp is lit."
+      },
+      {
+        "role": "user",
+        "content": "I came in from the rain."
+      },
+      {
+        "role": "assistant",
+        "content": "Sit by the fire."
+      },
+      {
+        "role": "user",
+        "content": "It started snowing."
+      },
+      {
+        "role": "system",
+        "content": "Sam is tall and patient.\nAria hums when nervous.\nLore before the note.\nSnow now.\nLore after the note.\nAria wears a grey coat.\nLore at depth one."
+      },
+      {
+        "role": "assistant",
+        "content": "Then stay the night."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Aria - main :: (unnamed) :: 01a19544-6a89-73d6-a996-8da6ad8a990a": {
+    "tip": "01a19544-6a95-75ad-b629-78e5c60a9a96",
+    "fork": "01a19544-6a89-73d6-a996-8da6ad8a990a",
+    "chat": "01a19544-6a03-76ad-8a07-a7e3f523f642",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria's next reply in a fictional chat between Aria and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "The lamp is lit."
+      },
+      {
+        "role": "user",
+        "content": "I came in from the rain."
+      },
+      {
+        "role": "assistant",
+        "content": "Sit by the fire."
+      },
+      {
+        "role": "system",
+        "content": "Sam is tall and patient.\nAria hums when nervous.\nLore before the note.\nRain all day.\nLore after the note.\nAria wears a grey coat.\nLore at depth one."
+      },
+      {
+        "role": "user",
+        "content": "I should go."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Aria - plain :: (unnamed) :: 01a19544-6aae-750d-9f69-6f2862aacd83": {
+    "tip": "01a19544-6ab4-746d-8421-042443f6555b",
+    "fork": "01a19544-6aae-750d-9f69-6f2862aacd83",
+    "chat": "01a19544-6aae-750d-9f69-6f2862aacd83",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria's next reply in a fictional chat between Aria and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "The lamp is lit."
+      },
+      {
+        "role": "system",
+        "content": "Sam is tall and patient.\nAria hums when nervous.\nAria wears a grey coat."
+      },
+      {
+        "role": "user",
+        "content": "I came in from the rain."
+      },
+      {
+        "role": "system",
+        "content": "Lore before the note.\nLore after the note.\nLore at depth one."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Aria - quiet :: (unnamed) :: 01a19544-6ad0-7017-87d1-72955648a8ab": {
+    "tip": "01a19544-6ad7-73b1-be3d-fc59cfde7b78",
+    "fork": "01a19544-6ad0-7017-87d1-72955648a8ab",
+    "chat": "01a19544-6ad0-7017-87d1-72955648a8ab",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria's next reply in a fictional chat between Aria and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "The lamp is lit."
+      },
+      {
+        "role": "system",
+        "content": "Aria wears a grey coat."
+      },
+      {
+        "role": "user",
+        "content": "I came in from the rain."
+      },
+      {
+        "role": "system",
+        "content": "Lore before the note.\nLore after the note.\nLore at depth one."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Both: Both - 1 :: (unnamed) :: 01a19544-6b16-7049-a452-45a81e938586": {
+    "tip": "01a19544-6b20-7419-899b-44aca2b7ed32",
+    "fork": "01a19544-6b16-7049-a452-45a81e938586",
+    "chat": "01a19544-6b16-7049-a452-45a81e938586",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Aria, Bram's next reply in a fictional chat between Aria, Bram and Sam."
+      },
+      {
+        "role": "system",
+        "content": "<Aria>\nAria is made up for a test.\n</Aria>\n<Bram>\nBram is made up for a test.\n</Bram>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new group chat. Group members: Aria, Bram]"
+      },
+      {
+        "role": "assistant",
+        "content": "Aria: Welcome."
+      },
+      {
+        "role": "system",
+        "content": "Sam is tall and patient.\nLore before the note.\nCrowded room.\nLore after the note."
+      },
+      {
+        "role": "user",
+        "content": "Thanks."
+      },
+      {
+        "role": "system",
+        "content": "Aria wears a grey coat.\nLore at depth one."
+      },
+      {
+        "role": "assistant",
+        "content": "Bram: Hm."
+      },
+      {
+        "role": "user",
+        "content": "[Write Aria's next message. Write only for Aria.]"
+      }
+    ]
+  },
+  "Bram - one :: (unnamed) :: 01a19544-6af4-75d9-b824-62648650ca9c": {
+    "tip": "01a19544-6aff-70a0-a765-8bbcf70a5b70",
+    "fork": "01a19544-6af4-75d9-b824-62648650ca9c",
+    "chat": "01a19544-6af4-75d9-b824-62648650ca9c",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Write Bram's next reply in a fictional chat between Bram and Rook."
+      },
+      {
+        "role": "user",
+        "content": "Dust storm.\nBram limps.\nRook keeps a ledger."
+      },
+      {
+        "role": "system",
+        "content": "<Bram>\nBram is made up for a test.\n</Bram>"
+      },
+      {
+        "role": "system",
+        "content": "[Start a new Chat]"
+      },
+      {
+        "role": "assistant",
+        "content": "Dust everywhere."
+      },
+      {
+        "role": "user",
+        "content": "I brought the ledger."
+      },
+      {
+        "role": "user",
+        "content": "[Write Bram's next message. Write only for Bram.]"
+      }
+    ]
+  }
+}

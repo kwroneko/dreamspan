@@ -57,8 +57,7 @@ const oracle: { readonly [K in StateEventData["key"]]?: Expected } = {
   "lorebook.attach": { value: (t) => ({ ref: t.lorebook.ref }) },
   "lorebook.detach": { value: (t) => ({ ref: t.lorebook.ref }), removes: true },
   "lorebook.embedded": { value: (t) => ({ entity: t.card.entity, on: false }) },
-  "lorebook.global": { value: (t) => ({ ref: t.lorebook.ref, on: false }) },
-  "author_note.set": { value: (t) => ({ note: t.note.entity }) }
+  "lorebook.global": { value: (t) => ({ ref: t.lorebook.ref, on: false }) }
 }
 
 const kinds: ReadonlyArray<EntityKind> = ["card", "preset", "lorebook", "note", "preset_overlay"]
@@ -238,7 +237,7 @@ layer(fixture, { excludeTestServices: true, timeout: "60 seconds" })("state key 
     }
   }
 
-  for (const key of ["note.activate", "note.deactivate", "note.binding", "author_note.set"] as const) {
+  for (const key of ["note.activate", "note.deactivate", "note.binding"] as const) {
     it.effect(`${key}: another chat's note is NotFound`, () =>
       Effect.gen(function* () {
         const f = yield* Fixture

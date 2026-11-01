@@ -247,11 +247,6 @@ export interface Assembly {
   skippedNotes?: ReadonlyArray<NoteInput>
   /** Enabled preset prompts left out by their condition this turn, for the request inspector. */
   skippedPrompts?: Array<Source>
-  /**
-   * The chat's author's note while it's switched off: what rides on it still goes where it
-   * sits, without its own text (owner question 6 of DESIGN §4.1's notes).
-   */
-  offAuthorNote?: NoteInput
   noteDecisions?: ReadonlyMap<string, Extract<SourceActivation, { kind: "note" }>>
   sendIfEmpty?: boolean
   mode?: Mode

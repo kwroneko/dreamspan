@@ -461,18 +461,18 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const handlers = {
       RecordMessageImage: ({ userId, media }) =>
         recordMedia(userId, media).pipe(transaction(sql, "RecordMessageImage")),
-      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, position, scanLore, sourcePath }) =>
+      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, placement, scanLore, sourcePath }) =>
         Effect.gen(function* () {
           const [card] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM entities WHERE id = ${cardEntityId} AND owner_user_id = ${userId} AND kind = 'card'`
           if (card!.n === 0) return yield* new NotFound({ entity: "card", id: cardEntityId })
-          // Before or after the chat's note is its top or bottom; ST's "replace" keeps both,
-          // the character's at the top [owner question 5].
+          // ST's "replace" keeps both notes [owner question 5]: the importer places it where the
+          // author's note was, concretely (owner, 2026-11-01).
           const doc: NoteDoc = {
             schema_version: NOTE_SCHEMA_VERSION,
             title: "Character author's note",
             content: prompt,
-            placement: { mode: "section", section: position === 2 ? "author_note_bottom" : "author_note_top" },
+            placement,
             owner: { card: cardEntityId },
             exportable: false,
             kind: "character_author_note",

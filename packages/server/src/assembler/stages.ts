@@ -25,7 +25,8 @@ import type { ChatMessage } from "@rp/shared/macros/context.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
 import type { VariableEffect } from "@rp/shared/macros/variables.ts"
 import { branchOwned, type ChatState, foldState, noteSwitches, swappedCard } from "@rp/shared/state.ts"
-import { isAuthorNote as isChatAuthorNote, noteCondition } from "@rp/shared/docs/note.ts"
+import { concretePlacement, noteCondition } from "@rp/shared/docs/note.ts"
+import { concreteLore } from "@rp/shared/docs/lorebook.ts"
 import { Effect, type Scope } from "effect"
 import { loreActivationStage, lorebooksStage } from "./loreStages.ts"
 import { SUMMARY_HISTORY, summaryOnPath as selectSummary } from "./summary.ts"
@@ -284,10 +285,6 @@ const conditionText = (note: NoteInput, cast: Cast) => {
   return condition.when === "turn" ? `on ${name}'s turn` : `while ${name} isn't muted`
 }
 
-/** The chat's author's note, whose place notes and lore at its top or bottom ride on (shown on the note). */
-const isAuthorNote = (state: ChatState, note: NoteInput) =>
-  noteCard(note.doc) === null && isChatAuthorNote(note.doc, note.entity, state.authorNote)
-
 /**
  * An imported summary as ST would send it on this path: the newest of its texts saved on a
  * message of the path, up to the leaf (DATA-MODEL §15, invariant 5); none when the path has
@@ -333,8 +330,6 @@ const notesStage: AssemblerStage = {
         assembly.notes = []
         return assembly
       }
-      const off = notes.find((note) => isAuthorNote(state, note) && !active.includes(note))
-      if (off) assembly.offAuthorNote = off
       assembly.notes = active
       return assembly
     })
@@ -1196,7 +1191,7 @@ type NotePlace =
     }
 
 const placeOf = (note: NoteInput): NotePlace | null => {
-  const { placement } = note.doc
+  const placement = concretePlacement(note.doc.placement)
   switch (placement.mode) {
     case "depth":
       return { at: "chat", depth: placement.depth, role: placement.role }
@@ -1227,29 +1222,11 @@ const placeOf = (note: NoteInput): NotePlace | null => {
 interface PendingNote {
   readonly place: NotePlace
   readonly id: string
-  /** Where the note sorts among ST's extension prompts: the summary, the author's note, the others, cards', personas'. */
+  /** Where the note sorts among ST's extension prompts: the summary, the chat's notes, cards', personas'. */
   readonly rank: number
   readonly baseline: number
-  /** The author's note that goes this turn: what is placed at its top and bottom joins its text. */
-  readonly author?: true
   readonly text: () => Text | null
 }
-
-/** What ST puts at the top or bottom of the author's note: personas outermost, then other notes, then lore. */
-interface Attachments {
-  readonly top: ReadonlyArray<() => Text | null>
-  readonly bottom: ReadonlyArray<() => Text | null>
-}
-
-/**
- * Where the chat stands with the author's note, which ST's persona descriptions and lore
- * placed at its top or bottom ride on (`setFloatingPrompt`, `addPersonaDescriptionExtensionPrompt`):
- * it goes this turn (`due`); it doesn't by its condition (`skipped`), so nothing rides along;
- * it's switched off (`off`), so what rides on it goes where it sits without its text (owner
- * question 6; ST sends nothing of a frequency-0 note); or the chat has none (`none`), which
- * ST treats as its default note, empty, in-chat at depth 4 as the system, every message.
- */
-type AuthorState = "due" | "skipped" | "off" | "none"
 
 /**
  * Whether a card's note goes inside its card's part, at the top (DESIGN §4.1, owner 2026-10-28):
@@ -1308,33 +1285,21 @@ const withCardNotes = (assembly: Assembly, card: CardInput, owner: CardInput | n
 
 /**
  * The notes this context sends, in ST's order for its extension prompts (`1_memory`,
- * `2_floating_prompt`, `DEPTH_PROMPT`, `PERSONA_DESCRIPTION`): the chat's summary, its
- * author's note, its other notes, then the notes of `cards` and of `personas`, each group by
- * id. Notes at one depth and role are joined in this order, and those beside the main prompt
- * go there in it. Notes at the author's note's top or bottom are returned apart, to join its
- * text.
+ * `2_floating_prompt`, `DEPTH_PROMPT`, `PERSONA_DESCRIPTION`): the chat's summary, its other
+ * notes (an imported author's note among them), then the notes of `cards` and of `personas`,
+ * each group by id. Notes at one depth and role are joined in this order, and those beside
+ * the main prompt go there in it.
  */
 const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, personas: ReadonlyArray<CardInput>) => {
   const env = need(assembly, "macros")
-  const state = need(assembly, "state")
   // A summary note is placed by its own switch alone, also beside summaries (DESIGN §8 [P]).
   const candidates = [...(assembly.notes ?? []), ...(assembly.skippedNotes ?? [])]
   const isSummary = (note: NoteInput) => isSummaryNote(note)
   const isPersona = (note: NoteInput) => personas.some((p) => p.entity === noteCard(note.doc))
-  const rank = (note: NoteInput) =>
-    isSummary(note) ? 0 : isPersona(note) ? 4 : noteCard(note.doc) !== null ? 3 : isAuthorNote(state, note) ? 1 : 2
+  const rank = (note: NoteInput) => (isSummary(note) ? 0 : isPersona(note) ? 4 : noteCard(note.doc) !== null ? 3 : 2)
   const sorted = candidates
     .filter((note) => note.doc.kind !== "imported_summary" || isSummary(note))
     .toSorted((a, b) => rank(a) - rank(b) || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0))
-  const authorNote = sorted.find((note) => isAuthorNote(state, note))
-  const offNote = authorNote ? undefined : assembly.offAuthorNote
-  const authorState: AuthorState = authorNote
-    ? assembly.skippedNotes?.includes(authorNote)
-      ? "skipped"
-      : "due"
-    : offNote
-      ? "off"
-      : "none"
   // A persona's text keeps the page's bindings: `{{char}}` is the character, not the persona.
   const textOf = (note: NoteInput, owner: CardInput | null) => (): Text | null => {
     const skipped = assembly.skippedNotes?.includes(note)
@@ -1349,26 +1314,6 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
   const ownerOf = (note: NoteInput) => {
     const card = noteCard(note.doc)
     return card === null ? null : (cards.find((c) => c.entity === card) ?? null)
-  }
-  const section = (note: NoteInput) => (note.doc.placement.mode === "section" ? note.doc.placement.section : null)
-  const attached = (which: "author_note_top" | "author_note_bottom") =>
-    authorState !== "skipped"
-      ? sorted.filter(
-          (note) =>
-            section(note) === which &&
-            !assembly.skippedNotes?.includes(note) &&
-            (isPersona(note) || ownerOf(note) !== null || noteCard(note.doc) === null)
-        )
-      : []
-  const attachments: Attachments = {
-    top: [
-      ...attached("author_note_top").filter(isPersona),
-      ...attached("author_note_top").filter((note) => !isPersona(note))
-    ].map((note) => textOf(note, ownerOf(note))),
-    bottom: [
-      ...attached("author_note_bottom").filter((note) => !isPersona(note)),
-      ...attached("author_note_bottom").filter(isPersona)
-    ].map((note) => textOf(note, ownerOf(note)))
   }
   const placed: Array<PendingNote> = sorted.flatMap((note) => {
     const card = noteCard(note.doc)
@@ -1387,25 +1332,11 @@ const placedNotes = (assembly: Assembly, cards: ReadonlyArray<CardInput>, person
         id: note.entity,
         rank: rank(note),
         baseline: skipped && !content.includes("{{") ? content.length : 0,
-        ...(note === authorNote && authorState === "due" ? { author: true as const } : {}),
         text: textOf(note, owner)
       }
     ]
   })
-  // A switched-off author's note keeps its place, empty, for what rides on it.
-  const offPlace = offNote ? placeOf(offNote) : null
-  if (offNote && offPlace) {
-    const after = placed.findIndex((note) => note.rank > rank(offNote))
-    placed.splice(after < 0 ? placed.length : after, 0, {
-      place: offPlace,
-      id: offNote.entity,
-      rank: rank(offNote),
-      baseline: 0,
-      author: true,
-      text: () => ({ text: "", piece: env.verbatim(`note:${offNote.entity}`, noteSource(assembly, offNote), "") })
-    })
-  }
-  return { placed, attachments, authorState }
+  return { placed }
 }
 
 /** The context as ST's populateChatCompletion builds it, filled the way the preset says. */
@@ -1719,83 +1650,10 @@ const composeStage = sync("compose", (assembly) => {
   const configurationChanged = prior?.configuration !== configuration
 
   // Placement order is independent of expansion order: summaries see main's writes.
-  const authorBlock = (id: string, parts: ReadonlyArray<Text | null | undefined>, what: string): Text | null => {
-    const present = parts.filter((part): part is Text => part !== null && part !== undefined)
-    const combined = present
-      .map((part) => part.text)
-      .join("\n")
-      .trim()
-    return present.length === 0
-      ? null
-      : {
-          text: combined,
-          piece: env.verbatim(
-            id,
-            { kind: "assembler", what },
-            combined,
-            present.map((part) => part.piece)
-          )
-        }
-  }
-  const loreTop = () =>
-    loreBlock(
-      "an-top",
-      positioned.filter((e) => e.entry.position === "an_top")
-    )
-  const loreBottom = () =>
-    loreBlock(
-      "an-bottom",
-      positioned.filter((e) => e.entry.position === "an_bottom")
-    )
-  const { attachments, authorState } = pendingNotes
-  // ST adds what rides on the author's note to its text, persona outermost: the lore first
-  // (`getWorldInfoPrompt`), then the persona (`addPersonaDescriptionExtensionPrompt`).
-  const around = (expanded: Text): Text => {
-    const top = [...attachments.top.map((attach) => attach()), loreTop()]
-    const bottom = [loreBottom(), ...attachments.bottom.map((attach) => attach())]
-    return [...top, ...bottom].some((part) => part !== null)
-      ? authorBlock("lore:author-note", [...top, expanded, ...bottom], "author's note with lore and personas")!
-      : expanded
-  }
-  // Lore on the author's note is never pinned: out of the chat, the note changes whenever an
-  // entry that can ride on it comes or goes, so it is volatile even on a turn with none.
-  const authorLore = need(assembly, "lorebooks").some((b) =>
-    b.doc.entries.some((e) => e.enabled && (e.position === "an_top" || e.position === "an_bottom"))
-  )
-  const notes = pendingNotes.placed.flatMap(({ text, place, id, baseline, rank, author }) => {
+  const notes = pendingNotes.placed.flatMap(({ text, place, id, baseline, rank }) => {
     const expanded = text()
-    if (!expanded) return []
-    const riding = author && authorLore && !belowHistory && place.at !== "chat"
-    return [
-      {
-        text: author ? around(expanded) : expanded,
-        place: riding ? { ...place, volatile: true } : place,
-        id,
-        baseline,
-        rank
-      }
-    ]
+    return expanded ? [{ text: expanded, place, id, baseline, rank }] : []
   })
-  // A chat without an author's note has ST's default one: empty, in-chat at depth 4 as the
-  // system, every message. What rides on it (a persona at its top or bottom, lore) is still sent.
-  if (authorState === "none") {
-    // The empty note still takes its line between what rides on it, as in ST's join.
-    const empty = {
-      text: "",
-      piece: env.verbatim("author-note:default", { kind: "assembler", what: "default author's note" }, "")
-    }
-    const combined = around(empty)
-    if (combined && combined !== empty) {
-      const at = notes.findIndex((note) => note.rank > 1)
-      notes.splice(at < 0 ? notes.length : at, 0, {
-        text: combined,
-        place: { at: "chat", depth: 4, role: "system" },
-        id: "author-note:default",
-        baseline: 0,
-        rank: 1
-      })
-    }
-  }
   const sendIfEmpty = assembly.sendIfEmpty ? optional("utility.send_if_empty", utility.send_if_empty) : null
   const normalFill =
     cast.type === "normal" && sendIfEmpty?.text
@@ -1866,12 +1724,13 @@ const composeStage = sync("compose", (assembly) => {
     const injections: Array<Injection> = placed.flatMap(({ text, place }) =>
       place.at === "chat" ? [{ depth: place.depth, role: place.role, text }] : []
     )
-    for (const e of positioned.filter((e) => e.entry.position === "at_depth"))
-      injections.push({
-        depth: Math.max(0, Math.min(10000, e.entry.depth)),
-        role: e.entry.role,
-        text: { text: env.text(e.piece), piece: e.piece }
-      })
+    for (const e of positioned.map((e) => ({ ...e, entry: concreteLore(e.entry) })))
+      if (e.entry.position === "at_depth")
+        injections.push({
+          depth: Math.max(0, Math.min(10000, e.entry.depth)),
+          role: e.entry.role,
+          text: { text: env.text(e.piece), piece: e.piece }
+        })
     const beside: Array<{ readonly message: StMessage; readonly at: "start" | "end" }> = []
     // Notes already put at a slot's start, so the next one follows them and the notes keep their order.
     const before = { context_start: 0, tail_start: 0 }

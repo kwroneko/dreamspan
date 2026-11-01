@@ -192,14 +192,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         message("later", 2)
       )
       yield* sendStFile(second.importId, path, cleared, { card: "none" })
-      // Kept, for what rides on the author's note, but off: ST sends nothing of an empty one.
+      // Kept with its settings, but off: ST sends nothing of an empty one. The same note, its
+      // empty text bound from the new messages on.
       const state = yield* stateAtLeaf(chatOf(path))
       assert.lengthOf(state.activeNotes, 0)
-      assert.isString(state.authorNote)
-      const doc = query(
-        "SELECT doc_json FROM entity_revisions WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1",
-        state.authorNote as string
-      )[0]!
+      const [bound] = Object.values(state.noteRevisions)
+      const doc = query("SELECT doc_json FROM entity_revisions WHERE id = ?", bound as string)[0]!
       assert.strictEqual((JSON.parse(doc.doc_json as string) as { content: string }).content, "")
     })
   )

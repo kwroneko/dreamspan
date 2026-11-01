@@ -288,9 +288,7 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
-  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean }),
-  /** Which of the chat's own notes is its author's note; null for none. */
-  Schema.TaggedStruct("AuthorNote", { entityId: Schema.NullOr(EntityId) })
+  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
 
@@ -317,8 +315,6 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   card: Schema.NullOr(EntityId),
   /** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
   onByDefault: Schema.Boolean,
-  /** It's the chat's author's note (`isAuthorNote`): notes and lore at its top or bottom join it. */
-  authorNote: Schema.Boolean,
   linked: Schema.NullOr(LinkedNote),
   active: Schema.Boolean
 }) {}

@@ -6,15 +6,22 @@ import { importPromptPreset } from "../formats/presetSettings.ts"
 import { createHash } from "node:crypto"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { LoreRole } from "@rp/shared/docs/lorebook.ts"
-import { MAX_NOTE_DEPTH, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, Placement } from "@rp/shared/docs/note.ts"
+import {
+  concretePlacement,
+  MAX_NOTE_DEPTH,
+  NOTE_SCHEMA_VERSION,
+  noteDepth,
+  type NoteDoc,
+  Placement
+} from "@rp/shared/docs/note.ts"
 import { PRESET_SCHEMA_VERSION } from "@rp/shared/docs/preset.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { importCard } from "../formats/cardImport.ts"
 import { isStPresetFile } from "../formats/preset.ts"
-import { attempt, type FormatError } from "../formats/safety.ts"
-import { importLorebook } from "../formats/worldInfo.ts"
+import { attempt, defaultLimits, type FormatError } from "../formats/safety.ts"
+import { AuthorNoteLorePlace, importLorebook } from "../formats/worldInfo.ts"
 import { OUR_EXTENSION } from "../formats/lorebook.ts"
 import { docHash, searchText } from "../db/documents.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
@@ -137,8 +144,9 @@ const exportedNotes = (card: CardDoc) => {
         )
         return
       }
-      // A placement that isn't valid is dropped, so the note goes with the definitions.
-      const placement = Schema.is(Placement)(item.placement) ? item.placement : WITH_THE_DEFINITIONS
+      // A placement that isn't valid is dropped, so the note goes with the definitions. One an
+      // older export put at the author's note goes where ST's default author's note is.
+      const placement = Schema.is(Placement)(item.placement) ? concretePlacement(item.placement) : WITH_THE_DEFINITIONS
       notes.push({
         schema_version: NOTE_SCHEMA_VERSION,
         title: item.title,
@@ -220,17 +228,20 @@ const lorebookImporter: Importer = {
   id: "st-world-info",
   detect: (file) => file.keys.has("entries"),
   parse: (bytes, fileName) =>
-    Effect.map(importLorebook(bytes, baseName(fileName)), ({ lorebook, report }) => ({
-      report,
-      library: {
-        kind: "lorebook",
-        label: labelFrom(lorebook.name, baseName(fileName)),
-        doc: lorebook,
-        schemaVersion: lorebook.schema_version,
-        note: null
-      },
-      files: []
-    }))
+    Effect.map(
+      Effect.flatMap(AuthorNoteLorePlace, (place) => importLorebook(bytes, baseName(fileName), defaultLimits, place)),
+      ({ lorebook, report }) => ({
+        report,
+        library: {
+          kind: "lorebook",
+          label: labelFrom(lorebook.name, baseName(fileName)),
+          doc: lorebook,
+          schemaVersion: lorebook.schema_version,
+          note: null
+        },
+        files: []
+      })
+    )
 }
 
 const presetImporter: Importer = {

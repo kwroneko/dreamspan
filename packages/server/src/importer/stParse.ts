@@ -4,11 +4,13 @@
 // can't be read is a report with an error.
 import { docHash, searchText } from "../db/documents.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
-import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { LEGACY_PLACEMENT, NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, type Placement } from "@rp/shared/docs/note.ts"
 import { ImportReport, ReportBuilder } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
 import { Effect, Schema } from "effect"
+import type { AuthorNoteLore } from "../formats/lorebook.ts"
 import { attempt } from "../formats/safety.ts"
+import { AuthorNoteLorePlace } from "../formats/worldInfo.ts"
 import { parseStChatPart, stChatLimits } from "../formats/stChat.ts"
 import { parseStGroup, parseStSettings, personaCard, stRole } from "../formats/stData.ts"
 import { failed, type Imported, parseFile, parsedFile, sha256 } from "./importers.ts"
@@ -88,69 +90,81 @@ const parseLibraryFile = (
   bytes: Uint8Array,
   fileName: string,
   expect: EntityKind,
-  textSwitches?: StSettings["textSwitches"]
+  textSwitches?: StSettings["textSwitches"],
+  authorNoteLore?: AuthorNoteLore
 ) =>
-  Effect.map(parseFile(bytes, fileName), (file) => {
-    let parsed = file
-    if (expect === "preset" && parsed.library?.kind === "preset" && textSwitches) {
-      // Global in ST, prompt-local here. Both content and reimport hashes must
-      // include the copied settings, including when only settings.json changed.
-      const doc = { ...JSON.parse(parsed.library.docJson), ...textSwitches }
-      parsed = new ParsedFile({
-        ...parsed,
-        library: {
-          ...parsed.library,
-          docJson: JSON.stringify(doc),
-          docHash: docHash(doc),
-          searchText: searchText(doc)
-        },
-        sha256: sha256(new TextEncoder().encode(JSON.stringify([parsed.sha256, textSwitches])))
-      })
-    }
-    if (parsed.library !== null && parsed.library.kind !== expect) {
-      return new StLibraryFile({
-        parsed: {
+  Effect.map(
+    authorNoteLore
+      ? Effect.provideService(parseFile(bytes, fileName), AuthorNoteLorePlace, authorNoteLore)
+      : parseFile(bytes, fileName),
+    (file) => {
+      let parsed = file
+      // A book whose entries went where the folder's default author's note is changes with it.
+      if (authorNoteLore && parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries"))
+        parsed = new ParsedFile({
           ...parsed,
-          library: null,
-          media: [],
-          report: failed(parsed.report.format, "st.wrong_kind", `This is a ${parsed.library.kind}, not a ${expect}.`)
-        },
-        card: null
+          sha256: sha256(new TextEncoder().encode(JSON.stringify([parsed.sha256, authorNoteLore])))
+        })
+      if (expect === "preset" && parsed.library?.kind === "preset" && textSwitches) {
+        // Global in ST, prompt-local here. Both content and reimport hashes must
+        // include the copied settings, including when only settings.json changed.
+        const doc = { ...JSON.parse(parsed.library.docJson), ...textSwitches }
+        parsed = new ParsedFile({
+          ...parsed,
+          library: {
+            ...parsed.library,
+            docJson: JSON.stringify(doc),
+            docHash: docHash(doc),
+            searchText: searchText(doc)
+          },
+          sha256: sha256(new TextEncoder().encode(JSON.stringify([parsed.sha256, textSwitches])))
+        })
+      }
+      if (parsed.library !== null && parsed.library.kind !== expect) {
+        return new StLibraryFile({
+          parsed: {
+            ...parsed,
+            library: null,
+            media: [],
+            report: failed(parsed.report.format, "st.wrong_kind", `This is a ${parsed.library.kind}, not a ${expect}.`)
+          },
+          card: null
+        })
+      }
+      if (parsed.library?.kind !== "card") return new StLibraryFile({ parsed, card: null })
+      const card = Schema.decodeUnknownSync(CardDoc)(JSON.parse(parsed.library.docJson))
+      const world = card.extensions.world
+      return new StLibraryFile({
+        parsed,
+        card: {
+          name: card.name,
+          greetings: [card.first_mes, ...card.alternate_greetings, ...card.group_only_greetings]
+            .filter((greeting) => greeting.trim() !== "")
+            .map((greeting) => greeting.slice(0, stChatLimits.maxGreetingChars)),
+          world: typeof world === "string" && world !== "" ? world : null,
+          book: card.character_book !== undefined
+        }
       })
     }
-    if (parsed.library?.kind !== "card") return new StLibraryFile({ parsed, card: null })
-    const card = Schema.decodeUnknownSync(CardDoc)(JSON.parse(parsed.library.docJson))
-    const world = card.extensions.world
-    return new StLibraryFile({
-      parsed,
-      card: {
-        name: card.name,
-        greetings: [card.first_mes, ...card.alternate_greetings, ...card.group_only_greetings]
-          .filter((greeting) => greeting.trim() !== "")
-          .map((greeting) => greeting.slice(0, stChatLimits.maxGreetingChars)),
-        world: typeof world === "string" && world !== "" ? world : null,
-        book: card.character_book !== undefined
-      }
-    })
-  })
+  )
 
 /**
  * Where ST put a persona's description (`persona_description_positions`) when not at the
  * prompt's persona description: an ordinary note on the persona's card at that place, which
- * then holds the only copy of the text (DESIGN §4.1, owner 2026-10-28). Null for the prompt's
- * persona description, where the card's description goes.
+ * then holds the only copy of the text (DESIGN §4.1, owner 2026-10-28). At the top or bottom of
+ * the author's note it's `authorNote`, the concrete place of the folder's default author's
+ * note (owner, 2026-11-01). Null for the prompt's persona description, where the card's
+ * description goes.
  */
-const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
+const personaNote = (persona: StPersona, authorNote: Placement): Omit<NoteDoc, "owner"> | null => {
   const placement: NoteDoc["placement"] | null =
-    persona.position === 2
-      ? { mode: "section", section: "author_note_top" }
-      : persona.position === 3
-        ? { mode: "section", section: "author_note_bottom" }
-        : persona.position === 4
-          ? { mode: "depth", depth: noteDepth(persona.depth), role: stRole(persona.role) }
-          : persona.position === 9
-            ? { mode: "none" }
-            : null
+    persona.position === 2 || persona.position === 3
+      ? authorNote
+      : persona.position === 4
+        ? { mode: "depth", depth: noteDepth(persona.depth), role: stRole(persona.role) }
+        : persona.position === 9
+          ? { mode: "none" }
+          : null
   return (
     placement && {
       schema_version: NOTE_SCHEMA_VERSION,
@@ -164,7 +178,12 @@ const personaNote = (persona: StPersona): Omit<NoteDoc, "owner"> | null => {
   )
 }
 
-export const buildPersona = (bytes: Uint8Array, fileName: string, persona: StPersona | null) => {
+export const buildPersona = (
+  bytes: Uint8Array,
+  fileName: string,
+  persona: StPersona | null,
+  authorNote: Placement = LEGACY_PLACEMENT
+) => {
   const named: StPersona = persona ?? {
     avatar: fileName,
     name: fileName.replace(/\.[^.]*$/, ""),
@@ -173,7 +192,7 @@ export const buildPersona = (bytes: Uint8Array, fileName: string, persona: StPer
     depth: 2,
     role: 0
   }
-  const note = personaNote(named)
+  const note = personaNote(named, authorNote)
   // One copy of the text: the note's, when ST placed it anywhere but the persona description.
   const doc = note ? { ...personaCard(named), description: "" } : personaCard(named)
   const imported: Imported = {

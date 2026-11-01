@@ -199,13 +199,21 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
       })}`
     })
 
-  /** A chat-owned note: an entity with a revision per text, oldest first, and its upstream ref. */
-  const insertNote = (userId: UserId, chatId: string, source: string, note: StImportNote) =>
+  /**
+   * A revision per text of an imported note, oldest first, each on the one before and the
+   * first on `parent`; the last one's id. The kind is written only for a summary, which the
+   * assembler reads its history by: an imported author's note is an ordinary note (owner,
+   * 2026-11-01).
+   */
+  const insertNoteRevisions = (
+    entityId: string,
+    chatId: string,
+    source: string,
+    note: StImportNote,
+    parent: string | null,
+    at: number
+  ) =>
     Effect.gen(function* () {
-      const at = Date.now()
-      const entityId = uuidv7()
-      yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind: "note", created_at: at })}`
-      let parent: string | null = null
       for (const [index, content] of note.contents.entries()) {
         // Earlier revisions are the history of the text. How it's sent (template, frequency) and
         // what it covers are on the current one; each keeps its placement, which a note needs.
@@ -217,7 +225,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           placement: note.placement,
           owner: { chat: chatId as ChatId },
           exportable: true,
-          kind: note.kind,
+          ...(note.kind === "imported_summary" ? { kind: note.kind } : {}),
           ...(note.scanLore ? { scan_lore: true } : {}),
           ...(note.template === undefined || !current ? {} : { template: note.template }),
           ...(note.covers === undefined || !current ? {} : { covers: note.covers }),
@@ -242,6 +250,16 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         })}`
         parent = id
       }
+      return parent!
+    })
+
+  /** A chat-owned note: an entity with a revision per text, oldest first, and its upstream ref. */
+  const insertNote = (userId: UserId, chatId: string, source: string, note: StImportNote) =>
+    Effect.gen(function* () {
+      const at = Date.now()
+      const entityId = uuidv7()
+      yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind: "note", created_at: at })}`
+      const parent = yield* insertNoteRevisions(entityId, chatId, source, note, null, at)
       yield* sql`INSERT INTO entity_refs ${sql.insert({
         id: uuidv7(),
         entity_id: entityId,
@@ -736,7 +754,6 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           local.flatMap((e) => stateTargets({ key: e.key, value: JSON.parse(e.value_json) } as StateEventData))
         )
         const keepNote = Effect.fnUntraced(function* (id: string | undefined, kind: StImportNote["kind"]) {
-          if (kind === "author_note" && localTargets.has("author_note.set")) return true
           if (id === undefined) return false
           if (localTargets.has(`note:${id}`)) return true
           const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
@@ -752,32 +769,45 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         for (const note of input.notes) {
           const replaced = notes[note.kind]
           if (yield* keepNote(replaced, note.kind)) continue
-          const entity = yield* insertNote(userId, chatId, payload.source, note)
           if (replaced !== undefined) {
+            // The chat already has this ST note, from the file's parent or an earlier import of
+            // it: its new text is a revision of that note bound in this file's fork from here,
+            // as an edit there is (DESIGN §3.4), so each fork shows its own file's text and
+            // the chat has one such note. A new note here showed up in every fork, switched off
+            // in all but this one (owner, 2026-11-01).
+            const [ref] = yield* sql<{ head_revision_id: string }>`
+              SELECT head_revision_id FROM entity_refs WHERE entity_id = ${replaced} AND ref_kind = 'upstream'`
+            const revision = yield* insertNoteRevisions(
+              replaced,
+              chatId,
+              payload.source,
+              note,
+              ref!.head_revision_id,
+              Date.now()
+            )
             yield* insertEvent(
               userId,
               chatId,
               input.position,
-              { key: "note.deactivate", value: { note: replaced } },
+              { key: "note.binding", value: { note: replaced, revision: revision as never } },
               fileFork.id
             )
+            yield* insertEvent(
+              userId,
+              chatId,
+              input.position,
+              { key: note.activate ? "note.activate" : "note.deactivate", value: { note: replaced } },
+              fileFork.id
+            )
+            continue
           }
+          const entity = yield* insertNote(userId, chatId, payload.source, note)
           if (note.activate) {
             yield* insertEvent(
               userId,
               chatId,
               input.position,
               { key: "note.activate", value: { note: entity } },
-              fileFork.id
-            )
-          }
-          // Which note is the chat's ST author's note (DATA-MODEL §5.3), sent or not.
-          if (note.kind === "author_note") {
-            yield* insertEvent(
-              userId,
-              chatId,
-              input.position,
-              { key: "author_note.set", value: { note: entity } },
               fileFork.id
             )
           }

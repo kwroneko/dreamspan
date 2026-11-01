@@ -49,7 +49,7 @@ describe("the lorebook table", () => {
 
   it("names positions and strategies as ST does", () => {
     expect(positionValue(entry(1, "", { position: "at_depth", role: "user" }))).toBe("at_depth:user")
-    expect(positionValue(entry(1, "", { position: "an_top", role: "user" }))).toBe("an_top")
+    expect(positionValue(entry(1, "", { position: "an_top", role: "user" }))).toBe("at_depth:system")
     expect(strategyOf(entry(1, "", { constant: true, vectorized: true }))).toBe("constant")
     expect(strategyOf(entry(1, "", { vectorized: true }))).toBe("vectorized")
     expect(strategyOf(entry(1, ""))).toBe("normal")

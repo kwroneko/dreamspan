@@ -12,6 +12,8 @@ import { bundleEntry, WorkerBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
 import type { ImportReport } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
+import type { Placement } from "@rp/shared/docs/note.ts"
+import type { AuthorNoteLore } from "../formats/lorebook.ts"
 import {
   type ExportInput,
   type ExportRefused,
@@ -82,12 +84,14 @@ export class Formats extends Context.Service<
         bytes: Uint8Array,
         fileName: string,
         expect: EntityKind,
-        textSwitches?: StSettings["textSwitches"]
+        textSwitches?: StSettings["textSwitches"],
+        authorNoteLore?: AuthorNoteLore
       ) => Effect.Effect<StLibraryFile, FormatWorkerFailed>
       readonly persona: (
         bytes: Uint8Array,
         fileName: string,
-        persona: StPersona | null
+        persona: StPersona | null,
+        authorNote?: Placement
       ) => Effect.Effect<ParsedFile, FormatWorkerFailed>
     }
   }
@@ -212,7 +216,7 @@ export const layer = (options: FormatsOptions) =>
                 Effect.suspend(() =>
                   workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName, parser: parser("group") }))
                 ),
-              libraryFile: (bytes, fileName, expect, textSwitches) =>
+              libraryFile: (bytes, fileName, expect, textSwitches, authorNoteLore) =>
                 Effect.suspend(() =>
                   workerFailures(
                     client.ParseStLibraryFile({
@@ -220,14 +224,21 @@ export const layer = (options: FormatsOptions) =>
                       fileName,
                       expect,
                       ...(textSwitches ? { textSwitches } : {}),
+                      ...(authorNoteLore ? { authorNoteLore } : {}),
                       parser: parser("library-file")
                     })
                   )
                 ),
-              persona: (bytes, fileName, persona) =>
+              persona: (bytes, fileName, persona, authorNote) =>
                 Effect.suspend(() =>
                   workerFailures(
-                    client.BuildStPersona({ bytes: ownBuffer(bytes), fileName, persona, parser: parser("persona") })
+                    client.BuildStPersona({
+                      bytes: ownBuffer(bytes),
+                      fileName,
+                      persona,
+                      parser: parser("persona"),
+                      ...(authorNote ? { authorNote } : {})
+                    })
                   )
                 )
             }

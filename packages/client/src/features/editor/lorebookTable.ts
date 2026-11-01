@@ -147,8 +147,6 @@ export const POSITIONS: ReadonlyArray<{
 }> = [
   { value: "before_char", position: "before_char", short: "↑Char", label: "↑Char · Before the character definitions" },
   { value: "after_char", position: "after_char", short: "↓Char", label: "↓Char · After the character definitions" },
-  { value: "an_top", position: "an_top", short: "↑AN", label: "↑AN · Before the author's note" },
-  { value: "an_bottom", position: "an_bottom", short: "↓AN", label: "↓AN · After the author's note" },
   { value: "em_top", position: "em_top", short: "↑EM", label: "↑EM · Before the example messages" },
   { value: "em_bottom", position: "em_bottom", short: "↓EM", label: "↓EM · After the example messages" },
   {
@@ -169,9 +167,16 @@ export const POSITIONS: ReadonlyArray<{
   { value: "outlet", position: "outlet", short: "Outlet", label: "Outlet · Only where an {{outlet}} macro asks" }
 ]
 
-/** The position picker's value for an entry: at a depth, its role says which. */
+/**
+ * The position picker's value for an entry: at a depth, its role says which. An old revision's
+ * entry before or after the author's note is read at a depth as the system (`concreteLore`).
+ */
 export const positionValue = (entry: Pick<LorebookEntry, "position" | "role">) =>
-  entry.position === "at_depth" ? `at_depth:${entry.role}` : entry.position
+  entry.position === "an_top" || entry.position === "an_bottom"
+    ? "at_depth:system"
+    : entry.position === "at_depth"
+      ? `at_depth:${entry.role}`
+      : entry.position
 
 /** ST's strategies: constant (always in), normal (on a key match), vectorized (by similarity). */
 export type Strategy = "constant" | "normal" | "vectorized"

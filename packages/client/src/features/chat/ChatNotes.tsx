@@ -105,7 +105,6 @@ function ChatNoteRow({
       open={open}
       onOpenChange={onOpenChange}
       shared={note.linked}
-      authorNote={note.authorNote}
       detail={
         note.doc["kind"] === "imported_summary" && (summary || summarizing) ? (
           <SummaryMacroLine note={note} summary={summary} summarizing={summarizing} />
