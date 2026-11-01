@@ -54,6 +54,10 @@ describe("describePresetChanges", () => {
     expect(describePresetChanges(head, current, [content("main"), content("a"), content("c")])).toEqual([
       "text of 3 prompts"
     ])
+    const renamed = { ...head, prompts: head.prompts.map((p) => (p.identifier === "a" ? { ...p, name: "Alef" } : p)) }
+    expect(describePresetChanges(head, renamed, [textField(["prompts", "identifier=a", "name"])])).toEqual([
+      "renamed Alef"
+    ])
   })
 
   it("counts prompts added and deleted without listing their fields, and other settings", () => {

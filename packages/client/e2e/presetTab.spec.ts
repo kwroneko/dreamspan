@@ -148,7 +148,7 @@ for (const width of [1440, 390])
       const panel = await open(page, chatId)
       const shot = async (name: string) => {
         await noOverflow(page)
-        await page.screenshot({ path: join(shots, `${name}-${width}-${scheme}.png`) })
+        await page.screenshot({ path: join(shots, `tab-${name}-${width}-${scheme}.png`) })
       }
       // Closed rows: a name and the first line of the text, editors not mounted.
       await expect(panel.getByRole("textbox", { name: /^Prompt: / })).toHaveCount(0)

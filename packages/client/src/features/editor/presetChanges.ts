@@ -47,6 +47,7 @@ export function describePresetChanges(
   }
   const texts = new Set<string>()
   const options = new Set<string>()
+  const renamed = new Set<string>()
   let other = 0
   const fresh = new Set([...added, ...removed])
   for (const key of dirtyFields) {
@@ -58,6 +59,7 @@ export function describePresetChanges(
       const identifier = identity.slice("identifier=".length)
       if (part === undefined || fresh.has(identifier)) continue
       if (part === "content") texts.add(identifier)
+      else if (part === "name") renamed.add(identifier)
       else options.add(identifier)
     } else other += 1
   }
@@ -67,6 +69,11 @@ export function describePresetChanges(
     ...count(added.length, "prompt added", "prompts added"),
     ...count(removed.length, "prompt deleted", "prompts deleted"),
     ...named("text", [...texts].map(name)),
+    ...(renamed.size === 0
+      ? []
+      : renamed.size <= 2
+        ? [`renamed ${[...renamed].map(name).join(" and ")}`]
+        : [`${renamed.size} prompts renamed`]),
     ...named("options", [...options].map(name)),
     ...count(other, "other setting", "other settings")
   ]
