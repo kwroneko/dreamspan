@@ -13,7 +13,8 @@ import { mediaUrl } from "../../ui/mediaImage.ts"
 import { useCutoutChooser } from "../../ui/portraitParts.ts"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
-import { type EditorStore, useEditorState, useValue } from "./store.ts"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
+import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 
 const ACCEPT = "image/png,image/jpeg,image/gif,image/webp"
 
@@ -235,6 +236,24 @@ export function EditorPortrait({ store, call }: { store: EditorStore; call: Call
         </p>
       )}
     </div>
+  )
+}
+
+/** The full editor's header portrait: `TabPortrait` showing the card's own picture and cutout. */
+export function StorePortrait({ store, call, id }: { store: EditorStore; call: Caller; id: string }) {
+  const stored = useValue<unknown>(store, ["avatar_media_id"])
+  const crop = avatarCropOf(stored, useValue<unknown>(store, ["avatar_crop"]))
+  const name = useText(store, ["name"]) ?? ""
+  const viewer = usePortraitViewer()
+  const mediaId = typeof stored === "string" ? stored : null
+  return (
+    <TabPortrait
+      store={store}
+      call={call}
+      id={id}
+      shown={{ name, mediaId, crop }}
+      onViewFull={viewer && mediaId !== null ? () => viewer.show({ id, name, mediaId }) : undefined}
+    />
   )
 }
 

@@ -1,5 +1,6 @@
-// Continuations after a card was saved or swapped. Features own their dialogs;
-// callers only provide the saved names and wait before closing/navigating.
+// Continuations when a card's chat name changes: where its name is confirmed (the name
+// header, `CardNameHeader.tsx`), or after a fork or swap renamed what the chat uses. Features
+// own their dialogs; callers only provide the names and wait for the answer.
 import { useEffect, useSyncExternalStore, type ComponentType } from "react"
 import type { ChatId, EntityId, ForkId } from "@rp/shared/chat.ts"
 import { makeRegistry } from "../../registry.ts"
@@ -10,12 +11,31 @@ export interface CardSaved {
   readonly newName: string
   readonly current?: { readonly chatId: ChatId; readonly forkId: ForkId } | undefined
   readonly onlyThis?: boolean
+  /**
+   * Asked where the name is confirmed, before it changes: closing the dialog cancels the
+   * rename (`cancel`), and the answer says what to write.
+   */
+  readonly atConfirm?: boolean
+  /**
+   * The display name changed while there's no nickname (`renameQuestion`'s `display`): also
+   * offer keeping the old name in chats (it becomes the nickname) or just changing it.
+   */
+  readonly display?: boolean
 }
+
+/**
+ * How a name question was answered: `cancel` (closed: no rename), `keep` (the old name stays
+ * the chat name, as the nickname), `plain` (renamed from now on), `no` (renamed, past messages
+ * kept), `replaced` (renamed and replaced in past messages), `failed` (renamed; the replacement
+ * failed and can be resumed). None: no question was registered, so the rename just goes ahead.
+ */
+export type RenameAnswer = "cancel" | "keep" | "plain" | "no" | "replaced" | "failed"
+export type CardSavedDone = (stay?: boolean, answer?: RenameAnswer) => void
 export const cardSavedContributions = makeRegistry<{
   readonly id: string
   readonly order: number
   readonly applies: (change: CardSaved) => boolean
-  readonly component: ComponentType<{ change: CardSaved; onDone: (stay?: boolean) => void }>
+  readonly component: ComponentType<{ change: CardSaved; onDone: CardSavedDone }>
 }>()
 
 export const cardSavedContribution = (change: CardSaved) =>
@@ -27,13 +47,13 @@ interface Continuation {
   readonly id: number
   readonly userId: string
   readonly change: CardSaved
-  readonly onDone: (stay?: boolean) => void
+  readonly onDone: CardSavedDone
 }
 let queue: ReadonlyArray<Continuation> = []
 let sequence = 0
 const listeners = new Set<() => void>()
 const publish = () => listeners.forEach((listener) => listener())
-export function showCardSaved(userId: string, change: CardSaved, onDone: (stay?: boolean) => void) {
+export function showCardSaved(userId: string, change: CardSaved, onDone: CardSavedDone) {
   const contribution = cardSavedContribution(change)
   if (!contribution) return onDone()
   queue = [...queue, { id: ++sequence, userId, change, onDone }]
@@ -60,11 +80,11 @@ export function useCardSaved(userId: string) {
   if (!request) return null
   return {
     ...request,
-    onDone: (stay?: boolean) => {
+    onDone: (stay?: boolean, answer?: RenameAnswer) => {
       if (!queue.includes(request)) return
       queue = queue.filter((entry) => entry !== request)
       publish()
-      request.onDone(stay)
+      request.onDone(stay, answer)
     }
   }
 }

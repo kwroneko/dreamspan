@@ -1,37 +1,119 @@
-// The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a). Card modules
-// are card notes (§5.0).
-import { SlotOutlet } from "../../slots.tsx"
-import { cardEditorSections } from "./cardSections.ts"
-import { valueField } from "@rp/shared/editing.ts"
+// The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a), in tabs (owner,
+// 2026-11-01), the same component in the chat's character tab (`layout: "panel"`, a narrow
+// column) and in the full editor (`layout: "page"`). Definition holds what goes into the prompt
+// directly, Greetings the greetings, Metadata everything that isn't prompt text, Lorebook the
+// card's own book, Notes the card's notes, Extra its regex scripts and the sections plugins
+// add (`cardEditorSections`). Each tab is registered (`cardTabs.ts`). Card modules are card
+// notes (§5.0).
+import { estimateTextTokens } from "@rp/shared/cardTokens.ts"
+import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
+import { valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
+import { SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
-import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
+import { Slider } from "../../ui/Slider.tsx"
+import { EmptyState } from "../../ui/Surface.tsx"
+import { Tabs } from "../../ui/Tabs.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { CardSources } from "../cardSources/index.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, TextField } from "./controls.tsx"
-import { AddNoteMenu, SharedNotePicker } from "./notes.tsx"
-import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
-import { type EditorStore, useEditorState, useValue } from "./store.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
-import { PromptUseNote } from "./PromptUseNote.tsx"
+import { CARD_LOREBOOK_SECTION, cardEditorSections } from "./cardSections.ts"
+import { CARD_TAB_DEFINITION, type CardTabProps, cardEditorTabs } from "./cardTabs.ts"
+import { FieldTools, TextField } from "./controls.tsx"
+import { LorebookPanelEditor } from "./LorebookPanelEditor.tsx"
+import { addEntry } from "./lorebookTable.ts"
+import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
+import { AddNoteMenu, SharedNotePicker } from "./notes.tsx"
 import { EditorPortrait } from "./PortraitControls.tsx"
+import { PromptUseNote } from "./PromptUseNote.tsx"
+import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
 
-function Greetings({ store }: { store: EditorStore }) {
-  const path = ["alternate_greetings"]
-  const greetings = useValue<ReadonlyArray<string>>(store, path) ?? []
+/** What each field is for, on hover over its label. */
+const HINTS = {
+  description: "Who they are: sent with every request. ST's description field; {{char}} and {{user}} become the names.",
+  personality: "A short summary of their personality, sent with every request after the description.",
+  scenario: "The situation the chat starts in, sent with every request.",
+  mes_example:
+    "Example dialogue showing how they talk, each example starting with <START>. Sent as the preset says (ST's example messages).",
+  system_prompt:
+    "The card's own system prompt: used in place of the preset's Main Prompt where the preset allows it ({{original}} is the preset's).",
+  post_history_instructions:
+    "The card's own instructions after the chat history: used in place of the preset's where it allows it ({{original}} is the preset's).",
+  first_mes: "The first message of a new chat with them, unless another greeting is picked.",
+  creator_notes: "The creator's notes for users of the card: never sent to the model.",
+  creator: "Who made the card, as the card file says.",
+  tags: "Words to find and sort cards by in the library; never sent to the model."
+} as const
+
+/** A field's estimated tokens, at the end of its label, live as you type. */
+function FieldTokens({ store, path }: { store: EditorStore; path: FieldPath }) {
+  const tokens = estimateTextTokens(useText(store, path) ?? "")
+  return <span className="text-xs font-normal text-muted tabular-nums">~{tokens.toLocaleString()} tokens</span>
+}
+
+/** A text field of the card with its hint, and its token count where it's prompt text. */
+function CardField({
+  store,
+  field,
+  label,
+  rows,
+  layout,
+  tokens = false
+}: {
+  store: EditorStore
+  field: keyof typeof HINTS
+  label: string
+  rows?: number
+  layout: CardTabProps["layout"]
+  tokens?: boolean
+}) {
   return (
-    <div className="flex flex-col gap-3">
+    <TextField
+      store={store}
+      path={[field]}
+      label={label}
+      hint={HINTS[field]}
+      aside={tokens ? <FieldTokens store={store} path={[field]} /> : undefined}
+      {...(rows === undefined ? {} : { rows })}
+      expandable={layout === "panel"}
+    />
+  )
+}
+
+/** A list of greetings at `path`: alternate greetings, or the ones used only in group chats. */
+function Greetings({
+  store,
+  path,
+  title,
+  one,
+  hint,
+  add
+}: {
+  store: EditorStore
+  path: FieldPath
+  title: string
+  /** "Alternate greeting": each one's label, numbered. */
+  one: string
+  hint: string
+  add: { label: string; hint: string }
+}) {
+  const greetings = useValue<ReadonlyArray<string> | undefined>(store, path) ?? []
+  return (
+    <Fieldset legend={title}>
+      <p className="text-sm text-muted">{hint}</p>
       {greetings.map((greeting, index) => (
         <div key={index} className="flex flex-col gap-1">
-          <Field label={`Alternate greeting ${index + 1}`}>
+          <Field label={`${one} ${index + 1}`}>
             <CardTextEditor
               store={store}
               field={valueField(path)}
               path={[...path, index]}
-              label={`Alternate greeting ${index + 1}`}
+              label={`${one} ${index + 1}`}
               rows={4}
               value={greeting}
               onChange={(value) => store.setValue(path, greetings.with(index, value))}
@@ -42,7 +124,8 @@ function Greetings({ store }: { store: EditorStore }) {
             <Button
               variant="ghost"
               onClick={() => store.setValue(path, greetings.toSpliced(index, 1))}
-              aria-label={`Remove alternate greeting ${index + 1}`}
+              aria-label={`Remove ${one.toLowerCase()} ${index + 1}`}
+              hint="Removes this greeting from the card; History keeps every revision."
             >
               Remove
             </Button>
@@ -50,10 +133,12 @@ function Greetings({ store }: { store: EditorStore }) {
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => store.setValue(path, [...greetings, ""])}>Add a greeting</Button>
+        <Button hint={add.hint} onClick={() => store.setValue(path, [...greetings, ""])}>
+          {add.label}
+        </Button>
       </div>
-      <FieldTools store={store} field={valueField(path)} label="Alternate greetings" />
-    </div>
+      <FieldTools store={store} field={valueField(path)} label={title} />
+    </Fieldset>
   )
 }
 
@@ -68,26 +153,31 @@ function Tags({ store }: { store: EditorStore }) {
   }
   return (
     <Fieldset legend="Tags">
-      <ul aria-label="Tags" className="flex flex-wrap gap-2">
-        {tags.map((name) => (
-          <li key={name} className="flex items-center gap-1 rounded-full border border-border py-0.5 pr-1 pl-3 text-sm">
-            {name}
-            <button
-              type="button"
-              aria-label={`Remove the tag ${name}`}
-              className="rounded-full px-1.5 text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-              onClick={() =>
-                store.setValue(
-                  path,
-                  tags.filter((other) => other !== name)
-                )
-              }
+      <p className="text-sm text-muted">{HINTS.tags}</p>
+      {tags.length > 0 && (
+        <ul aria-label="Tags" className="flex flex-wrap gap-2">
+          {tags.map((name) => (
+            <li
+              key={name}
+              className="flex items-center gap-0.5 rounded-full border border-border py-0.5 pr-0.5 pl-3 text-sm"
             >
-              ×
-            </button>
-          </li>
-        ))}
-      </ul>
+              {name}
+              <IconButton
+                label={`Remove the tag ${name}`}
+                hint={`Removes the tag “${name}” from this card.`}
+                icon="close"
+                className="size-6! rounded-full"
+                onClick={() =>
+                  store.setValue(
+                    path,
+                    tags.filter((other) => other !== name)
+                  )
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="flex gap-2">
         <Field label={<span className="sr-only">New tag</span>} className="flex-1">
           <Input
@@ -102,15 +192,62 @@ function Tags({ store }: { store: EditorStore }) {
             }}
           />
         </Field>
-        <Button onClick={add}>Add the tag</Button>
+        <Button hint="Adds what's typed as a tag of this card." onClick={add}>
+          Add the tag
+        </Button>
       </div>
       <FieldTools store={store} field={valueField(path)} label="Tags" />
     </Fieldset>
   )
 }
 
-/** The card's notes (DESIGN §4.1), each collapsed to a row: they travel with the card to every chat. */
-function Notes({ store, call }: { store: EditorStore; call: Caller }) {
+/** ST's default talkativeness, for a card that doesn't set it (public/script.js `talkativeness_default`). */
+export const TALKATIVENESS_DEFAULT = 0.5
+const TALKATIVENESS = ["extensions", "talkativeness"]
+
+/**
+ * How often they speak up in group chats (ST's "Talkativeness" slider, `extensions.talkativeness`,
+ * 0 to 1): their chance to reply when no one is named and it's no one's turn. A setting: it
+ * applies as it's changed.
+ */
+function Talkativeness({ store }: { store: EditorStore }) {
+  const stored = useValue<unknown>(store, TALKATIVENESS)
+  const value = typeof stored === "number" && Number.isFinite(stored) ? stored : TALKATIVENESS_DEFAULT
+  const [dragged, setDragged] = useState<number | null>(null)
+  return (
+    <Slider
+      label="Talkativeness in group chats"
+      description="Their chance of replying when the next speaker is picked for you: someone named in the message replies first, then each by this chance. 50% when the card doesn't say."
+      value={dragged ?? value}
+      min={0}
+      max={1}
+      step={0.05}
+      valueText={(next) => `${Math.round(next * 100)}%`}
+      onValueChange={setDragged}
+      onValueCommitted={(next) => {
+        setDragged(null)
+        store.setValue(TALKATIVENESS, Math.round(next * 100) / 100)
+      }}
+    />
+  )
+}
+
+/** The card file's dates (CCv3 `creation_date`, `modification_date`, Unix seconds), read-only. */
+function CardDates({ store }: { store: EditorStore }) {
+  const created = useValue<number | undefined>(store, ["creation_date"])
+  const modified = useValue<number | undefined>(store, ["modification_date"])
+  if (typeof created !== "number" && typeof modified !== "number") return null
+  const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString()
+  return (
+    <p className="text-sm text-muted">
+      {typeof created === "number" && <>Created {day(created)} by its file. </>}
+      {typeof modified === "number" && <>Last changed {day(modified)} by its file.</>}
+    </p>
+  )
+}
+
+/** The card's notes (DESIGN §4.1), each a block: they travel with the card to every chat. */
+function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
   const [notes, setNotes] = useState<ReadonlyArray<NoteEntry> | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [version, setVersion] = useState(0)
@@ -137,7 +274,11 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
   const cards = entity ? [{ entity, name }] : []
   return (
     <div className="flex flex-col gap-3">
+      <p className="text-sm text-muted">
+        Each note is saved on its own, and goes where it says in the chats it's on in.
+      </p>
       <ErrorAlert error={error} />
+      {notes === null && !error && <p role="status">Loading the notes…</p>}
       {notes?.length === 0 && (
         <EmptyState title="No notes">
           <p>
@@ -166,7 +307,7 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
         </>
       )}
       <div>
-        <AddNoteMenu onNew={() => void add()} onPick={() => setPicking(true)} />
+        <AddNoteMenu label="Add a note" onNew={() => void add()} onPick={() => setPicking(true)} />
       </div>
       <SharedNotePicker
         open={picking}
@@ -181,69 +322,223 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
   )
 }
 
-export function CardEditor({ store, call }: { store: EditorStore; call: Caller }) {
+/** Two columns on a wide page for fields that fit side by side; one in the panel. */
+const columns = (layout: CardTabProps["layout"]) =>
+  layout === "page" ? "grid gap-4 lg:grid-cols-2" : "flex flex-col gap-4"
+
+function DefinitionTab({ store, call, layout }: CardTabProps) {
+  const panel = layout === "panel"
   return (
-    <>
-      <Card>
-        <CardHeader title="Identity" />
-        <div className="flex flex-col gap-4">
-          <TextField store={store} path={["name"]} label="Display name" />
-          <TextField
+    <div className="flex min-w-0 flex-col gap-4">
+      <CardField store={store} field="description" label="Description" rows={panel ? 8 : 12} layout={layout} tokens />
+      <div className={columns(layout)}>
+        <CardField store={store} field="personality" label="Personality" rows={panel ? 3 : 4} layout={layout} tokens />
+        <CardField store={store} field="scenario" label="Scenario" rows={panel ? 3 : 4} layout={layout} tokens />
+      </div>
+      <CardField
+        store={store}
+        field="mes_example"
+        label="Example messages"
+        rows={panel ? 5 : 6}
+        layout={layout}
+        tokens
+      />
+      <div className={columns(layout)}>
+        <div className="flex min-w-0 flex-col gap-1">
+          <CardField
             store={store}
-            path={["nickname"]}
-            label="Name the model sees (leave empty to use the display name)"
+            field="system_prompt"
+            label="System prompt"
+            rows={panel ? 3 : 4}
+            layout={layout}
+            tokens
           />
-          <TextField store={store} path={["character_version"]} label="Version (shown as subtitle)" />
+          <PromptUseNote store={store} call={call} field="system_prompt" />
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          <CardField
+            store={store}
+            field="post_history_instructions"
+            label="Post-history instructions"
+            rows={panel ? 3 : 4}
+            layout={layout}
+            tokens
+          />
+          <PromptUseNote store={store} call={call} field="post_history_instructions" />
+        </div>
+      </div>
+      <p className="text-sm text-muted">
+        The card's Character's Note is one of its notes, in the Notes tab, as are its other notes.
+      </p>
+    </div>
+  )
+}
+
+function GreetingsTab({ store, layout }: CardTabProps) {
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <CardField
+        store={store}
+        field="first_mes"
+        label="First message"
+        rows={layout === "panel" ? 5 : 6}
+        layout={layout}
+        tokens
+      />
+      <Greetings
+        store={store}
+        path={["alternate_greetings"]}
+        title="Alternate greetings"
+        one="Alternate greeting"
+        hint="Other first messages a new chat can start from, as swipes of the first message."
+        add={{ label: "Add a greeting", hint: "A new, empty alternate greeting at the end of the list." }}
+      />
+      <Greetings
+        store={store}
+        path={["group_only_greetings"]}
+        title="Group greetings"
+        one="Group greeting"
+        hint="First messages offered only when a new chat has more than one character."
+        add={{ label: "Add a group greeting", hint: "A new, empty greeting used only in group chats." }}
+      />
+    </div>
+  )
+}
+
+function MetadataTab({ store, call, layout }: CardTabProps) {
+  const doc = useWorkingDoc(store)
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      {layout === "page" && (
+        <section aria-labelledby="card-picture" className="flex flex-col gap-2">
+          <h3 id="card-picture" className="text-sm font-medium">
+            Picture
+          </h3>
           <EditorPortrait store={store} call={call} />
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Definition" />
-        <div className="flex flex-col gap-4">
-          <TextField store={store} path={["description"]} label="Description" rows={12} />
-          <TextField store={store} path={["personality"]} label="Personality" rows={4} />
-          <TextField store={store} path={["scenario"]} label="Scenario" rows={4} />
-          <TextField store={store} path={["mes_example"]} label="Example messages" rows={6} />
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Greetings" />
-        <div className="flex flex-col gap-4">
-          <TextField store={store} path={["first_mes"]} label="First message" rows={6} />
-          <Greetings store={store} />
-        </div>
-      </Card>
-      <Card>
-        <CardHeader title="Prompts" description="The card's own prompts, used where the preset allows them." />
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <TextField store={store} path={["system_prompt"]} label="System prompt" rows={4} />
-            <PromptUseNote store={store} call={call} field="system_prompt" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <TextField store={store} path={["post_history_instructions"]} label="Post-history instructions" rows={4} />
-            <PromptUseNote store={store} call={call} field="post_history_instructions" />
-          </div>
-        </div>
-      </Card>
-      <Card>
-        <CardHeader
-          title="Notes"
-          description="Each note is saved on its own, and goes where it says in the chats it's on in."
-        />
-        <Notes store={store} call={call} />
-      </Card>
-      <SlotOutlet slot={cardEditorSections} props={{ store, call }} />
-      <Card>
-        <CardHeader title="About" />
-        <div className="flex flex-col gap-4">
-          <TextField store={store} path={["creator_notes"]} label="Creator's notes" rows={4} />
-          <Tags store={store} />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <TextField store={store} path={["creator"]} label="Creator" />
-          </div>
-        </div>
-      </Card>
-    </>
+        </section>
+      )}
+      <CardField store={store} field="creator_notes" label="Creator's notes" rows={4} layout={layout} />
+      <Tags store={store} />
+      <div className={columns(layout)}>
+        <TextField store={store} path={["creator"]} label="Creator" hint={HINTS.creator} />
+      </div>
+      <CardDates store={store} />
+      <section aria-labelledby="card-group-settings" className="flex flex-col gap-2">
+        <h3 id="card-group-settings" className="text-sm font-medium">
+          In group chats
+        </h3>
+        <Talkativeness store={store} />
+      </section>
+      <CardSources doc={doc as Parameters<typeof CardSources>[0]["doc"]} />
+    </div>
+  )
+}
+
+const BOOK: FieldPath = ["character_book"]
+
+function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
+  const book = useValue<LorebookDoc | undefined>(store, BOOK)
+  const name = useText(store, ["name"]) || "This card"
+  if (!book)
+    return (
+      <div className="flex min-w-0 flex-col items-start gap-3">
+        <p className="text-sm text-muted">
+          {name} has no lorebook of its own. A card's book travels with it on export and is used in its chats.
+        </p>
+        <Button
+          hint="Starts the card's own lorebook with one empty entry."
+          onClick={() => {
+            addEntry(store, BOOK, undefined)
+          }}
+        >
+          Add a lorebook
+        </Button>
+      </div>
+    )
+  return (
+    <div className={`flex min-w-0 flex-col gap-3 ${layout === "page" ? "max-w-4xl" : ""}`}>
+      <LorebookPanelEditor
+        store={store}
+        root={BOOK}
+        fallbackName={`${name}'s lorebook`}
+        note={`Part of ${name}'s card: saving the card saves it.`}
+        saveControls={false}
+        {...(onOpenBook ? { onOpenLarge: onOpenBook } : {})}
+      />
+    </div>
+  )
+}
+
+function NotesTab({ store, call }: CardTabProps) {
+  return <CardNotes store={store} call={call} />
+}
+
+/** Regex scripts and every section a plugin adds; the card's book has its own tab. */
+function ExtraTab({ store, call }: CardTabProps) {
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <SlotOutlet slot={cardEditorSections} props={{ store, call }} except={[CARD_LOREBOOK_SECTION]} />
+    </div>
+  )
+}
+
+/** The built-in tabs' panels, registered lazily (`cardTabsRegister.tsx`). */
+export const CARD_TAB_PANELS = {
+  definition: DefinitionTab,
+  greetings: GreetingsTab,
+  metadata: MetadataTab,
+  lorebook: LorebookTab,
+  notes: NotesTab,
+  extra: ExtraTab
+}
+
+/** The card's tabs, as registered, in order. `initial`: the tab id to open first. */
+export function CardEditor({
+  store,
+  call,
+  layout = "page",
+  initial = CARD_TAB_DEFINITION,
+  onOpenBook,
+  header
+}: {
+  store: EditorStore
+  call: Caller
+  layout?: CardTabProps["layout"]
+  initial?: string
+  onOpenBook?: (() => void) | undefined
+  /** Above the tabs' panels, under the tab row: nothing by default. */
+  header?: ReactNode
+}) {
+  const snapshot = useSyncExternalStore(cardEditorTabs.subscribe, cardEditorTabs.snapshot, cardEditorTabs.snapshot)
+  const tabs = [...snapshot.entries].sort((a, b) => a.order - b.order)
+  const [tab, setTab] = useState(initial)
+  // Opened again on another tab (the panel's Lorebooks list opening this card's book): it decides.
+  const [lastInitial, setLastInitial] = useState(initial)
+  if (initial !== lastInitial) {
+    setLastInitial(initial)
+    setTab(initial)
+  }
+  const shown = tabs.some((entry) => entry.id === tab) ? tab : (tabs[0]?.id ?? "")
+  if (tabs.length === 0) return null
+  return (
+    <div data-card-tabs={layout} className="flex min-w-0 flex-col gap-4">
+      {header}
+      <Tabs
+        label="Card fields"
+        value={shown}
+        onValueChange={setTab}
+        wrap={layout === "panel"}
+        tabs={tabs.map((entry) => ({
+          value: entry.id,
+          label: entry.label,
+          description: entry.description,
+          panel: (
+            <div className="pt-3">
+              <entry.component store={store} call={call} layout={layout} onOpenBook={onOpenBook} />
+            </div>
+          )
+        }))}
+      />
+    </div>
   )
 }

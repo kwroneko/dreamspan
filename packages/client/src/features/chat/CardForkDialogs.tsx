@@ -22,6 +22,8 @@ export interface ChatCardActionProps {
   session: ChatSession
   card: CastCard
   info: ChatCard | undefined
+  /** The card the user plays here (the persona's tab): actions for a character in the chat leave it out. */
+  persona?: boolean | undefined
 }
 
 /** The full card editor, over the chat (the chat stays as it was); without the workspace, its page. */
@@ -49,8 +51,9 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
     </Button>
   )
 }
-export function ForkChatCard({ session, card, info }: ChatCardActionProps) {
+export function ForkChatCard({ session, card, info, persona }: ChatCardActionProps) {
   const [open, setOpen] = useState(false)
+  if (persona) return null
   return (
     <>
       <Button
@@ -67,8 +70,9 @@ export function ForkChatCard({ session, card, info }: ChatCardActionProps) {
     </>
   )
 }
-export function ChooseChatCard({ session, card, info }: ChatCardActionProps) {
+export function ChooseChatCard({ session, card, info, persona }: ChatCardActionProps) {
   const [open, setOpen] = useState(false)
+  if (persona) return null
   return (
     <>
       <Button

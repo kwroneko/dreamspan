@@ -1,6 +1,10 @@
+// The question a change of a card's chat name asks (owner, 2026-11-01): where the name is
+// confirmed (`atConfirm`, the name header), or after a fork or a swap renamed what a chat uses.
+// "Replace <old> with <new> in the history: No / this chat / all N chats"; when the display
+// name changed with no nickname (`display`), also keep the old name in chats or just change it.
 import { useSession } from "../../session.ts"
 import { keepPending, dropPending } from "./pending.ts"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { ErrorAlert, useAction } from "../../actions.tsx"
@@ -9,17 +13,21 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { useCaller } from "../editor/caller.ts"
-import type { CardSaved } from "../editor/cardSaved.ts"
+import type { CardSaved, CardSavedDone, RenameAnswer } from "../editor/cardSaved.ts"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { branchLabel } from "../chat/forks.ts"
 
 type Target = NonNullable<CardSaved["current"]> & { label: string }
 
-export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (stay?: boolean) => void }) {
+const wide = "h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"
+
+export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: CardSavedDone }) {
   const user = useSession().user.id
   const call = useCaller()
   useEffect(() => {
-    keepPending(user, change)
+    // Asked after a save, the name has changed already: an unanswered question can be resumed.
+    // Asked on confirm, nothing has changed yet; only a failed replacement is kept.
+    if (!change.atConfirm) keepPending(user, change)
   }, [user, change])
   const action = useAction()
   const [targets, setTargets] = useState<ReadonlyArray<Target> | null>(null)
@@ -27,6 +35,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [done, setDone] = useState<{ count: number; targets: ReadonlyArray<Target> } | null>(null)
+  const failed = useRef(false)
   useEffect(() => {
     let active = true
     void call((client) =>
@@ -59,6 +68,10 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
     }
   }, [call, change, attempt])
 
+  const finish = (answer: RenameAnswer, stay?: boolean) => onDone(stay, answer)
+  /** Closing: on confirm, an unanswered question cancels the rename. */
+  const close = () => finish(done ? "replaced" : failed.current ? "failed" : change.atConfirm ? "cancel" : "no")
+
   const replace = async (scope: "this" | "all") => {
     const chosen = scope === "all" ? (targets ?? []) : (targets?.filter((t) => t.forkId === selected) ?? [])
     const target = chosen[0]
@@ -76,17 +89,60 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
       ["chats"]
     )
     if (result.ok) {
+      failed.current = false
       dropPending(user, change)
       setDone({ count: result.value, targets: chosen })
+    } else if (change.atConfirm && !failed.current) {
+      // The rename goes ahead; the replacement can be retried here, or resumed later.
+      failed.current = true
+      keepPending(user, { ...change, atConfirm: false, display: false })
     }
   }
+  const all = targets?.length ?? 0
+  const thisChat = !targets?.some((t) => t.forkId === selected)
+  const replaceButtons = (yes: boolean) => (
+    <>
+      <Button
+        className={wide}
+        disabled={action.pending || thisChat}
+        hint="Replaces the name in this chat's messages, swipes and summaries only; its other branches and other chats keep the old one."
+        onClick={() => void replace("this")}
+      >
+        {yes ? "Yes, only in this chat." : "In this chat"}
+      </Button>
+      {!change.onlyThis && (
+        <Button
+          className={wide}
+          disabled={action.pending || all === 0}
+          hint="Replaces the name in the messages, swipes and summaries of every chat and branch that uses this card."
+          onClick={() => void replace("all")}
+        >
+          {yes
+            ? `Yes, in all ${targets?.length ?? "…"} chats with ${change.oldName}`
+            : `In all ${targets?.length ?? "…"} chats`}
+        </Button>
+      )}
+    </>
+  )
 
   return (
     <Dialog
       open
-      onOpenChange={(open) => !open && !action.pending && onDone()}
-      title={done ? "History replacement finished" : "Replace the name in past messages?"}
-      description={`The card is saved. Its in-character name changed from “${change.oldName}” to “${change.newName}”.`}
+      onOpenChange={(open) => !open && !action.pending && close()}
+      title={
+        done
+          ? "History replacement finished"
+          : change.display
+            ? `Rename ${change.oldName} to ${change.newName}?`
+            : "Replace the name in past messages?"
+      }
+      description={
+        change.display
+          ? `“${change.oldName}” is also the name chats call them by: what should chats call them now?`
+          : change.atConfirm
+            ? `Chats will call them “${change.newName}” instead of “${change.oldName}”.`
+            : `The card is saved. Its in-character name changed from “${change.oldName}” to “${change.newName}”.`
+      }
     >
       {done ? (
         <>
@@ -108,7 +164,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
                       params={{ chatId: t.chatId }}
                       search={{ fork: t.forkId, panel: "history" }}
                       className={`${buttonClass("ghost")} h-auto! whitespace-normal!`}
-                      onClick={() => onDone(true)}
+                      onClick={() => finish("replaced", true)}
                     >
                       History diff / undo: {t.label}
                     </Link>
@@ -118,17 +174,22 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             </>
           )}
           <DialogActions>
-            <Button onClick={() => onDone()}>Done</Button>
+            <Button hint="Closes this; the name is changed." onClick={() => finish("replaced")}>
+              Done
+            </Button>
           </DialogActions>
         </>
       ) : (
         <>
-          <p className="text-sm [overflow-wrap:anywhere]">
-            Replace “{change.oldName}” with “{change.newName}” in past messages?
-          </p>
+          {!change.display && (
+            <p className="text-sm [overflow-wrap:anywhere]">
+              Replace “{change.oldName}” with “{change.newName}” in past messages?
+            </p>
+          )}
           <p className="text-sm text-muted">
-            Includes swipes and summaries. Branches count as separate chats. The name save is complete; a failed history
-            replacement can be retried here.
+            {change.atConfirm
+              ? "Includes swipes and summaries. Branches count as separate chats. Closing this keeps the old name."
+              : "Includes swipes and summaries. Branches count as separate chats. The name save is complete; a failed history replacement can be retried here."}
           </p>
           {error && (
             <p role="alert" className="text-sm text-danger">
@@ -136,7 +197,11 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             </p>
           )}
           <ErrorAlert error={action.error} />
-          {error && <Button onClick={() => setAttempt((n) => n + 1)}>Retry reading chats</Button>}
+          {error && (
+            <Button hint="Reads the chats that use this card again." onClick={() => setAttempt((n) => n + 1)}>
+              Retry reading chats
+            </Button>
+          )}
           {targets === null && !error && (
             <p role="status" className="text-sm text-muted">
               Reading chats…
@@ -164,35 +229,46 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
                 "the original chat, which no longer uses this card"}
             </p>
           )}
-          <div className="flex flex-col gap-2">
-            <Button
-              className="h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"
-              disabled={action.pending}
-              onClick={() => {
-                dropPending(user, change)
-                onDone()
-              }}
-            >
-              No. Past messages will keep “{change.oldName}”.
-            </Button>
-            <Button
-              className="h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"
-              disabled={action.pending || !targets?.some((t) => t.forkId === selected)}
-              onClick={() => void replace("this")}
-            >
-              Yes, only in this chat.
-            </Button>
-            <p className="text-xs text-muted">Does not touch this chat’s other branches or any other chats.</p>
-            {!change.onlyThis && (
+          {change.display ? (
+            <div className="flex flex-col gap-2">
               <Button
-                className="h-auto! min-h-11 whitespace-normal! py-2! [overflow-wrap:anywhere]"
-                disabled={action.pending || !targets?.length}
-                onClick={() => void replace("all")}
+                className={wide}
+                disabled={action.pending}
+                hint={`“${change.oldName}” stays the name chats use, as its chat name; past messages stay as they are. The display name becomes “${change.newName}”.`}
+                onClick={() => finish("keep")}
               >
-                Yes, in all {targets?.length ?? "…"} chats with {change.oldName}
+                Keep “{change.oldName}” in chats
               </Button>
-            )}
-          </div>
+              <Button
+                className={wide}
+                disabled={action.pending}
+                hint={`Chats call them “${change.newName}” from now on; past messages keep “${change.oldName}”.`}
+                onClick={() => finish("plain")}
+              >
+                Just change it
+              </Button>
+              <p className="pt-1 text-sm font-medium">Rename everywhere: replace “{change.oldName}” in past messages</p>
+              {replaceButtons(false)}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Button
+                className={wide}
+                disabled={action.pending}
+                hint={`Renames from now on; past messages keep “${change.oldName}”.`}
+                onClick={() => {
+                  dropPending(user, change)
+                  finish("no")
+                }}
+              >
+                No. Past messages will keep “{change.oldName}”.
+              </Button>
+              {replaceButtons(true)}
+              <p className="text-xs text-muted">
+                “Only in this chat” doesn’t touch this chat’s other branches or any other chats.
+              </p>
+            </div>
+          )}
         </>
       )}
     </Dialog>

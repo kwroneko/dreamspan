@@ -11,7 +11,9 @@ export function InlineRename({
   children,
   allowEmpty = false,
   className = "",
-  inputClassName = ""
+  inputClassName = "",
+  hint = "Rename",
+  fieldLabel
 }: {
   /** The name as it is, what the field starts with. */
   value: string
@@ -25,6 +27,10 @@ export function InlineRename({
   allowEmpty?: boolean
   className?: string
   inputClassName?: string
+  /** The pencil's tooltip: what the name is, when that isn't obvious ("Rename" by default). */
+  hint?: ReactNode
+  /** The field's accessible name while renaming ("New name for <label>" by default). */
+  fieldLabel?: string
 }) {
   const [typed, setTyped] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -43,7 +49,7 @@ export function InlineRename({
         {children ?? <span className="min-w-0 [overflow-wrap:anywhere]">{value}</span>}
         <IconButton
           label={`Rename ${label}`}
-          hint="Rename"
+          hint={hint}
           icon="edit"
           className="size-7! shrink-0"
           onClick={() => setTyped(value)}
@@ -53,7 +59,7 @@ export function InlineRename({
   return (
     <span className={`flex min-w-0 flex-1 items-center gap-1 ${className}`}>
       <Input
-        aria-label={`New name for ${label}`}
+        aria-label={fieldLabel ?? `New name for ${label}`}
         value={typed}
         autoFocus
         onFocus={(event) => event.currentTarget.select()}

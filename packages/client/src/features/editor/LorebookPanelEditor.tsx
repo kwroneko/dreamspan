@@ -43,10 +43,13 @@ export function LorebookPanelEditor({
   fallbackName,
   note,
   onClose,
-  onOpenLarge
+  onOpenLarge,
+  saveControls = true
 }: {
   store: EditorStore
   root: FieldPath
+  /** Its own Save and Revert; off inside an editor that has them already (a card's Lorebook tab). */
+  saveControls?: boolean
   /** The name shown when the book has none: "Aria's lorebook". */
   fallbackName: string
   /** One line on what an edit reaches: "Part of Aria's card: saving it saves the card." */
@@ -99,9 +102,13 @@ export function LorebookPanelEditor({
             error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
           />
         )}
-        <SaveRevision store={store} compact />
-        <RestoredNotice count={state.restored} />
-        <RecoveredNotice store={store} />
+        {saveControls && (
+          <>
+            <SaveRevision store={store} compact />
+            <RestoredNotice count={state.restored} />
+            <RecoveredNotice store={store} />
+          </>
+        )}
         {searching && (
           <div id="panel-lore-search" className="rounded-md border border-border p-2">
             <SearchDialog

@@ -1,6 +1,7 @@
 // Tabs: arrow keys move between them, and each panel is labelled by its tab.
 import { Tabs as BaseTabs } from "@base-ui/react/tabs"
 import type { ReactNode } from "react"
+import { Tooltip } from "./Tooltip.tsx"
 
 export function Tabs<Value extends string>({
   tabs,
@@ -10,9 +11,16 @@ export function Tabs<Value extends string>({
   label,
   fill = false,
   keepMounted = false,
+  wrap = false,
   end
 }: {
-  tabs: ReadonlyArray<{ readonly value: Value; readonly label: string; readonly panel: ReactNode }>
+  tabs: ReadonlyArray<{
+    readonly value: Value
+    readonly label: string
+    readonly panel: ReactNode
+    /** What the tab holds, in a tooltip on hover and focus. */
+    readonly description?: string | undefined
+  }>
   value: Value
   onValueChange: (value: Value) => void
   /** After a pointer clicks any tab, including the active one; keyboard focus stays on tabs. */
@@ -22,28 +30,44 @@ export function Tabs<Value extends string>({
   fill?: boolean | undefined
   /** Hidden panels stay mounted, keeping their state: text being typed, say. */
   keepMounted?: boolean | undefined
+  /** The tabs wrap onto a second row rather than running out of a narrow column. */
+  wrap?: boolean | undefined
   /** Beside the tabs, at the end of their row: a close button, say. */
   end?: ReactNode
 }) {
   const list = (
     <BaseTabs.List
       aria-label={label}
-      className={fill ? "flex min-w-0 flex-1 flex-wrap gap-0.5" : "flex gap-1 border-b border-border"}
+      className={
+        fill
+          ? "flex min-w-0 flex-1 flex-wrap gap-0.5"
+          : `flex gap-1 border-b border-border ${wrap ? "flex-wrap gap-y-0" : ""}`
+      }
     >
-      {tabs.map((tab) => (
-        <BaseTabs.Tab
-          key={tab.value}
-          value={tab.value}
-          onClick={(event) => {
-            if (event.detail > 0) onPointerActivate?.(tab.value)
-          }}
-          title={tab.label}
-          // A long label (a card's full name) is cut short rather than running out of the panel.
-          className={`${fill ? "max-w-56 min-w-0 shrink-0 truncate px-1.5" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
-        >
-          {tab.label}
-        </BaseTabs.Tab>
-      ))}
+      {tabs.map((tab) => {
+        const button = (
+          <BaseTabs.Tab
+            key={tab.value}
+            value={tab.value}
+            onClick={(event) => {
+              if (event.detail > 0) onPointerActivate?.(tab.value)
+            }}
+            {...(tab.description ? {} : { title: tab.label })}
+            // A long label (a card's full name) is cut short rather than running out of the panel.
+            className={`${fill ? "max-w-56 min-w-0 shrink-0 truncate px-1.5" : wrap ? "-mb-px px-2" : "-mb-px px-3"} rounded-t-md border-b-2 border-transparent py-1.5 text-sm whitespace-nowrap text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-active:border-accent data-active:text-text`}
+          >
+            {tab.label}
+          </BaseTabs.Tab>
+        )
+        // What the tab holds, on hover and keyboard focus.
+        return tab.description ? (
+          <Tooltip key={tab.value} label={tab.description}>
+            {button}
+          </Tooltip>
+        ) : (
+          button
+        )
+      })}
     </BaseTabs.List>
   )
   return (
