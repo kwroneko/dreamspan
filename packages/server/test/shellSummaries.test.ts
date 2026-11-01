@@ -218,6 +218,98 @@ describe("shell fork summaries", () => {
     }).pipe(Effect.provide(database()))
   )
 
+  // Per-fork validity (db/summaryValidity.ts): main runs root, a, b; `atA` branches at a and
+  // `atB` at b, each with a message of its own. A write keeps valid the summaries it can't
+  // reach, and every summary a read takes from storage equals one computed from scratch.
+  it.live("a write makes stale only the forks it reaches", () =>
+    Effect.gen(function* () {
+      const t = yield* setup
+      const { writer, reader, userId, harbor, mira, tam } = t
+      const root = yield* t.append(harbor.id, null, "Hello.", null)
+      const a = yield* t.append(harbor.id, root.slotId, "Mira answers.")
+      const b = yield* t.append(harbor.id, a.slotId, "b", null)
+      yield* t.check("main", [harbor.id])
+      const main = (yield* reader.ShellLibrary({ userId })).forks.find((f) => f.chat.id === harbor.id)!.forkId as ForkId
+      const atA = (yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: a.slotId })).fork
+        .id
+      const ownA = yield* t.append(harbor.id, a.slotId, "Only in atA.", null, atA)
+      const atB = (yield* writer.CreateFork({ userId, chatId: harbor.id, fromForkId: main, atSlotId: b.slotId })).fork
+        .id
+      const ownB = yield* t.append(harbor.id, b.slotId, "Only in atB.", mira.entityId, atB)
+      yield* t.check("forks", [harbor.id])
+      const name = new Map<string, string>([
+        [main, "main"],
+        [atA, "atA"],
+        [atB, "atB"]
+      ])
+      /** After a write: which of harbor's forks a read walks, then `check`'s equalities. */
+      const walks = (label: string, expected: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const read = yield* reader.ShellLibrary({ userId })
+          const walked = read.fresh
+            .filter((c) => c.chatId === harbor.id)
+            .flatMap((c) =>
+              (JSON.parse(c.forks) as Array<{ forkId: string }>).map((f) => name.get(f.forkId) ?? f.forkId)
+            )
+          assert.deepStrictEqual(walked.sort(), [...expected].sort(), label)
+          yield* t.check(label, [])
+        })
+      yield* walks("nothing written", [])
+      yield* t.append(harbor.id, ownA.slotId, "atA goes on.", mira.entityId, atA)
+      yield* walks("append in one fork", ["atA"])
+      // A swipe on the shared prefix, chosen in main: main's own selection.
+      const swipe = yield* writer.AddVersion({
+        userId,
+        slotId: a.slotId,
+        forkId: main,
+        version: t.version("Mira, second take.", mira.entityId),
+        select: true,
+        commitDraft: null
+      })
+      yield* walks("swipe on a shared slot", ["main"])
+      yield* writer.SelectVersion({
+        userId,
+        slotId: a.slotId,
+        forkId: main,
+        versionId: a.version.id,
+        expectedVersionId: swipe.id
+      })
+      yield* walks("select on a shared slot", ["main"])
+      // Hiding isn't read by the summaries.
+      yield* writer.SetSlotHidden({ userId, slotId: a.slotId, forkId: atB, hidden: true })
+      yield* walks("hide", [])
+      const written = yield* reader.GetSlot({ userId, slotId: b.slotId, forkId: atB })
+      yield* writer.AmendVersion({
+        userId,
+        versionId: written.entry.version.id,
+        forkId: atB,
+        content: "b, amended.",
+        expectedRowVersion: written.entry.version.rowVersion
+      })
+      yield* walks("edit on a shared slot", ["atB"])
+      yield* writer.AddStateEvent({
+        userId,
+        chatId: harbor.id,
+        forkId: atB,
+        slotId: ownB.slotId,
+        versionId: null,
+        scope: null,
+        data: { key: "participant.join", value: { entity: tam.entityId } }
+      })
+      yield* walks("state event in one fork", ["atB"])
+      yield* writer.DeleteMessage({ userId, slotId: b.slotId, forkId: main })
+      yield* walks("delete on a shared slot", ["atB", "main"])
+      // main's tip moves on to a new slot, which neither branch's path holds.
+      yield* t.append(harbor.id, a.slotId, "main goes on.", mira.entityId, main)
+      yield* walks("append in a parent", ["main"])
+      yield* writer.DeleteFork({ userId, forkId: atA })
+      yield* walks("fork deleted", [])
+      // atB now splits off at its base, b, rather than where main's path leaves it.
+      yield* writer.DeleteFork({ userId, forkId: main })
+      yield* walks("parent deleted", ["atB"])
+    }).pipe(Effect.provide(database()))
+  )
+
   it.live("a chat an ST import is still writing is never walked by a read", () =>
     Effect.gen(function* () {
       const t = yield* setup
