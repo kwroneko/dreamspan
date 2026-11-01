@@ -5,14 +5,14 @@ import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // Edit scope: making a named variant is one action. Card names live in revision content;
 // other library entries retain their separate labels.
-import type { LibraryRef } from "@rp/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, type ReactNode, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
+import { InlineRename } from "../../ui/InlineRename.tsx"
 import { type EditorStore, useEditorState } from "./store.ts"
 
 export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: () => void }) {
@@ -136,88 +136,36 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
   )
 }
 
-export function RenameDialog({
-  store,
-  onClose,
-  onRenamed
-}: {
-  store: EditorStore
-  onClose: () => void
-  onRenamed: (ref: LibraryRef) => void
-}) {
+/**
+ * A library entry's name, renamed in place (pencil, then the field with Save and Cancel): the
+ * library label of a preset, lorebook or note. A card's name is its revision's own field.
+ */
+export function RefName({ store, children }: { store: EditorStore; children?: ReactNode }) {
   const ref = useEditorState(store).snapshot!.ref
   const action = useAction()
-  const durable = useUserDraft(
-    `ref:${ref.id}:rename`,
-    "Names",
-    JSON.stringify({ label: ref.label, subtitle: ref.subtitle, rowVersion: ref.rowVersion })
-  )
-  const names = JSON.parse(durable.text) as { label: string; subtitle: string; rowVersion: number }
-  const { label, subtitle } = names
-  const setLabel = (label: string) => durable.setText(JSON.stringify({ ...names, label }))
-  const setSubtitle = (subtitle: string) => durable.setText(JSON.stringify({ ...names, subtitle }))
-  const nameCheck = useCardNameCheck(label.trim(), subtitle.trim(), ref)
-  const clash = ref.kind === "card" ? nameCheck : null
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
-    if (clash) return
-    await durable.commit(durable.text, async () => {
-      const result = await action.run(
-        (client) =>
-          Effect.gen(function* () {
-            if (ref.kind === "card") yield* checkCardNames(client, label.trim(), subtitle.trim(), ref)
-            return yield* client("RenameRef", {
-              refId: ref.id,
-              label: label.trim(),
-              subtitle: subtitle.trim(),
-              expectedRowVersion: names.rowVersion
-            })
-          }),
-        ["library"]
-      )
-      if (result.ok) onRenamed(result.value)
-      return result.ok
-    })
-  }
-
   return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title="Rename in the library"
-      description={
-        ref.kind === "card"
-          ? "Changes the card’s display name and version as a new revision."
-          : "Changes the entry’s library label."
-      }
-    >
-      <UserDraftStatus draft={durable} />
-      <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
-        <Field label={ref.kind === "card" ? "Display name" : "Library label"}>
-          <Input value={label} onChange={(event) => setLabel(event.currentTarget.value)} required />
-        </Field>
-        <Field label={ref.kind === "card" ? "Version (shown as subtitle)" : "Subtitle (optional)"}>
-          <Input value={subtitle} onChange={(event) => setSubtitle(event.currentTarget.value)} />
-        </Field>
-        {clash && (
-          <p role="status" className="text-sm text-muted">
-            {clash}
-          </p>
-        )}
-        <ErrorAlert error={action.error} />
-        <DialogActions>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            type="submit"
-            variant="primary"
-            pending={action.pending}
-            disabled={label.trim() === "" || clash !== null}
-          >
-            Rename
-          </Button>
-        </DialogActions>
-      </form>
-    </Dialog>
+    <span className="flex min-w-0 flex-col gap-1">
+      <InlineRename
+        value={ref.label}
+        label={ref.label}
+        onRename={async (label) => {
+          const result = await action.run(
+            (client) =>
+              client("RenameRef", {
+                refId: ref.id,
+                label,
+                subtitle: ref.subtitle,
+                expectedRowVersion: ref.rowVersion
+              }),
+            ["library"]
+          )
+          if (result.ok) await store.refresh()
+          return result.ok
+        }}
+      >
+        {children}
+      </InlineRename>
+      <ErrorAlert error={action.error} />
+    </span>
   )
 }

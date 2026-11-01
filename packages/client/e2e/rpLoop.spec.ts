@@ -303,6 +303,8 @@ for (const width of [1440, 390])
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")
+      // The options fold under the block's header (owner, 2026-11-01).
+      await style.getByRole("button", { name: /^Options of / }).click()
       await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("Always")
       const types = style.getByRole("group", { name: "Generation types" })
       await expect(types.getByRole("checkbox", { name: "Impersonate" })).toBeChecked()

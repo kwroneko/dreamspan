@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 
 export function usePanelWidth(
   userId: string,
-  panel: "sidebar" | "chat",
+  panel: "sidebar" | "chat" | "presetOutline",
   initial: number,
   min: number,
   limit: number,

@@ -1,150 +1,112 @@
-import type { AppError } from "../../errors.ts"
-import { writePresetOrder } from "../editor/presetDraft.ts"
+// The side panel's Prompt preset tab (DESIGN §6.2a; owner, 2026-11-01): the whole preset,
+// editable in the column. The prompt order is the large editor's own document in its "column"
+// layout, sharing the workspace's store, so an edit in either shows in the other. Nothing is
+// committed as it's made: every change, a switch flip included, is a draft until the floating
+// bar's Save (the same Save and Revert as the large editor's toolbar), or goes with Revert.
 import type { RefId } from "@rp/shared/library.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
-import { newestMessage, presetOrder } from "@rp/shared/presetOrder.ts"
-import { lazy, Suspense, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
+import { SlotOutlet } from "../../slots.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Switch } from "../../ui/Choice.tsx"
-import { ConfirmDialog } from "../../ui/Dialog.tsx"
-import { valueField } from "@rp/shared/editing.ts"
-import { Badge } from "../../ui/Surface.tsx"
-import { summaryBadge } from "../editor/summaryBadge.ts"
+import { Icon } from "../../ui/Icon.tsx"
+import { Disclosure } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { useCaller } from "../editor/caller.ts"
+import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
+import { describePresetChanges } from "../editor/presetChanges.ts"
+import { PresetSettings } from "../editor/PresetEditor.tsx"
+import { presetEditorWarnings } from "../editor/presetSections.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
-import { type EditorStore, useEditorState, useLeaveGuard, useValue, useWorkingDoc } from "../editor/store.ts"
+import { PromptDocument } from "../editor/PromptDocument.tsx"
+import { RefName } from "../editor/RefDialogs.tsx"
+import { SaveRevert } from "../editor/SaveRevert.tsx"
+import { type EditorStore, useEditorState, useLeaveGuard, useWorkingDoc } from "../editor/store.ts"
 import type { ChatView } from "./session.ts"
 
-/** What flipping a switch writes: the order, and the newest-message marker an older revision gains. */
-const switchFields = new Set([valueField(["order"]), valueField(["prompts", "identifier=newestMessage"])])
-
-/** Whether the drafts are only switch flips: the switch fields, with the saved order's sequence. */
-function onlySwitches(store: EditorStore) {
-  if (!store.dirtyFields().every((field) => switchFields.has(field))) return false
-  const sequence = (prompts: unknown, order: unknown) =>
-    presetOrder((prompts ?? []) as ReadonlyArray<PresetPrompt>, (order ?? []) as ReadonlyArray<PromptOrderEntry>)
-      .map((e) => e.identifier)
-      .join("\n")
-  return sequence(store.head.prompts, store.head.order) === sequence(store.value(["prompts"]), store.value(["order"]))
-}
-
-const SaveDialog = lazy(() => import("../editor/SaveDialog.tsx").then((m) => ({ default: m.SaveDialog })))
-
-function PresetSwitches({ store }: { store: EditorStore }) {
+/**
+ * Says what's unsaved, with Revert and Save, stuck to the bottom of the panel while it scrolls;
+ * gone once nothing is unsaved. Its own component, so typing re-renders only it.
+ */
+function UnsavedBar({ store }: { store: EditorStore }) {
   const workspace = usePresetWorkspace()
   const state = useEditorState(store)
-  const doc = useWorkingDoc(store)
-  const prompts = useValue<ReadonlyArray<PresetPrompt>>(store, ["prompts"]) ?? []
-  const order = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
-  const [confirming, setConfirming] = useState(false)
+  const working = useWorkingDoc(store)
+  if (state.dirty === 0) return null
+  const parts = describePresetChanges(store.head, working, store.dirtyFields())
+  return (
+    <div
+      role="region"
+      aria-label="Unsaved changes"
+      className="sticky bottom-0 z-20 mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-accent/40 bg-surface-raised p-2.5 shadow-lg"
+    >
+      <p role="status" className="min-w-0 flex-1 basis-40 text-sm [overflow-wrap:anywhere]">
+        <span className="font-medium">Unsaved:</span>{" "}
+        <span className="text-muted">{parts.length > 0 ? parts.join(" · ") : "changes"}</span>
+      </p>
+      <div className="ml-auto flex shrink-0 flex-wrap gap-2">
+        <SaveRevert store={store} current={workspace?.chat} what={parts.join(", ")} />
+      </div>
+    </div>
+  )
+}
+
+function PresetColumn({ store }: { store: EditorStore }) {
+  const workspace = usePresetWorkspace()
+  const call = useCaller()
+  const state = useEditorState(store)
+  const [goTo, setGoTo] = useState<{ readonly identifier: string } | null>(null)
   useEffect(() => {
     void store.load()
   }, [store])
   useLeaveGuard(store)
   if (state.loadError) return <ErrorAlert error={state.loadError} />
   if (!state.snapshot) return <p role="status">Loading preset…</p>
-  const all = [...prompts, newestMessage]
-  const discard = async () => {
-    setConfirming(false)
-    for (const field of store.dirtyFields()) {
-      const result = await store.discard(field)
-      if (result && !result.ok) {
-        setError(result.error)
-        break
-      }
-    }
-  }
   return (
-    <div className="flex flex-col gap-3">
-      <p className="font-medium">{state.snapshot.ref.label}</p>
-      <p className="text-xs text-muted">
-        Switches edit this preset everywhere it is used. Save a revision to apply changes.
-      </p>
-      <ErrorAlert error={error ?? state.saveError} />
-      {state.dirty > 0 && (
-        <div className="sticky top-0 z-10 flex gap-2 bg-surface py-2">
-          <Button variant="primary" onClick={() => setSaving(true)}>
-            Save
-          </Button>
-          <Button
-            onClick={() => {
-              // The switches alone go at once; anything else edited in the overlay, a reorder
-              // included, is confirmed first.
-              if (onlySwitches(store)) void discard()
-              else setConfirming(true)
-            }}
-          >
-            Discard
-          </Button>
+    <div className="flex min-h-full flex-col gap-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="font-medium">
+            <RefName store={store} />
+          </span>
+          <p className="text-xs text-muted">Used by every chat with this preset. Changes wait for Save.</p>
         </div>
+        <Tooltip label="The preset editor over the chat, with room to work and search">
+          <Button
+            className="h-8 shrink-0 px-2.5"
+            aria-label="Open the preset in the large editor"
+            onClick={() => workspace?.open(store.refId)}
+          >
+            <Icon name="expand" />
+            Large editor
+          </Button>
+        </Tooltip>
+      </div>
+      {state.saveError && (
+        <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
       )}
-      <ol className="divide-y divide-border" aria-label="Preset blocks">
-        {presetOrder(prompts, order).map((entry) => {
-          const p = all.find((p) => p.identifier === entry.identifier)!
-          const content =
-            (doc.prompts as PresetPrompt[] | undefined)?.find((p) => p.identifier === entry.identifier)?.content ?? ""
-          const filled = workspace?.context?.blocks.find((b) => b.identifier === entry.identifier)
-          return (
-            <li key={entry.identifier} className="flex flex-wrap items-center gap-2 py-2">
-              {entry.identifier !== "newestMessage" && (
-                <Switch
-                  checked={entry.enabled}
-                  onCheckedChange={(enabled) =>
-                    writePresetOrder(
-                      store,
-                      presetOrder(prompts, order).map((e) =>
-                        e.identifier === entry.identifier ? { ...e, enabled } : e
-                      )
-                    )
-                  }
-                >
-                  <span className="sr-only">Send {p.name}</span>
-                </Switch>
-              )}
-              {/* The badge goes under the name, so the name keeps the row's width. */}
-              <span className="flex min-w-0 flex-1 flex-col items-start gap-1">
-                <span className="text-sm break-words">{p.name}</span>
-                {!p.marker && /\{\{summary\}\}/i.test(content) && workspace?.context?.summary && (
-                  <Badge>{summaryBadge(workspace?.context.summary)}</Badge>
-                )}
-              </span>
-              <span className="text-xs text-muted">
-                ~{(p.marker ? (filled?.tokens ?? 0) : Math.ceil(content.length / 4)).toLocaleString()} tokens
-              </span>
-              <Button
-                variant="ghost"
-                aria-label={`Edit ${p.name}`}
-                onClick={() => workspace?.open(store.refId, entry.identifier)}
-              >
-                Edit
-              </Button>
-            </li>
-          )
-        })}
-      </ol>
-      <ConfirmDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        title={`Discard ${state.dirty} unsaved ${state.dirty === 1 ? "change" : "changes"}?`}
-        description="This includes changes made in the preset editor, such as prompt text or the order, not only the switches. Discarded text is kept in the bin's recovered texts."
-        confirmLabel="Discard them"
-        onConfirm={() => void discard()}
+      <RestoredNotice count={state.restored} />
+      <RecoveredNotice store={store} />
+      <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
+      <PromptDocument
+        store={store}
+        context={workspace?.context}
+        layout="column"
+        goTo={goTo}
+        onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
       />
-      {saving && (
-        <Suspense>
-          <SaveDialog store={store} onClose={() => setSaving(false)} onSaved={() => setSaving(false)} />
-        </Suspense>
-      )}
+      <Disclosure lazy title="End of request, prefill, utility prompts, regex scripts">
+        <PresetSettings store={store} call={call} />
+      </Disclosure>
+      <UnsavedBar store={store} />
     </div>
   )
 }
+
 export function PresetTab({ view }: { view: ChatView }) {
   const workspace = usePresetWorkspace()
   const preset = view.history?.preset
   return preset?.ref && workspace ? (
-    <PresetSwitches key={preset.ref} store={workspace.store(preset.ref as RefId)} />
+    <PresetColumn key={preset.ref} store={workspace.store(preset.ref as RefId)} />
   ) : (
     <p className="text-sm text-muted">
       {preset?.scope === "builtin"
