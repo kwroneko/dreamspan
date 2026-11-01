@@ -10,7 +10,7 @@ import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
 import { nameOf, useCast } from "./cast.ts"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
-import { GenerateIcon, RegenerateIcon, SendIcon } from "./icons.tsx"
+import { GenerateIcon, SendIcon } from "./icons.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import { hasReplyChoice, NextReplyChip } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
@@ -257,26 +257,6 @@ export const registerComposerControls = () => [
     placement: "actions",
     component: ({ guidance, prefsReady, changeGuidance, hint }) => (
       <GuidanceToggle guidance={guidance} prefsReady={prefsReady} changeGuidance={changeGuidance} hint={hint} />
-    )
-  }),
-  composerControls.register({
-    id: "composer.regenerate",
-    order: 10,
-    placement: "actions",
-    // A phone regenerates from the reply itself, to leave the box its width.
-    available: ({ leaf, leafGenerating, compact }) => !compact && leaf?.version.writer === "model" && !leafGenerating,
-    run: async ({ session, leaf, report }) => {
-      if (leaf) report(await session.regenerate(leaf))
-    },
-    component: ({ invoke }) => (
-      <SquareIconButton
-        label="Regenerate the latest reply"
-        hint="Regenerate the latest reply: a new version of it, in its place"
-        variant="ghost"
-        onClick={invoke}
-      >
-        <RegenerateIcon />
-      </SquareIconButton>
     )
   }),
   composerControls.register({

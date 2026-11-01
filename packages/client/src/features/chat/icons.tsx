@@ -37,12 +37,6 @@ export const PlusIcon = () => (
   </svg>
 )
 
-export const RegenerateIcon = () => (
-  <svg {...base}>
-    <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5" />
-  </svg>
-)
-
 /** Generating with guidance: a spark, not Send's arrow, so guidance never looks like a message going out. */
 export const GenerateIcon = () => (
   <svg {...base}>
