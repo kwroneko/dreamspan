@@ -142,13 +142,8 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
     })
   )
 
-/** The same selected revisions for chat-list metadata and chat search. */
-export const chatCast = Effect.fnUntraced(function* (
-  sql: SqlClient.SqlClient,
-  userId: UserId,
-  chatId: ChatId,
-  leaf: string | null
-) {
+/** A chat's state folded at `leaf`, as its cast is read there. */
+export const chatStateAt = Effect.fnUntraced(function* (sql: SqlClient.SqlClient, chatId: ChatId, leaf: string | null) {
   const fork = yield* forkAt(sql, chatId, leaf)
   // At the fork's tip, its cast as it stands: through its display end, which an inserted
   // message after the tip is (spec/MESSAGE-INSERT.md §2.3).
@@ -159,7 +154,7 @@ export const chatCast = Effect.fnUntraced(function* (
     SELECT id, tip_slot_id FROM forks WHERE id = ${fork} AND chat_id = ${chatId}`
   const at = tip !== undefined && tip.tip_slot_id === leaf ? yield* displayEndOf(sql, chatId, tip) : leaf
   const events = yield* stateEventsThrough(sql, chatId, at as SlotId | null, fork)
-  const state = foldState(
+  return foldState(
     yield* withoutPurged(
       sql,
       events.map((e) => ({
@@ -168,6 +163,16 @@ export const chatCast = Effect.fnUntraced(function* (
       })) as Array<FoldableEvent>
     )
   )
+})
+
+/** The same selected revisions for chat-list metadata and chat search. */
+export const chatCast = Effect.fnUntraced(function* (
+  sql: SqlClient.SqlClient,
+  userId: UserId,
+  chatId: ChatId,
+  leaf: string | null
+) {
+  const state = yield* chatStateAt(sql, chatId, leaf)
   const ids = state.participants as ReadonlyArray<EntityId>
   const cards = yield* loadCards(sql, userId, ids)
   const bindings = state.cardBindings

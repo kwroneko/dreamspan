@@ -86,6 +86,7 @@ import {
   RevisionId
 } from "@rp/shared/library.ts"
 import { LibraryImport } from "@rp/shared/libraryImport.ts"
+import { CardReplaceSource } from "@rp/shared/cardReplace.ts"
 import {
   ChatNotePosition,
   EditConflict,
@@ -1446,7 +1447,14 @@ export class WriteOps extends RpcGroup.make(
        * A preset's lorebooks (`PresetDoc.lorebooks`), each on, from an ST folder's global World
        * Info books (§13); ids that aren't the user's live library lorebooks are left out.
        */
-      presetLorebooks: Schema.optionalKey(Schema.Array(RefId))
+      presetLorebooks: Schema.optionalKey(Schema.Array(RefId)),
+      /**
+       * "Import a new version…" of a card (§11.1): the file goes on the import line, and the
+       * card's next revision is the file's content wholesale (`replacementDoc`), not a merge,
+       * its merge base that import. Refused unless the head is still the one previewed. The
+       * card's notes and favourite stay as they are.
+       */
+      replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String }))
     },
     success: LibraryImport,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -2696,6 +2704,16 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("ExportSource", {
     payload: { userId: UserId, refId: RefId },
     success: ExportSource,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * A card as "Import a new version…" previews it (@rp/shared/cardReplace.ts): its head, the
+   * text of its first note, its picture's hash, and how many chats follow it or keep a fixed
+   * revision. Anything but the user's own card is NotFound.
+   */
+  Rpc.make("CardReplaceSource", {
+    payload: { userId: UserId, refId: RefId },
+    success: CardReplaceSource,
     error: Schema.Union([NotFound, StorageError])
   }),
   /** A ref without its document, to check where an import goes before reading the file. */

@@ -7,6 +7,7 @@ import { CurrentUser } from "@rp/shared/api.ts"
 import { SavedRef } from "@rp/shared/editorApi.ts"
 import { ImportIssue, ImportReport } from "@rp/shared/importReport.ts"
 import { ExportFormat as ExportFormatSchema, ImportResult } from "@rp/shared/libraryImport.ts"
+import { CardReplacePreview } from "@rp/shared/cardReplace.ts"
 import { RefId } from "@rp/shared/library.ts"
 import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { EditorDraftSave } from "@rp/shared/editorApi.ts"
@@ -203,11 +204,21 @@ export const layer = Layer.unwrap(
       const fileName = fileNameFrom(query.get("name"))
       const into = query.get("into")
       if (into !== null && !Schema.is(RefId)(into)) return jsonError(400, "into must name a ref")
+      // "Import a new version…" of a card (§11.1): `preview` parses the file and stores nothing;
+      // `replace` makes the file's content the card's next revision, if its head is still `head`.
+      const mode = query.get("mode")
+      const head = query.get("head")
+      if (mode !== null && mode !== "preview" && mode !== "replace")
+        return jsonError(400, "mode must be preview or replace")
+      if (mode !== null && into === null) return jsonError(400, "a new version needs the card it's for (into)")
+      if (mode === "replace" && (head === null || head.length > 100))
+        return jsonError(400, "replace needs the head the preview showed")
       // Before the body is read: a refused import reads, parses and stores nothing.
       const target = into === null ? null : yield* reader.GetLibraryRef({ userId: user.id, refId: into })
       if (target !== null && target.refKind !== "upstream") {
         return jsonError(409, "only a library entry's original takes a new version of its file")
       }
+      if (mode !== null && target?.kind !== "card") return jsonError(409, "only a card takes a new version in place")
 
       const message = NodeHttpServerRequest.toIncomingMessage(request)
       const limits = {
@@ -229,6 +240,45 @@ export const layer = Layer.unwrap(
               // reading stops, and the answer closes the connection.
               const body = yield* readBody(message, limits)
               const parsed = yield* formats.parse(body, fileName)
+              if (mode === "preview") {
+                if (parsed.library === null)
+                  return yield* HttpServerResponse.schemaJson(CardReplacePreview)(
+                    new CardReplacePreview({
+                      report: parsed.report,
+                      docJson: null,
+                      noteDocJson: null,
+                      otherNotes: 0,
+                      avatar: null,
+                      assets: 0,
+                      card: null
+                    })
+                  )
+                if (parsed.library.kind !== "card")
+                  return jsonError(409, `This file is a ${parsed.library.kind}, not a card.`)
+                // Nothing is stored and no file written: the document goes back as the format
+                // worker encoded it, and the picture as a data URL, so the dialog can show it.
+                const avatar = parsed.media.find((file) => file.role === "avatar")
+                return yield* HttpServerResponse.schemaJson(CardReplacePreview)(
+                  new CardReplacePreview({
+                    report: parsed.report,
+                    docJson: parsed.library.docJson,
+                    noteDocJson: parsed.library.noteDocJson,
+                    otherNotes: parsed.library.notesDocJson?.length ?? 0,
+                    avatar: avatar
+                      ? {
+                          sha256: avatar.sha256,
+                          mime: avatar.mime,
+                          base64:
+                            INLINE_IMAGES.has(avatar.mime) && avatar.bytes.byteLength <= MAX_AVATAR_BYTES
+                              ? Buffer.from(avatar.bytes).toString("base64")
+                              : null
+                        }
+                      : null,
+                    assets: parsed.media.filter((file) => file.role !== "avatar").length,
+                    card: yield* reader.CardReplaceSource({ userId: user.id, refId: into! })
+                  })
+                )
+              }
               if (parsed.library === null) {
                 return yield* HttpServerResponse.schemaJson(ImportResult)(
                   new ImportResult({ report: parsed.report, library: null })
@@ -249,7 +299,8 @@ export const layer = Layer.unwrap(
                     ...parsed.library!,
                     sourceName: fileName,
                     sourceHash: parsed.sha256,
-                    media: parsed.media.map(({ bytes: _, ...file }) => file)
+                    media: parsed.media.map(({ bytes: _, ...file }) => file),
+                    ...(mode === "replace" ? { replace: { expectedHeadRevisionId: head! } } : {})
                   })
                 })
               )

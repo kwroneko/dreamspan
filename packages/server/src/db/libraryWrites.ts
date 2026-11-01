@@ -17,6 +17,11 @@ import {
   withoutGrantedAgentEdits
 } from "@rp/shared/editing.ts"
 import { InvalidDocument } from "@rp/shared/editorApi.ts"
+import { replacementDoc } from "@rp/shared/cardReplace.ts"
+import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
+import { isHeldField } from "@rp/shared/editing.ts"
+import { editedDoc } from "@rp/shared/presetConditions.ts"
+import { fieldContent } from "./drafts.ts"
 import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
@@ -385,6 +390,90 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         yield* sql`UPDATE entity_refs SET source_path = coalesce(${options.sourcePath}, source_path),
                    source_hash = coalesce(${options.sourceHash}, source_hash) WHERE id = ${ref.id}`
         return yield* mergeAndFlow(yield* reload(ref.id))
+      })
+
+    /**
+     * "Import a new version…" (§11.1): the file goes on the card's import line as a re-import's
+     * does, and the card's next revision is the file's content wholesale with what a file can't
+     * carry kept from the card (`replacementDoc`), two parents (the head, the import), its merge
+     * base that import: so a later re-import of the same file is up to date, and a newer one
+     * merges against this. Live text is what's sent (§14.2a): the fields typed since the last
+     * revision take the new text, as a restore's do, what was typed one state back.
+     */
+    const replaceCard = (
+      userId: UserId,
+      ref: RefRow,
+      current: Doc,
+      file: EncodedDoc,
+      schemaVersion: number,
+      source: ImportSource,
+      options: { readonly expectedHeadRevisionId: string }
+    ) =>
+      Effect.gen(function* () {
+        if (ref.ref_kind !== "upstream") {
+          return yield* new RefOperationRefused({ refId: ref.id, reason: "Only upstream refs take imports." })
+        }
+        if (ref.head_revision_id !== options.expectedHeadRevisionId) {
+          return yield* new RefOperationRefused({
+            refId: ref.id,
+            reason: "The card changed since this version was previewed; import it again to see what it changes now."
+          })
+        }
+        const head = yield* revision(ref.head_revision_id)
+        if (schemaVersion !== head.schema_version) {
+          return yield* new RefOperationRefused({
+            refId: ref.id,
+            reason: `This is schema version ${schemaVersion}, but the library holds version ${head.schema_version}, and documents can't be migrated yet.`
+          })
+        }
+        const last = ref.followed_head === null ? null : yield* revision(ref.followed_head)
+        const imported =
+          last !== null && last.doc_hash === file.hash
+            ? ref.followed_head!
+            : yield* insertRevision({
+                entityId: ref.entity_id,
+                schemaVersion,
+                doc: file,
+                parents: ref.followed_head === null ? [] : [ref.followed_head],
+                origin: "import",
+                originRef: source.originRef,
+                message: null
+              })
+        yield* sql`UPDATE entity_refs SET source_path = ${source.sourcePath}, source_hash = ${source.sourceHash}
+                   WHERE id = ${ref.id}`
+        const next = replacementDoc(current, JSON.parse(file.json) as Doc)
+        const encoded = encode(next)
+        let outcome: MergeOutcome = "up_to_date"
+        let headId = ref.head_revision_id
+        if (encoded.hash !== head.doc_hash) {
+          headId = yield* insertRevision({
+            entityId: ref.entity_id,
+            schemaVersion,
+            doc: encoded,
+            parents: [ref.head_revision_id, imported],
+            origin: "merge",
+            originRef: source.originRef,
+            message: `Replaced with a new version from ${source.sourcePath}`
+          })
+          yield* moveHead(ref.id, headId, imported)
+          outcome = "merged"
+        } else if (imported !== ref.merge_base_revision_id) {
+          yield* moveHead(ref.id, headId, imported)
+        }
+        const shown = editedDoc("card", next)
+        const fields = yield* sql<{ field: string }>`SELECT field FROM drafts WHERE user_id = ${userId}
+          AND target_kind = 'entity_field' AND target_id = ${entityDraftTarget(ref.id as RefId)} AND status = 'active'
+          ORDER BY field`
+        for (const { field } of fields) {
+          if (isHeldField(field)) continue
+          const row = yield* drafts.find(
+            userId,
+            new DraftKey({ targetKind: "entity_field", targetId: entityDraftTarget(ref.id as RefId), field })
+          )
+          const content = row === null ? null : fieldContent(shown, field)
+          if (row !== null && content !== null) yield* drafts.settleOn(row, content, headId)
+        }
+        return { ref: yield* reload(ref.id), outcome }
       })
 
     /** Records a file in media storage for the user; the same bytes are one row for everyone. */
@@ -769,6 +858,24 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
             sourcePath: input.sourceName,
             sourceHash: input.sourceHash
+          }
+          if (input.replace !== undefined) {
+            if (into === null || kind !== "card" || current === null) {
+              return yield* new RefOperationRefused({
+                refId: (intoRefId ?? "") as RefId,
+                reason: "Only a card takes a new version in place."
+              })
+            }
+            const replaced = yield* replaceCard(userId, into, current, doc, input.schemaVersion, source, input.replace)
+            return new LibraryImport({
+              created: false,
+              ref: toLibraryRef(replaced.ref),
+              outcome: replaced.outcome,
+              followers: [],
+              note: null,
+              keptAvatar,
+              keptAssets
+            })
           }
           let upstream: RefRow
           let outcome: MergeOutcome | null = null

@@ -5,6 +5,7 @@ import * as cardRename from "./cardRename/index.tsx"
 import * as cardForks from "./cardForks/index.tsx"
 import * as cardSources from "./cardSources/index.tsx"
 import * as cardExport from "./cardExport/index.tsx"
+import * as cardImport from "./cardImport/index.tsx"
 import * as accounts from "./accounts.tsx"
 import * as bin from "./bin/index.ts"
 import * as characters from "./characters/index.ts"
@@ -30,6 +31,7 @@ export const registerFeatures = () => {
   cardRename.register()
   cardSources.register()
   cardExport.register()
+  cardImport.register()
   shell.register()
   settings.register()
   login.register()
