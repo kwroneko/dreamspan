@@ -17,10 +17,7 @@ export function SkeletonMessages({ onRetry }: { onRetry: () => void }) {
     return () => clearTimeout(timer)
   }, [attempt])
   return (
-    <div
-      data-testid="messages-loading"
-      className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden px-4 py-4"
-    >
+    <div data-testid="messages-loading" className="chat-column flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4">
       <p role="status" className="sr-only">
         Loading the chat…
       </p>

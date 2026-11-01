@@ -19,6 +19,7 @@ import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
 
+import { ChatWidthSetting } from "./ChatWidth.tsx"
 import { MessageColorSettings } from "./MessageColors.tsx"
 
 const NO_SCRIPTS: ReadonlyArray<RegexScript> = []
@@ -153,6 +154,7 @@ export function DisplaySettings() {
   const viewer = useViewPrefs()
   return (
     <div className="flex flex-col gap-6">
+      <ChatWidthSetting />
       <Fieldset
         legend="Enter sends"
         description="Your account preference for both chat and new-chat composers. Ctrl/Cmd+Enter always submits; Shift+Enter adds a line."

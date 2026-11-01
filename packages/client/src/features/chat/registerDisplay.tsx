@@ -3,6 +3,7 @@ import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
 import { registerMessageCopy } from "../../ui/messageCopy.tsx"
 import { appTools } from "../shell.tsx"
+import { ChatWidthPreference } from "./ChatWidth.tsx"
 import { MessageColorPreferences } from "./MessageColors.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
 import { displayTransforms, macroDisplay } from "./displayPipeline.ts"
@@ -23,6 +24,7 @@ export const registerDisplay = () => [
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
+  appTools.register({ id: "display.chat-width", order: 0, component: ChatWidthPreference }),
   displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),

@@ -1,6 +1,7 @@
 // A model's context size is never a silent guess (owner report 2026-10-31): the model list says
 // where each window comes from and marks an assumed one; a budget refusal sits in the composer's
 // column, names its numbers' sources and opens the model's settings at the field. Synthetic data.
+import { CHAT_WIDTH } from "@rp/shared/chatApi.ts"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { mkdirSync } from "node:fs"
@@ -135,7 +136,7 @@ test("a budget refusal sits in the composer's column, names its sources and open
   await expect(refusal).toContainText("the reply reserves 1,500 (default)")
   // It is the one explanation: the history note doesn't repeat it above.
   await expect(page.getByRole("status").filter({ hasText: "aren’t sent to the model" })).toHaveCount(0)
-  const composer = page.locator("div.max-w-3xl", { has: page.getByTestId("composer") }).last()
+  const composer = page.locator("div.chat-column", { has: page.getByTestId("composer") }).last()
   await themes(page, async (width, theme) => {
     // After a reload the refusal waits for the next-context estimate, slow on a loaded host.
     await expect(refusal).toBeVisible({ timeout: 30_000 })
@@ -144,7 +145,7 @@ test("a budget refusal sits in the composer's column, names its sources and open
     // The same column as the composer, never wider than it.
     expect(Math.abs(box.x - column.x)).toBeLessThanOrEqual(1)
     expect(Math.abs(box.width - column.width)).toBeLessThanOrEqual(1)
-    if (width === 1440) expect(box.width).toBeLessThanOrEqual(768)
+    if (width === 1440) expect(box.width).toBeLessThanOrEqual(CHAT_WIDTH.default)
     await shoot(page, `refusal-${width}-${theme}`)
   })
   // The action opens the model's settings at the window field; a larger window clears the refusal.

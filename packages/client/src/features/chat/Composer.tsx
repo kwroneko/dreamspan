@@ -36,10 +36,10 @@ import type { ChatSession, ChatView, Outcome } from "./session.ts"
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
 /**
- * The narrowest composer that holds the full bar (speaker and recent faces, the box with its
- * tools, Write for, Send). A desktop chat between both panels at their defaults is wider.
+ * The narrowest composer whose control row holds the speaker's name and Write's word beside
+ * the tools and Send. A desktop chat between both panels at their widest is narrower.
  */
-const FULL_BAR_WIDTH = 520
+const FULL_ROW_WIDTH = 480
 
 const subscribePhone = (notify: () => void) => {
   const media = matchMedia(`(max-width: ${COMPACT_WIDTH - 1}px)`)
@@ -57,12 +57,63 @@ export const useCompactComposer = () => {
   const ref = useCallback((node: HTMLElement | null) => {
     if (node === null) return
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setNarrow(entry.contentRect.width < FULL_BAR_WIDTH)
+      if (entry) setNarrow(entry.contentRect.width < FULL_ROW_WIDTH)
     })
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
   return { compact: phone || narrow, ref }
+}
+
+/**
+ * The composers' box (owner 2026-11-01: the input is the composer's main part): the text on a
+ * row of its own, the whole box's width, with everything about it inside the same border. On
+ * top, `header`, what says how the box stands (editing a reply's guidance, replayed or restored
+ * text), shown only while it has something; under the text what's attached; then one row of
+ * controls, `start` (who speaks, tools) at its left and `end` (guidance, write, send) at its
+ * right, wrapping rather than ever narrowing the text.
+ */
+export function ComposerBox({
+  guidance,
+  header,
+  attachments,
+  start,
+  end,
+  children
+}: {
+  guidance: boolean
+  header?: ReactNode
+  attachments?: ReactNode
+  start: ReactNode
+  end: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div
+      data-testid="composer-box"
+      data-guidance={guidance || undefined}
+      className={`flex min-w-0 flex-col rounded-lg border focus-within:ring-2 ${
+        guidance
+          ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
+          : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
+      }`}
+    >
+      {header !== undefined && (
+        <div
+          data-testid="composer-header"
+          className={`flex flex-col gap-1.5 border-b px-1 py-1 empty:hidden ${guidance ? "border-guidance/40" : "border-border"}`}
+        >
+          {header}
+        </div>
+      )}
+      <div className="grid min-w-0 px-1 pt-1">{children}</div>
+      {attachments && <div className="px-2 pt-1">{attachments}</div>}
+      <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1 p-1">
+        <div className="flex min-w-0 items-center gap-1">{start}</div>
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">{end}</div>
+      </div>
+    </div>
+  )
 }
 
 /** A send whose text was typed on a branch the chat view has left since. */
@@ -503,6 +554,7 @@ export function Composer({
     hasText,
     replier,
     generateText,
+    generateWord: editing !== null ? "New version" : "Write",
     generateHint,
     sendLabel,
     sendHint,
@@ -520,91 +572,82 @@ export function Composer({
   return (
     <div
       ref={composerRef}
-      className="@container mx-auto flex w-full max-w-3xl flex-col gap-1.5 border-t border-border pt-1.5 pb-2 max-sm:px-2"
+      className="@container chat-column flex flex-col gap-1.5 border-t border-border pt-2 pb-2 max-sm:px-2"
     >
-      <ComposerControls placement="banner" context={controls} />
+      {/* Sent while a reply is written, posting after it: between the messages and the box. */}
       <ComposerControls placement="queue" context={controls} />
-      {conflict && (
-        <ReplayNotice
-          conflict={conflict}
-          acknowledge={() => draft.acknowledgeConflict()}
-          switchText={() => draft.switchConflict()}
-        />
-      )}
-      {restored && !conflict && (
-        <p role="status" className="text-sm text-muted">
-          Text this browser kept when the page closed before the server had it is back in the box.
-        </p>
-      )}
-      {recovered && (
-        <p role="status" className="text-sm text-muted">
-          Some text from this composer is in the{" "}
-          <Link to="/bin" search={{ section: "recovered" }}>
-            bin, under recovered text
-          </Link>
-          : text typed in this browser while offline whose session ended elsewhere, or earlier text another tab's typing
-          went over.
-        </p>
-      )}
-      {/* The next reply: what it uses and who writes it, as chips; one row, scrolled sideways on a phone. */}
-      <StripRow scroll={phone}>
-        <ComposerControls placement="strip" context={controls} />
-      </StripRow>
-      {/* On a phone the box takes the 2 px: its text keeps 40% of the width beside four icon actions. */}
-      <div className="flex min-w-0 items-end gap-1.5 max-sm:gap-1">
-        {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
-        <div className="flex h-[46px] shrink-0 items-center gap-1">
-          <ComposerControls placement="speaker" context={controls} />
-        </div>
-        <div
-          data-guidance={guidance || undefined}
-          className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
-            guidance
-              ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
-              : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
-          }`}
-        >
-          <div className="grid min-w-0 flex-1">
-            <label htmlFor="composer" className="sr-only">
-              {guidance ? "Guidance" : "Message"}
-            </label>
-            <AutoGrowTextarea
-              id="composer"
-              data-testid="composer"
-              data-has-attachments={attachmentInput?.count ? true : undefined}
-              value={text}
-              readOnly={editing === null && !textReady}
-              aria-busy={editing === null && !textReady}
-              aria-describedby="composer-hint"
-              placeholder={
-                editing !== null
-                  ? "Guidance for this reply…"
-                  : !textReady
-                    ? "Loading…"
-                    : guidance
-                      ? "Direction for the next message…"
-                      : leafGenerating
-                        ? "Queue…"
-                        : "Message…"
-              }
-              onChange={(event) =>
-                editing === null ? draft.type(event.currentTarget.value) : editor.type(event.currentTarget.value)
-              }
-              onKeyDown={onKeyDown}
-            />
-          </div>
-          <div className="flex shrink-0 items-end gap-0.5">
+      <ComposerBox
+        guidance={guidance}
+        header={
+          <>
+            <ComposerControls placement="banner" context={controls} />
+            {conflict && (
+              <ReplayNotice
+                conflict={conflict}
+                acknowledge={() => draft.acknowledgeConflict()}
+                switchText={() => draft.switchConflict()}
+              />
+            )}
+            {restored && !conflict && (
+              <p role="status" className="text-sm text-muted">
+                Text this browser kept when the page closed before the server had it is back in the box.
+              </p>
+            )}
+            {recovered && (
+              <p role="status" className="text-sm text-muted">
+                Some text from this composer is in the{" "}
+                <Link to="/bin" search={{ section: "recovered" }}>
+                  bin, under recovered text
+                </Link>
+                : text typed in this browser while offline whose session ended elsewhere, or earlier text another tab's
+                typing went over.
+              </p>
+            )}
+          </>
+        }
+        attachments={attachmentInput?.editor}
+        start={
+          <>
+            {/* Who's speaking, and the speakers used last: one tap each (DESIGN §2.2). */}
+            <ComposerControls placement="speaker" context={controls} />
             <ComposerControls placement="tools" context={controls} />
             {attachmentInput?.action}
-            <ComposerControls placement="actions" context={controls} />
-          </div>
-        </div>
-      </div>
+          </>
+        }
+        end={<ComposerControls placement="actions" context={controls} />}
+      >
+        <label htmlFor="composer" className="sr-only">
+          {guidance ? "Guidance" : "Message"}
+        </label>
+        <AutoGrowTextarea
+          id="composer"
+          data-testid="composer"
+          data-has-attachments={attachmentInput?.count ? true : undefined}
+          value={text}
+          readOnly={editing === null && !textReady}
+          aria-busy={editing === null && !textReady}
+          aria-describedby="composer-hint"
+          placeholder={
+            editing !== null
+              ? "Guidance for this reply…"
+              : !textReady
+                ? "Loading…"
+                : guidance
+                  ? "Direction for the next message…"
+                  : leafGenerating
+                    ? "Queue…"
+                    : "Message…"
+          }
+          onChange={(event) =>
+            editing === null ? draft.type(event.currentTarget.value) : editor.type(event.currentTarget.value)
+          }
+          onKeyDown={onKeyDown}
+        />
+      </ComposerBox>
       {/* What the text is for, read with the box; its tooltip on the guidance switch shows it. */}
       <p id="composer-hint" className="sr-only">
         {controls.hint}
       </p>
-      {attachmentInput?.editor}
       {impersonationNotice && (
         <div
           role="status"
@@ -633,6 +676,11 @@ export function Composer({
           {shownError.message}
         </p>
       )}
+      {/* The next reply, which follows what's typed: what it uses and who writes it, as chips;
+          one row, scrolled sideways on a phone. */}
+      <StripRow scroll={phone}>
+        <ComposerControls placement="strip" context={controls} />
+      </StripRow>
     </div>
   )
 }

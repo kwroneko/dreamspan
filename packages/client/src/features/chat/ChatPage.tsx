@@ -363,7 +363,7 @@ function MessageList({
         data-testid="messages"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
-        <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
+        <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
           {showRail && (
             <SlotOutlet
               slot={timelineRails}
@@ -577,7 +577,7 @@ function ChatSurface({
                 // One line, not a block: it stays while the chat is read for hours.
                 <div
                   role="status"
-                  className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+                  className="chat-column flex items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
                 >
                   {/* A phone's line has room for the gist only; the button says the rest. */}
                   <span className="min-w-0 flex-1 truncate">
@@ -596,7 +596,7 @@ function ChatSurface({
                 </div>
               )}
             {(view.error ?? branchError) && (
-              <div className="mx-auto w-full max-w-3xl">
+              <div className="chat-column">
                 <Alert tone="danger">{view.error ?? branchError}</Alert>
               </div>
             )}

@@ -1,5 +1,5 @@
 // Small fixes (spec/PHASE1-DECISIONS.md §7), at the widths where layout is the point: the
-// composer's actions in its one bar, beside the text box, and the one-time impersonation notice
+// composer's actions on the control row under its full-width text, and the one-time impersonation notice
 // wrapping cleanly. Every card and preset here is made up.
 import { mkdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -61,7 +61,7 @@ const setUp = async (page: Page, label: string) => {
 
 for (const [width, height] of sizes)
   for (const theme of ["light", "dark"] as const) {
-    test(`the composer's actions sit beside the text box in one bar; the notice wraps (${width}px ${theme})`, async ({
+    test(`the composer's actions sit under its full-width text, in the window; the notice wraps (${width}px ${theme})`, async ({
       page
     }) => {
       await page.setViewportSize({ width, height })
@@ -77,14 +77,14 @@ for (const [width, height] of sizes)
       const area = await box.boundingBox()
       const generate = await write.boundingBox()
       const sendAt = await send.boundingBox()
-      // One bar at every width (fcomposer): the actions after the text, on its row, in the window.
+      // The text has a row of its own at every width (composer2, owner 2026-11-01): the actions
+      // are on the box's control row under it, at its right end, in the window.
+      const outline = (await page.getByTestId("composer-box").boundingBox())!
       for (const action of [generate!, sendAt!]) {
-        expect(action.x).toBeGreaterThanOrEqual(area!.x + area!.width - 1)
-        expect(action.x + action.width).toBeLessThanOrEqual(width)
-        expect(action.y).toBeLessThan(area!.y + area!.height)
+        expect(action.y).toBeGreaterThanOrEqual(area!.y + area!.height - 1)
+        expect(action.x + action.width).toBeLessThanOrEqual(Math.min(width, outline.x + outline.width))
       }
-      // On a phone the actions are icons, so the text box keeps a good part of the width.
-      if (width < 640) expect(area!.width).toBeGreaterThan(width * 0.4)
+      expect(area!.width).toBeGreaterThan(outline.width * 0.95)
       await page.screenshot({ path: join(shots, `composer-${width}-${theme}.png`) })
 
       // The one-time notice: the text keeps a readable line, the buttons wrap under it on a phone.
