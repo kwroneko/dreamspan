@@ -115,7 +115,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
               >
                 <span className="text-sm font-medium">{snippet.title || "Untitled snippet"}</span>
                 <span className="line-clamp-1 text-xs text-muted">
-                  {snippet.global ? "Global" : "This chat and future forks"} · {snippet.content || "Empty"}
+                  {snippet.global ? "Global" : "This chat and future branches"} · {snippet.content || "Empty"}
                 </span>
               </button>
             </li>

@@ -238,7 +238,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
                 void (async () => {
                   if (session.snapshot().forkId !== position.forkId) {
                     setPending(false)
-                    return setError("The viewed fork changed. Close this dialog and choose again.")
+                    return setError("The branch shown changed. Close this dialog and choose again.")
                   }
                   const outcome = await session.changeCast({
                     _tag: "Swap",
