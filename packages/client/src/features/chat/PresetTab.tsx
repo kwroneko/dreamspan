@@ -21,7 +21,7 @@ import { PromptDocument } from "../editor/PromptDocument.tsx"
 import { RefName } from "../editor/RefDialogs.tsx"
 import { SaveRevert } from "../editor/SaveRevert.tsx"
 import { type EditorStore, useEditorState, useLeaveGuard, useWorkingDoc } from "../editor/store.ts"
-import type { ChatView } from "./session.ts"
+import type { ChatSession, ChatView } from "./session.ts"
 
 /**
  * Says what's unsaved, with Revert and Save, stuck to the bottom of the panel while it scrolls;
@@ -102,16 +102,42 @@ function PresetColumn({ store }: { store: EditorStore }) {
   )
 }
 
-export function PresetTab({ view }: { view: ChatView }) {
+/**
+ * The account's selected preset, the next reply's when the chat has no context estimate yet: a
+ * chat without messages has none, so the tab would otherwise wait for a first message.
+ */
+function useSelectedPreset(session: ChatSession) {
+  const call = useCaller()
+  const [selected, setSelected] = useState<{ readonly ref: RefId | null } | null>(null)
+  useEffect(() => {
+    let live = true
+    const refresh = () =>
+      void call((client) => client("GetGenerationDefaults", undefined)).then((result) => {
+        if (live && result.ok) setSelected({ ref: result.value.preset })
+      })
+    const unsubscribe = session.subscribeContext(refresh)
+    refresh()
+    return () => {
+      live = false
+      unsubscribe()
+    }
+  }, [session, call])
+  return selected
+}
+
+export function PresetTab({ session, view }: { session: ChatSession; view: ChatView }) {
   const workspace = usePresetWorkspace()
-  const preset = view.history?.preset
-  return preset?.ref && workspace ? (
-    <PresetColumn key={preset.ref} store={workspace.store(preset.ref as RefId)} />
+  const selected = useSelectedPreset(session)
+  // The estimate names the preset the next reply is assembled with (a chat's own copy, say);
+  // until there is one, the account's selection.
+  const estimated = view.history?.preset
+  const ref = estimated ? estimated.ref : selected?.ref
+  const builtin = estimated ? estimated.scope === "builtin" : selected !== null && selected.ref === null
+  return ref && workspace ? (
+    <PresetColumn key={ref} store={workspace.store(ref as RefId)} />
   ) : (
     <p className="text-sm text-muted">
-      {preset?.scope === "builtin"
-        ? "SillyTavern's built-in default. Import a preset to edit its prompts."
-        : "Loading the current preset…"}
+      {builtin ? "SillyTavern's built-in default. Import a preset to edit its prompts." : "Loading the current preset…"}
     </p>
   )
 }

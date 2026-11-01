@@ -36,7 +36,10 @@ export const registerPanels = () => [
     order: 30,
     icon: "preset",
     component: lazyPanel(
-      () => import("./PresetTab.tsx").then((m) => ({ default: ({ view }: PanelProps) => <m.PresetTab view={view} /> })),
+      () =>
+        import("./PresetTab.tsx").then((m) => ({
+          default: ({ session, view }: PanelProps) => <m.PresetTab session={session} view={view} />
+        })),
       "preset"
     )
   }),
