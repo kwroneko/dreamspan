@@ -234,6 +234,35 @@ it.live(
 )
 
 it.live(
+  "a reply that ends before its first live rewrite comes back streams its text as saved",
+  () =>
+    run(
+      Effect.gen(function* () {
+        // A live rewrite slower than the whole reply (a short one, a busy host): nothing has
+        // shown when it ends, and the stream still ends on the stored text, scripts applied.
+        const { liveRewrites } = yield* ExecutionRegistry
+        yield* liveRewrites.disable("live.regex")
+        yield* liveRewrites.register({
+          id: "test.late",
+          rewrite: () => Effect.as(Effect.sleep("2 seconds"), null)
+        })
+        const model = yield* slowModel(`<cot>secret chain of thought</cot>${BODY}`, 40, 1)
+        const api = yield* client()
+        const generated = yield* generateReply(api, {
+          connection: { kind: "openai-chat", baseUrl: model.url + "/v1" },
+          model: {},
+          preset: { extensions: { regex_scripts: regexToSt([stripCot]) } },
+          approveRegex: true
+        })
+        const body = frames(generated.events, generated.version.id, "Delta")
+        assert.equal(generated.version.content, BODY)
+        assert.deepStrictEqual(body, [BODY])
+      })
+    ),
+  60_000
+)
+
+it.live(
   "a live rewrite that fails or runs out of time holds what's shown and is tried again, never showing the text as it came",
   () =>
     run(

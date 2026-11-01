@@ -198,6 +198,14 @@ export class Generations extends Context.Service<
                 }
           entry.text = written.content
           if (written.reasoning !== undefined) entry.reasoning = written.reasoning
+          // A reply that ended before its first live rewrite came back (a short one, a busy
+          // host) has shown nothing yet: its stream ends on the texts as saved, which went
+          // through the scripts.
+          if (entry.mode === "pending" && (status === "complete" || status === "stopped")) {
+            send(entry, "text", entry.text)
+            send(entry, "reasoning", entry.reasoning)
+            send(entry, "sections", sectionsDisplay(written.sections))
+          }
           // The final save posts what was queued behind this reply, in the same transaction.
           const saved = yield* Effect.exit(
             writer.FinishGeneration({
