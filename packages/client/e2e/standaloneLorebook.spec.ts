@@ -201,6 +201,8 @@ for (const width of [1440, 390]) {
     await toggle.click()
     await expect(toggle).toHaveAttribute("aria-expanded", "true")
     const finder = page.getByRole("region", { name: "Search and replace" })
+    // On a phone "Look in" folds behind Options with the other options.
+    if (width < 640) await finder.getByRole("button", { name: /^Options/ }).click()
     await expect(finder.getByRole("button", { name: "Everything", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true"

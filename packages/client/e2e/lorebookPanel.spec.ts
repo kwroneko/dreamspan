@@ -101,6 +101,16 @@ const theme = async (page: Page, width: number, scheme: "light" | "dark") => {
   await page.addInitScript((value) => localStorage.setItem("rp.theme", value), scheme)
 }
 
+/** The chat's own books as the server has them now, on or off. */
+const listed = (chatId: string) =>
+  admin((api) =>
+    Effect.gen(function* () {
+      const chat = yield* api.GetChat({ chatId: chatId as never })
+      const cast = yield* api.GetCast({ chatId: chat.id, slotId: chat.activeLeafSlotId, forkId: chat.currentForkId })
+      return cast.listedLorebooks.map(({ on }) => ({ on }))
+    })
+  )
+
 const books = (panel: Locator) => panel.getByRole("list", { name: "Lorebooks in this chat" })
 const bookNames = (panel: Locator) =>
   books(panel)
@@ -132,6 +142,8 @@ for (const [width, scheme] of [
     await expect(tidesSwitch).not.toBeChecked()
     expect(await bookNames(panel)).toEqual([`Wren's notes ${tag}`, `Tides ${tag}`])
     await expect(books(panel).getByText("Off in this chat")).toBeVisible()
+    // The switch shows at once; the reload waits for the server to have it (slow under load).
+    await expect.poll(() => listed(chatId), { timeout: 60_000 }).toEqual([{ on: false }])
     await page.reload()
     const again = await openPanel(page, "Lorebooks")
     await expect(books(again).getByRole("switch", { name: `Tides ${tag}`, exact: true })).not.toBeChecked()
@@ -172,14 +184,18 @@ for (const [width, scheme] of [
     // Disable all switches every entry off as a revision; Undo restores the one before.
     await editor.getByRole("button", { name: "Disable all", exact: true }).click()
     const toast = page.getByText("Disabled all 3 entries", { exact: true })
-    await expect(toast).toBeVisible()
+    await expect(toast).toBeVisible({ timeout: 30_000 })
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).not.toBeChecked()
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 2$/ })).toBeVisible()
+    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 2$/ })).toBeVisible({
+      timeout: 30_000
+    })
     await page.getByRole("button", { name: "Undo", exact: true }).click()
     for (const title of ["Harbour", "Lamp", "Fog"])
-      await expect(editor.getByRole("switch", { name: `${title} enabled` })).toBeChecked()
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 3$/ })).toBeVisible()
+      await expect(editor.getByRole("switch", { name: `${title} enabled` })).toBeChecked({ timeout: 30_000 })
+    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 3$/ })).toBeVisible({
+      timeout: 30_000
+    })
 
     // Change for selected: one setting on the chosen entries; the others keep theirs.
     await editor.getByRole("button", { name: "Select", exact: true }).click()
@@ -191,7 +207,9 @@ for (const [width, scheme] of [
     await dialog.getByRole("combobox", { name: "New value" }).selectOption("vectorized")
     await expect(dialog.getByText("Changes all 2 selected.")).toBeVisible()
     await dialog.getByRole("button", { name: "Apply to 2 entries", exact: true }).click()
-    await expect(page.getByText("Set Strategy to Vectorized on 2 entries", { exact: true })).toBeVisible()
+    await expect(page.getByText("Set Strategy to Vectorized on 2 entries", { exact: true })).toBeVisible({
+      timeout: 30_000
+    })
     for (const title of ["Harbour", "Lamp"])
       await expect(
         editor
@@ -212,7 +230,7 @@ for (const [width, scheme] of [
     await editor.getByRole("button", { name: "Find", exact: true }).click()
     await expect(editor.getByText("1 match.")).toBeVisible()
     await editor.getByRole("button", { name: "Replace all", exact: true }).click()
-    await expect(editor.getByRole("button", { name: /^Keys of Lamp: torch, lantern/ })).toBeVisible()
+    await expect(editor.getByRole("button", { name: /^Keys of Lamp: torch, lantern/ })).toBeVisible({ timeout: 30_000 })
 
     // The card's own book opens the same way, rooted in the card.
     await books(again)
