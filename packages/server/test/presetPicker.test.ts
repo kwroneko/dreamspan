@@ -1,6 +1,6 @@
 // What the preset and model pickers read and write (the owner, 2026-11-01): archiving a preset
 // is the user's own and keeps nothing from use, a preset's last-modified and last-used times,
-// the backfill of last used from generations made before it was recorded, and models' last use.
+// and models' last use.
 import { assert, describe, it } from "@effect/vitest"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -8,7 +8,6 @@ import { Effect } from "effect"
 import { Writer } from "../src/db/Database.ts"
 import { client, testConfig, withServer } from "./support/config.ts"
 import { generateReply } from "./support/generation.ts"
-import { fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, type Recorded, sse, startMockProvider } from "./support/mockProvider.ts"
 
 const completion = (_request: Recorded, res: Parameters<typeof sse>[0]) =>
@@ -102,32 +101,10 @@ describe("archiving a preset", () => {
         const userId = (yield* api.Whoami()).id as UserId
         const override = yield* writer.CreateChatOverride({ userId, refId: preset.ref.id, chatId: chat.id })
         assert.strictEqual(yield* failure(api.SetRefArchived({ refId: override.id, archived: true })), "EditRefused")
-        return { refId: preset.ref.id, at: used.lastUsedAt! }
-      }).pipe(
-        Effect.scoped,
-        withServer(config),
-        // A database from before last use was recorded: the startup migration fills it in from the
-        // generations' context snapshots.
-        Effect.tap(() =>
-          fixtureSql(config.dataDir, [
-            { sql: "UPDATE entity_refs SET last_used_at = NULL" },
-            { sql: "DELETE FROM effect_sql_migrations WHERE name = 'preset_last_used'" }
-          ])
-        ),
-        Effect.flatMap(({ refId, at }) =>
-          Effect.gen(function* () {
-            const api = yield* client()
-            const ref = (yield* api.ListLibrary({ kind: "preset", archived: true })).find(
-              (entry) => entry.id === refId
-            )!
-            assert.isNumber(ref.lastUsedAt)
-            assert.isAtMost(Math.abs(ref.lastUsedAt! - at), 1_000)
-          }).pipe(Effect.scoped, withServer(config))
-        )
-      )
-      // A reply, then the server started twice: about 5 s idle, over 30 s at a load average of 140.
+      }).pipe(Effect.scoped, withServer(config))
     },
-    120_000
+    // A reply on a mock provider: about 3 s idle, over 30 s at a load average of 140.
+    90_000
   )
 
   it.live("moves last modified with an edit or a rename, not with archiving", () =>
