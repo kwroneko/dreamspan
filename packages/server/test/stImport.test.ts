@@ -98,6 +98,14 @@ const noteDocs = (chatId: ChatId) => {
   }))
 }
 
+/** A revision's document. */
+const revisionDoc = (id: string) => {
+  const conn = db()
+  const row = conn.prepare(`SELECT doc_json FROM entity_revisions WHERE id = ?`).get(id)
+  conn.close()
+  return JSON.parse(row!.doc_json as string) as Record<string, unknown>
+}
+
 const entityByLabel = (label: string, tag?: string) => {
   const conn = db()
   const row = conn
@@ -196,13 +204,14 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const notes = noteDocs(alice)
       const mainNote = notes.find((n) => n.doc.content === "Keep it gentle.")!
       assert.deepStrictEqual(main.activeNotes, [mainNote.id])
-      assert.strictEqual(main.authorNote, mainNote.id)
       assert.deepStrictEqual(mainNote.doc.placement, { mode: "depth", depth: 2, role: "system" })
-      assert.strictEqual(mainNote.doc.kind, "author_note")
-      // The branch's own note replaces it from the branch's first new message on.
+      // An ordinary note: nothing marks it the author's note (owner, 2026-11-01).
+      assert.isUndefined(mainNote.doc.kind)
+      // The branch's own text is that note's, from the branch's first new message on, in its fork.
+      assert.lengthOf(notes, 1)
       const branch = yield* stateAt(alice, graph.find((s) => s.content === "As you wish.")!.id)
-      const branchNote = notes.find((n) => n.doc.content === "Keep it tense.")!
-      assert.deepStrictEqual(branch.activeNotes, [branchNote.id])
+      assert.deepStrictEqual(branch.activeNotes, [mainNote.id])
+      assert.strictEqual(revisionDoc(branch.noteRevisions[mainNote.id]!).content, "Keep it tense.")
 
       // Bob's chat: fifteen messages hidden from the start, covered by its latest summary.
       const bob = chatBySource("chats/Bob/Bob - long.jsonl")
@@ -212,19 +221,17 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.deepStrictEqual([offer.hidden, offer.throughSlotId, offer.summaryCovers], [15, bobSlots[14]!.id, true])
       const bobNotes = noteDocs(bob)
       const summary = bobNotes.find((note) => note.doc.kind === "imported_summary")
-      const emptyAuthor = bobNotes.find((note) => note.doc.kind === "author_note")!
+      const emptyAuthor = bobNotes.find((note) => note.doc.title === "Author's Note")!
       assert.deepStrictEqual(emptyAuthor.doc, {
         schema_version: 1,
         title: "Author's Note",
         content: "",
         placement: { mode: "depth", depth: 4, role: "system" },
         owner: { chat: bob },
-        exportable: true,
-        kind: "author_note"
+        exportable: true
       })
-      // Empty, it's kept for what rides on it, but off: ST sent nothing of it (DESIGN §4.1).
+      // Empty, it's kept with its settings, but off: ST sent nothing of it (DESIGN §4.1).
       const bobState = yield* stateAt(bob, null)
-      assert.strictEqual(bobState.authorNote, emptyAuthor.id)
       assert.notInclude(bobState.activeNotes, emptyAuthor.id)
       assert.strictEqual(summary!.revisions, 2)
       assert.deepStrictEqual(summary!.doc, {
@@ -285,7 +292,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       assert.strictEqual(report.summaries, 2)
 
       // Mira's card file was renamed: linked by her name. Her summary covers no hidden run,
-      // and her author's note (a summary she kept there) stays an author's note.
+      // and her author's note (a summary she kept there) is a note of the chat's like any.
       const mira = chatBySource("chats/Mira/Mira - map.jsonl")
       assert.strictEqual(slots(mira)[0]!.speaker, entityByLabel("Mira"))
       const miraNotes = noteDocs(mira)
@@ -293,7 +300,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
         miraNotes.map((n) => [n.doc.kind, n.doc.content, n.doc.placement, n.doc.covers]),
         [
           [
-            "author_note",
+            undefined,
             "Summary: Mira lost her map.",
             { mode: "section", section: "after_main_prompt", role: "system" },
             undefined

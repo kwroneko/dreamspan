@@ -13,8 +13,8 @@ import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { importCard } from "../formats/cardImport.ts"
 import { isStPresetFile } from "../formats/preset.ts"
-import { attempt, type FormatError } from "../formats/safety.ts"
-import { importLorebook } from "../formats/worldInfo.ts"
+import { attempt, defaultLimits, type FormatError } from "../formats/safety.ts"
+import { AuthorNoteLorePlace, importLorebook } from "../formats/worldInfo.ts"
 import { OUR_EXTENSION } from "../formats/lorebook.ts"
 import { docHash, searchText } from "../db/documents.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
@@ -220,17 +220,20 @@ const lorebookImporter: Importer = {
   id: "st-world-info",
   detect: (file) => file.keys.has("entries"),
   parse: (bytes, fileName) =>
-    Effect.map(importLorebook(bytes, baseName(fileName)), ({ lorebook, report }) => ({
-      report,
-      library: {
-        kind: "lorebook",
-        label: labelFrom(lorebook.name, baseName(fileName)),
-        doc: lorebook,
-        schemaVersion: lorebook.schema_version,
-        note: null
-      },
-      files: []
-    }))
+    Effect.map(
+      Effect.flatMap(AuthorNoteLorePlace, (place) => importLorebook(bytes, baseName(fileName), defaultLimits, place)),
+      ({ lorebook, report }) => ({
+        report,
+        library: {
+          kind: "lorebook",
+          label: labelFrom(lorebook.name, baseName(fileName)),
+          doc: lorebook,
+          schemaVersion: lorebook.schema_version,
+          note: null
+        },
+        files: []
+      })
+    )
 }
 
 const presetImporter: Importer = {

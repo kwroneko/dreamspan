@@ -375,6 +375,7 @@ export class ImportLeaseLost extends Schema.TaggedError<ImportLeaseLost>()("Impo
 
 /** A chat-owned note an ST chat brings, which the writer stores as a note entity. */
 export const StImportNote = Schema.Struct({
+  /** Which of the chat file's notes it is, by which a re-import finds it; only a summary's doc keeps it. */
   kind: Schema.Literals(["author_note", "imported_summary"]),
   title: Schema.String,
   /** Its texts, oldest first, as the note's revisions; the last is current. */
@@ -1726,8 +1727,11 @@ export class WriteOps extends RpcGroup.make(
       cardEntityId: EntityId,
       prompt: Schema.String,
       useChara: Schema.Boolean,
-      /** ST's `chara_note_position`: 0 replace, 1 before the chat's note, 2 after. */
-      position: Schema.Number,
+      /**
+       * Where it goes: ST put it before, after or in place of the chat's author's note, which
+       * the import turns into the concrete place of the folder's default author's note.
+       */
+      placement: NoteDoc.fields.placement,
       scanLore: Schema.Boolean,
       sourcePath: Schema.String
     },

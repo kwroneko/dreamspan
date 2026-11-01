@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 42
+export const ASSEMBLER_VERSION = 43
 
 export type Role = "system" | "user" | "assistant"
 

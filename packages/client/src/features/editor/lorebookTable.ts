@@ -169,20 +169,6 @@ export const POSITIONS: ReadonlyArray<{
     description: "At the preset's World Info (after) marker, after the character's definitions."
   },
   {
-    value: "an_top",
-    position: "an_top",
-    short: "↑AN",
-    label: "↑AN · Before the author's note",
-    description: "Joins the chat's author's note, above its text. Not sent while that note is off."
-  },
-  {
-    value: "an_bottom",
-    position: "an_bottom",
-    short: "↓AN",
-    label: "↓AN · After the author's note",
-    description: "Joins the chat's author's note, below its text. Not sent while that note is off."
-  },
-  {
     value: "em_top",
     position: "em_top",
     short: "↑EM",

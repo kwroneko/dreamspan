@@ -103,16 +103,6 @@ const PLACES = [
     description: "An older place: right before the preset's main prompt."
   },
   {
-    value: "section:author_note_top",
-    label: "Before the author's note",
-    description: "Imported from ST: joins the chat's author's note, just above its text."
-  },
-  {
-    value: "section:author_note_bottom",
-    label: "After the author's note",
-    description: "Imported from ST: joins the chat's author's note, just below its text."
-  },
-  {
     value: "none",
     label: "Not placed",
     description: "Never sent by itself: only a macro that reads it sends its text."
@@ -152,9 +142,7 @@ const shortPlace = (placement: Placement | undefined): string => {
         tail_start: "Start of tail",
         tail_end: "End of tail",
         card: "Beside the card",
-        before_main_prompt: "Before the main prompt",
-        author_note_top: "Before the author's note",
-        author_note_bottom: "After the author's note"
+        before_main_prompt: "Before the main prompt"
       }[place.section]
   }
 }
@@ -183,10 +171,6 @@ const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>) => {
 
 /** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
 const CARD_DEFINITIONS = "At the top of this card's own part of the definitions, inside its wrapper."
-
-/** What a place at the author's note means, said where it's chosen: nothing about it is hidden. */
-const AUTHOR_NOTE_PLACE =
-  "It joins the chat's author's note (the note marked “author's note” in the chat's notes), at its depth and role. In a chat without one, it goes in the history at depth 4 as the system, where ST's default author's note goes."
 
 /** Where a note goes, saved whole as one value. Fields of the placement this editor doesn't show stay as they are. */
 function PlacementField({
@@ -253,10 +237,6 @@ function PlacementField({
           </Field>
         )}
       </div>
-      {placement.mode === "section" &&
-        (placement.section === "author_note_top" || placement.section === "author_note_bottom") && (
-          <p className="text-sm text-muted">{AUTHOR_NOTE_PLACE}</p>
-        )}
       <FieldTools store={store} field={valueField(path)} label={label} />
     </div>
   )
@@ -695,7 +675,6 @@ export function NoteRow({
   shared,
   detail,
   keepMounted = false,
-  authorNote = false,
   children
 }: {
   doc: Doc
@@ -714,8 +693,6 @@ export function NoteRow({
    * leaving and a copy kept in this browser comes back as the page opens.
    */
   keepMounted?: boolean
-  /** It's the chat's author's note, which notes and lore at its top or bottom join. */
-  authorNote?: boolean
   children: ReactNode
 }) {
   const { title, muted } = rowTitle(doc, label)
@@ -748,7 +725,6 @@ export function NoteRow({
             {!control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
             {shared?.binned && <Badge tone="warning">linked note is in the bin</Badge>}
             {doc["exportable"] === false && "card" in Object(doc["owner"]) && <Badge>Private</Badge>}
-            {authorNote && <Badge>author's note</Badge>}
             {kind === "imported_summary" && <Badge>summary</Badge>}
           </span>
         </button>

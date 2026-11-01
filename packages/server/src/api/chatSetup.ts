@@ -9,7 +9,6 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
-import { isAuthorNote, type NoteDoc } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { type ChatState, foldState, noteSwitches, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Option } from "effect"
@@ -58,8 +57,6 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "lorebook.global", value: { ref: change.ref, on: change.on } }
     case "LoreBelowHistory":
       return { key: "lorebook.below_history", value: { on: change.on } }
-    case "AuthorNote":
-      return { key: "author_note.set", value: { note: change.entityId } }
   }
 }
 
@@ -438,9 +435,6 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
               ...entry,
               ...resolved,
               onByDefault,
-              authorNote:
-                entry.card === null &&
-                isAuthorNote(resolved.doc as Pick<NoteDoc, "kind">, entry.ref.entityId, state.authorNote),
               active: switches.get(entry.ref.entityId) ?? onByDefault
             })
           })

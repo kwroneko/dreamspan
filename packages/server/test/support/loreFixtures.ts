@@ -64,6 +64,9 @@ export const loreBook = (
 })
 
 /** Every kept ST position, plus primary, secondary, constant and depth activation. */
+/** The gate lorebook's entries ST has before (2) and after (3) its author's note, by uid. */
+export const GATE_AUTHOR_NOTE_ENTRIES: Readonly<Record<number, 2 | 3>> = { 5: 2, 6: 3 }
+
 export const gateLore = loreBook(
   [
     loreEntry({ keys: ["crossing"], content: "A copper bell marks the crossing.", order: 200 }),
@@ -89,8 +92,16 @@ export const gateLore = loreBook(
       { constant: true, content: "A watchman keeps the upper bank.", position: "at_depth", depth: 1, role: "system" },
       4
     ),
-    loreEntry({ constant: true, content: "The lower bank is dark.", position: "an_top" }, 5),
-    loreEntry({ constant: true, content: "The upper bank has lanterns.", position: "an_bottom" }, 6),
+    // ST's file has these two at its author's note (`GATE_AUTHOR_NOTE_ENTRIES`), where our
+    // import places them at a depth.
+    loreEntry(
+      { constant: true, content: "The lower bank is dark.", position: "at_depth", depth: 4, role: "system" },
+      5
+    ),
+    loreEntry(
+      { constant: true, content: "The upper bank has lanterns.", position: "at_depth", depth: 4, role: "system" },
+      6
+    ),
     loreEntry(
       {
         constant: true,

@@ -799,11 +799,6 @@ export function PromptDocument({
                 <>
                   {divider("History starts")}
                   {slot("At depth N", (p) => p.mode === "depth")}
-                  {slot("Top of the author's note", (p) => p.mode === "section" && p.section === "author_note_top")}
-                  {slot(
-                    "Bottom of the author's note",
-                    (p) => p.mode === "section" && p.section === "author_note_bottom"
-                  )}
                 </>
               )}
               {history >= 0 && index === afterHistory && tailStarts}

@@ -28,9 +28,9 @@ export const Placement = Schema.Union([
   }),
   Schema.Struct({ mode: Schema.Literal("tail"), role: LoreRole }),
   /**
-   * [P] `card`: with the card's definition, at the top. The others are the fixed places ST
-   * puts an extension prompt or a persona description: before or after the main prompt
-   * (story string), or at the top or bottom of the author's note.
+   * [P] `card`: with the card's definition, at the top. Before or after the main prompt (story
+   * string) are the fixed places ST puts an extension prompt. Nothing is placed relative to
+   * another note (owner, 2026-11-01: no author's note).
    */
   Schema.Struct({
     mode: Schema.Literal("section"),
@@ -40,9 +40,7 @@ export const Placement = Schema.Union([
       "tail_end",
       "card",
       "before_main_prompt",
-      "after_main_prompt",
-      "author_note_top",
-      "author_note_bottom"
+      "after_main_prompt"
     ]),
     role: Schema.optionalKey(LoreRole)
   }),
@@ -126,15 +124,14 @@ export const NoteDoc = Schema.Struct({
    */
   agent_editable: Schema.optionalKey(Schema.Boolean),
   /**
-   * [P] What an imported note was in ST: a chat's author's note, or the Summarize
-   * extension's summary (DESIGN §8.1), kept in its own note; or a card's Character Author's
-   * Note from ST's settings (`extension_settings.note.chara`), which a re-import finds by it.
-   * `persona_description` is still decoded in old revisions, never written and ignored:
-   * migration 0050 made those notes ordinary (DESIGN §4.1: no hidden note kinds).
+   * [P] What an imported note was in ST: the Summarize extension's summary (DESIGN §8.1), kept
+   * in its own note; or a card's Character Author's Note from ST's settings
+   * (`extension_settings.note.chara`), which a re-import finds by it. A chat's imported author's
+   * note is an ordinary note with no kind (owner, 2026-11-01). `persona_description` is still
+   * decoded in old revisions, never written and ignored: migration 0050 made those notes
+   * ordinary (DESIGN §4.1: no hidden note kinds).
    */
-  kind: Schema.optionalKey(
-    Schema.Literals(["author_note", "imported_summary", "persona_description", "character_author_note"])
-  ),
+  kind: Schema.optionalKey(Schema.Literals(["imported_summary", "persona_description", "character_author_note"])),
   /**
    * Deprecated: ST's author's note frequency, which older imports kept. Still read, never
    * written; the assembler ignores it (a note goes every turn, DESIGN §4.1).
@@ -154,15 +151,6 @@ export const NoteDoc = Schema.Struct({
   source_slot_id: Schema.optionalKey(SlotId)
 })
 export type NoteDoc = typeof NoteDoc.Type
-
-/**
- * Whether a chat's note is its author's note, which what is placed at the author's note's top
- * or bottom joins (ST's floating prompt): the note the chat names with `author_note.set` (the
- * user's choice in its Notes tab, or an import's), none after it chose none (`false`), else an
- * imported one of kind `author_note`. The chat's notes show it ("author's note").
- */
-export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAuthorNote: string | false | null) =>
-  chatAuthorNote === null ? doc.kind === "author_note" : entity === chatAuthorNote
 
 /** A note's condition, absent read as always. */
 export const noteCondition = (doc: Pick<NoteDoc, "condition">): NoteCondition => doc.condition ?? { when: "always" }

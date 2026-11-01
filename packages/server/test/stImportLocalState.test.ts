@@ -184,7 +184,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
     it.effect("editing a shared-tip note addresses the viewed fork while its parent is current", () =>
       Effect.gen(function* () {
         const { api, branch, parent, notes, read } = yield* setup("shared-tip-editor")
-        const note = (yield* notes()).find((n) => n.doc.kind === "author_note")!
+        const note = (yield* notes()).find((n) => n.doc.title === "Author's Note")!
         const chatNote = { chatId: branch.chatId, forkId: branch.forkId, slotId: branch.end }
         const opened = yield* api.OpenEditor({ refId: note.ref.id, chatNote })
         const field = textField(["content"])
@@ -224,8 +224,8 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
     for (const change of ["off", "edit", "delete", "other fork"] as const)
       it.effect(`preserves a locally ${change} imported note when ST changes its text`, () =>
         Effect.gen(function* () {
-          const { api, branch, parent, notes, read, reimport } = yield* setup(`note-${change}`)
-          const note = (yield* notes()).find((n) => n.doc.kind === "author_note")!
+          const { api, branch, parent, notes, reimport } = yield* setup(`note-${change}`)
+          const note = (yield* notes()).find((n) => n.doc.title === "Author's Note")!
           if (change === "off" || change === "other fork")
             yield* api.ChangeCast({
               chatId: branch.chatId,
@@ -262,7 +262,6 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
             return
           }
           assert.isFalse(after.some((n) => n.active && n.doc.content === "Changed in ST"))
-          if (change !== "delete") assert.strictEqual((yield* read()).authorNote, note.ref.entityId)
           if (change !== "delete") {
             const retained = after.find((n) => n.ref.entityId === note.ref.entityId)!
             assert.strictEqual(retained.active, change === "edit")

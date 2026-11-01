@@ -5,6 +5,8 @@ import { ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
 import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import { LoreRole } from "@rp/shared/docs/lorebook.ts"
+import { Placement } from "@rp/shared/docs/note.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
@@ -235,13 +237,22 @@ export class FormatOps extends RpcGroup.make(
       fileName: Schema.String,
       expect: EntityKind,
       parser,
-      textSwitches: Schema.optionalKey(StTextSwitches)
+      textSwitches: Schema.optionalKey(StTextSwitches),
+      /** Where a World Info entry ST placed before or after its author's note goes (`authorNotePlace`). */
+      authorNoteLore: Schema.optionalKey(Schema.Struct({ depth: Schema.Int, role: LoreRole }))
     },
     success: StLibraryFile
   }),
   /** A persona as a card with its avatar; null for an avatar ST lists under no name. */
   Rpc.make("BuildStPersona", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, persona: Schema.NullOr(StPersona), parser },
+    payload: {
+      bytes: Transferable.Uint8Array,
+      fileName: Schema.String,
+      persona: Schema.NullOr(StPersona),
+      parser,
+      /** Where a persona ST placed at its author's note's top or bottom goes (`authorNotePlace`). */
+      authorNote: Schema.optionalKey(Placement)
+    },
     success: ParsedFile
   })
 ) {}

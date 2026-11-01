@@ -7,9 +7,10 @@ import { readFileSync } from "node:fs"
 import { exportCardPng } from "../../src/formats/cardExport.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { exportStPreset, importStPreset } from "../../src/formats/preset.ts"
+import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { exportLorebook, importLorebook } from "../../src/formats/worldInfo.ts"
 import type { CardFields } from "@rp/shared/macros/context.ts"
-import { gateLore } from "../support/loreFixtures.ts"
+import { GATE_AUTHOR_NOTE_ENTRIES, gateLore } from "../support/loreFixtures.ts"
 import { json, png, run } from "../formats/support.ts"
 
 interface ChatLine {
@@ -217,6 +218,20 @@ const presetRoundTrips = () =>
     }
   })
 
+/**
+ * The gate book as ST's World Info file, with the entries `GATE_AUTHOR_NOTE_ENTRIES` names at
+ * ST's author's note (positions 2 and 3): the harness has no such position (owner, 2026-11-01),
+ * but the gate compares what ST does with them to what our import makes of them.
+ */
+const stWorldFile = (book: LorebookDoc) => {
+  const file = JSON.parse(new TextDecoder().decode(exportLorebook(book))) as {
+    entries: Record<string, Record<string, unknown>>
+  }
+  for (const [uid, position] of Object.entries(GATE_AUTHOR_NOTE_ENTRIES))
+    file.entries[uid] = { ...file.entries[uid], position }
+  return new TextEncoder().encode(JSON.stringify(file, null, 4))
+}
+
 export const fixtureSet = (): FixtureSet => {
   const roundTrips = presetRoundTrips()
   return {
@@ -225,7 +240,7 @@ export const fixtureSet = (): FixtureSet => {
     gateCards: GATE_CARDS.map((card) => card.name),
     lorebooks: [
       { name: LORE, file: lorebook() },
-      { name: gateLore.id, file: exportLorebook(gateLore.document) }
+      { name: gateLore.id, file: stWorldFile(gateLore.document) }
     ],
     presets: roundTrips.flatMap((preset) => [
       { name: preset.name, data: preset.original },

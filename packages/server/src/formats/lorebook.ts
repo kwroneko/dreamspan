@@ -18,7 +18,11 @@ import { fail, type Limits, type Path } from "./safety.ts"
 /** Our namespace in `extensions`, for what a standard card or lorebook has no field for. */
 export const OUR_EXTENSION = "rp_harness"
 
-export const POSITIONS: ReadonlyArray<LorePosition> = [
+/** A position in ST's files: ours, or before or after ST's author's note, which an import places. */
+type StPosition = LorePosition | "an_top" | "an_bottom"
+
+/** ST's `world_info_position` by its index in ST's files; 2 and 3 are before and after its author's note. */
+export const POSITIONS: ReadonlyArray<StPosition> = [
   "before_char",
   "after_char",
   "an_top",
@@ -126,6 +130,12 @@ export interface Candidate {
   readonly entry: Omit<LorebookEntry, "uid">
 }
 
+/** A candidate as read from ST's file, its position possibly at ST's author's note. */
+export interface StCandidate {
+  readonly id: number | undefined
+  readonly entry: Omit<LorebookEntry, "uid" | "position"> & { readonly position: StPosition }
+}
+
 /**
  * Settles uids, which the merge matches entries by: unique safe integers. Usable ids are kept,
  * the first one wins, and every other entry gets a number no entry has, after the largest.
@@ -162,7 +172,7 @@ export const checkEntryCount = (count: number, limits: Limits) => {
   }
 }
 
-const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBuilder): Candidate | undefined => {
+const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBuilder): StCandidate | undefined => {
   const entryPath = [...path, "entries", index]
   if (!Predicate.isObject(source)) {
     issues.add("warning", "lorebook.invalid_entry", `Entry ${index} isn't an object; it was dropped.`, entryPath)
@@ -253,6 +263,44 @@ const cardEntry = (source: unknown, index: number, path: Path, issues: ReportBui
 export const isRecursionDelay = (value: unknown): value is boolean | number =>
   Predicate.isBoolean(value) || isSafeInt(value)
 
+/** Where an entry ST placed before or after its author's note goes: a depth and a role. */
+export interface AuthorNoteLore {
+  readonly depth: number
+  readonly role: LoreRole
+}
+
+/** ST's default author's note place: in the chat at depth 4, as the system. */
+export const DEFAULT_AUTHOR_NOTE_LORE: AuthorNoteLore = { depth: 4, role: "system" }
+
+/**
+ * Entries ST placed before or after its author's note (positions 2 and 3), at a concrete place
+ * instead, kept (owner, 2026-11-01): `place`, the author's note's depth and role. A file's
+ * book has no chat, so an upload takes ST's default author's note place (depth 4, the system)
+ * and a folder import the folder's default author's note's. The report says so once.
+ */
+export const placeAuthorNoteEntries = (
+  candidates: ReadonlyArray<StCandidate>,
+  place: AuthorNoteLore,
+  path: Path,
+  issues: ReportBuilder
+): Array<Candidate> => {
+  let moved = 0
+  const placed = candidates.map(({ id, entry }): Candidate => {
+    const { position } = entry
+    if (position !== "an_top" && position !== "an_bottom") return { id, entry: { ...entry, position } }
+    moved++
+    return { id, entry: { ...entry, position: "at_depth", depth: place.depth, role: place.role } }
+  })
+  if (moved > 0)
+    issues.add(
+      "info",
+      "lorebook.author_note_entries",
+      `${moved === 1 ? "An entry" : `${moved} entries`} ST placed before or after the author's note ${moved === 1 ? "is" : "are"} at depth ${place.depth} as ${place.role} here, where ST's default author's note is.`,
+      path
+    )
+  return placed
+}
+
 /** A card's `character_book` as our lorebook document. */
 export const lorebookFromCharacterBook = (
   source: Record<string, unknown>,
@@ -272,7 +320,12 @@ export const lorebookFromCharacterBook = (
     recursive_scanning: book.nullableBoolean("recursive_scanning"),
     extensions: book.object("extensions"),
     entries: assignUids(
-      entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+      placeAuthorNoteEntries(
+        entries.flatMap((entry, index) => cardEntry(entry, index, path, issues) ?? []),
+        DEFAULT_AUTHOR_NOTE_LORE,
+        path,
+        issues
+      ),
       path,
       issues
     ),
