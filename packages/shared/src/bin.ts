@@ -21,6 +21,35 @@ export class BinForkShown extends Schema.Class<BinForkShown>("BinForkShown")({
   deleted: Schema.Boolean
 }) {}
 
+/**
+ * A branch that deleting a bin item for good affects (`BinItemBranches`), for the list the
+ * confirmation shows. `state`: `shown`, a live branch shows the text; `deletedHere`, a live
+ * branch deleted it in its own view, so it's in the bin for it; `branchInBin`, the branch itself
+ * is in the bin; `chatInBin`, the whole chat is. `shows`: it shows the text, a branch in the bin
+ * included: exactly the forks `BinItemForks` names, which the purge's confirmation compares.
+ * Named as the chat's branch list names it: `name`, else "Original" for the chat's first fork
+ * (`original`), else "Branch `number`", numbered by when it was made among the chat's live
+ * branches made from another. `position`: where the item's message is in that branch, from 0
+ * (null for a branch or chat item). `link`: the message to open the branch at, the item's own
+ * where it shows it, else the nearest message it shows above it (or below, with none above);
+ * null when the branch can't be opened (it or its chat is in the bin) or shows nothing near it.
+ */
+export class BinBranch extends Schema.Class<BinBranch>("BinBranch")({
+  itemId: Schema.String,
+  chatId: Schema.String,
+  chatTitle: Schema.String,
+  forkId: Schema.String,
+  name: Schema.NullOr(Schema.String),
+  original: Schema.Boolean,
+  number: Schema.NullOr(Schema.Int),
+  tipExcerpt: Schema.String,
+  current: Schema.Boolean,
+  state: Schema.Literals(["shown", "deletedHere", "branchInBin", "chatInBin"]),
+  shows: Schema.Boolean,
+  position: Schema.NullOr(Schema.Int),
+  link: Schema.NullOr(Schema.Struct({ slotId: Schema.String, position: Schema.Int }))
+}) {}
+
 const BinItemKind = Schema.Literals(["chat", "message", "branch", "version", "entity", "connection"])
 
 /** Something explicitly deleted: a chat, a message, a swipe, a branch, a library entity, a connection. */

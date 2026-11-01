@@ -14,7 +14,7 @@ import { FoldableEvent } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { toBinItem, toRecoveredText } from "./bin.ts"
-import { binItemForks } from "./binForks.ts"
+import { binItemBranches, binItemForks } from "./binForks.ts"
 import { reachableSlot } from "./graphReachability.ts"
 import { forkColumns, forkRecency, forkThrough, withDisplayEnd } from "./forks.ts"
 import {
@@ -520,6 +520,7 @@ export const makeReadHandlers = Effect.gen(function* () {
       ),
 
     BinItemForks: ({ userId, itemIds }) => binItemForks(sql, userId, itemIds).pipe(query("BinItemForks")),
+    BinItemBranches: ({ userId, itemIds }) => binItemBranches(sql, userId, itemIds).pipe(query("BinItemBranches")),
 
     ListRecoveredTexts: ({ userId, source, limit, before }) =>
       sql<Parameters<typeof toRecoveredText>[0]>`

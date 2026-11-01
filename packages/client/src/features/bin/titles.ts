@@ -37,6 +37,40 @@ export const binTitle = (item: BinItem) => {
   }
 }
 
+/**
+ * The question a "delete for good" confirmation asks: what goes, in plain words, without the
+ * chat (the dialog names it in its body), so no title nests inside another's quotes.
+ */
+export const purgeTitle = (item: BinItem) => {
+  const place = typeof item.origin.position === "number" ? item.origin.position : item.origin.depth
+  const number = typeof place === "number" ? place + 1 : null
+  const message = number === null ? "a message" : `message ${number}`
+  switch (item.kind) {
+    case "message":
+      return number === null ? "Delete this message for good?" : `Delete message ${number} for good?`
+    case "version": {
+      // Numbered among the message's versions, from 1.
+      const ordinal = typeof item.origin.ordinal === "number" ? item.origin.ordinal + 1 : null
+      return ordinal === null
+        ? `Delete a version of ${message} for good?`
+        : `Delete version ${ordinal} of ${message} for good?`
+    }
+    case "branch": {
+      const name = typeof item.origin.forkName === "string" && item.origin.forkName !== "" ? item.origin.forkName : null
+      if (name !== null) return `Delete the branch “${name}” for good?`
+      const count = item.origin.messages
+      return typeof count === "number" && count > 0
+        ? `Delete a branch of ${count} message${count === 1 ? "" : "s"} for good?`
+        : "Delete this branch for good?"
+    }
+    case "chat":
+      return `Delete the chat “${binTitle(item)}” for good?`
+    case "entity":
+    case "connection":
+      return item.title === "" ? "Delete this for good?" : `Delete “${item.title}” for good?`
+  }
+}
+
 /** Legacy recovered labels have a known prefix followed by ONE outer quoted title.
  * Use the source kind's format, so embedded quotes and unrelated library labels survive.
  */

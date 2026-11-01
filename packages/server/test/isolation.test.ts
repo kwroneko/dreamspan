@@ -2567,6 +2567,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* actor.api.BinItemForks({ itemIds: [owner.binItemId] }), [])
       })
   },
+  // Nor any branches.
+  BinItemBranches: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.BinItemBranches({ itemIds: [owner.binItemId] }), [])
+      })
+  },
   GetBinLimits: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

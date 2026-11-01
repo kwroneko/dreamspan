@@ -17,13 +17,26 @@ export const automaticBranchName = (entry: Pick<PathEntry, "position" | "depth">
  * "Branch k" by when it was made among `forks`.
  */
 export const branchLabel = (fork: Fork, forks: ReadonlyArray<Fork>) => {
-  if (fork.name !== null && fork.name !== "") return fork.name
-  if (fork.parentForkId === null) return "Original"
   // Numbered among the branches made from another, as ST numbers "Branch #1": the first is 1.
   const made = forks
     .filter((f) => f.parentForkId !== null)
     .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-  return `Branch ${made.findIndex((f) => f.id === fork.id) + 1}`
+  return branchName({
+    name: fork.name,
+    original: fork.parentForkId === null,
+    number: made.findIndex((f) => f.id === fork.id) + 1
+  })
+}
+
+/** `branchLabel` from its parts, for a branch read already numbered elsewhere (the bin's `BinBranch`). */
+export const branchName = (branch: {
+  readonly name: string | null
+  readonly original: boolean
+  readonly number: number | null
+}) => {
+  if (branch.name !== null && branch.name !== "") return branch.name
+  if (branch.original) return "Original"
+  return branch.number === null ? "Branch" : `Branch ${branch.number}`
 }
 
 /** When a branch was last chatted in, else made. */

@@ -2,7 +2,7 @@
 // deleted, to restore in place or delete for good, and the text recovered from drafts.
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
-import { BinLimits, BinLimitChange, BinChanged, BinForkShown, BinItem, RecoveredText } from "./bin.ts"
+import { BinBranch, BinLimits, BinLimitChange, BinChanged, BinForkShown, BinItem, RecoveredText } from "./bin.ts"
 import { NotFound, ServerError } from "./errors.ts"
 
 const Errors = [NotFound, ServerError] as const
@@ -39,6 +39,16 @@ export class BinApi extends RpcGroup.make(
   Rpc.make("BinItemForks", {
     payload: { itemIds: Schema.Array(Schema.String) },
     success: Schema.Array(BinForkShown),
+    error: ServerError
+  }),
+  /**
+   * Every branch that deleting the items for good affects (`BinBranch`): the ones that show
+   * the text and the ones that hold it only in the bin, each with where the message is in it,
+   * so the confirmation can list and link them.
+   */
+  Rpc.make("BinItemBranches", {
+    payload: { itemIds: Schema.Array(Schema.String) },
+    success: Schema.Array(BinBranch),
     error: ServerError
   }),
   Rpc.make("EmptyBin", {

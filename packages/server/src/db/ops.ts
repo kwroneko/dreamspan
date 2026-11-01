@@ -71,7 +71,7 @@ import {
   PathWindow
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
+import { BinBranch, BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import {
   ComposerImage,
@@ -2485,6 +2485,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("BinItemForks", {
     payload: { userId: UserId, itemIds: Schema.Array(Schema.String) },
     success: Schema.Array(BinForkShown),
+    error: StorageError
+  }),
+  /** Every branch deleting the user's bin items for good affects (`BinBranch`), for the confirmation's list. */
+  Rpc.make("BinItemBranches", {
+    payload: { userId: UserId, itemIds: Schema.Array(Schema.String) },
+    success: Schema.Array(BinBranch),
     error: StorageError
   }),
   /** The bin's deleted items, newest first. `before` pages back from the last item seen. */
