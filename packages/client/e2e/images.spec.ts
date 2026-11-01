@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { oversizedPortraitPng, writeLargeImageStFolder } from "../../server/test/support/stLargeImages.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { portraitView } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 test.setTimeout(600_000)
@@ -65,9 +66,9 @@ for (const width of [1440, 390]) {
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
       await page.getByRole("button", { name: /^Send as / }).click()
       await expect(page).toHaveURL(/\/chats\//)
-      // A message portrait opens the original in a lightbox, including on phones.
+      // A message portrait opens the original: beside the chat, or full-screen on a phone.
       await page.getByRole("button", { name: "View Synthetic 001's portrait" }).first().click()
-      const full = page.getByRole("dialog", { name: "Synthetic 001" }).getByRole("img")
+      const full = portraitView(page, "Synthetic 001").getByRole("img", { name: "Synthetic 001's full portrait" })
       await expect(full).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(1024)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(2048)

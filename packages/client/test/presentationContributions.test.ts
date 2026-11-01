@@ -14,6 +14,7 @@ import {
   queuedPreviews,
   chatComposer,
   chatComposerNotes,
+  chatColumns,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -78,6 +79,7 @@ acceptsAlternative(queuedPreviews)
 acceptsAlternative(chatComposer)
 acceptsAlternative(chatComposerNotes)
 acceptsAlternative(chatOverlays)
+acceptsAlternative(chatColumns)
 acceptsAlternative(chatSettingSections)
 acceptsAlternative(accountSettingSections)
 acceptsAlternative(summarySettingFields)

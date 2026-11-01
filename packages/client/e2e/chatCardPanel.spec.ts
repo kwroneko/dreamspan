@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { portraitPng } from "./support/portrait.ts"
+import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -141,19 +141,19 @@ for (const width of [1440, 390])
           expect(await cast.evaluate((strip) => strip.scrollWidth <= strip.clientWidth + 1)).toBeTruthy()
         await page.waitForTimeout(300)
         await shoot(page, `panel-${label}-${tag}`)
-        // A portrait opens the whole image over the page, the panel kept beneath.
+        // A portrait opens the whole image (beside the chat, or over it on a phone), the panel kept.
         await page
           .getByRole("tabpanel", { name, exact: true })
           .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
           .click()
-        const lightbox = page.getByRole("dialog", { name, exact: true })
+        const lightbox = portraitView(page, name)
         await expect(lightbox).toBeVisible()
         if (label === "single") {
           await expect(lightbox.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
           await page.waitForTimeout(300)
           await shoot(page, `lightbox-${tag}`)
         }
-        await page.keyboard.press("Escape")
+        await closePortrait(page)
         await expect(lightbox).toHaveCount(0)
         await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
       }

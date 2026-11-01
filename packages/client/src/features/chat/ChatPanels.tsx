@@ -3,6 +3,7 @@ import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
@@ -165,6 +166,13 @@ export function ChatSidePanel({
   const all = usePanelTabs(content.view, tab)
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
+  // While a portrait is shown, a character's chip shows theirs too: the strip's portraits switch it.
+  const portraits = usePortraitViewer()
+  const pick = (value: PanelTab) => {
+    const avatar = cast.find((t) => t.value === value)?.avatar
+    if (portraits?.shown && avatar && portraits.shown.id !== avatar.id) portraits.show(avatar)
+    onTab(value)
+  }
   const nav = (
     <div className="flex flex-col gap-1 border-b border-border px-2 pt-1.5">
       <ToolTabs
@@ -184,7 +192,7 @@ export function ChatSidePanel({
           note: t.note
         }))}
         value={tab}
-        onValueChange={onTab}
+        onValueChange={pick}
         label="Characters"
       />
       {cast.length === 0 && <div className="h-0.5" />}

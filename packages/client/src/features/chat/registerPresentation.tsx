@@ -12,6 +12,7 @@ import {
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
+  chatColumns,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -29,6 +30,7 @@ import { AuthorNoteAction } from "./AuthorNoteAction.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
+import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
@@ -166,8 +168,9 @@ export const registerPresentation = () => [
   chatSurfaceProviders.register({
     id: "chat.portraits",
     order: 30,
-    component: ({ children }) => <PortraitProvider>{children}</PortraitProvider>
+    component: ({ wide, children }) => <PortraitProvider inline={wide}>{children}</PortraitProvider>
   }),
+  chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),
   chatOverlays.register({ id: "chat.preset-overlay", order: 10, component: () => <PresetOverlayHost /> }),
   ...registerImages()
 ]

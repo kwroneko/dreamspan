@@ -111,6 +111,8 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
       props.children
     )
 }
+/** Columns left of the messages, beside them on a wide screen: the portrait (`chat.portrait-column`). */
+export const chatColumns = defineSlot<{ wide: boolean }>("chat.columns")
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
 /** Actions beside a failed version's error, such as saving a context size its error states. */
 export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
