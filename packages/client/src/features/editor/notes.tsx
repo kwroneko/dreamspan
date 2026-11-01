@@ -691,6 +691,7 @@ export function AddNoteMenu({
     <Menu
       align="start"
       label={label}
+      hint="A new note here, or one that shows a shared note (a snippet)"
       trigger={
         <Button>
           {label} <Icon name="down" />

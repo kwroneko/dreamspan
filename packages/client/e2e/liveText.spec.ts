@@ -103,7 +103,7 @@ for (const width of [1440, 390])
     await page.getByRole("menuitem", { name: "New note" }).click()
     const note = notes.getByRole("region", { name: "Note Note" })
     const noteText = `NOTE-LIVE-${width} lanterns along the levee.`
-    await note.getByRole("textbox", { name: /^Content/ }).fill(noteText)
+    await note.getByRole("textbox", { name: /^Text of/ }).fill(noteText)
     await expect(note.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Changed since revision \d+$/)
     await shoot(page, `note-changed-${width}`)
 

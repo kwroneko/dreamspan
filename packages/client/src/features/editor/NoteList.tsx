@@ -255,7 +255,11 @@ function NoteBlock({
           ) : (
             <span className="flex min-w-0 flex-1">{toggle}</span>
           )}
-          <Menu label={`Actions for ${title}`} trigger={<BlockMenuButton label={`Actions for ${title}`} />}>
+          <Menu
+            label={`Actions for ${title}`}
+            hint="More: its History, Save as shared note, Delete"
+            trigger={<BlockMenuButton label={`Actions for ${title}`} />}
+          >
             <MenuItem
               icon="history"
               disabled={!loaded}

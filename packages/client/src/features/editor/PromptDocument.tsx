@@ -407,7 +407,11 @@ function PromptBlock({
   )
 
   const menu = (
-    <Menu label={`Actions for ${name}`} trigger={<BlockMenuButton label={`Actions for ${name}`} />}>
+    <Menu
+      label={`Actions for ${name}`}
+      hint="More: open it in the large editor, insert a prompt beside it, delete it"
+      trigger={<BlockMenuButton label={`Actions for ${name}`} />}
+    >
       {actions.openLarge && (
         <MenuItem
           icon="expand"

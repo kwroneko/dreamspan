@@ -1,3 +1,4 @@
+import { closeNoteBlock, noteBlock, noteSettings, noteText, noteToggle } from "./support/notes.ts"
 import { expectTextBox } from "./support/textbox.ts"
 // The card and preset editors (ARCHITECTURE.md §14) in a real browser against the real
 // server: edits used as typed, saved as revisions, put back from a field's edit history,
@@ -66,17 +67,19 @@ const savedCard = (name: string, fields: Record<string, string>) =>
 const open = async (page: Page, refId: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${refId}`)
-  await expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+  // The card's state line, first: an open note has its own.
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: /^Saved as revision \d+$/ })
+      .first()
+  ).toBeVisible()
 }
 
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
 
 /** Opens a card's note from its collapsed row (DESIGN §4.1). */
-const openNote = (page: Page, title: string) =>
-  page
-    .getByRole("list", { name: "The card's notes" })
-    .getByRole("button", { name: new RegExp(`^${title}`) })
-    .click()
+const openNote = (page: Page, title: string) => noteText(page.getByRole("list", { name: "The card's notes" }), title)
 const state = (page: Page) =>
   page.getByRole("status").filter({ hasText: /^(Saved as revision|Changed since revision|Keeping your changes)/ })
 
@@ -429,7 +432,7 @@ test("note text typed just before closing the tab is kept, with a warning first"
   await open(page, card.id)
   await recordBeacons(page)
   await openNote(page, "Outfit")
-  const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Content/ })
+  const content = page.getByRole("region", { name: "Note Outfit" }).getByRole("textbox", { name: /^Text of/ })
   await content.fill("A grey coat, typed in the last moment.")
   const warned = await page.evaluate(() => {
     const event = new Event("beforeunload", { cancelable: true })
@@ -449,16 +452,17 @@ test("note text typed just before closing the tab is kept, with a warning first"
     .toEqual(["A grey coat, typed in the last moment."])
 })
 
-test("a card's notes are collapsed rows, and the card has no modules section (DESIGN §5.0)", async ({ page }) => {
+test("a card's notes are blocks, and the card has no modules section (DESIGN §5.0)", async ({ page }) => {
   const refId = await savedCard("Rows", {})
   await admin((api) => api.CreateCardNote({ cardRefId: refId as RefId, title: "Scarf" }))
   await open(page, refId)
   await expect(page.getByRole("button", { name: "Add a module" })).toHaveCount(0)
-  const row = page.getByRole("list", { name: "The card's notes" }).getByRole("button", { name: /^Scarf/ })
-  await expect(row).toContainText("End of tail")
-  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeHidden()
-  await row.click()
-  await expect(page.getByRole("region", { name: "Note Scarf" })).toBeVisible()
+  const list = page.getByRole("list", { name: "The card's notes" })
+  // Its header says where it goes, open or closed; its settings are folded under its text.
+  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await closeNoteBlock(noteBlock(list, "Scarf"), "Scarf")
+  await expect(noteToggle(list, "Scarf")).toContainText("End of tail")
+  await noteSettings(list, "Scarf")
   // In the card editor, a note's condition can name the card itself.
   await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()
   await page.getByRole("option", { name: "On a chosen character's turn" }).click()
@@ -490,7 +494,7 @@ test("text too long to send as the page goes: the warning stops a close, and a r
   )
   await open(page, card.id)
   await openNote(page, "Long")
-  const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Content/ })
+  const content = () => page.getByRole("region", { name: "Note Long" }).getByRole("textbox", { name: /^Text of/ })
   const saved = async () => {
     const opened = await admin((api) => api.OpenEditor({ refId: note.id }))
     return opened.drafts.filter((d) => d.status === "active").map((d) => d.content.length)
@@ -621,7 +625,7 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   await open(page, card.id)
   const field = textField(["content"])
   await openNote(page, "Gone")
-  await page.getByRole("button", { name: "More actions for Gone" }).click()
+  await page.getByRole("button", { name: "Actions for Gone" }).click()
   await page.getByRole("menuitem", { name: "Delete the note" }).click()
   await expect(page.getByRole("region", { name: "Note Gone" })).toHaveCount(0)
   // A copy of the note left behind: kept while the note is in the bin, saved once it's back.
@@ -634,7 +638,7 @@ test("copies stay with a note in the bin and survive age and capacity limits", a
   await page.reload()
   await openNote(page, "Gone")
   await expectTextBox(
-    page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Content/ }),
+    page.getByRole("region", { name: "Note Gone" }).getByRole("textbox", { name: /^Text of/ }),
     "Unsent."
   )
   await expect.poll(async () => (await storedCopies(page)).filter((c) => c.refId === note.id)).toEqual([])

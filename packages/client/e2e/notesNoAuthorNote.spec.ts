@@ -7,6 +7,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { noteSettings, noteToggle } from "./support/notes.ts"
 import { asUser } from "./support/rpc.ts"
 
 const server = serverPerFile(withAdmin)
@@ -42,14 +43,13 @@ for (const width of [1440, 390]) {
     )
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chat.id}?panel=notes`)
-    const row = (title: string) => page.getByRole("button", { name: new RegExp(`^${title}`) })
+    const row = (title: string) => noteToggle(page, title)
     await expect(row("Author's Note")).toBeVisible()
     await expect(row("Mood")).toBeVisible()
     await shoot(page, `notes-no-author-note-${width}`)
 
     for (const title of ["Author's Note", "Mood"]) {
-      await row(title).click()
-      const note = page.getByRole("region", { name: `Note ${title}` })
+      const note = await noteSettings(page, title)
       await expect(note).toBeVisible()
       // No mark on the row, and nothing to make it, or stop it being, the author's note.
       await expect(row(title).getByText("author's note", { exact: true })).toHaveCount(0)
@@ -60,7 +60,6 @@ for (const width of [1440, 390]) {
       await expect(page.getByRole("option", { name: /author's note/i })).toHaveCount(0)
       if (title === "Author's Note") await shoot(page, `notes-no-author-note-positions-${width}`)
       await page.keyboard.press("Escape")
-      await row(title).click()
     }
   })
 }

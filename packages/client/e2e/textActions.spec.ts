@@ -9,6 +9,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { showActions } from "./support/message.ts"
 import { closePanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
 const shots = process.env.SCREENSHOT_DIR
@@ -145,12 +146,11 @@ for (const width of [1440, 390])
       for (let i = 0; i < 5; i++) await editor.press("Shift+ArrowLeft")
       await expect(sendSelection).toBeVisible()
       await sendSelection.click()
-      await expect(page.getByRole("textbox", { name: "Snippet text" })).toHaveText("quay.")
+      const snippetText = page.getByRole("textbox", { name: "Text of Untitled snippet" })
+      await expect.poll(() => textBoxValue(snippetText)).toBe("quay.")
       if (width === 390) await closePanel(page)
       await sendText.click()
-      await expect(page.getByRole("textbox", { name: "Snippet text" })).toContainText(
-        "The lantern swings over the quay."
-      )
+      await expect.poll(() => textBoxValue(snippetText)).toContain("The lantern swings over the quay.")
       if (width === 390) await closePanel(page)
       await mine.getByRole("button", { name: "Cancel" }).click()
       await expect(editor).toHaveCount(0)

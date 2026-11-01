@@ -15,6 +15,14 @@ import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { openPanel } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
+import {
+  closeNoteBlock,
+  noteBlock,
+  noteSettings,
+  noteToggle,
+  openNoteBlock,
+  openNoteSettings
+} from "./support/notes.ts"
 import { asUser } from "./support/rpc.ts"
 import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -159,26 +167,29 @@ for (const width of [1440, 390])
     }) => {
       const tab = await notesAt(page, width, theme)
       const own = tab.getByRole("region", { name: "This chat's notes" })
-      // Collapsed: rows with their place and condition, no editor open.
-      const row = own.getByRole("button", { name: /^Aria's outfit/ })
+      // Each header says where the note goes and when, open or closed; opening shows its text.
+      const row = noteToggle(own, "Aria's outfit")
       await expect(row).toContainText("End of tail")
       await expect(row).toContainText("Aria Vance's turn")
-      await expect(tab.getByRole("region", { name: /^Note / })).toHaveCount(0)
-      await row.click()
-      await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toBeVisible()
-      await row.click()
-      await expect(tab.getByRole("region", { name: "Note Aria's outfit" })).toHaveCount(0)
+      const outfit = noteBlock(own, "Aria's outfit")
+      await expect(await openNoteBlock(outfit, "Aria's outfit")).toBeVisible()
+      await closeNoteBlock(outfit, "Aria's outfit")
+      await expect(outfit.getByRole("textbox")).toHaveCount(0)
+      await expect(row).toContainText("End of tail")
       // An imported group chat has Aria's own author's note off, as ST ignores it there.
       const aria = tab.getByRole("region", { name: "Aria Vance's notes" })
       await expect(aria.getByRole("switch", { name: /Character author's note/ })).not.toBeChecked()
-      await expect(aria.getByRole("button", { name: /^Character author's note/ })).toContainText("Private")
+      await expect(noteToggle(aria, "Character author's note")).toContainText("Private")
 
       // Add a new note: it opens, on from here.
       await own.getByRole("button", { name: "Add note" }).click()
       await expect(page.getByRole("menuitem", { name: "New note" })).toBeInViewport()
       await page.getByRole("menuitem", { name: "New note" }).click({ timeout: 10_000 })
-      const fresh = tab.getByRole("region", { name: "Note Note" })
+      const fresh = noteBlock(own, "Note").last()
       await expect(fresh).toBeVisible()
+      // It opens with its text; its settings are folded under it.
+      await expect(fresh.getByRole("textbox", { name: "Text of Note" })).toBeVisible()
+      await openNoteSettings(fresh, "Note")
       await expect(fresh.getByRole("spinbutton", { name: /Every how many/ })).toHaveCount(0)
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).toBeChecked()
       // Its condition and a place above the history: the cache warning.
@@ -203,7 +214,7 @@ for (const width of [1440, 390])
       )
       await page.keyboard.press("Escape")
       await saveRevision(fresh)
-      await expect(own.getByRole("button", { name: /^Note/ }).last()).toContainText("Start of context")
+      await expect(noteToggle(own, "Note").last()).toContainText("Start of context")
       // Its switch turns it off from here.
       await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).not.toBeChecked()
@@ -238,8 +249,8 @@ for (const width of [1440, 390])
       await expect(page.getByRole("menu", { name: "Add note", exact: true })).toHaveCSS("opacity", "1")
       await page.screenshot({ animations: "disabled", path: join(shots, `new-note-menu-${width}-${theme}.png`) })
       await page.getByRole("menuitem", { name: "New note" }).click({ timeout: 10_000 })
-      const his = tab.getByRole("region", { name: "Note Note" }).last()
-      await his.getByRole("button", { name: "More actions for Note" }).click()
+      const his = noteBlock(tobias, "Note").last()
+      await his.getByRole("button", { name: "Actions for Note" }).click()
       await page.getByRole("menuitem", { name: "Save as shared note" }).click()
       await expect(
         tab
@@ -247,7 +258,7 @@ for (const width of [1440, 390])
           .last()
           .getByText(/Shared note “Note”/)
       ).toBeVisible()
-      await expect(tobias.getByRole("button", { name: /Shared note/ }).last()).toBeVisible()
+      await expect(noteBlock(tobias, "Note").last().getByText("Shared note", { exact: true })).toBeAttached()
       await noWideScroll(page)
     })
   }
@@ -261,15 +272,19 @@ for (const width of [1440, 390])
         await page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`) })
       }
       const own = tab.getByRole("region", { name: "This chat's notes" })
-      await expect(own.getByRole("button", { name: /^Aria's outfit/ })).toBeVisible()
+      await expect(noteToggle(own, "Aria's outfit")).toBeVisible()
+      // Every note folded to its header (Collapse all is off when none is open).
+      const collapse = tab.getByRole("button", { name: "Collapse all" })
+      if (await collapse.isEnabled()) await collapse.click()
+      await expect(collapse).toBeDisabled()
       await shoot("notes-collapsed")
-      await own.getByRole("button", { name: /^Aria's outfit/ }).click()
-      const open = tab.getByRole("region", { name: "Note Aria's outfit" })
-      await expect(open).toBeVisible()
+      const open = noteBlock(own, "Aria's outfit")
+      await openNoteBlock(open, "Aria's outfit")
       await shoot("note-open")
+      await openNoteSettings(open, "Aria's outfit")
       await open.getByRole("combobox", { name: "When it applies" }).scrollIntoViewIfNeeded()
       await shoot("condition-position")
-      await own.getByRole("button", { name: /^Aria's outfit/ }).click()
+      await closeNoteBlock(open, "Aria's outfit")
       // The group's cards, Aria's imported author's note off here.
       await tab.getByRole("region", { name: "Aria Vance's notes" }).scrollIntoViewIfNeeded()
       await shoot("group-notes")
@@ -294,12 +309,11 @@ for (const width of [1440, 390])
       await expect(notes.getByRole("button").first()).toBeVisible()
       await notes.scrollIntoViewIfNeeded()
       await shoot("card-notes")
-      await notes.getByRole("button", { name: /^Character author's note/ }).click()
-      const characterNote = page.getByRole("region", { name: "Note Character author's note" })
+      const characterNote = await noteSettings(notes, "Character author's note")
       await expect(characterNote).toBeVisible()
       // ST put it at the author's note: here it's where ST's default note is, a depth like any
-      // (owner, 2026-11-01), and nothing about it says "author's note".
-      await expect(characterNote.getByText(/author's note/)).toHaveCount(0)
+      // (owner, 2026-11-01), and nothing about it but the name it was imported with says "author's note".
+      await expect(characterNote.getByText(/author's note/).filter({ hasNotText: "Character author's note" })).toHaveCount(0)
       await shoot("card-note-open")
       // A card's note "with the definitions" goes inside its card's part.
       await characterNote.getByRole("combobox", { name: "Position" }).click()

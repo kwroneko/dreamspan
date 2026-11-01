@@ -1,102 +1,92 @@
-// Synthetic text only. Covers transfers from editors' own Send buttons and shortcut (a note,
-// a message and a swipe opened for editing by a double-click), Insert,
-// continuous persistence and cross-tab updates, at desktop/phone sizes in both themes.
+// Synthetic text only. The Snippets panel (owner, 2026-11-01): a plain explanation, snippets as
+// blocks (renamed in place, Copy, the text saved as it's typed with no revision until Save), "This
+// chat" or "All chats" by a switch, no Insert; transfers from editors' own Send buttons and the
+// shortcut (a note, a message and a swipe opened for editing by a double-click), at desktop and
+// phone sizes in both themes.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, test } from "@playwright/test"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { serverPerFile, withAdmin, apiLogin, ADMIN } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
+import { noteText } from "./support/notes.ts"
+import { saveRevision } from "./support/saveRevision.ts"
+import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = process.env.SCREENSHOT_DIR
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+
+const snippetBlock = (scope: Locator, title: string) => scope.getByRole("region", { name: `Snippet ${title}` })
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
-    test(`snippet transfers ${width} ${theme}`, async ({ page, context }) => {
+    test(`snippets ${width} ${theme}`, async ({ page }) => {
       test.setTimeout(120_000)
       await page.setViewportSize({ width, height: 1000 })
       await page.emulateMedia({ colorScheme: theme })
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      const oldGlobals = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.ListSnippets({ chatId: null, forkId: null })
-      )
-      for (const old of oldGlobals)
-        await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteNote({ noteRefId: old.ref.id }))
-
-      const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.CreateChat({ title: "The harbour notebook" })
-      )
+      for (const old of await admin((api) => api.ListSnippets({ chatId: null })))
+        await admin((api) => api.DeleteNote({ noteRefId: old.ref.id }))
+      const chat = await admin((api) => api.CreateChat({ title: "The harbour notebook" }))
+      const other = await admin((api) => api.CreateChat({ title: "Another harbour" }))
       const chatId = chat.id as ChatId
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.CreateChatNote({ chatId, title: "Destination" })
-      )
+      await admin((api) => api.CreateChatNote({ chatId, title: "Destination" }))
       await page.goto(`${server().url}/chats/${chat.id}`)
-      const composer = page.getByLabel("Message", { exact: true })
+
       // An editor's selection goes to a new snippet with the button under the editor.
       const notes = await openPanel(page, "Notes")
-      await notes.getByRole("button", { name: /Destination/ }).click()
-      const content = notes.getByRole("textbox", { name: "Content", exact: true })
+      const content = await noteText(notes, "Destination")
       await content.fill("Lanterns by the harbour")
       await content.press("Control+Home")
       await content.press("Control+Shift+ArrowRight")
       await notes.getByRole("button", { name: "Send selection to snippet" }).click()
       const panel = page.getByRole("tabpanel", { name: "Snippets" })
       await expect(panel).toBeVisible()
-      const editor = panel.getByRole("textbox", { name: "Snippet text" })
-      await expect(editor).toHaveText("Lanterns")
-      await panel.getByLabel("Snippet name").fill("Harbour details")
+      // What snippets are, said plainly; no Insert (copy and paste does it).
+      await expect(panel.getByText(/never sent to the model by itself/)).toBeVisible()
+      await expect(panel.getByRole("button", { name: /^Insert/ })).toHaveCount(0)
+      const fresh = snippetBlock(panel, "Untitled snippet")
+      await expectTextBox(fresh.getByRole("textbox", { name: "Text of Untitled snippet" }), "Lanterns")
+      await expect(fresh.getByRole("button", { name: "Collapse Untitled snippet" })).toContainText("This chat")
+
+      // Renamed in place in its header.
+      await fresh.getByRole("button", { name: "Rename Untitled snippet" }).click()
+      await fresh.getByRole("textbox", { name: "New name for Untitled snippet" }).fill("Harbour details")
+      await page.keyboard.press("Enter")
+      const block = snippetBlock(panel, "Harbour details")
+      const editor = block.getByRole("textbox", { name: "Text of Harbour details" })
       await editor.fill("A lighthouse above the quiet harbour.")
-      await expect
-        .poll(
-          async () =>
-            (
-              await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-                api.ListSnippets({ chatId: chat.id, forkId: null })
-              )
-            )[0]?.content
-        )
-        .toBe("A lighthouse above the quiet harbour.")
+      const listed = async (id: ChatId | null) => (await admin((api) => api.ListSnippets({ chatId: id })))[0]
+      await expect.poll(async () => (await listed(chatId))?.content).toBe("A lighthouse above the quiet harbour.")
+      await expect.poll(async () => (await listed(chatId))?.title).toBe("Harbour details")
+      // Typing is live and makes no revision; Save does.
+      const refId = (await listed(chatId))!.ref.id
+      expect(await admin((api) => api.ListRevisions({ refId, limit: 10 }))).toHaveLength(1)
+      await saveRevision(block)
+      expect(await admin((api) => api.ListRevisions({ refId, limit: 10 }))).toHaveLength(2)
+
+      // Copy, one click.
+      await block.getByRole("button", { name: "Copy Harbour details" }).click()
+      await expect(page.getByText("Snippet copied").or(page.getByText(/Couldn't copy the snippet/))).toBeVisible()
+
+      // This chat (every branch of it), or All chats, by its switch.
+      expect(await listed(other.id as ChatId)).toBeUndefined()
+      await block.getByRole("switch", { name: "All chats" }).click()
+      await expect(block.getByRole("button", { name: "Collapse Harbour details" })).toContainText("All chats")
+      await expect.poll(async () => (await listed(other.id as ChatId))?.ref.id).toBe(refId)
+      await block.getByRole("switch", { name: "All chats" }).click()
+      await expect(block.getByRole("button", { name: "Collapse Harbour details" })).toContainText("This chat")
+      await expect.poll(async () => await listed(other.id as ChatId)).toBeUndefined()
       if (shots) {
         mkdirSync(shots, { recursive: true })
         await page.screenshot({ path: join(shots, `snippets-${width}-${theme}.png`) })
       }
-      await closePanel(page)
-      await composer.fill("Before. After.")
-      await composer.evaluate((node: HTMLTextAreaElement) => {
-        node.focus()
-        node.setSelectionRange(8, 8)
-        node.dispatchEvent(new Event("select", { bubbles: true }))
-      })
-      await openPanel(page, "Snippets")
-      await panel.getByRole("button", { name: "Insert", exact: true }).click()
-      if (width === 390) await closePanel(page)
-      await expect(composer).toHaveValue("Before. A lighthouse above the quiet harbour.After.")
-      if (width === 390) await openPanel(page, "Snippets")
-      // CodeMirror selections transfer only the selected part back to the last field.
-      await editor.click()
-      await editor.press("Control+Home")
-      await editor.press("Control+Shift+ArrowRight")
-      await panel.getByRole("button", { name: "Insert selection" }).click()
-      if (width === 390) await closePanel(page)
-      await expect(composer).toHaveValue("Before. A lighthouse above the quiet harbour.AAfter.")
-      if (width === 390) await openPanel(page, "Snippets")
-      await panel.getByRole("button", { name: "Make global" }).click()
-      await expect(panel.getByRole("list", { name: "Snippets" })).toContainText("Global")
-      // Another tab reads, then receives the next draft while open.
-      const other = await context.newPage()
-      await other.goto(`${server().url}/chats/${chat.id}?panel=snippets`)
-      await expect(other.getByRole("textbox", { name: "Snippet text" })).toHaveText(
-        "A lighthouse above the quiet harbour."
-      )
-      await editor.fill("The tide is rising.")
-      await expect(other.getByRole("textbox", { name: "Snippet text" })).toHaveText("The tide is rising.")
-      await other.close()
-      await page.reload()
-      await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
-      await expect(page.getByRole("textbox", { name: "Snippet text" })).toHaveText("The tide is rising.")
-      // A message opened for editing by a double-click sends its selection the same way.
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+
+      // A message opened for editing by a double-click adds its selection to the snippet open last.
+      await admin((api) =>
         api.SendMessage({ chatId, forkId: null, parentSlotId: null, branch: false, content: "A gull crosses the bay." })
       )
       await page.reload()
@@ -108,77 +98,49 @@ for (const width of [1440, 390])
       await expect(messageText).toBeFocused()
       await messageText.press("Control+a")
       await mine.getByRole("button", { name: "Send selection to snippet" }).click()
-      await expect(page.getByRole("textbox", { name: "Snippet text" })).toContainText("A gull crosses the bay.")
+      // After a reload nothing is open last: it's a new snippet.
+      await expect
+        .poll(async () => (await admin((api) => api.ListSnippets({ chatId }))).map((s) => s.content))
+        .toContain("A gull crosses the bay.")
       if (width === 390) await closePanel(page)
       await mine.getByRole("button", { name: "Cancel" }).click()
-      // Code-editor destinations keep their cursor while another panel is active.
+
+      // The note's selection, by the shortcut, then its whole text: both to the snippet open last.
       await openPanel(page, "Notes")
-      await notes.getByRole("button", { name: /Destination/ }).click()
-      await content.fill("Start End")
-      await content.press("Control+Home")
-      await content.press("ArrowRight")
-      await openPanel(page, "Snippets")
-      await panel.getByRole("button", { name: "Insert", exact: true }).click()
+      const again = await noteText(notes, "Destination")
+      await again.fill("A foghorn sounds.")
+      await again.press("Control+Home")
+      await again.press("Control+Shift+End")
+      await again.press("Control+Shift+S")
+      const target = snippetBlock(panel, "Untitled snippet")
+      const targetText = target.getByRole("textbox", { name: "Text of Untitled snippet" })
+      await expect.poll(() => textBoxValue(targetText)).toContain("A foghorn sounds.")
       await openPanel(page, "Notes")
-      await expect(content).toContainText("SThe tide is rising.")
-      // The selection's button has a shortcut in its tooltip; the whole text has its own button.
-      await content.fill("A foghorn sounds.")
-      await content.press("Control+Home")
-      await content.press("Control+Shift+End")
-      await content.press("Control+Shift+S")
-      await expect(editor).toContainText("A foghorn sounds.")
-      await openPanel(page, "Notes")
-      await content.fill("A bell rings.")
+      await again.fill("A bell rings.")
       await notes.getByRole("button", { name: "Send text to snippet" }).click()
-      await expect(editor).toContainText("A bell rings.")
-      // A different swipe, opened for editing, sends its whole text to the same snippet.
-      const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.ReadPath({ chatId, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
-      )
-      const entry = path.entries[0]!
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.WriteVersion({
-          slotId: entry.slotId,
-          content: "A second gull in an alternate version.",
-          expectedRowVersion: entry.rowVersion
-        })
-      )
-      await page.reload()
-      await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
-      await closePanel(page)
-      await mine.locator(".markdown").dblclick()
-      await expect(messageText).toBeFocused()
-      await mine.getByRole("button", { name: "Send text to snippet" }).click()
-      await expect(page.getByRole("textbox", { name: "Snippet text" })).toContainText(
-        "A second gull in an alternate version."
-      )
+      await expect.poll(() => textBoxValue(targetText)).toContain("A bell rings.")
+      // A snippet's own editor offers no sending to a snippet.
+      await targetText.click()
+      await expect(panel.getByRole("button", { name: /to snippet/ })).toHaveCount(0)
     })
   }
 
-test("a library field creates a global snippet outside a chat", async ({ page }) => {
+test("a library field creates a snippet for all chats outside a chat", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-  const globals = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-    api.ListSnippets({ chatId: null, forkId: null })
-  )
-  for (const item of globals)
-    await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.DeleteNote({ noteRefId: item.ref.id }))
-  const card = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-    api.CreateCard({ label: "Synthetic keeper", name: "Keeper" })
-  )
+  for (const item of await admin((api) => api.ListSnippets({ chatId: null })))
+    await admin((api) => api.DeleteNote({ noteRefId: item.ref.id }))
+  const card = await admin((api) => api.CreateCard({ label: "Synthetic keeper", name: "Keeper" }))
   await page.goto(`${server().url}/library/${card.id}`)
   const description = page.getByRole("textbox", { name: "Description", exact: true })
   await description.fill("A keeper watches the harbour.")
   await description.press("Control+Home")
   await description.press("Control+Shift+End")
   await description.press("Control+Shift+S")
-  const workspace = page.getByRole("region", { name: "Snippet workspace" })
-  await expect(workspace.getByRole("textbox", { name: "Snippet text" })).toHaveText("A keeper watches the harbour.")
-  await expect(workspace.getByRole("list", { name: "Snippets" })).toContainText("Global")
+  const sheet = page.getByRole("region", { name: "Snippets" })
+  const block = snippetBlock(sheet, "Untitled snippet")
+  await expectTextBox(block.getByRole("textbox", { name: "Text of Untitled snippet" }), "A keeper watches the harbour.")
+  await expect(block.getByRole("button", { name: "Collapse Untitled snippet" })).toContainText("All chats")
   await expect
-    .poll(async () =>
-      (
-        await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListSnippets({ chatId: null, forkId: null }))
-      ).map((snippet) => snippet.content)
-    )
+    .poll(async () => (await admin((api) => api.ListSnippets({ chatId: null }))).map((snippet) => snippet.content))
     .toEqual(["A keeper watches the harbour."])
 })
