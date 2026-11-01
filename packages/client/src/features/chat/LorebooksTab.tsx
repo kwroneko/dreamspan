@@ -129,6 +129,8 @@ function Book({
     <li
       className={`flex items-start gap-1 rounded-md px-1 py-1.5 ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
       data-selected={selected || undefined}
+      // Switched here, not confirmed yet: the row says so without changing its name.
+      aria-busy={row.pending || undefined}
     >
       {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
       <Tooltip label={shown.switchHint}>
@@ -153,10 +155,7 @@ function Book({
             onClick={onSelect}
             className="flex w-full min-w-0 flex-col items-start rounded-md px-1.5 py-0.5 text-left outline-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:hover:bg-transparent"
           >
-            <span className="text-sm font-medium [overflow-wrap:anywhere]">
-              {shown.name}
-              {row.pending && <span className="sr-only"> (switching)</span>}
-            </span>
+            <span className="text-sm font-medium [overflow-wrap:anywhere]">{shown.name}</span>
             <span className="text-xs text-muted [overflow-wrap:anywhere]">{shown.from}</span>
           </button>
         </Tooltip>
