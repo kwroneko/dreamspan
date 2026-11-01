@@ -18,7 +18,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "model",
     label: "Model",
-    description: "Settings of the model the next reply uses. They apply wherever it's used.",
+    description: "The model the next reply uses, to choose, and its settings, which apply wherever it's used.",
     order: 20,
     icon: "model",
     component: lazyPanel(
@@ -37,7 +37,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "preset",
     label: "Prompt preset",
-    description: "The prompt preset the next reply is built with, to edit.",
+    description: "The prompt preset the next reply is built with, to choose and edit.",
     order: 30,
     icon: "preset",
     component: lazyPanel(
