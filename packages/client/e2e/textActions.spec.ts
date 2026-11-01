@@ -181,12 +181,15 @@ for (const width of [1440, 390])
     // Not in use, it isn't there and takes no room: the wrapper is the box's height.
     await expect(toolbar).toHaveCount(0)
     expect((await bar.boundingBox())!.height - (await box.boundingBox())!.height).toBeLessThan(1)
-    const top = (await box.boundingBox())!.y
+    // Where the box sits in what holds it: the page may scroll to it, but nothing above it moves.
+    const field = bar.locator("..")
+    const offset = async () => (await box.boundingBox())!.y - (await field.boundingBox())!.y
+    const top = await offset()
     await box.fill("alpha\nbeta")
     // It comes below the box: the text being edited doesn't move.
     await expect(bar.getByRole("button", { name: "Send text to snippet" })).toBeVisible()
     const shown = (await box.boundingBox())!
-    expect(shown.y).toBe(top)
+    expect(await offset()).toBe(top)
     expect((await toolbar.boundingBox())!.y).toBeGreaterThanOrEqual(shown.y + shown.height - 1)
     await expect(sendSelection).toHaveCount(0)
     for (let i = 0; i < 4; i++) await box.press("Shift+ArrowLeft")

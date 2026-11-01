@@ -226,7 +226,7 @@ for (const width of [1440, 390])
       await shot("08-persona-control")
       await page.keyboard.press("Escape")
       await expect(cast.getByText("Muted", { exact: true }).first()).toBeVisible()
-      await expect(cast.getByRole("heading", { level: 2 })).toContainText("1 muted")
+      await expect(cast.getByRole("heading", { level: 2, name: /muted/ })).toContainText("1 muted")
       const mutedRow = cast
         .getByRole("list", { name: "Characters in this chat" })
         .getByRole("listitem")

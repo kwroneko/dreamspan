@@ -139,17 +139,42 @@ export function EditorTextActions({
   )
 }
 
+/** Whether a pointer is pressed anywhere: a press that takes focus from an editor isn't over yet. */
+let pressed = false
+let tracking = false
+const trackPresses = () => {
+  if (tracking || typeof document === "undefined") return
+  tracking = true
+  document.addEventListener("pointerdown", () => (pressed = true), true)
+  for (const name of ["pointerup", "pointercancel"])
+    document.addEventListener(name, () => setTimeout(() => (pressed = false)), true)
+}
+
 /**
  * Whether focus is in an editor (its box or its bar), for the wrapper around both. Its selection
- * counts only then: a box left for elsewhere keeps its selection, unseen, until it's back.
+ * counts only then: a box left for elsewhere keeps its selection, unseen, until it's back. Left by
+ * a press (a click on the editor's own Save or Cancel, under its bar), it counts as focused until
+ * the press ends and its click has landed: the bar going away moves what's below it, which would
+ * otherwise move the button out from under the pointer before the click.
  */
 export const useEditorFocus = () => {
   const [focused, setFocused] = useState(false)
+  trackPresses()
   return {
     focused,
     onFocus: () => setFocused(true),
     onBlur: (event: FocusEvent<HTMLElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false)
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+      if (!pressed) return setFocused(false)
+      const wrapper = event.currentTarget
+      const release = () => {
+        document.removeEventListener("pointerup", release, true)
+        document.removeEventListener("pointercancel", release, true)
+        // After the click the release makes, unless focus came back meanwhile.
+        setTimeout(() => !wrapper.contains(document.activeElement) && setFocused(false))
+      }
+      document.addEventListener("pointerup", release, true)
+      document.addEventListener("pointercancel", release, true)
     }
   }
 }
