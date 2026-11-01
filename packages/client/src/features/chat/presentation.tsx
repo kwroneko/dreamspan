@@ -17,6 +17,8 @@ export function ChatCardActions(props: ChatCardActionProps) {
   return <SlotOutlet slot={chatCardActions} props={props} />
 }
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
+/** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
+export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
 /** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
   "chat.note-actions"

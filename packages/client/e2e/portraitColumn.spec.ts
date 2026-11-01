@@ -7,6 +7,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { SHAPES, shapeCard } from "./support/shapes.ts"
+import { addToCast } from "./support/cast.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200", FAKE_GENERATOR_TOKENS: "20" })
 test.setTimeout(240_000)
@@ -42,13 +43,7 @@ const openChat = async (page: Page) => {
     await expect(page.getByText("generating", { exact: true })).toHaveCount(0)
     const cast = await openPanel(page, "Cast")
     for (const shape of SHAPES.slice(1)) {
-      await cast.getByRole("button", { name: "Add character" }).click()
-      const picker = page.getByRole("dialog", { name: "Add a character to this chat" })
-      await picker.getByRole("searchbox", { name: "Search your cards" }).fill(shape.name)
-      await picker
-        .getByRole("list", { name: "Characters", exact: true })
-        .getByRole("button", { name: new RegExp(`^${shape.name}`) })
-        .click()
+      await addToCast(page, shape.name)
       await expect(cast.getByRole("button", { name: `View ${shape.name}'s portrait` })).toBeVisible()
     }
     return new URL(page.url()).pathname

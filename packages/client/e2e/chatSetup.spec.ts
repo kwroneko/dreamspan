@@ -10,6 +10,7 @@ import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
 import { openPanel } from "./support/panel.ts"
+import { addToCast } from "./support/cast.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -130,10 +131,9 @@ test("a new chat from a card: the greeting follows the persona until the first s
   // Later, playing Ana from here on doesn't rewrite what was said before.
   await openPanel(page, "Cast")
   const cast = page.getByRole("tabpanel", { name: "Cast" })
-  await cast.getByRole("button", { name: "Add character" }).click()
-  await page.getByRole("dialog", { name: "Add a character to this chat" }).getByRole("button", { name: /^Ana/ }).click()
+  // Ana is in the persona folder: offered apart, under the characters.
+  await addToCast(page, "Ana")
   await expect(cast.getByRole("list", { name: "Characters in this chat" })).toContainText("Ana")
-  await page.keyboard.press("Escape")
   await expect(first).toContainText("Mira waves at Bo from the pier.")
   // The panel's tab is in the URL: a reload keeps it open there.
   await expect(page).toHaveURL(/panel=cast/)
@@ -173,12 +173,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await page.keyboard.press("Escape")
   // To speak as another card, add it to the chat first.
   await openPanel(page, "Cast")
-  await page.getByRole("button", { name: "Add character" }).click()
-  await page.getByRole("searchbox", { name: "Search your cards" }).fill("tob")
-  await page
-    .getByRole("dialog", { name: "Add a character to this chat" })
-    .getByRole("button", { name: /^Tobin/ })
-    .click()
+  await addToCast(page, "Tobin")
   await page.getByRole("button", { name: "More for Tobin" }).click()
   await page.getByRole("button", { name: "Write as Tobin" }).click()
   await page.keyboard.press("Escape")
