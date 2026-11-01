@@ -67,11 +67,8 @@ const tileLabels = (page: Page) =>
 for (const width of [1440, 390]) {
   test(`${width}: Add characters, collapsed at first; filter, search, add two, the cast marked`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
-    // Each width adds its own two, so the other's adds don't change what's never used.
+    // Each width adds its own two, never used until it does, whatever the other width added.
     const [one, two] = width === 1440 ? ["Tobin", "Wren"] : ["Tess", "Wade"]
-    const neverUsed = (width === 1440 ? ["Tess", "Tobin", "Wade", "Wren"] : ["Tess", "Wade"]).map(
-      (name) => `Add ${name} to this chat`
-    )
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chatId = await chatFor(`Harbor ${width}`)
     await page.goto(`${server().url}/chats/${chatId}`)
@@ -110,7 +107,10 @@ for (const width of [1440, 390]) {
     await show.click()
     await expect(page.getByRole("option", { name: /^Groups/ })).toHaveCount(0)
     await page.getByRole("option", { name: /^Never used/ }).click()
-    await expect.poll(() => tileLabels(page)).toEqual(neverUsed)
+    await expect
+      .poll(() => tileLabels(page))
+      .toEqual(expect.arrayContaining([`Add ${one} to this chat`, `Add ${two} to this chat`]))
+    await expect.poll(() => tileLabels(page)).not.toContain("Mira: in this chat")
     await expect(personas).toHaveCount(0)
     await show.click()
     await page.getByRole("option", { name: /^All/ }).click()
