@@ -102,7 +102,11 @@ for (const [name, viewport] of [
         await expect(resummarize).toBeVisible()
         await expect(page.getByRole("menuitem", { name: "Condensed from 2" })).toBeVisible()
         await resummarize.hover()
-        await expect(page.getByText("Writes it again from its messages with your next reply.")).toBeVisible()
+        // Beside the menu (explain's menu items), and the item's description.
+        await expect(
+          page.getByText("Writes it again from its messages with your next reply.").filter({ visible: true })
+        ).toBeVisible()
+        await expect(resummarize).toHaveAccessibleDescription("Writes it again from its messages with your next reply.")
         await page.keyboard.press("Escape")
         // A badge says what it means.
         await hint(page, top.getByText("Level 2", { exact: true }), /a summary of level-1 summaries/)
