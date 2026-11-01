@@ -7,7 +7,6 @@
 // message or scroll it sideways. Regenerate with… says plainly when there are no models.
 import { expect, type Browser, type Locator, type Page, test } from "@playwright/test"
 import { join } from "node:path"
-import { Effect } from "effect"
 import { showActions } from "./support/message.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
