@@ -237,7 +237,7 @@ export function NotesTab({
   }
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted">
+      <p className="max-w-[52rem] text-sm text-muted">
         Notes are sent with the chat where each says. Switching one on or off applies from the latest message on, on
         this branch.
       </p>
@@ -279,7 +279,8 @@ export function NotesTab({
           )
           const own = notes.filter((n) => n.card === null)
           return (
-            <div className="flex flex-col gap-5">
+            // The chat's and each card's notes side by side as the panel widens (26rem each at least).
+            <div className="grid gap-5 @4xl:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] @4xl:gap-x-8">
               <section aria-label="This chat's notes" className="flex flex-col gap-1">
                 <h3 className="text-sm font-semibold">This chat</h3>
                 {own.length === 0 ? (

@@ -419,9 +419,10 @@ function Browser({ data }: { data: ShellLibrary }) {
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
-      <div className="-mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
+      <div className="@container -mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
         {grid ? (
-          <div className="grid grid-cols-2 gap-2">
+          // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
+          <div className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]">
             {sortCards(
               data.cards.filter((c) => c.card.label.toLowerCase().includes(needle)),
               "recent"

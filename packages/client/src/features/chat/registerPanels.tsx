@@ -35,6 +35,8 @@ export const registerPanels = () => [
     label: "Prompt preset",
     order: 30,
     icon: "preset",
+    // Its own layout (the preset's outline and editor).
+    width: "full",
     component: lazyPanel(
       () => import("./PresetTab.tsx").then((m) => ({ default: ({ view }: PanelProps) => <m.PresetTab view={view} /> })),
       "preset"
@@ -86,6 +88,8 @@ export const registerPanels = () => [
     label: "Notes",
     order: 40,
     icon: "note",
+    // Its sections go side by side as the panel widens.
+    width: "full",
     component: lazyPanel(loadNotes, "notes"),
     preload: () => {
       void loadNotes().catch(() => undefined)
