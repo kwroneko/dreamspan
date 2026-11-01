@@ -14,6 +14,7 @@ import type {
   SourceActivation
 } from "@rp/shared/inspectorApi.ts"
 import { Link, Navigate, useParams, useSearch } from "@tanstack/react-router"
+import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { createContext, type ReactNode, useContext, useMemo, useRef, useState } from "react"
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual"
 import { AsyncView } from "../../actions.tsx"
@@ -110,6 +111,9 @@ function SourceTitle({
           <Link
             to="/library/$refId"
             params={{ refId: source.ref }}
+            // An entry's link opens its book: a card's own opens the card on it (a standalone
+            // lorebook ignores the focus).
+            search={source.kind === "lorebook" ? { focus: CARD_LOREBOOK_FOCUS } : {}}
             className="text-accent underline-offset-2 hover:underline"
           >
             {label}

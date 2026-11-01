@@ -71,6 +71,14 @@ const paths = {
   left: ["m15 18-6-6 6-6"],
   right: ["m9 18 6-6-6-6"],
   down: ["m6 9 6 6 6-6"],
+  // A pinned chat (filled when pinned); the star is a favourite character's.
+  pin: [
+    "M12 17v5",
+    "M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"
+  ],
+  // A sort's direction: the arrow points the way the list runs, the bars from long to short.
+  sortDown: ["m3 16 4 4 4-4", "M7 20V4", "M11 4h10", "M11 8h7", "M11 12h4"],
+  sortUp: ["m3 8 4-4 4 4", "M7 4v16", "M11 12h4", "M11 16h7", "M11 20h10"],
   back: ["m12 19-7-7 7-7", "M19 12H5"],
   undo: ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"],
   check: ["M20 6 9 17l-5-5"],

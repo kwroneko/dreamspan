@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
+import { setFavourite } from "./cardFavourites.ts"
 import { storeSummaries } from "./forkSummaries.ts"
 import { forkAt } from "./forkState.ts"
 import { onPath } from "./forks.ts"
@@ -27,6 +28,14 @@ export const makeShellWriteHandlers = Effect.gen(function* () {
         Effect.asVoid,
         transaction(sql, "SetHomePinsCollapsed")
       ),
+    // Favourites are the user's (db/cardFavourites.ts), of a live card of theirs.
+    SetCardFavourite: ({ userId, entityId, favourite }) =>
+      Effect.gen(function* () {
+        const [card] = yield* sql`SELECT id FROM entities WHERE id = ${entityId} AND owner_user_id = ${userId}
+          AND kind = 'card' AND deleted_at IS NULL AND purged_at IS NULL`
+        if (!card) return yield* new NotFound({ entity: "card", id: entityId })
+        yield* setFavourite(sql, userId, entityId, favourite)
+      }).pipe(transaction(sql, "SetCardFavourite")),
     // What a ShellLibrary read computed (db/forkSummaries.ts), each chat's only if no write moved its stamps since.
     StoreForkSummaries: ({ userId, chats }) =>
       storeSummaries(sql, userId, chats).pipe(transaction(sql, "StoreForkSummaries"))

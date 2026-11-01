@@ -410,6 +410,10 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual((yield* owner.api.GetShellLibrary()).pinsCollapsed, before.pinsCollapsed)
       })
   },
+  SetCardFavourite: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetCardFavourite({ entityId: owner.editor.cardEntityId, favourite: true }), "NotFound")
+  },
   GetSummaryDetails: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
   },

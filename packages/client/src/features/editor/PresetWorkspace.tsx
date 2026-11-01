@@ -5,6 +5,7 @@ import { useSession } from "../../session.ts"
 import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCaller } from "./caller.ts"
+import { CARD_LOREBOOK_FOCUS } from "./cardSections.ts"
 import { EditorStore, useEditorState } from "./store.ts"
 
 const Editor = lazy(() => import("./EditorPage.tsx").then((m) => ({ default: m.Editor })))
@@ -92,7 +93,14 @@ function WorkspaceOverlay({
     <ColumnOverlay
       page={page}
       onClose={workspace.close}
-      label={kind === "card" ? "Card editor" : kind === "lorebook" ? "Lorebook editor" : "Preset editor"}
+      label={
+        // A card opened on its own book is that book's editor.
+        kind === "lorebook" || (kind === "card" && selection.focus === CARD_LOREBOOK_FOCUS)
+          ? "Lorebook editor"
+          : kind === "card"
+            ? "Card editor"
+            : "Preset editor"
+      }
     >
       <div
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"

@@ -101,7 +101,15 @@ const ShellOpen = Schema.Struct({
 export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   /** The shell uses character_version as the subtitle, independent of a legacy ref subtitle. */
   card: CardUsage,
+  /**
+   * Its Created: the entity's making. An ST import dates it by ST's `create_date` (else the
+   * file's ctime); a single-file upload or a card written here, by when it came in.
+   */
   createdAt: Schema.Number,
+  /** Its Added: when it came into this app (its upstream ref's making), imported or written here. */
+  addedAt: Schema.Number,
+  /** The user's favourite (`cards.favourites`; an import's ST `fav` until the user sets it here). */
+  favourite: Schema.Boolean,
   /** Null: the card is in no chat yet, and its tile starts one. */
   open: Schema.NullOr(ShellOpen),
   /**
@@ -194,6 +202,8 @@ export const ShellForksView = Schema.Struct({
   /** Matched against each fork's name and its cast's names, ignoring case. */
   search: Schema.String,
   sort: ShellForkSort,
+  /** The sort the other way round from its own: oldest first, or Z to A. */
+  reversed: Schema.optionalKey(Schema.Boolean),
   sections: Schema.Array(
     Schema.Struct({ id: ShellSection, limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5000 })) })
   ).check(Schema.isMaxLength(12))
@@ -386,6 +396,12 @@ export class ChatSetupApi extends RpcGroup.make(
   }),
   Rpc.make("SetHomePinsCollapsed", {
     payload: { collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([...Errors])
+  }),
+  /** Marks a card of the user's a favourite or not; an import's ST `fav` no longer changes it. */
+  Rpc.make("SetCardFavourite", {
+    payload: { entityId: EntityId, favourite: Schema.Boolean },
     success: Schema.Void,
     error: Schema.Union([...Errors])
   }),

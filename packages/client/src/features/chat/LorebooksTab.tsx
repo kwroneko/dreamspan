@@ -15,6 +15,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -167,6 +168,8 @@ interface BookRow {
   readonly switchHint: string
   /** The library entry its Open button edits: the book, or the card holding it. */
   readonly ref: LibraryRef | undefined
+  /** A card's own book: the card's editor opens on it (`CARD_LOREBOOK_FOCUS`), not on the card. */
+  readonly focus?: string
   readonly openLabel: string
   /** What Open does, when it isn't plain from the row: a card's own book opens its card. */
   readonly openHint?: string
@@ -174,7 +177,7 @@ interface BookRow {
 }
 
 /** A book: its switch in this chat, Open (its editor over the chat) and its ⋯. */
-function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void }) {
+function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef, focus?: string) => void }) {
   return (
     <li className="flex items-start gap-1 py-2.5">
       <div className="min-w-0 flex-1">
@@ -191,7 +194,7 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
             row.openHint ??
             "Opens the book's editor over the chat. What you save there changes it in every chat that reads it."
           }
-          onClick={() => onOpen(row.ref!)}
+          onClick={() => onOpen(row.ref!, row.focus)}
         >
           Open
         </Button>
@@ -264,8 +267,10 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
   const navigate = useNavigate()
   const workspace = usePresetWorkspace()
   // Over the chat, as the preset and card editors open from the panel; a page without one.
-  const openEditor = (ref: LibraryRef) =>
-    workspace ? workspace.open(ref.id) : void navigate({ to: "/library/$refId", params: { refId: ref.id } })
+  const openEditor = (ref: LibraryRef, focus?: string) =>
+    workspace
+      ? workspace.open(ref.id, focus)
+      : void navigate({ to: "/library/$refId", params: { refId: ref.id }, search: focus ? { focus } : {} })
   const detach = (id: string, next: boolean) => {
     setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
     void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
@@ -291,8 +296,9 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
         switchHint: `Off stops ${card.name}'s own book in this chat only, from the latest message on. The card keeps it, and its other chats still read it.`,
         ref: library?.cards.get(card.entityId),
-        openLabel: `Open ${card.name}'s card, where its book is edited`,
-        openHint: `Opens ${card.name}'s card: its book is edited there.`,
+        focus: CARD_LOREBOOK_FOCUS,
+        openLabel: `Open ${card.lorebookName ?? `${card.name}'s lorebook`}`,
+        openHint: `Opens the book alone, in ${card.name}'s card editor: saving it saves the card.`,
         menu: []
       }
     }),

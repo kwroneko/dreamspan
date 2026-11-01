@@ -20,7 +20,8 @@ import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { usageLine } from "../characters/data.ts"
-import { shellAtom } from "../characters/shellData.tsx"
+import { FavouriteStar } from "../characters/cardBrowse.tsx"
+import { shellAtom, type ShellLibrary } from "../characters/shellData.tsx"
 import { useTitle } from "../shell.tsx"
 import { PRESET_VIEWS, type PresetView, presetDetail, presetsInView } from "../pickers/presetList.ts"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
@@ -88,7 +89,10 @@ interface Item {
   readonly usage: Usage | undefined
   /** A preset's line: when it was edited, used or archived. */
   readonly detail?: string
+  /** A character's shell card (not a persona's), for its favourite star. */
+  readonly shell: ShellCard | undefined
 }
+type ShellCard = ShellLibrary["cards"][number]
 const persona = (item: Item) => item.card?.persona === true
 
 const SORTS: Record<Sort, (a: Item, b: Item) => number> = {
@@ -201,7 +205,8 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
           </span>
         </span>
       )}
-      <div className="col-start-3 row-start-1 sm:row-span-2">
+      <div className="col-start-3 row-start-1 flex items-center gap-0.5 sm:row-span-2">
+        {item.shell && <FavouriteStar card={item.shell} />}
         <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
       </div>
     </li>
@@ -228,7 +233,8 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-1 text-xs">
           <Badges item={item} seen={seen} />
         </span>
-        <div className="mt-auto flex justify-end pt-1">
+        <div className="mt-auto flex items-center justify-end gap-0.5 pt-1">
+          {item.shell && <FavouriteStar card={item.shell} />}
           <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
         </div>
       </div>
@@ -299,7 +305,13 @@ function Section({
         search,
         all.map((item) => item.entry),
         archived
-      ).map((entry) => ({ entry, card: undefined, usage: undefined, detail: presetDetail(entry, presetView) }))
+      ).map((entry) => ({
+        entry,
+        card: undefined,
+        usage: undefined,
+        shell: undefined,
+        detail: presetDetail(entry, presetView)
+      }))
     : shown
         .filter((item) => matches(needle, item.entry.label, item.entry.subtitle, item.entry.modelName))
         .sort((a, b) => (cards ? SORTS[prefs.sort](a, b) : 0) || byName(a, b))
@@ -416,7 +428,7 @@ export function LibraryPage() {
   useTitle("Library")
   const [prefs, setPrefs] = usePrefs()
   const shell = useAtomValue(shellAtom)
-  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c.card]) : [])
+  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c]) : [])
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -446,7 +458,8 @@ export function LibraryPage() {
                     all={lists[kind].map((entry) => ({
                       entry,
                       card: cards.get(entry.entityId),
-                      usage: usage.get(entry.entityId)
+                      usage: usage.get(entry.entityId)?.card,
+                      shell: usage.get(entry.entityId)
                     }))}
                     {...(kind === "preset" ? { archived: lists.archivedPresets } : {})}
                     prefs={prefs}

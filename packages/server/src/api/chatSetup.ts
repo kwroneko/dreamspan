@@ -196,6 +196,10 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.SetHomePinsCollapsed({ ...input, userId: id })).pipe(
         internal("SetHomePinsCollapsed")
       ),
+    SetCardFavourite: (input) =>
+      Effect.flatMap(userId, (id) => writer.SetCardFavourite({ ...input, userId: id })).pipe(
+        internal("SetCardFavourite")
+      ),
     ListCards: () => Effect.flatMap(userId, (id) => reader.ListCards({ userId: id })).pipe(internal("ListCards")),
     GetGlobalLorebooks: () =>
       Effect.flatMap(userId, (id) => reader.GetGlobalLorebooks({ userId: id })).pipe(internal("GetGlobalLorebooks")),

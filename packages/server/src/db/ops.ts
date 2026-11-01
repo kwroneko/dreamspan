@@ -484,6 +484,12 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.Void,
     error: StorageError
   }),
+  /** A live card of the user's marked a favourite or not (db/cardFavourites.ts); NotFound otherwise. */
+  Rpc.make("SetCardFavourite", {
+    payload: { userId: UserId, entityId: EntityId, favourite: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Each chat's summaries, if the chat's and its owner's stamps are still the ones they were computed at. */
   Rpc.make("StoreForkSummaries", {
     payload: { userId: UserId, chats: Schema.Array(ChatSummariesAt) },

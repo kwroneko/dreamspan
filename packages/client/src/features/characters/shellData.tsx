@@ -15,13 +15,15 @@ import { createContext, type ReactNode, useContext, useState } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { FavouriteStar, SortDate } from "./cardBrowse.tsx"
+import type { CardSort } from "./cardRecency.ts"
 
 /** A fork row with its cast's cards, which the wire names once in `people`. */
 export type ShellFork = Omit<ShellForkRow, "cast"> & { readonly cast: ReadonlyArray<CastCard> }
 /** The shell's cards (GetShellCards): home, the grids, Start a chat and the card pages read them. */
 export type ShellLibrary = ShellCards
 
-const SHELL_KEYS = ["chats", "library", "pins"]
+const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
 
 /** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
 export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
@@ -79,6 +81,18 @@ export function useShellForks(view: ShellForksView) {
     failure: AsyncResult.isFailure(result) ? result : null,
     section: (id: ShellSection) => data?.get(id) ?? empty
   }
+}
+
+/** How many groups (chats of several characters) there are, for the filter's count; null while it's read. */
+export function useGroupCount() {
+  const forks = useShellForks({
+    entity: null,
+    chat: null,
+    search: "",
+    sort: "recent",
+    sections: [{ id: "groups", limit: 0 }]
+  })
+  return forks.loading ? null : forks.section("groups").total
 }
 
 type Scope = { entity: EntityId | null; chat: string | null }
@@ -168,7 +182,47 @@ export function useOpenCharacter() {
   }
 }
 
-export function CharacterTile({ card }: { card: ShellCard }) {
+/**
+ * Characters as tiles, in the order given (`browseCards`), each with the date `sort` orders
+ * by. `onPick`: what a tile does, else open the character's chat. `children` follow the tiles
+ * (an empty state). `className` sets the columns for where it's shown.
+ */
+export function CharacterGrid({
+  cards,
+  sort,
+  onPick,
+  className,
+  children
+}: {
+  cards: ReadonlyArray<ShellCard>
+  sort: CardSort
+  onPick?: (card: ShellCard) => void
+  className: string
+  children?: ReactNode
+}) {
+  return (
+    <div aria-label="Characters" className={className}>
+      {cards.map((c) => (
+        <CharacterTile key={c.card.entityId} card={c} sort={sort} {...(onPick ? { onPick } : {})} />
+      ))}
+      {children}
+    </div>
+  )
+}
+
+/**
+ * A character's tile: its picture, names and use, with the favourite star over the picture.
+ * `sort`: a date sort's date ends the last line. `onPick`: what a click does, else open its chat.
+ */
+function CharacterTile({
+  card,
+  sort = "name",
+  onPick
+}: {
+  card: ShellCard
+  sort?: CardSort
+  onPick?: (card: ShellCard) => void
+}) {
   const open = useOpenCharacter()
   const c = card.card
   return (
@@ -176,7 +230,7 @@ export function CharacterTile({ card }: { card: ShellCard }) {
       {/* Fills the grid row, its last line at the bottom, so tiles in a row match (DESIGN §2.1). */}
       <button
         type="button"
-        onClick={() => open(c.entityId)}
+        onClick={() => (onPick ? onPick(card) : open(c.entityId))}
         aria-label={`Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
         className="group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none hover:border-focus focus-visible:ring-2 focus-visible:ring-focus"
       >
@@ -188,11 +242,18 @@ export function CharacterTile({ card }: { card: ShellCard }) {
             {c.label}
           </span>
           {c.subtitle && <span className="truncate text-xs text-muted">{c.subtitle}</span>}
-          <span className="mt-auto text-xs text-muted">
-            {c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}
+          {/* The date a date sort orders by shares the last line, so tiles keep their height. */}
+          <span className="mt-auto flex min-w-0 items-baseline justify-between gap-1.5 text-xs text-muted">
+            <span className="shrink-0">
+              {c.chats ? `${c.chats} ${c.chats === 1 ? "chat" : "chats"}` : "Never used"}
+            </span>
+            <SortDate card={card} sort={sort} />
           </span>
         </span>
       </button>
+      <span className="absolute top-1 left-1 rounded-md bg-surface/85">
+        <FavouriteStar card={card} />
+      </span>
       <CardSurface placement="badge" entityId={c.entityId} label={c.label} />
     </div>
   )
