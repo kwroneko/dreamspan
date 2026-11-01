@@ -150,7 +150,7 @@ function Chip({ label, hint, tone = "muted" }: { label: string; hint: string; to
  * a trigger % that isn't 100, and secondary keys only when they're used. Order, matching,
  * groups, recursion and timing wait in the entry's Settings.
  */
-export function EntryBadges({ entry }: { entry: LorebookEntry }) {
+function EntryBadges({ entry }: { entry: LorebookEntry }) {
   const position = POSITIONS.find((item) => item.value === positionValue(entry))
   const chips: Array<ReactNode> = []
   if (entry.constant) chips.push(<Chip key="s" label="Constant" tone="accent" hint={EXPLAIN.constant} />)

@@ -4,7 +4,7 @@
 // switched off (`Cast.listedLorebooks`), until it's removed. A switch shows its new state at
 // once (`pending`), confirmed in the background; the tab drops it once the server agrees.
 
-export type BookSource = "card" | "chat" | "preset"
+type BookSource = "card" | "chat" | "preset"
 
 export interface BookRow {
   /** Stable: `card:<entity>`, `chat:<ref>`, `preset:<ref>`. */

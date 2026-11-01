@@ -18,7 +18,7 @@ import type { EditorStore } from "./store.ts"
 export type MassValue = string | number | boolean | null
 
 /** How a setting's new value is picked in the dialog. */
-export type MassInput =
+type MassInput =
   | {
       readonly kind: "choice"
       readonly options: ReadonlyArray<{ readonly value: string; readonly label: string; readonly description?: string }>

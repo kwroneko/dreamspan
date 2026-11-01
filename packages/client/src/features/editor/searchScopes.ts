@@ -3,7 +3,7 @@
 // and in either everything else as well. A scope picks fields by their path.
 import type { FieldPath } from "@rp/shared/editing.ts"
 
-export interface SearchScope {
+interface SearchScope {
   readonly value: string
   readonly label: string
   /** What it looks through, as its tooltip says. */
