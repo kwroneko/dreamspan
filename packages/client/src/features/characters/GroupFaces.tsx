@@ -14,7 +14,13 @@ export function GroupFaces({ members }: { members: ChatGroup["members"] }) {
           key={member.entityId}
           className={`relative min-w-0 ${shown.length === 3 && i === 2 ? "col-span-2 w-[calc(50%-0.125rem)] justify-self-center" : ""}`}
         >
-          <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="fill" />
+          <Avatar
+            id={member.entityId}
+            name={member.name}
+            mediaId={member.avatarMediaId}
+            crop={member.avatarCrop}
+            size="fill"
+          />
           {more > 0 && i === shown.length - 1 && (
             <span className="absolute inset-0 flex items-center justify-center bg-canvas/70 text-lg font-semibold text-text">
               +{more}

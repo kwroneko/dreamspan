@@ -2,6 +2,7 @@
 // §2.1, §2.2, §3.5; DATA-MODEL §5.3), merged into AppApi. Every id is the caller's own;
 // anything else is NotFound.
 import { Schema } from "effect"
+import { AvatarCrop } from "./media.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
   MessageImages,
@@ -55,6 +56,8 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   modelName: Schema.optionalKey(Schema.String),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String),
+  /** The avatar's chosen cutout (ARCHITECTURE.md §14.5c); absent: the default. */
+  avatarCrop: Schema.optionalKey(AvatarCrop),
   /** Chats it has joined, group chats included; chats in the bin don't count. */
   chats: Schema.Int,
   /** The last message in any of them. */
@@ -79,7 +82,8 @@ export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
       name: Schema.String,
       label: Schema.String,
       subtitle: Schema.optionalKey(Schema.String),
-      avatarMediaId: Schema.NullOr(Schema.String)
+      avatarMediaId: Schema.NullOr(Schema.String),
+      avatarCrop: Schema.optionalKey(AvatarCrop)
     })
   ),
   chats: Schema.Int,

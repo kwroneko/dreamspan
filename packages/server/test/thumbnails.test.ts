@@ -72,23 +72,24 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("an uploaded avatar has its grid and list thumbnails before the browser asks", () =>
+  it.effect("an uploaded avatar has its grid and list thumbnails, of its cutout, before the browser asks", () =>
     Effect.gen(function* () {
-      const { id } = yield* upload(largeImagePng(7, 900, 1350), "Prepared")
+      // Taller than 2:3: the default cutout (§14.5c) is the full width from the top.
+      const { id } = yield* upload(largeImagePng(7, 900, 1500), "Prepared")
       const reader = yield* Reader
       const api = yield* client(alice)
       const user = yield* api.Whoami()
       const source = yield* reader.GetMediaFile({ userId: user.id, mediaId: id })
       // 768 is made on its first request (PREPARED_WIDTHS).
-      assert.isFalse(existsSync(join(config.dataDir, `${source.path}.thumb-v1-768.webp`)))
+      assert.isFalse(existsSync(join(config.dataDir, `${source.path}.thumb-v1-768-cauto.webp`)))
       for (const width of [96, 192, 384]) {
-        const file = join(config.dataDir, `${source.path}.thumb-v1-${width}.webp`)
+        const file = join(config.dataDir, `${source.path}.thumb-v1-${width}-cauto.webp`)
         const made = statSync(file).mtimeMs
         const meta = yield* Effect.promise(() => sharp(file).metadata())
         assert.strictEqual(meta.width, width)
-        assert.strictEqual(meta.height, Math.round((width * 1350) / 900))
+        assert.strictEqual(meta.height, width * 1.5)
         // Served from disk: the request doesn't make it again.
-        const response = yield* get(id, `&w=${width}`)
+        const response = yield* get(id, `&w=${width}&crop=auto`)
         assert.strictEqual(response.status, 200)
         assert.strictEqual(response.headers.get("content-type"), "image/webp")
         assert.strictEqual(statSync(file).mtimeMs, made)

@@ -22,6 +22,7 @@ import { type Sniffed, sniff } from "./detect.ts"
 import { ParsedFile, ParsedMedia } from "./ops.ts"
 import { describeImage } from "./images.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
+import { AvatarCrop, snapCrop } from "@rp/shared/media.ts"
 
 /** A file that came with an imported one: a card's avatar or an embedded asset. */
 interface ImportedFile {
@@ -160,6 +161,32 @@ const exportedNotes = (card: CardDoc) => {
   }
 }
 
+/**
+ * The avatar's cutout an export of ours put in our namespace (`extensions.rp_harness.avatar_crop`,
+ * §14.5c), out of it and onto the card, when the file holds the image it was chosen on (the same
+ * size: an image ST cropped again is another). The writer binds it to the stored file. ST's
+ * cards have none: the default.
+ */
+const exportedCrop = (card: CardDoc, avatar: Uint8Array | null): CardDoc => {
+  const ours = card.extensions[OUR_EXTENSION]
+  if (!Predicate.isObject(ours) || ours.avatar_crop === undefined) return card
+  const { avatar_crop: carried, ...rest } = ours
+  const { [OUR_EXTENSION]: _ours, ...others } = card.extensions
+  const extensions = Object.keys(rest).length > 0 ? { ...others, [OUR_EXTENSION]: rest } : others
+  const crop = Predicate.isObject(carried)
+    ? { x: carried.x, y: carried.y, width: carried.width, height: carried.height }
+    : null
+  const image = avatar === null ? null : describeImage(avatar)
+  const sameImage =
+    image !== null &&
+    Predicate.isObject(carried) &&
+    (carried.image_width === undefined || carried.image_width === image.width) &&
+    (carried.image_height === undefined || carried.image_height === image.height)
+  return sameImage && Schema.is(AvatarCrop)(crop)
+    ? { ...card, extensions, avatar_crop: snapCrop(crop) }
+    : { ...card, extensions }
+}
+
 /** At most this many notes come in with a card, as the card's other lists are bounded. */
 const MAX_EXPORTED_NOTES = 1000
 
@@ -169,7 +196,7 @@ const cardImporter: Importer = {
   detect: (file) => file.container === "png" || file.container === "zip" || file.keys.has("spec"),
   parse: (bytes, fileName) =>
     Effect.map(importCard(bytes), (imported) => {
-      const lifted = exportedNotes(imported.card)
+      const lifted = exportedNotes(exportedCrop(imported.card, imported.avatar?.bytes ?? null))
       const { card, note, clamped } = characterNote(lifted.card)
       const carried = lifted.issues.reduce(withIssue, imported.report)
       const noted = note

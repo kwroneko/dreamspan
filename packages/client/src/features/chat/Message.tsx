@@ -743,6 +743,7 @@ export const Message = memo(function Message({
         id={speakerId ?? (model ? "model" : "you")}
         name={name}
         mediaId={speaker?.avatarMediaId ?? null}
+        crop={speaker?.avatarCrop}
         size="chat"
         preview
         className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}

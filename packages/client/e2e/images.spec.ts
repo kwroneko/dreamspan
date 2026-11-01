@@ -38,7 +38,7 @@ for (const width of [1440, 390]) {
       await expect(tile).toHaveAttribute("decoding", "async")
       await expect.poll(() => tile.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
       expect(requests.length).toBeGreaterThan(0)
-      expect(requests.every((url) => /&w=(96|192|384|768)$/.test(url))).toBeTruthy()
+      expect(requests.every((url) => /&w=(96|192|384|768)&crop=\w+$/.test(url))).toBeTruthy()
       const sizing = await tile.evaluate((img) => ({
         pixels: img.getBoundingClientRect().width * devicePixelRatio,
         url: (img as HTMLImageElement).currentSrc
@@ -52,7 +52,7 @@ for (const width of [1440, 390]) {
         .getByRole("button", { name: /^Open Synthetic 001(?: · .*)?$/ })
         .click()
       const portrait = page.locator("main img").first()
-      await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)$/)
+      await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)
       // With no chat yet the tile opens a new one, the card's panel offering New chat; with one,
       // its latest chat at the card's tab, whose More menu starts another (fpanel).
       const newChat = page.getByRole("link", { name: "New chat", exact: true }).filter({ visible: true })
@@ -99,9 +99,14 @@ for (const width of [1440, 390]) {
       mimeType: "image/png",
       buffer: bytes
     })
+    // A new picture goes through the cutout chooser (§14.5c); its default cutout is saved.
+    await page
+      .getByRole("dialog", { name: /new picture$/ })
+      .getByRole("button", { name: "Save picture" })
+      .click()
     expect((await uploaded).status()).toBe(200)
     const avatar = page.getByRole("img", { name: "The card's avatar" })
-    await expect(avatar).toHaveAttribute("src", /&w=(96|192|384|768)$/)
+    await expect(avatar).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)
     await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(8000)
     await avatar.evaluate((img) => (img as HTMLImageElement).decode())
     if (process.env.SCREENSHOT_DIR)

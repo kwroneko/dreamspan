@@ -27,6 +27,7 @@ import {
   type StSettings
 } from "./ops.ts"
 import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
 /**
@@ -52,6 +53,8 @@ export class Formats extends Context.Service<
       readonly dataDir: string
       readonly path: string
       readonly width: (typeof MEDIA_WIDTHS)[number]
+      /** A portrait's cutout (§14.5c): null for the default; absent, the whole image. */
+      readonly crop?: AvatarCrop | null
     }) => Effect.Effect<ThumbnailResult, ThumbnailFailed | FormatWorkerFailed>
     /**
      * Makes an image's thumbnails at every width ahead of its first view, on the format
@@ -60,6 +63,8 @@ export class Formats extends Context.Service<
     readonly prepareThumbnails: (input: {
       readonly dataDir: string
       readonly path: string
+      /** The cutout the portrait shows: null for the default. */
+      readonly crop: AvatarCrop | null
     }) => Effect.Effect<void, ThumbnailFailed | FormatWorkerFailed>
     /** Parses a file in a worker. A buffer of its own is transferred, and unusable here afterwards. */
     readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>

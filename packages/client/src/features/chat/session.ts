@@ -347,6 +347,11 @@ export class ChatSession {
   /** Bumped by every cast read, so an older reply is dropped. */
   private castReads = 0
 
+  /** The cast read again: after a card's picture or cutout changed (§14.5c), what its portraits show. */
+  rereadCast() {
+    return this.refreshCast()
+  }
+
   private async refreshCast() {
     const read = ++this.castReads
     const slotId = this.view.leafSlotId

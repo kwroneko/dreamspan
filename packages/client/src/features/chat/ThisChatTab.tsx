@@ -176,7 +176,15 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
         {chatDisplayName(view)}
       </h2>
       <div role="group" aria-label="Your persona" className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {persona && <Avatar id={persona.entityId} name={persona.name} mediaId={persona.avatarMediaId} size="lg" />}
+        {persona && (
+          <Avatar
+            id={persona.entityId}
+            name={persona.name}
+            mediaId={persona.avatarMediaId}
+            crop={persona.avatarCrop}
+            size="lg"
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-xs text-muted">You play</span>
           <span className="font-medium [overflow-wrap:anywhere]">{persona?.name ?? (cast ? "No persona" : "…")}</span>

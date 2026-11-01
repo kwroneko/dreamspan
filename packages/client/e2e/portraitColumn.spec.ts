@@ -173,16 +173,11 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
       await page.getByRole("button", { name: "Close the panel" }).click()
     } else {
       await openPanel(page, shape.name)
-      // The tab's own portrait: it's the one shown, so this closes it (as ST's zoomed avatar)…
+      // The tab's own portrait changes the picture (owner, 2026-11-01); View full image beside
+      // it shows the whole image, staying open when it's the one shown.
       await page
         .getByRole("tabpanel", { name: shape.name })
-        .getByRole("button", { name: `View ${shape.name}'s portrait` })
-        .click()
-      await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
-      // …and another click opens it again.
-      await page
-        .getByRole("tabpanel", { name: shape.name })
-        .getByRole("button", { name: `View ${shape.name}'s portrait` })
+        .getByRole("button", { name: "View full image", exact: true })
         .click()
       await expect(column(shape.name)).toBeVisible()
       await page.getByRole("button", { name: "Close the panel" }).click()

@@ -132,7 +132,6 @@ export function Editor({
   const [searching, setSearching] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   // A card opened on its own lorebook shows that section alone, until "Show the whole card",
   // which shows the rest and keeps the book in view.
   const [bookView, setBookView] = useState(focus === CARD_LOREBOOK_FOCUS)
@@ -221,18 +220,6 @@ export function Editor({
   if (state.snapshot === null) return <Loading label="Opening the editor…" onRetry={() => void store.load()} />
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
-
-  const upload = async (file: File) => {
-    setUploadError(null)
-    const response = await fetch(`/library/avatar?ref=${ref.id}&rowVersion=${ref.rowVersion}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: file
-    })
-    if (response.ok) return store.refresh()
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown }
-    setUploadError(typeof body.error === "string" ? body.error : "The avatar couldn't be uploaded.")
-  }
 
   /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
   const overPreset = onClose !== undefined && ref.kind === "preset"
@@ -443,11 +430,6 @@ export function Editor({
             error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
           />
         )}
-        {uploadError && (
-          <Alert tone="danger" title="The avatar wasn't changed">
-            <p>{uploadError}</p>
-          </Alert>
-        )}
         <RestoredNotice count={state.restored} />
         <RecoveredNotice store={store} />
         {notice && (
@@ -478,9 +460,7 @@ export function Editor({
 
         {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
         {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
-        {ref.kind === "card" && !bookOnly && (
-          <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />
-        )}
+        {ref.kind === "card" && !bookOnly && <CardEditor store={store} call={call} />}
         {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
         {ref.kind === "note" && (
           <Card>

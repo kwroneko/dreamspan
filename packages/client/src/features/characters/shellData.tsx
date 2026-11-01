@@ -235,7 +235,7 @@ function CharacterTile({
         className="group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none hover:border-focus focus-visible:ring-2 focus-visible:ring-focus"
       >
         <span className="aspect-[2/3] w-full overflow-hidden">
-          <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="fill" />
+          <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
         </span>
         <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
           <span className="truncate text-sm font-medium" title={c.label}>

@@ -91,7 +91,13 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
                   onClick={() => openCharacter(member.entityId)}
                   className="flex items-center gap-3 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-raised/60 focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="lg" />
+                  <Avatar
+                    id={member.entityId}
+                    name={member.name}
+                    mediaId={member.avatarMediaId}
+                    crop={member.avatarCrop}
+                    size="lg"
+                  />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{member.name}</span>
                     {member.subtitle && <span className="truncate text-xs text-muted">{member.subtitle}</span>}

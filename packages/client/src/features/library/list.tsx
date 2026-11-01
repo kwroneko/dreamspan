@@ -163,7 +163,15 @@ const nameLink =
 function Picture({ item, size }: { item: Item; size: "lg" | "fill" }) {
   const { entry } = item
   if (entry.kind === "card")
-    return <Avatar id={entry.entityId} name={entry.label} mediaId={item.card?.avatarMediaId ?? null} size={size} />
+    return (
+      <Avatar
+        id={entry.entityId}
+        name={entry.label}
+        mediaId={item.card?.avatarMediaId ?? null}
+        crop={item.card?.avatarCrop}
+        size={size}
+      />
+    )
   return (
     <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-surface-raised text-muted">
       <Icon name={entry.kind === "lorebook" ? "book" : "sliders"} size={20} />

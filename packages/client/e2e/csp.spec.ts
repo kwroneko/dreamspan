@@ -95,6 +95,11 @@ test("every screen runs under the Content-Security-Policy", async ({ page }) => 
     mimeType: "image/png",
     buffer: Buffer.from(PNG, "base64")
   })
+  // A new picture goes through the cutout chooser (§14.5c); its default cutout is saved.
+  await page
+    .getByRole("dialog", { name: /new picture$/ })
+    .getByRole("button", { name: "Save picture" })
+    .click()
   await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
   await page.getByRole("button", { name: "Search", exact: true }).click()
   await page.getByRole("textbox", { name: "Find" }).fill("Wren")

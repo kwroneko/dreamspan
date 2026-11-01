@@ -221,6 +221,7 @@ function Page({ card }: { card: CardUsage }) {
           id={card.entityId}
           name={card.name}
           mediaId={card.avatarMediaId}
+          crop={card.avatarCrop}
           size="2xl"
           className="rounded-xl"
           shape="square"

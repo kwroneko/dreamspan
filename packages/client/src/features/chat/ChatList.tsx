@@ -95,7 +95,12 @@ function Row({
         }`}
       >
         <AvatarStack
-          faces={characters.map((card) => ({ id: card.entityId, name: card.name, mediaId: card.avatarMediaId }))}
+          faces={characters.map((card) => ({
+            id: card.entityId,
+            name: card.name,
+            mediaId: card.avatarMediaId,
+            crop: card.avatarCrop
+          }))}
         />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-baseline gap-2">

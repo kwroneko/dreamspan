@@ -157,7 +157,14 @@ export function ForkRow({
       >
         <span className="flex shrink-0 gap-0.5">
           {fork.cast.slice(0, 2).map((c) => (
-            <Avatar key={c.entityId} id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
+            <Avatar
+              key={c.entityId}
+              id={c.entityId}
+              name={c.name}
+              mediaId={c.avatarMediaId}
+              crop={c.avatarCrop}
+              size="md"
+            />
           ))}
         </span>
         <span className="flex min-w-0 flex-col">

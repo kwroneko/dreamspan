@@ -11,7 +11,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
 import { ImportedMedia, Sha256 } from "../db/ops.ts"
-import { MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import { AvatarCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
 export class ThumbnailFailed extends Schema.TaggedError<ThumbnailFailed>()("ThumbnailFailed", {}) {}
 
@@ -197,12 +197,17 @@ export class FormatOps extends RpcGroup.make(
     success: StSettingsImport
   }),
   Rpc.make("Thumbnail", {
-    payload: { dataDir: Schema.String, path: Schema.String, width: Schema.Literals(MEDIA_WIDTHS) },
+    payload: {
+      dataDir: Schema.String,
+      path: Schema.String,
+      width: Schema.Literals(MEDIA_WIDTHS),
+      crop: Schema.optionalKey(Schema.NullOr(AvatarCrop))
+    },
     success: ThumbnailResult,
     error: ThumbnailFailed
   }),
   Rpc.make("PrepareThumbnails", {
-    payload: { dataDir: Schema.String, path: Schema.String },
+    payload: { dataDir: Schema.String, path: Schema.String, crop: Schema.NullOr(AvatarCrop) },
     error: ThumbnailFailed
   }),
   Rpc.make("Parse", {

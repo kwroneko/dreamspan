@@ -1,5 +1,6 @@
 // Chat panel contributions use the client registry's reversible registration scope.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -53,7 +54,12 @@ export interface PanelDescriptor {
 export interface PanelTabEntry {
   readonly value: string
   readonly label: string
-  readonly avatar?: { readonly id: string; readonly name: string; readonly mediaId: string | null }
+  readonly avatar?: {
+    readonly id: string
+    readonly name: string
+    readonly mediaId: string | null
+    readonly crop?: AvatarCrop | undefined
+  }
   readonly note?: string
 }
 
