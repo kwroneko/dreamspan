@@ -1,6 +1,7 @@
 // The reply order follows the branch's tip, even when the message list is scrolled to
 // older history. Read backwards in windows only until a character's last turn is found, unless
-// the messages shown already reach the tip with one in them.
+// the messages shown already reach the tip with one in them. Either way the entries run to the
+// tip, whose message Auto's pick reads (replyPolicy.ts).
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import { useEffect, useState } from "react"
@@ -34,6 +35,8 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
     const read = async () => {
       const characters = cast.participants.filter((id) => !cast.playedByMe.includes(id))
       let range: { _tag: "Bottom" } | { _tag: "Older"; from: SlotId } = { _tag: "Bottom" }
+      // The windows read so far, oldest first.
+      let windows: ReadonlyArray<PathEntry> = []
       while (!cancelled) {
         const result = await session.call((client) =>
           client("ReadPath", { chatId: session.id, leafSlotId: leaf, range, limit: 60 })
@@ -43,7 +46,9 @@ export function useComposerTurn(session: ChatSession, view: ChatView, cast: Cast
           timer = setTimeout(() => void read(), 2000)
           return
         }
-        const { entries, older } = result.value
+        const { older } = result.value
+        const entries = [...result.value.entries, ...windows]
+        windows = entries
         if (
           characters.length === 0 ||
           older === null ||

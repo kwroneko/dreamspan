@@ -1,5 +1,5 @@
-// Who replies next, in a group (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (the next
-// in turn) or one of the cast for one reply, after which turns go on round the cast. Beside it,
+// Who replies next, in a group (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (ST's natural
+// order, replyPolicy.ts) or one of the cast for one reply, after which Auto picks again. Beside it,
 // ▶ makes them reply at once, as ST's force talk does. Shown only when there's a choice to make.
 import type { EntityId } from "@rp/shared/chat.ts"
 import { nameOf, type NextInTurn, useCast } from "./cast.ts"
@@ -9,10 +9,10 @@ const AUTO = "auto"
 
 export interface ReplyChoice {
   readonly candidates: ReadonlyArray<EntityId>
-  /** Muted characters: offered for an explicit pick, never next in turn (DESIGN §3.5). */
+  /** Muted characters: offered for an explicit pick, never Auto's pick (DESIGN §3.5). */
   readonly muted: ReadonlyArray<EntityId>
   readonly next: NextInTurn | null
-  /** The one picked for the next reply; null: the next in turn replies. */
+  /** The one picked for the next reply; null: Auto's pick replies. */
   readonly picked: EntityId | null
   readonly onPick: (id: EntityId | null) => void
   /** The turn order isn't read yet: who's next shows as "…", not "no one". */
@@ -35,8 +35,8 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
         picked !== null
           ? `${who} replies next: your pick, for one reply`
           : replier === null
-            ? "No one is next in turn"
-            : `${who} replies next, in turn`
+            ? "No one is picked to reply"
+            : `${who} replies next: named in the message, else picked by talkativeness`
       }
       title="Who replies next"
       chip={<ChipText>Next: {who}</ChipText>}
@@ -44,7 +44,7 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
         {
           value: AUTO,
           label: next === null ? "Auto" : `Auto: ${name(next.id)}`,
-          detail: next === null ? "Whoever is next in turn replies" : "Next in turn: turns go round the cast"
+          detail: "Picked by talkativeness: someone you name first, else each by their chance"
         },
         ...candidates.map((id) => ({
           value: id,
@@ -54,9 +54,7 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
       ]}
       value={picked ?? AUTO}
       onChoose={(value) => onPick(value === AUTO ? null : value)}
-      footer={() => (
-        <p className="px-2 py-1 text-xs text-muted">A pick is for one reply; then turns go on round the cast.</p>
-      )}
+      footer={() => <p className="px-2 py-1 text-xs text-muted">A pick is for one reply; then Auto picks again.</p>}
     />
   )
 }

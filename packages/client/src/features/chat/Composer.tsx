@@ -289,13 +289,14 @@ export function Composer({
   const setPicked = (id: EntityId) => void choices.change({ speaker: id }).then(report)
   const name = nameOf(castView, speaker)
   const speakerPlayed = speaker !== null && (cast?.playedByMe.includes(speaker) ?? false)
-  // Who replies to the next send: the face picked for it, else the next in turn (ReplyFrom.tsx).
-  // A muted character is never next in turn, but can be picked for one reply.
+  // Who replies to the next send: the face picked for it, else Auto's pick (ReplyFrom.tsx).
+  // A muted character is never Auto's pick, but can be picked for one reply. The text in the box
+  // counts, as Send passes it: naming a character there makes them the one to reply.
   const faces = useMemo(() => replyFaces(cast, speaker), [cast, speaker])
   const pickedReply = choice.replyFrom !== null && faces.includes(choice.replyFrom) ? choice.replyFrom : null
   const replyPlan = useMemo(
-    () => planReply(cast, turnEntries, speaker, pickedReply),
-    [cast, turnEntries, speaker, pickedReply]
+    () => planReply(cast, turnEntries, speaker, pickedReply, draftText),
+    [cast, turnEntries, speaker, pickedReply, draftText]
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
@@ -413,13 +414,15 @@ export function Composer({
     return submit(async (from) => {
       await captured?.begin(from)
       let accepted = false
+      // The text submitted decides, should it differ from the box the preview read.
+      const plan = planReply(cast, turnEntries, speaker, pickedReply, from.text)
       try {
         const { sent, outcome, draft, recovered } = await session.send(
           from.text,
           speaker,
-          replier,
+          plan.replier,
           from,
-          replyPlan.reply,
+          plan.reply,
           captured?.images,
           captured?.ids
         )

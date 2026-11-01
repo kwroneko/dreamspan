@@ -173,6 +173,10 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 
 ### 2.3 Group-chat orchestration (see §7)
 - **[D]** The owner only uses group chats. Single-card chats are a special case of the general system.
+- **[P]** **Auto follows ST's natural order** (owner, 2026-11-01: "There's also no 'talkativeness in group chats' setting"). The composer's automatic reply pick (`replyPolicy.ts`, policy `natural`) replaces the round-robin: a character named by a whole word of their name in the text being sent replies first; else each present character passes a roll with their card's `extensions.talkativeness` (0..1, ST's default 0.5 when unset); when no roll passes, one character with talkativeness above 0 is picked at random. Round-robin stays registered as a replaceable policy. Built (ARCHITECTURE §12, Next).
+- **[P]** **One reply per send.** ST generates a reply for every character the natural order activates, in turn; here Auto takes only the first of that list (mentions, then the first roll in shuffled order, then the fallback). Multi-reply rounds are not built.
+- **[P]** **The rolls are seeded**, not `Math.random()`: a mulberry32 PRNG seeded by a hash of the branch tip's version id and the candidates with their talkativeness, so the Next preview, what Send submits, a reload, a second tab and a queued send agree, and the pick changes only when the chat moves on. The text being sent decides only the mentions, so typing doesn't reshuffle the rolls.
+- **[P]** **With nothing typed** (Reply now, an empty Send), the mentions come from the tip's message, and when a character wrote it they're skipped (ST's `bannedUser`); unlike ST's fallback, they're picked only when no one else can reply. With text typed, the last speaker can reply again, as in ST.
 
 ---
 
