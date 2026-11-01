@@ -9,7 +9,6 @@ export const DraftTargetKind = Schema.Literals([
   "composer",
   "version_edit",
   "scratchpad",
-  "snippet",
   "entity_field",
   "user_field",
   "summary_edit",
@@ -28,6 +27,27 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
    */
   field: Schema.String
 }) {}
+
+/**
+ * A library field's draft target: its ref, or for a chat's own note the ref and the branch it's
+ * edited in (`scope`: the fork, and `@slot` for an earlier message than the fork's latest), so
+ * each branch keeps its own unsaved text (owner, 2026-11-01: the note is tied to its branch).
+ */
+export const entityDraftTarget = (refId: string, scope?: string | null) =>
+  scope === undefined || scope === null || scope === "" ? refId : `${refId}/${scope}`
+
+/** The ref a library field's draft target names, and its branch scope (null: none). */
+export const parseDraftTarget = (targetId: string) => {
+  const at = targetId.indexOf("/")
+  if (at < 0) return { refId: targetId, fork: null, slot: null }
+  const scope = targetId.slice(at + 1)
+  const pin = scope.indexOf("@")
+  return {
+    refId: targetId.slice(0, at),
+    fork: pin < 0 ? scope : scope.slice(0, pin),
+    slot: pin < 0 ? null : scope.slice(pin + 1)
+  }
+}
 
 /**
  * The composer belongs to a fork, not just a chat: each fork has its own, so leaving a

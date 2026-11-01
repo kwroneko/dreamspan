@@ -8,6 +8,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { RefId } from "@rp/shared/library.ts"
+import { noteSettings } from "./support/notes.ts"
 import { openPanel, panelTab } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
@@ -91,8 +92,7 @@ const beside = async (list: Locator, box: Locator) => {
 const openOutfit = async (page: Page) => {
   const notes = page.getByRole("tabpanel", { name: "Notes" })
   const hers = notes.getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: /^Outfit/ }).click()
-  return { notes, note: hers.getByRole("region", { name: "Note Outfit" }) }
+  return { notes, note: await noteSettings(hers, "Outfit") }
 }
 
 for (const theme of ["light", "dark"] as const) {

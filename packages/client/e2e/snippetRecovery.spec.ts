@@ -1,11 +1,13 @@
-// Synthetic text only. A snippet's visible Undo and earlier text come from the server's
-// history, so they work after a reload, at desktop and phone widths in both themes.
+// Synthetic text only. A snippet's earlier texts come from its edit history on the server, so
+// they're there after a reload; Delete goes to the bin with Undo, and says first what shows a
+// shared one. At desktop and phone widths in both themes.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
-import { expect, type Page, test } from "@playwright/test"
+import { expect, type Locator, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
 import { openPanel } from "./support/panel.ts"
+import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = process.env.SCREENSHOT_DIR
@@ -20,98 +22,54 @@ const shoot = async (page: Page, name: string) => {
   await page.emulateMedia({ colorScheme: "light" })
 }
 
-for (const width of [1440, 390]) {
-  test(`an inherited snippet's first edit is undoable after reload and promotion at ${width}`, async ({ page }) => {
-    test.setTimeout(120_000)
-    await page.setViewportSize({ width, height: 1000 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const chat = await admin((api) => api.CreateChat({ title: `Inherited snippet ${width}` }))
-    const original = "The harbour is quiet before dawn."
-    const made = await admin((api) =>
-      api.CreateSnippet({ chatId: chat.id, forkId: chat.currentForkId, title: `Inherited ${width}`, content: original })
-    )
-    try {
-      const child = await admin((api) =>
-        api.CreateFork({ chatId: chat.id, fromForkId: chat.currentForkId, atSlotId: null })
-      )
-      const scope = { chatId: chat.id, forkId: child.fork.id }
-      await page.goto(`${server().url}/chats/${chat.id}`)
-      let panel = await openPanel(page, "Snippets")
-      const select = () =>
-        panel
-          .getByRole("list", { name: "Snippets" })
-          .getByRole("button", { name: new RegExp(`^Inherited ${width}`) })
-          .click()
-      await select()
-      const editor = () => panel.getByRole("textbox", { name: "Snippet text" })
-      await expect(editor()).toHaveText(original)
-      await editor().fill("Replacement.")
-      await expect.poll(async () => (await admin((api) => api.ListSnippets(scope)))[0]?.content).toBe("Replacement.")
-      await page.reload()
-      panel = await openPanel(page, "Snippets")
-      await select()
-      await panel.getByRole("button", { name: `Undo Inherited ${width}`, exact: true }).click()
-      await expect(editor()).toHaveText(original)
-      await panel.getByRole("button", { name: "Make global", exact: true }).click()
-      await expect(panel.getByRole("button", { name: "Make global", exact: true })).toHaveCount(0)
-      await page.reload()
-      panel = await openPanel(page, "Snippets")
-      await select()
-      await panel.getByRole("button", { name: `Earlier text of Inherited ${width}`, exact: true }).click()
-      const dialog = page.getByRole("dialog", { name: `Earlier text of Inherited ${width}` })
-      const replacement = dialog.getByRole("listitem").filter({ hasText: "12 characters" })
-      await expect(replacement).toHaveCount(1)
-      await shoot(page, `snippet-promoted-history-${width}`)
-      await replacement.getByRole("button", { name: "Restore" }).click()
-      await expect(editor()).toHaveText("Replacement.")
-      const parent = (await admin((api) => api.ListSnippets({ chatId: chat.id, forkId: chat.currentForkId })))[0]!
-      expect(parent.global).toBe(true)
-      expect(parent.content).toBe("Replacement.")
-    } finally {
-      await admin((api) => api.DeleteNote({ noteRefId: made.ref.id }))
-    }
-  })
+/** A snippet's block, open: its text box. */
+const openSnippet = async (panel: Locator, title: string) => {
+  const block = panel.getByRole("region", { name: `Snippet ${title}` })
+  const toggle = block.getByRole("button", { name: new RegExp(`^(Expand|Collapse) ${title}$`) })
+  await expect(toggle).toBeVisible()
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+  return { block, text: block.getByRole("textbox", { name: `Text of ${title}` }) }
+}
 
-  test(`a snippet's earlier text survives a reload and comes back with Undo or Earlier text at ${width}`, async ({
+for (const width of [1440, 390]) {
+  test(`a snippet's earlier text survives a reload and comes back from its edit history at ${width}`, async ({
     page
   }) => {
     test.setTimeout(120_000)
     await page.setViewportSize({ width, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chat = await admin((api) => api.CreateChat({ title: `Scene fragments ${width}` }))
+    const title = `Fragments ${width}`
     const original = "The lighthouse keeper counts the gulls at dawn."
-    await admin((api) =>
-      api.CreateSnippet({ chatId: chat.id, forkId: null, title: `Fragments ${width}`, content: original })
-    )
-    const content = async () => (await admin((api) => api.ListSnippets({ chatId: chat.id, forkId: null })))[0]?.content
+    const made = await admin((api) => api.CreateSnippet({ chatId: chat.id, title, content: original }))
+    const content = async () => (await admin((api) => api.ListSnippets({ chatId: chat.id })))[0]?.content
     await page.goto(`${server().url}/chats/${chat.id}`)
     let panel = await openPanel(page, "Snippets")
-    const editor = () => panel.getByRole("textbox", { name: "Snippet text" })
-    await expect(editor()).toHaveText(original)
-    await editor().fill("Replaced.")
+    let { text } = await openSnippet(panel, title)
+    await expectTextBox(text, original)
+    await text.fill("Replaced.")
     await expect.poll(content).toBe("Replaced.")
+    // Typing makes no revision: Save does.
+    expect(await admin((api) => api.ListRevisions({ refId: made.ref.id, limit: 10 }))).toHaveLength(1)
 
-    // A reload loses the editor's own undo; the visible Undo still goes back.
+    // A reload loses the box's own undo; its edit history still has the text before.
     await page.reload()
     panel = await openPanel(page, "Snippets")
-    await expect(editor()).toHaveText("Replaced.")
-    await shoot(page, `snippet-undo-${width}`)
-    await panel.getByRole("button", { name: `Undo Fragments ${width}`, exact: true }).click()
-    await expect(editor()).toHaveText(original)
-    await expect.poll(content).toBe(original)
-
-    // Earlier text lists the replaced text too, since restoring keeps it.
-    await page.reload()
-    panel = await openPanel(page, "Snippets")
-    await panel.getByRole("button", { name: `Earlier text of Fragments ${width}`, exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: `Earlier text of Fragments ${width}` })
-    const states = dialog.getByRole("list", { name: "Earlier texts" }).getByRole("listitem")
-    await expect(states.filter({ hasText: "9 characters" })).toHaveCount(1)
-    await shoot(page, `snippet-history-${width}`)
-    await states.filter({ hasText: "9 characters" }).getByRole("button", { name: "Restore" }).click()
+    ;({ text } = await openSnippet(panel, title))
+    await expectTextBox(text, "Replaced.")
+    await panel.getByRole("button", { name: `Edit history of Text of ${title}`, exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: `Edit history: Text of ${title}` })
+    const earlier = dialog.getByRole("list", { name: "Earlier states" }).getByRole("button", { name: /characters/ })
+    await earlier
+      .filter({ hasText: `${original.length} characters` })
+      .first()
+      .click()
+    await expect(dialog.getByLabel("Text of the state")).toHaveText(original)
+    await shoot(page, `snippet-edit-history-${width}`)
+    await dialog.getByRole("button", { name: "Put this text in the box" }).click()
     await expect(dialog).toHaveCount(0)
-    await expect(editor()).toHaveText("Replaced.")
-    await expect.poll(content).toBe("Replaced.")
+    await expectTextBox(text, original)
+    await expect.poll(content).toBe(original)
   })
 }
 
@@ -123,7 +81,7 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     const chat = await admin((api) => api.CreateChat({ title: `Snippet tidy ${width}` }))
-    const scope = { chatId: chat.id, forkId: null }
+    const scope = { chatId: chat.id }
     await admin((api) => api.CreateSnippet({ ...scope, title: `Empty ${width}`, content: "" }))
     const linked = await admin((api) => api.CreateSnippet({ ...scope, title: `Shown ${width}`, content: "Fog." }))
     await admin((api) =>
@@ -133,21 +91,21 @@ for (const width of [1440, 390]) {
       (await admin((api) => api.ListSnippets(scope))).map((item) => item.title).filter((t) => t.endsWith(`${width}`))
     await page.goto(`${server().url}/chats/${chat.id}`)
     const panel = await openPanel(page, "Snippets")
-    const list = panel.getByRole("list", { name: "Snippets" })
+    const block = (title: string) => panel.getByRole("region", { name: `Snippet ${title}` })
 
     // An unused snippet goes straight to the bin; the toast's Undo brings it back.
-    await list.getByRole("button", { name: new RegExp(`^Empty ${width}`) }).click()
+    await openSnippet(panel, `Empty ${width}`)
     await panel.getByRole("button", { name: `Delete Empty ${width}`, exact: true }).click()
     await expect(page.getByText(`Deleted: Empty ${width}`)).toBeVisible()
-    await expect(list.getByRole("button", { name: new RegExp(`^Empty ${width}`) })).toHaveCount(0)
+    await expect(block(`Empty ${width}`)).toHaveCount(0)
     await expect.poll(titles).toEqual([`Shown ${width}`])
     await shoot(page, `snippet-deleted-${width}`)
     await page.getByRole("button", { name: "Undo", exact: true }).click()
-    await expect(list.getByRole("button", { name: new RegExp(`^Empty ${width}`) })).toBeVisible()
+    await expect(block(`Empty ${width}`)).toBeVisible()
     await expect.poll(titles).toEqual([`Empty ${width}`, `Shown ${width}`])
 
     // A snippet a chat note shows asks first, and says so.
-    await list.getByRole("button", { name: new RegExp(`^Shown ${width}`) }).click()
+    await openSnippet(panel, `Shown ${width}`)
     await panel.getByRole("button", { name: `Delete Shown ${width}`, exact: true }).click()
     const confirm = page.getByRole("alertdialog", { name: `Delete Shown ${width}?` })
     await expect(confirm).toContainText("1 note in a card or chat shows it")

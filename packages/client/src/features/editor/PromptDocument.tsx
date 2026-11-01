@@ -17,11 +17,21 @@ import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
+import {
+  Block,
+  BlockBody,
+  BlockHeader,
+  BlockMenuButton,
+  BlockOptions,
+  BlockOptionsToggle,
+  BlockToggle,
+  ExpandCollapseAll
+} from "../../ui/Block.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { NumberField, SelectField, SwitchField, TextField, TriggersField } from "./controls.tsx"
 import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
@@ -272,7 +282,7 @@ interface RowActions {
   readonly definitionsBelow: (() => void) | undefined
 }
 
-function Block({
+function PromptBlock({
   store,
   entry,
   handle,
@@ -360,31 +370,21 @@ function Block({
       <MarkerNote entry={entry} context={context} byDefinitions={byDefinitions} />
     </span>
   ) : (
-    <Tooltip label={collapsed ? "Show the prompt's text" : "Hide the prompt's text"}>
-      <button
-        type="button"
-        aria-expanded={!collapsed}
-        aria-label={`${collapsed ? "Expand" : "Collapse"} ${name}`}
-        onClick={toggle}
-        className="flex min-w-0 shrink items-start gap-1 rounded-md px-1 py-1 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-      >
-        <Icon
-          name="right"
-          size={14}
-          className={`mt-0.5 text-muted transition-transform motion-reduce:transition-none ${collapsed ? "" : "rotate-90"}`}
-        />
-        <span className="flex min-w-0 flex-col items-start gap-0.5">
-          <span
-            className={`text-sm break-words ${label.derived ? "text-muted italic" : "font-medium"} ${entry.enabled ? "" : "opacity-60"}`}
-          >
-            {name}
-          </span>
-          {column && collapsed && !label.derived && first !== "" && (
-            <span className="line-clamp-1 text-xs text-muted [overflow-wrap:anywhere]">{first}</span>
-          )}
-        </span>
-      </button>
-    </Tooltip>
+    <BlockToggle
+      open={!collapsed}
+      onToggle={toggle}
+      label={name}
+      name={name}
+      hint={collapsed ? "Show the prompt's text" : "Hide the prompt's text"}
+      derived={label.derived}
+      dim={!entry.enabled}
+      detail={
+        column &&
+        collapsed &&
+        !label.derived &&
+        first !== "" && <span className="line-clamp-1 text-xs text-muted [overflow-wrap:anywhere]">{first}</span>
+      }
+    />
   )
   // A closed row in the column keeps its width for the name and first line: renaming and the
   // options are in the header once it's open.
@@ -411,11 +411,8 @@ function Block({
   const menu = (
     <Menu
       label={`Actions for ${name}`}
-      trigger={
-        <Button variant="ghost" className="size-8 shrink-0 px-0!" aria-label={`Actions for ${name}`}>
-          <Icon name="more" />
-        </Button>
-      }
+      hint="More: open it in the large editor, insert a prompt beside it, delete it"
+      trigger={<BlockMenuButton label={`Actions for ${name}`} />}
     >
       {actions.openLarge && (
         <MenuItem
@@ -454,27 +451,24 @@ function Block({
   )
 
   const optionsToggle = !prompt.marker && full && (
-    <IconButton
+    <BlockOptionsToggle
+      open={optionsOpen}
+      onToggle={toggleOptions}
       label={`Options of ${name}`}
       hint={optionsOpen ? "Hide the prompt's options" : "Show the prompt's options: role, position, condition…"}
-      icon="sliders"
-      aria-expanded={optionsOpen}
-      className={optionsOpen ? "bg-surface-raised text-text" : ""}
-      onClick={toggleOptions}
     />
   )
 
   return (
-    <section
+    <Block
       ref={marker}
       tabIndex={-1}
       id={column ? undefined : `prompt-${entry.identifier}`}
       data-prompt={entry.identifier}
-      className={`scroll-mt-[var(--preset-toolbar-height,1rem)] rounded-lg border ${
-        prompt.marker ? "border-dashed border-border bg-transparent" : "border-border bg-surface shadow-xs"
-      } ${column ? "bg-canvas" : ""}`}
+      dashed={prompt.marker}
+      className={`scroll-mt-[var(--preset-toolbar-height,1rem)] ${column ? "bg-canvas" : ""}`}
     >
-      <header className={`flex min-w-0 items-start gap-0.5 px-1 py-0.5 ${column ? "" : "@lg:items-center"}`}>
+      <BlockHeader className={column ? "" : "@lg:items-center"}>
         {handle}
         <span className="flex h-8 w-10 shrink-0 items-center justify-center">{sendSwitch}</span>
         <span
@@ -498,7 +492,7 @@ function Block({
         )}
         {optionsToggle}
         {menu}
-      </header>
+      </BlockHeader>
       {column && open && !prompt.marker && (
         <div className="flex flex-wrap items-center gap-1 px-2 pb-1 pl-12">
           <SendBadges prompt={prompt} />
@@ -506,13 +500,13 @@ function Block({
         </div>
       )}
       {open && optionsOpen && (
-        <div className="border-t border-border bg-surface-raised/50 px-3 py-3">
+        <BlockOptions>
           <PromptOptions store={store} path={path} prompt={prompt} />
-        </div>
+        </BlockOptions>
       )}
       {full && <OverrideNote store={store} entry={entry} context={context} className="px-3 pb-1" />}
       {open && (
-        <div className={`border-t border-border px-2 pt-2 pb-2 ${entry.enabled ? "" : "opacity-70"}`}>
+        <BlockBody dim={!entry.enabled}>
           <TextField
             store={store}
             path={[...path, "content"]}
@@ -520,9 +514,9 @@ function Block({
             labelHidden
             rows={Math.min(8, Math.max(2, content.split("\n").length))}
           />
-        </div>
+        </BlockBody>
       )}
-    </section>
+    </Block>
   )
 }
 
@@ -746,22 +740,15 @@ export function PromptDocument({
   const small = column ? "h-7 px-2" : ""
   const variant = column ? "ghost" : "secondary"
   const controls = (
-    <div className={`flex flex-wrap items-center gap-1 ${column ? "justify-end" : "sm:gap-2"}`}>
-      <Tooltip label="Show every prompt's text">
-        <Button variant={variant} className={small} onClick={() => setOpened({ all: true, except: new Set() })}>
-          Expand all
-        </Button>
-      </Tooltip>
-      <Tooltip label="Fold every prompt to its header: an outline of the preset">
-        <Button
-          variant={variant}
-          className={small}
-          disabled={column && !anyOpen}
-          onClick={() => setOpened({ all: false, except: new Set() })}
-        >
-          Collapse all
-        </Button>
-      </Tooltip>
+    <ExpandCollapseAll
+      compact={column}
+      anyOpen={anyOpen}
+      allOpen={false}
+      expandHint="Show every prompt's text"
+      collapseHint="Fold every prompt to its header: an outline of the preset"
+      onExpand={() => setOpened({ all: true, except: new Set() })}
+      onCollapse={() => setOpened({ all: false, except: new Set() })}
+    >
       <Tooltip
         label={
           options.all
@@ -782,7 +769,7 @@ export function PromptDocument({
           {options.all ? "Hide all options" : "Show all options"}
         </Button>
       </Tooltip>
-    </div>
+    </ExpandCollapseAll>
   )
   const list = (
     <div className="@container min-w-0 flex-1">
@@ -815,7 +802,7 @@ export function PromptDocument({
               {entry.identifier === "main" &&
                 slot("Before main prompt", (p) => p.mode === "section" && p.section === "before_main_prompt")}
               <div className={column ? "py-0.5" : ""}>
-                <Block
+                <PromptBlock
                   store={store}
                   entry={entry}
                   handle={handle}

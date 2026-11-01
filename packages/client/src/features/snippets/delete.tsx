@@ -23,8 +23,9 @@ export function DeleteSnippet({ store, item }: { store: SnippetWorkspace; item: 
     <>
       <Button
         variant="ghost"
+        className="h-8 px-2"
         aria-label={`Delete ${name}`}
-        hint="Moves it to the bin, with Undo."
+        hint="Moves it to the bin, with Undo there and in the message that follows."
         disabled={pending}
         onClick={async () => {
           const used = await store.usedBy(item.ref.id)

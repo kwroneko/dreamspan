@@ -5,7 +5,7 @@ import { readBinLimits } from "./binLimits.ts"
 import { Buffer } from "node:buffer"
 import { BinChanged, BinItem, type BinLimits, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import type { UserId } from "@rp/shared/domain.ts"
-import { composerKey, type DraftKey, excerpt } from "@rp/shared/drafts.ts"
+import { composerKey, type DraftKey, excerpt, parseDraftTarget } from "@rp/shared/drafts.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { Data, Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -1073,9 +1073,10 @@ export const makeBin = (sql: SqlClient.SqlClient, defaults: BinLimits, now: () =
           return `Scratchpad in ${yield* chatTitle(`SELECT c.title FROM slots s JOIN chats c ON c.id = s.chat_id WHERE s.id = ?`)}`
         case "summary_edit":
           return `Summary in ${yield* chatTitle(`SELECT c.title FROM summaries s JOIN chats c ON c.id = s.chat_id WHERE s.id = ?`)}`
-        case "snippet":
         case "entity_field": {
-          const [ref] = yield* sql<{ label: string }>`SELECT label FROM entity_refs WHERE id = ${key.targetId}`
+          const [ref] = yield* sql<{
+            label: string
+          }>`SELECT label FROM entity_refs WHERE id = ${parseDraftTarget(key.targetId).refId}`
           return [ref?.label ?? "A library entry", key.field].filter(Boolean).join(" › ")
         }
       }

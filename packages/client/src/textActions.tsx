@@ -1,10 +1,9 @@
 // Generic text-command contributions. Editors offer them in their own chrome; features supply
 // the behavior. The browser's own context menu stays everywhere: nothing here replaces it.
-import { useEffect, useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from "react"
+import { useState, useSyncExternalStore, type FocusEvent, type KeyboardEvent } from "react"
 import { makeRegistry } from "./registry.ts"
 import { Icon, type IconName } from "./ui/Icon.tsx"
 import { Tooltip } from "./ui/Tooltip.tsx"
-import { textSelection, type TextSelection } from "./ui/textTargets.ts"
 
 interface TextActionContext {
   readonly text: string
@@ -30,33 +29,6 @@ export interface TextAction {
   readonly run: (context: TextActionContext) => void
 }
 export const textActions = makeRegistry<TextAction>()
-let destination: TextSelection | null = null
-export const hasTextDestination = () => destination !== null
-export const insertText = (text: string) => {
-  if (!destination) return false
-  destination.insert(text)
-  return true
-}
-
-/** Remembers the last field the user worked in, where Insert puts text. */
-export function TextActionHost() {
-  useEffect(() => {
-    const isTool = (e: Event) =>
-      e.composedPath().some((node) => node instanceof HTMLElement && node.hasAttribute("data-text-tool"))
-    const capture = (e: Event) => {
-      if (isTool(e)) return
-      const target = textSelection(e)
-      if (target && target.editable !== false) destination = target
-    }
-    const events = ["focusin", "keyup", "pointerup", "select"]
-    for (const name of events) document.addEventListener(name, capture)
-    return () => {
-      for (const name of events) document.removeEventListener(name, capture)
-      destination = null
-    }
-  }, [])
-  return null
-}
 
 const shortcutLabel = (key: string) =>
   `${typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Command" : "Ctrl"}+Shift+${key.toUpperCase()}`

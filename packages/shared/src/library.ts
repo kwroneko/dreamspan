@@ -81,7 +81,14 @@ export class Revision extends Schema.Class<Revision>("Revision")({
   createdAt: Schema.Number,
   /** Its place along the ref's first-parent line, from 1 for the first revision. */
   number: Schema.optionalKey(Schema.Int),
-  usedBy: Schema.optionalKey(RevisionUse)
+  usedBy: Schema.optionalKey(RevisionUse),
+  /**
+   * A chat's own note's revision listed at a position: where it took effect, by message number
+   * (null: before the first message), and whether on the branch shown or another one.
+   */
+  changedAt: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ message: Schema.NullOr(Schema.Int), thisBranch: Schema.Boolean }))
+  )
 }) {}
 
 export const MergeOutcome = Schema.Literals(["up_to_date", "fast_forward", "merged", "conflicts"])

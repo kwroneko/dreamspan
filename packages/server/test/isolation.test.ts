@@ -2481,74 +2481,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ListSnippets: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(actor.api.ListSnippets({ chatId: owner.chat.chatId, forkId: null }), "NotFound")
-        const mine = yield* actor.api.ListSnippets({ chatId: null, forkId: null })
+        yield* refused(actor.api.ListSnippets({ chatId: owner.chat.chatId }), "NotFound")
+        const mine = yield* actor.api.ListSnippets({ chatId: null })
         assert.isFalse(mine.some((n) => n.ref.id === owner.editor.sharedRefId))
       })
   },
   CreateSnippet: {
     probe: (actor, owner) =>
-      refused(
-        actor.api.CreateSnippet({ chatId: owner.chat.chatId, forkId: null, title: "Taken", content: "Planted" }),
-        "NotFound"
-      )
+      refused(actor.api.CreateSnippet({ chatId: owner.chat.chatId, title: "Taken", content: "Planted" }), "NotFound")
   },
-  SaveSnippet: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.SaveSnippet({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId,
-          title: "Taken",
-          content: "Planted"
-        }),
-        "NotFound"
-      )
-  },
-  MakeSnippetGlobal: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.MakeSnippetGlobal({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId
-        }),
-        "NotFound"
-      )
-  },
-  SnippetHistory: {
+  SetSnippetScope: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
         yield* refused(
-          actor.api.SnippetHistory({
-            chatId: owner.chat.chatId,
-            forkId: null,
-            refId: owner.editor.sharedRefId,
-            limit: 5
-          }),
+          actor.api.SetSnippetScope({ chatId: null, refId: owner.editor.sharedRefId, global: true }),
           "NotFound"
         )
         yield* refused(
-          actor.api.SnippetHistory({ chatId: null, forkId: null, refId: owner.editor.sharedRefId, limit: 5 }),
+          actor.api.SetSnippetScope({ chatId: owner.chat.chatId, refId: owner.editor.sharedRefId, global: false }),
           "NotFound"
         )
       })
-  },
-  RestoreSnippet: {
-    probe: (actor, owner) =>
-      refused(
-        actor.api.RestoreSnippet({
-          chatId: null,
-          forkId: null,
-          refId: owner.editor.sharedRefId,
-          expectedRevision: owner.editor.revisionId,
-          seq: 0
-        }),
-        "NotFound"
-      )
   },
   ListSharedNotes: {
     probe: (actor, owner) =>

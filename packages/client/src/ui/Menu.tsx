@@ -16,10 +16,13 @@ export function Menu({
   align = "end",
   label,
   defaultOpen = false,
-  onOpenChange
+  onOpenChange,
+  hint
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
   trigger: ReactElement
+  /** What the trigger opens, on hover and focus: an icon-only ⋯ says what's in it. */
+  hint?: string | undefined
   children: ReactNode
   side?: "top" | "bottom"
   align?: "start" | "center" | "end"
@@ -37,7 +40,13 @@ export function Menu({
       defaultOpen={defaultOpen}
       {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}
     >
-      <BaseMenu.Trigger render={trigger} />
+      {hint ? (
+        <Tooltip label={hint}>
+          <BaseMenu.Trigger render={trigger} />
+        </Tooltip>
+      ) : (
+        <BaseMenu.Trigger render={trigger} />
+      )}
       <BaseMenu.Portal>
         <BaseMenu.Positioner
           className="z-50 outline-none"

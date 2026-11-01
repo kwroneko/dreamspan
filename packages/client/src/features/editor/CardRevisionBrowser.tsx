@@ -38,10 +38,29 @@ const orderLines = (doc: Doc) => (value: unknown) => {
   )
 }
 
-function FieldComparison({ label, change, doc }: { label: string; change: FieldChange; doc: Doc }) {
+/**
+ * How a kind's settings read in History, by their path (a note's position, say), where the
+ * generic reading of a value wouldn't say it well; undefined keeps that one.
+ */
+export type SettingLines = (
+  path: ReadonlyArray<string | number>
+) => ((value: unknown) => ReadonlyArray<string>) | undefined
+
+function FieldComparison({
+  label,
+  change,
+  doc,
+  settingLines
+}: {
+  label: string
+  change: FieldChange
+  doc: Doc
+  settingLines?: SettingLines | undefined
+}) {
   const [open, setOpen] = useState(false)
   const text = isText(change.before) && isText(change.after)
   const order = change.path.length === 1 && change.path[0] === "order"
+  const lines = order ? orderLines(doc) : settingLines?.(change.path)
   return (
     <details
       className="min-w-0 rounded-md border border-border p-2"
@@ -53,7 +72,7 @@ function FieldComparison({ label, change, doc }: { label: string; change: FieldC
           {text ? (
             <ValueDiff before={change.before} after={change.after} rich />
           ) : (
-            <ReadableDiff before={change.before} after={change.after} {...(order ? { lines: orderLines(doc) } : {})} />
+            <ReadableDiff before={change.before} after={change.after} {...(lines ? { lines } : {})} />
           )}
         </div>
       )}
@@ -64,6 +83,13 @@ function FieldComparison({ label, change, doc }: { label: string; change: FieldC
 /** What made a revision, in words: the reply that used its text (linked), a Save, an import. */
 function RevisionTitle({ revision }: { revision: Revision }) {
   const use = revision.usedBy
+  // A chat's own note: where the change took effect (owner, 2026-11-01).
+  const where = revision.changedAt
+    ?.map(
+      (at) =>
+        `${at.message === null ? "Changed before the first message" : `Changed at message ${at.message}`}, ${at.thisBranch ? "this branch" : "another branch"}`
+    )
+    .join("; ")
   if (revision.origin === "generation" && use)
     return (
       <>
@@ -77,6 +103,7 @@ function RevisionTitle({ revision }: { revision: Revision }) {
           {use.chatTitle ? readableChatTitle(use.chatTitle) : "a chat"}
         </Link>{" "}
         · {use.summary ? `messages ${use.summary.from}–${use.summary.to}` : `message ${use.message}`}
+        {where && <span className="block text-muted">{where}</span>}
       </>
     )
   const origins: Record<Revision["origin"], string> = {
@@ -87,10 +114,25 @@ function RevisionTitle({ revision }: { revision: Revision }) {
     agent: "Changed by the agent",
     changeset: "Changed"
   }
-  return <>{origins[revision.origin]}</>
+  return (
+    <>
+      {origins[revision.origin]}
+      {where && <span className="block text-muted">{where}</span>}
+    </>
+  )
 }
 
-function RevisionComparison({ store, call, revision }: { store: EditorStore; call: Caller; revision: Revision }) {
+function RevisionComparison({
+  store,
+  call,
+  revision,
+  settingLines
+}: {
+  store: EditorStore
+  call: Caller
+  revision: Revision
+  settingLines?: SettingLines | undefined
+}) {
   const [mode, setMode] = useState<"parent" | "current">("parent")
   const [docs, setDocs] = useState<{ doc: Doc; parent: Doc } | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -126,7 +168,8 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
           return yield* client("RestoreRevision", {
             refId: store.refId,
             revisionId: revision.id,
-            expectedRowVersion: state.snapshot!.ref.rowVersion
+            expectedRowVersion: state.snapshot!.ref.rowVersion,
+            ...(store.chatNote ? { chatNote: store.chatNote } : {})
           })
         }),
       ["library"]
@@ -175,6 +218,7 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
                 label={label}
                 change={change}
                 doc={mode === "parent" ? docs!.doc : current}
+                settingLines={settingLines}
               />
             )
           })}
@@ -204,7 +248,18 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
   )
 }
 
-export function CardRevisionBrowser({ store, call }: { store: EditorStore; call: Caller }) {
+export function CardRevisionBrowser({
+  store,
+  call,
+  settingLines
+}: {
+  store: EditorStore
+  call: Caller
+  /** How the kind's settings read (a note's position), past the generic reading. */
+  settingLines?: SettingLines | undefined
+}) {
+  // A chat's own note: its line as the branch shown has it, and where each change took effect.
+  const chatNote = store.chatNote ? { chatNote: store.chatNote } : {}
   const [revisions, setRevisions] = useState<ReadonlyArray<Revision>>([])
   const [selected, setSelected] = useState<Revision | null>(null)
   const [error, setError] = useState<AppError | null>(null)
@@ -212,7 +267,8 @@ export function CardRevisionBrowser({ store, call }: { store: EditorStore; call:
   const head = useEditorState(store).snapshot!.ref.headRevisionId
   useEffect(() => {
     let live = true
-    void call((client) => client("ListRevisions", { refId: store.refId, limit: 50 })).then((result) => {
+    const at = store.chatNote ? { chatNote: store.chatNote } : {}
+    void call((client) => client("ListRevisions", { refId: store.refId, limit: 50, ...at })).then((result) => {
       if (!live) return
       if (result.ok) setRevisions(result.value)
       else setError(result.error)
@@ -224,7 +280,7 @@ export function CardRevisionBrowser({ store, call }: { store: EditorStore; call:
   const more = async () => {
     setPending(true)
     const result = await call((client) =>
-      client("ListRevisions", { refId: store.refId, limit: 50, before: revisions.at(-1)!.id })
+      client("ListRevisions", { refId: store.refId, limit: 50, before: revisions.at(-1)!.id, ...chatNote })
     )
     setPending(false)
     if (result.ok) setRevisions([...revisions, ...result.value])
@@ -269,7 +325,15 @@ export function CardRevisionBrowser({ store, call }: { store: EditorStore; call:
           Earlier revisions
         </Button>
       )}
-      {selected !== null && <RevisionComparison key={selected.id} store={store} call={call} revision={selected} />}
+      {selected !== null && (
+        <RevisionComparison
+          key={selected.id}
+          store={store}
+          call={call}
+          revision={selected}
+          settingLines={settingLines}
+        />
+      )}
     </div>
   )
 }

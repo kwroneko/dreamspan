@@ -5,7 +5,7 @@ import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
 import { PRESET_SCHEMA_VERSION, promptPreset } from "@rp/shared/docs/preset.ts"
 import { builtinPreset } from "../db/assemblySources.ts"
 import { CARD_SCHEMA_VERSION } from "@rp/shared/docs/card.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { newCardDoc, parseField, validateDoc } from "@rp/shared/editing.ts"
 import { EditRefused, InvalidDocument, SavedRef } from "@rp/shared/editorApi.ts"
 import { NotFound, ServerError } from "@rp/shared/errors.ts"
@@ -64,7 +64,9 @@ const saved = (change: RefChange) =>
     recoveredFields: change.recoveredFields ?? []
   })
 
-const draftKey = (refId: RefId, field: string) => new DraftKey({ targetKind: "entity_field", targetId: refId, field })
+/** A field's draft; a chat's own note's are its branch's (`scope`, from `OpenEditor`). */
+const draftKey = (refId: RefId, field: string, scope?: string) =>
+  new DraftKey({ targetKind: "entity_field", targetId: entityDraftTarget(refId, scope), field })
 
 /** Only fields that name a place in a document get drafts. */
 const checkField = (field: string) =>
@@ -101,19 +103,9 @@ export const makeEditorHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => writer.CreateSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
         settle("CreateSnippet")
       ),
-    SaveSnippet: (args) =>
-      Effect.flatMap(userId, (id) => writer.SaveSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
-        settle("SaveSnippet")
-      ),
-    MakeSnippetGlobal: (args) =>
-      Effect.flatMap(userId, (id) => writer.MakeSnippetGlobal({ userId: id, ...args }).pipe(changed(id))).pipe(
-        settle("MakeSnippetGlobal")
-      ),
-    SnippetHistory: (args) =>
-      Effect.flatMap(userId, (id) => reader.SnippetHistory({ userId: id, ...args })).pipe(settle("SnippetHistory")),
-    RestoreSnippet: (args) =>
-      Effect.flatMap(userId, (id) => writer.RestoreSnippet({ userId: id, ...args }).pipe(changed(id))).pipe(
-        settle("RestoreSnippet")
+    SetSnippetScope: (args) =>
+      Effect.flatMap(userId, (id) => writer.SetSnippetScope({ userId: id, ...args }).pipe(changed(id))).pipe(
+        settle("SetSnippetScope")
       ),
     GetUserDraft: ({ ownerId, targetId, field }) =>
       Effect.flatMap(draftOwner(ownerId), (id) => reader.GetDraft({ userId: id, key: userKey(targetId, field) })).pipe(
@@ -178,12 +170,12 @@ export const makeEditorHandlers = Effect.gen(function* () {
         return ref
       }).pipe(settle("CreateCard")),
 
-    SaveEditorDraft: ({ refId, field, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
+    SaveEditorDraft: ({ refId, field, scope, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
       Effect.gen(function* () {
         yield* checkField(field)
         return yield* writer.SaveDraft({
           userId: yield* userId,
-          key: draftKey(refId, field),
+          key: draftKey(refId, field, scope),
           draftId,
           content,
           expectedRowVersion,
@@ -192,18 +184,20 @@ export const makeEditorHandlers = Effect.gen(function* () {
         })
       }).pipe(settle("SaveEditorDraft")),
 
-    EditorDraftHistory: ({ refId, field, limit, before }) =>
+    EditorDraftHistory: ({ refId, field, scope, limit, before }) =>
       Effect.flatMap(userId, (id) =>
         reader.DraftHistory({
           userId: id,
-          key: draftKey(refId, field),
+          key: draftKey(refId, field, scope),
           limit,
           ...(before === undefined ? {} : { before })
         })
       ).pipe(settle("EditorDraftHistory")),
 
-    EditorDraftState: ({ refId, field, seq }) =>
-      Effect.flatMap(userId, (id) => reader.GetDraftState({ userId: id, key: draftKey(refId, field), seq })).pipe(
+    EditorDraftState: ({ refId, field, scope, seq }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.GetDraftState({ userId: id, key: draftKey(refId, field, scope), seq })
+      ).pipe(
         Effect.map((state) => state.content),
         settle("EditorDraftState")
       ),
@@ -218,16 +212,16 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("SetRevisionMessage")
       ),
 
-    RestoreEditorDraft: ({ refId, field, ...restore }) =>
+    RestoreEditorDraft: ({ refId, field, scope, ...restore }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field), ...restore })
+        writer.RestoreDraftState({ userId: id, key: draftKey(refId, field, scope), ...restore })
       ).pipe(settle("RestoreEditorDraft")),
 
-    DiscardEditorDraft: ({ refId, field, draftId, expectedRowVersion }) =>
+    DiscardEditorDraft: ({ refId, field, scope, draftId, expectedRowVersion }) =>
       Effect.flatMap(userId, (id) =>
         writer.ClearDraft({
           userId: id,
-          key: draftKey(refId, field),
+          key: draftKey(refId, field, scope),
           draftId,
           outcome: "discarded",
           expectedRowVersion
@@ -258,9 +252,15 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("CommitEditorDrafts")
       ),
 
-    ListRevisions: ({ refId, limit, before }) =>
+    ListRevisions: ({ refId, limit, before, chatNote }) =>
       Effect.flatMap(userId, (id) =>
-        reader.RefHistory({ userId: id, refId, limit, ...(before ? { before } : {}) })
+        reader.RefHistory({
+          userId: id,
+          refId,
+          limit,
+          ...(before ? { before } : {}),
+          ...(chatNote ? { chatNote } : {})
+        })
       ).pipe(settle("ListRevisions")),
 
     GetRevision: ({ refId, revisionId }) =>
@@ -268,10 +268,16 @@ export const makeEditorHandlers = Effect.gen(function* () {
         settle("GetRevision")
       ),
 
-    RestoreRevision: ({ refId, revisionId, expectedRowVersion }) =>
+    RestoreRevision: ({ refId, revisionId, expectedRowVersion, chatNote }) =>
       Effect.flatMap(userId, (id) =>
-        writer.RestoreRevision({ userId: id, refId, revisionId, expectedRowVersion }).pipe(changed(id))
-      ).pipe(Effect.map(saved), settle("RestoreRevision")),
+        writer
+          .RestoreRevision({ userId: id, refId, revisionId, expectedRowVersion, ...(chatNote ? { chatNote } : {}) })
+          .pipe(changed(id))
+      ).pipe(
+        Effect.tap(() => Effect.sync(() => chatNote && hub.publish(chatNote.chatId, { _tag: "State" }))),
+        Effect.map(saved),
+        settle("RestoreRevision")
+      ),
 
     ForkVariant: ({ refId, label, subtitle, moveDrafts }) =>
       Effect.flatMap(userId, (id) => writer.ForkWithDrafts({ userId: id, refId, label, subtitle, moveDrafts })).pipe(

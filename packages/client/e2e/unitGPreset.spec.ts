@@ -11,6 +11,7 @@ import { asUser } from "./support/rpc.ts"
 import { revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, openPresetAt } from "./support/panel.ts"
+import { openNoteSettings } from "./support/notes.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
@@ -158,12 +159,11 @@ for (const width of [1440, 390])
       await expect(overlay).toHaveCount(0)
       await expectTextBox(composer, `An unfinished message ${width} ${theme}`)
       const notes = await openPanel(page, "Notes")
-      await notes
-        .getByRole("list", { name: "Notes", exact: true })
-        .getByRole("button", { expanded: false })
-        .first()
-        .click()
-      await notes.getByRole("combobox", { name: "Position", exact: true }).first().click()
+      // The first note, its settings opened (they fold under its text).
+      const first = notes.getByRole("list", { name: "Notes", exact: true }).getByRole("region").first()
+      const title = ((await first.getAttribute("aria-label")) ?? "").replace(/^Note /, "")
+      await openNoteSettings(first, title)
+      await first.getByRole("combobox", { name: "Position", exact: true }).click()
       await expect(page.getByRole("option", { name: "Start of context", exact: true })).toBeVisible()
       await shoot("note-positions")
       await page.keyboard.press("Escape")

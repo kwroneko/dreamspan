@@ -77,7 +77,7 @@ test("a note made in the chat goes into the request once on, and out once off", 
   await dialog.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
   await page.getByRole("menuitem", { name: "New note" }).click()
   const editor = dialog.getByRole("region", { name: "Note Note" })
-  await editor.getByRole("textbox", { name: /^Content/ }).fill("Lanterns burn along the levee.")
+  await editor.getByRole("textbox", { name: /^Text of/ }).fill("Lanterns burn along the levee.")
   // No frequency: a note goes every turn (DESIGN §4.1).
   await expect(editor.getByRole("spinbutton")).toHaveCount(0)
   await saveRevision(editor)
@@ -92,11 +92,11 @@ test("a note made in the chat goes into the request once on, and out once off", 
   // Made here, it's on from here.
   const own = dialog.getByRole("region", { name: "This chat's notes" })
   await expect(own.getByRole("switch", { name: "Note: on in this chat" })).toBeChecked()
-  // Mira's note is hers: editing it here says so, and it isn't deleted from here.
+  // Mira's note is hers: her group says so, and it isn't deleted from here. With two notes, both are open.
   const hers = dialog.getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: /^Outfit/ }).click()
-  await expect(hers.getByText("saving it changes it in the library, in every chat with Mira")).toBeVisible()
-  await hers.getByRole("button", { name: "More actions for Outfit" }).click()
+  await expect(hers.getByRole("button", { name: "Collapse Outfit" })).toBeVisible()
+  await expect(hers.getByText("what you change here changes them in every chat with Mira")).toBeVisible()
+  await hers.getByRole("button", { name: "Actions for Outfit" }).click()
   await expect(page.getByRole("menuitem", { name: "Delete the note" })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
@@ -121,8 +121,7 @@ test("the notes fit a phone, under the Content-Security-Policy", async ({ browse
   await page.getByRole("button", { name: "Chat panel" }).click()
   await panelTab(page, "Notes")
   const hers = page.getByRole("tabpanel", { name: "Notes" }).getByRole("region", { name: "Mira's notes" })
-  await hers.getByRole("button", { name: /^Outfit/ }).click()
-  await expect(hers.getByRole("textbox", { name: /^Content/ })).toBeVisible()
+  await expect(hers.getByRole("textbox", { name: /^Text of Outfit/ })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0)
   expect(violations).toEqual([])
   await context.close()
@@ -208,17 +207,18 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   const openAt = async (fork: string) => {
     // A link can open the panel at a tab.
     await page.goto(`${server().url}/chats/${chat.id}?fork=${fork}&panel=notes`)
-    await page.getByRole("button", { name: /^Weather/ }).click()
+    // One note: it's open.
+    await expect(page.getByRole("button", { name: "Collapse Weather" })).toBeVisible()
   }
   await openAt(leftFork)
-  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
-  await editor.getByRole("textbox", { name: "Content" }).fill("SUN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Text of Weather" }), "RAIN")
+  await editor.getByRole("textbox", { name: "Text of Weather" }).fill("SUN")
   await saveRevision(editor)
   await expect(revisionStatus(editor)).toHaveText(/^Saved as revision \d+$/)
   const listed = await admin((api) => api.ListChatNotes({ chatId: chat.id, slotId: left }))
   expect(listed.find((n) => n.ref.id === note.id)?.doc.content).toBe("SUN")
   await openAt(rightFork)
-  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Text of Weather" }), "RAIN")
   await openAt(leftFork)
-  await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "SUN")
+  await expectTextBox(editor.getByRole("textbox", { name: "Text of Weather" }), "SUN")
 })

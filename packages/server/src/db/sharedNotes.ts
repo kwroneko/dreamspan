@@ -1,4 +1,3 @@
-import { snippetRevision } from "./snippets.ts"
 // Shared named notes (DESIGN §4.1): note entities with a global or chat-scoped `owner.shared`, the text
 // a note slot can link to. Queries both workers use.
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -55,12 +54,8 @@ export const sharedNote = (sql: SqlClient.SqlClient, userId: UserId, entityId: s
     JOIN entity_revisions h ON h.id = r.head_revision_id
     WHERE e.id = ${entityId} AND e.owner_user_id = ${userId} AND e.kind = 'note' AND e.purged_at IS NULL
       AND json_extract(h.doc_json, '$.owner.shared') IS NOT NULL`
-    if (!row || row.scope === "global") return row ?? null
-    const revision = yield* snippetRevision(sql, row.scope, entityId)
-    if (revision === null) return null
-    const [doc] = yield* sql<{ title: string; content: string }>`SELECT json_extract(doc_json, '$.title') AS title,
-    json_extract(doc_json, '$.content') AS content FROM entity_revisions WHERE id = ${revision} AND entity_id = ${entityId}`
-    return doc ? { ...row, ...doc, head: revision } : null
+    // A chat's snippet is its head in every branch of the chat, as one for all chats is everywhere.
+    return row ?? null
   })
 
 /** The shared note a slot links to, as a chat's note list shows it; null when it's gone. */

@@ -45,6 +45,7 @@ import {
 import { pathSegments } from "./pathSegments.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
+import { noteAt, noteChangedAt } from "./noteAt.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
   versionExtras,
@@ -598,10 +599,16 @@ export const makeReadHandlers = Effect.gen(function* () {
         return { ref: toLibraryRef(ref), doc: yield* lib.loadDoc(ref.head_revision_id) }
       }).pipe(query("GetRef")),
 
-    RefHistory: ({ userId, refId, limit, before }) =>
+    RefHistory: ({ userId, refId, limit, before, chatNote }) =>
       Effect.gen(function* () {
         const ref = yield* lib.ownedRef(userId, refId)
-        let start: string | null = ref.head_revision_id
+        // A chat's own note: its line as the branch at that position has it.
+        const head = yield* lib.loadDoc(ref.head_revision_id)
+        const resolved =
+          chatNote && (head.owner as { chat?: string } | undefined)?.chat === chatNote.chatId
+            ? yield* noteAt(sql, lib, userId, ref, chatNote)
+            : null
+        let start: string | null = resolved?.ref.head_revision_id ?? ref.head_revision_id
         if (before !== undefined) {
           const [cursor] = yield* sql<{ parent: string | null }>`
             SELECT json_extract(parents, '$[0]') AS parent FROM entity_revisions
@@ -628,8 +635,17 @@ export const makeReadHandlers = Effect.gen(function* () {
           SELECT r.id, r.parents, r.origin, r.origin_ref, r.message, r.doc_hash, r.created_at, h.n
           FROM history h JOIN entity_revisions r ON r.id = h.id ORDER BY h.n`
         const first = start === null ? 0 : yield* revisionNumber(sql, start)
+        const changedAt = resolved
+          ? yield* noteChangedAt(
+              sql,
+              chatNote!.chatId,
+              resolved.fork,
+              rows.map((row) => row.id)
+            )
+          : null
         const out = []
         for (const row of rows) {
+          const at = changedAt?.get(row.id)
           const usedBy = row.origin === "generation" ? yield* revisionUse(sql, userId, row.origin_ref) : null
           out.push(
             new Revision({
@@ -640,7 +656,8 @@ export const makeReadHandlers = Effect.gen(function* () {
               docHash: row.doc_hash,
               createdAt: row.created_at,
               number: first - row.n + 1,
-              ...(usedBy ? { usedBy } : {})
+              ...(usedBy ? { usedBy } : {}),
+              ...(at ? { changedAt: at } : {})
             })
           )
         }
