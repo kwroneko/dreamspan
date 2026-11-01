@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { portraitPng } from "./support/portrait.ts"
+import { closePortrait, portraitPng } from "./support/portrait.ts"
 import { condensed, level1 } from "./support/summaries.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
@@ -132,7 +132,7 @@ for (const width of [1440, 390])
       await shoot(page, `historical-speakers-${width}-${theme}`)
       await impersonated.getByRole("button", { name: "View Sam's portrait", exact: true }).click()
       await expect(page.getByRole("img", { name: "Sam's full portrait", exact: true })).toBeVisible()
-      await page.keyboard.press("Escape")
+      await closePortrait(page)
       await admin((api) =>
         Effect.gen(function* () {
           const path = yield* api.ReadPath({

@@ -3,6 +3,7 @@ import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
   ChatSurfaceProviders,
+  chatColumns,
   chatOverlays,
   chatComposer,
   chatComposerNotes,
@@ -561,7 +562,8 @@ function ChatSurface({
             } as CSSProperties
           }
         >
-          <div className="relative flex min-w-0 flex-1 flex-col">
+          <SlotOutlet slot={chatColumns} props={{ wide }} />
+          <div data-chat-main className="relative flex min-w-0 flex-1 flex-col">
             <ChatHeader
               session={session}
               view={view}

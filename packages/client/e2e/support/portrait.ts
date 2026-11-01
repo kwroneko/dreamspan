@@ -1,6 +1,7 @@
 // A deliberately wide original: colored corners outside the chat's center crop prove
 // that the full viewer preserves the original. Synthetic pixels, with no private data.
 import { crc32, deflateSync } from "node:zlib"
+import { expect, type Page } from "@playwright/test"
 
 const chunk = (type: string, data: Buffer) => {
   const out = Buffer.alloc(data.length + 12)
@@ -46,4 +47,18 @@ export const portraitPng = (metadata: ReadonlyArray<Buffer> = [], variant = 0) =
     ...metadata,
     chunk("IEND", Buffer.alloc(0))
   ])
+}
+
+/** Where a portrait's whole image shows: the chat's portrait column on a wide screen, a full-screen viewer on a phone. */
+export const portraitView = (page: Page, name: string) =>
+  page
+    .getByRole("complementary", { name: `${name}'s portrait`, exact: true })
+    .or(page.getByRole("dialog", { name, exact: true }))
+
+/** Closes the portrait shown, by its own close button. */
+export const closePortrait = async (page: Page) => {
+  const column = page.locator("[data-portrait-column]")
+  if (await column.count()) await column.getByRole("button", { name: "Close the portrait", exact: true }).click()
+  else await page.keyboard.press("Escape")
+  await expect(column.or(page.getByRole("img", { name: /full portrait$/ }))).toHaveCount(0)
 }

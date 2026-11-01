@@ -1,91 +1,144 @@
-// A portrait's whole image, in a lightbox over the page, independent of the chat's display crop.
-// Its context lets stock avatars open it without making every avatar (inside a picker, say) a button.
+// A portrait's whole original image, independent of the chat's display crop. Its context lets
+// stock avatars marked `preview` open it without making every avatar (inside a picker, say) a
+// button. Where it shows is the host's: the chat's portrait column on a wide screen
+// (features/chat/PortraitColumn.tsx), a full-screen viewer here on a phone.
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { createContext, type ReactNode, useContext, useState } from "react"
 import { Button } from "./Button.tsx"
 import { initials } from "./Avatar.tsx"
-import { Icon } from "./Icon.tsx"
+import { ImageViewer, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import { mediaUrl } from "./mediaImage.ts"
+import { IconButton } from "./Tooltip.tsx"
 
-interface Portrait {
+export interface Portrait {
   readonly id: string
   readonly name: string
   readonly mediaId: string | null
 }
-const Context = createContext<{ open: (portrait: Portrait) => void } | null>(null)
+interface PortraitViewer {
+  /** A portrait's click: shows it, or closes it when it's the one shown (as ST's zoomed avatar). */
+  readonly open: (portrait: Portrait) => void
+  /** Shows a portrait, the one shown or not. */
+  readonly show: (portrait: Portrait) => void
+  readonly close: () => void
+  readonly shown: Portrait | null
+}
+const Context = createContext<PortraitViewer | null>(null)
 
-/** Where avatars marked `preview` open their whole image: a click on one, from any of them. */
-export function PortraitProvider({ children }: { children: ReactNode }) {
+/**
+ * Where avatars marked `preview` open their whole image: a click on one, from any of them.
+ * `inline` says a host shows it beside the page (the chat's column); otherwise it's a
+ * full-screen viewer over the page.
+ */
+export function PortraitProvider({ inline, children }: { inline: boolean; children: ReactNode }) {
   const [shown, setShown] = useState<Portrait | null>(null)
+  const viewer: PortraitViewer = {
+    open: (portrait) => setShown((current) => (current?.id === portrait.id ? null : portrait)),
+    show: setShown,
+    close: () => setShown(null),
+    shown
+  }
   return (
-    <Context value={{ open: setShown }}>
+    <Context value={viewer}>
       {children}
-      {shown && <PortraitLightbox portrait={shown} onClose={() => setShown(null)} />}
+      {shown && !inline && <PortraitScreen portrait={shown} onClose={() => setShown(null)} />}
     </Context>
   )
 }
 
 export const useOpenPortrait = () => useContext(Context)?.open
+export const usePortraitViewer = () => useContext(Context)
 
-/** The whole image fitted to the screen, or at its own size to scroll around; Escape or a click beside it closes. */
-function PortraitLightbox({ portrait, onClose }: { portrait: Portrait; onClose: () => void }) {
-  const { mode } = useImagePrefs()
-  const [actual, setActual] = useState(false)
-  const shown = portrait.mediaId !== null && mode === "show"
+/** The phone's viewer: the whole screen, the image fitted to it or at 100% to pan and pinch. */
+function PortraitScreen({ portrait, onClose }: { portrait: Portrait; onClose: () => void }) {
   return (
     <BaseDialog.Root open onOpenChange={(open) => !open && onClose()}>
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-40 min-h-dvh bg-overlay" />
-        <BaseDialog.Popup className="fixed inset-2 z-50 flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-text shadow-xl outline-none sm:inset-6">
-          <div className="flex items-center gap-2">
-            <BaseDialog.Title className="min-w-0 flex-1 truncate text-base font-semibold">
-              {portrait.name}
-            </BaseDialog.Title>
-            {shown && (
-              <Button variant="ghost" className="h-8 px-2.5" onClick={() => setActual(!actual)}>
-                {actual ? "Fit to the screen" : "Actual size"}
-              </Button>
+        <BaseDialog.Popup className="fixed inset-0 z-50 flex h-dvh flex-col bg-surface text-text outline-none">
+          <PortraitView
+            key={portrait.id}
+            portrait={portrait}
+            title={(name) => (
+              <BaseDialog.Title className="min-w-0 flex-1 truncate text-base font-semibold">{name}</BaseDialog.Title>
             )}
-            <BaseDialog.Close
-              aria-label="Close"
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <Icon name="close" />
-            </BaseDialog.Close>
-          </div>
-          {mode !== "show" && (
-            <p className="text-sm text-muted">
-              Images are {mode === "blur" ? "blurred" : "hidden"} in this browser. Use the images toggle to show them.
-            </p>
-          )}
-          {portrait.mediaId === null && <p className="text-sm text-muted">This card has no image.</p>}
-          <div
-            className={`relative min-h-0 flex-1 ${actual ? "overflow-auto" : "flex items-center justify-center overflow-hidden"}`}
-            onClick={(event) => event.target === event.currentTarget && onClose()}
-          >
-            {portrait.mediaId !== null ? (
-              <>
-                <img
-                  src={mediaUrl(portrait.mediaId)}
-                  decoding="async"
-                  alt={`${portrait.name}'s full portrait`}
-                  className={actual ? "max-w-none" : "max-h-full max-w-full object-contain"}
-                />
-                <span
-                  data-image-fallback
-                  className="absolute inset-0 items-center justify-center rounded-md bg-surface-raised text-4xl text-muted"
-                >
-                  {initials(portrait.name)}
-                </span>
-              </>
-            ) : (
-              <span className="text-4xl text-muted">{initials(portrait.name)}</span>
-            )}
-          </div>
+            close={<BaseDialog.Close render={<IconButton label="Close" icon="close" className="shrink-0" />} />}
+          />
         </BaseDialog.Popup>
       </BaseDialog.Portal>
     </BaseDialog.Root>
+  )
+}
+
+/**
+ * A portrait's name, Fit / 100%, the scale shown and a close button over its whole image.
+ * Fit shows all of it, as large as the box allows (a small one enlarged at most
+ * `MAX_UPSCALE` times); 100% is one image pixel to a CSS pixel, dragged or pinched about.
+ */
+export function PortraitView({
+  portrait,
+  title,
+  close
+}: {
+  portrait: Portrait
+  title: (name: string) => ReactNode
+  close: ReactNode
+}) {
+  const { mode } = useImagePrefs()
+  const [zoom, setZoom] = useState<Zoom>("fit")
+  const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null } | null>(null)
+  const visible = portrait.mediaId !== null && mode === "show"
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
+        {title(portrait.name)}
+        {visible && (
+          <>
+            {scale?.natural && (
+              <span
+                className="shrink-0 px-1 text-xs text-muted tabular-nums"
+                title={`${scale.natural.width} × ${scale.natural.height} pixels, shown at ${Math.round(scale.value * 100)}%`}
+              >
+                {Math.round(scale.value * 100)}%
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              className="h-8 shrink-0 px-2.5"
+              aria-pressed={zoom !== "fit"}
+              title={zoom === "fit" ? "Show it at its own size, to drag around" : "Show all of it"}
+              onClick={() => setZoom(zoom === "fit" ? 1 : "fit")}
+            >
+              {zoom === "fit" ? "100%" : "Fit"}
+            </Button>
+          </>
+        )}
+        {close}
+      </div>
+      {mode !== "show" && (
+        <p className="px-3 pt-2 text-sm text-muted">
+          Images are {mode === "blur" ? "blurred" : "hidden"} in this browser. Use the images toggle to show them.
+        </p>
+      )}
+      <div className="min-h-0 flex-1 p-2">
+        {portrait.mediaId !== null ? (
+          <ImageViewer
+            src={mediaUrl(portrait.mediaId)}
+            placeholder={mediaUrl(portrait.mediaId, 768)}
+            alt={`${portrait.name}'s full portrait`}
+            zoom={visible ? zoom : "fit"}
+            onZoom={(next) => visible && setZoom(next)}
+            onScale={(value, natural) => setScale({ value, natural })}
+            initials={initials(portrait.name)}
+          />
+        ) : (
+          <div className="flex size-full flex-col items-center justify-center gap-2 text-muted">
+            <span className="text-4xl">{initials(portrait.name)}</span>
+            <span className="text-sm">This card has no image.</span>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -10,6 +10,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
+import { closePortrait } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40" })
 test.setTimeout(240_000)
@@ -147,9 +148,8 @@ for (const width of [1440, 390])
       await portrait.click()
       const full = page.getByRole("img", { name: /full portrait$/ })
       await expect(full).toBeVisible()
-      await expect(full).toHaveCSS("object-fit", "contain")
-      await shoot(page, `portrait-lightbox-${width}-${colorScheme}`)
-      await page.keyboard.press("Escape")
+      await shoot(page, `portrait-${width}-${colorScheme}`)
+      await closePortrait(page)
       await showAppNavigation(page)
       const imageSettings = page
         .getByRole("button", { name: "Image settings", exact: true })
