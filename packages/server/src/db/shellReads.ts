@@ -22,6 +22,7 @@ import {
   type ForkSummary,
   summaryStamps
 } from "./forkSummaries.ts"
+import { readFavourites } from "./cardFavourites.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
@@ -126,8 +127,11 @@ const sectionRows = (forks: ReadonlyArray<Fork>, view: ShellForksView, id: Shell
       return scoped.filter((f) => !f.current && (f.pinned || f.named))
     case "other":
       return scoped.filter((f) => !peer(f))
-    case "groups":
-      return sortBy(perChat(scoped.filter((f) => f.cast.length > 1)), view.sort, "chat")
+    case "groups": {
+      // The home grid's direction toggle turns the order round (oldest first, Z to A).
+      const sorted = sortBy(perChat(scoped.filter((f) => f.cast.length > 1)), view.sort, "chat")
+      return view.reversed === true ? sorted.reverse() : sorted
+    }
     case "card":
       return perChat(view.entity === null ? scoped : byTurn(scoped, view.entity))
     case "all":
@@ -152,6 +156,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       const rows = yield* sql<{
         id: string
         created_at: number
+        added_at: number
         ref: string
         revision: string
         fields: string
@@ -159,7 +164,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         book_entries: number | null
         persona: number
       }>`
-        SELECT e.id, e.created_at, r.id AS ref, rev.id AS revision,
+        SELECT e.id, e.created_at, r.created_at AS added_at, r.id AS ref, rev.id AS revision,
           -- One parse of the document for the strings (a missing or non-string value reads as empty
           -- below), and the lorebook's type and size without returning its entries.
           json_extract(rev.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
@@ -384,6 +389,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         }
         for (const a of f.activity) if (joined.has(a.entityId)) usageOf(a.entityId).spoke.push({ f, a })
       }
+      const favourites = new Set((yield* readFavourites(sql, userId)).on)
       const shellCards = metadata
         .filter((m) => !m.persona && byCard.has(m.id))
         .map((m) => {
@@ -427,6 +433,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                 trusted
               ),
               createdAt: m.created_at,
+              addedAt: m.added_at,
+              favourite: favourites.has(m.id),
               open:
                 open === undefined
                   ? null

@@ -20,6 +20,7 @@ import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
+import { importFavourite, isFav } from "./cardFavourites.ts"
 import { docHash, searchText } from "./documents.ts"
 import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
@@ -759,6 +760,15 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             upstream = yield* reload(into.id)
             outcome = merged.outcome
             followers = merged.change.followers
+          }
+          // ST's favourite flag (`extensions.fav`), on a first import and each re-import, unless
+          // the user set the card's favourite here since; a card without one changes nothing.
+          if (kind === "card") {
+            const [flag] = yield* sql<{
+              fav: unknown
+            }>`SELECT json_extract(${doc.json}, '$.extensions.fav') AS fav`
+            if (flag?.fav !== null && flag?.fav !== undefined)
+              yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
           const noteDocJson =
             input.noteDocJson !== null && input.characterNoteScan
