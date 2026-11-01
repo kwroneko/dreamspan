@@ -1,46 +1,73 @@
 // A chat's branches as the header lists them (DESIGN §3.2; the forks of
-// spec/FORK-INDEPENDENCE-DELTA.md, which the UI calls branches): every live fork, most
-// recently current first, with its name, its last message's first words and when it was last
-// chatted in. Read with `ListForks` when the chat opens and again whenever what it lists may
-// have changed: the fork shown, the chat's record (its current fork), a branch's name, or a
-// branch made, renamed or deleted here (`forksChanged`).
-import type { ChatId, Fork, PathEntry } from "@rp/shared/chat.ts"
+// spec/FORK-INDEPENDENCE-DELTA.md, which the UI calls branches): every live fork, with its
+// name (`forkLabel`), its last message's first words and time. Read with `ListForks` when the
+// chat opens and again whenever what it lists may have changed: the fork shown, the chat's
+// record (its current fork), a branch's name, or a branch made, renamed or deleted here
+// (`forksChanged`). How every list names a branch is here too (`forkLabel`).
+import type { ChatId, Fork, ForkSplit } from "@rp/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
-import { positionOf } from "./position.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
-/** The name a branch made at `entry` starts with, which the user can change: "From #14". */
-export const automaticBranchName = (entry: Pick<PathEntry, "position" | "depth">) => `From #${positionOf(entry) + 1}`
+const momentFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit"
+})
+const thisYearFormat = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "numeric",
+  minute: "2-digit"
+})
+
+/** A date and time: "12 Jan, 21:40" this year, "12 Jan 2025, 21:40" before (in the reader's locale). */
+export const formatMoment = (at: number, now = Date.now()) =>
+  (new Date(at).getFullYear() === new Date(now).getFullYear() ? thisYearFormat : momentFormat).format(at)
+
+/** What names a branch, from whichever read lists it: ListForks, the shell's rows, the bin. */
+export interface BranchNaming {
+  /** The name the user gave it (a branch they promoted); null or empty without one. */
+  readonly name: string | null
+  /** The chat's first fork, made from no other. */
+  readonly original: boolean
+  /** Where it parts from the fork it was made from, when the read knows. */
+  readonly split?: ForkSplit | null | undefined
+  readonly createdAt?: number | undefined
+}
+
+/** Where it splits off, time first: "12 Jan 2025, 21:40 at #14"; null where that isn't known. */
+const splitText = (fork: Pick<BranchNaming, "split">, now = Date.now()) =>
+  fork.split
+    ? `${formatMoment(fork.split.at, now)} ${fork.split.after === 0 ? "at the start" : `at #${fork.split.after}`}`
+    : null
 
 /**
- * A branch as people read it: its name, else "Original" for the chat's first fork, else
- * "Branch k" by when it was made among `forks`.
+ * A branch as people read it, everywhere one is named (the sidebar, the header's Branch ▾, the
+ * bin): the name the user gave it; else "Original" for the chat's first fork; else where it
+ * splits off, the time first, "Split 12 Jan 2025, 21:40 at #14" (owner, 2026-11-01): the time
+ * of its first own message (else its making) and the number of the last message it shares.
+ * Never a file name: an ST import names no fork.
  */
-export const branchLabel = (fork: Fork, forks: ReadonlyArray<Fork>) => {
-  // Numbered among the branches made from another, as ST numbers "Branch #1": the first is 1.
-  const made = forks
-    .filter((f) => f.parentForkId !== null)
-    .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
-  return branchName({
-    name: fork.name,
-    original: fork.parentForkId === null,
-    number: made.findIndex((f) => f.id === fork.id) + 1
-  })
+export const forkLabel = (fork: BranchNaming, now = Date.now()) => {
+  if (fork.name !== null && fork.name !== "") return fork.name
+  if (fork.original) return "Original"
+  const split = splitText(fork, now)
+  if (split !== null) return `Split ${split}`
+  return fork.createdAt === undefined ? "Branch" : `Made ${formatMoment(fork.createdAt, now)}`
 }
 
-/** `branchLabel` from its parts, for a branch read already numbered elsewhere (the bin's `BinBranch`). */
-export const branchName = (branch: {
-  readonly name: string | null
-  readonly original: boolean
-  readonly number: number | null
-}) => {
-  if (branch.name !== null && branch.name !== "") return branch.name
-  if (branch.original) return "Original"
-  return branch.number === null ? "Branch" : `Branch ${branch.number}`
-}
+/** `forkLabel` of a fork as ListForks reads it. */
+export const branchLabel = (fork: Fork) =>
+  forkLabel({ name: fork.name, original: fork.parentForkId === null, split: fork.split, createdAt: fork.createdAt })
 
-/** When a branch was last chatted in, else made. */
-export const branchActivity = (fork: Fork) => Math.max(fork.createdAt, fork.lastChattedAt ?? 0)
+/** Its last message's time, else when it was made. */
+export const branchLastAt = (fork: Pick<Fork, "createdAt" | "endAt">) => fork.endAt ?? fork.createdAt
+
+/** What the chat opening on a branch means, wherever it's marked. */
+export const OPENS_HERE_HINT =
+  "The chat opens on this branch: the one you last wrote in or made. An imported chat opens where SillyTavern last had it open."
 
 // Writes made here bump a chat's count, so every list of its branches reads again at once. A
 // branch made here is listed from the write's answer until a read made after it has it.

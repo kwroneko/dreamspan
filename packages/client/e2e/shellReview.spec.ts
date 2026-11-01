@@ -48,7 +48,7 @@ test("Groups opens its forks after navigating home from an unrelated character",
   await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
   await expect(page.getByRole("tab", { name: "This chat", exact: true })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByRole("link", { name: "Edit card", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("region", { name: "Latest branch", exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: /^(Named and pinned|Branches)$/ }).first()).toBeVisible()
 })
 
 test("home pins discard an unrelated remembered character tab", async ({ page }) => {

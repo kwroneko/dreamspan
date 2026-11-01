@@ -116,8 +116,8 @@ interface RecordPayload {
   readonly branchDeleted?: boolean
   /** A replacement ST path must not move the fork off locally changed history. */
   readonly keepTip?: boolean
-  /** A branch whose ST name the import has placed (or found a name where it would go). */
-  readonly named?: boolean
+  /** ST opened the file's card or group on it when the folder was read (`stCurrent`). */
+  readonly stCurrent?: boolean
   /** Last resolved parent, retained when a later header loses main_chat. */
   readonly parentRecordId?: string
 }
@@ -164,6 +164,37 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
       tipSlotId: payload.end ?? payload.last ?? null,
       at: Date.now()
     })
+  })
+
+  /**
+   * The fork an imported chat opens on, as ST opens it (owner, 2026-11-01): the one of the file
+   * ST last opened (`chosen`, else a finished record's `stCurrent`), else the one with the
+   * latest message (the earlier one on a tie), as ST picks when its record names no chat it
+   * has. Only while the user hasn't chatted or branched in the chat here: a fork chatted in
+   * (`last_chatted_at`) or made at a message (`base_slot_id`, which an import never sets) means
+   * its current fork is theirs. A chat of one fork (most) has nothing to choose.
+   */
+  const openOnStCurrent = Effect.fnUntraced(function* (userId: UserId, chatId: string, chosen: string | null) {
+    const [state] = yield* sql<{ forks: number; touched: number }>`SELECT count(*) AS forks,
+        coalesce(max(last_chatted_at IS NOT NULL OR base_slot_id IS NOT NULL), 0) AS touched
+      FROM forks WHERE chat_id = ${chatId} AND deleted_at IS NULL`
+    if (state === undefined || state.forks < 2 || state.touched === 1) return
+    const [recorded] =
+      chosen !== null
+        ? [{ id: chosen }]
+        : yield* sql<{ id: string }>`SELECT f.id FROM jobs j
+            JOIN forks f ON f.id = json_extract(j.payload_json, '$.forkId') AND f.chat_id = ${chatId} AND f.deleted_at IS NULL
+            WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD} AND j.status = 'complete'
+              AND json_extract(j.payload_json, '$.chatId') = ${chatId} AND json_extract(j.payload_json, '$.stCurrent') = 1
+            ORDER BY j.updated_at DESC LIMIT 1`
+    const [latest] = recorded
+      ? [recorded]
+      : yield* sql<{ id: string }>`SELECT f.id FROM forks f LEFT JOIN slots t ON t.id = f.tip_slot_id
+          WHERE f.chat_id = ${chatId} AND f.deleted_at IS NULL
+          ORDER BY coalesce(t.created_at, 0) DESC, f.created_at, f.id LIMIT 1`
+    if (latest)
+      yield* sql`UPDATE chats SET current_fork_id = ${latest.id}, row_version = row_version + 1
+        WHERE id = ${chatId} AND current_fork_id IS NOT ${latest.id}`
   })
 
   /** Deleting the recorded tail may have moved only this fork's tip up its path. */
@@ -847,17 +878,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         yield* sql`UPDATE chats SET status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
           last_message_at = max(coalesce(last_message_at, 0), coalesce(${input.lastMessageAt}, 0)), row_version = row_version + 1
           WHERE id = ${chatId}`
-        let fork: "named" | "kept" | "same" | null = null
-        if (input.fork !== null || payload.merged) {
-          const name = input.fork?.name ?? null
-          fork = fileFork.name_user || payload.named || name === null ? "kept" : "named"
-          if (fork === "named")
-            yield* sql`UPDATE forks SET name = ${name}, row_version = row_version + 1 WHERE id = ${fileFork.id}`
-        }
         const updated: RecordPayload = {
           ...payload,
           forkId: fileFork.id,
-          named: payload.named || fork === "named",
+          stCurrent: input.stCurrent === true,
           ...(input.fork === null ? {} : { parentRecordId: input.fork.parentRecordId }),
           sha256: input.sha256,
           state: input.stateJson,
@@ -872,9 +896,10 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         }
         yield* sql`UPDATE jobs SET status = 'complete', payload_json = ${JSON.stringify(updated)}, updated_at = ${Date.now()}
           WHERE id = ${input.recordId}`
+        yield* openOnStCurrent(userId, chatId, input.stCurrent === true ? fileFork.id : null)
         // The shell's summaries of the finished chat, last, at the stamps this write left.
         yield* refreshChatSummaries(sql, userId, chatId)
-        return { notes, fork }
+        return { notes }
       }).pipe(transaction(sql, "StImportFinishChat")),
 
     // The import's hidden messages up to a slot shown again, in the fork through it (a `hide`

@@ -964,7 +964,7 @@
       "type": "table",
       "name": "fork_summaries",
       "tbl_name": "fork_summaries",
-      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)) ) STRICT"
+      "sql": "CREATE TABLE fork_summaries ( fork_id TEXT PRIMARY KEY REFERENCES forks(id) ON DELETE CASCADE, chat_id TEXT NOT NULL, -- The computation's format, and the chat's and owner's stamps it was computed at. format INTEGER NOT NULL, stamp INTEGER NOT NULL, user_stamp INTEGER NOT NULL, preview TEXT NOT NULL, messages INTEGER NOT NULL, leaf TEXT, end_at INTEGER, -- Where it parts from the fork it was made from: its first own message's time (else its -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first. split_at INTEGER, split_after INTEGER, -- Entity ids only: names and avatars are read with the summary. cast_json TEXT NOT NULL CHECK (json_valid(cast_json)), joined_json TEXT NOT NULL CHECK (json_valid(joined_json)), departed_json TEXT NOT NULL CHECK (json_valid(departed_json)), activity_json TEXT NOT NULL CHECK (json_valid(activity_json)) ) STRICT"
     },
     {
       "type": "table",

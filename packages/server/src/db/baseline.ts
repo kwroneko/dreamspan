@@ -40,6 +40,10 @@ const shellSummaries: ReadonlyArray<string> = [
     messages INTEGER NOT NULL,
     leaf TEXT,
     end_at INTEGER,
+    -- Where it parts from the fork it was made from: its first own message's time (else its
+    -- making) and how many messages it shares (forkSummaries.ts); null for a chat's first.
+    split_at INTEGER,
+    split_after INTEGER,
     -- Entity ids only: names and avatars are read with the summary.
     cast_json TEXT NOT NULL CHECK (json_valid(cast_json)),
     joined_json TEXT NOT NULL CHECK (json_valid(joined_json)),

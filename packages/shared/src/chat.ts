@@ -53,6 +53,14 @@ export class Chat extends Schema.Class<Chat>("Chat")({
 }) {}
 
 /**
+ * Where a fork parts from the fork it was made from (owner, 2026-11-01): `at`, the time of its
+ * first own message, else of its making; `after`, how many shown messages the two share before
+ * it ("at #14" when it's 14). What names a branch the user hasn't named (`forkLabel`).
+ */
+export const ForkSplit = Schema.Struct({ at: Schema.Number, after: Schema.Int })
+export type ForkSplit = typeof ForkSplit.Type
+
+/**
  * One line of a chat as the user sees it: history from the first message to its tip
  * (spec/FORK-INDEPENDENCE-DELTA.md §2.1). Forks share their history's messages; a fork made
  * at a message has that message as its base and, until something is sent in it, its tip.
@@ -74,7 +82,11 @@ export class Fork extends Schema.Class<Fork>("Fork")({
   tipExcerpt: Schema.String,
   /** It's the chat's current fork (`Chat.currentForkId`). */
   current: Schema.Boolean,
-  rowVersion: Schema.Int
+  rowVersion: Schema.Int,
+  /** Where it parts from its parent (ListForks); null for the chat's first fork. */
+  split: Schema.optionalKey(Schema.NullOr(ForkSplit)),
+  /** Its last shown message's time (ListForks); null without one. */
+  endAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
 }) {}
 
 /**

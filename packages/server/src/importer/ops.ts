@@ -37,6 +37,8 @@ export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
 /** A parsed file: its report, and what goes into the library, if anything. */
 export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
   stCreatedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  /** A card's ST `chat`: the chat file (without `.jsonl`) ST last opened it on. */
+  stChat: Schema.optionalKey(Schema.String),
   report: ImportReport,
   /** Of the file's bytes. */
   sha256: Sha256,
@@ -169,7 +171,9 @@ export class StGroup extends Schema.Class<StGroup>("StGroup")({
   name: Schema.String,
   members: Schema.Array(Schema.String),
   disabledMembers: Schema.Array(Schema.String),
-  chats: Schema.Array(Schema.String)
+  chats: Schema.Array(Schema.String),
+  /** The chat ST opens the group on (`chat_id`): the one last opened. */
+  chatId: Schema.NullOr(Schema.String)
 }) {}
 
 /** A library file of the folder, and for a card what chats are linked to it by. */

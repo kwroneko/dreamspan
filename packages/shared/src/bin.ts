@@ -1,6 +1,7 @@
 // The recycle bin (DESIGN §6.2): two independent sections, each with its own capacity.
 import { Schema } from "effect"
 import { DraftTargetKind } from "./drafts.ts"
+import { ForkSplit } from "./chat.ts"
 
 /** The deleted-item set changed since the user confirmed it. */
 export class BinChanged extends Schema.TaggedError<BinChanged>()("BinChanged", {}) {}
@@ -42,6 +43,9 @@ export class BinBranch extends Schema.Class<BinBranch>("BinBranch")({
   name: Schema.NullOr(Schema.String),
   original: Schema.Boolean,
   number: Schema.NullOr(Schema.Int),
+  /** Where it parts from its parent, while known (`forkLabel`). */
+  split: Schema.optionalKey(Schema.NullOr(ForkSplit)),
+  createdAt: Schema.optionalKey(Schema.Number),
   tipExcerpt: Schema.String,
   current: Schema.Boolean,
   state: Schema.Literals(["shown", "deletedHere", "branchInBin", "chatInBin"]),
