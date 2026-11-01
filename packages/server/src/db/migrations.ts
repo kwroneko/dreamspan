@@ -17,7 +17,7 @@ const runAll = (statements: ReadonlyArray<string>) =>
 export const migrations = {
   "0001_baseline": runAll(baseline),
   // Notes and lore at the author's note's top or bottom get the place it resolves to (owner, 2026-11-01).
-  "0002_concrete_author_note": authorNoteMigration
+  "0004_concrete_author_note": authorNoteMigration
 }
 
 /**

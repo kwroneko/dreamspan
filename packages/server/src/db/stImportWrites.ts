@@ -753,7 +753,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         const localTargets = new Set(
           local.flatMap((e) => stateTargets({ key: e.key, value: JSON.parse(e.value_json) } as StateEventData))
         )
-        const keepNote = Effect.fnUntraced(function* (id: string | undefined, kind: StImportNote["kind"]) {
+        const keepNote = Effect.fnUntraced(function* (id: string | undefined) {
           if (id === undefined) return false
           if (localTargets.has(`note:${id}`)) return true
           const [row] = yield* sql<{ changed: number }>`SELECT e.deleted_at IS NOT NULL OR EXISTS (
@@ -768,7 +768,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         }
         for (const note of input.notes) {
           const replaced = notes[note.kind]
-          if (yield* keepNote(replaced, note.kind)) continue
+          if (yield* keepNote(replaced)) continue
           if (replaced !== undefined) {
             // The chat already has this ST note, from the file's parent or an earlier import of
             // it: its new text is a revision of that note bound in this file's fork from here,
@@ -817,7 +817,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         for (const kind of input.removedNotes) {
           const gone = notes[kind]
           if (gone === undefined) continue
-          if (yield* keepNote(gone, kind)) continue
+          if (yield* keepNote(gone)) continue
           yield* insertEvent(
             userId,
             chatId,

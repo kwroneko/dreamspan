@@ -36,12 +36,6 @@ interface Head {
 
 type Lore = { readonly depth: number; readonly role: string }
 
-const isRelative = (placement: unknown) =>
-  typeof placement === "object" &&
-  placement !== null &&
-  (placement as { section?: unknown }).section !== undefined &&
-  ["author_note_top", "author_note_bottom"].includes((placement as { section: string }).section)
-
 const relativeEntry = (entry: unknown) =>
   typeof entry === "object" &&
   entry !== null &&

@@ -5,7 +5,7 @@
 // `authorNoteFolder()` and then `authorNoteFolder("Rain all night.", true)`, with lore "only
 // below the history" turned off in every chat but the plain and quiet ones
 // (`loreWherePlaced`). `master-requests.json` is the request each fork then assembled on
-// master. Migration 0002 converts that database at startup.
+// master. Migration 0004 converts that database at startup.
 import { DatabaseSync } from "node:sqlite"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
