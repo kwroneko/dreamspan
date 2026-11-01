@@ -182,21 +182,24 @@ for (const width of [1440, 390])
       await expect(own.getByRole("switch", { name: "Note: on in this chat" }).last()).toBeChecked()
       // Its condition and a place above the history: the cache warning.
       await fresh.getByRole("combobox", { name: "When it applies" }).click()
-      await page.getByRole("option", { name: "While a character isn't muted" }).click()
-      await expect(fresh.getByRole("combobox", { name: "Character" })).toBeVisible()
+      await page.getByRole("option", { name: "While a chosen character isn't muted" }).click()
+      await expect(fresh.getByRole("combobox", { name: "Characters" })).toBeVisible()
       await expect(fresh.getByText(/rewrites the cached part/)).toHaveCount(0)
       await fresh.getByRole("combobox", { name: "Position" }).click()
       await page.getByRole("option", { name: "Start of context" }).click()
       await expect(fresh.getByText(/rewrites the cached part/)).toBeVisible()
       await fresh.getByRole("combobox", { name: "Position" }).click()
-      // Exactly the five decided places for a new note.
+      // Exactly the five decided places for a new note, each with what it means.
       await expect(page.getByRole("option")).toHaveText([
-        "Start of context",
-        "With the definitions (after the main prompt)",
-        "In the history, at a depth",
-        "Start of the tail",
-        "End of the tail"
+        /^Start of context/,
+        /^With the definitions/,
+        /^In the history/,
+        /^Start of the tail/,
+        /^End of the tail/
       ])
+      await expect(page.getByRole("option", { name: "With the definitions" })).toHaveAccessibleDescription(
+        "Right after the preset's main prompt."
+      )
       await page.keyboard.press("Escape")
       await fresh.getByRole("button", { name: "Save the note" }).click()
       await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
@@ -294,15 +297,16 @@ for (const width of [1440, 390])
       await notes.getByRole("button", { name: /^Character author's note/ }).click()
       const characterNote = page.getByRole("region", { name: "Note Character author's note" })
       await expect(characterNote).toBeVisible()
-      // Its place says what it means: it joins the chat's author's note (DESIGN §4.1, no hidden kinds).
-      await expect(characterNote.getByText(/It joins the chat's author's note/)).toBeVisible()
+      // ST put it at the author's note: here it's where ST's default note is, a depth like any
+      // (owner, 2026-11-01), and nothing about it says "author's note".
+      await expect(characterNote.getByText(/author's note/)).toHaveCount(0)
       await shoot("card-note-open")
       // A card's note "with the definitions" goes inside its card's part.
       await characterNote.getByRole("combobox", { name: "Position" }).click()
-      await expect(page.getByRole("option", { name: "With the definitions (in the card's part)" })).toBeVisible()
-      await expect(
-        page.getByRole("option", { name: "Just before the chat's author's note (imported from ST)" })
-      ).toBeVisible()
+      await expect(page.getByRole("option", { name: "With the definitions" })).toHaveAccessibleDescription(
+        /this card's own part of the definitions/
+      )
+      await expect(page.getByRole("option", { name: /author's note/ })).toHaveCount(0)
       await shoot("card-note-positions")
       await page.keyboard.press("Escape")
 

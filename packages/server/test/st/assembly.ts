@@ -8,7 +8,7 @@ import { Effect } from "effect"
 import { ReportBuilder } from "@rp/shared/importReport.ts"
 import { parseStChatPart } from "../../src/formats/stChat.ts"
 import { parseStSettings } from "../../src/formats/stData.ts"
-import { chatStateChange } from "../../src/importer/stMapping.ts"
+import { authorNotePlace, chatStateChange } from "../../src/importer/stMapping.ts"
 import { chatCompletionsFields } from "../../src/assembler/wire.ts"
 import { importCard } from "../../src/formats/cardImport.ts"
 import { importStPreset } from "../../src/formats/preset.ts"
@@ -16,7 +16,7 @@ import * as Importers from "../../src/importer/importers.ts"
 import { json, png, run } from "../formats/support.ts"
 import type { NoteInput } from "../../src/assembler/types.ts"
 import { assembleFixture, type FixtureMessage } from "../support/assemblySources.ts"
-import { gateLore } from "../support/loreFixtures.ts"
+import { GATE_AUTHOR_NOTE_ENTRIES, gateLore } from "../support/loreFixtures.ts"
 import type { FixtureSet } from "./fixtures.ts"
 import { MOCK_MODEL, type MockEndpoint } from "./mock.ts"
 import { diffJson, type Section } from "./report.ts"
@@ -49,6 +49,19 @@ const DOCUMENTED: ReadonlyArray<{
     why: "what rides on an author's note imported off (frequency 0) still goes where it sits (owner question 6); ST sends none of it",
     matches: (line, config) =>
       config.authorNote !== undefined && config.authorNote.interval === 0 && line.startsWith("messages")
+  },
+  {
+    // Owner, 2026-11-01: nothing rides on a note. The import puts what ST placed at the top or
+    // bottom of the author's note where ST's default author's note is, at its depth and role,
+    // where notes and lore at one depth join in the harness's order (the chat's notes, the
+    // cards', the personas', then lore), and beside nothing. ST joins it around the chat's
+    // author's note's text, wherever that note is.
+    why: "what ST puts at the author's note's top or bottom goes where ST's default author's note is, in the harness's order there",
+    matches: (line, config) =>
+      line.startsWith("messages") &&
+      ((config.persona !== undefined && (config.persona.position === 2 || config.persona.position === 3)) ||
+        (config.lorebook === true &&
+          (line.includes("The lower bank is dark.") || line.includes("The upper bank has lanterns."))))
   },
   {
     // Unit P1-1 (fb-rp), owner: "on an impersonation turn the speaking card's prompt override
@@ -313,7 +326,6 @@ const authorNoteInput = (
             placement: mapped.placement,
             owner: { chat: "chat-1" as never },
             exportable: true,
-            kind: "author_note",
             ...(mapped.scanLore ? { scan_lore: true } : {})
           }
         }
@@ -322,15 +334,24 @@ const authorNoteInput = (
 }
 
 /** The note our ST import makes of the fixture persona placed there (importer/stParse.ts), or none in the prompt. */
-const personaNoteInput = async (fixtures: FixtureSet, placement: PersonaPlacement): Promise<NoteInput | null> => {
+const personaNoteInput = async (
+  fixtures: FixtureSet,
+  placement: PersonaPlacement,
+  authorNote: ReturnType<typeof authorNotePlace>
+): Promise<NoteInput | null> => {
   const avatar = "st-diff-persona.png"
   const parsed = await Effect.runPromise(
-    buildPersona(png(), avatar, {
+    buildPersona(
+      png(),
       avatar,
-      name: fixtures.persona.name,
-      description: fixtures.persona.description,
-      ...placement
-    })
+      {
+        avatar,
+        name: fixtures.persona.name,
+        description: fixtures.persona.description,
+        ...placement
+      },
+      authorNote.note
+    )
   )
   const note = parsed.library?.noteDocJson
   return note
@@ -387,7 +408,25 @@ const ourRequest = async (
     : importedCard
   const persona = run(importCard(json({ name: fixtures.persona.name, description: fixtures.persona.description }))).card
   const importedAuthorNote = config.authorNote ? authorNoteInput(config.authorNote, config.defaultAuthorNote) : null
-  const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona) : null
+  // What ST put at its author's note goes where the folder's default author's note is.
+  const place = authorNotePlace(
+    config.defaultAuthorNote && config.authorNote
+      ? {
+          content: config.authorNote.text,
+          position: config.authorNote.position,
+          depth: config.authorNote.depth,
+          role: config.authorNote.role,
+          interval: config.authorNote.interval
+        }
+      : null
+  )
+  const personaNote = config.persona ? await personaNoteInput(fixtures, config.persona, place) : null
+  const lore = {
+    ...gateLore.document,
+    entries: gateLore.document.entries.map((entry) =>
+      entry.uid in GATE_AUTHOR_NOTE_ENTRIES ? { ...entry, depth: place.lore.depth, role: place.lore.role } : entry
+    )
+  }
   // The import keeps one copy of the text: with a note, the persona card's description is empty.
   const personaDoc = personaNote ? { ...persona, description: "" } : persona
   const lines: Array<FixtureMessage> = config.overMaximum
@@ -434,9 +473,7 @@ const ourRequest = async (
         ...(config.summary ? [summaryNote(config.summary)] : []),
         ...(importedAuthorNote ? [importedAuthorNote.input] : [])
       ],
-      lorebooks: config.lorebook
-        ? [{ id: gateLore.id, entity: "gate-book", revision: "gate-rev", doc: gateLore.document }]
-        : [],
+      lorebooks: config.lorebook ? [{ id: gateLore.id, entity: "gate-book", revision: "gate-rev", doc: lore }] : [],
       events: [
         ...(config.lorebook
           ? [

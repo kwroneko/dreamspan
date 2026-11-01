@@ -1313,7 +1313,8 @@ describe("context assembly from the database", () => {
       assert.isTrue(yield* listed(sent.slotId))
       assert.isFalse(yield* listed(elsewhere.slotId))
 
-      // On Tobin's turn only: Mira writes the reply, so it isn't due; on Mira's, it is.
+      // On Tobin's turn only (stored in the single-card shape of notes saved before, which still
+      // reads): Mira writes the reply, so it isn't due; on Tobin's or Mira's, it is.
       const onTobin = yield* note({ condition: { when: "turn", card: tobin.entityId } }, edited.ref.rowVersion)
       const skipped = yield* assembleAt(reply)
       assert.isFalse(raining(skipped))
@@ -1327,9 +1328,19 @@ describe("context assembly from the database", () => {
           due: false
         }
       })
-      yield* note({ condition: { when: "turn", card: mira.entityId } }, onTobin.ref.rowVersion)
+      yield* note({ condition: { when: "turn", cards: [tobin.entityId, mira.entityId] } }, onTobin.ref.rowVersion)
       const snapshot = yield* assembleAt(reply)
       assert.isTrue(raining(snapshot))
+      assert.deepInclude(snapshot.pieces.find((p) => p.id === `note:${created.entityId}`)!.source, {
+        activation: {
+          kind: "note",
+          activation: "explicit",
+          interval: null,
+          userMessages: null,
+          condition: "on Tobin's or Mira's turn",
+          due: true
+        }
+      })
       const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(snapshot) })
       assert.ok(rebuilt._tag === "Rebuilt")
       assert.deepStrictEqual(JSON.parse(rebuilt.snapshot), snapshot)

@@ -8,6 +8,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 import { panelTab } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { closePortrait } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -140,7 +141,7 @@ for (const width of [1440, 390]) {
         content: "Synthetic navigation regression: the pinned fork continues."
       })
     )
-    // The chat header's ☆ (a phone's header leaves it to the chat lists' rows).
+    // The chat header's pin (a phone's header leaves it to the chat lists' rows).
     const headerPin = page
       .getByRole("main")
       .locator("header")
@@ -243,7 +244,7 @@ for (const width of [1440, 390]) {
         .click()
       await expect(page.getByRole("img", { name: /full portrait$/ })).toBeVisible()
       await shoot("portrait")
-      await page.keyboard.press("Escape")
+      await closePortrait(page)
       // A phone's chat header replaces the app's bar: its ← opens the menu, which has the image settings.
       if (width === 390) await page.getByRole("button", { name: "Chats and menu" }).click()
       await page.getByRole("button", { name: "Image settings", exact: true }).first().click()

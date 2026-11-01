@@ -79,12 +79,13 @@ for (const width of [1440, 390]) {
     // The trio's chat is today's, Bob's imported one later than Alice's; Cara has none.
     expect(order.slice(0, 3).sort()).toEqual(["Dax", "Eve", "Fin"])
     expect(order.slice(3)).toEqual(["Bob", "Alice", "Cara"])
-    // No dead tab.
+    // No dead tab; each with its count (characterBrowse.spec.ts has more).
     await expect(page.getByRole("group", { name: "Show", exact: true }).getByRole("button")).toHaveText([
-      "All",
-      "With chats",
-      "Never used",
-      "Groups"
+      /^All\s*6$/,
+      /^With chats\s*5$/,
+      /^Never used\s*1$/,
+      /^Favourites\s*0$/,
+      /^Groups\s*1$/
     ])
     if (width === 1440) {
       // The left panel's grid uses the same key.

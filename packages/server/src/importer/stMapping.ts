@@ -10,6 +10,7 @@ import type { StateEventData } from "@rp/shared/state.ts"
 import { createHash } from "node:crypto"
 import type { StImportNote } from "../db/ops.ts"
 import { DEFAULT_SUMMARY_SETTINGS, stRole } from "../formats/stData.ts"
+import type { StAuthorNote } from "../formats/stChat.ts"
 import type { StChatHeader, StGroup, StSettings, StSpeaker } from "./ops.ts"
 
 /** A run this long, hidden from message 0, is ST's manual-summary pattern (DESIGN §1.4). [P] */
@@ -98,6 +99,8 @@ export interface FolderContext {
   readonly personaNames: ReadonlyMap<string, ReadonlyArray<string>>
   /** Lorebooks by name. */
   readonly worlds: ReadonlyMap<string, RefId>
+  /** Something the import placed where ST's default author's note is: a persona, a card's own note, lore. */
+  readonly riders?: boolean
   /** An enabled prompt of the preset ST used holds `{{summary}}`, so ST sent the summary through it. */
   readonly summaryMacro?: boolean
 }
@@ -127,6 +130,20 @@ const placementOf = (position: number, depth: number, role: number): NoteDoc["pl
       : position === 2
         ? { mode: "section", section: "before_main_prompt", role: stRole(role) }
         : { mode: "depth", depth: noteDepth(depth), role: stRole(role) }
+
+/**
+ * Where what ST placed at the top or bottom of its author's note goes here, kept (owner,
+ * 2026-11-01): the concrete place of the folder's default author's note, ST's own default
+ * (in the chat at depth 4 as the system) without one. A note goes there, at its depth and role
+ * or beside the main prompt where the author's note was; a lorebook entry, which has no place
+ * beside the main prompt, at its depth and role. Personas, characters' own author's notes and
+ * lorebooks are the library's, used by every chat, so each has one place: chats whose own
+ * author's note was elsewhere get an info line (`st.author_note_riders`).
+ */
+export const authorNotePlace = (note: StAuthorNote | null) => ({
+  note: placementOf(note === null || note.position === -1 ? 1 : note.position, note?.depth ?? 4, note?.role ?? 0),
+  lore: { depth: noteDepth(note?.depth ?? 4), role: stRole(note?.role ?? 0) }
+})
 
 /** A card greeting as a pattern: `{{char}}` filled in, `{{user}}` matching any name. */
 const greetingMatches = (greeting: string, cardName: string, chatGreeting: string) => {
@@ -503,6 +520,12 @@ export const chatStateChange = (
   const chara = file.link.group ? null : (file.link.card?.file ?? null)
   const replacing = folder.settings?.characterNotes.find((n) => n.card === chara && n.useChara && n.position === 0)
   const replacedAuthorNote = replacing !== undefined && (file.header?.authorNote?.content.trim() ?? "") !== ""
+  // What ST put at this chat's own author's note went where the default one is.
+  const ridersElsewhere =
+    folder.riders === true &&
+    authorNote !== null &&
+    JSON.stringify(authorNote.placement) !==
+      JSON.stringify(authorNotePlace(folder.settings?.defaultAuthorNote ?? null).note)
   const notes: Array<StImportNote> = []
   const removedNotes: Array<StImportNote["kind"]> = []
   if (authorNote !== null && state.authorNote !== previous?.authorNote) notes.push(authorNote)
@@ -518,6 +541,7 @@ export const chatStateChange = (
     summaryIndex: summary?.index ?? null,
     summaryOnLast: file.summaries.some((s) => s.index >= file.messages - 1),
     summaryTrimmed: summary?.trimmed ?? false,
-    replacedAuthorNote
+    replacedAuthorNote,
+    ridersElsewhere
   }
 }

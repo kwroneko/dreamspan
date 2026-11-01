@@ -53,10 +53,13 @@ it("offers each kind its own actions, a lorebook an Edit, a newly made fork no u
     expect(ids({ ...card, entry: ref({ hasImport: false }) })).not.toContain("library.update")
     // Every kind opens in its editor's page, a lorebook too.
     expect(ids({ ...card, entry: ref({ kind: "lorebook" }) })).toEqual(["library.edit", "library.update"])
+    // A preset has its archive button beside Edit, as in the preset pickers.
     expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "variant" }) })).toEqual([
       "library.edit",
+      "library.archive",
       "library.export"
     ])
+    expect(ids({ ...card, entry: ref({ kind: "preset", refKind: "chat_override" }) })).not.toContain("library.archive")
   } finally {
     for (const undo of dispose) undo()
   }
@@ -97,4 +100,22 @@ it("renders direct actions and a menu only when something registered fills it", 
   card()
   direct()
   expect(render()).toBe('<div class="flex shrink-0 items-center gap-1"></div>')
+})
+
+it("hands an action its registered description, so a plugin's entry explains itself", () => {
+  const context = { entry: ref({}), persona: false, exportFormats: formats }
+  const direct = libraryItemActions.register({
+    id: "synthetic.described",
+    order: 0,
+    description: "Does a synthetic thing.",
+    direct: ({ description }) => createElement("button", { title: description }, "Synthetic")
+  })
+  try {
+    const html = renderToStaticMarkup(
+      createElement(TooltipProvider, null, createElement(LibraryItemActions, { context }))
+    )
+    expect(html).toContain('title="Does a synthetic thing."')
+  } finally {
+    direct()
+  }
 })

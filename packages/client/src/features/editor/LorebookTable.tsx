@@ -153,6 +153,7 @@ function RowActions({
           <MenuItem
             {...(action.tone ? { tone: action.tone } : {})}
             {...(action.icon ? { icon: action.icon } : {})}
+            description={action.description}
             onClick={() => onPick(action)}
           >
             {action.label}
@@ -351,6 +352,7 @@ function Removed({ store, root, uids }: { store: EditorStore; root: FieldPath; u
               variant="ghost"
               className="h-7! px-2!"
               aria-label={`Restore ${title}`}
+              hint="Brings the entry back as it was saved."
               onClick={() => void store.discard(valueField(entryPath(root, uid)))}
             >
               Restore
@@ -547,7 +549,7 @@ export function LorebookTable({
             <div className="w-44">
               <Select
                 ariaLabel="Sort entries by"
-                items={sorts.map((s) => ({ value: s.id, label: s.label }))}
+                items={sorts.map((s) => ({ value: s.id, label: s.label, description: s.description }))}
                 value={sort?.id ?? null}
                 onValueChange={(next) => {
                   setPinned([])

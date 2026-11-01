@@ -10,6 +10,7 @@ import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
+import { closePortrait } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40" })
 test.setTimeout(240_000)
@@ -124,9 +125,9 @@ for (const width of [1440, 390])
         node.scrollTop = 0
       })
       await shoot(page, `chat-summaries-${width}-${colorScheme}`)
-      await summary.getByRole("button", { name: "Expand to messages", exact: true }).click()
+      await summary.getByRole("button", { name: "Expand messages 1–120", exact: true }).click()
       await expect(summary.locator("article")).toHaveCount(100)
-      await summary.getByRole("button", { name: "Load earlier messages in this summary" }).click()
+      await summary.getByRole("button", { name: "Earlier messages", exact: true }).click()
       await expect(summary.locator("article")).toHaveCount(120)
       await page.getByTestId("messages").evaluate((node) => {
         node.scrollTop = 0
@@ -137,7 +138,7 @@ for (const width of [1440, 390])
       await page.getByTestId("messages").evaluate((node) => {
         node.scrollTop = 0
       })
-      await summary.getByRole("button", { name: "Collapse", exact: true }).click()
+      await summary.getByRole("button", { name: "Collapse messages 1–120", exact: true }).first().click()
       const panel = await openPanel(page, "Summaries")
       await expect(panel.getByRole("switch", { name: "Summaries in chat" })).toBeChecked()
       await shoot(page, `summaries-tab-${width}-${colorScheme}`)
@@ -147,9 +148,8 @@ for (const width of [1440, 390])
       await portrait.click()
       const full = page.getByRole("img", { name: /full portrait$/ })
       await expect(full).toBeVisible()
-      await expect(full).toHaveCSS("object-fit", "contain")
-      await shoot(page, `portrait-lightbox-${width}-${colorScheme}`)
-      await page.keyboard.press("Escape")
+      await shoot(page, `portrait-${width}-${colorScheme}`)
+      await closePortrait(page)
       await showAppNavigation(page)
       const imageSettings = page
         .getByRole("button", { name: "Image settings", exact: true })

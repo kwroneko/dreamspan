@@ -3,7 +3,9 @@ import { lazy } from "react"
 import { messageRenderers } from "../../ui/Markdown.tsx"
 import { registerMessageCopy } from "../../ui/messageCopy.tsx"
 import { appTools } from "../shell.tsx"
+import { ChatWidthPreference } from "./ChatWidth.tsx"
 import { MessageColorPreferences } from "./MessageColors.tsx"
+import { MessageToolbarPreferences } from "./MessageToolbarPreferences.tsx"
 const StMarkdown = lazy(() => import("../../ui/StMarkdown.tsx").then((module) => ({ default: module.StMarkdown })))
 import { displayTransforms, macroDisplay } from "./displayPipeline.ts"
 import { regexDisplay } from "./displayWorker.ts"
@@ -23,9 +25,19 @@ export const registerDisplay = () => [
   }),
   messageRenderers.register({ id: "markdown", order: 0, component: StMarkdown }),
   appTools.register({ id: "display.message-colors", order: 0, component: MessageColorPreferences }),
+  appTools.register({ id: "display.chat-width", order: 0, component: ChatWidthPreference }),
+  // Which message actions show as buttons, from the account (messageActions.tsx).
+  appTools.register({ id: "display.message-toolbar", order: 0, component: MessageToolbarPreferences }),
   displayTransforms.register({ id: "display.macros", order: 10, transform: macroDisplay }),
   displayTransforms.register({ id: "display.regex", order: 20, transform: regexDisplay }),
   ...builtinDisplayScriptLists.map((list) => displayScriptLists.register(list)),
   chatSurfaceProviders.register({ id: "display.context", order: 15, component: DisplayProvider }),
-  chatPanels.register({ id: "display", label: "Display", order: 85, icon: "type", component: DisplaySettings })
+  chatPanels.register({
+    id: "display",
+    label: "Display",
+    description: "How your chats look to you: Enter to send, colours, macros and display scripts.",
+    order: 85,
+    icon: "type",
+    component: DisplaySettings
+  })
 ]

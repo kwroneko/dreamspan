@@ -63,6 +63,20 @@ export class NotContinuable extends Schema.TaggedError<NotContinuable>()("NotCon
 export const ReasoningDisplay = Schema.Literals(["expanded", "collapsed"])
 export type ReasoningDisplay = typeof ReasoningDisplay.Type
 
+/**
+ * The chat column's widest, in CSS px (ST's Chat Width; owner 2026-11-01). ST's slider is
+ * 25–100 % of the screen; this one follows the account to every screen, so it's a width the
+ * column never exceeds and narrower screens fill: the top of the range is the full width.
+ */
+export const CHAT_WIDTH = { min: 480, max: 3840, step: 40, default: 1200 } as const
+
+/**
+ * The sorts of a preset list: by name (A–Z), last modified, last used. The list's fourth view,
+ * Archived, isn't one: it always sorts by most recently archived and is never remembered.
+ */
+export const PresetSort = Schema.Literals(["name", "modified", "used"])
+export type PresetSort = typeof PresetSort.Type
+
 /** The user's display choices that follow them across devices (`user_prefs`). */
 const messageColor = Schema.NullOr(Schema.String.check(Schema.isPattern(/^#[\da-f]{6}$/i)))
 const displayFields = {
@@ -78,7 +92,22 @@ const displayFields = {
   displayRegex: Schema.Boolean,
   /** The composer's text is guidance for the next generation, not a message (DESIGN §2.2). */
   enterSends: Schema.Literals(["automatic", "always", "never"]),
-  guidance: Schema.Boolean
+  guidance: Schema.Boolean,
+  chatWidth: Schema.Int.check(Schema.isBetween({ minimum: CHAT_WIDTH.min, maximum: CHAT_WIDTH.max })),
+  /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
+  presetSort: PresetSort,
+  /** How model lists sort (the composer's picker and the Model tab's). */
+  modelSort: Schema.Literals(["name", "used"]),
+  /**
+   * Which message actions show as buttons on a message, by action id: the user's choices
+   * over each action's default. An id no action has is kept and ignored.
+   */
+  messageToolbar: Schema.Record(Schema.String, Schema.Boolean).check(
+    Schema.isMaxProperties(200),
+    Schema.makeFilter((choices: Record<string, boolean>) => Object.keys(choices).every((id) => id.length <= 200), {
+      expected: "action ids of at most 200 characters"
+    })
+  )
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -94,7 +123,12 @@ export const DisplayPrefsChange = Schema.Struct({
   outputMacros: Schema.optionalKey(displayFields.outputMacros),
   displayRegex: Schema.optionalKey(displayFields.displayRegex),
   enterSends: Schema.optionalKey(displayFields.enterSends),
-  guidance: Schema.optionalKey(displayFields.guidance)
+  guidance: Schema.optionalKey(displayFields.guidance),
+  chatWidth: Schema.optionalKey(displayFields.chatWidth),
+  presetSort: Schema.optionalKey(displayFields.presetSort),
+  modelSort: Schema.optionalKey(displayFields.modelSort),
+  /** Merged by id with what's stored, so a write names only the choices it changes. */
+  messageToolbar: Schema.optionalKey(displayFields.messageToolbar)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -109,7 +143,11 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   outputMacros: false,
   displayRegex: true,
   enterSends: "automatic",
-  guidance: false
+  guidance: false,
+  chatWidth: CHAT_WIDTH.default,
+  presetSort: "name",
+  modelSort: "name",
+  messageToolbar: {}
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

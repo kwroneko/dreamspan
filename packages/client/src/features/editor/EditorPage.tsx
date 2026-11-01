@@ -7,8 +7,13 @@ import { useAtomValue } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { Link, useParams } from "@tanstack/react-router"
-import { lorebookEditorSections } from "./cardSections.ts"
+import { Link, useParams, useSearch } from "@tanstack/react-router"
+import {
+  CARD_LOREBOOK_FOCUS,
+  CARD_LOREBOOK_SECTION,
+  cardEditorSections,
+  lorebookEditorSections
+} from "./cardSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -16,20 +21,23 @@ import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { chatName, formatDay } from "../chat/chatTitle.ts"
 import { useTitle } from "../shell.tsx"
+import { FavouriteStar } from "../characters/cardBrowse.tsx"
+import { shellAtom } from "../characters/shellData.tsx"
 import { useCaller } from "./caller.ts"
 import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor } from "./CardEditor.tsx"
 import { NoteFields } from "./notes.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
-import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
+import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
-import { SaveDialog } from "./SaveDialog.tsx"
+import { SaveRevert } from "./SaveRevert.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
@@ -37,7 +45,7 @@ import { UpdateDialog } from "./UpdateDialog.tsx"
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
 
-type Open = "save" | "history" | "search" | "fork" | "rename" | "update" | null
+type Open = "history" | "search" | "fork" | "update" | null
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
@@ -91,6 +99,13 @@ function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string
   )
 }
 
+/** A character's favourite star beside its name; a persona (not on the shell's grids) has none. */
+function CardFavourite({ entityId }: { entityId: string }) {
+  const shell = useAtomValue(shellAtom)
+  const card = AsyncResult.isSuccess(shell) ? shell.value.cards.find((c) => c.card.entityId === entityId) : undefined
+  return card ? <FavouriteStar card={card} /> : null
+}
+
 export function Editor({
   refId,
   suppliedStore,
@@ -117,7 +132,17 @@ export function Editor({
   const [searching, setSearching] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  // A card opened on its own lorebook shows that section alone, until "Show the whole card",
+  // which shows the rest and keeps the book in view.
+  const [bookView, setBookView] = useState(focus === CARD_LOREBOOK_FOCUS)
+  const [revealBook, setRevealBook] = useState(false)
+  // Opened again from the panel while open: the new focus decides.
+  const [lastFocus, setLastFocus] = useState(focus)
+  if (focus !== lastFocus) {
+    setLastFocus(focus)
+    setBookView(focus === CARD_LOREBOOK_FOCUS)
+  }
+  const root = useRef<HTMLDivElement>(null)
   // The page shows the state: loads, and fields starting or ending unsaved changes.
   const state = useEditorState(store)
   const toolbar = useRef<HTMLDivElement>(null)
@@ -132,7 +157,33 @@ export function Editor({
     measure()
     return () => observer.disconnect()
   }, [loaded])
-  useTitle(state.snapshot?.ref.label ?? "Editor")
+  const bookOnly = bookView && state.snapshot?.ref.kind === "card"
+  const bookName = useText(store, ["character_book", "name"])?.trim()
+  const bookTitle = bookName || `${state.snapshot?.ref.label ?? ""}'s lorebook`
+  useTitle(bookOnly ? bookTitle : (state.snapshot?.ref.label ?? "Editor"))
+  useEffect(() => {
+    const element = root.current
+    const book = element?.querySelector("[data-card-lorebook]")
+    if (!revealBook || bookView || !element || !book) return
+    // What loads above the book (the definition's editors, the notes) grows after this: the
+    // book is kept in view while it does, until the user scrolls or a moment has passed.
+    const scroll = () => book.scrollIntoView({ block: "start" })
+    scroll()
+    const observer = new ResizeObserver(scroll)
+    observer.observe(element)
+    const stop = () => {
+      observer.disconnect()
+      setRevealBook(false)
+    }
+    const timer = setTimeout(stop, 1500)
+    const events = ["wheel", "touchstart", "keydown", "pointerdown"] as const
+    for (const event of events) window.addEventListener(event, stop, { once: true, capture: true })
+    return () => {
+      clearTimeout(timer)
+      observer.disconnect()
+      for (const event of events) window.removeEventListener(event, stop, { capture: true })
+    }
+  }, [revealBook, bookView])
   const workingName = useText(store, ["name"]) ?? ""
   const workingVersion = useText(store, ["character_version"]) ?? ""
   const nameCheck = useCardNameCheck(workingName, workingVersion, state.snapshot?.ref)
@@ -170,21 +221,27 @@ export function Editor({
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
 
-  const upload = async (file: File) => {
-    setUploadError(null)
-    const response = await fetch(`/library/avatar?ref=${ref.id}&rowVersion=${ref.rowVersion}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: file
-    })
-    if (response.ok) return store.refresh()
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown }
-    setUploadError(typeof body.error === "string" ? body.error : "The avatar couldn't be uploaded.")
-  }
+  /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
+  const overPreset = onClose !== undefined && ref.kind === "preset"
+  /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
+  const title = (size: string) => (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
+        {bookOnly ? bookTitle : ref.kind === "card" ? ref.label : <RefName store={store} />}
+      </h1>
+      {(ref.kind !== "card" || bookOnly) && <Badge>{bookOnly ? "lorebook" : (KINDS[ref.kind] ?? ref.kind)}</Badge>}
+      {ref.kind === "card" && !bookOnly && <CardFavourite entityId={ref.entityId} />}
+      {ref.kind !== "card" && ref.refKind !== "upstream" && (
+        <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
+          {ref.refKind === "variant" ? "variant" : "edited for this chat"}
+        </Badge>
+      )}
+    </div>
+  )
 
   return (
     <SearchNavigation value={searchMatch}>
-      <div className="flex flex-col gap-6">
+      <div ref={root} className="flex flex-col gap-6">
         <header className="flex flex-col gap-1">
           {onClose ? null : ref.chatId !== null ? (
             <span className="text-sm">
@@ -195,19 +252,27 @@ export function Editor({
               ← Library
             </Link>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
-            {ref.kind !== "card" && <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>}
-            {ref.kind !== "card" && ref.refKind !== "upstream" && (
-              <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-                {ref.refKind === "variant" ? "variant" : "edited for this chat"}
-              </Badge>
-            )}
-          </div>
-          {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
-          {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
+          {/* Over a chat, a preset's name is in the sticky bar, once. */}
+          {!overPreset && title("text-2xl")}
+          {ref.kind === "card" && !bookOnly && <CardSurface placement="provenance" entityId={ref.entityId} />}
+          {ref.subtitle && !bookOnly && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
           <p className="text-sm text-muted">
-            {ref.kind === "preset" ? (
+            {bookOnly ? (
+              // The book is part of the card's document: saved, versioned and exported with it.
+              <>
+                {ref.label}'s own lorebook. It's part of the card: saving it saves the card.{" "}
+                <button
+                  type="button"
+                  className="text-accent underline-offset-4 hover:underline"
+                  onClick={() => {
+                    setBookView(false)
+                    setRevealBook(true)
+                  }}
+                >
+                  Show the whole card
+                </button>
+              </>
+            ) : ref.kind === "preset" ? (
               "Saving changes this prompt preset in every chat that uses it."
             ) : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
@@ -253,10 +318,12 @@ export function Editor({
           {onClose &&
             (ref.kind === "preset" ? (
               <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{ref.label}</span>
-                <Button className="shrink-0" onClick={onClose}>
-                  Close preset editor
-                </Button>
+                {title("text-base")}
+                <Tooltip label="Back to the chat; unsaved changes stay as drafts">
+                  <Button className="shrink-0" onClick={onClose}>
+                    Close preset editor
+                  </Button>
+                </Tooltip>
               </div>
             ) : (
               // A card's name is the heading just above: the bar keeps only the way back.
@@ -267,22 +334,34 @@ export function Editor({
                 </Button>
               </div>
             ))}
-          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-            <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
-              Save{dirty > 0 ? ` (${dirty})` : ""}
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
+            <SaveRevert
+              store={store}
+              current={current}
+              saveDisabled={clash !== null}
+              onSaved={(saved) => setNotice(savedNotice(saved))}
+            />
+            {ref.kind !== "preset" && (
+              <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
+                Search
+              </Button>
+            )}
+            <Button hint="Every saved revision, to compare or restore." onClick={() => setOpen("history")}>
+              History
             </Button>
-            {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
-            <Button onClick={() => setOpen("history")}>History</Button>
             {ref.kind === "card" && (
               <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
             )}
-            {ref.kind === "preset" ? (
-              <>
-                {ref.refKind !== "chat_override" && <Button onClick={() => setOpen("fork")}>Make a variant</Button>}
-                <Button variant="ghost" onClick={() => setOpen("rename")}>
-                  Rename
+            {ref.kind !== "card" ? (
+              ref.kind !== "note" &&
+              ref.refKind !== "chat_override" && (
+                <Button
+                  hint="A named copy with its own changes, which still gets this one's updates."
+                  onClick={() => setOpen("fork")}
+                >
+                  Make a variant
                 </Button>
-              </>
+              )
             ) : (
               // What's used less, grouped; each opens its own dialog.
               <Popover
@@ -305,13 +384,7 @@ export function Editor({
                   className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
                   onClickCapture={() => setMore(false)}
                 >
-                  {ref.kind === "card" && (
-                    <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
-                  )}
-                  {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
-                    <Button onClick={() => setOpen("fork")}>Make a variant</Button>
-                  )}
-                  {ref.kind !== "card" && <Button onClick={() => setOpen("rename")}>Rename</Button>}
+                  <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
                 </div>
               </Popover>
             )}
@@ -331,6 +404,7 @@ export function Editor({
                   className="h-7! shrink-0 px-2!"
                   aria-expanded={searching}
                   aria-controls="preset-search"
+                  hint="Find and replace text anywhere in the preset."
                   onClick={() => setSearching(!searching)}
                 >
                   <Icon name="search" />
@@ -355,11 +429,6 @@ export function Editor({
           <ErrorAlert
             error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
           />
-        )}
-        {uploadError && (
-          <Alert tone="danger" title="The avatar wasn't changed">
-            <p>{uploadError}</p>
-          </Alert>
         )}
         <RestoredNotice count={state.restored} />
         <RecoveredNotice store={store} />
@@ -389,8 +458,9 @@ export function Editor({
           </Alert>
         )}
 
-        {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
-        {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
+        {bookOnly && <SlotOutlet slot={cardEditorSections} props={{ store, call }} only={CARD_LOREBOOK_SECTION} />}
+        {ref.kind === "card" && !bookOnly && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
+        {ref.kind === "card" && !bookOnly && <CardEditor store={store} call={call} />}
         {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
         {ref.kind === "note" && (
           <Card>
@@ -399,31 +469,10 @@ export function Editor({
         )}
         {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
 
-        {open === "save" && (
-          <SaveDialog
-            store={store}
-            current={current}
-            onClose={() => setOpen(null)}
-            onSaved={(saved) => {
-              setOpen(null)
-              setNotice(savedNotice(saved))
-            }}
-          />
-        )}
         {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
         {open === "search" && <SearchDialog store={store} onClose={() => setOpen(null)} onReveal={setSearchMatch} />}
         {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
         {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
-        {open === "rename" && (
-          <RenameDialog
-            store={store}
-            onClose={() => setOpen(null)}
-            onRenamed={() => {
-              setOpen(null)
-              void store.refresh()
-            }}
-          />
-        )}
       </div>
     </SearchNavigation>
   )
@@ -431,5 +480,7 @@ export function Editor({
 
 export function EditorPage() {
   const { refId }: { refId?: string } = useParams({ strict: false })
-  return <Editor key={refId} refId={refId as RefId} />
+  // `?focus=lorebook` opens a card on its own lorebook, as the chat's workspace does.
+  const { focus } = useSearch({ strict: false }) as { focus?: unknown }
+  return <Editor key={refId} refId={refId as RefId} focus={typeof focus === "string" ? focus : undefined} />
 }

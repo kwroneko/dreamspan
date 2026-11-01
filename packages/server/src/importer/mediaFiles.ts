@@ -118,7 +118,9 @@ export const sweepMedia = (dataDir: string, recorded: ReadonlySet<string>, optio
         // while it is recorded; sweep them with it when its row is gone.
         const sha256 = HASH.test(name)
           ? name
-          : (/^([0-9a-f]{64})\.(?:thumb-v1-(?:96|192|384|768)\.webp|animated-v1|original-v1)$/.exec(name)?.[1] ?? null)
+          : (/^([0-9a-f]{64})\.(?:thumb-v1-(?:96|192|384|768)(?:-c(?:auto|\d{1,5}_\d{1,5}_\d{1,5}_\d{1,5}))?\.webp|animated-v1|original-v1)$/.exec(
+              name
+            )?.[1] ?? null)
         if (sha256 !== null && (recorded.has(sha256) || options.pending.has(sha256))) continue
         if (options.between) yield* options.between("checked", path)
         if (yield* wanted(sha256)) continue

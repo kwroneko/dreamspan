@@ -32,6 +32,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
       variant="ghost"
       className="h-8! px-2!"
       aria-label={`Open ${card.name} in the full editor`}
+      hint="Every field of the card, opened over the chat."
       disabled={!info}
       onClick={() => {
         if (!info) return
@@ -56,6 +57,7 @@ export function ForkChatCard({ session, card, info }: ChatCardActionProps) {
         className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Fork for this chat: ${card.name}`}
+        hint="Makes a copy of the card for this branch, to change without changing other chats."
         onClick={() => setOpen(true)}
       >
         Fork for this chat
@@ -73,6 +75,7 @@ export function ChooseChatCard({ session, card, info }: ChatCardActionProps) {
         className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Use another version: ${card.name}`}
+        hint="Swaps in another card of its family, such as a fork, on this branch."
         onClick={() => setOpen(true)}
       >
         Use another version
@@ -171,8 +174,12 @@ function ChatCardForkDialog({
         <Field label="In-character name" description="Used in prompts and {{char}}. Empty uses the display name.">
           <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
         </Field>
-        <Checkbox checked={moveDrafts} onCheckedChange={setMoveDrafts}>
-          Take unsaved changes from the card’s editor (name drafts stay there)
+        <Checkbox
+          checked={moveDrafts}
+          onCheckedChange={setMoveDrafts}
+          description="They move from the original to the copy, all but its names, which you set here."
+        >
+          Bring the editor’s unsaved changes
         </Checkbox>
         <p className="text-xs text-muted">
           The original is used by {info.usedByChats} {info.usedByChats === 1 ? "chat" : "chats"}.

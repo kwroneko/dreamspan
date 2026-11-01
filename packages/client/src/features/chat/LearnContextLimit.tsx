@@ -15,13 +15,15 @@ export function LearnContextLimit({ version }: { version: Version }) {
     <div className="mt-2 flex flex-col gap-2 text-text">
       {saved ? (
         <p role="status">
-          Saved: the model&rsquo;s context size is {limit.tokens.toLocaleString()} tokens. Regenerate to try again.
+          Saved: the model&rsquo;s context size is {limit.tokens.toLocaleString()} tokens. › on the reply generates
+          another version to try again.
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <span>The provider says this model takes {limit.tokens.toLocaleString()} tokens.</span>
           <Button
             pending={action.pending}
+            hint="Saved as the model's learned context size, which every chat with it then uses."
             onClick={async () => {
               const result = await action.run(
                 (client) => client("SaveLearnedContext", { modelId: limit.modelId as ModelId, context: limit.tokens }),

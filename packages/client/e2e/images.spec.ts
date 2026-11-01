@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { expect, test } from "@playwright/test"
 import { oversizedPortraitPng, writeLargeImageStFolder } from "../../server/test/support/stLargeImages.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { portraitView } from "./support/portrait.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
 test.setTimeout(600_000)
@@ -37,7 +38,7 @@ for (const width of [1440, 390]) {
       await expect(tile).toHaveAttribute("decoding", "async")
       await expect.poll(() => tile.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
       expect(requests.length).toBeGreaterThan(0)
-      expect(requests.every((url) => /&w=(96|192|384|768)$/.test(url))).toBeTruthy()
+      expect(requests.every((url) => /&w=(96|192|384|768)&crop=\w+$/.test(url))).toBeTruthy()
       const sizing = await tile.evaluate((img) => ({
         pixels: img.getBoundingClientRect().width * devicePixelRatio,
         url: (img as HTMLImageElement).currentSrc
@@ -51,7 +52,7 @@ for (const width of [1440, 390]) {
         .getByRole("button", { name: /^Open Synthetic 001(?: · .*)?$/ })
         .click()
       const portrait = page.locator("main img").first()
-      await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)$/)
+      await expect(portrait).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)
       // With no chat yet the tile opens a new one, the card's panel offering New chat; with one,
       // its latest chat at the card's tab, whose More menu starts another (fpanel).
       const newChat = page.getByRole("link", { name: "New chat", exact: true }).filter({ visible: true })
@@ -65,9 +66,9 @@ for (const width of [1440, 390]) {
       await page.getByLabel("Message", { exact: true }).fill("Hello from the image test.")
       await page.getByRole("button", { name: /^Send as / }).click()
       await expect(page).toHaveURL(/\/chats\//)
-      // A message portrait opens the original in a lightbox, including on phones.
+      // A message portrait opens the original: beside the chat, or full-screen on a phone.
       await page.getByRole("button", { name: "View Synthetic 001's portrait" }).first().click()
-      const full = page.getByRole("dialog", { name: "Synthetic 001" }).getByRole("img")
+      const full = portraitView(page, "Synthetic 001").getByRole("img", { name: "Synthetic 001's full portrait" })
       await expect(full).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(1024)
       await expect.poll(() => full.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBe(2048)
@@ -98,9 +99,14 @@ for (const width of [1440, 390]) {
       mimeType: "image/png",
       buffer: bytes
     })
+    // A new picture goes through the cutout chooser (§14.5c); its default cutout is saved.
+    await page
+      .getByRole("dialog", { name: /new picture$/ })
+      .getByRole("button", { name: "Save picture" })
+      .click()
     expect((await uploaded).status()).toBe(200)
     const avatar = page.getByRole("img", { name: "The card's avatar" })
-    await expect(avatar).toHaveAttribute("src", /&w=(96|192|384|768)$/)
+    await expect(avatar).toHaveAttribute("src", /&w=(96|192|384|768)&crop=\w+$/)
     await expect.poll(() => avatar.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBe(8000)
     await avatar.evaluate((img) => (img as HTMLImageElement).decode())
     if (process.env.SCREENSHOT_DIR)

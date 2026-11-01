@@ -45,7 +45,8 @@ import {
   linkChat,
   speakerMap,
   stem,
-  stForkName
+  stForkName,
+  authorNotePlace
 } from "./stMapping.ts"
 
 const IDLE_MS = 60 * 60_000
@@ -191,6 +192,7 @@ interface Session extends FolderContext {
   readonly report: Report
   settings: StSettings | null
   summaryMacro: boolean
+  riders: boolean
   personaNames: Map<string, ReadonlyArray<string>>
   /** Characters held, against MAX_HELD_CHARS, and the settings' share of them. */
   held: number
@@ -304,6 +306,7 @@ export class StImports extends Context.Service<
             report: new Report(),
             settings: null,
             summaryMacro: false,
+            riders: false,
             personaNames: new Map(),
             held: 0,
             settingsHeld: 0,
@@ -472,7 +475,15 @@ export class StImports extends Context.Service<
       const personaFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array) =>
         Effect.gen(function* () {
           const persona: StPersona | null = session.settings?.personas.find((p) => p.avatar === file) ?? null
-          const parsed = yield* formats.st.persona(bytes, file, persona)
+          // At the author's note's top or bottom: where the folder's default author's note is.
+          const riding = persona !== null && (persona.position === 2 || persona.position === 3)
+          if (riding) session.riders = true
+          const parsed = yield* formats.st.persona(
+            bytes,
+            file,
+            persona,
+            authorNotePlace(session.settings?.defaultAuthorNote ?? null).note
+          )
           const imported = yield* importLibrary(session, user, path, "persona", parsed)
           if (imported.entity === null) return imported.outcome
           // Only a new card goes into the persona folder: the user may have refiled it since.
@@ -480,9 +491,8 @@ export class StImports extends Context.Service<
             yield* writer.SetEntityTags({ userId: user.id, entityId: imported.entity.entityId, tags: ["persona"] })
           }
           session.personas.set(file, imported.entity.entityId)
-          // At the author's note's top or bottom: switched off in chats whose author's note ST disabled.
-          if (persona !== null && (persona.position === 2 || persona.position === 3) && imported.note !== null)
-            session.personaNotes.set(imported.entity.entityId, imported.note)
+          // Where the author's note was: switched off in chats whose author's note ST disabled.
+          if (riding && imported.note !== null) session.personaNotes.set(imported.entity.entityId, imported.note)
           if (persona !== null && persona.position === 9) {
             session.report.issue(
               path,
@@ -510,7 +520,8 @@ export class StImports extends Context.Service<
               cardEntityId: card,
               prompt: chara.prompt,
               useChara: chara.useChara,
-              position: chara.position,
+              // Before, after or in place of the author's note: where the folder's default one is.
+              placement: authorNotePlace(settings.defaultAuthorNote).note,
               scanLore: settings.allowWIScan,
               sourcePath: path
             })
@@ -523,6 +534,7 @@ export class StImports extends Context.Service<
                 }
               })
             )
+          session.riders = true
           session.report.count("character_note", imported === null ? "failed" : imported.created ? "added" : "updated")
           return imported !== null && chara.useChara ? imported.entity : null
         })
@@ -564,7 +576,15 @@ export class StImports extends Context.Service<
         name: string
       ) =>
         Effect.gen(function* () {
-          const parsed = yield* formats.st.libraryFile(bytes, file, kind, session.settings?.textSwitches)
+          const parsed = yield* formats.st.libraryFile(
+            bytes,
+            file,
+            kind,
+            session.settings?.textSwitches,
+            kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined
+          )
+          if (parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries"))
+            session.riders = true
           const imported = yield* importLibrary(session, user, path, kind, parsed.parsed)
           if (imported.entity !== null && kind === "lorebook") {
             session.worlds.set(name, imported.entity.refId)
@@ -733,7 +753,15 @@ export class StImports extends Context.Service<
               progress.path,
               "info",
               "st.character_note_replaced",
-              "ST sent the character's own author's note in place of this chat's; both are kept here, the character's at the top of the chat's."
+              "ST sent the character's own author's note in place of this chat's; both are kept here, at the default author's note's place."
+            )
+          }
+          if (change.ridersElsewhere) {
+            report.issue(
+              progress.path,
+              "warning",
+              "st.author_note_riders",
+              "ST put a persona, a character's own author's note or lorebook entries at this chat's author's note. Here they're where ST's default author's note is, the same place in every chat, not at this chat's note."
             )
           }
           if (change.summaryTrimmed) {

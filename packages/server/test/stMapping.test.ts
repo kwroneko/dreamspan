@@ -274,8 +274,9 @@ describe("ST personas (DESIGN §4.1, owner 2026-10-28)", () => {
 
   it("puts one placed elsewhere in an ordinary note on its card, its only copy", () => {
     for (const [position, placement] of [
-      [2, { mode: "section", section: "author_note_top" }],
-      [3, { mode: "section", section: "author_note_bottom" }],
+      // At the author's note's top or bottom: ST's default author's note place, with no settings.
+      [2, { mode: "depth", depth: 4, role: "system" }],
+      [3, { mode: "depth", depth: 4, role: "system" }],
       [4, { mode: "depth", depth: 3, role: "user" }],
       [9, { mode: "none" }]
     ] as const) {

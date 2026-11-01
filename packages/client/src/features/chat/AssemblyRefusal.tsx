@@ -9,7 +9,7 @@ export function AssemblyRefusal({ history }: { history: Omit<NextContext, "warmt
   const budget = history.assemblyErrorReason === "budget" ? history.budget : null
   if (!budget)
     return (
-      <div className="mx-auto w-full max-w-3xl pb-2">
+      <div className="chat-column pb-2">
         <Alert tone="danger" title="Can't prepare the next reply">
           {history.assemblyError}
         </Alert>
@@ -22,7 +22,7 @@ export function AssemblyRefusal({ history }: { history: Omit<NextContext, "warmt
   // otherwise the refusal's own message (the newest message, a summary chunk) says what doesn't fit.
   const fixedOverflows = budget.nonHistoryTokens + budget.responseReserve > budget.maximum
   return (
-    <div className="mx-auto w-full max-w-3xl pb-2">
+    <div className="chat-column pb-2">
       <Alert
         tone="warning"
         title="The next reply doesn't fit the context size"

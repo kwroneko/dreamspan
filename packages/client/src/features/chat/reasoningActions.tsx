@@ -5,6 +5,7 @@
 // Show as reply text, for a wrong parse (spec/REPLY-SECTIONS.md).
 import { useState } from "react"
 import { showToast } from "../../ui/Toast.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { type ReasoningActionProps, reasoningActions } from "./presentation.tsx"
 import { copy } from "./copy.ts"
 
@@ -22,7 +23,7 @@ export const subscribeCollapses = (listener: () => void) => {
 }
 
 const actionClass =
-  "rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+  "rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
 
 export const registerReasoningActions = () => [
   reasoningActions.register({
@@ -54,9 +55,11 @@ export const registerReasoningActions = () => [
 function CollapseAll({ first }: ReasoningActionProps) {
   if (!first) return null
   return (
-    <button type="button" className={actionClass} onClick={collapseAllReasoning}>
-      Collapse all
-    </button>
+    <Tooltip label="Closes every reasoning and thinking block in the chat.">
+      <button type="button" className={actionClass} onClick={collapseAllReasoning}>
+        Collapse all
+      </button>
+    </Tooltip>
   )
 }
 
@@ -73,8 +76,10 @@ function ShowAsReplyText({ version, kind, streaming, session }: ReasoningActionP
     if (!result.ok) showToast({ title: "Couldn't show the thinking as reply text", description: result.error.message })
   }
   return (
-    <button type="button" className={actionClass} disabled={busy} onClick={() => void run()}>
-      Show as reply text
-    </button>
+    <Tooltip label="Puts this thinking back in the reply's text as a new version; this one stays among its versions.">
+      <button type="button" className={actionClass} disabled={busy} onClick={() => void run()}>
+        Show as reply text
+      </button>
+    </Tooltip>
   )
 }

@@ -111,6 +111,8 @@ export function ChatSurfaceProviders(props: ChatSurfaceProps) {
       props.children
     )
 }
+/** Columns left of the messages, beside them on a wide screen: the portrait (`chat.portrait-column`). */
+export const chatColumns = defineSlot<{ wide: boolean }>("chat.columns")
 export const chatOverlays = defineSlot<{ session: ChatSession; view: ChatView }>("chat.overlays")
 /** Actions beside a failed version's error, such as saving a context size its error states. */
 export const versionFailureActions = defineSlot<{ version: import("@rp/shared/chat.ts").Version }>(
@@ -126,7 +128,7 @@ export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.
 
 /** The header's branch control (`chat.branches`: BranchControl.tsx). */
 export const chatBranchControls = defineSlot<import("./BranchControl.tsx").BranchControlProps>("chat.branch-controls")
-/** The header's buttons at the end of its row, after the branch control: ☆, the panel, ⋯. */
+/** The header's buttons at the end of its row, after the branch control: the pin, the panel, ⋯. */
 export const chatHeaderActions = defineSlot<import("./ChatHeader.tsx").ChatHeaderActionProps>("chat.header-actions")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
 export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(

@@ -4,11 +4,12 @@ import { textActions } from "../../textActions.tsx"
 import { useAtomValue } from "@effect/atom-react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import type { NoteCondition, Placement } from "@rp/shared/docs/note.ts"
+import { anyOf, conditionCards, type NoteCondition, type Placement, readNoteCondition } from "@rp/shared/docs/note.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc, LibraryRef } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
+import { Predicate } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -21,6 +22,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
+import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { browserEnv } from "./backup.ts"
@@ -36,9 +38,17 @@ export interface NoteCard {
 }
 
 const ROLES = [
-  { value: "system", label: "System" },
-  { value: "user", label: "User" },
-  { value: "assistant", label: "Assistant" }
+  {
+    value: "system",
+    label: "System",
+    description: "Sent as a system message: an instruction, from no one in the story."
+  },
+  { value: "user", label: "User", description: "Sent as a user message, as if you had written it." },
+  {
+    value: "assistant",
+    label: "Assistant",
+    description: "Sent as an assistant message, as if the model had written it."
+  }
 ] as const
 
 type Role = (typeof ROLES)[number]["value"]
@@ -47,20 +57,56 @@ type Section = Extract<Placement, { mode: "section" }>["section"]
 
 /**
  * Where a note goes: the five places relative to the preset's own sections (DESIGN §4.1),
- * then older and imported places, which show only on a note already there.
+ * then older and imported places, which show only on a note already there. The tail is what
+ * the preset sends after the chat history.
  */
 const PLACES = [
-  { value: "section:context_start", label: "Start of context" },
-  { value: "section:after_main_prompt", label: "With the definitions (after the main prompt)" },
-  { value: "depth", label: "In the history, at a depth" },
-  { value: "section:tail_start", label: "Start of the tail" },
-  { value: "section:tail_end", label: "End of the tail" },
-  { value: "tail", label: "After the newest message (older notes)" },
-  { value: "section:card", label: "Beside the card's definition (older notes)" },
-  { value: "section:before_main_prompt", label: "Before the main prompt (older notes)" },
-  { value: "section:author_note_top", label: "Just before the chat's author's note (imported from ST)" },
-  { value: "section:author_note_bottom", label: "Just after the chat's author's note (imported from ST)" },
-  { value: "none", label: "Not placed: only a macro reads it" }
+  {
+    value: "section:context_start",
+    label: "Start of context",
+    description: "The very first thing sent, before everything in the preset."
+  },
+  {
+    value: "section:after_main_prompt",
+    label: "With the definitions",
+    description: "Right after the preset's main prompt."
+  },
+  {
+    value: "depth",
+    label: "In the history",
+    description: "Among the chat's messages, the depth you set back from the newest. At 0 it follows the newest."
+  },
+  {
+    value: "section:tail_start",
+    label: "Start of the tail",
+    description: "Right after the chat history and the newest message, before the preset's prompts that follow."
+  },
+  {
+    value: "section:tail_end",
+    label: "End of the tail",
+    description:
+      "Last of the preset's prompts after the history: only the closing instruction, and the newest message if the preset puts it last, follow."
+  },
+  {
+    value: "tail",
+    label: "After the newest message",
+    description: "An older place: in the history at depth 0, as ST puts it. Pick another to move it."
+  },
+  {
+    value: "section:card",
+    label: "Beside the card",
+    description: "An older place: at the top of its card's part of the definitions. A chat's note here isn't sent."
+  },
+  {
+    value: "section:before_main_prompt",
+    label: "Before the main prompt",
+    description: "An older place: right before the preset's main prompt."
+  },
+  {
+    value: "none",
+    label: "Not placed",
+    description: "Never sent by itself: only a macro that reads it sends its text."
+  }
 ] as const
 
 type Place = (typeof PLACES)[number]["value"]
@@ -96,9 +142,7 @@ const shortPlace = (placement: Placement | undefined): string => {
         tail_start: "Start of tail",
         tail_end: "End of tail",
         card: "Beside the card",
-        before_main_prompt: "Before the main prompt",
-        author_note_top: "Before the author's note",
-        author_note_bottom: "After the author's note"
+        before_main_prompt: "Before the main prompt"
       }[place.section]
   }
 }
@@ -108,19 +152,25 @@ const aboveHistory = (placement: Placement | undefined) =>
   placement?.mode === "section" &&
   ["context_start", "card", "before_main_prompt", "after_main_prompt"].includes(placement.section)
 
-/** A condition as its chip says it: "Aria's turn", "While Bram isn't muted". */
-const conditionText = (condition: NoteCondition | undefined, cards: ReadonlyArray<NoteCard>) => {
-  if (condition === undefined || condition.when === "always") return null
-  const name = cards.find((card) => card.entity === condition.card)?.name ?? "A card not in this chat"
-  return condition.when === "turn" ? `${name}'s turn` : `While ${name} isn't muted`
+/**
+ * A condition as its chip says it: "Aria's turn", "Aria's or Bram's turn", "While Bram isn't
+ * muted". A card not in this chat never counts, so only the others are named, unless none is.
+ */
+const conditionText = (stored: unknown, cards: ReadonlyArray<NoteCard>) => {
+  const condition = readNoteCondition(stored)
+  if (condition.when === "always") return null
+  const named = condition.cards.flatMap((entity) => cards.find((card) => card.entity === entity)?.name ?? [])
+  const names = named.length > 0 ? named : ["A card not in this chat"]
+  // A long list names two, so the chip fits a phone's row.
+  const shown = names.length > 3 ? names.slice(0, 2) : names
+  const others = names.length - shown.length
+  return condition.when === "turn"
+    ? `${anyOf([...shown.map((name) => `${name}'s`), ...(others > 0 ? [`${others} others'`] : [])])} turn`
+    : `While ${anyOf([...shown, ...(others > 0 ? [`${others} others`] : [])])} isn't muted`
 }
 
 /** "With the definitions" for a card's note: inside its card's part (DESIGN §4.1). */
-const CARD_DEFINITIONS = "With the definitions (in the card's part)"
-
-/** What a place at the author's note means, said where it's chosen: nothing about it is hidden. */
-const AUTHOR_NOTE_PLACE =
-  "It joins the chat's author's note (the note marked “author's note” in the chat's notes), at its depth and role. In a chat without one, it goes in the history at depth 4 as the system, where ST's default author's note goes."
+const CARD_DEFINITIONS = "At the top of this card's own part of the definitions, inside its wrapper."
 
 /** Where a note goes, saved whole as one value. Fields of the placement this editor doesn't show stay as they are. */
 function PlacementField({
@@ -152,7 +202,7 @@ function PlacementField({
   }
   // An older or imported place still shows, when the note is there already.
   const items = PLACES.filter((p) => DECIDED.includes(p.value) || p.value === placeOf(placement)).map((p) =>
-    card && p.value === "section:after_main_prompt" ? { ...p, label: CARD_DEFINITIONS } : p
+    card && p.value === "section:after_main_prompt" ? { ...p, description: CARD_DEFINITIONS } : p
   )
   return (
     // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
@@ -187,10 +237,6 @@ function PlacementField({
           </Field>
         )}
       </div>
-      {placement.mode === "section" &&
-        (placement.section === "author_note_top" || placement.section === "author_note_bottom") && (
-          <p className="text-sm text-muted">{AUTHOR_NOTE_PLACE}</p>
-        )}
       <FieldTools store={store} field={valueField(path)} label={label} />
     </div>
   )
@@ -198,40 +244,81 @@ function PlacementField({
 
 type When = NoteCondition["when"]
 
-const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string }> = [
-  { value: "always", label: "Always" },
-  { value: "turn", label: "On a character's turn" },
-  { value: "not_muted", label: "While a character isn't muted" }
+const WHEN: ReadonlyArray<{ readonly value: When; readonly label: string; readonly description: string }> = [
+  { value: "always", label: "Always", description: "Sent on every turn while it's on." },
+  {
+    value: "turn",
+    label: "On a chosen character's turn",
+    description:
+      "Sent only when one of the chosen characters writes the message, a new version or continuation of theirs included."
+  },
+  {
+    value: "not_muted",
+    label: "While a chosen character isn't muted",
+    description: "Sent while at least one of the chosen characters is in the chat and not muted."
+  }
 ]
 
-/** When a note applies (DESIGN §4.1): always, on a card's turn, or while a card isn't muted. */
+/** What choosing a card means for the condition, said on its option. */
+const cardDescription = (when: Exclude<When, "always">, name: string, offered: boolean) =>
+  !offered
+    ? "Not in this chat, so it never counts here. Remove it, or add the card to the chat."
+    : when === "turn"
+      ? `Sent when ${name} writes the message.`
+      : `Sent while ${name} isn't muted.`
+
+/**
+ * When a note applies (DESIGN §4.1): always, on the turn of any of the chosen cards, or while
+ * any of them isn't muted. The cards are the chat's cast (the card itself in its editor); a
+ * card the condition names that isn't offered here still shows, and can be removed.
+ */
 function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyArray<NoteCard> }) {
-  const condition = useValue<NoteCondition | undefined>(store, ["condition"])
+  const condition = readNoteCondition(useValue<unknown>(store, ["condition"]))
   const placement = useValue<Placement | undefined>(store, ["placement"])
-  const when = condition?.when ?? "always"
-  const named = condition && condition.when !== "always" ? condition.card : null
-  // A card the condition names that isn't one offered here still shows.
-  const choices = [
-    ...cards.map((card) => ({ value: card.entity, label: card.name })),
-    ...(named !== null && !cards.some((card) => card.entity === named)
-      ? [{ value: named, label: "A card not in this chat" }]
-      : [])
+  const owner = useValue<unknown>(store, ["owner"])
+  const when = condition.when
+  const named = conditionCards(condition)
+  const missing = named.filter((entity) => !cards.some((card) => card.entity === entity))
+  const choices = (on: Exclude<When, "always">) => [
+    ...cards.map((card) => ({
+      value: card.entity,
+      label: card.name,
+      description: cardDescription(on, card.name, true)
+    })),
+    ...missing.map((entity, i) => ({
+      value: entity,
+      label: missing.length === 1 ? "A card not in this chat" : `A card not in this chat (${i + 1})`,
+      description: cardDescription(on, "", false),
+      unavailable: true
+    }))
   ]
-  const set = (next: When, card: string | null) =>
-    store.setValue(["condition"], next === "always" || card === null ? undefined : { when: next, card })
+  // A new condition names the note's own card when it's offered, else the first one.
+  const ownCard = Predicate.isObject(owner) && Predicate.isString(owner["card"]) ? owner["card"] : null
+  const first = cards.find((card) => card.entity === ownCard)?.entity ?? cards[0]?.entity
+  const set = (next: When, chosen: ReadonlyArray<string>) =>
+    store.setValue(["condition"], next === "always" || chosen.length === 0 ? undefined : { when: next, cards: chosen })
   return (
     <div className="@container flex min-w-0 flex-col gap-2">
       <div className="grid gap-3 @md:grid-cols-2">
         <Field label="When it applies">
           <Select
-            items={WHEN.filter((w) => w.value === "always" || choices.length > 0)}
+            items={WHEN.filter((w) => w.value === "always" || named.length > 0 || cards.length > 0)}
             value={when}
-            onValueChange={(next) => set(next, named ?? choices[0]?.value ?? null)}
+            onValueChange={(next) => set(next, named.length > 0 ? named : first === undefined ? [] : [first])}
           />
         </Field>
         {when !== "always" && (
-          <Field label="Character">
-            <Select items={choices} value={named} onValueChange={(card) => set(when, card)} />
+          <Field label="Characters">
+            <MultiSelect
+              items={choices(when)}
+              value={named}
+              minimum={1}
+              addLabel="Add"
+              chosenLabel="Chosen characters"
+              listLabel="Choose characters"
+              explanation={WHEN.find((w) => w.value === when)?.description}
+              onValueChange={(next) => set(when, next)}
+            />
           </Field>
         )}
       </div>
@@ -538,12 +625,21 @@ export function NoteEditor({
           }
         >
           {shareable && (
-            <MenuItem icon="link" onClick={() => void relink("share")}>
+            <MenuItem
+              icon="link"
+              description="Makes its text a shared note this one shows, so other cards and chats can use it too."
+              onClick={() => void relink("share")}
+            >
               Save as shared note
             </MenuItem>
           )}
           {onDeleted && (
-            <MenuItem icon="trash" tone="danger" onClick={() => void remove()}>
+            <MenuItem
+              icon="trash"
+              tone="danger"
+              description="Moves it to the bin, where it can be restored."
+              onClick={() => void remove()}
+            >
               Delete the note
             </MenuItem>
           )}
@@ -579,7 +675,6 @@ export function NoteRow({
   shared,
   detail,
   keepMounted = false,
-  authorNote = false,
   children
 }: {
   doc: Doc
@@ -598,12 +693,10 @@ export function NoteRow({
    * leaving and a copy kept in this browser comes back as the page opens.
    */
   keepMounted?: boolean
-  /** It's the chat's author's note, which notes and lore at its top or bottom join. */
-  authorNote?: boolean
   children: ReactNode
 }) {
   const { title, muted } = rowTitle(doc, label)
-  const condition = conditionText(doc["condition"] as NoteCondition | undefined, cards)
+  const condition = conditionText(doc["condition"], cards)
   const kind = doc["kind"]
   return (
     <li className="flex flex-col gap-2 py-2">
@@ -632,7 +725,6 @@ export function NoteRow({
             {!control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
             {shared?.binned && <Badge tone="warning">linked note is in the bin</Badge>}
             {doc["exportable"] === false && "card" in Object(doc["owner"]) && <Badge>Private</Badge>}
-            {authorNote && <Badge>author's note</Badge>}
             {kind === "imported_summary" && <Badge>summary</Badge>}
           </span>
         </button>
@@ -744,10 +836,14 @@ export function AddNoteMenu({
         </Button>
       }
     >
-      <MenuItem icon="write" onClick={onNew}>
+      <MenuItem icon="write" description="An empty note of its own here." onClick={onNew}>
         New note
       </MenuItem>
-      <MenuItem icon="link" onClick={onPick}>
+      <MenuItem
+        icon="link"
+        description="A note that shows a shared note's text: editing it changes it everywhere it's used."
+        onClick={onPick}
+      >
         Pick a shared note…
       </MenuItem>
     </Menu>

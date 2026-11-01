@@ -183,6 +183,16 @@ export function ForkBadge({ entityId, label }: CardSurfaceContext) {
     </>
   )
 }
+/** What each command does, beside its button or menu item. */
+const EXPLAIN = {
+  fork: "Makes an independent copy of the card, in its family, to change on its own.",
+  family: "Every card of this card's family: the one it came from and its forks.",
+  compareParent: "The saved fields where it differs from the card it was forked from.",
+  compareFamily: "The saved fields where it differs from another card of its family.",
+  parent: "Records another card as the one it was forked from. Neither card's content changes.",
+  unlink: "Forgets which card it was forked from. Neither card's content changes."
+} as const
+
 export function ForkCommand({
   entityId,
   store,
@@ -213,24 +223,33 @@ export function ForkCommand({
   return (
     <>
       {command === "fork" && (
-        <Button disabled={!member?.refId} pending={loading} onClick={() => void fork()}>
+        <Button disabled={!member?.refId} pending={loading} hint={EXPLAIN.fork} onClick={() => void fork()}>
           Fork
         </Button>
       )}
       {command === "family" && (
-        <Button disabled={!family} onClick={() => setOpen("family")}>
+        <Button disabled={!family} hint={EXPLAIN.family} onClick={() => setOpen("family")}>
           Forks
         </Button>
       )}
       {command === "compare" && (
-        <Button disabled={!family || family.members.length < 2} onClick={() => setOpen("compare")}>
+        <Button
+          disabled={!family || family.members.length < 2}
+          hint={member?.parentEntityId ? EXPLAIN.compareParent : EXPLAIN.compareFamily}
+          onClick={() => setOpen("compare")}
+        >
           {member?.parentEntityId ? "Compare with parent" : "Compare with family"}
         </Button>
       )}
-      {command === "parent" && <Button onClick={() => setOpen("parent")}>Mark as a fork of…</Button>}
+      {command === "parent" && (
+        <Button hint={EXPLAIN.parent} onClick={() => setOpen("parent")}>
+          Mark as a fork of…
+        </Button>
+      )}
       {command === "unlink" && member?.parentEntityId && (
         <Button
           pending={action.pending}
+          hint={EXPLAIN.unlink}
           onClick={() =>
             void action.run((api) => api("SetCardParent", { entityId, parentEntityId: null }), ["library"])
           }
@@ -263,26 +282,37 @@ export function ForkMenuItem({ entityId, openDialog, command }: CardMenuProps & 
   const action = useAction()
   if (command === "fork")
     return (
-      <MenuItem icon="branch" disabled={!member?.refId} onClick={openDialog}>
+      <MenuItem icon="branch" disabled={!member?.refId} description={EXPLAIN.fork} onClick={openDialog}>
         Fork…
       </MenuItem>
     )
   if (command === "family")
     return (
-      <MenuItem disabled={!family} onClick={openDialog}>
+      <MenuItem disabled={!family} description={EXPLAIN.family} onClick={openDialog}>
         Forks
       </MenuItem>
     )
   if (command === "compare")
     return (
-      <MenuItem icon="compare" disabled={!family || family.members.length < 2} onClick={openDialog}>
+      <MenuItem
+        icon="compare"
+        disabled={!family || family.members.length < 2}
+        description={member?.parentEntityId ? EXPLAIN.compareParent : EXPLAIN.compareFamily}
+        onClick={openDialog}
+      >
         {member?.parentEntityId ? "Compare with parent" : "Compare with family"}
       </MenuItem>
     )
-  if (command === "parent") return <MenuItem onClick={openDialog}>Mark as a fork of…</MenuItem>
+  if (command === "parent")
+    return (
+      <MenuItem description={EXPLAIN.parent} onClick={openDialog}>
+        Mark as a fork of…
+      </MenuItem>
+    )
   if (!member?.parentEntityId) return null
   return (
     <MenuItem
+      description={EXPLAIN.unlink}
       onClick={() =>
         void action
           .run((api) => api("SetCardParent", { entityId, parentEntityId: null }), ["library"])

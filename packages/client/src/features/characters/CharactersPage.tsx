@@ -1,23 +1,22 @@
-import { useAtomRefresh } from "@effect/atom-react"
 import { useState, useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
-import { AsyncView, FailureView } from "../../actions.tsx"
-import { Loading } from "../../ui/Spinner.tsx"
+import { AsyncView } from "../../actions.tsx"
 import { Input } from "../../ui/Field.tsx"
-import { Segmented } from "../../ui/Segmented.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
-import { sortCards } from "./cardRecency.ts"
-import { CharacterTile, PAGE_ROWS, shellAtom, useShellForks, type ShellLibrary } from "./shellData.tsx"
-import { GroupTile, PinnedChats, ShowMore, SortSwitch, type ShellSort } from "./ShellBrowser.tsx"
+import { browseCards, CardFilterControl, CardSortControl, useCardBrowse } from "./cardBrowse.tsx"
+import { GroupGrid } from "./GroupGrid.tsx"
+import { CharacterGrid, shellAtom, useGroupCount, type ShellLibrary } from "./shellData.tsx"
+import { PinnedChats } from "./ShellBrowser.tsx"
 
-type Filter = "all" | "used" | "unused" | "groups"
+const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
+
 function Home({ data }: { data: ShellLibrary }) {
-  const [filter, setFilter] = useState<Filter>("all")
-  const [sort, setSort] = useState<ShellSort>("recent")
+  const [browse, setBrowse] = useCardBrowse("home")
   const [search, setSearch] = useState("")
+  const groups = useGroupCount()
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
   // Then the filters and search, having nothing to work on, stay out of the way too.
@@ -29,31 +28,17 @@ function Home({ data }: { data: ShellLibrary }) {
       </div>
     )
   const needle = search.trim().toLowerCase()
-  const cards = sortCards(
-    data.cards.filter(
-      (c) =>
-        (filter !== "used" || c.card.chats > 0) &&
-        (filter !== "unused" || c.card.chats === 0) &&
-        [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(needle))
-    ),
-    sort
-  )
+  const cards = browseCards(data.cards, browse, search)
   return (
     <div className="flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
       <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
       <div>
-        <Segmented
-          wrap
-          label="Show"
-          value={filter}
-          onValueChange={setFilter}
-          options={[
-            { value: "all", label: "All" },
-            { value: "used", label: "With chats" },
-            { value: "unused", label: "Never used" },
-            { value: "groups", label: "Groups" }
-          ]}
+        <CardFilterControl
+          value={browse.filter}
+          onChange={(filter) => setBrowse({ filter })}
+          cards={data.cards}
+          groups={groups}
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -65,60 +50,25 @@ function Home({ data }: { data: ShellLibrary }) {
           onChange={(e) => setSearch(e.currentTarget.value)}
           className="sm:max-w-xs"
         />
-        <SortSwitch value={sort} onChange={setSort} />
+        <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />
       </div>
-      {filter === "groups" ? (
-        <Groups needle={needle} sort={sort} />
+      {browse.filter === "groups" ? (
+        <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (
-        <div aria-label="Characters" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-          {cards.map((c) => (
-            <CharacterTile key={c.card.entityId} card={c} />
-          ))}
+        <CharacterGrid cards={cards} sort={browse.sort} className={COLUMNS}>
           {!cards.length && (
-            <EmptyState title="No characters here">
-              <Link to="/import/st" className="text-accent">
-                Import from SillyTavern
-              </Link>
+            <EmptyState title={browse.filter === "favourites" && !needle ? "No favourites yet" : "No characters here"}>
+              {browse.filter === "favourites" && !needle ? (
+                <p>Star a character to keep it here.</p>
+              ) : (
+                <Link to="/import/st" className="text-accent">
+                  Import from SillyTavern
+                </Link>
+              )}
             </EmptyState>
           )}
-        </div>
+        </CharacterGrid>
       )}
-    </div>
-  )
-}
-/** Chats of several characters, read a page at a time. */
-function Groups({ needle, sort }: { needle: string; sort: ShellSort }) {
-  const [limit, setLimit] = useState({ key: "", limit: PAGE_ROWS })
-  const key = `${needle}/${sort}`
-  const shown = limit.key === key ? limit.limit : PAGE_ROWS
-  const forks = useShellForks({
-    entity: null,
-    chat: null,
-    search: needle,
-    sort,
-    sections: [{ id: "groups", limit: shown }]
-  })
-  const refresh = useAtomRefresh(forks.atom)
-  const groups = forks.section("groups")
-  if (forks.loading)
-    return forks.failure ? (
-      <FailureView cause={forks.failure.cause} onRetry={refresh} />
-    ) : (
-      <Loading label="Loading groups…" />
-    )
-  return (
-    <div className="flex flex-col gap-3">
-      <div aria-label="Groups" className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-        {groups.rows.map((f) => (
-          <GroupTile key={`${f.chat.id}/${f.forkId}`} fork={f} />
-        ))}
-        {!groups.total && <p className="text-muted">No chats with several characters yet.</p>}
-      </div>
-      <ShowMore
-        shown={groups.rows.length}
-        total={groups.total}
-        onMore={() => setLimit({ key, limit: shown + PAGE_ROWS })}
-      />
     </div>
   )
 }

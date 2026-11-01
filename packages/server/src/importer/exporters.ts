@@ -13,6 +13,8 @@ import { OUR_EXTENSION } from "../formats/lorebook.ts"
 import type { ExportFormatInfo } from "@rp/shared/libraryImport.ts"
 import { makeRegistry, type Registry } from "../registry.ts"
 import { type ExportInput, ExportRefused } from "./ops.ts"
+import { describeImage } from "./images.ts"
+import { avatarCropOf } from "@rp/shared/media.ts"
 
 /** A 1×1 PNG for a card without an avatar, since a PNG card needs an image to live in. */
 const PLACEHOLDER_PNG = Buffer.from(
@@ -100,6 +102,28 @@ export interface Exporter extends ExportFormatInfo {
 
 export class Exporters extends Context.Service<Exporters, Registry<Exporter>>()("rp/importer/Exporters") {}
 
+/**
+ * The avatar's chosen cutout (ARCHITECTURE.md §14.5c) in our namespace
+ * (`extensions.rp_harness.avatar_crop`), which ST ignores, with the image's size, so an import
+ * applies it only to the image it was chosen on (ST's own crop makes another). Only in a file
+ * that holds the image; the image itself goes whole.
+ */
+const withCrop = (card: CardDoc, avatar: ExportInput["avatar"]): CardDoc => {
+  const crop = avatarCropOf(card.avatar_media_id, card.avatar_crop)
+  if (crop === null || avatar === null) return card
+  const image = describeImage(avatar.bytes)
+  const ours = card.extensions[OUR_EXTENSION]
+  const size =
+    image.width !== null && image.height !== null ? { image_width: image.width, image_height: image.height } : {}
+  return {
+    ...card,
+    extensions: {
+      ...card.extensions,
+      [OUR_EXTENSION]: { ...(Predicate.isObject(ours) ? ours : {}), avatar_crop: { ...crop, ...size } }
+    }
+  }
+}
+
 const cardWriter =
   (write: (card: CardDoc, input: ExportInput) => Effect.Effect<Uint8Array, ExportRefused>) => (input: ExportInput) =>
     Effect.gen(function* () {
@@ -108,7 +132,7 @@ const cardWriter =
         input.noteDocJson,
         input.notesDocJson
       )
-      return yield* write(card, input)
+      return yield* write(withCrop(card, input.avatar), input)
     })
 
 const builtins: ReadonlyArray<Exporter> = [
@@ -119,6 +143,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "image/png",
     extension: "png",
     media: "avatar",
+    description: "A PNG of its avatar with the card inside, as most apps share cards. Embedded assets stay out.",
     write: cardWriter((card, input) =>
       Effect.gen(function* () {
         if (input.avatar && input.avatar.mime !== "image/png") {
@@ -140,6 +165,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The card as Character Card V2 JSON, with no images: for apps that don’t read V3.",
     write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v2")))
   },
   {
@@ -149,6 +175,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The card as Character Card V3 JSON, with no images.",
     write: cardWriter((card) => Effect.succeed(exportCardJson(card, "v3")))
   },
   {
@@ -158,6 +185,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/zip",
     extension: "charx",
     media: "all",
+    description: "A CHARX archive: the card with its avatar and every embedded asset.",
     write: cardWriter((card, input) =>
       Effect.sync(() => {
         const mainIcon = card.assets?.find(
@@ -180,6 +208,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "The lorebook as a SillyTavern World Info file.",
     write: (input) => Effect.map(decode(LorebookDoc, "lorebook")(input.docJson), exportLorebook)
   },
   {
@@ -189,6 +218,7 @@ const builtins: ReadonlyArray<Exporter> = [
     mime: "application/json",
     extension: "json",
     media: "none",
+    description: "Its prompts as a SillyTavern chat-completion preset, with no model or connection settings.",
     // Hydrate legacy export fields from a recognized chat-completion document.
     // Prompt-only revisions deliberately have no sampler or wire fields.
     write: (input) =>
@@ -243,4 +273,12 @@ export const exportFile = (
 
 /** Never pass executable code across the worker boundary. */
 export const listFormats = (registry: Registry<Exporter>): ReadonlyArray<ExportFormatInfo> =>
-  registry.list().map(({ id, kind, label, mime, extension, media }) => ({ id, kind, label, mime, extension, media }))
+  registry.list().map(({ id, kind, label, mime, extension, media, description }) => ({
+    id,
+    kind,
+    label,
+    mime,
+    extension,
+    media,
+    ...(description === undefined ? {} : { description })
+  }))

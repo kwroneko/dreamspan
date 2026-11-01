@@ -18,13 +18,17 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "model",
     label: "Model",
+    description: "The model the next reply uses, to choose, and its settings, which apply wherever it's used.",
     order: 20,
     icon: "model",
     component: lazyPanel(
       () =>
-        import("./GenerationControls.tsx").then((m) => ({
+        Promise.all([import("./GenerationControls.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
           default: ({ session, view }: PanelProps) => (
-            <m.GenerationSettingsPanel session={session} view={view} kind="model" />
+            <>
+              <p.ModelTabPicker session={session} />
+              <m.GenerationSettingsPanel session={session} view={view} kind="model" />
+            </>
           )
         })),
       "model"
@@ -33,16 +37,29 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "preset",
     label: "Prompt preset",
+    description: "The prompt preset the next reply is built with, to choose and edit.",
     order: 30,
     icon: "preset",
+    // Its own layout (the preset's outline and editor).
+    width: "full",
     component: lazyPanel(
-      () => import("./PresetTab.tsx").then((m) => ({ default: ({ view }: PanelProps) => <m.PresetTab view={view} /> })),
+      () =>
+        Promise.all([import("./PresetTab.tsx"), import("../pickers/PanelPickers.tsx")]).then(([m, p]) => ({
+          // The picker is its own mount above the tab's content (pickers/PanelPickers.tsx).
+          default: ({ session, view }: PanelProps) => (
+            <>
+              <p.PresetTabPicker session={session} />
+              <m.PresetTab session={session} view={view} />
+            </>
+          )
+        })),
       "preset"
     )
   }),
   chatPanels.register({
     id: "cast",
     label: "Cast",
+    description: "Who's in this chat: add or remove characters, mute them or make one speak.",
     order: 10,
     icon: "people",
     placement: "cast",
@@ -58,6 +75,7 @@ export const registerPanels = () => [
     id: "chat",
     default: true,
     label: "This chat",
+    description: "This chat's name, who you play, summaries on or off, and more.",
     order: 10,
     icon: "chat",
     component: lazyPanel(
@@ -71,6 +89,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "lorebooks",
     label: "Lorebooks",
+    description: "The lorebooks this chat reads, each with its switch, and where their entries go.",
     order: 50,
     icon: "book",
     component: lazyPanel(
@@ -84,8 +103,11 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "notes",
     label: "Notes",
+    description: "What the model is sent with this chat: the chat's own notes and its characters'.",
     order: 40,
     icon: "note",
+    // Its sections go side by side as the panel widens.
+    width: "full",
     component: lazyPanel(loadNotes, "notes"),
     preload: () => {
       void loadNotes().catch(() => undefined)
@@ -94,6 +116,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "summaries",
     label: "Summaries",
+    description: "The summaries that stand in for older messages, and how they're written.",
     order: 60,
     icon: "summary",
     component: lazyPanel(
@@ -117,6 +140,7 @@ export const registerPanels = () => [
   chatPanels.register({
     id: "history",
     label: "History edits",
+    description: "Search and replace in this branch's messages, and undo past edits.",
     order: 90,
     icon: "history",
     component: lazyPanel(

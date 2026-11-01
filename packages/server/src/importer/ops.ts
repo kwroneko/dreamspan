@@ -5,11 +5,13 @@ import { ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { ImportReport } from "@rp/shared/importReport.ts"
 import { EntityKind } from "@rp/shared/library.ts"
 import { ExportFormat, ExportFormatInfo } from "@rp/shared/libraryImport.ts"
+import { LoreRole } from "@rp/shared/docs/lorebook.ts"
+import { Placement } from "@rp/shared/docs/note.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
 import { ImportedMedia, Sha256 } from "../db/ops.ts"
-import { MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import { AvatarCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
 export class ThumbnailFailed extends Schema.TaggedError<ThumbnailFailed>()("ThumbnailFailed", {}) {}
 
@@ -195,12 +197,17 @@ export class FormatOps extends RpcGroup.make(
     success: StSettingsImport
   }),
   Rpc.make("Thumbnail", {
-    payload: { dataDir: Schema.String, path: Schema.String, width: Schema.Literals(MEDIA_WIDTHS) },
+    payload: {
+      dataDir: Schema.String,
+      path: Schema.String,
+      width: Schema.Literals(MEDIA_WIDTHS),
+      crop: Schema.optionalKey(Schema.NullOr(AvatarCrop))
+    },
     success: ThumbnailResult,
     error: ThumbnailFailed
   }),
   Rpc.make("PrepareThumbnails", {
-    payload: { dataDir: Schema.String, path: Schema.String },
+    payload: { dataDir: Schema.String, path: Schema.String, crop: Schema.NullOr(AvatarCrop) },
     error: ThumbnailFailed
   }),
   Rpc.make("Parse", {
@@ -235,13 +242,22 @@ export class FormatOps extends RpcGroup.make(
       fileName: Schema.String,
       expect: EntityKind,
       parser,
-      textSwitches: Schema.optionalKey(StTextSwitches)
+      textSwitches: Schema.optionalKey(StTextSwitches),
+      /** Where a World Info entry ST placed before or after its author's note goes (`authorNotePlace`). */
+      authorNoteLore: Schema.optionalKey(Schema.Struct({ depth: Schema.Int, role: LoreRole }))
     },
     success: StLibraryFile
   }),
   /** A persona as a card with its avatar; null for an avatar ST lists under no name. */
   Rpc.make("BuildStPersona", {
-    payload: { bytes: Transferable.Uint8Array, fileName: Schema.String, persona: Schema.NullOr(StPersona), parser },
+    payload: {
+      bytes: Transferable.Uint8Array,
+      fileName: Schema.String,
+      persona: Schema.NullOr(StPersona),
+      parser,
+      /** Where a persona ST placed at its author's note's top or bottom goes (`authorNotePlace`). */
+      authorNote: Schema.optionalKey(Placement)
+    },
     success: ParsedFile
   })
 ) {}

@@ -4,21 +4,32 @@
 // is its own tab list over the same panels, so a character named "Model" is never one of the tools.
 import { Tabs as BaseTabs } from "@base-ui/react/tabs"
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import { Avatar } from "./Avatar.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 import { Menu, MenuItem } from "./Menu.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 interface ToolTab {
   readonly value: string
   readonly label: string
   readonly icon: IconName
+  /** What the tab holds, beside it on hover and focus, and under it in More. */
+  readonly description?: string | undefined
 }
 
 interface SubjectTab {
   readonly value: string
   readonly label: string
   /** A portrait; without one the tab shows `icon` (the cast's own tab, say). */
-  readonly avatar?: { readonly id: string; readonly name: string; readonly mediaId: string | null } | undefined
+  readonly avatar?:
+    | {
+        readonly id: string
+        readonly name: string
+        readonly mediaId: string | null
+        readonly crop?: AvatarCrop | undefined
+      }
+    | undefined
   readonly icon?: IconName | undefined
   /** A word beside the name: "you" on the persona. */
   readonly note?: string | undefined
@@ -110,16 +121,25 @@ export function ToolTabs({
         <div className="flex items-center gap-0.5">
           <BaseTabs.Root value={value} onValueChange={(next) => onValueChange(next as string)}>
             <BaseTabs.List aria-label={label} className={`flex items-center gap-0.5 ${ready ? "" : "invisible"}`}>
-              {visible.map((tab) => (
-                <BaseTabs.Tab
-                  key={tab.value}
-                  value={tab.value}
-                  className={`group ${toolClass} data-active:border-accent data-active:text-text`}
-                >
-                  <Icon name={tab.icon} className="group-data-active:text-accent" />
-                  {tab.label}
-                </BaseTabs.Tab>
-              ))}
+              {visible.map((tab) => {
+                const button = (
+                  <BaseTabs.Tab
+                    key={tab.value}
+                    value={tab.value}
+                    className={`group ${toolClass} data-active:border-accent data-active:text-text`}
+                  >
+                    <Icon name={tab.icon} className="group-data-active:text-accent" />
+                    {tab.label}
+                  </BaseTabs.Tab>
+                )
+                return tab.description ? (
+                  <Tooltip key={tab.value} label={tab.description} side="bottom">
+                    {button}
+                  </Tooltip>
+                ) : (
+                  button
+                )
+              })}
             </BaseTabs.List>
           </BaseTabs.Root>
           {hidden.length > 0 && (
@@ -133,7 +153,12 @@ export function ToolTabs({
               }
             >
               {hidden.map((tab) => (
-                <MenuItem key={tab.value} icon={tab.icon} onClick={() => onValueChange(tab.value)}>
+                <MenuItem
+                  key={tab.value}
+                  icon={tab.icon}
+                  description={tab.description}
+                  onClick={() => onValueChange(tab.value)}
+                >
                   {tab.label}
                 </MenuItem>
               ))}
@@ -212,7 +237,13 @@ export function SubjectTabs({
   const chip = (tab: SubjectTab, short: boolean) => (
     <>
       {tab.avatar ? (
-        <Avatar id={tab.avatar.id} name={tab.avatar.name} mediaId={tab.avatar.mediaId} size="chip" />
+        <Avatar
+          id={tab.avatar.id}
+          name={tab.avatar.name}
+          mediaId={tab.avatar.mediaId}
+          crop={tab.avatar.crop}
+          size="chip"
+        />
       ) : (
         tab.icon && <Icon name={tab.icon} />
       )}

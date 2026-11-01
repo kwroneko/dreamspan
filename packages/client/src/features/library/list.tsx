@@ -20,8 +20,11 @@ import { Badge, Card, EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { usageLine } from "../characters/data.ts"
-import { shellAtom } from "../characters/shellData.tsx"
+import { FavouriteStar } from "../characters/cardBrowse.tsx"
+import { shellAtom, type ShellLibrary } from "../characters/shellData.tsx"
 import { useTitle } from "../shell.tsx"
+import { PRESET_VIEWS, type PresetView, presetDetail, presetsInView } from "../pickers/presetList.ts"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { LISTED, libraryAtom } from "./data.ts"
 import { itemName, LibraryItemActions } from "./itemActions.tsx"
 import { libraryActions } from "./slots.ts"
@@ -84,7 +87,12 @@ interface Item {
   readonly entry: LibraryRef
   readonly card: CastCard | undefined
   readonly usage: Usage | undefined
+  /** A preset's line: when it was edited, used or archived. */
+  readonly detail?: string
+  /** A character's shell card (not a persona's), for its favourite star. */
+  readonly shell: ShellCard | undefined
 }
+type ShellCard = ShellLibrary["cards"][number]
 const persona = (item: Item) => item.card?.persona === true
 
 const SORTS: Record<Sort, (a: Item, b: Item) => number> = {
@@ -102,7 +110,7 @@ const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
 /** What an item says under its name: its version, then how it's used. */
 function Meta({ item }: { item: Item }) {
   // A persona's badge says what it is; the shell doesn't count the chats it plays in.
-  const usage = !persona(item) && item.usage ? usageLine(item.usage) : null
+  const usage = !persona(item) && item.usage ? usageLine(item.usage) : (item.detail ?? null)
   return (
     <>
       {item.entry.subtitle && <span>{item.entry.subtitle}</span>}
@@ -155,7 +163,15 @@ const nameLink =
 function Picture({ item, size }: { item: Item; size: "lg" | "fill" }) {
   const { entry } = item
   if (entry.kind === "card")
-    return <Avatar id={entry.entityId} name={entry.label} mediaId={item.card?.avatarMediaId ?? null} size={size} />
+    return (
+      <Avatar
+        id={entry.entityId}
+        name={entry.label}
+        mediaId={item.card?.avatarMediaId ?? null}
+        crop={item.card?.avatarCrop}
+        size={size}
+      />
+    )
   return (
     <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-md bg-surface-raised text-muted">
       <Icon name={entry.kind === "lorebook" ? "book" : "sliders"} size={20} />
@@ -167,7 +183,12 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
   const [ref, seen] = useSeen<HTMLLIElement>()
   const { entry } = item
   // A card always has a line under its name (badges, usage); a lorebook or preset may not.
-  const line = entry.kind === "card" || entry.subtitle !== "" || entry.refKind === "variant" || entry.updateAvailable
+  const line =
+    entry.kind === "card" ||
+    entry.subtitle !== "" ||
+    entry.refKind === "variant" ||
+    entry.updateAvailable ||
+    item.detail !== undefined
   // The name beside the actions, and the line under it: one row, never wrapped. On a phone the
   // line runs on beneath the actions; wider, the actions stand centred beside both lines.
   return (
@@ -192,7 +213,8 @@ function Row({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForma
           </span>
         </span>
       )}
-      <div className="col-start-3 row-start-1 sm:row-span-2">
+      <div className="col-start-3 row-start-1 flex items-center gap-0.5 sm:row-span-2">
+        {item.shell && <FavouriteStar card={item.shell} />}
         <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
       </div>
     </li>
@@ -219,7 +241,8 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
         <span className="flex min-h-5 min-w-0 flex-wrap items-center gap-1 text-xs">
           <Badges item={item} seen={seen} />
         </span>
-        <div className="mt-auto flex justify-end pt-1">
+        <div className="mt-auto flex items-center justify-end gap-0.5 pt-1">
+          {item.shell && <FavouriteStar card={item.shell} />}
           <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
         </div>
       </div>
@@ -259,6 +282,7 @@ function Section({
   kind,
   title,
   all,
+  archived = [],
   prefs,
   setPrefs,
   formats
@@ -266,6 +290,8 @@ function Section({
   kind: Kind
   title: string
   all: ReadonlyArray<Item>
+  /** Archived entries, for the presets' Archived view. */
+  archived?: ReadonlyArray<LibraryRef>
   prefs: Prefs
   setPrefs: (change: Partial<Prefs>) => void
   formats: ReadonlyArray<ExportFormatInfo>
@@ -273,15 +299,34 @@ function Section({
   const [search, setSearch] = useState("")
   const needle = search.trim().toLowerCase()
   const cards = kind === "card"
+  // Presets list as the preset pickers do: Name, Modified, Used or Archived (pickers/presetList.ts).
+  const presets = kind === "preset"
+  const views = useViewPrefs()
+  const [archivedView, setArchivedView] = useState(false)
+  const presetView: PresetView = archivedView ? "archived" : views.prefs.presetSort
   const shown = cards
     ? all.filter((item) => prefs.show === "all" || (prefs.show === "personas") === persona(item))
     : all
-  const items = shown
-    .filter((item) => matches(needle, item.entry.label, item.entry.subtitle, item.entry.modelName))
-    .sort((a, b) => (cards ? SORTS[prefs.sort](a, b) : 0) || byName(a, b))
+  const items: ReadonlyArray<Item> = presets
+    ? presetsInView(
+        presetView,
+        search,
+        all.map((item) => item.entry),
+        archived
+      ).map((entry) => ({
+        entry,
+        card: undefined,
+        usage: undefined,
+        shell: undefined,
+        detail: presetDetail(entry, presetView)
+      }))
+    : shown
+        .filter((item) => matches(needle, item.entry.label, item.entry.subtitle, item.entry.modelName))
+        .sort((a, b) => (cards ? SORTS[prefs.sort](a, b) : 0) || byName(a, b))
   const personas = all.filter(persona).length
-  const noun = title.toLowerCase()
-  if (all.length === 0)
+  const noun = presets && presetView === "archived" ? `archived ${title.toLowerCase()}` : title.toLowerCase()
+  const total = presets && presetView === "archived" ? archived.length : all.length
+  if (all.length === 0 && archived.length === 0)
     return (
       <EmptyState title={`No ${noun} yet`}>
         <Link to="/import" className="text-accent">
@@ -300,6 +345,24 @@ function Section({
           onChange={(e) => setSearch(e.currentTarget.value)}
           className="min-w-0 flex-1 basis-60"
         />
+        {presets && (
+          <Segmented<PresetView>
+            label="Show presets"
+            value={presetView}
+            onValueChange={(next) => {
+              setArchivedView(next === "archived")
+              if (next !== "archived" && next !== views.prefs.presetSort) void views.change({ presetSort: next })
+            }}
+            options={PRESET_VIEWS.map((option) => ({
+              value: option.value,
+              description: option.description,
+              label:
+                option.value === "archived" && archived.length > 0
+                  ? `${option.label} · ${archived.length}`
+                  : option.label
+            }))}
+          />
+        )}
         {cards && (
           <Segmented
             label="Show"
@@ -307,17 +370,21 @@ function Section({
             onValueChange={(show) => setPrefs({ show })}
             options={[
               { value: "all", label: "All" },
-              { value: "characters", label: "Characters" },
-              { value: "personas", label: `Personas · ${personas}` }
+              { value: "characters", label: "Characters", description: "Cards outside the persona folder." },
+              {
+                value: "personas",
+                label: `Personas · ${personas}`,
+                description: "Cards in the persona folder, offered when you pick who you play."
+              }
             ]}
           />
         )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted" aria-live="polite">
-          {items.length === all.length
-            ? `${all.length.toLocaleString()} ${noun}`
-            : `${items.length.toLocaleString()} of ${all.length.toLocaleString()} ${noun}`}
+          {items.length === total
+            ? `${total.toLocaleString()} ${noun}`
+            : `${items.length.toLocaleString()} of ${total.toLocaleString()} ${noun}`}
         </p>
         {cards && (
           <div className="flex items-center gap-2">
@@ -347,6 +414,11 @@ function Section({
       </div>
       {items.length === 0 ? (
         <EmptyState title={needle ? `No ${noun} match “${search.trim()}”` : `No ${noun} here`}>
+          {!needle && presets && presetView === "archived" && (
+            <p className="text-sm text-muted">
+              Archive a preset with its box button to hide it from the lists; nothing is deleted.
+            </p>
+          )}
           {needle && (
             <Button variant="ghost" onClick={() => setSearch("")}>
               Clear the search
@@ -364,7 +436,7 @@ export function LibraryPage() {
   useTitle("Library")
   const [prefs, setPrefs] = usePrefs()
   const shell = useAtomValue(shellAtom)
-  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c.card]) : [])
+  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c]) : [])
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -394,8 +466,10 @@ export function LibraryPage() {
                     all={lists[kind].map((entry) => ({
                       entry,
                       card: cards.get(entry.entityId),
-                      usage: usage.get(entry.entityId)
+                      usage: usage.get(entry.entityId)?.card,
+                      shell: usage.get(entry.entityId)
                     }))}
+                    {...(kind === "preset" ? { archived: lists.archivedPresets } : {})}
                     prefs={prefs}
                     setPrefs={setPrefs}
                     formats={lists.exportFormats}

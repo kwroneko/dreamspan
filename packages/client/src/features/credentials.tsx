@@ -292,7 +292,12 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
           description="One URL per line. Only the scheme, host and port count."
           error={bad.length > 0 ? `Not a URL: ${bad.join(", ")}` : null}
         >
-          <Textarea value={urls} onChange={(event) => setUrls(event.target.value)} spellCheck={false} />
+          <Textarea
+            value={urls}
+            onChange={(event) => setUrls(event.target.value)}
+            spellCheck={false}
+            textActions={false}
+          />
         </Field>
         <ErrorAlert error={action.error} title="The key wasn't saved" />
         <DialogActions>
@@ -387,13 +392,25 @@ function CredentialList({
                 <Button variant="ghost" onClick={() => setOpen({ dialog: "rename", credential })}>
                   Rename
                 </Button>
-                <Button variant="ghost" onClick={() => setOpen({ dialog: "allow", credential })}>
+                <Button
+                  variant="ghost"
+                  hint="Lets the key go to one more address. You type the key again to confirm."
+                  onClick={() => setOpen({ dialog: "allow", credential })}
+                >
                   Allow an address
                 </Button>
-                <Button variant="ghost" onClick={() => setOpen({ dialog: "replace", credential })}>
+                <Button
+                  variant="ghost"
+                  hint="A new key in its place for every connection using it. You allow its addresses again."
+                  onClick={() => setOpen({ dialog: "replace", credential })}
+                >
                   Replace key
                 </Button>
-                <Button variant="ghost" onClick={() => setOpen({ dialog: "delete", credential })}>
+                <Button
+                  variant="ghost"
+                  hint="Deletes the key, after you confirm. Connections using it are left without one."
+                  onClick={() => setOpen({ dialog: "delete", credential })}
+                >
                   Delete
                 </Button>
               </div>
@@ -457,7 +474,11 @@ function CredentialsPage() {
         title="Saved keys"
         description="Each key is sent only to the addresses you allowed for it."
         actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
+          <Button
+            variant="primary"
+            hint="Saves a key once, for any number of connections to use."
+            onClick={() => setCreating(true)}
+          >
             Save a key
           </Button>
         }

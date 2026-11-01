@@ -7,6 +7,7 @@ import { AsyncView } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Definition } from "./CardPage.tsx"
 import { shellAtom, sidebarCleared } from "./shellData.tsx"
 
@@ -59,21 +60,23 @@ export function CharacterPanel({
     <div className="flex flex-col gap-4">
       {card && (
         <header className="flex items-start gap-3">
-          <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="xl" />
+          <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="xl" />
           <div>
             <h2 className="text-lg font-semibold">{card.label}</h2>
             <p className="text-sm text-muted">{card.subtitle}</p>
           </div>
         </header>
       )}
-      <Link
-        to="/cards/$entityId/chat"
-        params={{ entityId }}
-        search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
-        className={buttonClass("primary")}
-      >
-        New chat
-      </Link>
+      <Tooltip label="Opens a new chat at their greeting. Nothing is saved until you send.">
+        <Link
+          to="/cards/$entityId/chat"
+          params={{ entityId }}
+          search={{ ...sidebarCleared, character: entityId, panel: `card:${entityId}` }}
+          className={buttonClass("primary")}
+        >
+          New chat
+        </Link>
+      </Tooltip>
       {actions ?? (
         <Link to="/library/$refId" params={{ refId: ref }} className={buttonClass()}>
           Edit card

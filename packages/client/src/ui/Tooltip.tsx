@@ -3,7 +3,7 @@
 import { Button as BaseButton } from "@base-ui/react/button"
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 import type { ComponentProps, ReactElement, ReactNode } from "react"
-import { Button } from "./Button.tsx"
+import { Button, tooltipPopupClass } from "./Button.tsx"
 import { Icon, type IconName } from "./Icon.tsx"
 
 /** Shares one delay among the tooltips inside, so moving along a toolbar shows each at once. */
@@ -23,19 +23,21 @@ export function Tooltip({
   label,
   children,
   side = "top",
+  followCursor = false,
   ...props
-}: { label: ReactNode; children: ReactElement; side?: "top" | "bottom" | "left" | "right" } & Omit<
-  ComponentProps<typeof BaseTooltip.Trigger>,
-  "render" | "children"
->) {
+}: {
+  label: ReactNode
+  children: ReactElement
+  side?: "top" | "bottom" | "left" | "right"
+  /** Placed at the pointer's height: for a trigger taller than the screen, as a rail's bar can be. */
+  followCursor?: boolean
+} & Omit<ComponentProps<typeof BaseTooltip.Trigger>, "render" | "children">) {
   return (
-    <BaseTooltip.Root>
+    <BaseTooltip.Root {...(followCursor ? { trackCursorAxis: "y" as const } : {})}>
       <BaseTooltip.Trigger {...props} render={children} />
       <BaseTooltip.Portal>
         <BaseTooltip.Positioner side={side} sideOffset={6} className="pointer-events-none z-50">
-          <BaseTooltip.Popup className="pointer-events-none max-w-72 origin-[var(--transform-origin)] rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md transition-[scale,opacity] duration-100 data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none">
-            {label}
-          </BaseTooltip.Popup>
+          <BaseTooltip.Popup className={tooltipPopupClass}>{label}</BaseTooltip.Popup>
         </BaseTooltip.Positioner>
       </BaseTooltip.Portal>
     </BaseTooltip.Root>
@@ -43,7 +45,7 @@ export function Tooltip({
 }
 
 export const iconButtonClass = (tone: "muted" | "danger" = "muted") =>
-  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-surface-raised data-popup-open:text-text ${
+  `inline-flex size-8 shrink-0 items-center justify-center rounded-md outline-none transition-colors select-none hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40 data-popup-open:bg-hover data-popup-open:text-text ${
     tone === "danger" ? "text-muted hover:text-danger" : "text-muted hover:text-text"
   }`
 
@@ -117,7 +119,7 @@ export function ToggleIconButton({
         disabled={disabled}
         focusableWhenDisabled
         onClick={onClick}
-        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus data-disabled:cursor-not-allowed ${
+        className={`inline-flex size-8 items-center justify-center rounded-md border border-border bg-surface shadow-sm outline-none transition-opacity select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus ${
           pressed ? "text-text" : "text-muted"
         } ${className}`}
       >

@@ -165,10 +165,16 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
   expect(page.url()).toBe(chat)
 })
 
-test("the composer regenerates the latest reply, apart from Generate", async ({ page }) => {
+test("the latest reply's › makes a new version, shown without a hover even at one version", async ({ page }) => {
   await chatWithMira(page)
   const latest = replies(page).last()
-  await page.getByRole("button", { name: "Regenerate the latest reply" }).click()
+  const next = latest.getByRole("group", { name: "Versions" }).getByRole("button", { name: "Generate another version" })
+  // Not hovered: the pointer is on the composer.
+  await page.locator("#composer").hover()
+  await expect(next).toHaveCSS("opacity", "1")
+  // The reply's own › is the one way to swipe it: the composer has no second copy.
+  await expect(page.getByRole("button", { name: /regenerate the latest/i })).toHaveCount(0)
+  await next.click()
   await expect(generating(page)).toHaveCount(1)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   // A new version of that reply, not a new turn.

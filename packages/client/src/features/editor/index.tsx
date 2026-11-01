@@ -4,7 +4,7 @@ import { NewCardButton } from "./NewCard.tsx"
 import { NewPresetButton } from "./NewPreset.tsx"
 import { appTools } from "../shell.tsx"
 import { CardSavedHost } from "./CardSavedHost.tsx"
-import { cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
+import { CARD_LOREBOOK_SECTION, cardEditorSections, lorebookEditorSections } from "./cardSections.ts"
 import { EmbeddedLorebook } from "./EmbeddedLorebook.tsx"
 import { EndOfRequest } from "./EndOfRequest.tsx"
 import { ReplySectionsSettings } from "./ReplySectionsSettings.tsx"
@@ -18,9 +18,22 @@ import { registerLorebookTable } from "./lorebookColumns.tsx"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { CUTOUT_CHOOSER, type CutoutChooserProps, cutoutChoosers } from "../../ui/portraitParts.ts"
 
 // The editors load with the first entry opened.
 const EditorPage = lazy(() => import("./EditorPage.tsx").then((module) => ({ default: module.EditorPage })))
+// The portrait's cutout chooser (§14.5c), loaded when a picture is first set or adjusted.
+const CutoutChooser = lazy(() =>
+  import("../../ui/CutoutChooser.tsx").then((module) => ({ default: module.CutoutChooser }))
+)
+
+function LazyCutoutChooser(props: CutoutChooserProps) {
+  return (
+    <Suspense fallback={null}>
+      <CutoutChooser {...props} />
+    </Suspense>
+  )
+}
 
 function LazyEditorPage() {
   return (
@@ -32,10 +45,11 @@ function LazyEditorPage() {
 
 export const register = () => {
   registerUserDraftNotices()
+  cutoutChoosers.register({ id: CUTOUT_CHOOSER, component: LazyCutoutChooser })
   libraryActions.register({ id: "editor.new-card", order: 10, component: NewCardButton })
   libraryActions.register({ id: "editor.new-preset", order: 20, component: NewPresetButton })
   appTools.register({ id: "editor.card-saved", order: 200, component: CardSavedHost })
-  cardEditorSections.register({ id: "card.embedded-lorebook", order: 100, component: EmbeddedLorebook })
+  cardEditorSections.register({ id: CARD_LOREBOOK_SECTION, order: 100, component: EmbeddedLorebook })
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerLorebookTable()

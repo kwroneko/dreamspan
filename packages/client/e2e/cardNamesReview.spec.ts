@@ -86,6 +86,9 @@ test("the sidebar refreshes card name and version after an ordinary editor Save"
     .getByRole("button", { name: "Save revision", exact: true })
     .click()
   await expect(page.getByRole("heading", { name: "Cache renamed", exact: true })).toBeVisible()
+  // The card has a chat, so the save offers to rename it in past messages; that dialog keeps
+  // the rest of the page out of reach until it's answered.
+  await page.getByRole("button", { name: /^No\. Past messages will keep/ }).click()
   await expect(sidebar.getByRole("button", { name: "Open Cache renamed · 2", exact: true })).toBeVisible()
 })
 test("three name drafts and diffs work, but history must refuse a colliding restore", async ({ page }) => {

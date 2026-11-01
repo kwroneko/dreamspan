@@ -446,10 +446,10 @@ test("a card's notes are collapsed rows, and the card has no modules section (DE
   await expect(page.getByRole("region", { name: "Note Scarf" })).toBeVisible()
   // In the card editor, a note's condition can name the card itself.
   await page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "When it applies" }).click()
-  await page.getByRole("option", { name: "On a character's turn" }).click()
+  await page.getByRole("option", { name: "On a chosen character's turn" }).click()
   await expect(
-    page.getByRole("region", { name: "Note Scarf" }).getByRole("combobox", { name: "Character" })
-  ).toContainText("Rows")
+    page.getByRole("region", { name: "Note Scarf" }).getByRole("toolbar").getByText("Rows", { exact: true })
+  ).toBeVisible()
 })
 
 test("a send that failed as the page went is sent again the next time it goes", async ({ page }) => {
@@ -644,7 +644,10 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
   const refId = await importPreset(page, Buffer.from(JSON.stringify(file)))
   await open(page, refId)
   const main = page.locator('[data-prompt="main"]')
-  await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+  await main.getByRole("button", { name: "Actions for Main Prompt" }).click()
+  await expect(page.getByRole("menuitem", { name: "Insert a prompt below" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Delete the prompt" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
   const send = main.getByRole("switch", { name: "Send Main Prompt" })
   await send.click()
   await expect(send).not.toBeChecked()

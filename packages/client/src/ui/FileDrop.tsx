@@ -39,7 +39,7 @@ export function FileDrop({
       onDrop={drop}
       data-over={over || undefined}
       data-disabled={disabled || undefined}
-      className="flex cursor-pointer flex-col items-center gap-1 rounded-lg border-2 border-dashed border-border bg-surface px-4 py-8 text-center transition-colors has-[:focus-visible]:border-focus has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus/40 hover:bg-surface-raised data-disabled:cursor-not-allowed data-disabled:opacity-50 data-over:border-accent data-over:bg-surface-raised"
+      className="flex cursor-pointer flex-col items-center gap-1 rounded-lg border-2 border-dashed border-border bg-surface px-4 py-8 text-center transition-colors has-[:focus-visible]:border-focus has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus/40 hover:bg-surface-raised data-disabled:cursor-default data-disabled:opacity-50 data-over:border-accent data-over:bg-surface-raised"
     >
       <input
         type="file"

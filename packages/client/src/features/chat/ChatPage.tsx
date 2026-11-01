@@ -3,6 +3,7 @@ import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import {
   ChatSurfaceProviders,
+  chatColumns,
   chatOverlays,
   chatComposer,
   chatComposerNotes,
@@ -185,8 +186,21 @@ function MessageList({
   )
 
   // A new window opens at the asked-for message, or at the bottom.
+  // With summaries in the chat, a link waits for the layer: placed among the originals first,
+  // the list would keep that offset when the layer replaces them, far from the summary that
+  // holds the message, which then never renders, so never expands to it.
+  // A layer that can't be read doesn't hold the link for long.
+  const layerPending =
+    summaries && anchor !== null && (view.lcm === null || (view.lcm.enabled && view.lcm.leafSlotId !== view.leafSlotId))
+  const [waitedFor, setWaitedFor] = useState(0)
+  useEffect(() => {
+    if (!layerPending) return
+    const timer = setTimeout(() => setWaitedFor(view.opened), 3000)
+    return () => clearTimeout(timer)
+  }, [layerPending, view.opened])
   useLayoutEffect(() => {
     if (view.opened === positioned.current || entries.length === 0) return
+    if (layerPending && waitedFor !== view.opened) return
     positioned.current = view.opened
     settled.current = false
     const requested = anchor ?? (summaries ? (lcm?.layer.at(-1)?.lastSlotId ?? null) : null)
@@ -363,7 +377,7 @@ function MessageList({
         data-testid="messages"
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
       >
-        <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() }}>
+        <div className="relative chat-column" style={{ height: virtualizer.getTotalSize() }}>
           {showRail && (
             <SlotOutlet
               slot={timelineRails}
@@ -561,7 +575,8 @@ function ChatSurface({
             } as CSSProperties
           }
         >
-          <div className="relative flex min-w-0 flex-1 flex-col">
+          <SlotOutlet slot={chatColumns} props={{ wide }} />
+          <div data-chat-main className="relative flex min-w-0 flex-1 flex-col">
             <ChatHeader
               session={session}
               view={view}
@@ -577,7 +592,7 @@ function ChatSurface({
                 // One line, not a block: it stays while the chat is read for hours.
                 <div
                   role="status"
-                  className="mx-auto flex w-full max-w-3xl items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
+                  className="chat-column flex items-center gap-2 border-b border-border px-2 pb-1 text-sm text-muted"
                 >
                   {/* A phone's line has room for the gist only; the button says the rest. */}
                   <span className="min-w-0 flex-1 truncate">
@@ -596,7 +611,7 @@ function ChatSurface({
                 </div>
               )}
             {(view.error ?? branchError) && (
-              <div className="mx-auto w-full max-w-3xl">
+              <div className="chat-column">
                 <Alert tone="danger">{view.error ?? branchError}</Alert>
               </div>
             )}

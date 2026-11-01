@@ -4,7 +4,7 @@ import { getAt, parseField } from "@rp/shared/editing.ts"
 // Library write handlers (DATA-MODEL §3.2). They run in the writer worker, each as one
 // transaction. Every change to a ref flows on to the refs that follow it.
 import type { EntityId } from "@rp/shared/chat.ts"
-import { NOTE_SCHEMA_VERSION, type NoteDoc } from "@rp/shared/docs/note.ts"
+import { conditionCards, NOTE_SCHEMA_VERSION, type NoteDoc, readNoteCondition } from "@rp/shared/docs/note.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { Doc, EntityKind, MergeOutcome, RefId } from "@rp/shared/library.ts"
 import { ImportedFollower, LibraryImport } from "@rp/shared/libraryImport.ts"
@@ -20,6 +20,7 @@ import { InvalidDocument } from "@rp/shared/editorApi.ts"
 import { Schema, Effect, Predicate } from "effect"
 import { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
+import { importFavourite, isFav } from "./cardFavourites.ts"
 import { docHash, searchText } from "./documents.ts"
 import { makeCardForkWriteHandlers } from "./cardForkWrites.ts"
 import { makeEditorWriteHandlers } from "./editorWrites.ts"
@@ -166,7 +167,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
 
     /**
      * Media, cards and shared notes a document names that aren't the user's, as NotFound: a
-     * note's owner card and condition card, and the shared note a slot links to (§14.3).
+     * note's owner card and condition cards, and the shared note a slot links to (§14.3).
      */
     const checkReferences = (userId: string, doc: Doc) =>
       Effect.gen(function* () {
@@ -188,7 +189,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         }
         const cards = [
           Predicate.isObject(doc.owner) ? doc.owner.card : undefined,
-          Predicate.isObject(doc.condition) ? doc.condition.card : undefined
+          ...(doc.condition === undefined ? [] : conditionCards(readNoteCondition(doc.condition)))
         ].filter((card) => card !== undefined)
         for (const card of cards) {
           const [owned] = yield* sql<{ n: number }>`
@@ -461,18 +462,18 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const handlers = {
       RecordMessageImage: ({ userId, media }) =>
         recordMedia(userId, media).pipe(transaction(sql, "RecordMessageImage")),
-      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, position, scanLore, sourcePath }) =>
+      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, placement, scanLore, sourcePath }) =>
         Effect.gen(function* () {
           const [card] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM entities WHERE id = ${cardEntityId} AND owner_user_id = ${userId} AND kind = 'card'`
           if (card!.n === 0) return yield* new NotFound({ entity: "card", id: cardEntityId })
-          // Before or after the chat's note is its top or bottom; ST's "replace" keeps both,
-          // the character's at the top [owner question 5].
+          // ST's "replace" keeps both notes [owner question 5]: the importer places it where the
+          // author's note was, concretely (owner, 2026-11-01).
           const doc: NoteDoc = {
             schema_version: NOTE_SCHEMA_VERSION,
             title: "Character author's note",
             content: prompt,
-            placement: { mode: "section", section: position === 2 ? "author_note_bottom" : "author_note_top" },
+            placement,
             owner: { card: cardEntityId },
             exportable: false,
             kind: "character_author_note",
@@ -545,6 +546,17 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           WHERE id = ${entityId} AND owner_user_id = ${userId} AND deleted_at IS NULL RETURNING id`
           if (rows.length === 0) return yield* new NotFound({ entity: "entity", id: entityId })
         }).pipe(transaction(sql, "SetEntityArchived")),
+
+      SetRefArchived: ({ userId, refId, archived }) =>
+        Effect.gen(function* () {
+          const ref = yield* lib.ownedRef(userId, refId)
+          if (ref.ref_kind === "chat_override")
+            return yield* new RefOperationRefused({ refId, reason: "A chat's own copy can't be archived." })
+          yield* sql`UPDATE entities
+            SET archived_at = CASE WHEN ${archived ? 1 : 0} = 1 THEN coalesce(archived_at, ${Date.now()}) END
+            WHERE id = ${ref.entity_id}`
+          return toLibraryRef(yield* reload(refId))
+        }).pipe(transaction(sql, "SetRefArchived")),
 
       EditRef: ({ userId, refId, doc, expectedRowVersion, message, commitDraft }) =>
         Effect.gen(function* () {
@@ -730,6 +742,12 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             // Untouched unless the file brought media or the card kept some of its own.
             if (input.media.length > 0 || keptAvatar || keptAssets > 0) {
               card.avatar_media_id = avatar
+              // The cutout goes with its image (§14.5c): a kept avatar keeps the card's; the file's
+              // own (an export of ours carried it) is bound to the file just stored; else the default.
+              if (keptAvatar && current?.avatar_crop !== undefined) card.avatar_crop = current.avatar_crop
+              else if (!keptAvatar && avatar !== null && Predicate.isObject(card.avatar_crop))
+                card.avatar_crop = { ...card.avatar_crop, media_id: avatar }
+              else delete card.avatar_crop
               if (assets.size > 0) card.asset_media_ids = Object.fromEntries(assets)
               doc = encode(card)
             }
@@ -759,6 +777,15 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             upstream = yield* reload(into.id)
             outcome = merged.outcome
             followers = merged.change.followers
+          }
+          // ST's favourite flag (`extensions.fav`), on a first import and each re-import, unless
+          // the user set the card's favourite here since; a card without one changes nothing.
+          if (kind === "card") {
+            const [flag] = yield* sql<{
+              fav: unknown
+            }>`SELECT json_extract(${doc.json}, '$.extensions.fav') AS fav`
+            if (flag?.fav !== null && flag?.fav !== undefined)
+              yield* importFavourite(sql, userId, upstream.entity_id, isFav(flag.fav))
           }
           const noteDocJson =
             input.noteDocJson !== null && input.characterNoteScan

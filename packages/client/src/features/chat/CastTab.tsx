@@ -77,7 +77,7 @@ function AddCharacter({
         }}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
       >
-        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{card.name}</span>
           {version && <span className="truncate text-xs text-muted">{version}</span>}
@@ -165,19 +165,32 @@ function MemberMore({
         className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
         onClickCapture={() => setOpen(false)}
       >
-        <Button variant="ghost" onClick={() => writeAs(session, card.entityId)}>
+        <Button
+          variant="ghost"
+          hint={`The composer writes as ${name}: what you send is their message.`}
+          onClick={() => writeAs(session, card.entityId)}
+        >
           Write as {name}
         </Button>
-        <Button variant="ghost" onClick={() => showPanel(`card:${card.entityId}`)}>
+        <Button
+          variant="ghost"
+          hint="Opens their card's fields in this panel."
+          onClick={() => showPanel(`card:${card.entityId}`)}
+        >
           Edit the card here
         </Button>
         <ChatCardActions session={session} card={card} info={info} />
-        <Button variant="ghost" onClick={onPersona}>
+        <Button
+          variant="ghost"
+          hint={`You play ${name} from the latest message on, on this branch: {{user}} is them.`}
+          onClick={onPersona}
+        >
           Use as my persona
         </Button>
         <Button
           variant="ghost"
           className="text-danger!"
+          hint="They leave from the latest message on, on this branch. Earlier messages stay."
           onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
         >
           Remove from chat
@@ -223,7 +236,7 @@ function Member({
   return (
     <li aria-label={name} className="flex items-center gap-3 py-2">
       <span className={muted ? "opacity-50" : ""}>
-        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
+        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
       </span>
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
         <button
@@ -269,7 +282,16 @@ function You({ session, card }: { session: ChatSession; card: CastCard | undefin
   const showPanel = useShowPanel()
   return (
     <div role="group" aria-label="Your persona" className="flex items-center gap-3">
-      {card && <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />}
+      {card && (
+        <Avatar
+          id={card.entityId}
+          name={card.name}
+          mediaId={card.avatarMediaId}
+          crop={card.avatarCrop}
+          size="lg"
+          preview
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col items-start">
         <span className="text-xs text-muted">You play</span>
         {card ? (
@@ -370,7 +392,7 @@ export function CastTab({ session }: { session: ChatSession }) {
         {characters.length === 0 ? (
           <p className="py-2 text-sm text-muted">No one is in this chat. Add a character to start.</p>
         ) : (
-          <ul aria-label="Characters in this chat" className="flex flex-col">
+          <ul aria-label="Characters in this chat" className="grid gap-x-6 @3xl:grid-cols-2">
             {characters.map((id) => {
               const card = view.cards.get(id)
               if (card === undefined) return null

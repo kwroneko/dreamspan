@@ -54,9 +54,7 @@ export const StateEventData = Schema.Union([
   event("lorebook.global", Schema.Struct({ ref: RefId, on: Schema.Boolean })),
   /** Lorebook entries only below the history, whatever their position; absent is on (DESIGN §1.3). */
   event("lorebook.below_history", Schema.Struct({ on: Schema.Boolean })),
-  event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown })),
-  /** Which chat note is the author's note; null: none, not even an imported one. */
-  event("author_note.set", Schema.Struct({ note: Schema.NullOr(EntityId) }))
+  event("var.set", Schema.Struct({ name: Schema.String, value: Schema.Unknown }))
 ])
 export type StateEventData = typeof StateEventData.Type
 
@@ -142,8 +140,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "lorebook.embedded": { ids: { entity: { table: "entity", kind: "card" } } },
   "lorebook.global": { ids: { ref: { table: "ref", kind: "lorebook" } } },
   "lorebook.below_history": { ids: {} },
-  "var.set": { ids: {} },
-  "author_note.set": { ids: { note: { table: "entity", kind: "note", chatOwned: "required" } } }
+  "var.set": { ids: {} }
 }
 
 /**
@@ -351,11 +348,6 @@ export interface ChatState {
   /** Whether lorebook entries go only below the history; null (no event) is on. */
   readonly loreBelowHistory: boolean | null
   readonly vars: Readonly<Record<string, unknown>>
-  /**
-   * The chat's chosen author's note; false when the chat chose none; null (no event) leaves it
-   * to an imported note of kind `author_note`.
-   */
-  readonly authorNote: string | false | null
   /** Plugin keys' values by key id (`<plugin>/<key>`); absent until a registered key has an event. */
   readonly plugin?: Readonly<Record<string, unknown>>
 }
@@ -382,8 +374,7 @@ const emptyChatState: ChatState = {
   embeddedLorebooks: {},
   globalLorebooks: {},
   loreBelowHistory: null,
-  vars: {},
-  authorNote: null
+  vars: {}
 }
 
 const add = (list: ReadonlyArray<string>, item: string) => (list.includes(item) ? list : [...list, item])
@@ -490,8 +481,6 @@ const applyCore = (
       return { ...state, loreBelowHistory: data.value.on }
     case "var.set":
       return { ...state, vars: { ...state.vars, [data.value.name]: data.value.value } }
-    case "author_note.set":
-      return { ...state, authorNote: data.value.note ?? false }
   }
 }
 

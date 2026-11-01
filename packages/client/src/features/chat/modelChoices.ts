@@ -1,8 +1,10 @@
 // The user's models as picker items, "connection · model", for the places that choose one.
 import type { Connection, Model } from "@rp/shared/providers.ts"
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
+import { describeCause } from "../../errors.ts"
+import type { AppClient } from "../../rpc.ts"
 
 export interface ModelChoice {
   readonly value: string
@@ -15,6 +17,32 @@ export const parseModelValue = (value: string) => {
   return { connection, model }
 }
 
+/** A connection whose models couldn't be read: the others' are still listed. */
+interface ModelListFailure {
+  readonly connection: string
+  readonly message: string
+}
+
+export interface ModelChoiceList {
+  readonly choices: ReadonlyArray<ModelChoice>
+  /** Read, whether or not every connection answered. */
+  readonly loaded: boolean
+  /** The connections that were read, so an empty list can say whether there are any. */
+  readonly connections: number
+  /** Connections whose models couldn't be read. */
+  readonly failed: ReadonlyArray<ModelListFailure>
+  /** Why the connections themselves couldn't be listed: nothing is, then. */
+  readonly error: string | null
+  /** Reads them all again. */
+  readonly retry: () => void
+}
+
+/** One connection's read waits this long at most: a busy server mustn't keep a picker loading for good. */
+const READ_TIMEOUT = "20 seconds"
+
+const failureMessage = (cause: Cause.Cause<unknown>) =>
+  Cause.isTimeoutError(Cause.squash(cause)) ? `It didn't answer within ${READ_TIMEOUT}.` : describeCause(cause).message
+
 /**
  * Loaded once `enabled` turns true. Hidden models are left out, except `current` (a `modelValue`),
  * which is still in use and named as hidden.
@@ -23,47 +51,84 @@ export function useModelChoices(enabled: boolean, current: string | null = null)
   return useModelChoiceList(enabled, current).choices
 }
 
+interface Read {
+  readonly models: ReadonlyArray<ModelChoice & { readonly hidden: boolean }>
+  readonly connections: number
+  readonly failed: ReadonlyArray<ModelListFailure>
+  readonly error: string | null
+}
+
 /**
- * The choices, and whether they've been read: read once `enabled` turns true, and again when
- * `current` turns out not to be among them (a model added since, in another tab, say).
+ * Every connection's models, each connection read on its own (four at a time, each for
+ * `READ_TIMEOUT` at most): one that fails leaves the others' listed and is named in `failed`.
  */
-export function useModelChoiceList(
-  enabled: boolean,
-  current: string | null = null
-): { readonly choices: ReadonlyArray<ModelChoice>; readonly loaded: boolean } {
+export const readModelChoices = (client: AppClient["Service"]) =>
+  Effect.gen(function* () {
+    const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
+    const lists = yield* Effect.forEach(
+      connections,
+      (connection) =>
+        Effect.exit(
+          client("ListModels", { connectionId: connection.id, includeHidden: true }).pipe(Effect.timeout(READ_TIMEOUT))
+        ).pipe(Effect.map((exit) => ({ connection, exit }))),
+      { concurrency: 4 }
+    )
+    return {
+      connections: connections.length,
+      models: lists.flatMap(({ connection, exit }) =>
+        Exit.isSuccess(exit)
+          ? exit.value.map((model: Model) => ({
+              value: modelValue(connection.id, model.id),
+              label: `${connection.name} · ${model.key}`,
+              hidden: model.hidden
+            }))
+          : []
+      ),
+      failed: lists.flatMap(({ connection, exit }) =>
+        Exit.isFailure(exit) ? [{ connection: connection.name, message: failureMessage(exit.cause) }] : []
+      ),
+      error: null
+    } satisfies Read
+  })
+
+/**
+ * The choices, and how reading them went: read once `enabled` turns true, again when
+ * `current` turns out not to be among them (a model added since, in another tab, say), and
+ * on `retry`. Each connection is read on its own, so one that fails (or times out) leaves
+ * the others' models listed and is named in `failed`.
+ */
+export function useModelChoiceList(enabled: boolean, current: string | null = null): ModelChoiceList {
   const action = useAction()
-  const [models, setModels] = useState<ReadonlyArray<ModelChoice & { readonly hidden: boolean }> | null>(null)
-  const missing = models !== null && current !== null && !models.some((model) => model.value === current)
+  const [read, setRead] = useState<Read | null>(null)
+  const missing = read !== null && current !== null && !read.models.some((model) => model.value === current)
   // A model missing from the list is looked for once more, not on every render.
   const [lookedFor, setLookedFor] = useState<string | null>(null)
   if (missing && lookedFor !== current) setLookedFor(current)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     if (!enabled) return
+    let live = true
     void action
-      .run((client) =>
-        Effect.gen(function* () {
-          const connections: ReadonlyArray<Connection> = yield* client("ListConnections", undefined)
-          const lists = yield* Effect.forEach(connections, (connection) =>
-            Effect.map(
-              client("ListModels", { connectionId: connection.id, includeHidden: true }),
-              (list: ReadonlyArray<Model>) =>
-                list.map((model) => ({
-                  value: modelValue(connection.id, model.id),
-                  label: `${connection.name} · ${model.key}`,
-                  hidden: model.hidden
-                }))
-            )
-          )
-          return lists.flat()
-        })
-      )
-      // A list that can't be read is an empty one, so nothing waits on it for good.
-      .then((result) => setModels(result.ok ? result.value : []))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once when enabled, and once per missing model
-  }, [enabled, lookedFor])
+      .run((client) => readModelChoices(client))
+      .then((result) => {
+        if (!live) return
+        setRead(result.ok ? result.value : { models: [], connections: 0, failed: [], error: result.error.message })
+      })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once when enabled, once per missing model, and per retry
+  }, [enabled, lookedFor, attempt])
   return {
-    loaded: models !== null,
-    choices: (models ?? []).flatMap(({ hidden, ...choice }) =>
+    loaded: read !== null,
+    connections: read?.connections ?? 0,
+    failed: read?.failed ?? [],
+    error: read?.error ?? null,
+    retry: () => {
+      setRead(null)
+      setAttempt((n) => n + 1)
+    },
+    choices: (read?.models ?? []).flatMap(({ hidden, ...choice }) =>
       !hidden ? [choice] : choice.value === current ? [{ ...choice, label: `${choice.label} (hidden)` }] : []
     )
   }

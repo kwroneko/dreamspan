@@ -1,6 +1,7 @@
 // The editor RPCs (ARCHITECTURE.md "Editing the library"; DESIGN §4, §6.2), merged into
 // AppApi. Every text field edits through a draft on the server, with its own undo history;
 // saving commits the drafts as one revision. Writes carry the row version the client saw.
+import { AvatarCrop } from "./media.ts"
 import { UserId } from "./domain.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
@@ -292,9 +293,29 @@ export class EditorApi extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([...Writes])
   }),
+  /**
+   * Archives a library entry, or takes it out of the archive: archived ones are left out of the
+   * lists (an Archived view shows them), nothing is deleted, and one in use stays in use.
+   * `EditRefused` for a chat's own copy.
+   */
+  Rpc.make("SetRefArchived", {
+    payload: { refId: RefId, archived: Schema.Boolean },
+    success: LibraryRef,
+    error: Schema.Union([...Writes])
+  }),
   /** The user allows (or stops) a preset's regex scripts, as ST asks once per preset (ARCHITECTURE.md §9). */
   Rpc.make("SetRegexApproval", {
     payload: { refId: RefId, approved: Schema.Boolean, expectedRowVersion: Schema.Int },
+    success: SavedRef,
+    error: Schema.Union([...Writes])
+  }),
+  /**
+   * The card's avatar's cutout, the 2:3 part its small portraits show (ARCHITECTURE.md §14.5c),
+   * chosen again without a new image; null: back to the default. A new image's goes with
+   * `POST /library/avatar`.
+   */
+  Rpc.make("SetCardAvatarCrop", {
+    payload: { refId: RefId, crop: Schema.NullOr(AvatarCrop), expectedRowVersion: Schema.Int },
     success: SavedRef,
     error: Schema.Union([...Writes])
   }),

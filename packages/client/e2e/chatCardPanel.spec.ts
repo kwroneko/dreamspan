@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { portraitPng } from "./support/portrait.ts"
+import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -75,6 +75,11 @@ test.beforeAll(async ({ browser }) => {
   await page
     .getByLabel("Choose an avatar, or drop it here")
     .setInputFiles({ name: "wren.png", mimeType: "image/png", buffer: portraitPng() })
+  // A new picture goes through the cutout chooser (§14.5c); its default cutout is saved.
+  await page
+    .getByRole("dialog", { name: /new picture$/ })
+    .getByRole("button", { name: "Save picture" })
+    .click()
   await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
   await page.close()
   await admin((api) => api.SetPersona({ entityId: id("Juniper Ashgrove"), persona: true }))
@@ -141,19 +146,22 @@ for (const width of [1440, 390])
           expect(await cast.evaluate((strip) => strip.scrollWidth <= strip.clientWidth + 1)).toBeTruthy()
         await page.waitForTimeout(300)
         await shoot(page, `panel-${label}-${tag}`)
-        // A portrait opens the whole image over the page, the panel kept beneath.
-        await page
-          .getByRole("tabpanel", { name, exact: true })
-          .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
-          .click()
-        const lightbox = page.getByRole("dialog", { name, exact: true })
-        await expect(lightbox).toBeVisible()
-        if (label === "single") {
-          await expect(lightbox.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
-          await page.waitForTimeout(300)
-          await shoot(page, `lightbox-${tag}`)
+        // The tab's portrait changes the picture (§14.5c); a card with one has View full image
+        // beside it, which opens the whole image (beside the chat, or over it on a phone), the
+        // panel kept. One without a picture has nothing to view.
+        const panel = page.getByRole("tabpanel", { name, exact: true })
+        await expect(panel.getByRole("button", { name: `Change ${name}'s picture`, exact: true })).toBeVisible()
+        if (label === "group") {
+          await expect(panel.getByRole("button", { name: "View full image", exact: true })).toHaveCount(0)
+          continue
         }
-        await page.keyboard.press("Escape")
+        await panel.getByRole("button", { name: "View full image", exact: true }).click()
+        const lightbox = portraitView(page, name)
+        await expect(lightbox).toBeVisible()
+        await expect(lightbox.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
+        await page.waitForTimeout(300)
+        await shoot(page, `lightbox-${tag}`)
+        await closePortrait(page)
         await expect(lightbox).toHaveCount(0)
         await expect(page.getByRole("tabpanel", { name, exact: true })).toBeVisible()
       }

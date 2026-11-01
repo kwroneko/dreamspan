@@ -35,6 +35,8 @@ export interface ChatCommandDialogProps {
 interface ChatCommand {
   readonly id: string
   readonly label: string
+  /** What it does, beside its menu item while it's highlighted, so its label can stay short. */
+  readonly description?: string
   readonly order: number
   readonly icon: IconName
   /** Hide the command and its shortcut while its target panel is absent or unavailable. */
@@ -101,6 +103,7 @@ export function ChatCommandMenu({ context }: { context: ChatCommandContext }) {
             <MenuItem
               icon={entry.icon}
               tone={entry.tone ?? "default"}
+              description={entry.description}
               onClick={() => (entry.dialog ? setDialog(entry) : entry.run?.(context))}
             >
               {entry.label}

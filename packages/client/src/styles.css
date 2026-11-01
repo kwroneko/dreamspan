@@ -27,6 +27,10 @@
   --overlay: oklch(20% 0.01 260 / 0.4);
   --guidance: oklch(55% 0.14 300);
   --guidance-surface: oklch(97% 0.02 300);
+  --scrollbar: oklch(80% 0.008 260);
+  --scrollbar-hover: oklch(64% 0.012 260);
+  /* A control's hover wash: see-through, so it reads the same on any surface under it. */
+  --hover: oklch(22% 0.015 260 / 0.07);
   color-scheme: light;
 }
 
@@ -52,6 +56,9 @@
     --overlay: oklch(5% 0 0 / 0.6);
     --guidance: oklch(74% 0.11 300);
     --guidance-surface: oklch(25% 0.035 300);
+    --scrollbar: oklch(40% 0.014 260);
+    --scrollbar-hover: oklch(54% 0.014 260);
+    --hover: oklch(92% 0.008 260 / 0.09);
     color-scheme: dark;
   }
 }
@@ -77,6 +84,9 @@
   --overlay: oklch(5% 0 0 / 0.6);
   --guidance: oklch(74% 0.11 300);
   --guidance-surface: oklch(25% 0.035 300);
+  --scrollbar: oklch(40% 0.014 260);
+  --scrollbar-hover: oklch(54% 0.014 260);
+  --hover: oklch(92% 0.008 260 / 0.09);
   color-scheme: dark;
 }
 
@@ -85,6 +95,7 @@
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
+  --color-hover: var(--hover);
   --color-border: var(--border);
   --color-text: var(--text);
   --color-muted: var(--text-muted);
@@ -132,6 +143,21 @@ main:has(> [data-fill]) {
   flex-direction: column;
   min-height: 0;
   padding-bottom: 0;
+}
+
+/*
+ * The chat column: the messages, the composer and the notices that line up with them
+ * (features/chat/ChatWidth.tsx). `--chat-width` is the account's Chat width on the root; the
+ * column never exceeds it, fills a narrower space less a 1rem gutter each side, and on a
+ * phone takes the whole width, as before.
+ */
+@utility chat-column {
+  width: 100%;
+  margin-inline: auto;
+  max-width: min(var(--chat-width, 1200px), 100% - 2rem);
+  @media (width < 40rem) {
+    max-width: 100%;
+  }
 }
 
 /* Rows of the message list: each lays out and paints on its own (CLIENT-FRAMEWORK §5). */
@@ -272,6 +298,90 @@ main:has(> [data-fill]) {
 .md-blocked {
   color: var(--text-muted);
   font-size: 0.9em;
+}
+
+/*
+ * In the base layer, so a utility class on an element (`cursor-grab`, `[scrollbar-width:none]`)
+ * still wins over these.
+ */
+@layer base {
+  /*
+   * Every enabled control shows the pointer (owner, 2026-11-01): browsers give a <button> the
+   * arrow. A disabled one shows the arrow (`Button` and `iconButtonClass` also let the pointer
+   * through it), a busy one `progress`. Text fields keep the text cursor (a combobox that is an
+   * <input> is one); drag handles set their own with a utility class.
+   */
+  :is(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="menuitemradio"],
+    [role="menuitemcheckbox"],
+    [role="tab"],
+    [role="option"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="combobox"]:not(input),
+    summary,
+    select,
+    input:is([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"]),
+    label:has(input:is([type="checkbox"], [type="radio"], [type="file"]))
+  ) {
+    cursor: pointer;
+  }
+  :is(
+    button,
+    [role="button"],
+    [role="menuitem"],
+    [role="menuitemradio"],
+    [role="menuitemcheckbox"],
+    [role="tab"],
+    [role="option"],
+    [role="switch"],
+    [role="checkbox"],
+    [role="radio"],
+    [role="combobox"]:not(input),
+    select,
+    input
+  ):is(:disabled, [aria-disabled="true"], [data-disabled]) {
+    cursor: default;
+  }
+  :is(button, [role="button"])[aria-busy="true"] {
+    cursor: progress;
+  }
+
+  /*
+   * Every scrollbar: thin, a muted thumb with no track, a little stronger while the pointer is
+   * over what scrolls (owner, 2026-11-01). WebKit without `scrollbar-color` gets the same look
+   * from its own pseudo-elements. Cards in a scrolling list keep a gap before the bar
+   * (`scrollbar-gutter: stable` and a right padding on the list).
+   */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--scrollbar-hover) transparent;
+  }
+  @supports not (scrollbar-color: auto) {
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--scrollbar);
+      border: 2px solid transparent;
+      border-radius: 9999px;
+      background-clip: padding-box;
+    }
+    :hover::-webkit-scrollbar-thumb {
+      background-color: var(--scrollbar-hover);
+    }
+  }
 }
 
 /* What Base UI would add as an inline <style>, which the CSP refuses (ui/CspProvider.tsx). */

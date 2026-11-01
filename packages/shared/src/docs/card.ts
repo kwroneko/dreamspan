@@ -2,6 +2,7 @@
 // follow the card specs, so an export maps one to one. Card modules are card notes now
 // (DESIGN §5.0); older revisions keep their `modules`.
 import { Schema } from "effect"
+import { StoredCrop } from "../media.ts"
 import { LorebookDoc } from "./lorebook.ts"
 import { Placement } from "./note.ts"
 import { RegexScript } from "./regexScript.ts"
@@ -56,6 +57,12 @@ export const CardDoc = Schema.Struct({
   modification_date: Schema.optionalKey(Schema.Finite),
   /** Set by the importer once the avatar is stored; parsers leave it null. */
   avatar_media_id: Schema.NullOr(Schema.String),
+  /**
+   * The avatar's cutout, the 2:3 part every small portrait shows (ARCHITECTURE.md §14.5c), for
+   * the image it names. Absent, or for another image: the default. Changed only with the avatar
+   * (SetCardAvatar) or by SetCardAvatarCrop, never by a draft.
+   */
+  avatar_crop: Schema.optionalKey(StoredCrop),
   /** Absent means V3's default: the avatar as the main icon. */
   assets: Schema.optionalKey(Schema.Array(CardAsset)),
   /** The stored files of embedded assets, by their `uri`. Set by the importer like the avatar. */

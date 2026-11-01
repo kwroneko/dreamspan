@@ -1,7 +1,8 @@
 import { Field as BaseField } from "@base-ui/react/field"
 import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
-import type { ComponentProps, ReactNode } from "react"
+import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
+import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -16,9 +17,12 @@ export function Field({
   description,
   error,
   children,
-  className = ""
+  className = "",
+  labelHidden = false
 }: {
   label: ReactNode
+  /** The label names the control for assistive technology only: what's around it already says. */
+  labelHidden?: boolean
   description?: ReactNode
   /** Shown under the control, and marks it invalid. */
   error?: string | null | undefined
@@ -27,7 +31,7 @@ export function Field({
 }) {
   return (
     <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <BaseField.Label className="text-sm font-medium text-text">{label}</BaseField.Label>
+      <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
       {children}
       {description && <BaseField.Description className="text-sm text-muted">{description}</BaseField.Description>}
       {error && (
@@ -125,8 +129,60 @@ export const formText = (form: HTMLFormElement, name: string) => {
   return typeof value === "string" ? value : ""
 }
 
-export function Textarea({ className = "", ...props }: ComponentProps<"textarea">) {
-  return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
+/**
+ * A text box with the editor's text actions under it (Send to snippet, say); `textActions={false}`
+ * for a box of settings rather than text (a list of URLs).
+ */
+export function Textarea({
+  className = "",
+  textActions = true,
+  ...props
+}: ComponentProps<"textarea"> & { textActions?: boolean }) {
+  const [text, setText] = useState({ value: "", selection: "" })
+  const { focused, onFocus, onBlur } = useEditorFocus()
+  if (!textActions || props.disabled)
+    return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
+  const read = (event: SyntheticEvent<HTMLTextAreaElement>) => {
+    const box = event.currentTarget
+    const next = { value: box.value, selection: box.value.slice(box.selectionStart, box.selectionEnd) }
+    if (next.value !== text.value || next.selection !== text.selection) setText(next)
+  }
+  const value = typeof props.value === "string" ? props.value : text.value
+  const selection = focused ? text.selection : ""
+  return (
+    <div
+      className="group/text flex min-w-0 flex-col gap-0.5"
+      onFocus={onFocus}
+      onBlur={onBlur}
+      // A key comes from inside, so the box has focus: its selection as it is now.
+      onKeyDown={(event) => {
+        const box = event.target instanceof HTMLTextAreaElement ? event.target : null
+        runEditorShortcut(event, value, box ? box.value.slice(box.selectionStart, box.selectionEnd) : selection)
+      }}
+    >
+      <BaseField.Control
+        render={
+          <textarea
+            className={`min-h-24 py-2 ${control} ${className}`}
+            {...props}
+            onSelect={(event) => {
+              read(event)
+              props.onSelect?.(event)
+            }}
+            onInput={(event) => {
+              read(event)
+              props.onInput?.(event)
+            }}
+            onFocus={(event) => {
+              read(event)
+              props.onFocus?.(event)
+            }}
+          />
+        }
+      />
+      <EditorTextActions text={value} selection={selection} />
+    </div>
+  )
 }
 
 /** A group of related controls with a legend, such as a set of radio buttons. */

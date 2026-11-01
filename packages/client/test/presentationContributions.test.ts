@@ -14,6 +14,7 @@ import {
   queuedPreviews,
   chatComposer,
   chatComposerNotes,
+  chatColumns,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -70,7 +71,29 @@ const acceptsAlternative = <P extends object>(slot: Slot<P>) => {
   })
 }
 acceptsAlternative(chatCardActions)
-acceptsAlternative(chatNoteActions)
+// No built-in note action since notes have no author's note (owner, 2026-11-01): the slot
+// starts empty, takes a plugin's action and is empty again once its scope ends.
+it(`${chatNoteActions.id}: empty by default, takes a scoped addition, then restores`, async () => {
+  type P = Parameters<typeof chatNoteActions.register>[0]["component"] extends ComponentType<infer Q> ? Q : never
+  const render = () => renderToStaticMarkup(createElement(SlotOutlet<P>, { slot: chatNoteActions, props: {} as P }))
+  expect(chatNoteActions.list()).toEqual([])
+  expect(render()).toBe("")
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* scoped(() =>
+          chatNoteActions.register({
+            id: "synthetic.action",
+            order: 1,
+            component: () => createElement("b", null, "act")
+          })
+        )
+        expect(render()).toBe("<b>act</b>")
+      })
+    )
+  )
+  expect(chatNoteActions.list()).toEqual([])
+})
 acceptsAlternative(chatBranchControls)
 acceptsAlternative(messagePreviews)
 acceptsAlternative(summaryPreviews)
@@ -78,6 +101,7 @@ acceptsAlternative(queuedPreviews)
 acceptsAlternative(chatComposer)
 acceptsAlternative(chatComposerNotes)
 acceptsAlternative(chatOverlays)
+acceptsAlternative(chatColumns)
 acceptsAlternative(chatSettingSections)
 acceptsAlternative(accountSettingSections)
 acceptsAlternative(summarySettingFields)

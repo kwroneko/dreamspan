@@ -80,7 +80,8 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   return (
     <section data-text-tool className="flex min-w-0 flex-col gap-3" aria-label="Snippet workspace">
       <p className="text-sm text-muted">
-        Keep text beside your chat. Select text anywhere and press Ctrl+Shift+S to send it here.
+        Keep text beside your chat. Any text editor sends its text here with Send text to snippet, or what you selected
+        in it with Send selection to snippet.
       </p>
       <div className="flex items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">
@@ -136,15 +137,28 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
             readOnly={state.deleting === item.ref.id}
             onChange={(content) => store.change(item.ref.id, { content })}
             onSelectionChange={setSelection}
+            source="snippet"
           />
           <div className="flex flex-wrap items-center gap-2">
             {insertAction && (
-              <Button variant="primary" onMouseDown={(e) => e.preventDefault()} onClick={insert}>
+              <Button
+                variant="primary"
+                hint="Puts its text, or the part selected, at the cursor of the field you were last typing in."
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={insert}
+              >
                 {insertAction.label}
                 {selection ? " selection" : ""}
               </Button>
             )}
-            {!item.global && <Button onClick={() => void store.makeGlobal(item.ref.id)}>Make global</Button>}
+            {!item.global && (
+              <Button
+                hint="Makes it a snippet of every chat, not only this one and its later branches."
+                onClick={() => void store.makeGlobal(item.ref.id)}
+              >
+                Make global
+              </Button>
+            )}
             <SlotOutlet slot={snippetTools} props={{ store, item }} />
             <span role="status" className="text-xs text-muted">
               {state.error
@@ -161,7 +175,12 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
               <p role="alert" className="text-sm text-danger">
                 {state.error}
               </p>
-              <Button onClick={() => void store.create(item.content)}>Save as new snippet</Button>
+              <Button
+                hint="Keeps the text here as a new snippet, since this one couldn't be saved."
+                onClick={() => void store.create(item.content)}
+              >
+                Save as new snippet
+              </Button>
             </>
           )}
         </fieldset>
@@ -179,6 +198,7 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
     </section>
   )
 }
+const canSend = () => chatPanels.get("snippets") !== undefined
 export const register = () => [
   snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
   snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
@@ -187,20 +207,38 @@ export const register = () => [
   chatPanels.register({
     id: "snippets",
     label: "Snippets",
+    description: "Text kept beside the chat: send it here from any editor, and insert it back.",
     icon: "snippet",
     order: 75,
     component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets")
   }),
+  // Every editor's bar: its whole text, and its selection while there is one. A snippet's
+  // own editor doesn't offer them: they would append it to itself.
+  textActions.register({
+    id: "snippets.send-text",
+    label: "Send text to snippet",
+    shortLabel: "Text to snippet",
+    description: "Adds this editor's whole text to the end of the snippet open in Snippets, or to a new one.",
+    icon: "snippet",
+    editor: "text",
+    available: ({ text, source }) => source !== "snippet" && text.trim().length > 0 && canSend(),
+    run: ({ text }) => workspace?.send(text)
+  }),
   textActions.register({
     id: "snippets.send",
-    label: "Send to snippet",
+    label: "Send selection to snippet",
+    shortLabel: "Selection to snippet",
+    description: "Adds the selected text to the end of the snippet open in Snippets, or to a new one.",
+    icon: "snippet",
+    editor: "selection",
     shortcut: "s",
-    available: ({ text }) => text.length > 0 && chatPanels.get("snippets") !== undefined,
+    available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),
     run: ({ text }) => workspace?.send(text)
   }),
   textActions.register({
     id: "snippets.open",
     label: "Open in Snippets",
+    description: "Opens it in the Snippets panel, beside the chat.",
     available: ({ source, refId }) => source === "note" && refId !== undefined,
     run: ({ refId }) => {
       if (refId) workspace?.select(refId as import("@rp/shared/library.ts").RefId)
@@ -210,6 +248,7 @@ export const register = () => [
   textActions.register({
     id: "snippets.insert",
     label: "Insert",
+    description: "Puts the text at the cursor of the field you were last typing in.",
     available: ({ text, source }) => source === "snippet" && text.length > 0 && hasTextDestination(),
     run: ({ text }) => {
       insertText(text)

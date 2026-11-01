@@ -13,11 +13,14 @@ import { useWide } from "../chat/ChatPanels.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
-import { sortCards } from "./cardRecency.ts"
+import { IconButton } from "../../ui/Tooltip.tsx"
+import { browseCards, useCardBrowse } from "./cardBrowse.tsx"
+import { CardBrowseBar } from "./CardBrowseBar.tsx"
+import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import {
-  CharacterTile,
+  CharacterGrid,
   PAGE_ROWS,
   scopeSearch,
   shellAtom,
@@ -32,12 +35,15 @@ export function PinButton({ fork }: { fork: ShellFork }) {
   const action = useAction()
   return (
     <span className="shrink-0">
-      <Button
-        variant="ghost"
-        pending={action.pending}
-        aria-label={`${fork.pinned ? "Unpin" : "Pin"} ${fork.name}`}
+      {/* A pin, filled when pinned: the star is a favourite character's (cardBrowse.tsx). */}
+      <IconButton
+        label={`${fork.pinned ? "Unpin" : "Pin"} ${fork.name}`}
+        icon="pin"
+        filled={fork.pinned}
         aria-pressed={fork.pinned}
-        className="h-8 px-2"
+        hint={fork.pinned ? "Takes it out of Pinned chats." : "Keeps this branch in Pinned chats, above the rest."}
+        disabled={action.pending}
+        className={fork.pinned ? "text-text!" : ""}
         onClick={() =>
           void action.run(
             (client) =>
@@ -50,9 +56,7 @@ export function PinButton({ fork }: { fork: ShellFork }) {
             ["pins"]
           )
         }
-      >
-        {fork.pinned ? "★" : "☆"}
-      </Button>
+      />
       <ErrorAlert error={action.error} />
     </span>
   )
@@ -153,7 +157,14 @@ export function ForkRow({
       >
         <span className="flex shrink-0 gap-0.5">
           {fork.cast.slice(0, 2).map((c) => (
-            <Avatar key={c.entityId} id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
+            <Avatar
+              key={c.entityId}
+              id={c.entityId}
+              name={c.name}
+              mediaId={c.avatarMediaId}
+              crop={c.avatarCrop}
+              size="md"
+            />
           ))}
         </span>
         <span className="flex min-w-0 flex-col">
@@ -193,8 +204,8 @@ export function ForkRow({
   )
 }
 
-export type ShellSort = "recent" | "created" | "name"
-export function SortSwitch({
+type ShellSort = "recent" | "created" | "name"
+function SortSwitch({
   value,
   onChange,
   label = "Sort by"
@@ -209,8 +220,8 @@ export function SortSwitch({
       value={value}
       onValueChange={onChange}
       options={[
-        { value: "recent", label: "Recent" },
-        { value: "created", label: "Created" },
+        { value: "recent", label: "Recent", description: "Latest activity first." },
+        { value: "created", label: "Created", description: "Newest first." },
         { value: "name", label: "Name" }
       ]}
     />
@@ -298,6 +309,8 @@ const SECTIONS = {
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
   const [search, setSearch] = useState("")
+  // The characters grid's own filter and sort, apart from the home page's (cardBrowse.tsx).
+  const [browse, setBrowse] = useCardBrowse("sidebar")
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = (useSearch({ strict: false }) as { fork?: string }).fork
   const card = data.cards.find((c) => c.card.entityId === scope.entity)
@@ -418,16 +431,25 @@ function Browser({ data }: { data: ShellLibrary }) {
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups />}
+      {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
+      <div className="@container -mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
         {grid ? (
-          <div className="grid grid-cols-2 gap-2">
-            {sortCards(
-              data.cards.filter((c) => c.card.label.toLowerCase().includes(needle)),
-              "recent"
-            ).map((c) => (
-              <CharacterTile key={c.card.entityId} card={c} />
-            ))}
-          </div>
+          // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
+          browse.filter === "groups" ? (
+            <GroupGrid
+              needle={needle}
+              sort={browse.sort}
+              reversed={browse.reversed}
+              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+            />
+          ) : (
+            <CharacterGrid
+              cards={browseCards(data.cards, browse, needle)}
+              sort={browse.sort}
+              className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
+            />
+          )
         ) : (
           <>
             <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} chat={scope.chat as ChatId | null} />

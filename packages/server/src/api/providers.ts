@@ -116,6 +116,10 @@ export const makeProviderHandlers = Effect.gen(function* () {
       Effect.flatMap(userId, (id) => reader.ListModels({ userId: id, connectionId, includeHidden })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListModels"))
       ),
+    ListModelUse: () =>
+      Effect.flatMap(userId, (id) => reader.ListModelUse({ userId: id })).pipe(
+        Effect.catchTag(["StorageError", "RpcClientError"], toServerError("ListModelUse"))
+      ),
     AddUserModel: ({ connectionId, key, overrides }) =>
       Effect.flatMap(userId, (id) =>
         providers.catalogUpstream(id, connectionId, key).pipe(

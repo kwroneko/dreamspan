@@ -14,7 +14,7 @@ const base = {
 
 export const SendIcon = () => (
   <svg {...base}>
-    <path d="M2.5 8h9M8 3.5 12.5 8 8 12.5" />
+    <path d="M3 8h10M8.5 3.5 13 8 8.5 12.5" />
   </svg>
 )
 
@@ -34,12 +34,6 @@ export const ChevronIcon = ({ up = false }: { up?: boolean }) => (
 export const PlusIcon = () => (
   <svg {...base}>
     <path d="M8 3v10M3 8h10" />
-  </svg>
-)
-
-export const RegenerateIcon = () => (
-  <svg {...base}>
-    <path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5V5h-2.5" />
   </svg>
 )
 

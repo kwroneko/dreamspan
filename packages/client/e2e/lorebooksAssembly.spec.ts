@@ -13,7 +13,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { openPanel } from "./support/panel.ts"
+import { openPanel, openPresetAt } from "./support/panel.ts"
 
 // Replies go to the synthetic provider (not the fake generator), so the inspector has a captured request.
 const server = serverPerFile(withAdmin)
@@ -157,7 +157,7 @@ for (const width of [1440, 390])
       await shoot("lorebooks-setting-on")
       // The preset editor at the Main Prompt: Aria's system prompt replaces it in this chat.
       const presetPanel = await openPanel(page, "Prompt preset")
-      await presetPanel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+      await openPresetAt(page, presetPanel, "Main Prompt")
       const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
       const main = overlay.locator('[data-prompt="main"]')
       await expect(main).toContainText("Replaced in this chat by Aria Vance's system prompt")
@@ -189,8 +189,10 @@ test("a prompt that forbids overrides says so in both editors; entries by positi
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${ariaChat}`)
   const presetPanel = await openPanel(page, "Prompt preset")
-  await presetPanel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await openPresetAt(page, presetPanel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
+  // The switch is among the prompt's options, folded under its header.
+  await overlay.locator('[data-prompt="main"]').getByRole("button", { name: "Options of Main Prompt" }).click()
   await overlay.locator('[data-prompt="main"]').getByRole("switch", { name: "A card can't replace it" }).click()
   await overlay.getByRole("button", { name: /^Save \(/ }).click()
   await page
@@ -203,7 +205,7 @@ test("a prompt that forbids overrides says so in both editors; entries by positi
       const shoot = await setUp(page, width, theme, false)
       await page.goto(`${server().url}/chats/${ariaChat}`)
       const panel = await openPanel(page, "Prompt preset")
-      await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+      await openPresetAt(page, panel, "Main Prompt")
       const main = page.getByRole("dialog", { name: "Preset editor", exact: true }).locator('[data-prompt="main"]')
       await expect(main).toContainText("Aria Vance has a system prompt; this prompt forbids it")
       await main.scrollIntoViewIfNeeded()

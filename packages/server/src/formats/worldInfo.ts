@@ -3,15 +3,18 @@
 // a file must have `entries`, as ST's import requires (src/endpoints/worldinfo.js).
 import { LOREBOOK_SCHEMA_VERSION, type LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
-import { type Effect, Predicate } from "effect"
+import { Context, type Effect, Predicate } from "effect"
 import { enumByIndex, Fields, isSafeInt, present } from "./fields.ts"
 import {
   assignUids,
-  type Candidate,
+  type AuthorNoteLore,
+  DEFAULT_AUTHOR_NOTE_LORE,
+  type StCandidate,
   checkEntryCount,
   isRecursionDelay,
   LOGICS,
   ourEntryFields,
+  placeAuthorNoteEntries,
   POSITIONS,
   remainingExtensions,
   ROLES,
@@ -20,6 +23,15 @@ import {
 import { attempt, defaultLimits, fail, type FormatError, type Limits, parseJson, type Path } from "./safety.ts"
 
 const BOOK_KEYS = new Set(["entries", "name", "extensions", "originalData"])
+
+/**
+ * Where a World Info entry ST placed before or after its author's note goes (`placeAuthorNoteEntries`):
+ * ST's default author's note place unless the import knows the folder's (the ST folder import
+ * provides it from `settings.json`).
+ */
+export const AuthorNoteLorePlace = Context.Reference<AuthorNoteLore>("rp/formats/AuthorNoteLorePlace", {
+  defaultValue: () => DEFAULT_AUTHOR_NOTE_LORE
+})
 const ENTRY_KEYS = new Set([
   "uid",
   "key",
@@ -85,7 +97,7 @@ const wiEntry = (
   source: unknown,
   index: number,
   issues: ReportBuilder
-): Candidate | undefined => {
+): StCandidate | undefined => {
   const path: Path = ["entries", key]
   if (!Predicate.isObject(source)) {
     issues.add("warning", "lorebook.invalid_entry", `Entry ${shownText(key)} isn't an object; it was dropped.`, path)
@@ -156,7 +168,8 @@ const wiEntry = (
 export const importLorebook = (
   bytes: Uint8Array,
   fallbackName = "",
-  limits: Limits = defaultLimits
+  limits: Limits = defaultLimits,
+  authorNote: AuthorNoteLore = DEFAULT_AUTHOR_NOTE_LORE
 ): Effect.Effect<{ lorebook: LorebookDoc; report: ImportReport }, FormatError> =>
   attempt(() => {
     if (bytes.byteLength > limits.maxFileBytes) {
@@ -187,7 +200,7 @@ export const importLorebook = (
         token_budget: null,
         recursive_scanning: null,
         extensions: book.object("extensions"),
-        entries: assignUids(entries, [], issues),
+        entries: assignUids(placeAuthorNoteEntries(entries, authorNote, ["entries"], issues), [], issues),
         ...book.unknown(BOOK_KEYS)
       },
       report: issues.build("st-world-info")

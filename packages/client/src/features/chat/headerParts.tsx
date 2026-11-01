@@ -11,7 +11,7 @@ import { useShellForks } from "../characters/shellData.tsx"
 import { PanelToggles } from "./ChatPanels.tsx"
 import { ChatCommandMenu, type ChatCommandDialogProps, chatCommands, shortcutText } from "./commands.tsx"
 
-/** ☆: pins the fork shown, from its shell row (this chat's forks only). */
+/** The pin: pins the fork shown, from its shell row (this chat's forks only). */
 export function HeaderPin({ view }: ChatHeaderActionProps) {
   const fork = useShellForks({
     entity: null,
@@ -24,7 +24,7 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
     .section("all")
     // By id: a branch made at another's last message ends where that one does.
     .rows.find((f) => f.chat.id === view.chat?.id && f.forkId === (view.forkId ?? view.chat?.currentForkId))
-  // A phone's header keeps its room for the name; the chat lists' rows have ☆ too.
+  // A phone's header keeps its room for the name; the chat lists' rows have the pin too.
   return fork ? (
     <span className="contents max-sm:hidden">
       <PinButton fork={fork} />

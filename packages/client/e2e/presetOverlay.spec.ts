@@ -35,7 +35,7 @@ const note = (id: string, title: string, placement: Record<string, unknown>) => 
   on_by_default: true
 })
 
-/** A chat with Mira, whose notes sit at a depth, at both ends of the author's note and at the tail's start. */
+/** A chat with Mira, whose notes sit at two depths and at the tail's start. */
 const setUp = async (page: Page, preset: string, historyLast: boolean) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await upload(page, `Mira ${preset}`, {
@@ -49,8 +49,8 @@ const setUp = async (page: Page, preset: string, historyLast: boolean) => {
         rp_harness: {
           notes: [
             note("n-depth", "Tide table", { mode: "depth", depth: 2, role: "system" }),
-            note("n-top", "Pilot's log", { mode: "section", section: "author_note_top" }),
-            note("n-bottom", "Harbor rules", { mode: "section", section: "author_note_bottom" }),
+            note("n-top", "Pilot's log", { mode: "depth", depth: 4, role: "system" }),
+            note("n-bottom", "Harbor rules", { mode: "depth", depth: 4, role: "user" }),
             note("n-tail", "Tail rule", { mode: "section", section: "tail_start" })
           ]
         }
@@ -81,10 +81,7 @@ const open = async (page: Page, chatId: string) => {
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   const panel = await openPanel(page, "Prompt preset")
-  await panel
-    .getByRole("button", { name: /^Edit /, exact: false })
-    .first()
-    .click()
+  await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await expect(overlay).toBeVisible()
   return overlay
@@ -107,7 +104,7 @@ for (const [width, height] of [
       // Under Main: a card's prompt can replace it, whether or not one does.
       await expect(overlay.locator('[data-prompt="main"]')).toContainText("A card's own prompt can replace it")
 
-      // "At depth N" lists its note once, with the depth; the author's note ends have slots.
+      // "At depth N" lists each note once, with its depth.
       await expect(overlay.getByText("Tide table", { exact: false })).toHaveCount(1)
       await expect(overlay.getByText("Tide table (depth 2)")).toBeVisible()
       await expect(overlay.getByText("Pilot's log")).toBeVisible()

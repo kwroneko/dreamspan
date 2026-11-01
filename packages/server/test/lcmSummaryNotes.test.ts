@@ -99,7 +99,7 @@ it.effect("a {{summary}} prompt reading a conditioned summary note stays out of 
     assert.isAtLeast(holder(plain), 0)
     assert.isTrue(plain.request.breakpoints.some((b) => b.message >= holder(plain)))
     // Due only while Mira isn't muted: what `{{summary}}` reads can change from turn to turn.
-    const conditioned = yield* build({ when: "not_muted", card: "mira" as never })
+    const conditioned = yield* build({ when: "not_muted", cards: ["mira" as never] })
     assert.isAtLeast(holder(conditioned), 0)
     assert.isFalse(conditioned.request.breakpoints.some((b) => b.message >= holder(conditioned)))
   })

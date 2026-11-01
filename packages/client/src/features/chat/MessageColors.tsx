@@ -33,8 +33,10 @@ function ColorControl({
   return (
     <Field label={`${color.label} colour`}>
       <div className="flex items-center gap-2">
+        {/* A swatch, not a bar across the panel. */}
         <Input
           type="color"
+          className="w-24! px-1"
           value={viewer.prefs[color.key] ?? defaultColor}
           disabled={!viewer.ready || viewer.pending}
           onValueChange={(value) => void viewer.change({ [color.key]: value })}
@@ -59,9 +61,12 @@ export function MessageColorSettings() {
       legend="Message colours"
       description="Colours follow your account. Reset follows the current light or dark theme."
     >
-      {messageColors.map((color) => (
-        <ColorControl key={color.key} color={color} viewer={viewer} />
-      ))}
+      {/* One a row in a narrow panel, side by side as it widens. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3">
+        {messageColors.map((color) => (
+          <ColorControl key={color.key} color={color} viewer={viewer} />
+        ))}
+      </div>
       {viewer.error && (
         <p role="alert" className="text-sm text-danger">
           {viewer.error.message}

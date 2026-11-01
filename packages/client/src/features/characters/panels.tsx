@@ -6,6 +6,7 @@ export const registerCharacterPanels = () =>
   chatPanels.register({
     id: "character",
     label: "Character",
+    description: "A character's card, its fields edited right here.",
     order: 100,
     icon: "people",
     header: false,
@@ -16,7 +17,7 @@ export const registerCharacterPanels = () =>
       const tab = (card: CastCard): PanelTabEntry => ({
         value: `card:${card.entityId}`,
         label: card.label,
-        avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId },
+        avatar: { id: card.entityId, name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop },
         ...(cast!.playedByMe.includes(card.entityId) ? { note: "you" } : {})
       })
       // In the chat's own order (its header's, the composer's), the persona (you) last.

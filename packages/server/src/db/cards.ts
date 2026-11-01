@@ -5,6 +5,7 @@ import { forkAt } from "./forkState.ts"
 import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
+import { avatarCropField } from "@rp/shared/media.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
 // selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
@@ -70,7 +71,8 @@ const parse = (row: CardRow): CardText => {
       lorebook: book !== null,
       ...(bookName === "" ? {} : { lorebookName: bookName }),
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
-      avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
+      avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
+      ...avatarCropField(doc.avatar_media_id, doc.avatar_crop)
     }),
     greetings: greetingIndexes.filter((index) => index < ordinary.length).map((index) => all[index]!),
     groupGreetings: greetingIndexes.filter((index) => index >= ordinary.length).map((index) => all[index]!),
@@ -123,6 +125,7 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
         modelName: names.modelName,
         subtitle: names.version,
         avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
+        ...avatarCropField(doc.avatar_media_id, doc.avatar_crop),
         lorebook: typeof doc.character_book === "object" && doc.character_book !== null
       })
     })

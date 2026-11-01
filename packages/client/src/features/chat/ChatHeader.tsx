@@ -2,7 +2,7 @@ import { SlotOutlet } from "../../slots.tsx"
 import { chatBranchControls, chatHeaderActions } from "./presentation.tsx"
 // The open chat's header, one row: whose chat it is (the cast's faces, the chat's readable
 // name, never ST's file name, which a click renames in place, and the cast's names under it),
-// then the branch control and the chat's buttons (☆, the side panel, ⋯), which are
+// then the branch control and the chat's buttons (the pin, the side panel, ⋯), which are
 // contributions (`chatBranchControls`, `chatHeaderActions`). On a phone it replaces the app's
 // top bar (shell.tsx), with ← to the chats. While the chat loads it shows placeholders, not
 // a name it doesn't know yet.
@@ -20,7 +20,7 @@ import { NameDialog } from "./NameDialog.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
-import { openAppMenu, useTitle } from "../shell.tsx"
+import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
 import { castCharacters, chatName, formatDay } from "./chatTitle.ts"
 import type { PanelTab } from "./ChatPanels.tsx"
@@ -259,6 +259,8 @@ export function ChatHeader({
   return (
     <TooltipProvider>
       <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-1.5 sm:gap-3 sm:px-4">
+        {/* The desktop's hidden sidebar comes back from here. */}
+        <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <Tooltip label="All chats">
           <Link
             to="/chats"
@@ -285,20 +287,21 @@ export function ChatHeader({
           characters.length > 0 && (
             <div className="flex shrink-0 -space-x-2 max-sm:hidden">
               {characters.slice(0, 4).map((c) => (
-                <button
-                  key={c.entityId}
-                  type="button"
-                  aria-label={`Show ${c.label}'s card`}
-                  className="rounded-full ring-2 ring-surface outline-none focus-visible:ring-focus"
-                  onClick={() =>
-                    void navigate({
-                      to: ".",
-                      search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
-                    })
-                  }
-                >
-                  <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
-                </button>
+                <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
+                  <button
+                    type="button"
+                    aria-label={`Show ${c.label}'s card`}
+                    className="rounded-full ring-2 ring-surface outline-none focus-visible:ring-focus"
+                    onClick={() =>
+                      void navigate({
+                        to: ".",
+                        search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${c.entityId}` })
+                      })
+                    }
+                  >
+                    <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="md" />
+                  </button>
+                </Tooltip>
               ))}
               {characters.length > 4 && (
                 <span className="inline-flex size-9 items-center justify-center rounded-full bg-surface-raised text-xs text-muted ring-2 ring-surface">

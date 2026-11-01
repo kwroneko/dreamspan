@@ -16,7 +16,7 @@ import { Popover } from "../../ui/Popover.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { sidebarCleared } from "../characters/shellData.tsx"
 import { formatWhen } from "./chatTitle.ts"
@@ -130,7 +130,11 @@ function BranchRow({
         />
         <IconButton
           label={`Delete ${label}`}
-          hint={only ? "The only branch: delete the chat instead" : `Delete ${label}`}
+          hint={
+            only
+              ? "The only branch: delete the chat instead"
+              : "Moves it to the bin, with Undo. Branches made from it keep their messages."
+          }
           icon="trash"
           tone="danger"
           disabled={only}
@@ -212,35 +216,43 @@ function BranchList({
       </ol>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
         {latest !== undefined && shown !== undefined && latest.id !== shown.id && (
-          <button type="button" className="text-accent hover:underline" onClick={() => open(latest)}>
-            Back to the latest branch
-          </button>
+          <Tooltip label="The one the chat opens on: the branch you sent in last.">
+            <button type="button" className="text-accent hover:underline" onClick={() => open(latest)}>
+              Back to the latest branch
+            </button>
+          </Tooltip>
         )}
         {parent !== undefined && parent.id !== latest?.id && (
-          <button type="button" className="text-accent hover:underline" onClick={() => open(parent)}>
-            Back to “{branchLabel(parent, forks)}”, where it came from
-          </button>
+          <Tooltip label="The branch this one was made from.">
+            <button type="button" className="text-accent hover:underline" onClick={() => open(parent)}>
+              Back to “{branchLabel(parent, forks)}”
+            </button>
+          </Tooltip>
         )}
         {start !== null && (
-          <button
-            type="button"
-            className="text-accent hover:underline"
-            onClick={() => {
-              onDone()
-              onJump(start)
-            }}
-          >
-            Go to where this branch starts
-          </button>
+          <Tooltip label="Shows the message this branch was made at.">
+            <button
+              type="button"
+              className="text-accent hover:underline"
+              onClick={() => {
+                onDone()
+                onJump(start)
+              }}
+            >
+              Go to where this branch starts
+            </button>
+          </Tooltip>
         )}
-        <Link
-          to="."
-          className="text-accent hover:underline"
-          onClick={onDone}
-          search={(prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, forks: session.id })}
-        >
-          Show in the left panel
-        </Link>
+        <Tooltip label="Lists this chat's branches in the left panel.">
+          <Link
+            to="."
+            className="text-accent hover:underline"
+            onClick={onDone}
+            search={(prev: Record<string, unknown>) => ({ ...prev, ...sidebarCleared, forks: session.id })}
+          >
+            Show in the left panel
+          </Link>
+        </Tooltip>
       </div>
       <p className="text-xs text-muted">
         {live <= 1 ? "The only branch: delete the chat instead. " : ""}To start another, choose Branch from here in a
@@ -313,6 +325,8 @@ export function BranchControl(props: BranchControlProps) {
         </>
       }
       triggerLabel={`Branch: ${label}, ${place}: switch branch`}
+      hint="Switch to another of this chat's branches, or rename or delete them."
+      hintSide="bottom"
       triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
       title={title}
       side="bottom"

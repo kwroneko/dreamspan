@@ -71,7 +71,7 @@ import {
   PathWindow
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
-import { BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
+import { BinBranch, BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
 import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import {
   ComposerImage,
@@ -112,6 +112,7 @@ import {
   Model,
   ModelId,
   ModelOverrides,
+  ModelUse,
   ModelUpstream,
   ProviderKind,
   ProxyMode
@@ -130,6 +131,7 @@ import {
   TokenCounts,
   UsageSource
 } from "@rp/shared/usage.ts"
+import { AvatarCrop } from "@rp/shared/media.ts"
 import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { CastCard, ChatSummary, FrozenMacros, QueuedMessage } from "@rp/shared/chat.ts"
@@ -374,6 +376,7 @@ export class ImportLeaseLost extends Schema.TaggedError<ImportLeaseLost>()("Impo
 
 /** A chat-owned note an ST chat brings, which the writer stores as a note entity. */
 export const StImportNote = Schema.Struct({
+  /** Which of the chat file's notes it is, by which a re-import finds it; only a summary's doc keeps it. */
   kind: Schema.Literals(["author_note", "imported_summary"]),
   title: Schema.String,
   /** Its texts, oldest first, as the note's revisions; the last is current. */
@@ -481,6 +484,12 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, collapsed: Schema.Boolean },
     success: Schema.Void,
     error: StorageError
+  }),
+  /** A live card of the user's marked a favourite or not (db/cardFavourites.ts); NotFound otherwise. */
+  Rpc.make("SetCardFavourite", {
+    payload: { userId: UserId, entityId: EntityId, favourite: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
   }),
   /** Each chat's summaries, if the chat's and its owner's stamps are still the ones they were computed at. */
   Rpc.make("StoreForkSummaries", {
@@ -997,6 +1006,16 @@ export class WriteOps extends RpcGroup.make(
     payload: { userId: UserId, entityId: EntityId, archived: Schema.Boolean },
     success: Schema.Void,
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Archives or restores the entity of a library entry (an upstream or a variant, never a chat
+   * override): hidden from lists, nothing deleted, in use where it is used. Archiving keeps the
+   * first time it was archived.
+   */
+  Rpc.make("SetRefArchived", {
+    payload: { userId: UserId, refId: RefId, archived: Schema.Boolean },
+    success: LibraryRef,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /** A new variant following `refId` (an upstream or another variant). */
   Rpc.make("ForkRef", {
@@ -1715,8 +1734,11 @@ export class WriteOps extends RpcGroup.make(
       cardEntityId: EntityId,
       prompt: Schema.String,
       useChara: Schema.Boolean,
-      /** ST's `chara_note_position`: 0 replace, 1 before the chat's note, 2 after. */
-      position: Schema.Number,
+      /**
+       * Where it goes: ST put it before, after or in place of the chat's author's note, which
+       * the import turns into the concrete place of the folder's default author's note.
+       */
+      placement: NoteDoc.fields.placement,
       scanLore: Schema.Boolean,
       sourcePath: Schema.String
     },
@@ -2035,8 +2057,21 @@ export class WriteOps extends RpcGroup.make(
     success: Schema.String,
     error: StorageError
   }),
+  /** With `crop`, the cutout chosen for it (ARCHITECTURE.md §14.5c); without, the default. */
   Rpc.make("SetCardAvatar", {
-    payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, media: ImportedMedia },
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      expectedRowVersion: Schema.Int,
+      media: ImportedMedia,
+      crop: Schema.optionalKey(AvatarCrop)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
+  /** The card's avatar's cutout, chosen again without a new image; null: back to the default. */
+  Rpc.make("SetCardAvatarCrop", {
+    payload: { userId: UserId, refId: RefId, expectedRowVersion: Schema.Int, crop: Schema.NullOr(AvatarCrop) },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
@@ -2487,6 +2522,12 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(BinForkShown),
     error: StorageError
   }),
+  /** Every branch deleting the user's bin items for good affects (`BinBranch`), for the confirmation's list. */
+  Rpc.make("BinItemBranches", {
+    payload: { userId: UserId, itemIds: Schema.Array(Schema.String) },
+    success: Schema.Array(BinBranch),
+    error: StorageError
+  }),
   /** The bin's deleted items, newest first. `before` pages back from the last item seen. */
   Rpc.make("ListBin", {
     payload: {
@@ -2586,6 +2627,12 @@ export class ReadOps extends RpcGroup.make(
     payload: { userId: UserId, connectionId: ConnectionId, includeHidden: Schema.Boolean },
     success: Schema.Array(Model),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  /** When each of the user's models last wrote a reply: the model picker's Last used. */
+  Rpc.make("ListModelUse", {
+    payload: { userId: UserId },
+    success: Schema.Array(ModelUse),
+    error: StorageError
   }),
   Rpc.make("GetModel", {
     payload: { userId: UserId, modelId: ModelId },

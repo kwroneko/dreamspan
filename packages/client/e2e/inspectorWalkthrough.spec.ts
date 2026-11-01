@@ -366,7 +366,9 @@ for (const [width, height] of [
       const reply = page.getByRole("article", { name: "Reply" }).last()
       await expect(reply).toBeVisible()
       await showActions(reply)
-      const button = reply.getByRole("link", { name: "Request it was generated from" })
+      // In More actions unless pinned, like every action but Edit, Continue, Branch and Delete.
+      await reply.getByRole("button", { name: "More actions" }).click()
+      const button = page.getByRole("menuitem", { name: "Request it was generated from" })
       await expect(button).toBeVisible()
       await shoot(page, `${tag}-1-message-button`)
       await button.click()

@@ -1,5 +1,6 @@
 // Chat panel contributions use the client registry's reversible registration scope.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import { useNavigate } from "@tanstack/react-router"
 import { Component, lazy, Suspense, useCallback, useSyncExternalStore, type ComponentType } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -24,6 +25,8 @@ export interface PanelProps {
 export interface PanelDescriptor {
   readonly id: string
   readonly label: string
+  /** What the panel holds, on its tool tab's tooltip: "This chat's notes for the model", say. */
+  readonly description?: string
   readonly order: number
   readonly icon: IconName
   readonly component: ComponentType<PanelProps>
@@ -33,6 +36,12 @@ export interface PanelDescriptor {
    * doesn't fit under More; or "cast", the strip of the chat's characters, apart from the tools.
    */
   readonly placement?: "tools" | "cast"
+  /**
+   * How wide its body goes in a wide panel: "readable" (the default), at most 52rem from the
+   * left, so forms and prose keep a readable line however far the panel is dragged; "full",
+   * the panel's whole width, for a body that lays itself out in columns as it widens.
+   */
+  readonly width?: "readable" | "full"
   /** Dynamic tab families, such as the cast's cards. Exact registered IDs take precedence. */
   readonly matches?: (value: string) => boolean
   readonly tabs?: (view: ChatView, selected: string | null) => ReadonlyArray<PanelTabEntry>
@@ -45,7 +54,12 @@ export interface PanelDescriptor {
 export interface PanelTabEntry {
   readonly value: string
   readonly label: string
-  readonly avatar?: { readonly id: string; readonly name: string; readonly mediaId: string | null }
+  readonly avatar?: {
+    readonly id: string
+    readonly name: string
+    readonly mediaId: string | null
+    readonly crop?: AvatarCrop | undefined
+  }
   readonly note?: string
 }
 

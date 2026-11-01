@@ -79,7 +79,7 @@ export function NoModelNote({ view }: { view: ChatView }) {
   // Null (not absent) is the server saying no model is named anywhere.
   if (view.history?.model !== null) return null
   return (
-    <div className="mx-auto w-full max-w-3xl pb-2">
+    <div className="chat-column pb-2">
       <NoModel className="rounded-md border border-warning/50 bg-surface px-3 py-2" />
     </div>
   )

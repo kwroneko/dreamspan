@@ -15,6 +15,8 @@ import { ErrorAlert } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
+import { TabPortrait } from "../editor/PortraitControls.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Menu, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { Alert } from "../../ui/Surface.tsx"
@@ -93,7 +95,18 @@ function ChatCharacterPanel({
   return (
     <div className="flex flex-col gap-4">
       <header className="flex items-start gap-3">
-        <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />
+        {info && live ? (
+          <HeaderPortrait session={session} refId={info.refId} entityId={entityId} card={card} />
+        ) : (
+          <Avatar
+            id={entityId}
+            name={card.name}
+            mediaId={card.avatarMediaId}
+            crop={card.avatarCrop}
+            size="lg"
+            preview
+          />
+        )}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {persona && <p className="text-xs text-muted">You play</p>}
           <h2 className="text-lg leading-snug font-semibold [overflow-wrap:anywhere]">{card.label}</h2>
@@ -124,6 +137,8 @@ function ChatCharacterPanel({
   )
 }
 
+const FULL_EDITOR = "Every field of the card, not only its description."
+
 /** What's used less: a new chat (a persona's: its full editor), the card's notes. */
 function CardMenu({
   entityId,
@@ -151,28 +166,63 @@ function CardMenu({
       {persona ? (
         refId &&
         (workspace ? (
-          <MenuItem icon="edit" onClick={() => workspace.open(refId)}>
+          <MenuItem icon="edit" description={FULL_EDITOR} onClick={() => workspace.open(refId)}>
             Full editor
           </MenuItem>
         ) : (
-          <MenuLinkItem icon="edit" render={<Link to="/library/$refId" params={{ refId }} />}>
+          <MenuLinkItem icon="edit" description={FULL_EDITOR} render={<Link to="/library/$refId" params={{ refId }} />}>
             Full editor
           </MenuLinkItem>
         ))
       ) : (
         <MenuLinkItem
           icon="chat"
+          description="Starts a chat with only them, from their greeting. It's saved when you first send."
           render={<Link to="/cards/$entityId/chat" params={{ entityId }} search={{ panel: `card:${entityId}` }} />}
         >
           New chat with {card.name}
         </MenuLinkItem>
       )}
       {onNotes && (
-        <MenuItem icon="note" onClick={onNotes}>
+        <MenuItem icon="note" description="Opens the Notes tab at this card's notes." onClick={onNotes}>
           {card.name}'s notes
         </MenuItem>
       )}
     </Menu>
+  )
+}
+
+/**
+ * The tab's portrait: a click changes the picture (owner, 2026-11-01), beside Adjust cutout and
+ * View full image, which opens it as a message portrait's click does.
+ */
+function HeaderPortrait({
+  session,
+  refId,
+  entityId,
+  card
+}: {
+  session: ChatSession
+  refId: RefId
+  entityId: EntityId
+  card: CastCard
+}) {
+  const store = useCardStore(refId)
+  const call = useCaller()
+  const viewer = usePortraitViewer()
+  useEffect(() => {
+    if (store.snapshot === null) void store.load()
+  }, [store])
+  const portrait = { id: entityId, name: card.name, mediaId: card.avatarMediaId }
+  return (
+    <TabPortrait
+      store={store}
+      call={call}
+      id={entityId}
+      shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
+      onViewFull={viewer && card.avatarMediaId !== null ? () => viewer.show(portrait) : undefined}
+      onChanged={() => void session.rereadCast()}
+    />
   )
 }
 

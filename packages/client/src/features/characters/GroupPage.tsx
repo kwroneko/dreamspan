@@ -16,6 +16,7 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { ChatList } from "../chat/ChatList.tsx"
 import { NameDialog } from "../chat/NameDialog.tsx"
 import { useTitle } from "../shell.tsx"
@@ -49,10 +50,13 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
             <Link to="/chats/$chatId" params={{ chatId: group.latestChatId }} className={buttonClass("primary")}>
               Continue the latest chat
             </Link>
-            <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
-              New chat
-            </Link>
+            <Tooltip label="Opens a new chat with these characters, each greeting in turn. Nothing is saved until you send.">
+              <Link to="/groups/$chatId/new" params={{ chatId: group.latestChatId }} className={buttonClass()}>
+                New chat
+              </Link>
+            </Tooltip>
             <Button
+              hint="Renames every chat of the group, and the ones you start from here."
               onClick={() => {
                 rename.clearError()
                 setRenaming(true)
@@ -87,7 +91,13 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
                   onClick={() => openCharacter(member.entityId)}
                   className="flex items-center gap-3 rounded-lg px-2 py-1.5 outline-none hover:bg-surface-raised/60 focus-visible:ring-2 focus-visible:ring-focus"
                 >
-                  <Avatar id={member.entityId} name={member.name} mediaId={member.avatarMediaId} size="lg" />
+                  <Avatar
+                    id={member.entityId}
+                    name={member.name}
+                    mediaId={member.avatarMediaId}
+                    crop={member.avatarCrop}
+                    size="lg"
+                  />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate font-medium">{member.name}</span>
                     {member.subtitle && <span className="truncate text-xs text-muted">{member.subtitle}</span>}

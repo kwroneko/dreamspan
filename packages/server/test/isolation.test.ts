@@ -410,6 +410,10 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual((yield* owner.api.GetShellLibrary()).pinsCollapsed, before.pinsCollapsed)
       })
   },
+  SetCardFavourite: {
+    probe: (actor, owner) =>
+      refused(actor.api.SetCardFavourite({ entityId: owner.editor.cardEntityId, favourite: true }), "NotFound")
+  },
   GetSummaryDetails: {
     probe: (actor, owner) => refused(actor.api.GetSummaryDetails({ summaryId: owner.summary.id }), "NotFound")
   },
@@ -817,6 +821,12 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.strictEqual((yield* ownModel(owner)).id, owner.modelId)
         yield* refused(actor.api.ListModels({ connectionId: owner.connectionId, includeHidden: true }), "NotFound")
       })
+  },
+  ListModelUse: {
+    probe: (actor, owner) =>
+      Effect.map(actor.api.ListModelUse(), (used) =>
+        assert.isFalse(used.some((row) => row.modelId === owner.modelId || row.connectionId === owner.connectionId))
+      )
   },
   AddUserModel: {
     probe: (actor, owner) =>
@@ -2331,9 +2341,28 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       )
   },
+  SetRefArchived: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.SetRefArchived({ refId: owner.refId, archived: true }), "NotFound")
+        const archived = yield* owner.api.ListLibrary({ kind: "preset", archived: true })
+        assert.isFalse(archived.some((ref) => ref.id === owner.refId))
+      })
+  },
   SetRegexApproval: {
     probe: (actor, owner) =>
       refused(actor.api.SetRegexApproval({ refId: owner.refId, approved: true, expectedRowVersion: 1 }), "NotFound")
+  },
+  SetCardAvatarCrop: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.SetCardAvatarCrop({
+          refId: owner.editor.cardRefId,
+          crop: { x: 0, y: 0, width: 0.5, height: 0.5 },
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
   },
   PreviewUpdate: {
     probe: (actor, owner) => refused(actor.api.PreviewUpdate({ refId: owner.editor.cardRefId }), "NotFound")
@@ -2565,6 +2594,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
     probe: (actor, owner) =>
       Effect.gen(function* () {
         assert.deepStrictEqual(yield* actor.api.BinItemForks({ itemIds: [owner.binItemId] }), [])
+      })
+  },
+  // Nor any branches.
+  BinItemBranches: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        assert.deepStrictEqual(yield* actor.api.BinItemBranches({ itemIds: [owner.binItemId] }), [])
       })
   },
   GetBinLimits: {

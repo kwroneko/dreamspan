@@ -381,3 +381,38 @@ lcmTest(
       assert.lengthOf(yield* h.plan("reply"), 0)
     })
 )
+
+lcmTest(
+  "redoing a condensation over more messages than a leaf's part is answered once, not again after each job",
+  (server) =>
+    Effect.gen(function* () {
+      // Two leaves of 70 messages condense into one level-2 summary over 140, more than a
+      // leaf's 128-slot part: only a leaf is continued over parts after its first job.
+      const h = yield* lcmHarness(server, { messages: 150, settings: { fanout: 2 }, summarizer: numbered() })
+      yield* h.enqueue(0, 69)
+      yield* h.drain
+      yield* h.enqueue(70, 139)
+      yield* h.drain
+      const condensed = yield* h.plan("completion")
+      assert.lengthOf(condensed, 1)
+      assert.strictEqual(condensed[0]!.level, 2)
+      yield* h.drain
+      const top = (yield* rowsOf(h)).find((r) => r.level === 2)!
+      assert.strictEqual(top.slotCount, 140)
+      yield* h.api.SetSummaryRerun({
+        chatId: h.chat.id,
+        target: { _tag: "Summary", summaryId: top.id as never },
+        requested: true
+      })
+      const made = yield* h.plan("reply")
+      assert.lengthOf(made, 1)
+      assert.strictEqual(made[0]!.level, 2)
+      yield* h.drain
+      assert.lengthOf(yield* h.plan("completion"), 0, "the finished condensation isn't asked for again")
+      assert.lengthOf(
+        (yield* jobsOf(h)).filter((j) => j.level === 2),
+        2
+      )
+    }),
+  { timeout: 120_000 }
+)

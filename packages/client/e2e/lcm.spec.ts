@@ -145,7 +145,8 @@ for (const [name, viewport] of [
       await expect(article(page, fixture, 8)).toHaveAttribute("data-summarized", "true")
       await expect(article(page, fixture, 9)).not.toHaveAttribute("data-summarized")
       await expect(article(page, fixture, 8).getByRole("img", { name: /^Summarized/ })).toBeVisible()
-      await expect(article(page, fixture, 8).getByText("Summarized", { exact: true })).toBeVisible()
+      // Only the icon shows: the mark is on every message above the divider, and the edge says it too.
+      await expect(article(page, fixture, 8).getByText("Summarized", { exact: true })).toHaveClass(/sr-only/)
     })
 
     test("summarized, dropped out of context and hidden messages look different", async ({ page }) => {
@@ -179,7 +180,8 @@ for (const [name, viewport] of [
       await expect(row).toContainText("Messages 1–8")
       await expect(row).toContainText("A flood closed the road; Mira saved the ledger.")
       // Its children, a level down.
-      await row.getByRole("button", { name: /Condensed from 2/ }).click()
+      await row.getByRole("button", { name: /^Actions for the summary of messages 1–8/ }).click()
+      await page.getByRole("menuitem", { name: /Condensed from 2/ }).click()
       const children = row.getByRole("list", { name: /Summaries condensed into level 2/ })
       await expect(children).toContainText("Messages 1–4")
       await expect(children).toContainText("Messages 5–8")
@@ -202,17 +204,18 @@ for (const [name, viewport] of [
       const box = dialog.getByRole("textbox", { name: /Text of the summary of messages 1–8/ })
       await expectTextBox(box, "A flood closed the road; Mira saved the ledger.")
       await box.fill("The road flooded. Mira saved the ledger.")
-      await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
+      await expect(dialog.getByText("Draft kept. Save to use it.")).toBeVisible()
       // The draft is on the server: a reload offers it again, with the panel still open at it.
       await page.reload()
       await expect(dialog).toBeVisible()
       await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
       await expectTextBox(box, "The road flooded. Mira saved the ledger.")
-      await dialog.getByRole("button", { name: "Save revision" }).click()
+      await dialog.getByRole("button", { name: "Save", exact: true }).click()
       await expect(row).toContainText("The road flooded. Mira saved the ledger.")
       await expect(row.getByText("Edited", { exact: true })).toBeVisible()
       // Revisions: the first is one click away.
-      await row.getByRole("button", { name: /Revisions of the summary of messages 1–8/ }).click()
+      await row.getByRole("button", { name: /^Actions for the summary of messages 1–8/ }).click()
+      await page.getByRole("menuitem", { name: /Revisions of the summary of messages 1–8/ }).click()
       const revisions = row.getByRole("list", { name: "Revisions" })
       await expect(revisions.getByRole("listitem")).toHaveCount(2)
       await row.getByRole("button", { name: "Use revision 1" }).click()
@@ -239,16 +242,18 @@ for (const [name, viewport] of [
       // The fresh summary of 5–8 stands at the end, so the stale one over 1–4 is the one shown.
       const row = panel(page).locator(`[data-summary="${fixture.first.id}"]`)
       await expect(row.getByText("Stale", { exact: true })).toBeVisible()
-      await row.getByRole("button", { name: /^Re-summarize messages 1–4 with the next reply/ }).click()
-      await expect(row.getByText("Re-summarizes with the next reply")).toBeVisible()
+      await row.getByRole("button", { name: /^Actions for the summary of messages 1–4/ }).click()
+      await page.getByRole("menuitem", { name: /^Re-summarize messages 1–4 with the next reply/ }).click()
+      await expect(row.getByText("Redo next reply")).toBeVisible()
       await expect(page.getByTestId("lcm-boundary")).toContainText("1 to redo")
       // Nothing was started: no job, no request to the provider.
       await page.waitForTimeout(1000)
       expect(await count(server().dataDir, "summarization_jobs")).toBe(jobs)
       expect(provider.completions.length).toBe(requests)
       expect(await requested(fixture)).toBe(1)
-      await row.getByRole("button", { name: /^Cancel re-summarizing messages 1–4/ }).click()
-      await expect(row.getByText("Re-summarizes with the next reply")).toHaveCount(0)
+      await row.getByRole("button", { name: /^Actions for the summary of messages 1–4/ }).click()
+      await page.getByRole("menuitem", { name: /^Cancel re-summarizing messages 1–4/ }).click()
+      await expect(row.getByText("Redo next reply")).toHaveCount(0)
       expect(await requested(fixture)).toBe(0)
     })
 
@@ -259,10 +264,11 @@ for (const [name, viewport] of [
       await expect(page.getByTestId("lcm-boundary")).toContainText("1 failed")
       await page.getByTestId("lcm-boundary").click()
       const jobs = panel(page).getByRole("list", { name: "Work in progress" })
-      await expect(jobs).toContainText("Messages 9–11 could not be summarized")
+      const job = jobs.getByRole("listitem").filter({ hasText: "Messages 9–11" })
+      await expect(job.getByText("Failed", { exact: true })).toBeVisible()
       await expect(jobs).toContainText("The model refused three times.")
       await jobs.getByRole("button", { name: /^Retry messages 9–11 with the next reply/ }).click()
-      await expect(jobs.getByText("Retries with the next reply")).toBeVisible()
+      await expect(jobs.getByText("Retry next reply")).toBeVisible()
       expect(await requested(fixture)).toBeGreaterThan(0)
     })
 
@@ -443,12 +449,17 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
     .getByRole("button", { name: /Level 1, messages 1–4/ })
     .click()
   const row = panel(page).locator(`[data-summary="${fixture.first.id}"]`)
-  await row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ }).click()
+  const actions = row.getByRole("button", { name: /^Actions for the summary of messages 1–4/ })
+  await actions.click()
+  await page.getByRole("menuitem", { name: /Re-summarize messages 1–4 with the next reply/ }).click()
   await expect.poll(() => requested(fixture)).toBe(1)
-  await expect(row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ })).toBeVisible()
-  await row.getByRole("button", { name: /Cancel re-summarizing messages 1–4/ }).click()
+  await actions.click()
+  await expect(page.getByRole("menuitem", { name: /Cancel re-summarizing messages 1–4/ })).toBeVisible()
+  await page.getByRole("menuitem", { name: /Cancel re-summarizing messages 1–4/ }).click()
   await expect.poll(() => requested(fixture)).toBe(0)
-  await expect(row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeVisible()
+  await actions.click()
+  await expect(page.getByRole("menuitem", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeVisible()
+  await page.keyboard.press("Escape")
   await admin((api) =>
     api.EditSummary({
       summaryId: fixture.first.id as never,
@@ -466,9 +477,13 @@ test("rail child rerun exposes cancel action", async ({ page }) => {
       commitDraft: null
     })
   )
-  await expect(row.getByRole("button", { name: /Re-summarize messages 1–4 with the next reply/ })).toBeDisabled()
+  await actions.click()
+  await expect(page.getByRole("menuitem", { name: /Re-summarize messages 1–4 with the next reply/ })).toHaveAttribute(
+    "data-disabled"
+  )
+  await page.keyboard.press("Escape")
   await expect(
-    row.getByText("Edit or re-summarize the covering summary to change this part of the context.")
+    row.getByText("Your own summary over these messages is used instead, so this one isn't sent.")
   ).toBeVisible()
 })
 
@@ -502,8 +517,8 @@ test.describe("the text of a summary's edit", () => {
     const submitted = "The road flooded. Mira saved the ledger."
     const later = "The road flooded. Mira saved the ledger, and more typed while it was being saved."
     await box(dialog).fill(submitted)
-    await expect(dialog.getByText("Your text is kept as a draft.")).toBeVisible()
-    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await expect(dialog.getByText("Draft kept. Save to use it.")).toBeVisible()
+    await dialog.getByRole("button", { name: "Save", exact: true }).click()
     await expect.poll(() => release !== null).toBe(true)
     await box(dialog).fill(later)
     release!()
@@ -623,7 +638,7 @@ test.describe("the text of a summary's edit", () => {
       .toBe(`${offline}!`)
     // Every attempt named the draft as this browser had it, not as the other device left it.
     expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
-    await dialog.getByRole("button", { name: "Save revision" }).click()
+    await dialog.getByRole("button", { name: "Save", exact: true }).click()
     await expect(box(dialog)).toHaveCount(0)
     // The other device's text was one step back, and the revision sends it to the recovered texts.
     const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))

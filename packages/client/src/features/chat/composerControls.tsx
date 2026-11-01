@@ -1,12 +1,15 @@
 // Concrete composer contribution points. Draft/fork handling stays in the composer host.
-// Where each control goes:
-// - `banner` and `queue`: full-width rows above the composer, only while they have something;
-// - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) above the box;
-// - `speaker`: left of the box;
-// - `tools`: icon buttons inside the box, after the text;
-// - `actions`: the box's last buttons (guidance, regenerate, write, send).
+// Where each control goes (Composer.tsx, top to bottom; owner 2026-11-01):
+// - `queue`: full-width rows directly above the box, while there's something queued;
+// - `banner`: rows at the top of the box, inside its border, saying how the box stands;
+// - (the text, on a row of its own, the box's whole width)
+// - `speaker`: the start of the box's control row, under the text;
+// - `tools`: icon buttons after the speaker;
+// - `actions`: the row's last buttons, at its right end (guidance, write, send);
+// - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) under the box.
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
 import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -25,7 +28,7 @@ export interface ComposerControlContext {
   /** Opens a side panel tab. */
   readonly onSettings: (tab: "model" | "preset" | "cast") => void
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
-  readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null }>
+  readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null; crop?: AvatarCrop | undefined }>
   readonly onRecent: (id: EntityId) => void
   readonly guidance: boolean
   readonly prefsReady: boolean
@@ -39,7 +42,10 @@ export interface ComposerControlContext {
   readonly ready: boolean
   readonly hasText: boolean
   readonly replier: EntityId | null
+  /** Write for's accessible name, "Write for Sam" (or "New version" while a reply's guidance is edited). */
   readonly generateText: string
+  /** What Write for's button shows, a word: "Write", or "New version". */
+  readonly generateWord: string
   readonly generateHint: string
   readonly sendLabel: string
   readonly sendHint: string

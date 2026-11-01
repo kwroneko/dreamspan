@@ -171,16 +171,19 @@ for (const target of ["card", "group"] as const) {
       const generate = page.getByRole("button", { name: /^Generate / })
       await expect(composer).toBeEditable()
       await expect(send).toBeDisabled()
-      // One bar at every width, as the chat's composer: on a phone, Generate is an icon.
+      // The chat's composer box at every width: the text on a row of its own, the actions on the
+      // control row under it; on a phone, Generate is an icon.
       await expect(generate).toHaveText(width === 390 ? "" : "Generate")
       await expect(send.locator("svg")).toBeVisible()
       const empty = (await composer.boundingBox())!
       expect(empty.height).toBeLessThan(45)
+      const outline = (await page.getByTestId("composer-box").boundingBox())!
+      expect(empty.width).toBeGreaterThan(outline.width * 0.95)
       for (const control of [send, generate, page.getByRole("switch", { name: "Guidance", exact: true })]) {
         const box = (await control.boundingBox())!
-        expect(Math.abs(box.y - empty.y)).toBeLessThan(10)
-        expect(box.x).toBeGreaterThanOrEqual(empty.x + empty.width)
-        expect(box.x + box.width).toBeLessThanOrEqual(width)
+        expect(box.y).toBeGreaterThanOrEqual(empty.y + empty.height - 1)
+        expect(box.y + box.height).toBeLessThanOrEqual(outline.y + outline.height)
+        expect(box.x + box.width).toBeLessThanOrEqual(Math.min(width, outline.x + outline.width))
       }
       const pendingUrl = page.url()
       await composer.fill("First line")

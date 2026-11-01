@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
-import { portraitPng } from "./support/portrait.ts"
+import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
 
@@ -25,6 +25,11 @@ const prepare = async (page: Page) => {
       await page
         .getByLabel("Choose an avatar, or drop it here")
         .setInputFiles({ name: "wide.png", mimeType: "image/png", buffer: portraitPng() })
+      // A new picture goes through the cutout chooser (§14.5c); its default cutout is saved.
+      await page
+        .getByRole("dialog", { name: /new picture$/ })
+        .getByRole("button", { name: "Save picture" })
+        .click()
       await expect(page.getByRole("img", { name: "The card's avatar" })).toBeVisible()
     }
     await page.goto(`${server().url}/library`)
@@ -74,24 +79,26 @@ for (const width of [1440, 390]) {
     await expect(portrait).toHaveCSS("width", "60px")
     await expect(portrait).toHaveCSS("height", "90px")
     await expect(portrait).toHaveCSS("border-radius", "10px")
-    // Any portrait opens the whole image in a lightbox over the page, on phones too.
+    // Any portrait opens the whole image: beside the chat on a wide screen, full-screen on a phone.
     await portrait.click()
-    const lightbox = page.getByRole("dialog", { name: "Mira", exact: true })
+    const lightbox = portraitView(page, "Mira")
     const image = lightbox.getByRole("img", { name: "Mira's full portrait" })
-    await expect(image).toHaveCSS("object-fit", "contain")
     await expect(image).toHaveAttribute("src", /^\/library\/media\?id=[^&]+$/)
     await expect.poll(() => image.evaluate((img) => (img as HTMLImageElement).naturalHeight)).toBeGreaterThan(0)
     const fitted = (await image.boundingBox())!
     expect(fitted.x).toBeGreaterThanOrEqual(0)
     expect(fitted.x + fitted.width).toBeLessThanOrEqual(width)
-    await lightbox.getByRole("button", { name: "Actual size", exact: true }).click()
+    await lightbox.getByRole("button", { name: "100%", exact: true }).click()
     await expect(image).toHaveCSS("width", "900px")
-    expect((await image.boundingBox())!.x).toBeGreaterThanOrEqual(0)
-    await page.keyboard.press("Escape")
+    // Larger than its box at 100%: it scrolls, centred where the fitted view was.
+    expect(await lightbox.locator("[data-image-viewer]").evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(
+      true
+    )
+    await closePortrait(page)
     await expect(lightbox).toHaveCount(0)
     await page.locator("article[data-slot]").getByRole("button", { name: "View Bo's portrait" }).click()
     await expect(page.getByRole("img", { name: "Bo's full portrait" })).toBeVisible()
-    await page.keyboard.press("Escape")
+    await closePortrait(page)
     // The header's faces open a character's tab; a phone's header leaves them out for the name,
     // so there it's the panel's cast strip (fheader).
     if (width === 390) await openPanel(page, "Mira")
@@ -99,10 +106,10 @@ for (const width of [1440, 390]) {
     // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
     const card = page.getByRole("tabpanel", { name: "Mira", exact: true })
     await expect(card.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
-    await card.getByRole("button", { name: "View Mira's portrait", exact: true }).click()
+    await card.getByRole("button", { name: "View full image", exact: true }).click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
-    await page.keyboard.press("Escape")
-    // The lightbox closes alone: the panel (a sheet on a phone) stays where it was.
+    await closePortrait(page)
+    // The portrait closes alone: the panel (a sheet on a phone) stays where it was.
     await expect(card).toBeVisible()
     await page.getByRole("tab", { name: "Cast", exact: true }).click()
     // Mira among the characters, Bo, the persona, under "Your persona" above them (ftabs).
@@ -112,7 +119,9 @@ for (const width of [1440, 390]) {
         .getByRole("button", { name: `View ${name}'s portrait`, exact: true })
         .click()
       await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()
-      await page.getByRole("dialog", { name, exact: true }).getByRole("button", { name: "Close", exact: true }).click()
+      await portraitView(page, name)
+        .getByRole("button", { name: /^Close( the portrait)?$/ })
+        .click()
       await expect(page.getByRole("img", { name: `${name}'s full portrait` })).toHaveCount(0)
     }
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
@@ -186,8 +195,8 @@ test("every image follows concealment, reload's first frame and another tab", as
     "visibility",
     "hidden"
   )
-  await expect(page.getByRole("button", { name: "Actual size", exact: true })).toHaveCount(0)
-  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "100%", exact: true })).toHaveCount(0)
+  await closePortrait(page)
   await page.getByLabel("Message", { exact: true }).focus()
   await page.keyboard.press("Alt+Shift+B")
   await expect(page.locator("article img").first()).toHaveCSS("visibility", "visible")
@@ -256,7 +265,8 @@ test("both sidebars resize by pointer and keyboard, keep widths per user, and re
     await handle.dblclick({ position: { x: 4, y: 200 } })
     await expect(handle).toHaveAttribute("aria-valuenow", value!)
   }
+  // A reset forgets the choice: the default shows, and a later default would too.
   expect(
     await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("rp.panelWidth.")).length)
-  ).toBe(2)
+  ).toBe(0)
 })

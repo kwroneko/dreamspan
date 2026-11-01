@@ -1,7 +1,7 @@
 // The note document (DATA-MODEL §3.3, §6; DESIGN §4.1). A note slot belongs to a card or a
 // chat; a shared named note (`owner: { shared: "global" }`) is the text a slot can link to.
 // ST's Character's Note, Character Author's Note and author's note import as notes (§13).
-import { Schema } from "effect"
+import { Option, Schema, SchemaTransformation } from "effect"
 import { ChatId, EntityId, SlotId } from "../chat.ts"
 import { LoreRole } from "./lorebook.ts"
 
@@ -28,9 +28,9 @@ export const Placement = Schema.Union([
   }),
   Schema.Struct({ mode: Schema.Literal("tail"), role: LoreRole }),
   /**
-   * [P] `card`: with the card's definition, at the top. The others are the fixed places ST
-   * puts an extension prompt or a persona description: before or after the main prompt
-   * (story string), or at the top or bottom of the author's note.
+   * [P] `card`: with the card's definition, at the top. Before or after the main prompt (story
+   * string) are the fixed places ST puts an extension prompt. Nothing is placed relative to
+   * another note (owner, 2026-11-01: no author's note).
    */
   Schema.Struct({
     mode: Schema.Literal("section"),
@@ -40,9 +40,7 @@ export const Placement = Schema.Union([
       "tail_end",
       "card",
       "before_main_prompt",
-      "after_main_prompt",
-      "author_note_top",
-      "author_note_bottom"
+      "after_main_prompt"
     ]),
     role: Schema.optionalKey(LoreRole)
   }),
@@ -51,14 +49,43 @@ export const Placement = Schema.Union([
 ])
 export type Placement = typeof Placement.Type
 
+/** The most cards a note's condition names. */
+const MAX_CONDITION_CARDS = 100
+
+/** A conditioned note's cards: one or more, each once. */
+const ConditionCards = Schema.Array(EntityId).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(MAX_CONDITION_CARDS),
+  Schema.isUnique()
+)
+
+/** The conditions that name cards: on the turn of one of them, or while one of them isn't muted. */
+const CardCondition = Schema.Struct({ when: Schema.Literals(["turn", "not_muted"]), cards: ConditionCards })
+
 /**
- * When a note applies (DESIGN §4.1): always; only on a card's turn (the speaker of the
- * message being generated); or while a card isn't muted. Absent is always.
+ * The shape from before a condition named several cards (`card`, one), still in stored notes:
+ * read as a list of that one card, and written as the list from then on.
+ */
+const SingleCard = Schema.Struct({ when: Schema.Literals(["turn", "not_muted"]), card: EntityId })
+const SingleCardCondition = SingleCard.pipe(
+  Schema.decodeTo(
+    CardCondition,
+    SchemaTransformation.transform<typeof CardCondition.Encoded, typeof SingleCard.Type>({
+      decode: ({ when, card }) => ({ when, cards: [card] }),
+      encode: ({ when, cards }) => ({ when, card: cards[0] as EntityId })
+    })
+  )
+)
+
+/**
+ * When a note applies (DESIGN §4.1): always; on the turn of any of its cards (the speaker of
+ * the message being generated is one of them); or while any of its cards is in the chat and
+ * not muted. Absent is always. A stored `{ when, card }` reads as `{ when, cards: [card] }`.
  */
 export const NoteCondition = Schema.Union([
   Schema.Struct({ when: Schema.Literal("always") }),
-  Schema.Struct({ when: Schema.Literal("turn"), card: EntityId }),
-  Schema.Struct({ when: Schema.Literal("not_muted"), card: EntityId })
+  CardCondition,
+  SingleCardCondition
 ])
 export type NoteCondition = typeof NoteCondition.Type
 
@@ -97,15 +124,14 @@ export const NoteDoc = Schema.Struct({
    */
   agent_editable: Schema.optionalKey(Schema.Boolean),
   /**
-   * [P] What an imported note was in ST: a chat's author's note, or the Summarize
-   * extension's summary (DESIGN §8.1), kept in its own note; or a card's Character Author's
-   * Note from ST's settings (`extension_settings.note.chara`), which a re-import finds by it.
-   * `persona_description` is still decoded in old revisions, never written and ignored:
-   * migration 0050 made those notes ordinary (DESIGN §4.1: no hidden note kinds).
+   * [P] What an imported note was in ST: the Summarize extension's summary (DESIGN §8.1), kept
+   * in its own note; or a card's Character Author's Note from ST's settings
+   * (`extension_settings.note.chara`), which a re-import finds by it. A chat's imported author's
+   * note is an ordinary note with no kind (owner, 2026-11-01). `persona_description` is still
+   * decoded in old revisions, never written and ignored: migration 0050 made those notes
+   * ordinary (DESIGN §4.1: no hidden note kinds).
    */
-  kind: Schema.optionalKey(
-    Schema.Literals(["author_note", "imported_summary", "persona_description", "character_author_note"])
-  ),
+  kind: Schema.optionalKey(Schema.Literals(["imported_summary", "persona_description", "character_author_note"])),
   /**
    * Deprecated: ST's author's note frequency, which older imports kept. Still read, never
    * written; the assembler ignores it (a note goes every turn, DESIGN §4.1).
@@ -126,14 +152,26 @@ export const NoteDoc = Schema.Struct({
 })
 export type NoteDoc = typeof NoteDoc.Type
 
-/**
- * Whether a chat's note is its author's note, which what is placed at the author's note's top
- * or bottom joins (ST's floating prompt): the note the chat names with `author_note.set` (the
- * user's choice in its Notes tab, or an import's), none after it chose none (`false`), else an
- * imported one of kind `author_note`. The chat's notes show it ("author's note").
- */
-export const isAuthorNote = (doc: Pick<NoteDoc, "kind">, entity: string, chatAuthorNote: string | false | null) =>
-  chatAuthorNote === null ? doc.kind === "author_note" : entity === chatAuthorNote
-
 /** A note's condition, absent read as always. */
 export const noteCondition = (doc: Pick<NoteDoc, "condition">): NoteCondition => doc.condition ?? { when: "always" }
+
+const decodeCondition = Schema.decodeUnknownOption(NoteCondition)
+
+/**
+ * A condition as stored, either shape, read as the current one: for a document that hasn't
+ * been decoded (the editor's). Absent, or not a condition, is always.
+ */
+export const readNoteCondition = (raw: unknown): NoteCondition =>
+  Option.getOrElse(decodeCondition(raw), (): NoteCondition => ({ when: "always" }))
+
+/** A stored condition in the single-card shape, and nothing else, as the list; any other value as it is. */
+export const upgradedCondition = (value: unknown): unknown =>
+  Schema.is(SingleCard)(value) && Object.keys(value).length === 2 ? { when: value.when, cards: [value.card] } : value
+
+/** Names as a sentence lists them, any one of them: "Aria", "Aria or Bram", "Aria, Bram or Cato". */
+export const anyOf = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`
+
+/** The cards a condition names: none for always. */
+export const conditionCards = (condition: NoteCondition): ReadonlyArray<EntityId> =>
+  condition.when === "always" ? [] : condition.cards

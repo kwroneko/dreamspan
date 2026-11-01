@@ -46,6 +46,8 @@ export interface LorebookSort {
   readonly id: string
   readonly order: number
   readonly label: string
+  /** What the order is, when the label doesn't say: shown beside it in the picker. */
+  readonly description?: string
   /** Smaller first; ties keep the book's order. */
   readonly compare: (a: LorebookEntry, b: LorebookEntry, facts: (entry: LorebookEntry) => SortFacts) => number
 }
@@ -62,6 +64,8 @@ export interface LorebookEntryAction {
   readonly id: string
   readonly order: number
   readonly label: string
+  /** What it does, when the label doesn't say: shown beside the item in the menu. */
+  readonly description?: string
   readonly icon?: IconName
   readonly tone?: "danger"
   /** `reveal` shows an entry it added at the top of the table, open. */
@@ -137,36 +141,78 @@ export const arrangeEntries = (
   return [...lead, ...uids.filter((uid) => !pinned.has(uid))]
 }
 
-/** ST's position names, short as its table shows them, with what each means. */
+/**
+ * ST's position names: `short` as its table shows them, `label` in the open picker, and where
+ * each puts the entry when a chat lets entries go where their positions say (by default chats
+ * put every entry just after the history: LorebookForm says so).
+ */
 export const POSITIONS: ReadonlyArray<{
   readonly value: string
   readonly position: LorePosition
   readonly role?: LoreRole
   readonly short: string
   readonly label: string
+  readonly description: string
 }> = [
-  { value: "before_char", position: "before_char", short: "↑Char", label: "↑Char · Before the character definitions" },
-  { value: "after_char", position: "after_char", short: "↓Char", label: "↓Char · After the character definitions" },
-  { value: "an_top", position: "an_top", short: "↑AN", label: "↑AN · Before the author's note" },
-  { value: "an_bottom", position: "an_bottom", short: "↓AN", label: "↓AN · After the author's note" },
-  { value: "em_top", position: "em_top", short: "↑EM", label: "↑EM · Before the example messages" },
-  { value: "em_bottom", position: "em_bottom", short: "↓EM", label: "↓EM · After the example messages" },
+  {
+    value: "before_char",
+    position: "before_char",
+    short: "↑Char",
+    label: "↑Char · Before the character",
+    description: "At the preset's World Info (before) marker, ahead of the character's definitions."
+  },
+  {
+    value: "after_char",
+    position: "after_char",
+    short: "↓Char",
+    label: "↓Char · After the character",
+    description: "At the preset's World Info (after) marker, after the character's definitions."
+  },
+  {
+    value: "em_top",
+    position: "em_top",
+    short: "↑EM",
+    label: "↑EM · Before the examples",
+    description: "As example dialogue, before the character's example messages."
+  },
+  {
+    value: "em_bottom",
+    position: "em_bottom",
+    short: "↓EM",
+    label: "↓EM · After the examples",
+    description: "As example dialogue, after the character's example messages."
+  },
   {
     value: "at_depth:system",
     position: "at_depth",
     role: "system",
     short: "@D system",
-    label: "@D · At a depth, as system"
+    label: "@D · Depth, system",
+    description: "Among the chat's messages, its depth back from the newest, as a system message."
   },
-  { value: "at_depth:user", position: "at_depth", role: "user", short: "@D user", label: "@D · At a depth, as user" },
+  {
+    value: "at_depth:user",
+    position: "at_depth",
+    role: "user",
+    short: "@D user",
+    label: "@D · Depth, user",
+    description: "Among the chat's messages, its depth back from the newest, as if you had written it."
+  },
   {
     value: "at_depth:assistant",
     position: "at_depth",
     role: "assistant",
     short: "@D assistant",
-    label: "@D · At a depth, as assistant"
+    label: "@D · Depth, assistant",
+    description: "Among the chat's messages, its depth back from the newest, as if the model had written it."
   },
-  { value: "outlet", position: "outlet", short: "Outlet", label: "Outlet · Only where an {{outlet}} macro asks" }
+  {
+    value: "outlet",
+    position: "outlet",
+    short: "Outlet",
+    label: "Outlet",
+    description: "In ST, sent only where a prompt has {{outlet::its outlet name}}. Chats here don't fill outlets yet."
+  }
 ]
 
 /** The position picker's value for an entry: at a depth, its role says which. */

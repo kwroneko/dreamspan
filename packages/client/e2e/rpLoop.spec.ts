@@ -10,7 +10,6 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
-import { showActions } from "./support/message.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { unsentEditorCopies } from "./support/editorCopies.ts"
 import { choices, nextChip, nextName, pickReply } from "./support/strip.ts"
@@ -113,15 +112,12 @@ const shoot = async (page: Page, name: string, width: number, theme: string) => 
 const composerBox = (page: Page) => page.locator("#composer")
 const guidanceSwitch = (page: Page) => page.getByRole("switch", { name: "Guidance", exact: true })
 const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
-/** The composer's regenerate on a wide screen; on a phone, which leaves the box its width, the reply's own. */
-const regenerateLatest = async (page: Page) => {
-  if ((page.viewportSize()?.width ?? 1280) >= 640)
-    return page.getByRole("button", { name: "Regenerate the latest reply", exact: true }).click()
-  await expect(page.getByRole("button", { name: "Regenerate the latest reply", exact: true })).toHaveCount(0)
-  const reply = lastMessage(page)
-  await showActions(reply)
-  await reply.getByRole("button", { name: "Regenerate", exact: true }).click()
-}
+/** The latest reply's › past its last version, shown without a hover at every width. */
+const regenerateLatest = (page: Page) =>
+  lastMessage(page)
+    .getByRole("group", { name: "Versions" })
+    .getByRole("button", { name: "Generate another version" })
+    .click()
 /** The inspector's list draws rows as they scroll in: its end, where the tail is. */
 const inspectorEnd = async (page: Page, text: string) => {
   await expect
@@ -307,6 +303,8 @@ for (const width of [1440, 390])
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")
+      // The options fold under the block's header (owner, 2026-11-01).
+      await style.getByRole("button", { name: /^Options of / }).click()
       await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("Always")
       const types = style.getByRole("group", { name: "Generation types" })
       await expect(types.getByRole("checkbox", { name: "Impersonate" })).toBeChecked()

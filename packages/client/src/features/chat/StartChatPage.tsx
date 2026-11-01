@@ -50,7 +50,7 @@ import {
 import { GroupFaces } from "../characters/GroupFaces.tsx"
 import { useTitle } from "../shell.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
-import { useCompactComposer } from "./Composer.tsx"
+import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { expandForDisplay } from "./macros.ts"
 
 const PERSONA_KEY = "rp.lastPersona"
@@ -110,7 +110,13 @@ function Greeting({
       className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-4 py-3"
     >
       <header className="flex items-center gap-2 text-sm">
-        <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} size="sm" />
+        <Avatar
+          id={card.card.entityId}
+          name={name}
+          mediaId={card.card.avatarMediaId}
+          crop={card.card.avatarCrop}
+          size="sm"
+        />
         <span className="min-w-0 truncate font-medium">{name}</span>
         {count > 1 && (
           <div className="ml-auto flex shrink-0 items-center gap-1" role="group" aria-label={`${name}'s greetings`}>
@@ -445,7 +451,7 @@ function Pending({
 
   return (
     <>
-      <header className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-3 pb-2">
+      <header className="chat-column flex flex-wrap items-center gap-3 pb-2">
         {members === null ? (
           <button
             type="button"
@@ -459,7 +465,7 @@ function Pending({
               })
             }}
           >
-            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
+            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} crop={card.card.avatarCrop} />
           </button>
         ) : (
           <span className="block aspect-[2/3] w-12 shrink-0 overflow-hidden rounded-lg">
@@ -519,7 +525,7 @@ function Pending({
           )}
         </div>
       </header>
-      <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-2" aria-label="Pending cast">
+      <div className="chat-column flex flex-wrap items-center gap-2" aria-label="Pending cast">
         {greeters.map((item, at) => (
           <span key={item.card.entityId} className="flex items-center gap-1 text-sm">
             {item.card.name}
@@ -527,6 +533,7 @@ function Pending({
               <Button
                 variant="ghost"
                 aria-label={`Remove ${item.card.name} from pending cast`}
+                hint="Leaves them out of the new chat, with their greeting."
                 onClick={() => {
                   changePendingCast((current) => ({
                     ...current,
@@ -570,11 +577,11 @@ function Pending({
         </Field>
       </div>
       {fallbackNote && (
-        <p role="status" className="mx-auto w-full max-w-3xl text-sm text-muted">
+        <p role="status" className="chat-column text-sm text-muted">
           {fallbackNote}
         </p>
       )}
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3 overflow-y-auto py-2">
+      <div className="chat-column flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-2">
         {options.every((list) => list.length === 0) && (
           <p className="text-sm text-muted">
             {members === null ? `${name} has no greeting.` : "None of them has a greeting."} Your first message starts
@@ -607,61 +614,54 @@ function Pending({
           )
         )}
       </div>
-      <div ref={composerRef} className="mx-auto flex w-full max-w-3xl flex-col gap-2 border-t border-border pt-2 pb-2">
+      <div ref={composerRef} className="chat-column flex flex-col gap-2 border-t border-border pt-2 pb-2">
         <PendingComposerControls placement="notes" context={controls} />
         <UserDraftStatus draft={durable} />
-        {/* One bar, as the chat's composer: who's speaking, then the box with its actions. */}
-        <div className="flex min-w-0 items-end gap-1.5 max-sm:gap-1">
-          <div className="flex h-[46px] shrink-0 items-center">
+        {/* The chat's composer box: the text on its own row, who's speaking and the actions under it. */}
+        <ComposerBox
+          guidance={guidance}
+          start={
             <CastContext value={speakerView}>
               <PendingComposerControls placement="speaker" context={controls} />
             </CastContext>
-          </div>
-          <div
-            data-guidance={guidance || undefined}
-            className={`flex min-w-0 flex-1 items-end gap-1 rounded-lg border p-1 focus-within:ring-2 ${
-              guidance
-                ? "border-guidance bg-guidance-surface focus-within:ring-guidance/40"
-                : "border-border bg-surface focus-within:border-focus focus-within:ring-focus/40"
-            }`}
-          >
-            <div className="grid min-w-0 flex-1">
-              {guidance && (
-                <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
-                  Guidance
-                </span>
-              )}
-              <label htmlFor="composer" className="sr-only">
-                {guidance ? "Guidance" : "Message"}
-              </label>
-              <AutoGrowTextarea
-                id="composer"
-                data-testid="composer"
-                value={text}
-                // Short, so it fits one line on a phone, as the chat's composer does.
-                placeholder={guidance ? "Direction for the next message…" : "Message…"}
-                aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
-                onKeyDown={(event) =>
-                  composerKeyDown(async () => {
-                    await invokePendingComposer(controls)
-                  }, viewPrefs.prefs.enterSends)(event)
-                }
-                onChange={(event) => {
-                  const value = event.currentTarget.value
-                  typed.current = value
-                  setText(value)
-                  // While the first send is out, the copy keeps both, as a failed send leaves them.
-                  const out = sending.current
-                  void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
-                }}
-              />
-            </div>
-            <div className="flex shrink-0 items-end gap-0.5">
+          }
+          end={
+            <>
               <PendingComposerControls placement="guidance" context={controls} />
               <PendingComposerControls placement="actions" context={controls} />
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          {guidance && (
+            <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
+              Guidance
+            </span>
+          )}
+          <label htmlFor="composer" className="sr-only">
+            {guidance ? "Guidance" : "Message"}
+          </label>
+          <AutoGrowTextarea
+            id="composer"
+            data-testid="composer"
+            value={text}
+            // Short, so it fits one line on a phone, as the chat's composer does.
+            placeholder={guidance ? "Direction for the next message…" : "Message…"}
+            aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
+            onKeyDown={(event) =>
+              composerKeyDown(async () => {
+                await invokePendingComposer(controls)
+              }, viewPrefs.prefs.enterSends)(event)
+            }
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              typed.current = value
+              setText(value)
+              // While the first send is out, the copy keeps both, as a failed send leaves them.
+              const out = sending.current
+              void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
+            }}
+          />
+        </ComposerBox>
         {(guidance || text.trim() !== "") && (
           <p id="composer-hint" className="text-xs text-muted">
             {guidance

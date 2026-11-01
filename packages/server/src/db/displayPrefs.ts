@@ -32,12 +32,30 @@ export const makeDisplayPrefsReadHandlers = Effect.gen(function* () {
   } satisfies Partial<Parameters<typeof ReadOps.of>[0]>
 })
 
+/** Most choices a stored message toolbar keeps; past it, the oldest written go first. */
+const MAX_TOOLBAR_CHOICES = 200
+
+/**
+ * The message toolbar's choices merge by action id: a write names the ones it changes, so
+ * two devices pinning different actions don't undo each other. The ones written go last.
+ */
+const mergeChoices = (stored: DisplayPrefs["messageToolbar"], changed: DisplayPrefs["messageToolbar"] | undefined) => {
+  if (changed === undefined) return stored
+  const kept = Object.entries(stored).filter(([id]) => !(id in changed))
+  return Object.fromEntries([...kept, ...Object.entries(changed)].slice(-MAX_TOOLBAR_CHOICES))
+}
+
 export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   return {
     SetDisplayPrefs: ({ userId, prefs }) =>
       Effect.gen(function* () {
-        const merged = { ...(yield* read(sql, userId)), ...prefs }
+        const stored = yield* read(sql, userId)
+        const merged = {
+          ...stored,
+          ...prefs,
+          messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar)
+        }
         yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(merged)})
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
         return yield* read(sql, userId)

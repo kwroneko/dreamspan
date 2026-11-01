@@ -24,7 +24,11 @@ export const level1 = async (
   chatId: ChatId,
   entries: ReadonlyArray<PathEntry>,
   content: string,
-  options: { readonly status?: "complete" | "failed" } = {}
+  options: {
+    readonly status?: "complete" | "failed"
+    /** A failed one's error, as the summarizer stores it. */
+    readonly error?: string
+  } = {}
 ): Promise<FixtureSummary> => {
   const id = uuidv7()
   const revisionId = uuidv7()
@@ -43,7 +47,9 @@ export const level1 = async (
         entries.at(-1)!.slotId,
         entries.length,
         options.status ?? "complete",
-        options.status === "failed" ? JSON.stringify({ class: "refusal", message: "refused" }) : null,
+        options.status === "failed"
+          ? (options.error ?? JSON.stringify({ class: "refusal", message: "refused" }))
+          : null,
         Date.now()
       ]
     },

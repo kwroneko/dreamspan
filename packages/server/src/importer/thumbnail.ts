@@ -6,7 +6,7 @@ import { readFile, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
 import { isMediaPath } from "../db/media.ts"
-import { MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import { type AvatarCrop, cropKey, cropPixels, defaultCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
 import { ThumbnailFailed } from "./ops.ts"
 
 sharp.concurrency(1)
@@ -34,11 +34,14 @@ const write = async (target: string, output: Buffer) => {
  * Makes the derivatives of `path` at `widths` that aren't on disk yet, from one decode.
  * Answers, per width, the file to serve: its derivative, or the original when the image is
  * animated, too large, or too slow to resize (remembered by a `.original-v1` marker).
+ * With `crop`, a portrait's cutout (§14.5c; null: the default, from the image's own shape):
+ * the 2:3 part of the image, named in the file, so a changed cutout is another file and ETag.
  */
-const derive = async (dataDir: string, path: string, widths: ReadonlyArray<number>) => {
+const derive = async (dataDir: string, path: string, widths: ReadonlyArray<number>, crop?: AvatarCrop | null) => {
   if (!isMediaPath(path)) throw new Error("invalid media path")
   const original = join(dataDir, path)
-  const relative = (width: number) => `${path}.thumb-v1-${width}.webp`
+  const cut = crop === undefined ? "" : `-c${cropKey(crop)}`
+  const relative = (width: number) => `${path}.thumb-v1-${width}${cut}.webp`
   const missing: Array<number> = []
   for (const width of widths) if (!(await exists(join(dataDir, relative(width))))) missing.push(width)
   const done = new Map(
@@ -84,9 +87,22 @@ const derive = async (dataDir: string, path: string, widths: ReadonlyArray<numbe
     throw error
   }
   const { width, height, channels } = decoded.info
+  // The cutout in the oriented image's pixels, exactly 2:3; the whole image without one.
+  const region = crop === undefined ? null : cropPixels(crop ?? defaultCrop(width, height), width, height)
   for (const target of missing) {
-    const output = await sharp(decoded.data, { raw: { width, height, channels }, limitInputPixels: MAX_INPUT_PIXELS })
-      .resize({ width: target, withoutEnlargement: true })
+    const image = sharp(decoded.data, { raw: { width, height, channels }, limitInputPixels: MAX_INPUT_PIXELS })
+    if (region !== null) image.extract(region)
+    // Never enlarged: a cutout narrower than the width asked for stays its own size.
+    const output = await image
+      .resize(
+        region === null
+          ? { width: target, withoutEnlargement: true }
+          : {
+              width: Math.min(target, region.width),
+              height: Math.round((Math.min(target, region.width) * 3) / 2),
+              fit: "cover"
+            }
+      )
       .webp({ quality: 80 })
       .toBuffer()
     await write(join(dataDir, relative(target)), output)
@@ -95,9 +111,9 @@ const derive = async (dataDir: string, path: string, widths: ReadonlyArray<numbe
   return done
 }
 
-export const thumbnail = (input: { dataDir: string; path: string; width: number }) =>
+export const thumbnail = (input: { dataDir: string; path: string; width: number; crop?: AvatarCrop | null }) =>
   Effect.tryPromise({
-    try: async () => (await derive(input.dataDir, input.path, [input.width])).get(input.width)!,
+    try: async () => (await derive(input.dataDir, input.path, [input.width], input.crop)).get(input.width)!,
     catch: () => new ThumbnailFailed()
   })
 
@@ -108,9 +124,12 @@ export const thumbnail = (input: { dataDir: string; path: string; width: number 
  */
 const PREPARED_WIDTHS = MEDIA_WIDTHS.filter((width) => width <= 384)
 
-/** The widths of PREPARED_WIDTHS not on disk yet, e.g. when an import stores a card's image. */
-export const prepareThumbnails = (input: { dataDir: string; path: string }) =>
+/**
+ * The widths of PREPARED_WIDTHS not on disk yet, e.g. when an import stores a card's image: of
+ * the cutout its portraits show (null: the default), which is what the lists and grid ask for.
+ */
+export const prepareThumbnails = (input: { dataDir: string; path: string; crop: AvatarCrop | null }) =>
   Effect.tryPromise({
-    try: async () => void (await derive(input.dataDir, input.path, PREPARED_WIDTHS)),
+    try: async () => void (await derive(input.dataDir, input.path, PREPARED_WIDTHS, input.crop)),
     catch: () => new ThumbnailFailed()
   })

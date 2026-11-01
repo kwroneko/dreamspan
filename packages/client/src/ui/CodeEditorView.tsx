@@ -1,8 +1,9 @@
 import { registerTextTarget } from "./textTargets.ts"
+import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
 import { Compartment, EditorState, Transaction } from "@codemirror/state"
 import { EditorView, keymap } from "@codemirror/view"
-import { useEffect, useLayoutEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { proseTheme } from "./codeTheme.ts"
@@ -11,8 +12,12 @@ import { proseTheme } from "./codeTheme.ts"
 export default function CodeEditorView(props: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null)
   const controller = useRef<ReturnType<typeof mountEditor> | null>(null)
+  // The selected text, for the bar's selection actions under the box.
+  const [selected, setSelected] = useState("")
+  const { focused, onFocus, onBlur } = useEditorFocus()
+  const selection = focused ? selected : ""
   useLayoutEffect(() => {
-    const mounted = mountEditor(host.current!, props)
+    const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
     return () => {
       mounted.destroy()
@@ -33,13 +38,24 @@ export default function CodeEditorView(props: CodeEditorProps) {
   }, [])
   return (
     <div
-      ref={host}
-      className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
-    />
+      className="group/text flex min-w-0 flex-col gap-0.5"
+      onFocus={onFocus}
+      onBlur={onBlur}
+      // A key comes from inside, so the editor has focus: its selection as it is now.
+      onKeyDown={(event) =>
+        runEditorShortcut(event, props.value, controller.current?.selection() ?? selection, props.source)
+      }
+    >
+      <div
+        ref={host}
+        className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
+      />
+      <EditorTextActions text={props.value} selection={selection} source={props.source} />
+    </div>
   )
 }
 
-function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
+function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (text: string) => void) {
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
   let props = initial
@@ -70,7 +86,9 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
         EditorView.updateListener.of((update) => {
           if (update.selectionSet || update.docChanged) {
             const range = update.state.selection.main
-            props.onSelectionChange?.(update.state.sliceDoc(range.from, range.to))
+            const text = update.state.sliceDoc(range.from, range.to)
+            onSelected(text)
+            props.onSelectionChange?.(text)
           }
           if (update.docChanged && !applying) {
             deferred = null // A composition edit is now the latest user text.
@@ -165,12 +183,16 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps) {
   }
   update(initial)
   if (initial.autoFocus) {
-    // The caret at the end, where an edit usually goes on, scrolled into view with the page.
-    view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true })
+    // The caret at the end, where an edit usually goes on, or where it was asked to be,
+    // scrolled into view with the page.
+    const caret = Math.min(Math.max(0, initial.caret ?? view.state.doc.length), view.state.doc.length)
+    view.dispatch({ selection: { anchor: caret }, scrollIntoView: true })
     view.focus()
   }
   return {
     update,
+    /** The selected text now, which a render may not have caught up with. */
+    selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
     finishComposition() {
       if (deferred !== null) {
         const value = deferred

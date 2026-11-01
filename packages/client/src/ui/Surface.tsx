@@ -1,6 +1,6 @@
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
 // empty states, and sections opened on demand.
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-lg border border-border bg-surface p-4 sm:p-5 ${className}`}>{children}</section>
@@ -114,15 +114,23 @@ export function Disclosure({
   title,
   children,
   defaultOpen = false,
-  className = ""
+  className = "",
+  lazy = false
 }: {
   title: ReactNode
   children: ReactNode
   defaultOpen?: boolean
   className?: string
+  /** Mount the contents only once opened: for heavy contents (code editors) most visits never open. */
+  lazy?: boolean
 }) {
+  const [opened, setOpened] = useState(defaultOpen)
   return (
-    <details open={defaultOpen} className={`group ${className}`}>
+    <details
+      open={defaultOpen}
+      className={`group ${className}`}
+      onToggle={lazy ? (event) => event.currentTarget.open && setOpened(true) : undefined}
+    >
       <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-sm font-medium text-muted outline-none select-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus [&::-webkit-details-marker]:hidden">
         <svg
           width={14}
@@ -140,7 +148,7 @@ export function Disclosure({
         </svg>
         {title}
       </summary>
-      <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{children}</div>
+      <div className="flex flex-col gap-4 pt-3 pb-1 pl-5">{!lazy || opened ? children : null}</div>
     </details>
   )
 }

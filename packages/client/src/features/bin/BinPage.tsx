@@ -2,7 +2,7 @@
 // or delete for good (the one place that asks first), and the text recovered from drafts.
 import { SlotOutlet, defineSlot } from "../../slots.tsx"
 import { RegistryContext } from "@effect/atom-react"
-import type { BinForkShown, BinItem, RecoveredText } from "@rp/shared/bin.ts"
+import type { BinBranch, BinItem, RecoveredText } from "@rp/shared/bin.ts"
 import { Link, useSearch } from "@tanstack/react-router"
 import { useContext, useEffect, useState } from "react"
 import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
@@ -16,9 +16,14 @@ import { Tabs } from "../../ui/Tabs.tsx"
 import { useTitle } from "../shell.tsx"
 import { readableChatTitle } from "../chat/chatTitle.ts"
 import { RESTORED_KEYS, restoreItem } from "./deleted.ts"
-import { binTitle, recoveredSource } from "./titles.ts"
+import { binTitle, purgeTitle, recoveredSource } from "./titles.ts"
 
 export const binSettings = defineSlot<Record<string, never>>("bin.settings")
+/**
+ * Inside each "delete for good" confirmation, under what it does: the branches it affects
+ * (`bin.affected-branches`). The confirmation itself reads them and waits for the read.
+ */
+export const binPurgeBranches = defineSlot<{ branches: ReadonlyArray<BinBranch> }>("bin.purge-branches")
 
 const PAGE = 50
 
@@ -68,11 +73,12 @@ const purgeEffect = (item: BinItem) => {
 }
 
 /**
- * The forks that still show what deleting the items for good erases (`BinItemForks`): the
- * warning's list, which the user reads before confirming (owner, 2026-10-27). Reads when the
- * dialog opens, and says nothing while it has nobody to name.
+ * The branches deleting the items for good affects (`BinItemBranches`), which the user reads
+ * before confirming (owner, 2026-10-27 and 2026-11-01): read when the dialog opens, shown by the
+ * `bin.purge-branches` slot. `onReady` gets the forks that show the text, which the purge
+ * confirms; until then the dialog can't confirm.
  */
-function ForksShowing({
+function PurgeBranches({
   itemIds,
   open,
   onReady
@@ -83,17 +89,17 @@ function ForksShowing({
 }) {
   const read = useAction()
   // What was read for which items: a list for other items isn't this dialog's.
-  const [loaded, setRead] = useState<{ key: string; forks: ReadonlyArray<BinForkShown> } | null>(null)
+  const [loaded, setRead] = useState<{ key: string; branches: ReadonlyArray<BinBranch> } | null>(null)
   const key = itemIds.join(",")
   useEffect(() => {
     if (!open || itemIds.length === 0) return
     let active = true
     void read
-      .run((client) => client("BinItemForks", { itemIds }))
+      .run((client) => client("BinItemBranches", { itemIds }))
       .then((result) => {
         if (active && result.ok) {
-          setRead({ key, forks: result.value })
-          onReady([...new Set(result.value.map((fork) => fork.forkId))])
+          setRead({ key, branches: result.value })
+          onReady([...new Set(result.value.filter((branch) => branch.shows).map((branch) => branch.forkId))])
         }
       })
     return () => {
@@ -102,30 +108,10 @@ function ForksShowing({
     // `read` is a new function each render; the items are what the list is for.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, key, onReady])
-  const shown = loaded !== null && loaded.key === key ? loaded.forks : null
+  const branches = loaded !== null && loaded.key === key ? loaded.branches : null
   if (read.error) return <ErrorAlert error={read.error} />
-  if (shown === null || read.pending) return <p role="status">Checking affected forks…</p>
-  const forks = [...new Map(shown.map((fork) => [fork.forkId, fork])).values()]
-  if (forks.length === 0) return null
-  return (
-    <div role="alert" className="rounded-md border border-warning/60 bg-warning/10 p-3 text-sm">
-      <p className="font-medium">
-        {forks.length === 1
-          ? "A fork still shows this text, and loses it too:"
-          : `${forks.length} forks still show this text, and lose it too:`}
-      </p>
-      <ul className="mt-1 list-disc pl-5">
-        {forks.map((fork) => (
-          <li key={fork.forkId} className="[overflow-wrap:anywhere]">
-            {fork.name !== null && fork.name !== "" ? `“${fork.name}”` : "Unnamed branch"}
-            {fork.tipExcerpt !== "" ? <span className="text-muted"> ending “{fork.tipExcerpt}”</span> : null}
-            {fork.deleted ? <span className="text-muted"> (in the bin)</span> : null}
-            <span className="text-muted"> in “{readableChatTitle(fork.chatTitle)}”</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
+  if (branches === null || read.pending) return <p role="status">Checking affected branches…</p>
+  return <SlotOutlet slot={binPurgeBranches} props={{ branches }} />
 }
 
 /** Where a restored item is now, for a link to it. */
@@ -180,6 +166,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
         <div className="flex flex-wrap gap-2">
           <Button
             pending={restoring}
+            hint="Puts it back where it was deleted from."
             onClick={async () => {
               setRestoring(true)
               // The bin keeps showing it, with where it went back to, until the page reloads.
@@ -197,6 +184,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           </Button>
           <Button
             variant="ghost"
+            hint="Erases it so it can’t be restored. You see what it affects and confirm first."
             onClick={() => {
               setExpectedForkIds(null)
               setConfirming(true)
@@ -210,8 +198,8 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
       <ConfirmDialog
         open={confirming}
         onOpenChange={setConfirming}
-        title={`Delete “${title}” for good?`}
-        description={`${purgeEffect(item)} This can't be undone.`}
+        title={purgeTitle(item)}
+        description={`${chatTitle !== null && item.kind !== "chat" ? `From the chat “${chatTitle}”. ` : ""}${purgeEffect(item)} This can't be undone.`}
         confirmLabel="Delete for good"
         pending={purge.pending}
         confirmDisabled={expectedForkIds === null}
@@ -226,7 +214,7 @@ function ItemRow({ item, onGone }: { item: BinItem; onGone: (item: BinItem) => v
           }
         }}
       >
-        <ForksShowing itemIds={[item.id]} open={confirming} onReady={setExpectedForkIds} />
+        <PurgeBranches itemIds={[item.id]} open={confirming} onReady={setExpectedForkIds} />
         <ErrorAlert error={purge.error} />
       </ConfirmDialog>
     </li>
@@ -265,6 +253,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
         <Button
           variant="ghost"
           disabled={!end}
+          hint="Deletes everything in this list for good, after you confirm. Recovered text stays."
           onClick={() => {
             setExpectedForkIds(null)
             setEmptying(shown.map((item) => item.id))
@@ -307,7 +296,7 @@ function DeletedItems({ first }: { first: ReadonlyArray<BinItem> }) {
           if (result.ok) setEmptying(null)
         }}
       >
-        <ForksShowing itemIds={emptying ?? []} open={emptying !== null} onReady={setExpectedForkIds} />
+        <PurgeBranches itemIds={emptying ?? []} open={emptying !== null} onReady={setExpectedForkIds} />
         <ErrorAlert error={action.error} />
       </ConfirmDialog>
     </div>
@@ -334,6 +323,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
       <div className="flex flex-wrap gap-2">
         <Button
           pending={open.pending}
+          hint="Opens the whole text, to copy what you need."
           onClick={async () => {
             const result = await open.run((client) => client("GetRecoveredText", { id: text.id }))
             if (result.ok) setFull(result.value.content)
@@ -341,7 +331,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
         >
           Show all
         </Button>
-        <Button variant="ghost" onClick={() => setConfirming(true)}>
+        <Button variant="ghost" hint="Erases this text, after you confirm." onClick={() => setConfirming(true)}>
           Delete for good
         </Button>
       </div>

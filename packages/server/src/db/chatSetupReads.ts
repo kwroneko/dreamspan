@@ -6,6 +6,7 @@ import { makeShellReadHandlers } from "./shellReads.ts"
 import type { Chat } from "@rp/shared/chat.ts"
 import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
+import { avatarCropField, avatarCropFieldFromJson } from "@rp/shared/media.ts"
 import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -88,9 +89,10 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         subtitle: string
         name: unknown
         avatar: unknown
+        crop: unknown
       }>`
         SELECT e.id AS entity_id, r.label, r.subtitle, json_extract(rev.doc_json, '$.name') AS name,
-          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar
+          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar, json_extract(rev.doc_json, '$.avatar_crop') AS crop
         FROM entities e
         JOIN entity_refs r ON r.id = (
           SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
@@ -105,7 +107,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
           name: name === "" ? card.label : name,
           label: card.label,
           subtitle: card.subtitle,
-          avatarMediaId: typeof card.avatar === "string" ? card.avatar : null
+          avatarMediaId: typeof card.avatar === "string" ? card.avatar : null,
+          ...avatarCropFieldFromJson(card.avatar, card.crop)
         })
       }
       const decoded = yield* Effect.forEach(chats, (row) =>
@@ -148,7 +151,8 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
                   name: names.displayName,
                   label: names.displayName,
                   subtitle: names.version,
-                  avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null
+                  avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
+                  ...avatarCropField(doc.avatar_media_id, doc.avatar_crop)
                 }
               })
             )
@@ -214,6 +218,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         nickname: unknown
         name: unknown
         avatar: unknown
+        crop: unknown
         used: string
       }>`
         WITH cards AS (
@@ -227,7 +232,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             AND NOT EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona')
         )
         SELECT cards.*, json_extract(rev.doc_json, '$.name') AS name, json_extract(rev.doc_json, '$.nickname') AS nickname,
-          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar,
+          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar, json_extract(rev.doc_json, '$.avatar_crop') AS crop,
           (SELECT json_object(
               'chats', count(DISTINCT c.id),
               'last', max(c.last_message_at),
@@ -252,6 +257,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
               name: name === "" ? row.label : name,
               modelName: modelName({ name, nickname: text(row.nickname) }),
               avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
+              ...avatarCropFieldFromJson(row.avatar, row.crop),
               chats: used.chats,
               lastMessageAt: used.last,
               latestChatId: (used.latest || null) as ChatId | null

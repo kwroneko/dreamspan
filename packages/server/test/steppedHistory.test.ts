@@ -54,7 +54,7 @@ const pair = {
   participants: ["mira", "oren"],
   target: { speaker: "mira" }
 } satisfies Partial<AssemblyFixture>
-const whileOren = { condition: { when: "not_muted", card: "oren" as never } } as const
+const whileOren = { condition: { when: "not_muted", cards: ["oren" as never] } } as const
 const oren = (present: boolean) => ({
   depth: null,
   event: { scope: null, data: { key: "presence.set" as const, value: { entity: "oren" as never, present } } }
@@ -409,7 +409,7 @@ describe("stepped history", () => {
     })
   )
 
-  it.effect("keeps full author notes when lore surrounds the note", () =>
+  it.effect("keeps a full note when lore shares its depth", () =>
     Effect.gen(function* () {
       const fixture: AssemblyFixture = {
         ...base,
@@ -423,7 +423,7 @@ describe("stepped history", () => {
           },
           { depth: null, event: { scope: null, data: { key: "note.activate", value: { note: "author" as never } } } },
           { depth: null, event: { scope: null, data: { key: "lorebook.attach", value: { ref: "book" as never } } } },
-          // Entries by position: these ride on the author's note.
+          // Entries by position: these go at the note's depth.
           { depth: null, event: { scope: null, data: { key: "lorebook.below_history", value: { on: false } } } }
         ],
         notes: [
@@ -433,7 +433,6 @@ describe("stepped history", () => {
             doc: {
               schema_version: 1,
               title: "Author",
-              kind: "author_note",
               content: "{{getvar::long}}",
               owner: { chat: "chat-1" as never },
               placement: { mode: "depth", depth: 0, role: "system" },
@@ -447,8 +446,8 @@ describe("stepped history", () => {
             entity: "book",
             revision: "book-rev",
             doc: loreBook([
-              loreEntry({ constant: true, content: "top", position: "an_top" }),
-              loreEntry({ constant: true, content: "bottom", position: "an_bottom" }, 1)
+              loreEntry({ constant: true, content: "top", position: "at_depth", depth: 0, role: "system" }),
+              loreEntry({ constant: true, content: "bottom", position: "at_depth", depth: 0, role: "system" }, 1)
             ]).document
           }
         ]
@@ -456,7 +455,7 @@ describe("stepped history", () => {
       const built = yield* assembleFixture(fixture)
       const note = built.request.messages.find((message) => message.content.includes("QQ"))
       assert.ok(note, "the full note must still be sent")
-      assert.strictEqual(note.content, `top\n${"Q".repeat(1000)}\nbottom`)
+      assert.strictEqual(note.content, `${"Q".repeat(1000)}\nbottom\ntop`)
       const history = built.request.messages.filter((message) => message.content.startsWith("Turn "))
       assert.strictEqual(history.length, 24 - built.historyStart!.depth)
       assert.isAtMost(cost(built), 400)

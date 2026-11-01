@@ -1,4 +1,5 @@
-// Synthetic text only. Covers transfers from inputs, code editors, messages and swipes,
+// Synthetic text only. Covers transfers from editors' own Send buttons and shortcut (a note,
+// a message and a swipe opened for editing by a double-click), Insert,
 // continuous persistence and cross-tab updates, at desktop/phone sizes in both themes.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -26,11 +27,20 @@ for (const width of [1440, 390])
       const chat = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.CreateChat({ title: "The harbour notebook" })
       )
+      const chatId = chat.id as ChatId
+      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+        api.CreateChatNote({ chatId, title: "Destination" })
+      )
       await page.goto(`${server().url}/chats/${chat.id}`)
       const composer = page.getByLabel("Message", { exact: true })
-      await composer.fill("Lanterns by the harbour")
-      await composer.evaluate((node: HTMLTextAreaElement) => node.setSelectionRange(0, 8))
-      await composer.press("Control+Shift+S")
+      // An editor's selection goes to a new snippet with the button under the editor.
+      const notes = await openPanel(page, "Notes")
+      await notes.getByRole("button", { name: /Destination/ }).click()
+      const content = notes.getByRole("textbox", { name: "Content", exact: true })
+      await content.fill("Lanterns by the harbour")
+      await content.press("Control+Home")
+      await content.press("Control+Shift+ArrowRight")
+      await notes.getByRole("button", { name: "Send selection to snippet" }).click()
       const panel = page.getByRole("tabpanel", { name: "Snippets" })
       await expect(panel).toBeVisible()
       const editor = panel.getByRole("textbox", { name: "Snippet text" })
@@ -85,32 +95,25 @@ for (const width of [1440, 390])
       await page.reload()
       await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
       await expect(page.getByRole("textbox", { name: "Snippet text" })).toHaveText("The tide is rising.")
-      // A selected passage in a rendered message (any swipe's displayed body) uses the same command.
-      const chatId = chat.id as ChatId
+      // A message opened for editing by a double-click sends its selection the same way.
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.SendMessage({ chatId, forkId: null, parentSlotId: null, branch: false, content: "A gull crosses the bay." })
       )
       await page.reload()
       await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
       await closePanel(page)
-      const body = page.getByRole("article", { name: "Your message" }).locator(".markdown")
-      await body.evaluate((node) => {
-        const range = document.createRange()
-        range.selectNodeContents(node)
-        const selected = window.getSelection()!
-        selected.removeAllRanges()
-        selected.addRange(range)
-      })
-      await body.click({ button: "right" })
-      await page.getByRole("menuitem", { name: "Send to snippet" }).click()
+      const mine = page.getByRole("article", { name: "Your message" })
+      await mine.locator(".markdown").dblclick()
+      const messageText = mine.getByRole("textbox", { name: "Message text" })
+      await expect(messageText).toBeFocused()
+      await messageText.press("Control+a")
+      await mine.getByRole("button", { name: "Send selection to snippet" }).click()
       await expect(page.getByRole("textbox", { name: "Snippet text" })).toContainText("A gull crosses the bay.")
+      if (width === 390) await closePanel(page)
+      await mine.getByRole("button", { name: "Cancel" }).click()
       // Code-editor destinations keep their cursor while another panel is active.
-      await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
-        api.CreateChatNote({ chatId, title: "Destination" })
-      )
-      const notes = await openPanel(page, "Notes")
+      await openPanel(page, "Notes")
       await notes.getByRole("button", { name: /Destination/ }).click()
-      const content = notes.getByRole("textbox", { name: "Content", exact: true })
       await content.fill("Start End")
       await content.press("Control+Home")
       await content.press("ArrowRight")
@@ -118,19 +121,17 @@ for (const width of [1440, 390])
       await panel.getByRole("button", { name: "Insert", exact: true }).click()
       await openPanel(page, "Notes")
       await expect(content).toContainText("SThe tide is rising.")
-      // Ordinary fields and CodeMirror text can also be sent into the open snippet.
-      const title = notes.getByRole("textbox", { name: /^Name\b/ })
-      await title.fill("Harbour note")
-      await title.press("Control+a")
-      await title.press("Control+Shift+S")
-      await expect(editor).toContainText("Harbour note")
-      await openPanel(page, "Notes")
+      // The selection's button has a shortcut in its tooltip; the whole text has its own button.
       await content.fill("A foghorn sounds.")
       await content.press("Control+Home")
       await content.press("Control+Shift+End")
       await content.press("Control+Shift+S")
       await expect(editor).toContainText("A foghorn sounds.")
-      // Select a different swipe, then send its displayed passage to the same snippet.
+      await openPanel(page, "Notes")
+      await content.fill("A bell rings.")
+      await notes.getByRole("button", { name: "Send text to snippet" }).click()
+      await expect(editor).toContainText("A bell rings.")
+      // A different swipe, opened for editing, sends its whole text to the same snippet.
       const path = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
         api.ReadPath({ chatId, forkId: null, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 })
       )
@@ -145,15 +146,9 @@ for (const width of [1440, 390])
       await page.reload()
       await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
       await closePanel(page)
-      const swipe = page.getByRole("article", { name: "Your message" }).locator(".markdown")
-      await swipe.evaluate((node) => {
-        const range = document.createRange()
-        range.selectNodeContents(node)
-        const selected = window.getSelection()!
-        selected.removeAllRanges()
-        selected.addRange(range)
-      })
-      await page.keyboard.press("Control+Shift+S")
+      await mine.locator(".markdown").dblclick()
+      await expect(messageText).toBeFocused()
+      await mine.getByRole("button", { name: "Send text to snippet" }).click()
       await expect(page.getByRole("textbox", { name: "Snippet text" })).toContainText(
         "A second gull in an alternate version."
       )

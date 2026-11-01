@@ -22,15 +22,15 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
   if (estimate.blocked === "no_model")
     return (
       <Alert tone="warning">
-        No model is chosen to summarize with. Choose one in the side panel's This chat tab, or nothing will be
-        summarized.
+        No model is chosen to summarize with, so nothing would be summarized. Choose the chat's model in the side
+        panel's Model tab.
       </Alert>
     )
   if (estimate.blocked === "runway")
     return (
       <Alert tone="warning">
         Two summary chunks don't fit between the recent messages' target and maximum. Move them further apart, or make
-        the chunk size smaller, in the side panel's This chat tab.
+        the chunk size smaller, in Summary settings at the end of the Summaries tab.
       </Alert>
     )
   if (jobs === 0)
@@ -42,30 +42,23 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
   return (
     <div aria-label={title} role="group" className="flex flex-col gap-2 rounded-md border border-border p-3 text-sm">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-        <dt className="text-muted">Messages</dt>
+        <dt className="text-muted">To summarize</dt>
         <dd>
-          {estimate.messages} ({tokensText(estimate.tokens)})
+          {estimate.messages} messages ({tokensText(estimate.tokens)})
         </dd>
-        <dt className="text-muted">Summaries</dt>
+        <dt className="text-muted">Requests</dt>
         <dd>
-          {estimate.l1Jobs}, and {estimate.condensations} condensing them
+          {estimate.l1Jobs + estimate.condensations}: {estimate.l1Jobs} summaries
+          {estimate.condensations > 0 ? `, ${estimate.condensations} condensing them` : ""}
         </dd>
-        <dt className="text-muted">Sent in full</dt>
-        <dd>{countText(estimate.uncachedInput)} tokens</dd>
-        {estimate.cached && (
-          <>
-            <dt className="text-muted">Read from cache</dt>
-            <dd>{countText(estimate.cachedInput)} tokens</dd>
-          </>
-        )}
-        {estimate.cacheWrite > 0 && (
-          <>
-            <dt className="text-muted">Written to cache</dt>
-            <dd>{countText(estimate.cacheWrite)} tokens</dd>
-          </>
-        )}
-        <dt className="text-muted">Returned</dt>
-        <dd>{countText(estimate.output)} tokens</dd>
+        <dt className="text-muted">Tokens sent</dt>
+        <dd>
+          {countText(estimate.uncachedInput + (estimate.cached ? estimate.cachedInput : 0))}
+          {estimate.cached ? `, ${countText(estimate.cachedInput)} of them from the cache` : ""}
+          {estimate.cacheWrite > 0 ? `; ${countText(estimate.cacheWrite)} written to it` : ""}
+        </dd>
+        <dt className="text-muted">Tokens written</dt>
+        <dd>{countText(estimate.output)}</dd>
         <dt className="text-muted">Cost</dt>
         <dd data-testid="estimate-cost">
           {estimate.cost ? moneyText(estimate.cost.amount, estimate.cost.currency) : "Not priced for this model"}
@@ -77,16 +70,16 @@ export function EstimateList({ estimate, title }: { estimate: BackfillEstimate; 
             : durationText(estimate.seconds)}
         </dd>
       </dl>
-      <p className="text-muted">
-        {estimate.cached
-          ? "The preset and the summaries so far are read from the provider's cache while requests follow one another."
-          : "This model has no cache lifetime, so every request is sent in full."}
-        {estimate.model && !estimate.model.sharesCache
-          ? ` ${estimate.model.name} is not the chat's model, so the first request starts without the chat's cache.`
-          : ""}
-      </p>
+      {(!estimate.cached || (estimate.model && !estimate.model.sharesCache)) && (
+        <p className="text-muted">
+          {estimate.cached ? "" : "This model has no cache lifetime, so every request is sent in full."}
+          {estimate.model && !estimate.model.sharesCache
+            ? ` ${estimate.model.name} is not the chat's model, so the first request starts without the chat's cache.`
+            : ""}
+        </p>
+      )}
       <p>
-        Spending stops at {CAP_PERCENT}% of this
+        It pauses at {CAP_PERCENT}% of this
         {estimate.cost
           ? ` (${moneyText((estimate.cost.amount * CAP_PERCENT) / 100, estimate.cost.currency)})`
           : ""}{" "}
@@ -159,7 +152,7 @@ export function EnableLcmDialog({
       open
       onOpenChange={onOpenChange}
       title="Summarize older messages"
-      description="Older messages are summarized so the chat can go on. Nothing is generated until your next reply, or until you choose Summarize now."
+      description="Summaries stand in for older messages, so the story stays in what the model is sent. Nothing is sent until your next reply, or Summarize now in the Summaries tab."
     >
       {offer === null ? (
         error ? (
@@ -184,14 +177,14 @@ export function EnableLcmDialog({
                 options={[
                   {
                     value: "adopt",
-                    label: `Keep the imported summary as the first level over ${rangeText(1, offer.imported.to).toLowerCase()}`,
-                    description: `It stands in for those messages (${tokensText(offer.imported.tokens)}); they are shown again, and the rest is summarized from there.`
+                    label: "Keep the imported summary",
+                    description: `It stands in for ${rangeText(1, offer.imported.to).toLowerCase()} (${tokensText(offer.imported.tokens)}). They're shown again, and the rest is summarized from there.`
                   },
                   {
                     value: "scratch",
                     label: "Summarize from scratch",
                     description:
-                      "Those messages are shown again and summarized with the rest. The imported summary stays in its own note."
+                      "Those messages are shown again and summarized with the rest. The imported summary stays in its note."
                   }
                 ]}
               />
@@ -199,8 +192,7 @@ export function EnableLcmDialog({
           )}
           {offer.summaryNoteOn && (
             <p role="note" className="text-sm text-muted">
-              The imported summary's note is switched off in the same step, so it isn't sent beside the summaries. You
-              can switch it back on in the Notes tab.
+              Its note is switched off, so it isn't sent twice. You can switch it back on in the Notes tab.
             </p>
           )}
           {estimate && <EstimateList estimate={estimate} title="Estimate" />}

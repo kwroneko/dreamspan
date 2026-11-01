@@ -83,7 +83,15 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
           options={[
             { value: "keep", label: settings.proxy === null ? "No proxy" : "Keep this proxy" },
             { value: "replace", label: settings.proxy === null ? "Set a proxy" : "Replace it" },
-            ...(settings.proxy === null ? [] : [{ value: "remove" as const, label: "Remove it" }])
+            ...(settings.proxy === null
+              ? []
+              : [
+                  {
+                    value: "remove" as const,
+                    label: "Remove it",
+                    description: "Requests go direct, unless a connection sets its own proxy."
+                  }
+                ])
           ]}
         />
         {values.proxy === "replace" && (
@@ -96,7 +104,12 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
         label="Bypass list"
         description="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
       >
-        <Textarea value={values.bypass} onChange={(event) => edit({ bypass: event.target.value })} spellCheck={false} />
+        <Textarea
+          value={values.bypass}
+          onChange={(event) => edit({ bypass: event.target.value })}
+          spellCheck={false}
+          textActions={false}
+        />
       </Field>
       <Switch
         checked={values.forceProxy}

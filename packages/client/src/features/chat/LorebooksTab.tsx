@@ -15,6 +15,7 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -138,8 +139,17 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
         value={on ? "below" : "positions"}
         onValueChange={(next) => onChange(next === "below")}
         options={[
-          { value: "below", label: "Below the history" },
-          { value: "positions", label: "Where each entry says" }
+          {
+            value: "below",
+            label: "Below the history",
+            description: "Every matching entry goes in one block just after the history, so the history stays cached."
+          },
+          {
+            value: "positions",
+            label: "Where each entry says",
+            description:
+              "Each entry goes where its own position says, as in SillyTavern. One above the history can make the provider read the whole history again."
+          }
         ]}
       />
       <p className="text-sm text-muted">For every book in this chat.</p>
@@ -154,18 +164,24 @@ interface BookRow {
   readonly from: string
   readonly on: boolean
   readonly onChange: (on: boolean) => void
+  /** What its switch does, which differs by where the book comes from. */
+  readonly switchHint: string
   /** The library entry its Open button edits: the book, or the card holding it. */
   readonly ref: LibraryRef | undefined
+  /** A card's own book: the card's editor opens on it (`CARD_LOREBOOK_FOCUS`), not on the card. */
+  readonly focus?: string
   readonly openLabel: string
+  /** What Open does, when it isn't plain from the row: a card's own book opens its card. */
+  readonly openHint?: string
   readonly menu: ReadonlyArray<ActionMenuItem>
 }
 
 /** A book: its switch in this chat, Open (its editor over the chat) and its ⋯. */
-function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void }) {
+function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef, focus?: string) => void }) {
   return (
     <li className="flex items-start gap-1 py-2.5">
       <div className="min-w-0 flex-1">
-        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from}>
+        <Switch checked={row.on} onCheckedChange={row.onChange} description={row.from} hint={row.switchHint}>
           {row.name}
         </Switch>
       </div>
@@ -174,7 +190,11 @@ function Book({ row, onOpen }: { row: BookRow; onOpen: (ref: LibraryRef) => void
           variant="ghost"
           className="h-8 shrink-0 px-2"
           aria-label={row.openLabel}
-          onClick={() => onOpen(row.ref!)}
+          hint={
+            row.openHint ??
+            "Opens the book's editor over the chat. What you save there changes it in every chat that reads it."
+          }
+          onClick={() => onOpen(row.ref!, row.focus)}
         >
           Open
         </Button>
@@ -247,14 +267,18 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
   const navigate = useNavigate()
   const workspace = usePresetWorkspace()
   // Over the chat, as the preset and card editors open from the panel; a page without one.
-  const openEditor = (ref: LibraryRef) =>
-    workspace ? workspace.open(ref.id) : void navigate({ to: "/library/$refId", params: { refId: ref.id } })
+  const openEditor = (ref: LibraryRef, focus?: string) =>
+    workspace
+      ? workspace.open(ref.id, focus)
+      : void navigate({ to: "/library/$refId", params: { refId: ref.id }, search: focus ? { focus } : {} })
   const detach = (id: string, next: boolean) => {
     setDetached((list) => (next ? list.filter((d) => d !== id) : [...list, id]))
     void change({ _tag: "Lorebook", ref: id as LibraryRef["id"], active: next })
   }
   const globalItem = (id: string, global: boolean): ActionMenuItem => ({
     label: "Use in every chat",
+    description:
+      "Makes it global: every chat of yours reads it, as ST's globally selected World Info, unless a chat switches it off. Ticked while it is.",
     checked: global,
     onCheckedChange: (next) => void setGlobal(id as LibraryRef["id"], next)
   })
@@ -270,8 +294,11 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         ].join(" · "),
         on,
         onChange: (next) => void change({ _tag: "CardLorebook", entityId: card.entityId, on: next }),
+        switchHint: `Off stops ${card.name}'s own book in this chat only, from the latest message on. The card keeps it, and its other chats still read it.`,
         ref: library?.cards.get(card.entityId),
-        openLabel: `Open ${card.name}'s card, where its book is edited`,
+        focus: CARD_LOREBOOK_FOCUS,
+        openLabel: `Open ${card.lorebookName ?? `${card.name}'s lorebook`}`,
+        openHint: `Opens the book alone, in ${card.name}'s card editor: saving it saves the card.`,
         menu: []
       }
     }),
@@ -286,6 +313,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         ].join(" · "),
         on,
         onChange: (next) => detach(id, next),
+        switchHint:
+          "Off takes the book out of this chat, from the latest message on. Add a lorebook puts it back once this tab is closed.",
         ref: byId.get(id),
         openLabel: `Open ${name}`,
         menu: byId.has(id) ? [globalItem(id, false)] : []
@@ -299,6 +328,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
         from: on ? "Global: used in every chat" : "Global, but off in this chat",
         on,
         onChange: (next) => void change({ _tag: "GlobalLorebook", ref: id as LibraryRef["id"], on: next }),
+        switchHint:
+          "A global book is read by every chat of yours. Off stops it in this chat only, from the latest message on; other chats still read it.",
         ref: byId.get(id),
         openLabel: `Open ${name}`,
         menu: [
@@ -308,6 +339,8 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
             ? [
                 {
                   label: "Also added to this chat",
+                  description:
+                    "Added to this chat on its own too, so it stays here if it stops being global. Its entries are sent once either way.",
                   checked: attached.includes(id as LibraryRef["id"]),
                   onCheckedChange: (next: boolean) => detach(id, next)
                 }
@@ -346,7 +379,11 @@ export function LorebooksTab({ session, active }: { session: ChatSession; active
           />
         ) : (
           <div className="pt-1">
-            <Button onClick={() => setAdding(true)} disabled={library === null}>
+            <Button
+              onClick={() => setAdding(true)}
+              disabled={library === null}
+              hint="Picks a book from your library for this chat to read, from the latest message on."
+            >
               Add a lorebook
             </Button>
           </div>

@@ -1,5 +1,5 @@
 // The chat's side panel: beside the chat on a wide screen, a sheet over it on a phone.
-import { expect, type Page } from "@playwright/test"
+import { expect, type Locator, type Page } from "@playwright/test"
 
 /** Opens the chat's side panel at a tab, from the header or from the panel's own tabs, and returns the tab. */
 export const openPanel = async (page: Page, tab: string) => {
@@ -49,4 +49,10 @@ export const openSummarySettings = async (page: Page) => {
   if (!(await section.isVisible())) await open.click()
   await expect(section).toBeVisible()
   return section
+}
+
+/** From the Prompt preset tab, opens the large preset editor at one prompt (its row's menu). */
+export const openPresetAt = async (page: Page, panel: Locator, prompt: string) => {
+  await panel.getByRole("button", { name: `Actions for ${prompt}`, exact: true }).click()
+  await page.getByRole("menuitem", { name: "Open in the large editor", exact: true }).click()
 }

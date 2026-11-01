@@ -27,13 +27,13 @@ import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon, type IconName } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { MessageBody } from "../../ui/messageCopy.tsx"
+import { MessageBody, sourceOffsetAt } from "../../ui/messageCopy.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { ReplayNotice } from "../editor/ReplayNotice.tsx"
 import { messageSide, useCast } from "./cast.ts"
-import { MessageActions } from "./messageActions.tsx"
+import { invokeMessageAction, messageActions, MessageActions } from "./messageActions.tsx"
 import { ReasoningPanels } from "./Reasoning.tsx"
 import { type DisplayAt, useDisplayed } from "./useDisplayed.ts"
 import { formatWhen } from "./chatTitle.ts"
@@ -147,7 +147,7 @@ function VersionBody({
       )}
       {version.mark === "refused" && (
         <p role="note" className="text-sm text-muted">
-          A judge model found this reply a refusal. Its text is kept; Regenerate to try again.
+          A judge model found this reply a refusal. Its text is kept; › generates another version to try again.
         </p>
       )}
       {version.status === "failed" && version.error && (
@@ -174,6 +174,8 @@ function Editor({
   source,
   session,
   entry,
+  caret,
+  onCaretTaken,
   onSave,
   onCancel
 }: {
@@ -183,10 +185,18 @@ function Editor({
   source: Version | undefined
   session: ChatSession
   entry: PathEntry
+  /** Where the caret opens (a double-click's place in the text), else at the end. */
+  caret?: number | undefined
+  onCaretTaken: () => void
   onSave: () => void
   onCancel: () => void
 }) {
   const { text, error, conflict, imagesBusy } = useSyncExternalStore(draft.subscribe, draft.snapshot)
+  // The editor may mount after the saved text loads: it still opens at the first caret.
+  const [initialCaret] = useState(caret)
+  useEffect(() => {
+    if (initialCaret !== undefined) onCaretTaken()
+  }, [initialCaret, onCaretTaken])
   const [original, setOriginal] = useState<Version | undefined>(source)
   useEffect(() => {
     if (draft.target._tag !== "Edit" || source) return
@@ -261,6 +271,7 @@ function Editor({
             value: text,
             base,
             autoFocus: true,
+            caret: initialCaret,
             quietMarkers: true,
             onChange: (value) => draft.setText(value)
           }}
@@ -410,21 +421,27 @@ function Mark({
   name,
   label,
   reason,
-  className = ""
+  className = "",
+  compact = false
 }: {
   icon: IconName
   name: string
   label: string
   reason: string
   className?: string
+  /** Only the icon: for a mark most messages of a long chat carry, which the edge already shows. */
+  compact?: boolean
 }) {
   return (
     <Tooltip label={reason}>
-      <span tabIndex={0} className={`inline-flex shrink-0 items-center gap-1 text-xs outline-none ${className}`}>
+      <span
+        tabIndex={0}
+        className={`inline-flex shrink-0 items-center gap-1 rounded-sm text-xs outline-none focus-visible:ring-2 focus-visible:ring-focus ${className}`}
+      >
         <span role="img" aria-label={name}>
           <Icon name={icon} size={14} />
         </span>
-        <span>{label}</span>
+        <span className={compact ? "sr-only" : undefined}>{label}</span>
         <span className="sr-only">: {reason}</span>
       </span>
     </Tooltip>
@@ -458,9 +475,25 @@ const useEditor = (session: ChatSession, key: MessageEditorKey) =>
     useCallback(() => session.editor(key), [session, key])
   )
 
+/** Whether a double-click may open Edit here: not on a control, the version arrows or an image. */
+const canEditFrom = (target: EventTarget | null) =>
+  !onControl(target) &&
+  !(target instanceof Element && target.closest("[role='group'][aria-label='Versions'], [data-text-tool], img, label"))
+
 /** Whether a click or tap landed on something that acts on its own. */
 const onControl = (target: EventTarget | null) =>
   target instanceof Element && target.closest("button, a, input, textarea, select, summary, [role='menuitem']")
+
+/** The browser's caret at a point, as a text position. */
+const caretFromPoint = (x: number, y: number): { node: Node; offset: number } | null => {
+  const position = document.caretPositionFromPoint?.(x, y)
+  if (position) return { node: position.offsetNode, offset: position.offset }
+  const range = document.caretRangeFromPoint?.(x, y)
+  return range ? { node: range.startContainer, offset: range.startOffset } : null
+}
+
+/** A third click within this long of a double-click selects a paragraph instead of editing. */
+const TRIPLE_CLICK_MS = 350
 
 /**
  * Whether a touch starting at `target` may be a swipe: not on a control, and not in an editor
@@ -542,7 +575,7 @@ export const Message = memo(function Message({
   const side = messageSide(entry, cast.cast, speakerId)
   const model = side === "assistant"
   // A model writes its versions: a reply, or a turn on the user's side the model wrote (an
-  // impersonation), so it has Regenerate and › generates another, written as its speaker.
+  // impersonation), so its › generates another, written as its speaker.
   const generated = model || version.writer === "model" || versions?.at(-1)?.writer === "model"
   const name = speaker?.name ?? (model ? "Model" : "You")
   const deleted = useDeletedToast()
@@ -573,6 +606,44 @@ export const Message = memo(function Message({
         : null
   }
   const onPointerCancel = () => void (swipeStart.current = null)
+  // A double-click opens Edit, with the caret where it landed. It waits out a triple-click,
+  // which selects a paragraph, and a double-click drag, which selects words, to copy them.
+  const pendingEdit = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [caretAt, setCaretAt] = useState<number | undefined>(undefined)
+  // Only the edit it opened starts there: a later Edit opens with the caret at the end.
+  const caretTaken = useCallback(() => setCaretAt(undefined), [])
+  useEffect(() => () => clearTimeout(pendingEdit.current ?? undefined), [])
+  // What the wait may have changed: the edit opens only on the version double-clicked, still
+  // finished and not already being edited.
+  const now = useRef({ editing, generating, versionId: version.id })
+  useEffect(() => {
+    now.current = { editing, generating, versionId: version.id }
+  })
+  // Any press after the double-click (a triple-click's third, or another action begun within
+  // the wait) is the user doing something else.
+  const onMouseDown = () => {
+    if (pendingEdit.current === null) return
+    clearTimeout(pendingEdit.current)
+    pendingEdit.current = null
+  }
+  const onDoubleClick = (event: MouseEvent) => {
+    if (editing || generating || outside(event) || !canEditFrom(event.target)) return
+    const context = { entry, session, branchFork, generated, generating, hidden, report, toast }
+    if (messageActions.get("message.edit")?.available?.(context) === false) return
+    const point = caretFromPoint(event.clientX, event.clientY)
+    const mapped = point && sourceOffsetAt(point.node, point.offset)
+    const offset = mapped?.text === version.content ? mapped.offset : undefined
+    clearTimeout(pendingEdit.current ?? undefined)
+    const versionId = version.id
+    pendingEdit.current = setTimeout(() => {
+      pendingEdit.current = null
+      const current = now.current
+      if (current.editing || current.generating || current.versionId !== versionId) return
+      if (/\s/.test(window.getSelection()?.toString().trim() ?? "")) return
+      setCaretAt(offset)
+      void invokeMessageAction("message.edit", context, "button")
+    }, TRIPLE_CLICK_MS)
+  }
   const onPointerUp = (event: PointerEvent) => {
     const start = swipeStart.current
     swipeStart.current = null
@@ -621,9 +692,7 @@ export const Message = memo(function Message({
         ? "Empty: there's no text to send to the model."
         : null
 
-  const actions = (
-    <MessageActions context={{ entry, session, branchFork, generated, generating, hidden, report, toast }} />
-  )
+  const actionContext = { entry, session, branchFork, generated, generating, hidden, report, toast }
 
   let marks: ReactNode = null
   if (hidden)
@@ -636,6 +705,7 @@ export const Message = memo(function Message({
         label="Summarized"
         reason={context.reason}
         className="text-accent"
+        compact
       />
     )
   else if (context?.kind === "dropped")
@@ -673,11 +743,14 @@ export const Message = memo(function Message({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
     >
       <Avatar
         id={speakerId ?? (model ? "model" : "you")}
         name={name}
         mediaId={speaker?.avatarMediaId ?? null}
+        crop={speaker?.avatarCrop}
         size="chat"
         preview
         className={`mt-0.5 ${hidden ? "opacity-50 grayscale" : ""}`}
@@ -717,19 +790,18 @@ export const Message = memo(function Message({
           {generating && <Badge tone="accent">generating</Badge>}
           {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
           {marks}
-          <span className="flex-1" />
-          {!editing && (
-            <div
-              className={`hidden items-center transition-opacity duration-100 sm:flex ${
+          {editing ? (
+            <span className="flex-1" />
+          ) : (
+            // The rest of the header's width: the pinned buttons that fit, then More actions.
+            <MessageActions
+              context={actionContext}
+              className={`hidden justify-end transition-opacity duration-100 sm:flex ${
                 revealed
                   ? "opacity-100"
                   : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
               }`}
-              role="toolbar"
-              aria-label="Message actions"
-            >
-              {actions}
-            </div>
+            />
           )}
           {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
         </header>
@@ -745,6 +817,8 @@ export const Message = memo(function Message({
             draft={editor}
             session={session}
             entry={entry}
+            caret={editing === "edit" ? caretAt : undefined}
+            onCaretTaken={caretTaken}
             source={
               editor.target._tag === "Edit"
                 ? [version, ...(versions ?? [])].find(
@@ -846,12 +920,12 @@ export const Message = memo(function Message({
           <div ref={footer} className="flex flex-col gap-1">
             {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
             <footer className="-mb-1 flex min-h-8 items-center">
-              {revealed && !editing && (
-                <div className="-ml-1.5 flex items-center sm:hidden" role="toolbar" aria-label="Message actions">
-                  {actions}
-                </div>
+              {revealed && !editing ? (
+                // The footer's width before the versions: the pinned buttons that fit, then More actions.
+                <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
+              ) : (
+                <span className="flex-1" />
               )}
-              <span className="flex-1" />
               {savedAs !== null && (
                 <span role="status" className="mr-1 text-xs text-muted">
                   Saved as version {savedAs}

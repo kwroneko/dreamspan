@@ -329,7 +329,9 @@ export class ChatSession {
     const read = ++this.contextReads
     const forkId = this.view.forkId
     const leafSlotId = this.view.leafSlotId
-    if (leafSlotId === null) return
+    // A chat with no messages has no leaf, but its next reply still has a context (the
+    // preset, the cards, the notes); before the first read there's nothing to ask about.
+    if (leafSlotId === null && this.view.loading) return
     const result = await this.call((client) => client("GetNextContext", { chatId: this.chatId, leafSlotId, forkId }))
     if (
       !result.ok ||
@@ -344,6 +346,11 @@ export class ChatSession {
 
   /** Bumped by every cast read, so an older reply is dropped. */
   private castReads = 0
+
+  /** The cast read again: after a card's picture or cutout changed (§14.5c), what its portraits show. */
+  rereadCast() {
+    return this.refreshCast()
+  }
 
   private async refreshCast() {
     const read = ++this.castReads
@@ -611,6 +618,8 @@ export class ChatSession {
       })
       for (const entry of window.entries) this.track(entry.version)
       void this.refreshCast()
+      // A leaf read starts the context read (update); a chat with no messages has none to change.
+      if (window.leafSlotId === null) void this.refreshContext()
       void this.refreshQueue()
       void this.refreshEditors()
     })

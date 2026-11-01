@@ -60,6 +60,66 @@ export const originText = (origin: LcmSummary["origin"]) =>
         ? "changed by an agent"
         : "written by the model"
 
+/** The kinds of failure a job records (`JobError.class`), said plainly. */
+const failureClasses: Record<string, string> = {
+  unusable: "The connection can't be used",
+  budget_held: "Held by the spending limit",
+  auth: "The provider refused the key",
+  rate_limited: "The provider's rate limit was reached",
+  overloaded: "The provider was busy",
+  context_overflow: "Too long for the model",
+  length_cutoff: "Cut off by the reply length",
+  refused: "The model refused",
+  refusal: "The model refused",
+  bad_request: "The provider refused the request",
+  network: "The provider couldn't be reached",
+  aborted: "Stopped"
+}
+
+/**
+ * Why a summary or a job failed, in words: the stored error is the job's JSON
+ * (`{ class, message }`), whose message may carry the provider's own JSON body after its
+ * status. Anything else is shown as it is.
+ */
+export const failureText = (error: string): string => {
+  let cls: string | null = null
+  let message = error
+  try {
+    const parsed = JSON.parse(error) as unknown
+    if (parsed && typeof parsed === "object" && "message" in parsed) {
+      message = String((parsed as { message: unknown }).message)
+      cls = "class" in parsed ? String((parsed as { class: unknown }).class) : null
+    }
+  } catch {
+    // Not JSON: the text as it was stored.
+  }
+  // "500: {"message":"…"}" or "500: {"error":{"message":"…"}}": the provider's own words.
+  const body = message.match(/^(?:[A-Za-z]+Error: )?(\d{3}): (\{.*\})$/s)
+  let status: string | null = null
+  if (body) {
+    try {
+      const inner = JSON.parse(body[2]!) as { message?: unknown; error?: { message?: unknown } | string }
+      const said =
+        typeof inner.message === "string"
+          ? inner.message
+          : typeof inner.error === "string"
+            ? inner.error
+            : typeof inner.error?.message === "string"
+              ? inner.error.message
+              : null
+      if (said !== null) {
+        message = said
+        status = body[1]!
+      }
+    } catch {
+      // Not JSON after all.
+    }
+  }
+  const lead = cls === null ? null : (failureClasses[cls] ?? null)
+  const detail = status === null ? message : `${message} (HTTP ${status})`
+  return lead === null ? detail : `${lead}: ${detail}`
+}
+
 /** The work still to do or given up on, for the divider and the panel. */
 export const jobText = (job: LcmJob) =>
   job.status === "processing"

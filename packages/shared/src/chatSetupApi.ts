@@ -2,6 +2,7 @@
 // §2.1, §2.2, §3.5; DATA-MODEL §5.3), merged into AppApi. Every id is the caller's own;
 // anything else is NotFound.
 import { Schema } from "effect"
+import { AvatarCrop } from "./media.ts"
 import { Rpc, RpcGroup } from "effect/rpc"
 import {
   MessageImages,
@@ -55,6 +56,8 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   modelName: Schema.optionalKey(Schema.String),
   /** Its avatar, served at `/library/media?id=`; null without one. */
   avatarMediaId: Schema.NullOr(Schema.String),
+  /** The avatar's chosen cutout (ARCHITECTURE.md §14.5c); absent: the default. */
+  avatarCrop: Schema.optionalKey(AvatarCrop),
   /** Chats it has joined, group chats included; chats in the bin don't count. */
   chats: Schema.Int,
   /** The last message in any of them. */
@@ -79,7 +82,8 @@ export class ChatGroup extends Schema.Class<ChatGroup>("ChatGroup")({
       name: Schema.String,
       label: Schema.String,
       subtitle: Schema.optionalKey(Schema.String),
-      avatarMediaId: Schema.NullOr(Schema.String)
+      avatarMediaId: Schema.NullOr(Schema.String),
+      avatarCrop: Schema.optionalKey(AvatarCrop)
     })
   ),
   chats: Schema.Int,
@@ -101,7 +105,15 @@ const ShellOpen = Schema.Struct({
 export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   /** The shell uses character_version as the subtitle, independent of a legacy ref subtitle. */
   card: CardUsage,
+  /**
+   * Its Created: the entity's making. An ST import dates it by ST's `create_date` (else the
+   * file's ctime); a single-file upload or a card written here, by when it came in.
+   */
   createdAt: Schema.Number,
+  /** Its Added: when it came into this app (its upstream ref's making), imported or written here. */
+  addedAt: Schema.Number,
+  /** The user's favourite (`cards.favourites`; an import's ST `fav` until the user sets it here). */
+  favourite: Schema.Boolean,
   /** Null: the card is in no chat yet, and its tile starts one. */
   open: Schema.NullOr(ShellOpen),
   /**
@@ -194,6 +206,8 @@ export const ShellForksView = Schema.Struct({
   /** Matched against each fork's name and its cast's names, ignoring case. */
   search: Schema.String,
   sort: ShellForkSort,
+  /** The sort the other way round from its own: oldest first, or Z to A. */
+  reversed: Schema.optionalKey(Schema.Boolean),
   sections: Schema.Array(
     Schema.Struct({ id: ShellSection, limit: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5000 })) })
   ).check(Schema.isMaxLength(12))
@@ -288,9 +302,7 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("GlobalLorebook", { ref: RefId, on: Schema.Boolean }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
-  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean }),
-  /** Which of the chat's own notes is its author's note; null for none. */
-  Schema.TaggedStruct("AuthorNote", { entityId: Schema.NullOr(EntityId) })
+  Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type
 
@@ -317,8 +329,6 @@ export class ChatNote extends Schema.Class<ChatNote>("ChatNote")({
   card: Schema.NullOr(EntityId),
   /** A card's note on in every chat unless the chat switches it off (`on_by_default`). */
   onByDefault: Schema.Boolean,
-  /** It's the chat's author's note (`isAuthorNote`): notes and lore at its top or bottom join it. */
-  authorNote: Schema.Boolean,
   linked: Schema.NullOr(LinkedNote),
   active: Schema.Boolean
 }) {}
@@ -390,6 +400,12 @@ export class ChatSetupApi extends RpcGroup.make(
   }),
   Rpc.make("SetHomePinsCollapsed", {
     payload: { collapsed: Schema.Boolean },
+    success: Schema.Void,
+    error: Schema.Union([...Errors])
+  }),
+  /** Marks a card of the user's a favourite or not; an import's ST `fav` no longer changes it. */
+  Rpc.make("SetCardFavourite", {
+    payload: { entityId: EntityId, favourite: Schema.Boolean },
     success: Schema.Void,
     error: Schema.Union([...Errors])
   }),

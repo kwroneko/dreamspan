@@ -10,7 +10,7 @@ import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
 import { nameOf, useCast } from "./cast.ts"
 import { ModelChip, PresetChip } from "./GenerationControls.tsx"
-import { GenerateIcon, RegenerateIcon, SendIcon } from "./icons.tsx"
+import { GenerateIcon, SendIcon } from "./icons.tsx"
 import { chipClass } from "./nextReplyStrip.tsx"
 import { hasReplyChoice, NextReplyChip } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
@@ -37,7 +37,7 @@ function Help({ hint }: ComposerControlContext) {
       <Popover
         open={open}
         onOpenChange={setOpen}
-        trigger="?"
+        trigger={<Icon name="help" size={14} />}
         triggerLabel="Keyboard shortcuts"
         hint="Keyboard shortcuts"
         title="Keyboard shortcuts"
@@ -154,11 +154,11 @@ export const registerComposerControls = () => [
           aria-label={`Generate ${context.speakerName}`}
           pending={context.busy}
           disabled={context.busy || !context.prefsReady}
-          className="min-w-0 max-w-52 sm:max-w-56"
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
         >
+          {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
           {context.guidance && <GenerateIcon />}
-          <span className="truncate">{context.guidance ? `Generate ${context.speakerName}` : "Generate"}</span>
+          Generate
         </Button>
       )
   }),
@@ -217,8 +217,8 @@ export const registerComposerControls = () => [
   composerControls.register({
     id: "composer.history",
     order: 90,
-    // In the box beside the text; on a phone, at the end of the strip, to leave the box its width.
-    placement: ({ compact }) => (compact ? "strip" : "tools"),
+    // In the box's control row, after the speaker, at every width: the text has a row of its own.
+    placement: "tools",
     component: ({ history }) => history
   }),
   composerControls.register({
@@ -236,7 +236,7 @@ export const registerComposerControls = () => [
         <SpeakerSwitcher {...speaker} compact={compact ?? false} />
         {/* The speakers used last, one tap each, where the box can spare the width. */}
         {!compact &&
-          recent.map(({ id, name, mediaId }) => (
+          recent.map(({ id, name, mediaId, crop }) => (
             <Tooltip key={id} label={`Speak as ${name}`}>
               <button
                 type="button"
@@ -244,7 +244,7 @@ export const registerComposerControls = () => [
                 onClick={() => onRecent(id)}
                 className="hidden shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus @min-[760px]:inline-flex"
               >
-                <Avatar id={id} name={name} mediaId={mediaId} size="chip" />
+                <Avatar id={id} name={name} mediaId={mediaId} crop={crop} size="chip" />
               </button>
             </Tooltip>
           ))}
@@ -260,31 +260,13 @@ export const registerComposerControls = () => [
     )
   }),
   composerControls.register({
-    id: "composer.regenerate",
-    order: 10,
-    placement: "actions",
-    // A phone regenerates from the reply itself, to leave the box its width.
-    available: ({ leaf, leafGenerating, compact }) => !compact && leaf?.version.writer === "model" && !leafGenerating,
-    run: async ({ session, leaf, report }) => {
-      if (leaf) report(await session.regenerate(leaf))
-    },
-    component: ({ invoke }) => (
-      <SquareIconButton
-        label="Regenerate the latest reply"
-        hint="Regenerate the latest reply: a new version of it, in its place"
-        variant="ghost"
-        onClick={invoke}
-      >
-        <RegenerateIcon />
-      </SquareIconButton>
-    )
-  }),
-  composerControls.register({
     id: "composer.generate",
     order: 30,
     placement: "actions",
     run: ({ generate }) => generate(),
-    component: ({ guidance, busy, ready, generateHint, generateText, invoke, compact }) =>
+    // Its word only ("Write", or "New version" while a reply's guidance is edited; an icon on a
+    // phone): the speaker's name is on the chip at the row's start, and in this one's name and tooltip.
+    component: ({ guidance, busy, ready, generateHint, generateText, generateWord, invoke, compact }) =>
       compact ? (
         <SquareIconButton
           label={generateText}
@@ -299,15 +281,15 @@ export const registerComposerControls = () => [
       ) : (
         <Tooltip label={generateHint}>
           <Button
-            variant={guidance ? "primary" : "secondary"}
+            variant={guidance ? "primary" : "ghost"}
             pending={guidance && busy}
             aria-label={generateText}
             disabled={busy || !ready}
             onClick={invoke}
-            className={guidance ? "max-w-56" : "max-w-48"}
+            className="px-2.5"
           >
-            {guidance && !busy && <GenerateIcon />}
-            <span className="truncate">{generateText}</span>
+            {!(guidance && busy) && <GenerateIcon />}
+            {generateWord}
           </Button>
         </Tooltip>
       )

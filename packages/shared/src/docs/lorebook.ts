@@ -7,17 +7,11 @@ export const LOREBOOK_SCHEMA_VERSION = 1
 
 const Extensions = Schema.Record(Schema.String, Schema.Unknown)
 
-/** ST's `world_info_position`, 0 to 7 in its files. */
-export const LorePosition = Schema.Literals([
-  "before_char",
-  "after_char",
-  "an_top",
-  "an_bottom",
-  "at_depth",
-  "em_top",
-  "em_bottom",
-  "outlet"
-])
+/**
+ * ST's `world_info_position` but its 2 and 3, before and after the author's note, which the
+ * harness doesn't have (owner, 2026-11-01): an import places those entries at a depth.
+ */
+export const LorePosition = Schema.Literals(["before_char", "after_char", "at_depth", "em_top", "em_bottom", "outlet"])
 export type LorePosition = typeof LorePosition.Type
 
 /** ST's `world_info_logic`: how secondary keys combine with a primary match. */

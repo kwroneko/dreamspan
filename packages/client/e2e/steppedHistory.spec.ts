@@ -132,7 +132,7 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
   await expect(estimate.getByRole("button", { name: /countdown/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(estimate).toHaveCount(0)
-  await messageMenu(reply, "Context it was generated from")
+  await messageMenu(reply, "Request it was generated from")
   await expect(page.getByText(/older ones don't fit/)).toBeVisible()
 })
 
@@ -230,7 +230,7 @@ test("summarized messages are distinct from dropped and hidden messages", async 
   await page.goto(`${server().url}/chats/${chatId}?fork=${sent.chat.currentForkId}&slot=${entries[1]!.slotId}`)
   const summarized = page.locator(`article[data-slot="${entries[1]!.slotId}"]`)
   await expect(summarized).toHaveAttribute("data-summarized", "true")
-  await expect(summarized.getByText("Summarized", { exact: true })).toBeVisible()
+  await expect(summarized.getByRole("img", { name: /^Summarized/ })).toBeVisible()
   await expect(summarized).not.toHaveAttribute("data-out-of-context")
   const hidden = page.locator(`article[data-slot="${entries[0]!.slotId}"]`)
   await expect(hidden.getByRole("img", { name: "Hidden from context", exact: true })).toBeVisible()

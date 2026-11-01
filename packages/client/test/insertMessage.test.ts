@@ -293,7 +293,8 @@ describe("the insertion actions", () => {
     // A window that doesn't start at the first message has no first message to insert above.
     const later = await session([b, c], "c", "a")
     expect(offered(later.s, b)).toEqual(["message.insert-below", "message.duplicate"])
-    expect(messageActions.get("message.insert-below")!.order).toBe(28)
+    // With Branch from here, among the actions that put something beside the message.
+    expect(messageActions.get("message.insert-below")).toMatchObject({ order: 71, group: "place" })
   })
 
   it("disables Duplicate, with the reason, for a failed or generating version", async () => {

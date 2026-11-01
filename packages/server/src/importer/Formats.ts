@@ -12,6 +12,8 @@ import { bundleEntry, WorkerBundleDir, workerThreads } from "../db/Database.ts"
 import * as ReaderPool from "../db/readerPool.ts"
 import type { ImportReport } from "@rp/shared/importReport.ts"
 import type { EntityKind } from "@rp/shared/library.ts"
+import type { Placement } from "@rp/shared/docs/note.ts"
+import type { AuthorNoteLore } from "../formats/lorebook.ts"
 import {
   type ExportInput,
   type ExportRefused,
@@ -25,6 +27,7 @@ import {
   type StSettings
 } from "./ops.ts"
 import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
 /**
@@ -50,6 +53,8 @@ export class Formats extends Context.Service<
       readonly dataDir: string
       readonly path: string
       readonly width: (typeof MEDIA_WIDTHS)[number]
+      /** A portrait's cutout (§14.5c): null for the default; absent, the whole image. */
+      readonly crop?: AvatarCrop | null
     }) => Effect.Effect<ThumbnailResult, ThumbnailFailed | FormatWorkerFailed>
     /**
      * Makes an image's thumbnails at every width ahead of its first view, on the format
@@ -58,6 +63,8 @@ export class Formats extends Context.Service<
     readonly prepareThumbnails: (input: {
       readonly dataDir: string
       readonly path: string
+      /** The cutout the portrait shows: null for the default. */
+      readonly crop: AvatarCrop | null
     }) => Effect.Effect<void, ThumbnailFailed | FormatWorkerFailed>
     /** Parses a file in a worker. A buffer of its own is transferred, and unusable here afterwards. */
     readonly parse: (bytes: Uint8Array, fileName: string) => Effect.Effect<ParsedFile, FormatWorkerFailed>
@@ -82,12 +89,14 @@ export class Formats extends Context.Service<
         bytes: Uint8Array,
         fileName: string,
         expect: EntityKind,
-        textSwitches?: StSettings["textSwitches"]
+        textSwitches?: StSettings["textSwitches"],
+        authorNoteLore?: AuthorNoteLore
       ) => Effect.Effect<StLibraryFile, FormatWorkerFailed>
       readonly persona: (
         bytes: Uint8Array,
         fileName: string,
-        persona: StPersona | null
+        persona: StPersona | null,
+        authorNote?: Placement
       ) => Effect.Effect<ParsedFile, FormatWorkerFailed>
     }
   }
@@ -212,7 +221,7 @@ export const layer = (options: FormatsOptions) =>
                 Effect.suspend(() =>
                   workerFailures(client.ParseStGroup({ bytes: ownBuffer(bytes), fileName, parser: parser("group") }))
                 ),
-              libraryFile: (bytes, fileName, expect, textSwitches) =>
+              libraryFile: (bytes, fileName, expect, textSwitches, authorNoteLore) =>
                 Effect.suspend(() =>
                   workerFailures(
                     client.ParseStLibraryFile({
@@ -220,14 +229,21 @@ export const layer = (options: FormatsOptions) =>
                       fileName,
                       expect,
                       ...(textSwitches ? { textSwitches } : {}),
+                      ...(authorNoteLore ? { authorNoteLore } : {}),
                       parser: parser("library-file")
                     })
                   )
                 ),
-              persona: (bytes, fileName, persona) =>
+              persona: (bytes, fileName, persona, authorNote) =>
                 Effect.suspend(() =>
                   workerFailures(
-                    client.BuildStPersona({ bytes: ownBuffer(bytes), fileName, persona, parser: parser("persona") })
+                    client.BuildStPersona({
+                      bytes: ownBuffer(bytes),
+                      fileName,
+                      persona,
+                      parser: parser("persona"),
+                      ...(authorNote ? { authorNote } : {})
+                    })
                   )
                 )
             }

@@ -3,6 +3,7 @@ import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
+import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import { ResizeHandle, usePanelWidth } from "../../ui/ResizeHandle.tsx"
 import { Sheet } from "../../ui/Sheet.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
@@ -120,7 +121,13 @@ export function PanelToggles({
     // Icons, as ST's panel buttons are, so the header keeps room for the chat's name.
     <div role="group" aria-label="Chat panel" className="flex shrink-0 gap-0.5">
       {tabs.map((tab) => (
-        <IconButton key={tab.value} label={tab.label} icon={tab.descriptor.icon} onClick={() => onToggle(tab.value)} />
+        <IconButton
+          key={tab.value}
+          label={tab.label}
+          hint={tab.descriptor.description ? `${tab.label}: ${tab.descriptor.description}` : tab.label}
+          icon={tab.descriptor.icon}
+          onClick={() => onToggle(tab.value)}
+        />
       ))}
     </div>
   )
@@ -151,7 +158,7 @@ export function ChatSidePanel({
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
   const userId = useSession().user.id
-  const { ref, width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, 640, 426, wide)
+  const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
   const [notesFocus, setNotesFocus] = useState<EntityId | null>(null)
   const notes = (card: EntityId) => {
@@ -165,10 +172,22 @@ export function ChatSidePanel({
   const all = usePanelTabs(content.view, tab)
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
+  // While a portrait is shown, a character's chip shows theirs too: the strip's portraits switch it.
+  const portraits = usePortraitViewer()
+  const pick = (value: PanelTab) => {
+    const avatar = cast.find((t) => t.value === value)?.avatar
+    if (portraits?.shown && avatar && portraits.shown.id !== avatar.id) portraits.show(avatar)
+    onTab(value)
+  }
   const nav = (
     <div className="flex flex-col gap-1 border-b border-border px-2 pt-1.5">
       <ToolTabs
-        tabs={tools.map((t) => ({ value: t.value, label: t.label, icon: t.descriptor.icon }))}
+        tabs={tools.map((t) => ({
+          value: t.value,
+          label: t.label,
+          icon: t.descriptor.icon,
+          description: t.descriptor.description
+        }))}
         value={tab}
         onValueChange={onTab}
         label="Chat panel"
@@ -184,7 +203,7 @@ export function ChatSidePanel({
           note: t.note
         }))}
         value={tab}
-        onValueChange={onTab}
+        onValueChange={pick}
         label="Characters"
       />
       {cast.length === 0 && <div className="h-0.5" />}
@@ -199,17 +218,20 @@ export function ChatSidePanel({
           role="tabpanel"
           aria-label={t.label}
           hidden={t.value !== tab}
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
+          className="@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
         >
-          <PanelContent
-            key={t.descriptor.id}
-            descriptor={t.descriptor}
-            tab={t.value}
-            active={t.value === tab}
-            notesFocus={notesFocus}
-            onNotes={notes}
-            {...content}
-          />
+          {/* A readable width for forms and prose, unless the tab lays itself out in columns. */}
+          <div className={t.descriptor.width === "full" ? "" : "max-w-[52rem]"}>
+            <PanelContent
+              key={t.descriptor.id}
+              descriptor={t.descriptor}
+              tab={t.value}
+              active={t.value === tab}
+              notesFocus={notesFocus}
+              onNotes={notes}
+              {...content}
+            />
+          </div>
         </div>
       )
   )
@@ -225,9 +247,8 @@ export function ChatSidePanel({
   return (
     <aside
       aria-label="Chat panel"
-      ref={ref}
-      style={{ width, minWidth: 260, maxWidth: "calc(100% - 426px)" }}
-      className="relative flex min-w-0 shrink-0 flex-col border-l border-border bg-surface"
+      style={{ width }}
+      className="relative flex shrink-0 flex-col border-l border-border bg-surface"
     >
       <ResizeHandle
         label="Resize chat panel"

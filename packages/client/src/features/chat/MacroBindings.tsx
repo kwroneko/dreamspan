@@ -64,7 +64,12 @@ function Binding({
         <Input value={text} onValueChange={setText} disabled={pending} />
       </Field>
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" pending={pending} disabled={pending || (pinned && text === resolved)}>
+        <Button
+          type="submit"
+          pending={pending}
+          disabled={pending || (pinned && text === resolved)}
+          hint="Fixes the name from the latest message on, on this branch, whoever is in the chat."
+        >
           {pinned ? "Keep this name instead" : "Keep this name"}
         </Button>
         {pinned && (

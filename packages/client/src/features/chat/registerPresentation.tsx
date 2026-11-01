@@ -8,10 +8,10 @@ import {
   chatComposer,
   chatComposerNotes,
   chatCardActions,
-  chatNoteActions,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
+  chatColumns,
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
@@ -25,10 +25,10 @@ import {
   versionFailureActions
 } from "./presentation.tsx"
 import { LcmBoundary } from "./LcmBoundary.tsx"
-import { AuthorNoteAction } from "./AuthorNoteAction.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
 import { PortraitProvider } from "../../ui/Portrait.tsx"
+import { PortraitColumn } from "./PortraitColumn.tsx"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
@@ -114,7 +114,6 @@ export const registerPresentation = () => [
     )
   }),
   chatCardActions.register({ id: "card.edit", order: 10, component: EditChatCard }),
-  chatNoteActions.register({ id: "note.author-note", order: 10, component: AuthorNoteAction }),
   chatCardActions.register({ id: "card.fork-for-chat", order: 20, component: ForkChatCard }),
   chatCardActions.register({ id: "card.choose-version", order: 30, component: ChooseChatCard }),
   // This chat leads with what a person touches; what few need comes after, collapsed.
@@ -166,8 +165,9 @@ export const registerPresentation = () => [
   chatSurfaceProviders.register({
     id: "chat.portraits",
     order: 30,
-    component: ({ children }) => <PortraitProvider>{children}</PortraitProvider>
+    component: ({ wide, children }) => <PortraitProvider inline={wide}>{children}</PortraitProvider>
   }),
+  chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),
   chatOverlays.register({ id: "chat.preset-overlay", order: 10, component: () => <PresetOverlayHost /> }),
   ...registerImages()
 ]

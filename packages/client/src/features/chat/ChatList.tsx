@@ -16,6 +16,7 @@ import { AvatarStack } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Spinner } from "../../ui/Spinner.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useUnseen } from "../notices.tsx"
 import { type ShellFork, useShellForks } from "../characters/shellData.tsx"
@@ -94,7 +95,12 @@ function Row({
         }`}
       >
         <AvatarStack
-          faces={characters.map((card) => ({ id: card.entityId, name: card.name, mediaId: card.avatarMediaId }))}
+          faces={characters.map((card) => ({
+            id: card.entityId,
+            name: card.name,
+            mediaId: card.avatarMediaId,
+            crop: card.avatarCrop
+          }))}
         />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-baseline gap-2">
@@ -146,15 +152,16 @@ function Row({
           <PinButton fork={fork} />
         </span>
       )}
-      <button
-        type="button"
-        onClick={onDelete}
-        aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
-        title="Delete (to the bin)"
-        className="absolute top-2 right-2 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
-      >
-        Delete
-      </button>
+      <Tooltip label="Moves the chat, with all its branches, to the bin, with Undo.">
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
+          className="absolute top-2 right-2 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
+        >
+          Delete
+        </button>
+      </Tooltip>
     </li>
   )
 }

@@ -7,10 +7,8 @@ import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
-import { Avatar as CardAvatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Field, Fieldset, Input } from "../../ui/Field.tsx"
-import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, TextField } from "./controls.tsx"
@@ -18,38 +16,7 @@ import { AddNoteMenu, NoteEditor, NoteRow, SharedNotePicker } from "./notes.tsx"
 import { type EditorStore, useEditorState, useValue } from "./store.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
-
-function Avatar({ store, onUpload }: { store: EditorStore; onUpload: (file: File) => void }) {
-  const name = useValue<string>(store, ["name"]) ?? "Card"
-  const media = useValue<string | null>(store, ["avatar_media_id"])
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      {media ? (
-        <CardAvatar
-          alt="The card's avatar"
-          id="editor"
-          name={name}
-          mediaId={media}
-          size="2xl"
-          shape="square"
-          className="rounded-lg border border-border"
-        />
-      ) : (
-        <div className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-          No avatar
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <FileDrop
-          label="Choose an avatar, or drop it here"
-          description="PNG, JPEG, GIF or WebP, up to 16 MB. It's saved as a revision of its own."
-          accept="image/png,image/jpeg,image/gif,image/webp"
-          onFiles={(files) => files[0] && onUpload(files[0])}
-        />
-      </div>
-    </div>
-  )
-}
+import { EditorPortrait } from "./PortraitControls.tsx"
 
 function Greetings({ store }: { store: EditorStore }) {
   const path = ["alternate_greetings"]
@@ -218,15 +185,7 @@ function Notes({ store, call }: { store: EditorStore; call: Caller }) {
   )
 }
 
-export function CardEditor({
-  store,
-  call,
-  onUpload
-}: {
-  store: EditorStore
-  call: Caller
-  onUpload: (file: File) => void
-}) {
+export function CardEditor({ store, call }: { store: EditorStore; call: Caller }) {
   return (
     <>
       <Card>
@@ -239,7 +198,7 @@ export function CardEditor({
             label="Name the model sees (leave empty to use the display name)"
           />
           <TextField store={store} path={["character_version"]} label="Version (shown as subtitle)" />
-          <Avatar store={store} onUpload={onUpload} />
+          <EditorPortrait store={store} call={call} />
         </div>
       </Card>
       <Card>

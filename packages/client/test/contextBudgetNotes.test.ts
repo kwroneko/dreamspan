@@ -88,7 +88,7 @@ it("a budget refusal sits in the composer's column, names its sources and offers
   const html = renderToStaticMarkup(
     createElement(SlotOutlet<{ view: ChatView }>, { slot: chatComposerNotes, props: { view } })
   )
-  expect(html).toContain("mx-auto w-full max-w-3xl")
+  expect(html).toContain("chat-column")
   // A calm notice in the warning tone, not an error.
   expect(html).toContain("The next reply doesn&#x27;t fit the context size")
   expect(html).toContain("border-warning")
