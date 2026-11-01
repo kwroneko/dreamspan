@@ -12,7 +12,7 @@ import { ResizeHandle } from "../../ui/ResizeHandle.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 
 /** What the messages keep beside it. */
-export const CHAT_MIN = 440
+const CHAT_MIN = 440
 const MIN = 200
 /** Room around the image: its box's padding and the column's border. */
 const GUTTER = 17

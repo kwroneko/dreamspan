@@ -15,7 +15,7 @@ export interface NaturalSize {
 }
 
 /** The scale that shows all of an image in a box. */
-export const fitScale = (natural: NaturalSize, box: NaturalSize) =>
+const fitScale = (natural: NaturalSize, box: NaturalSize) =>
   Math.min(box.width / natural.width, box.height / natural.height, MAX_UPSCALE)
 
 export function ImageViewer({
