@@ -11,6 +11,10 @@ export interface CodeEditorProps {
   fullHeight?: boolean | undefined
   /** Focus it when it opens, with the caret at the end of the text, in view. */
   autoFocus?: boolean | undefined
+  /** With `autoFocus`, the caret's offset in the text instead of its end. */
+  caret?: number | undefined
+  /** The snippet editor's own text: its text actions don't offer sending it to a snippet. */
+  source?: "snippet" | undefined
   /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
   quietMarkers?: boolean | undefined
   rows?: number | undefined

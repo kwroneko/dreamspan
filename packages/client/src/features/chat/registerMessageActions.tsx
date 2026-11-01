@@ -103,23 +103,17 @@ export const registerMessageActions = () => [
     toolbar: (context) => (
       <IconButton
         label="Edit"
-        hint="Edit (ArrowUp in the empty composer; Ctrl+ArrowUp for your last message)"
+        hint="Edit (or double-click the message; ArrowUp in the empty composer, Ctrl+ArrowUp for your last message)"
         icon="edit"
         onClick={() => void invokeMessageAction("message.edit", context, "button")}
       />
     )
   }),
+  // A generated message's › past its last version generates another (VersionControls.tsx), so
+  // the toolbar has no Regenerate; a turn the user wrote has Generate a version in More actions.
   messageActions.register({
     id: "message.regenerate",
     order: 20,
-    toolbar: ({ generated, session, entry, report }) =>
-      generated ? (
-        <IconButton
-          label="Regenerate"
-          icon="regenerate"
-          onClick={async () => report(await session.regenerate(entry))}
-        />
-      ) : null,
     menu: ({ generated, session, entry, report }) =>
       !generated ? (
         <MenuItem icon="regenerate" onClick={async () => report(await session.regenerate(entry))}>

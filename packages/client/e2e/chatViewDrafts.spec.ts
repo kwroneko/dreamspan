@@ -382,7 +382,9 @@ test("copy text copies the text already shown while a version is streaming", asy
   expect(words(await reply.locator(".markdown").innerText())).toContain(words(copied).split(" ").slice(0, 4).join(" "))
 })
 
-test("a reply written by hand keeps its speaker and Regenerate after the original is deleted", async ({ page }) => {
+test("a reply written by hand keeps its speaker and its generating › after the original is deleted", async ({
+  page
+}) => {
   const chat = await create()
   await open(page, chat.id)
   const row = await stoppedReply(page, "First turn.")
@@ -394,8 +396,7 @@ test("a reply written by hand keeps its speaker and Regenerate after the origina
   await row.getByRole("button", { name: "Delete version", exact: true }).click()
   await expect(row.locator(".markdown")).toHaveText("My assembled reply.")
   await expect(row).toHaveAttribute("aria-label", "Reply")
-  await showActions(row)
-  await expect(row.getByRole("button", { name: "Regenerate", exact: true })).toBeVisible()
+  await expect(row.getByRole("button", { name: "Generate another version", exact: true })).toBeVisible()
 })
 
 test("on a phone, a tap on a long message out of the context shows the start of why", async ({ page }) => {

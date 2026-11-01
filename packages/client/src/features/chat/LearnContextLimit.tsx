@@ -15,7 +15,8 @@ export function LearnContextLimit({ version }: { version: Version }) {
     <div className="mt-2 flex flex-col gap-2 text-text">
       {saved ? (
         <p role="status">
-          Saved: the model&rsquo;s context size is {limit.tokens.toLocaleString()} tokens. Regenerate to try again.
+          Saved: the model&rsquo;s context size is {limit.tokens.toLocaleString()} tokens. › on the reply generates
+          another version to try again.
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
