@@ -10,6 +10,7 @@
 import { avatarCropField } from "@rp/shared/media.ts"
 import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
 import { modelName } from "@rp/shared/cardNames.ts"
+import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork, type ShellForksView, type ShellSection } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -172,7 +173,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           -- One parse of the document for the strings (a missing or non-string value reads as empty
           -- below), and the lorebook's type and size without returning its entries.
           json_extract(rev.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
-            '$.character_book.name', '$.avatar_crop') AS fields,
+            '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness') AS fields,
           json_type(rev.doc_json, '$.character_book') = 'object' AS book,
           CASE WHEN json_type(rev.doc_json, '$.character_book.entries') = 'array'
             THEN json_array_length(rev.doc_json, '$.character_book.entries') ELSE 0 END AS book_entries,
@@ -184,7 +185,9 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
       const text = (value: unknown) => (typeof value === "string" ? value : "")
       const metadata = rows.map((row) => {
-        const [name, nickname, subtitle, avatar, bookName, crop] = JSON.parse(row.fields) as Array<unknown>
+        const [name, nickname, subtitle, avatar, bookName, crop, talkativeness] = JSON.parse(
+          row.fields
+        ) as Array<unknown>
         return {
           ...row,
           name: text(name),
@@ -192,7 +195,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           subtitle: text(subtitle),
           avatar: typeof avatar === "string" ? avatar : null,
           crop: avatarCropField(avatar, crop),
-          bookName: text(bookName).trim()
+          bookName: text(bookName).trim(),
+          talkativeness: talkativenessOf(talkativeness)
         }
       })
       const byCard = new Map(
@@ -207,6 +211,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               subtitle: m.subtitle,
               persona: m.persona === 1,
               inBin: false,
+              talkativeness: m.talkativeness,
               lorebook: m.book === 1,
               ...(m.book === 1 && m.bookName !== "" ? { lorebookName: m.bookName } : {}),
               ...(m.book === 1 ? { lorebookEntries: m.book_entries ?? 0 } : {}),

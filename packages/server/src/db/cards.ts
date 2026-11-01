@@ -6,6 +6,7 @@ import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { cardNames } from "@rp/shared/cardNames.ts"
 import { avatarCropField } from "@rp/shared/media.ts"
+import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
 // selected card revision, and whether it is a persona. Shared by
 // the readers and the writer (chatSetupReads.ts, chatSetupWrites.ts).
@@ -40,6 +41,14 @@ export interface CardText {
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 
+/** The card's `extensions.talkativeness`, defaulted and clamped (ST's natural order). */
+const talkativenessFrom = (doc: Record<string, unknown>) =>
+  talkativenessOf(
+    typeof doc.extensions === "object" && doc.extensions !== null
+      ? (doc.extensions as Record<string, unknown>).talkativeness
+      : undefined
+  )
+
 const parse = (row: CardRow): CardText => {
   let doc: Record<string, unknown> = {}
   try {
@@ -68,6 +77,7 @@ const parse = (row: CardRow): CardText => {
       subtitle: names.version,
       persona: row.persona === 1,
       inBin: row.in_bin === 1,
+      talkativeness: talkativenessFrom(doc),
       lorebook: book !== null,
       ...(bookName === "" ? {} : { lorebookName: bookName }),
       ...(book === null ? {} : { lorebookEntries: Array.isArray(book.entries) ? book.entries.length : 0 }),
@@ -126,6 +136,7 @@ export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId:
         subtitle: names.version,
         avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
         ...avatarCropField(doc.avatar_media_id, doc.avatar_crop),
+        talkativeness: talkativenessFrom(doc),
         lorebook: typeof doc.character_book === "object" && doc.character_book !== null
       })
     })

@@ -355,6 +355,8 @@ export class CastCard extends Schema.Class<CastCard>("CastCard")({
   persona: Schema.Boolean,
   /** In the recycle bin: still named where a chat refers to it, but not offered. */
   inBin: Schema.Boolean,
+  /** Its chance 0..1 to reply in a group's automatic pick (`extensions.talkativeness`; 0.5 when unset). */
+  talkativeness: Schema.Number,
   /** It carries its own lorebook (`character_book`), which a chat can turn off. */
   lorebook: Schema.Boolean,
   /** That lorebook's own name (`character_book.name`), when it has one. */
