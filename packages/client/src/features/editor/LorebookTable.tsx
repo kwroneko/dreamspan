@@ -307,25 +307,24 @@ const EntryRow = memo(function EntryRow({
       </button>
     </Tooltip>
   )
+  // Explained on hover and focus only: a phone would otherwise repeat it under every entry.
   const enabled = (
-    <Switch
-      checked={entry.enabled}
-      onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}
-      hint={EXPLAIN.enabled}
-    >
-      <span className="sr-only">{`${title} enabled`}</span>
-    </Switch>
+    <Tooltip label={EXPLAIN.enabled}>
+      <span className="inline-flex">
+        <Switch checked={entry.enabled} onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}>
+          <span className="sr-only">{`${title} enabled`}</span>
+        </Switch>
+      </span>
+    </Tooltip>
   )
   const select = selecting && (
-    <span className="pt-1.5">
-      <Checkbox
-        checked={selected}
-        onCheckedChange={(next) => onSelect(uid, next)}
-        hint="Selected entries change together: Change for selected…"
-      >
-        <span className="sr-only">{`Select ${title}`}</span>
-      </Checkbox>
-    </span>
+    <Tooltip label="Selected entries change together: Change for selected…">
+      <span className="inline-flex pt-1.5">
+        <Checkbox checked={selected} onCheckedChange={(next) => onSelect(uid, next)}>
+          <span className="sr-only">{`Select ${title}`}</span>
+        </Checkbox>
+      </span>
+    </Tooltip>
   )
   const titleCell = (
     <TitleCell
@@ -656,7 +655,7 @@ export function LorebookTable({
   const dialogEntry = dialog ? (store.value(entryPath(root, dialog.uid)) as LorebookEntry | undefined) : undefined
   const filtered = query.trim() !== "" || enabled !== "all"
   const live = book.entries.filter((entry) => selected.has(entry.uid)).map((entry) => entry.uid)
-  const small = "h-8! px-2.5!"
+  const small = panel ? "h-8! px-2!" : "h-8! px-2.5!"
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -707,7 +706,7 @@ export function LorebookTable({
             ]}
           />
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted">Sort by</span>
+            <span className={panel ? "sr-only" : "text-sm text-muted"}>Sort by</span>
             <div className={panel ? "w-36" : "w-44"}>
               <Select
                 ariaLabel="Sort entries by"
@@ -730,7 +729,11 @@ export function LorebookTable({
             </p>
           )}
         </div>
-        <div role="toolbar" aria-label="All entries" className="flex flex-wrap items-center gap-1.5">
+        <div
+          role="toolbar"
+          aria-label="All entries"
+          className={`flex flex-wrap items-center ${panel ? "gap-0.5" : "gap-1.5"}`}
+        >
           <Button
             variant="ghost"
             className={small}
@@ -749,7 +752,7 @@ export function LorebookTable({
           >
             Collapse all
           </Button>
-          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />
+          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
           <Button
             variant="ghost"
             className={small}
@@ -770,7 +773,7 @@ export function LorebookTable({
           >
             Disable all
           </Button>
-          <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />
+          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
           <Button
             variant="ghost"
             className={small}

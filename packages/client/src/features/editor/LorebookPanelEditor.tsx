@@ -122,14 +122,14 @@ export function LorebookPanelEditor({
             tools={
               <Button
                 variant="ghost"
-                className="h-8! px-2.5!"
+                className="h-8! w-8! px-0!"
+                aria-label="Search and replace"
                 aria-expanded={searching}
                 aria-controls="panel-lore-search"
                 hint="Find and replace in the entries' text, their keys, or anywhere in the book."
                 onClick={() => setSearching(!searching)}
               >
                 <Icon name="search" />
-                Replace
               </Button>
             }
           />

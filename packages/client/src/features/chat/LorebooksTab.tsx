@@ -9,13 +9,14 @@ import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { ActionMenu, type ActionMenuItem } from "../../ui/Menu.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { inlineExplanationClass } from "../../ui/Explanation.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { CARD_LOREBOOK_FOCUS } from "../editor/cardSections.ts"
 import { useCardRefs, useLibraryLorebooks } from "../editor/libraryLorebooks.ts"
@@ -128,11 +129,14 @@ function Book({
       className={`flex items-start gap-1 rounded-md px-1 py-1.5 ${selected ? "bg-surface-raised ring-1 ring-accent/50" : ""}`}
       data-selected={selected || undefined}
     >
-      <span className="pt-1.5 pl-1">
-        <Switch checked={row.on} onCheckedChange={onSwitch} hint={shown.switchHint}>
-          <span className="sr-only">{`Use ${shown.name}`}</span>
-        </Switch>
-      </span>
+      {/* Its explanation on hover and focus; on a phone it's under the book's name. */}
+      <Tooltip label={shown.switchHint}>
+        <span className="shrink-0 pt-1.5 pl-1">
+          <Switch checked={row.on} onCheckedChange={onSwitch}>
+            <span className="sr-only">{shown.name}</span>
+          </Switch>
+        </span>
+      </Tooltip>
       <div className="min-w-0 flex-1">
         <Tooltip
           label={
@@ -166,6 +170,9 @@ function Book({
             </button>
           </Tooltip>
         )}
+        <p aria-hidden="true" className={`hidden px-1.5 text-xs text-muted ${inlineExplanationClass}`}>
+          {shown.switchHint}
+        </p>
       </div>
       {shown.menu.length > 0 ? (
         <ActionMenu label={`More for ${shown.name}`} trigger={<Icon name="more" />} items={shown.menu} />
@@ -313,6 +320,12 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
 
   const chosen = rows.find((row) => row.key === selected)
   const chosenShown = chosen ? shownOf(chosen) : null
+  // A book picked on a phone opens below the fold: its name is brought into view, the list
+  // staying put when it already shows.
+  const opened = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selected) opened.current?.scrollIntoView({ block: "nearest" })
+  }, [selected])
   const openLarge = (shown: Shown) => {
     if (!shown.edit) return
     if (workspace) workspace.open(shown.edit.ref, shown.focus)
@@ -397,7 +410,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
       </p>
 
       {chosen && chosenShown?.edit && workspace && (
-        <div className="border-t border-border pt-4">
+        <div ref={opened} className="scroll-mt-2 border-t border-border pt-4">
           <LorebookPanelEditor
             key={chosen.key}
             store={workspace.store(chosenShown.edit.ref)}
