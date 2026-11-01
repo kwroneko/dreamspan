@@ -138,7 +138,9 @@ const scroller = (panel: Locator) => panel
 const noOverflow = async (page: Page) =>
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
 
-test.setTimeout(120_000)
+// Each test makes its own chat and 30-prompt preset and walks many steps: 40-90 s alone at a
+// load of 60-140 on the 48-core host.
+test.setTimeout(180_000)
 
 for (const width of [1440, 390])
   for (const scheme of ["light", "dark"] as const)
