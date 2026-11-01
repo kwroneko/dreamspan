@@ -38,7 +38,7 @@ const loaded = <A,>(result: CallResult<A>): Loaded<A> =>
  * from any device, past its revisions; picking one puts it in the box as the newest state.
  * Shown once the field was typed into. The box's own Ctrl+Z is the everyday undo.
  */
-export function FieldEditHistory({ store, field, label }: { store: EditorStore; field: string; label: string }) {
+function FieldEditHistory({ store, field, label }: { store: EditorStore; field: string; label: string }) {
   const has = useHasHistory(store, field)
   const load = useCallback(async (before?: number) => loaded(await store.history(field, 50, before)), [store, field])
   const read = useCallback(async (seq: number) => loaded(await store.stateText(field, seq)), [store, field])
