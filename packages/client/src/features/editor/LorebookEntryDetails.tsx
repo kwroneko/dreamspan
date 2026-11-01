@@ -344,7 +344,12 @@ export function EntryDetails({
               description="Its text doesn't trigger other entries."
             />
             <DelayUntilRecursion store={store} path={[...path, "delay_until_recursion"]} />
-            <SwitchField store={store} path={[...path, "ignore_budget"]} label="Ignore the token budget" />
+            <SwitchField
+              store={store}
+              path={[...path, "ignore_budget"]}
+              label="Ignore the token budget"
+              description="Still included once the lorebook budget (a quarter of the context, less the reply's room) or this book's own is used up; its text still counts toward them. With entries below the history it still has to fit the room kept for them."
+            />
             <SwitchField
               store={store}
               path={[...path, "use_probability"]}
@@ -389,7 +394,12 @@ export function EntryDetails({
             </div>
             <CharacterFilter store={store} path={[...path, "character_filter"]} />
             <TextField store={store} path={[...path, "automation_id"]} label="Automation ID" />
-            <SwitchField store={store} path={[...path, "add_memo"]} label="Add the title as a memo" />
+            <SwitchField
+              store={store}
+              path={[...path, "add_memo"]}
+              label="Add the title as a memo"
+              description="SillyTavern's flag, which its imports set when an entry has a title. Nothing here reads it and it changes nothing sent to the model; it's kept for exports."
+            />
             {card && (
               <>
                 <TextField store={store} path={[...path, "name"]} label="Name (card books)" />

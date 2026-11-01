@@ -391,10 +391,18 @@ function Section({
             <Field label={<span className="sr-only">Sort cards</span>} className="w-36 shrink-0">
               <Select<Sort>
                 items={[
-                  { value: "used", label: "Last used" },
-                  { value: "name", label: "Name" },
-                  { value: "chats", label: "Most chats" },
-                  { value: "changed", label: "Recently changed" }
+                  {
+                    value: "used",
+                    label: "Last used",
+                    description: "By the last message the character itself wrote, in any chat; never used come last"
+                  },
+                  { value: "name", label: "Name", description: "By name" },
+                  { value: "chats", label: "Most chats", description: "By how many chats it's in" },
+                  {
+                    value: "changed",
+                    label: "Recently changed",
+                    description: "By when the card last changed: saved, imported, updated or renamed"
+                  }
                 ]}
                 value={prefs.sort}
                 onValueChange={(sort) => setPrefs({ sort })}
