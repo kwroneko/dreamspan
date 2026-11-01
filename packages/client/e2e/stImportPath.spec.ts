@@ -1,7 +1,7 @@
 // Importing an ST data folder by its path (ARCHITECTURE.md §13): the folder is on the
 // machine the app runs on, so the page names it and the app reads it from disk. Every file
 // here is made up.
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
@@ -86,4 +86,29 @@ test("import an ST folder by browsing to it or typing its path", async ({ page }
   await page.goto(`${server().url}/chats`)
   await expect(page.getByRole("link", { name: "Bob - bridge" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Bob - river" })).toBeVisible()
+})
+
+test("chats holding only a greeting get their own column, so each row adds up", async ({ page }) => {
+  const dir = mkdtempSync(join(root, "greeting-"))
+  const st = writeStFolder(dir, ["Bob - meadow"])
+  // ST's chat made when the card was opened: the header and Bob's greeting, no reply.
+  writeFileSync(
+    join(st, "data/default-user/chats/Bob/Bob - opened.jsonl"),
+    [
+      { chat_metadata: {}, user_name: "unused", character_name: "unused" },
+      { name: "Bob", is_user: false, send_date: "2025-01-01T10:00:00.000Z", mes: "Bob waves." }
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n")
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/import/st`)
+  await page.getByLabel("Folder path").fill(join(st, "data"))
+  await page.getByRole("button", { name: "Look in this folder" }).click()
+  const preview = page.getByRole("table", { name: "What's in the folder" })
+  await expect(preview.getByRole("columnheader", { name: "Only a greeting" })).toBeVisible()
+  // In the folder, new, already here, only a greeting. (The file's first test imported Bob's card,
+  // not these chats.)
+  await expect(preview.getByRole("row", { name: /^Chats/ })).toHaveText(/Chats\s*2\s*1\s*0\s*1/)
+  await expect(page.getByText("1 chat holds only a greeting", { exact: false })).toBeVisible()
 })

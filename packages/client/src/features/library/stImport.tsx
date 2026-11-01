@@ -646,7 +646,8 @@ const cell = "px-2 py-1.5 text-right tabular-nums"
 /**
  * The folder by kind: how many files, how many are new, how many earlier imports hold. A
  * folder named by its path (`folder`) is read too: files an earlier import holds under
- * another name, and chats holding only a greeting, which no import takes.
+ * another name, and chats holding only a greeting, which no import takes. Those get their own
+ * column when there are any, so each row's columns add up to its files.
  */
 function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; prefix: string } | null }) {
   const atom = useMemo(
@@ -699,6 +700,11 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
             <th scope="col" className={`${cell} font-medium`}>
               Already here
             </th>
+            {skipped > 0 && (
+              <th scope="col" className={`${cell} font-medium`}>
+                Only a greeting
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -710,7 +716,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
               <td className={cell}>{row.files}</td>
               {row.kind === "settings" || row.kind === "group" ? (
                 // Not kept as entries: read for what they say about the rest.
-                <td colSpan={2} className="px-2 py-1.5 text-right text-muted">
+                <td colSpan={skipped > 0 ? 3 : 2} className="px-2 py-1.5 text-right text-muted">
                   read on every import
                 </td>
               ) : (
@@ -721,6 +727,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
                     {pending ?? row.files - row.known - row.skipped}
                   </td>
                   <td className={`${cell} text-muted`}>{pending ?? row.known}</td>
+                  {skipped > 0 && <td className={`${cell} text-muted`}>{row.skipped}</td>}
                 </>
               )}
             </tr>
@@ -744,7 +751,7 @@ function FolderPreview({ plan, folder }: { plan: Plan; folder: { root: string; p
               ? `${fresh} new to import.`
               : `${fresh} new to import. What's already here is read again, and only what changed in it goes in.`}
         {skipped > 0 &&
-          ` ${skipped} ${skipped === 1 ? "chat holds" : "chats hold"} only a greeting, as ST makes one when a card is opened: no import takes ${skipped === 1 ? "it" : "them"}.`}
+          ` ${skipped} ${skipped === 1 ? "chat holds" : "chats hold"} only a greeting, as ST makes one when a card is opened: no import takes ${skipped === 1 ? "it" : "them"}, so they don't count as new.`}
       </p>
     </div>
   )
