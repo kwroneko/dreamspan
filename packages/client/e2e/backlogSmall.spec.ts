@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -43,8 +44,7 @@ for (const width of [1440, 390])
       await expect(main.locator("[data-override]")).toHaveAttribute("data-override", "forbidden")
       const content = `A synthetic instruction at ${width} in ${theme}.`
       await main.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }).fill(content)
-      await page.getByRole("button", { name: "Save (1)", exact: true }).click()
-      await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+      await saveRevision(page)
       await expect(page.getByText("Saved a revision.")).toBeVisible()
       await page.goto(`${server().url}/library/${preset.id}`)
       await expectTextBox(page.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true }), content)

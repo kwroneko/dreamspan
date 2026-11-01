@@ -16,6 +16,7 @@ import {
   isEmptyPatch,
   type Patch
 } from "@rp/shared/drafts.ts"
+import { getAt, isHeldField, parseField } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import type { MessageImages, EntityId } from "@rp/shared/chat.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
@@ -33,6 +34,7 @@ interface DraftRow {
   readonly images_json: string | null
   readonly status: Draft["status"]
   readonly base_revision: string | null
+  readonly committed_revision: string | null
   readonly row_version: number
   readonly session: number
   readonly text_version: number
@@ -56,11 +58,31 @@ interface Base {
   readonly session: number | null
 }
 
+/**
+ * A library field's draft keeps its edit history across revisions (owner, 2026-11-01): a save
+ * or a generation's checkpoint ends its session but keeps its text and every state, so the
+ * field's edit history runs on through them. Other drafts' histories end with their session.
+ */
+const keepsHistory = (row: { readonly target_kind: DraftKey["targetKind"] }) => row.target_kind === "entity_field"
+
+/** Settings and the held structural changes are plain values: their JSON never goes to the bin. */
+const toBin = (row: { readonly target_kind: DraftKey["targetKind"]; readonly field: string }) =>
+  !(row.target_kind === "entity_field" && (row.field.startsWith("=") || isHeldField(row.field)))
+
+/** A field's value in a document, as its draft holds it: text, or a value's JSON. */
+export const fieldContent = (doc: unknown, field: string) => {
+  const parsed = parseField(field)
+  if (parsed === null) return null
+  const value = getAt(doc as Record<string, unknown>, parsed.path)
+  if (parsed.kind === "value") return JSON.stringify(value) ?? "undefined"
+  return typeof value === "string" ? value : ""
+}
+
 interface EntryRow {
   readonly seq: number
   readonly images_before_json: string | null
   readonly images_after_json: string | null
-  readonly kind: "edit" | "restore"
+  readonly kind: "edit" | "restore" | "revision"
   readonly first_at: number
   readonly at: number
   readonly start: number
@@ -223,6 +245,12 @@ export const makeDraftStore = (
       WHERE d.user_id = ${userId} AND d.target_kind = ${key.targetKind} AND d.target_id = ${key.targetId}
         AND d.field = ${key.field}`.pipe(Effect.map(([row]) => row ?? null))
 
+  /** A field's content in a revision, as its draft would hold it. */
+  const revisionContent = (revisionId: string, field: string) =>
+    sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${revisionId}`.pipe(
+      Effect.map(([row]) => (row ? fieldContent(JSON.parse(row.doc_json), field) : null))
+    )
+
   const byId = (id: string) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -289,7 +317,7 @@ export const makeDraftStore = (
     })
 
   /** The restorable states, newest first, with what changed to reach each one. */
-  const history = (draft: DraftRow, limit: number) =>
+  const history = (draft: DraftRow, limit: number, before?: number) =>
     Effect.map(entries(draft.id), (newestFirst) => {
       const steps = walkBack(draft.content, newestFirst)
       const oldest = steps.at(-1)
@@ -314,7 +342,7 @@ export const makeDraftStore = (
           kind: "initial"
         })
       )
-      return states.slice(0, limit)
+      return (before === undefined ? states : states.filter((state) => state.seq < before)).slice(0, limit)
     })
 
   /**
@@ -323,14 +351,18 @@ export const makeDraftStore = (
    */
   const retain = (draft: DraftRow, content: string) =>
     Effect.gen(function* () {
-      const sizes = yield* sql<{ seq: number; removed: number; inserted: number; displaced: 0 | 1 }>`
-        SELECT seq, length(removed) AS removed, length(inserted) AS inserted, displaced
+      const sizes = yield* sql<{ seq: number; at: number; removed: number; inserted: number; displaced: 0 | 1 }>`
+        SELECT seq, at, length(removed) AS removed, length(inserted) AS inserted, displaced
         FROM draft_history WHERE draft_id = ${draft.id} ORDER BY seq DESC`
       let total = 0
-      const cut = sizes.findIndex((row, index) => {
-        total += row.removed + row.inserted
-        return index >= DraftHistoryPolicy.maxEntries || (index > 0 && total > DraftHistoryPolicy.maxHistoryChars)
-      })
+      // A library field keeps whichever is more: its last 200 states or its last 30 days.
+      const keepFrom = now() - DraftHistoryPolicy.fieldDays * 86_400_000
+      const cut = keepsHistory(draft)
+        ? sizes.findIndex((row, index) => index >= DraftHistoryPolicy.fieldStates && row.at < keepFrom)
+        : sizes.findIndex((row, index) => {
+            total += row.removed + row.inserted
+            return index >= DraftHistoryPolicy.maxEntries || (index > 0 && total > DraftHistoryPolicy.maxHistoryChars)
+          })
       if (cut < 0) return 0
       const cutSeq = sizes[cut]!.seq
       // The text is only loaded if a dropped entry is displaced or may be destructive. SQLite
@@ -343,7 +375,7 @@ export const makeDraftStore = (
         return index >= cut && (row.displaced === 1 || 2 * row.removed > 200 || 2 * row.removed > before / 2)
       })
       let recovered = 0
-      if (mayLoseText) {
+      if (mayLoseText && toBin(draft)) {
         const lost = beforeKept(content, yield* entries(draft.id), (seq) => seq <= cutSeq)
         yield* recover(draft.user_id, toDraft(draft).key, lost, "commit")
         recovered = new Set(lost.filter((text) => text.trim() !== "")).size
@@ -360,7 +392,7 @@ export const makeDraftStore = (
     draft: DraftRow,
     content: string,
     patch: Patch,
-    kind: "edit" | "restore",
+    kind: "edit" | "restore" | "revision",
     now: number,
     displaced: boolean,
     imagesJson: string | null
@@ -426,7 +458,7 @@ export const makeDraftStore = (
   const update = (
     draft: DraftRow,
     content: string,
-    kind: "edit" | "restore",
+    kind: "edit" | "restore" | "revision",
     baseRevision: string | null,
     displaced = false,
     imagesJson: string | null = draft.images_json
@@ -516,6 +548,14 @@ export const makeDraftStore = (
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
       }
+      // A library field's session a save or a checkpoint ended keeps its text: typing on
+      // exactly that text (the tab saw it last) goes on from the revision that holds it.
+      const onCommitted =
+        keepsHistory(draft) &&
+        draft.status === "committed" &&
+        ended &&
+        base !== null &&
+        base.rowVersion >= draft.text_version
       const changed =
         draft.status === "active" &&
         (base === null || ended || options.next === true || draft.text_version > base.rowVersion)
@@ -541,7 +581,13 @@ export const makeDraftStore = (
         draft,
         content,
         "edit",
-        ended ? (options.baseRevision ?? draft.base_revision) : changed ? null : options.baseRevision,
+        onCommitted
+          ? (draft.committed_revision ?? draft.base_revision)
+          : ended
+            ? (options.baseRevision ?? draft.base_revision)
+            : changed
+              ? null
+              : options.baseRevision,
         changed,
         imagesJson
       )
@@ -574,7 +620,34 @@ export const makeDraftStore = (
            WHERE f.id = ${options.key.targetId} AND e.owner_user_id = ${options.userId}`
         if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
       }
-      const existing = yield* find(options.userId, options.key)
+      const fieldBase =
+        options.baseRevision !== null && keepsHistory({ target_kind: options.key.targetKind })
+          ? yield* revisionContent(options.baseRevision, options.key.field)
+          : null
+      let existing = yield* find(options.userId, options.key)
+      // A resting library field typed on a revision whose text it doesn't hold (restored, or
+      // merged in, since): its history first goes to what the box showed, so it's a state.
+      if (
+        existing !== null &&
+        existing.status !== "active" &&
+        fieldBase !== null &&
+        fieldBase !== existing.content &&
+        (options.draftId === null || options.draftId === existing.id) &&
+        options.base?.session === existing.session
+      ) {
+        if (existing.history_length > 0)
+          yield* record(
+            existing,
+            fieldBase,
+            diffPatch(existing.content, fieldBase),
+            "revision",
+            now(),
+            false,
+            existing.images_json
+          )
+        yield* sql`UPDATE drafts SET content = ${fieldBase} WHERE id = ${existing.id}`
+        existing = (yield* byId(existing.id))!
+      }
       if (existing !== null) {
         const typedHere = options.draftId === null || options.draftId === existing.id
         const saved = yield* saveOnto(existing, typedHere ? options.base : null, options.content, {
@@ -585,6 +658,13 @@ export const makeDraftStore = (
         return saved.draft
       }
       yield* options.checkTarget
+      // A library field's first state is the revision's text it was typed on.
+      if (fieldBase !== null && fieldBase !== options.content) {
+        yield* insert(options.userId, options.key, fieldBase, options.baseRevision)
+        const seeded = (yield* find(options.userId, options.key))!
+        yield* update(seeded, options.content, "edit", options.baseRevision)
+        return toDraft((yield* find(options.userId, options.key))!)
+      }
       yield* insert(
         options.userId,
         options.key,
@@ -642,11 +722,27 @@ export const makeDraftStore = (
    * change in the session (hours of typing wiped, then saved), and a discarded draft.
    * `recovered` counts those texts.
    */
-  const end = (draft: DraftRow, outcome: "committed" | "discarded") =>
+  const end = (draft: DraftRow, outcome: "committed" | "discarded", revision: string | null = null) =>
     Effect.gen(function* () {
-      const lost = beforeKept(draft.content, yield* entries(draft.id))
+      // A library field's save or checkpoint keeps its text and its whole history (owner,
+      // 2026-11-01): the session ends, the text it was typed on is now `revision`'s, and
+      // typing on resumes from there. Nothing goes to the bin: every state stays reachable.
+      if (outcome === "committed" && keepsHistory(draft)) {
+        const updatedAt = now()
+        yield* sql`UPDATE drafts SET status = 'committed', row_version = row_version + 1, session = session + 1,
+                     committed_revision = ${revision}, updated_at = ${updatedAt}
+                   WHERE id = ${draft.id}`
+        return { draft: toDraft((yield* byId(draft.id))!), recovered: 0 }
+      }
+      // A library field's history starts at its revision's text, which that revision keeps.
+      const based =
+        keepsHistory(draft) && draft.base_revision !== null
+          ? yield* revisionContent(draft.base_revision, draft.field)
+          : null
+      const lost = beforeKept(draft.content, yield* entries(draft.id)).filter((text) => text !== based)
       if (outcome === "discarded") lost.unshift(draft.content)
-      yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
+      if (toBin(draft))
+        yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
       const updatedAt = now()
       yield* sql`UPDATE drafts SET status = ${outcome}, content = '', images_json = NULL, row_version = row_version + 1,
@@ -664,9 +760,9 @@ export const makeDraftStore = (
           updated_at: updatedAt,
           history_length: 0
         },
-        new Set(lost.filter((text) => text.trim() !== "")).size
+        toBin(draft) ? new Set(lost.filter((text) => text.trim() !== "")).size : 0
       )
-      return { draft: ended, recovered: new Set(lost.filter((text) => text.trim() !== "")).size }
+      return { draft: ended, recovered: toBin(draft) ? new Set(lost.filter((text) => text.trim() !== "")).size : 0 }
     })
 
   const clear = (
@@ -894,7 +990,18 @@ export const makeDraftStore = (
       return yield* restoreRow(draft, seq, expectedRowVersion, draftId, content)
     })
 
+  /**
+   * A library field's draft moved to `content` (a restored revision's text, appended as a
+   * restore, so the live text before it stays a state) and its session ended on `revision`.
+   */
+  const settleOn = (draft: DraftRow, content: string, revision: string) =>
+    Effect.gen(function* () {
+      yield* update(draft, content, "revision", revision)
+      return yield* end((yield* byId(draft.id))!, "committed", revision)
+    })
+
   return {
+    settleOn,
     find,
     checkIdentity,
     findComposer,

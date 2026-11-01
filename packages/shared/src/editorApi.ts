@@ -62,6 +62,8 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
   usedByChats: Schema.Int,
   /** Every draft of this ref's fields, ended ones too: their row versions are needed to start again. */
   drafts: Schema.Array(Draft),
+  /** The head's number along its first-parent line, from 1: "changed since revision N". */
+  revisionNumber: Schema.Int,
   /** Non-card upstream and variants, this one included; empty for cards. */
   variants: Schema.Array(LibraryRef)
 }) {}
@@ -187,9 +189,20 @@ export class EditorApi extends RpcGroup.make(
     success: Draft,
     error: Schema.Union([...Writes])
   }),
+  /** A field's edit history, newest first; `before` pages on to the states older than that seq. */
   Rpc.make("EditorDraftHistory", {
-    payload: { ...DraftField, limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })) },
+    payload: {
+      ...DraftField,
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1000 })),
+      before: Schema.optionalKey(Schema.Int)
+    },
     success: Schema.Array(DraftState),
+    error: Schema.Union([...Errors])
+  }),
+  /** One state's whole text, for the edit history to show. */
+  Rpc.make("EditorDraftState", {
+    payload: { ...DraftField, seq: Schema.Int },
+    success: Schema.String,
     error: Schema.Union([...Errors])
   }),
   /** Moves the draft back to an earlier state; the restore is itself undoable. */
@@ -233,6 +246,25 @@ export class EditorApi extends RpcGroup.make(
   Rpc.make("GetRevision", {
     payload: { refId: RefId, revisionId: RevisionId },
     success: Doc,
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * Every field changed since the last revision back to it, each as a new state of its edit
+   * history (the text there now stays one state back); no revision is written.
+   */
+  Rpc.make("RevertEditorDrafts", {
+    payload: { refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: Schema.Struct({ reverted: Schema.Int }),
+    error: Schema.Union([...Errors])
+  }),
+  /** A revision's message, a label: added, changed or (empty) removed at any time. */
+  Rpc.make("SetRevisionMessage", {
+    payload: {
+      refId: RefId,
+      revisionId: RevisionId,
+      message: Schema.String.check(Schema.isMaxLength(500), Schema.isPattern(/^\P{Cc}*$/u))
+    },
+    success: Schema.Void,
     error: Schema.Union([...Errors])
   }),
   /** A new revision with an earlier one's content: nothing in between is lost. */

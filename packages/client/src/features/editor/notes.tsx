@@ -28,7 +28,7 @@ import { Alert, Badge } from "../../ui/Surface.tsx"
 import { browserEnv } from "./backup.ts"
 import type { Caller } from "./caller.ts"
 import { FieldTools, RecoveredNotice, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
-import { SaveDialog } from "./SaveDialog.tsx"
+import { SaveRevision } from "./SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useValue } from "./store.ts"
 
 /** A card a note's condition can name: the chat's cast, or in the card editor the card itself. */
@@ -422,7 +422,7 @@ function SharedUse({ refId }: { refId: string }) {
           ? "Notes in cards and chats can show it."
           : used === 0
             ? "No note shows it yet. Pick it when adding a note to a card or a chat."
-            : `${used} ${used === 1 ? "note shows" : "notes show"} it: saving changes it in every one.`}
+            : `${used} ${used === 1 ? "note shows" : "notes show"} it: what you change is used in every one.`}
       </p>
     </Alert>
   )
@@ -539,7 +539,6 @@ export function NoteEditor({
 }) {
   const userId = useSession().user.id
   const [store] = useState(() => new EditorStore(noteRef.id, userId, call, browserEnv, chatNote))
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<AppError | null>(null)
   const state = useEditorState(store)
   const link = useValue<EntityId | undefined>(store, ["link"])
@@ -557,17 +556,12 @@ export function NoteEditor({
     if (result.ok) onDeleted?.(result.value)
     else setError(result.error)
   }
-  /** Saving as or unlinking from a shared note takes the saved note: unsaved changes first. */
+  /** Saving as or unlinking from a shared note takes the saved note: its changes are saved first. */
   const relink = async (action: "share" | "unlink") => {
     await store.flush()
     if (store.state().dirty > 0) {
-      setError({
-        tag: "Unsaved",
-        message: "Save or discard the note's changes first.",
-        problems: [],
-        reason: null
-      })
-      return
+      const saved = await store.commit(null)
+      if (!saved.ok) return setError(saved.error)
     }
     const result = await call(
       (client) =>
@@ -596,7 +590,6 @@ export function NoteEditor({
     setError(null)
     onRelinked?.()
   }
-  const dirty = state.dirty > 0
   const shareable = link === undefined
   return (
     <section aria-label={`Note ${noteRef.label}`} className="flex flex-col gap-3 rounded-md border border-border p-3">
@@ -612,9 +605,7 @@ export function NoteEditor({
       />
       <ErrorAlert error={error} />
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" disabled={!dirty} onClick={() => setSaving(true)}>
-          Save the note
-        </Button>
+        <SaveRevision store={store} />
         <Menu
           label="Note actions"
           align="start"
@@ -644,9 +635,7 @@ export function NoteEditor({
             </MenuItem>
           )}
         </Menu>
-        {dirty && <Badge tone="accent">unsaved changes</Badge>}
       </div>
-      {saving && <SaveDialog store={store} onClose={() => setSaving(false)} onSaved={() => setSaving(false)} />}
     </section>
   )
 }

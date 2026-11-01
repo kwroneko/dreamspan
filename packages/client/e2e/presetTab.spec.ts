@@ -1,8 +1,8 @@
 // The side panel's Prompt preset tab (owner, 2026-11-01): every prompt expands in place into its
-// text, its header into its options; handles reorder right in the column; nothing is committed
-// as it's made, and a floating bar says what's unsaved, with Revert and Save. The large editor
-// shares the drafts both ways and opens at a prompt. A made-up card and a made-up 30-prompt
-// preset with unnamed prompts and emoji names.
+// text, its header into its options; handles reorder right in the column. Text, switches and
+// added prompts are live; moving or deleting a prompt waits behind a floating bar that says
+// so, with Revert and Save. The large editor shares the drafts both ways and opens at a
+// prompt. A made-up card and a made-up 30-prompt preset with unnamed prompts and emoji names.
 import { mkdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -10,6 +10,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
+import { revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -164,6 +165,7 @@ for (const width of [1440, 390])
       await expect(panel.getByRole("button", { name: "Expand Unnamed prompt", exact: true })).toBeVisible()
       await expect(panel.locator('[data-prompt="chatHistory"]')).toContainText(/[\d,]+ tokens/)
       await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
+      await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
       await shot("collapsed")
 
       // Expand: the text in the code editor; the header's Options open the prompt's options.
@@ -178,10 +180,23 @@ for (const width of [1440, 390])
       await pacing.click()
       await page.keyboard.press("Control+End")
       await page.keyboard.type(" Slow down for quiet scenes.")
+      // Typed text is live: the state line says so, and no unsaved bar holds it.
       const bar = panel.getByRole("region", { name: "Unsaved changes" })
-      await expect(bar).toContainText("text of 🔥 Pacing")
+      await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+      await expect(bar).toHaveCount(0)
       await block.scrollIntoViewIfNeeded()
       await shot("expanded-options")
+
+      // Keyboard: a focused handle moves its prompt; the move waits behind the bar.
+      await panel.getByRole("button", { name: "Collapse 🔥 Pacing", exact: true }).click()
+      const before = await rowNames(panel)
+      await panel.getByRole("button", { name: "Move 🗺️ Locations", exact: true }).focus()
+      await page.keyboard.press("ArrowUp")
+      await expect.poll(() => rowNames(panel)).not.toEqual(before)
+      const moved = await rowNames(panel)
+      expect(moved.indexOf("synthetic-8")).toBe(before.indexOf("synthetic-8") - 1)
+      await expect(panel.getByRole("button", { name: "Move 🗺️ Locations", exact: true })).toBeFocused()
+      await expect(bar).toContainText("new order")
 
       // The bar stays at the bottom of the panel while the column scrolls.
       for (const to of ["bottom", "middle", "top"] as const) {
@@ -193,17 +208,6 @@ for (const width of [1440, 390])
         expect(box.y + box.height).toBeLessThanOrEqual(pane.y + pane.height + 1)
         if (to === "middle") await shot("unsaved-bar-scrolled")
       }
-
-      // Keyboard: a focused handle moves its prompt.
-      await panel.getByRole("button", { name: "Collapse 🔥 Pacing", exact: true }).click()
-      const before = await rowNames(panel)
-      await panel.getByRole("button", { name: "Move 🗺️ Locations", exact: true }).focus()
-      await page.keyboard.press("ArrowUp")
-      await expect.poll(() => rowNames(panel)).not.toEqual(before)
-      const moved = await rowNames(panel)
-      expect(moved.indexOf("synthetic-8")).toBe(before.indexOf("synthetic-8") - 1)
-      await expect(panel.getByRole("button", { name: "Move 🗺️ Locations", exact: true })).toBeFocused()
-      await expect(bar).toContainText("new order")
 
       // Pointer: drag a handle down past two rows.
       const handle = panel.getByRole("button", { name: "Move Formatting", exact: true })
@@ -253,23 +257,22 @@ for (const width of [1440, 390])
       )
       const unsaved = again.getByRole("region", { name: "Unsaved changes" })
       await expect(unsaved).toContainText("new order")
-      await expect(unsaved).toContainText("text of 🔥 Pacing and 🧭 Agency")
+      await expect(unsaved).not.toContainText("text of")
 
-      // Revert asks first, since it throws away typed text; then everything is as saved.
+      // Revert asks nothing: it puts the prompts back where they were, and the typed text stays.
       await unsaved.getByRole("button", { name: "Revert", exact: true }).click()
-      const confirm = page.getByRole("alertdialog", { name: /^Revert \d+ unsaved changes\?$/ })
-      await expect(confirm).toContainText("text you typed")
-      await confirm.getByRole("button", { name: "Revert them", exact: true }).click()
+      await expect(page.getByRole("alertdialog")).toHaveCount(0)
       await expect(unsaved).toHaveCount(0)
       expect(await rowNames(again)).toEqual(before)
       await expectTextBox(
         again.getByRole("textbox", { name: "Prompt: 🧭 Agency", exact: true }),
-        "Never decide what {{user}} does, says or feels."
+        "Never decide what {{user}} does, says or feels. Not even in a time skip."
       )
+      await expect(revisionStatus(again)).toHaveText(/^Changed since revision \d+$/)
       if (width < 600) await closePanel(page)
     })
 
-test("switches and reorders wait for Save; Revert without typed text doesn't ask", async ({ page }) => {
+test("switches are live; a reorder waits for Save, and Revert puts it back without asking", async ({ page }) => {
   await theme(page, 1440, "light")
   const { chatId, refId } = await setUp(page, "Tab save")
   const panel = await open(page, chatId)
@@ -277,22 +280,30 @@ test("switches and reorders wait for Save; Revert without typed text doesn't ask
   const pacing = panel.getByRole("switch", { name: "Send 🔥 Pacing", exact: true })
   await expect(pacing).toBeChecked()
   await pacing.click()
-  await expect(bar).toContainText("1 switch")
+  await expect(pacing).not.toBeChecked()
+  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+  await expect(bar).toHaveCount(0)
+
+  // A reorder waits; Revert puts it back without asking, and the switch stays as flipped.
+  const before = await rowNames(panel)
+  await panel.getByRole("button", { name: "Move 🎭 Narrator voice", exact: true }).focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(bar).toContainText("new order")
+  await expect(bar).not.toContainText("switch")
   await bar.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(bar).toHaveCount(0)
-  await expect(pacing).toBeChecked()
+  expect(await rowNames(panel)).toEqual(before)
+  await expect(pacing).not.toBeChecked()
 
-  // A reorder and a switch, saved through the rich diff.
-  await pacing.click()
+  // The reorder again, saved from the bar with the switch: no dialog.
   await panel.getByRole("button", { name: "Move 🎭 Narrator voice", exact: true }).focus()
   await page.keyboard.press("ArrowDown")
-  await expect(bar).toContainText("new order · 1 switch")
-  await bar.getByRole("button", { name: /^Save \(/ }).click()
-  const diff = page.getByRole("dialog", { name: /^Save/ })
-  await diff.getByRole("button", { name: "Save revision", exact: true }).click()
-  await expect(diff).toHaveCount(0)
+  await expect(bar).toContainText("new order")
+  await bar.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
   const saved = await admin((api) => api.OpenEditor({ refId: refId as never }))
   const doc = saved.doc as { order: Array<{ identifier: string; enabled: boolean }> }
   const at = (id: string) => doc.order.findIndex((e) => e.identifier === id)
@@ -316,17 +327,23 @@ test("adding and deleting a prompt in the column", async ({ page }) => {
   await panel.getByRole("textbox", { name: "Prompt: 🪶 Style notes", exact: true }).fill("Short sentences.")
   const names = await rowNames(panel)
   expect(names[names.indexOf("synthetic-4") + 1]).not.toMatch(/^synthetic-/)
+  // Adding is live; deleting waits behind the bar, the prompt gone from view at once.
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
-  await expect(bar).toContainText("1 prompt added")
+  // Adding a prompt is live where it was put: nothing is held.
+  await expect(bar).toHaveCount(0)
+  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
   await panel.getByRole("button", { name: "Actions for Banned phrases", exact: true }).click()
   await page.getByRole("menuitem", { name: "Delete the prompt", exact: true }).click()
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(0)
   await expect(bar).toContainText("1 prompt deleted")
+  // Revert brings the deleted prompt back without asking; the added one stays.
   await bar.getByRole("button", { name: "Revert", exact: true }).click()
-  await page.getByRole("button", { name: "Revert them", exact: true }).click()
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(bar).toHaveCount(0)
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(1)
-  await expect(panel.getByText("🪶 Style notes")).toHaveCount(0)
+  // The inserted prompt is live where it was put, after the Revert too.
+  expect(await rowNames(panel)).toEqual(names)
+  await expect(panel.getByRole("textbox", { name: "Prompt: 🪶 Style notes", exact: true })).toBeVisible()
 })
 
 test.describe("touch", () => {
@@ -376,11 +393,11 @@ for (const width of [2560, 1440, 390])
         await noOverflow(page)
         await page.screenshot({ path: join(shots, `large-${what}-${width}-${scheme}.png`) })
       }
-      // The name shows once, in the sticky bar, renamed in place; Revert sits beside Save.
+      // The name shows once, in the sticky bar, renamed in place; Save is there, with nothing to save yet.
       await expect(overlay.getByText(name, { exact: true })).toHaveCount(1)
       await expect(overlay.getByRole("button", { name: `Rename ${name}`, exact: true })).toBeVisible()
       await expect(overlay.getByRole("button", { name: "Rename", exact: true })).toHaveCount(0)
-      await expect(overlay.getByRole("button", { name: "Revert", exact: true })).toBeDisabled()
+      await expect(saveButton(overlay)).toBeDisabled()
       // Options are folded away, so the texts sit close together.
       await expect(overlay.getByRole("textbox", { name: "Prompt: 🔥 Pacing", exact: true })).toBeVisible()
       await expect(overlay.getByText("Generation types")).toHaveCount(0)
@@ -401,12 +418,11 @@ for (const width of [2560, 1440, 390])
       await shot("rename")
       await field.press("Enter")
       await expect(overlay.getByRole("textbox", { name: "Prompt: 🔥 Pacing and rhythm", exact: true })).toBeVisible()
-      await expect(overlay.getByRole("button", { name: "Revert", exact: true })).toBeEnabled()
+      await expect(saveButton(overlay)).toBeEnabled()
       await overlay.getByRole("button", { name: "Show all options", exact: true }).click()
       await expect(overlay.getByText("Generation types").first()).toBeVisible()
       await shot("all-options")
       await overlay.getByRole("button", { name: "Hide all options", exact: true }).click()
-      await overlay.getByRole("button", { name: "Revert", exact: true }).click()
-      await page.getByRole("button", { name: "Revert them", exact: true }).click()
-      await expect(overlay.getByRole("textbox", { name: "Prompt: 🔥 Pacing", exact: true })).toBeVisible()
+      await saveRevision(overlay)
+      await expect(overlay.getByRole("textbox", { name: "Prompt: 🔥 Pacing and rhythm", exact: true })).toBeVisible()
     })

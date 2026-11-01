@@ -608,7 +608,7 @@ export function CardRegexScripts({ store, call }: { store: EditorStore; call: Ca
     <Card>
       <CardHeader
         title="Regex scripts"
-        description="Run on this card's messages, after your global scripts and the preset's. Changes are drafts until you save the card."
+        description="Run on this card's messages, after your global scripts and the preset's. Changes are used as you make them."
       />
       <DocumentRegexScripts store={store} call={call} holder="card" />
     </Card>

@@ -33,6 +33,7 @@ import { readDefaults, readGlobalLorebooks, readGlobalRegex } from "./generation
 import { readCardPromptUse } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
 import type { ReadOps } from "./ops.ts"
+import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
 
 /** How many generating replies' prepared rewrites a worker keeps, and for how long unused. */
@@ -69,7 +70,9 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
               const inspection = yield* inspectionInputs(sql, userId, snapshot, assembler)
               return {
                 snapshot: JSON.stringify(snapshot),
-                generation: JSON.stringify({ ...generationOf(snapshot), inspection })
+                generation: JSON.stringify({ ...generationOf(snapshot), inspection }),
+                used: usedEntries(snapshot),
+                message: (snapshot.sources?.target.depth ?? 0) + 1
               }
             })
           )

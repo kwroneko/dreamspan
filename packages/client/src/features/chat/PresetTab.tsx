@@ -1,8 +1,9 @@
 // The side panel's Prompt preset tab (DESIGN §6.2a; owner, 2026-11-01): the whole preset,
 // editable in the column. The prompt order is the large editor's own document in its "column"
-// layout, sharing the workspace's store, so an edit in either shows in the other. Nothing is
-// committed as it's made: every change, a switch flip included, is a draft until the floating
-// bar's Save (the same Save and Revert as the large editor's toolbar), or goes with Revert.
+// layout, sharing the workspace's store, so an edit in either shows in the other. What's typed
+// and switched is used by the next reply as it's made (live text, owner 2026-11-01), and Save
+// with its message cuts a revision; moving or deleting a prompt is held behind the floating
+// bar's Save and Revert (heldOrder.ts), being easy to do by accident.
 import type { RefId } from "@rp/shared/library.ts"
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
@@ -13,42 +14,15 @@ import { Disclosure } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useCaller } from "../editor/caller.ts"
 import { RecoveredNotice, RestoredNotice } from "../editor/controls.tsx"
-import { describePresetChanges } from "../editor/presetChanges.ts"
 import { PresetSettings } from "../editor/PresetEditor.tsx"
 import { presetEditorWarnings } from "../editor/presetSections.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { PromptDocument } from "../editor/PromptDocument.tsx"
 import { RefName } from "../editor/RefDialogs.tsx"
-import { SaveRevert } from "../editor/SaveRevert.tsx"
-import { type EditorStore, useEditorState, useLeaveGuard, useWorkingDoc } from "../editor/store.ts"
+import { HeldChangesBar } from "../editor/SaveRevert.tsx"
+import { SaveRevision } from "../editor/SaveRevision.tsx"
+import { type EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
 import type { ChatSession, ChatView } from "./session.ts"
-
-/**
- * Says what's unsaved, with Revert and Save, stuck to the bottom of the panel while it scrolls;
- * gone once nothing is unsaved. Its own component, so typing re-renders only it.
- */
-function UnsavedBar({ store }: { store: EditorStore }) {
-  const workspace = usePresetWorkspace()
-  const state = useEditorState(store)
-  const working = useWorkingDoc(store)
-  if (state.dirty === 0) return null
-  const parts = describePresetChanges(store.head, working, store.dirtyFields())
-  return (
-    <div
-      role="region"
-      aria-label="Unsaved changes"
-      className="sticky bottom-0 z-20 mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-accent/40 bg-surface-raised p-2.5 shadow-lg"
-    >
-      <p role="status" className="min-w-0 flex-1 basis-40 text-sm [overflow-wrap:anywhere]">
-        <span className="font-medium">Unsaved:</span>{" "}
-        <span className="text-muted">{parts.length > 0 ? parts.join(" · ") : "changes"}</span>
-      </p>
-      <div className="ml-auto flex shrink-0 flex-wrap gap-2">
-        <SaveRevert store={store} current={workspace?.chat} what={parts.join(", ")} />
-      </div>
-    </div>
-  )
-}
 
 function PresetColumn({ store }: { store: EditorStore }) {
   const workspace = usePresetWorkspace()
@@ -68,7 +42,9 @@ function PresetColumn({ store }: { store: EditorStore }) {
           <span className="font-medium">
             <RefName store={store} />
           </span>
-          <p className="text-xs text-muted">Used by every chat with this preset. Changes wait for Save.</p>
+          <p className="text-xs text-muted">
+            Used by every chat with this preset, as you type. Moving or deleting a prompt waits for Save.
+          </p>
         </div>
         <Tooltip label="The preset editor over the chat, with room to work and search">
           <Button
@@ -84,6 +60,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
       {state.saveError && (
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
       )}
+      <SaveRevision store={store} current={workspace?.chat} />
       <RestoredNotice count={state.restored} />
       <RecoveredNotice store={store} />
       <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
@@ -97,7 +74,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
       <Disclosure lazy title="End of request, prefill, utility prompts, regex scripts">
         <PresetSettings store={store} call={call} />
       </Disclosure>
-      <UnsavedBar store={store} />
+      <HeldChangesBar store={store} floating />
     </div>
   )
 }

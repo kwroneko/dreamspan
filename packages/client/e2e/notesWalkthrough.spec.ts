@@ -16,6 +16,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 import { openPanel } from "./support/panel.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -201,8 +202,7 @@ for (const width of [1440, 390])
         "Right after the preset's main prompt."
       )
       await page.keyboard.press("Escape")
-      await fresh.getByRole("button", { name: "Save the note" }).click()
-      await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
+      await saveRevision(fresh)
       await expect(own.getByRole("button", { name: /^Note/ }).last()).toContainText("Start of context")
       // Its switch turns it off from here.
       await own.getByRole("switch", { name: "Note: on in this chat" }).last().click()

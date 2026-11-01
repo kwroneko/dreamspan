@@ -27,6 +27,15 @@ export interface EditField {
 export const textField = (path: FieldPath) => JSON.stringify(path)
 export const valueField = (path: FieldPath) => `=${JSON.stringify(path)}`
 
+/**
+ * A preset's structural changes held behind its unsaved bar (owner, 2026-11-01): prompts moved
+ * or deleted, as JSON (`HeldChanges` in the client's `features/editor/heldOrder.ts`). It's an editor field like the others,
+ * with a draft and its history, but not a field of the document: applying drafts, a save and a
+ * generation's checkpoint leave it out, and only the bar's Save applies it.
+ */
+export const HELD_FIELD = textField(["~held"])
+export const isHeldField = (field: string) => field === HELD_FIELD
+
 /** Keys that could reach a prototype if a later assignment met them. */
 const FORBIDDEN = new Set(["__proto__", "constructor", "prototype"])
 const IDENTITY = /^(id|identifier|uid)=(.+)$/s
@@ -185,6 +194,7 @@ export const applyDrafts = (kind: EntityKind, head: Doc, drafts: ReadonlyArray<D
   const doc = structuredClone(head)
   const problems: Array<FieldProblem> = []
   const parsed = drafts.flatMap((draft) => {
+    if (isHeldField(draft.field)) return []
     const field = parseField(draft.field)
     if (field === null) {
       problems.push({ field: draft.field, message: "This isn't a field of a document.", orphan: false })

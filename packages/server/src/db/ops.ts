@@ -148,6 +148,14 @@ import { AssemblyFailed } from "../assembler/types.ts"
 
 const StorageErrorReason = Schema.Literals(["busy", "constraint", "corrupt", "other"])
 
+/** A library entry an assembly read: its entity, the ref (null: the entity's upstream) and the revision read. */
+export const UsedEntry = Schema.Struct({
+  entity: Schema.String,
+  ref: Schema.NullOr(Schema.String),
+  revision: Schema.String
+})
+export type UsedEntry = typeof UsedEntry.Type
+
 /** A disabled user, refused before it can act. */
 export class UserDisabled extends Schema.TaggedError<UserDisabled>()("UserDisabled", { handle: Schema.String }) {}
 
@@ -1970,6 +1978,49 @@ export class WriteOps extends RpcGroup.make(
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, EditConflict, InvalidDocument, StorageError])
   }),
+  /**
+   * Live text is what's sent (owner, 2026-11-01): before a reply is assembled, the library
+   * entries the assembly read (`used`, as `AssembleContext` reported them) whose fields
+   * changed since their last revision get a revision of their live text, labelled with the
+   * reply (`usedBy`, origin `generation`), in one transaction. `cut`: how many were cut; the
+   * reply is assembled again when any was. Drafts that wouldn't make a valid document stay
+   * as they are (the head is sent); the held structural changes never go in.
+   */
+  Rpc.make("CheckpointLiveText", {
+    payload: {
+      userId: UserId,
+      chatId: ChatId,
+      forkId: Schema.NullOr(ForkId),
+      slotId: SlotId,
+      /** The version a reply writes; null for a summary. */
+      versionId: Schema.NullOr(VersionId),
+      /** A summary request: the messages it covers, by number (`slotId` is the last). */
+      summary: Schema.optionalKey(Schema.Struct({ from: Schema.Int, to: Schema.Int })),
+      /** The message the reply's history ends at, where a chat's note is edited from. */
+      leafSlotId: Schema.NullOr(SlotId),
+      /** The reply's number in the chat, from 1. */
+      message: Schema.Int,
+      used: Schema.Array(UsedEntry)
+    },
+    success: Schema.Struct({ cut: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /**
+   * Every field changed since the ref's last revision (a chat's note: the revision bound where
+   * it's edited) back to that revision's value, each as a new state of its edit history, so the
+   * text there now stays one state back; no revision is written. The held changes aside.
+   */
+  Rpc.make("RevertEditorDrafts", {
+    payload: { userId: UserId, refId: RefId, chatNote: Schema.optionalKey(ChatNotePosition) },
+    success: Schema.Struct({ reverted: Schema.Int }),
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** A revision's message (a label, never content), owned revisions of the ref's entity only. */
+  Rpc.make("SetRevisionMessage", {
+    payload: { userId: UserId, refId: RefId, revisionId: RevisionId, message: Schema.NullOr(Schema.String) },
+    success: Schema.Void,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** A new revision on the head with an earlier revision's content. */
   Rpc.make("RestoreRevision", {
     payload: { userId: UserId, refId: RefId, revisionId: RevisionId, expectedRowVersion: Schema.Int },
@@ -2505,7 +2556,8 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       key: DraftKey,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 })),
+      before: Schema.optionalKey(Schema.Int)
     },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, StorageError])
@@ -2935,7 +2987,14 @@ export class ReadOps extends RpcGroup.make(
       /** Data from the attempt's registered strategies, applied before budget checks. */
       instructions: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
     },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    success: Schema.Struct({
+      snapshot: Schema.String,
+      generation: Schema.String,
+      /** The library entries it read (`CheckpointLiveText`), and the messages it covers by number. */
+      used: Schema.Array(UsedEntry),
+      from: Schema.Int,
+      to: Schema.Int
+    }),
     error: Schema.Union([StorageError, NotFound, AssemblyFailed])
   }),
   Rpc.make("RoleProjections", { success: Schema.Array(RoleProjectionOption) }),
@@ -2954,7 +3013,13 @@ export class ReadOps extends RpcGroup.make(
       timeZone: Schema.String,
       frozen: Schema.NullOr(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)))
     },
-    success: Schema.Struct({ snapshot: Schema.String, generation: Schema.String }),
+    success: Schema.Struct({
+      snapshot: Schema.String,
+      generation: Schema.String,
+      /** The library entries it read, for `CheckpointLiveText`; message number in `message`. */
+      used: Schema.Array(UsedEntry),
+      message: Schema.Int
+    }),
     error: Schema.Union([NotFound, AssemblyFailed, StorageError])
   }),
   /**

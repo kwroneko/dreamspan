@@ -192,9 +192,30 @@ export const makeEditorHandlers = Effect.gen(function* () {
         })
       }).pipe(settle("SaveEditorDraft")),
 
-    EditorDraftHistory: ({ refId, field, limit }) =>
-      Effect.flatMap(userId, (id) => reader.DraftHistory({ userId: id, key: draftKey(refId, field), limit })).pipe(
-        settle("EditorDraftHistory")
+    EditorDraftHistory: ({ refId, field, limit, before }) =>
+      Effect.flatMap(userId, (id) =>
+        reader.DraftHistory({
+          userId: id,
+          key: draftKey(refId, field),
+          limit,
+          ...(before === undefined ? {} : { before })
+        })
+      ).pipe(settle("EditorDraftHistory")),
+
+    EditorDraftState: ({ refId, field, seq }) =>
+      Effect.flatMap(userId, (id) => reader.GetDraftState({ userId: id, key: draftKey(refId, field), seq })).pipe(
+        Effect.map((state) => state.content),
+        settle("EditorDraftState")
+      ),
+
+    RevertEditorDrafts: ({ refId, chatNote }) =>
+      Effect.flatMap(userId, (id) =>
+        writer.RevertEditorDrafts({ userId: id, refId, ...(chatNote ? { chatNote } : {}) })
+      ).pipe(settle("RevertEditorDrafts")),
+
+    SetRevisionMessage: ({ refId, revisionId, message }) =>
+      Effect.flatMap(userId, (id) => writer.SetRevisionMessage({ userId: id, refId, revisionId, message })).pipe(
+        settle("SetRevisionMessage")
       ),
 
     RestoreEditorDraft: ({ refId, field, ...restore }) =>

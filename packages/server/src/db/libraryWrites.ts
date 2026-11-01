@@ -101,7 +101,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly schemaVersion: number
       readonly doc: EncodedDoc
       readonly parents: ReadonlyArray<string>
-      readonly origin: "import" | "user" | "merge"
+      readonly origin: "import" | "user" | "merge" | "generation"
       readonly originRef: string | null
       readonly message: string | null
     }) =>

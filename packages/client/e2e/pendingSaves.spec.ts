@@ -4,6 +4,7 @@ import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { readFile } from "node:fs/promises"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
+import { editHistoryTexts, saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -109,7 +110,8 @@ for (const kind of ["card", "preset"] as const) {
           (await admin((api) => api.OpenEditor({ refId: refId! }))).drafts.find((d) => d.key.field === field)?.content
       )
       .toBe("hello A")
-    const recovered = await admin((api) =>
+    // The other tab's text this one's went over stays in the field's edit history past the commit.
+    const history = await admin((api) =>
       Effect.gen(function* () {
         const opened = yield* api.OpenEditor({ refId: refId! })
         yield* api.CommitEditorDrafts({
@@ -118,10 +120,10 @@ for (const kind of ["card", "preset"] as const) {
           fields: opened.drafts.map((d) => ({ field: d.key.field, draftId: d.id, expectedRowVersion: d.rowVersion })),
           message: null
         })
-        return yield* api.ListRecoveredTexts({ limit: 100, before: null })
+        return yield* editHistoryTexts(api, refId!, field)
       })
     )
-    expect(recovered.map((r) => r.content)).toContain("hello B")
+    expect(history).toContain("hello B")
     await expect.poll(() => copies(page)).toEqual([])
   })
 }
@@ -212,12 +214,13 @@ test("a stale active editor meets the conflict picker after another tab commits"
   await expect
     .poll(async () => (await admin((api) => api.OpenEditor({ refId: ref.id }))).drafts[0]?.content)
     .toBe("hello A")
-  await page.getByRole("button", { name: "Save (1)", exact: true }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  await dialog.getByRole("button", { name: "Save revision", exact: true }).click()
-  await expect(dialog.getByRole("alert")).toBeVisible()
-  await dialog.getByRole("button", { name: "Save revision", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toBeVisible()
+  // Save asks nothing until it meets the other tab's commit: then the picker, maybe after an
+  // error from the stale editor's first try.
+  const conflict = page.getByRole("dialog", { name: "Changed meanwhile" })
+  await saveButton(page).click()
+  await expect(page.getByRole("alert").or(conflict).first()).toBeVisible()
+  if (!(await conflict.isVisible())) await saveButton(page).click()
+  await expect(conflict).toBeVisible()
 })
 
 test("typing during a save deletes exactly the acknowledged copy and never recovers sent text", async ({ page }) => {
@@ -389,7 +392,9 @@ test("typing on another branch keeps the copy of a branch's text the server refu
   await expectTextBox(message(page), huge)
 })
 
-test("text typed while an editor's Undo is on its way stays, saved on top of the earlier text", async ({ page }) => {
+test("text typed while an edit history's put-back is on its way stays, saved on top of the earlier text", async ({
+  page
+}) => {
   const original = "Original paragraph before an accidental wipe. ".repeat(10)
   const card = await admin((api) =>
     Effect.gen(function* () {
@@ -421,8 +426,14 @@ test("text typed while an editor's Undo is on its way stays, saved on top of the
   await page.goto(`${server().url}/library/${card.id}`)
   const box = page.getByRole("textbox", { name: /^Description/ })
   await expectTextBox(box, "x")
-  await page.getByRole("button", { name: "Undo Description", exact: true }).click()
+  // The text before the wipe, put back from the edit history; the dialog closed before it lands.
+  await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "Edit history: Description" })
+  await expect(history.getByLabel("Text of the state")).toHaveText(original)
+  await history.getByRole("button", { name: "Put this text in the box", exact: true }).click()
   await expect.poll(hold.held).toBe(1)
+  await page.keyboard.press("Escape")
+  await expect(history).toHaveCount(0)
   const typed = "Unique keystrokes during undo 847261"
   await box.fill(typed)
   hold.release()
@@ -470,7 +481,7 @@ test("a change that can't reach the server survives its note going to the bin an
   await expect.poll(() => copies(page)).toEqual([])
 })
 
-test("text a revision's save sent to the recovered texts is pointed to from the editor", async ({ page }) => {
+test("another tab's text a revision's save went over stays in the field's edit history", async ({ page }) => {
   const card = await admin((api) =>
     Effect.gen(function* () {
       const card = yield* api.CreateCard({ label: "Recovery notice", name: "Recovery notice" })
@@ -507,16 +518,15 @@ test("text a revision's save sent to the recovered texts is pointed to from the 
     })
   )
   await box.fill("hello from this tab")
-  await expect(page.getByRole("status").filter({ hasText: "kept as drafts" })).toBeVisible()
-  await page.getByRole("button", { name: "Save (1)", exact: true }).click()
-  await page
-    .getByRole("dialog", { name: "Save a revision" })
-    .getByRole("button", { name: "Save revision", exact: true })
-    .click()
+  await expect(page.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+  await saveButton(page).click()
   await expect(page.getByText("Saved a revision.", { exact: true })).toBeVisible()
-  await expect(page.getByText("Earlier text is in the bin")).toBeVisible()
-  await page.getByRole("link", { name: "Open the bin", exact: true }).click()
-  await expect(page.getByRole("listitem", { name: /^Recovered from Recovery notice/ })).toContainText(
-    "hello from another tab"
+  // Nothing goes to the bin: the other tab's text is the state before this one's.
+  await expect(page.getByText(/in the bin/)).toHaveCount(0)
+  await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "Edit history: Description" })
+  await expect(history.getByRole("list", { name: "Earlier states" }).getByRole("button").first()).toContainText(
+    "Latest"
   )
+  await expect(history.getByLabel("Text of the state")).toHaveText("hello from another tab")
 })

@@ -7,6 +7,7 @@ import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { openCastAdd } from "./support/cast.ts"
@@ -107,7 +108,7 @@ test("the persona's tab is its description, edited in place, and Switch persona"
   await box.click()
   await page.keyboard.press("End")
   await page.keyboard.type(" She hums.")
-  const save = tab.getByRole("button", { name: /^Save/ })
+  const save = saveButton(tab)
   await expect(save).toBeEnabled()
   // Switch persona plays another card from here on.
   await tab.getByRole("button", { name: /^Playing as Juniper Ashgrove/ }).click()

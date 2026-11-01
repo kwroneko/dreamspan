@@ -90,7 +90,11 @@ export class DraftState extends Schema.Class<DraftState>("DraftState")({
   /** What changed to reach this state, shortened for a list. */
   removed: Schema.String,
   inserted: Schema.String,
-  kind: Schema.Literals(["initial", "edit", "restore"])
+  /**
+   * `revision`: the field took a revision's text it wasn't typed on (a revision restored, an
+   * update merged in) before the next edit, so the edit history goes through what was shown.
+   */
+  kind: Schema.Literals(["initial", "edit", "restore", "revision"])
 }) {}
 
 /** A single replacement: at `start`, `removed` was replaced by `inserted`. Invertible. */
@@ -165,7 +169,14 @@ export const DraftHistoryPolicy = {
   maxEntries: 1_000,
   /** Total removed + inserted characters kept across a draft's history. */
   maxHistoryChars: 1_000_000,
-  maxContentChars: 1_000_000
+  maxContentChars: 1_000_000,
+  /**
+   * A library field's edit history (`entity_field`, owner 2026-11-01) outlives revisions and
+   * keeps whichever is more: the last `fieldStates` states or the last `fieldDays` days.
+   * The two limits above don't apply to it.
+   */
+  fieldStates: 200,
+  fieldDays: 30
 } as const
 
 /** Shortens text for a history list: the start and the end, around an ellipsis. */

@@ -7,8 +7,10 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { textField } from "@rp/shared/editing.ts"
 import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
+import { editHistoryTexts, revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "200" })
@@ -188,12 +190,14 @@ for (const width of [1440, 390])
     const tab = page.getByRole("tabpanel", { name, exact: true })
     const description = textBox(tab, "Description")
     await expect(description).toBeVisible({ timeout: 30_000 })
-    await expect(tab.getByText(/Saving changes .* in \d+ chats, this one included|no other chat uses it/)).toBeVisible()
+    await expect(
+      tab.getByText(/What you change is used for .* as you type, in \d+ chats, this one included|no other chat uses it/)
+    ).toBeVisible()
     // An imported text's line endings rewritten by the first key aren't a deletion: no bin notice.
     await description.click()
     await page.keyboard.press("Control+End")
     await page.keyboard.type(" Added in the panel.")
-    await expect(tab.getByText("1 field has changes, kept as drafts until you save.")).toBeVisible()
+    await expect(revisionStatus(tab)).toHaveText(/^Changed since revision \d+$/)
     await page.waitForTimeout(1500)
     await expect(tab.getByText(/in the bin/)).toHaveCount(0)
     await shoot(page, `edit-in-panel-${width}`)
@@ -206,12 +210,12 @@ for (const width of [1440, 390])
     await shoot(page, `expanded-${width}`)
     await large.getByRole("button", { name: "Done", exact: true }).click()
     await expect(textBox(tab, "Scenario")).toContainText("The kettle is on.")
-    await expect(tab.getByText("2 fields have changes, kept as drafts until you save.")).toBeVisible()
-    // Save, with the changes shown first.
-    await tab.getByRole("button", { name: "Save (2)", exact: true }).click()
-    const save = page.getByRole("dialog", { name: "Save a revision", exact: true })
-    await save.getByRole("button", { name: "Save revision", exact: true }).click()
-    await expect(tab.getByText("Saved.", { exact: true })).toBeVisible()
+    await expect(revisionStatus(tab)).toHaveText(/^Changed since revision \d+$/)
+    // Save asks nothing.
+    await saveRevision(tab)
+    await expect(revisionStatus(tab)).toHaveText(/^Saved as revision \d+$/)
+    // (On a phone the panel is itself a dialog; no other opened.)
+    await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toHaveCount(0)
     await expect(tab.getByText(/in the bin/)).toHaveCount(0)
     const saved = await admin((api) =>
       api.ListChatCards({
@@ -222,7 +226,7 @@ for (const width of [1440, 390])
     )
     expect(saved[0]!.definition.description).toContain("Added in the panel.")
     expect(saved[0]!.definition.scenario).toContain("The kettle is on.")
-    // Text typed and then mostly replaced in one session is kept, and the notice says so plainly.
+    // Text typed and then mostly replaced in one session is kept in the field's edit history.
     await textBox(tab, "Personality").click()
     await page.keyboard.press("Control+End")
     await page.keyboard.type(" Keeps a dog called Ledger, who is older than the lighthouse.")
@@ -230,16 +234,18 @@ for (const width of [1440, 390])
     await page.keyboard.press("Control+A")
     await page.keyboard.type("Brisk.")
     // Save stays in sight above a field further down the tab.
-    await expect(tab.getByRole("button", { name: "Save (1)", exact: true })).toBeInViewport()
-    await tab.getByRole("button", { name: "Save (1)", exact: true }).click()
-    await save.getByRole("button", { name: "Save revision", exact: true }).click()
-    const notice = tab.getByText(
-      "What Personality had before you replaced most of it is kept in the bin, under Recovered text, in case you want it back."
-    )
-    await expect(notice).toBeVisible()
-    await shoot(page, `bin-notice-${width}`)
-    await tab.getByRole("button", { name: "Dismiss", exact: true }).click()
-    await expect(notice).toHaveCount(0)
+    await expect(saveButton(tab)).toBeInViewport()
+    await saveRevision(tab)
+    await expect(tab.getByText(/in the bin/)).toHaveCount(0)
+    const personality = await admin((api) => editHistoryTexts(api, ref(name).id, textField(["personality"])))
+    expect(personality).toContain("Brisk.")
+    expect(personality.some((text) => text.includes("Keeps a dog called Ledger"))).toBe(true)
+    await tab.getByRole("button", { name: "Edit history of Personality", exact: true }).click()
+    const history = page.getByRole("dialog", { name: "Edit history: Personality", exact: true })
+    await expect(history.getByRole("list", { name: "Earlier states" }).getByRole("listitem")).not.toHaveCount(0)
+    await shoot(page, `edit-history-${width}`)
+    await history.getByRole("button", { name: "Close", exact: true }).click()
+    await expect(history).toHaveCount(0)
     // The full editor opens over the chat and goes back to it, the URL never leaving it.
     await tab.getByRole("button", { name: `Open ${name} in the full editor`, exact: true }).click()
     const overlay = page.getByRole("dialog", { name: "Card editor", exact: true })
@@ -267,7 +273,7 @@ for (const width of [1440, 390])
       const ref = await ids()
       await page.goto(`${server().url}/library/${ref("Lady Isadora of the Silver Marches").id}`)
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
-      await expect(page.getByText("Used by 1 chat: saving changes it there.")).toBeVisible()
+      await expect(page.getByText("Used by 1 chat: what you change here is used there as you type.")).toBeVisible()
       await expect(page.getByText(/in the bin/)).toHaveCount(0)
       await page.waitForTimeout(300)
       await shoot(page, `editor-${width}-${scheme}`)

@@ -2109,6 +2109,48 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  EditorDraftState: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.EditorDraftState({ refId: owner.editor.cardRefId, field: owner.editor.field, seq: 0 }),
+        "NotFound"
+      )
+  },
+  RevertEditorDrafts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref is not found, and its typing stays as it was.
+        const before = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        yield* refused(actor.api.RevertEditorDrafts({ refId: owner.editor.cardRefId }), "NotFound")
+        const after = (yield* owner.api.OpenEditor({ refId: owner.editor.cardRefId })).drafts
+        assert.deepStrictEqual(
+          after.map((d) => [d.id, d.rowVersion, d.content]),
+          before.map((d) => [d.id, d.rowVersion, d.content])
+        )
+      })
+  },
+  SetRevisionMessage: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // Another's ref, and another's revision through one's own ref, are both not found.
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: owner.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+        yield* refused(
+          actor.api.SetRevisionMessage({
+            refId: actor.editor.cardRefId,
+            revisionId: owner.editor.revisionId,
+            message: "mine"
+          }),
+          "NotFound"
+        )
+      })
+  },
   RestoreEditorDraft: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

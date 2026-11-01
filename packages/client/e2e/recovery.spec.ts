@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { asUser } from "./support/rpc.ts"
+import { editHistoryTexts } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 const server = serverPerFile(withAdmin)
@@ -254,7 +255,11 @@ for (const action of ["retry", "logout", "logout retry", "logout unsaved"] as co
     ).toBe(true)
   })
 
-test("reverting a field links to its recovered text", async ({ page }) => {
+// Fields have no Revert of their own any more: History's Restore of the latest revision puts
+// them back, and what was typed stays in the field's edit history rather than the bin.
+test("putting a card back to its latest revision keeps the typed text in the field's edit history", async ({
+  page
+}) => {
   const card = await admin((api) => api.CreateCard({ label: "N5 revert", name: "N5 revert" }))
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${card.id}`)
@@ -263,10 +268,20 @@ test("reverting a field links to its recovered text", async ({ page }) => {
   await expect
     .poll(() => admin((api) => api.OpenEditor({ refId: card.id })).then((x) => x.drafts[0]?.content))
     .toBe("N5 REVERT RECOVERY 857194")
-  await page.getByRole("button", { name: "Revert Description", exact: true }).click()
+  await page.getByRole("button", { name: "History", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "History", exact: true })
+  await history
+    .getByRole("list", { name: "Revisions" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
+  await history.getByRole("button", { name: "Restore", exact: true }).click()
+  await history.getByRole("button", { name: "Close", exact: true }).click()
   await expectTextBox(box, "")
-  const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 10, before: null }))
-  expect(recovered.some((x) => x.content === "N5 REVERT RECOVERY 857194")).toBe(true)
-  const links = await page.locator('a[href="/bin?section=recovered"]').count()
-  expect(links).toBeGreaterThan(0)
+  const texts = await admin((api) => editHistoryTexts(api, card.id, textField(["description"])))
+  expect(texts).toContain("N5 REVERT RECOVERY 857194")
+  await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()
+  const states = page.getByRole("dialog", { name: "Edit history: Description" })
+  await expect(states.getByLabel("Text of the state")).toHaveText("N5 REVERT RECOVERY 857194")
 })
