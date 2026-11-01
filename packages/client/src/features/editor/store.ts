@@ -25,7 +25,7 @@ import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
 import { arrange, type HeldChanges, heldText, parseHeld, splitOrder } from "./heldOrder.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
-import type { Draft } from "@rp/shared/drafts.ts"
+import { type Draft, entityDraftTarget } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useMemo, useSyncExternalStore } from "react"
@@ -104,7 +104,21 @@ export class EditorStore {
   private readonly userId: string
   private readonly call: Caller
   private readonly env: PageEnv
-  private readonly chatNote: ChatNotePosition | undefined
+  /** A chat's own note: the position it's edited at (its branch, and the message shown). */
+  readonly chatNote: ChatNotePosition | undefined
+  /** A chat's own note's branch (`EditorSnapshot.chatNote`): its drafts are that branch's. */
+  private get scope() {
+    return this.snapshot?.chatNote?.scope
+  }
+  /** Where a draft call goes: the field's ref, and a chat's own note's branch. */
+  private get target() {
+    const scope = this.scope
+    return { refId: this.refId, ...(scope === undefined ? {} : { scope }) }
+  }
+  /** This browser's copies are kept per draft target, so each branch's are its own. */
+  private get copyTarget() {
+    return entityDraftTarget(this.refId, this.scope)
+  }
 
   constructor(refId: RefId, userId: string, call: Caller, env: PageEnv = browserEnv, chatNote?: ChatNotePosition) {
     this.userId = userId
@@ -237,7 +251,7 @@ export class EditorStore {
 
   /** Replay every copy with its original base: only the writer decides a stale save. */
   private async restoreCopies() {
-    for (const copy of [...(await copiesOf(this.userId, this.refId))].sort((a, b) => a.at - b.at)) {
+    for (const copy of [...(await copiesOf(this.userId, this.copyTarget))].sort((a, b) => a.at - b.at)) {
       const pending = pendingOf(copy)
       if (pending?.kind !== "editor") continue
       const payload = pending.payload
@@ -531,7 +545,7 @@ export class EditorStore {
       before?.kind === "editor"
         ? { ...before.payload, content }
         : {
-            refId: this.refId,
+            ...this.target,
             field: key,
             draftId: field.draftId,
             content,
@@ -544,7 +558,7 @@ export class EditorStore {
     if (previous === null && field.local === null) field.baseRevision = payload.baseRevisionId
     const copy = makeCopy(
       this.userId,
-      this.refId,
+      this.copyTarget,
       key,
       { kind: "editor", payload },
       this.env.now(),
@@ -742,7 +756,7 @@ export class EditorStore {
     if (field.saved === null || field.rowVersion === null || field.draftId === null) return
     const { draftId, rowVersion } = field
     const result = await this.call((client) =>
-      client("DiscardEditorDraft", { refId: this.refId, field: key, draftId, expectedRowVersion: rowVersion })
+      client("DiscardEditorDraft", { ...this.target, field: key, draftId, expectedRowVersion: rowVersion })
     )
     if (result.ok) await this.settle(key, result.value)
     return result
@@ -773,7 +787,7 @@ export class EditorStore {
   history(key: string, limit = 50, before?: number) {
     return this.call((client) =>
       client("EditorDraftHistory", {
-        refId: this.refId,
+        ...this.target,
         field: key,
         limit,
         ...(before === undefined ? {} : { before })
@@ -783,7 +797,7 @@ export class EditorStore {
 
   /** One state of a field's edit history, whole. */
   stateText(key: string, seq: number) {
-    return this.call((client) => client("EditorDraftState", { refId: this.refId, field: key, seq }))
+    return this.call((client) => client("EditorDraftState", { ...this.target, field: key, seq }))
   }
 
   /** The head's revision number: "changed since revision N". */
@@ -800,7 +814,7 @@ export class EditorStore {
     const { draftId, rowVersion } = field
     const result = await this.call((client) =>
       client("RestoreEditorDraft", {
-        refId: this.refId,
+        ...this.target,
         field: key,
         draftId: draftId ?? "",
         seq,
@@ -860,7 +874,7 @@ export class EditorStore {
     if (this.current(key) !== picked) return changed()
     const result = await this.call((client) =>
       client("SaveEditorDraft", {
-        refId: this.refId,
+        ...this.target,
         field: key,
         draftId: field.draftId,
         content,

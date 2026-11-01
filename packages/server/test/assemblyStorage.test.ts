@@ -3,7 +3,7 @@
 // acting user's, and the same context built again from the database (invariant 6).
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
-import { DraftKey } from "@rp/shared/drafts.ts"
+import { DraftKey, entityDraftTarget } from "@rp/shared/drafts.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -1018,7 +1018,7 @@ describe("context assembly from the database", () => {
       ) =>
         writer.SaveDraft({
           userId,
-          key: new DraftKey({ targetKind: "entity_field", targetId: note.ref.id, field }),
+          key: new DraftKey({ targetKind: "entity_field", targetId: entityDraftTarget(note.ref.id, scope), field }),
           draftId: null,
           content,
           expectedRowVersion,
@@ -1026,6 +1026,8 @@ describe("context assembly from the database", () => {
           baseRevision: baseRevisionId
         })
       const position = { chatId: chat.id, slotId: sent.slotId }
+      // A chat's own note's drafts are its branch's, at the position (its scope).
+      const scope = (yield* reader.OpenEditor({ userId, refId: note.ref.id, chatNote: position })).chatNote!.scope
       const draft = yield* save("SUN", note.ref.headRevisionId, null)
       const committed = yield* writer.CommitEditorDrafts({
         userId,

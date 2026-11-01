@@ -1,10 +1,10 @@
 import { revisionNumber } from "./revisionNumbers.ts"
 import { inFork } from "./forkState.ts"
-import { readSnippet, snippetFork, snippetKey } from "./snippets.ts"
+import { chatFork, readSnippet } from "./snippets.ts"
 // The editors' read handlers (ARCHITECTURE.md "Editing the library"), in the reader workers.
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
-import { DraftState } from "@rp/shared/drafts.ts"
+import { entityDraftTarget } from "@rp/shared/drafts.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
@@ -12,7 +12,7 @@ import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { isMediaPath } from "./media.ts"
-import { noteAt } from "./noteAt.ts"
+import { noteAt, otherBranches, slotMessage } from "./noteAt.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { linkCounts, linkedNote, sharedNote } from "./sharedNotes.ts"
 import { query } from "./tx.ts"
@@ -23,54 +23,32 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
   const drafts = makeDraftStore(sql)
 
   const handlers = {
-    ListSnippets: ({ userId, chatId, forkId, query: search }) =>
+    ListSnippets: ({ userId, chatId, query: search }) =>
       Effect.gen(function* () {
-        const fork = yield* snippetFork(sql, userId, chatId, forkId)
+        yield* chatFork(sql, userId, chatId, null)
         const refs = yield* lib.refsWhere(
           "e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'",
           [userId]
         )
-        const items = yield* Effect.forEach(refs, (ref) => readSnippet(sql, userId, ref, chatId, fork))
+        const items = yield* Effect.forEach(refs, (ref) => readSnippet(sql, userId, ref, chatId))
         const needle = search?.trim().toLocaleLowerCase() ?? ""
         return items
-          .filter((item) => item !== null && `${item.title} ${item.content}`.toLocaleLowerCase().includes(needle))
           .filter((item) => item !== null)
+          .filter((item) => `${item.title} ${item.content}`.toLocaleLowerCase().includes(needle))
           .sort((a, b) => a.title.localeCompare(b.title))
       }).pipe(query("ListSnippets")),
-    SnippetHistory: ({ userId, chatId, forkId, refId, limit }) =>
-      Effect.gen(function* () {
-        const fork = yield* snippetFork(sql, userId, chatId, forkId)
-        const current = yield* readSnippet(sql, userId, yield* lib.ownedRef(userId, refId), chatId, fork)
-        if (!current) return yield* new NotFound({ entity: "snippet", id: refId })
-        const draft = yield* drafts.find(userId, snippetKey(refId, current.global ? null : fork))
-        if (draft === null) return []
-        const history = yield* drafts.history(draft, limit)
-        // The shared note can also change through the library editor or revision restore.
-        // Its current revision is "Now"; every state of the older snippet draft is earlier.
-        return draft.content === current.content
-          ? history
-          : [
-              new DraftState({
-                seq: -1,
-                at: current.ref.updatedAt,
-                length: current.content.length,
-                removed: "",
-                inserted: "",
-                kind: "edit"
-              }),
-              ...history
-            ].slice(0, limit)
-      }).pipe(query("SnippetHistory")),
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
         const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
         const ref = resolved?.ref ?? owned
         const usedByChats = yield* lib.usedByChats(userId, { ...ref, id: refId })
+        // A chat's own note's drafts are its branch's (owner, 2026-11-01).
+        const target = entityDraftTarget(refId, resolved?.scope)
         const draftRows = yield* sql<Parameters<typeof drafts.toDraft>[0]>`
           SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
           FROM drafts d
-          WHERE d.user_id = ${userId} AND d.target_kind = 'entity_field' AND d.target_id = ${refId}
+          WHERE d.user_id = ${userId} AND d.target_kind = 'entity_field' AND d.target_id = ${target}
           ORDER BY d.field`
         const variants =
           ref.kind === "card"
@@ -82,7 +60,17 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
           usedByChats,
           drafts: draftRows.map((row) => drafts.toDraft(row)),
           revisionNumber: yield* revisionNumber(sql, ref.head_revision_id),
-          variants: variants.map(toLibraryRef)
+          variants: variants.map(toLibraryRef),
+          ...(resolved && chatNote
+            ? {
+                chatNote: {
+                  scope: resolved.scope,
+                  message: yield* slotMessage(sql, chatNote.slotId),
+                  latest: resolved.latest,
+                  otherBranches: yield* otherBranches(sql, lib, userId, owned, chatNote.chatId, resolved)
+                }
+              }
+            : {})
         })
       }).pipe(query("OpenEditor")),
 
@@ -174,7 +162,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
 
     ListSharedNotes: ({ userId, query: search, refId, entityId, chatNote }) =>
       Effect.gen(function* () {
-        if (chatNote) yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
+        if (chatNote) yield* chatFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
         // SQLite LIKE's case folding is ASCII-only, so titles are matched here.
         const rows = yield* lib.refsWhere(
           `e.owner_user_id = ? AND e.kind = 'note' AND e.deleted_at IS NULL AND r.ref_kind = 'upstream'
@@ -194,10 +182,8 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
             visible.push({ row, doc })
             continue
           }
-          if (!chatNote || scope !== chatNote.chatId) continue
-          const fork = yield* snippetFork(sql, userId, chatNote.chatId, chatNote.forkId ?? null)
-          const item = yield* readSnippet(sql, userId, row, chatNote.chatId, fork)
-          if (item) visible.push({ row, doc: { ...doc, title: item.title, content: item.content } })
+          // A chat's snippet is there in every branch of it.
+          if (chatNote && scope === chatNote.chatId) visible.push({ row, doc })
         }
         const found = visible.filter(({ doc }) =>
           String(doc.title ?? "")

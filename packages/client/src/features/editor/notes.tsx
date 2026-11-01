@@ -1,21 +1,19 @@
 import { textActions } from "../../textActions.tsx"
-// Notes (DESIGN §4.1): a note's fields and its editor, its collapsed row, and the picker of
+// Notes (DESIGN §4.1): a note's settings and fields, how its header says them, and the picker of
 // shared named notes, used by the card editor, a note's own page and a chat's notes.
 import { useAtomValue } from "@effect/atom-react"
-import type { BinItem } from "@rp/shared/bin.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { anyOf, conditionCards, type NoteCondition, type Placement, readNoteCondition } from "@rp/shared/docs/note.ts"
 import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
-import type { Doc, LibraryRef } from "@rp/shared/library.ts"
+import type { Doc } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { Predicate } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { AppClient } from "../../rpc.ts"
-import { useSession } from "../../session.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
@@ -24,12 +22,11 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { Alert, Badge } from "../../ui/Surface.tsx"
-import { browserEnv } from "./backup.ts"
+import { Alert } from "../../ui/Surface.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
-import { FieldTools, RecoveredNotice, RestoredNotice, SwitchField, TextField } from "./controls.tsx"
-import { SaveRevision } from "./SaveRevision.tsx"
-import { EditorStore, useEditorState, useLeaveGuard, useValue } from "./store.ts"
+import { FieldTools, SwitchField, TextField } from "./controls.tsx"
+import { type EditorStore, useEditorState, useValue } from "./store.ts"
 
 /** A card a note's condition can name: the chat's cast, or in the card editor the card itself. */
 export interface NoteCard {
@@ -205,40 +202,48 @@ function PlacementField({
     card && p.value === "section:after_main_prompt" ? { ...p, description: CARD_DEFINITIONS } : p
   )
   return (
-    // Three across when its container is wide enough, not the window: it's in the chat's side panel too.
-    <div className="@container flex min-w-0 flex-col gap-2">
-      <div className="grid gap-3 @md:grid-cols-3">
+    // Side by side while they fit, each at its own width, wrapping only when the panel is narrow.
+    <>
+      <div className="w-52 max-w-full">
         <Field label={label}>
           <Select items={items} value={placeOf(placement)} onValueChange={(place) => set(place)} />
         </Field>
-        {placement.mode === "depth" && (
-          <Field label="Depth" description="Messages from the end.">
-            <Input
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={10000}
-              value={depth ?? String(placement.depth)}
-              onChange={(event) => {
-                const text = event.currentTarget.value
-                setDepth(text)
-                const number = Number(text)
-                if (text !== "" && Number.isInteger(number) && number >= 0 && number <= 10000) {
-                  set("depth", { depth: number })
-                }
-              }}
-              onBlur={() => setDepth(null)}
-            />
+      </div>
+      {placement.mode === "depth" && (
+        <div className="w-24">
+          <Field label="Depth">
+            <Tooltip label="Messages back from the newest: at 0 it follows the newest.">
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={10000}
+                value={depth ?? String(placement.depth)}
+                onChange={(event) => {
+                  const text = event.currentTarget.value
+                  setDepth(text)
+                  const number = Number(text)
+                  if (text !== "" && Number.isInteger(number) && number >= 0 && number <= 10000) {
+                    set("depth", { depth: number })
+                  }
+                }}
+                onBlur={() => setDepth(null)}
+              />
+            </Tooltip>
           </Field>
-        )}
-        {(placement.mode === "depth" || placement.mode === "tail" || placement.mode === "section") && (
+        </div>
+      )}
+      {(placement.mode === "depth" || placement.mode === "tail" || placement.mode === "section") && (
+        <div className="w-36">
           <Field label="Role">
             <Select items={ROLES} value={role} onValueChange={(next) => set(placeOf(placement), { role: next })} />
           </Field>
-        )}
+        </div>
+      )}
+      <div className="basis-full empty:hidden">
+        <FieldTools store={store} field={valueField(path)} label={label} />
       </div>
-      <FieldTools store={store} field={valueField(path)} label={label} />
-    </div>
+    </>
   )
 }
 
@@ -298,8 +303,8 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
   const set = (next: When, chosen: ReadonlyArray<string>) =>
     store.setValue(["condition"], next === "always" || chosen.length === 0 ? undefined : { when: next, cards: chosen })
   return (
-    <div className="@container flex min-w-0 flex-col gap-2">
-      <div className="grid gap-3 @md:grid-cols-2">
+    <>
+      <div className="w-64 max-w-full">
         <Field label="When it applies">
           <Select
             items={WHEN.filter((w) => w.value === "always" || named.length > 0 || cards.length > 0)}
@@ -307,7 +312,9 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
             onValueChange={(next) => set(next, named.length > 0 ? named : first === undefined ? [] : [first])}
           />
         </Field>
-        {when !== "always" && (
+      </div>
+      {when !== "always" && (
+        <div className="min-w-56 flex-1">
           <Field label="Characters">
             <MultiSelect
               items={choices(when)}
@@ -320,15 +327,17 @@ function ConditionField({ store, cards }: { store: EditorStore; cards: ReadonlyA
               onValueChange={(next) => set(when, next)}
             />
           </Field>
-        )}
-      </div>
+        </div>
+      )}
       {when !== "always" && aboveHistory(placement) && (
-        <p role="status" className="text-sm text-warning">
+        <p role="status" className="basis-full text-sm text-warning">
           Placed above the history, it rewrites the cached part of the context whenever its condition changes.
         </p>
       )}
-      <FieldTools store={store} field={valueField(["condition"])} label="When it applies" />
-    </div>
+      <div className="basis-full empty:hidden">
+        <FieldTools store={store} field={valueField(["condition"])} label="When it applies" />
+      </div>
+    </>
   )
 }
 
@@ -349,7 +358,7 @@ const useSharedNote = (link: EntityId, chatNote: ChatNotePosition | undefined) =
 }
 
 /** Where a shared note can be edited, and how many slots it changes. */
-function SharedBanner({
+export function SharedBanner({
   link,
   onUnlink,
   onRestore,
@@ -429,7 +438,57 @@ function SharedUse({ refId }: { refId: string }) {
 }
 
 /**
- * A note's fields, wherever it's edited. A slot linked to a shared note shows the shared note
+ * A note's settings (owner, 2026-11-01: plain values, applied as they change, folded away under
+ * the text): where it goes and its role, when it applies, and its switches, side by side while
+ * they fit.
+ */
+export function NoteSettings({ store, cards = [] }: { store: EditorStore; cards?: ReadonlyArray<NoteCard> }) {
+  const owner = useValue<{ card?: string; chat?: string; shared?: string } | undefined>(store, ["owner"])
+  const exportable = useValue<boolean | undefined>(store, ["exportable"]) !== false
+  const card = owner?.card !== undefined
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2">
+        <PlacementField store={store} path={["placement"]} label="Position" card={card} />
+        <ConditionField store={store} cards={cards} />
+      </div>
+      <div className="flex min-w-0 flex-wrap items-start gap-x-6 gap-y-2">
+        <SwitchField
+          store={store}
+          path={["scan_lore"]}
+          label="Lorebook entries can trigger on it"
+          hint="Its text is scanned with the chat for lorebook keys, as ST's “Include in World Info Scanning”."
+        />
+        {card && (
+          <>
+            <SwitchField
+              store={store}
+              path={["on_by_default"]}
+              label="On in every chat"
+              hint="On in every chat with the card, unless a chat switches it off."
+            />
+            <Switch
+              checked={!exportable}
+              onCheckedChange={(hidden) => store.setValue(["exportable"], !hidden)}
+              hint="A private note never leaves in an export of the card."
+            >
+              Private
+            </Switch>
+          </>
+        )}
+        <SwitchField
+          store={store}
+          path={["agent_editable"]}
+          label="The agent may edit it"
+          hint="Kept for agents, which aren't built yet. A file never turns this on."
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A note's fields on its own library page. A slot linked to a shared note shows the shared note
  * in place of its text, and keeps its own place, condition and switches.
  */
 export function NoteFields({
@@ -448,31 +507,28 @@ export function NoteFields({
 }) {
   const owner = useValue<{ card?: string; chat?: string; shared?: string } | undefined>(store, ["owner"])
   const link = useValue<EntityId | undefined>(store, ["link"])
-  const exportable = useValue<boolean | undefined>(store, ["exportable"]) !== false
   const refId = useEditorState(store).snapshot?.ref.id
-  if (owner?.shared !== undefined && owner.shared !== "global")
-    return (
-      <Alert title="A chat snippet">
-        <p>Open this snippet beside its chat to edit the text for that branch.</p>
-        <Link
-          to="/chats/$chatId"
-          params={{ chatId: owner.shared }}
-          search={{ panel: "snippets" }}
-          className={buttonClass()}
-        >
-          Open in Snippets
-        </Link>
-      </Alert>
-    )
   if (owner?.shared !== undefined)
     return (
       <div className="flex flex-col gap-3">
         {refId && <SharedUse refId={refId} />}
+        {owner.shared !== "global" && (
+          <p className="text-sm text-muted">
+            A snippet of one chat, in every branch of it.{" "}
+            <Link
+              to="/chats/$chatId"
+              params={{ chatId: owner.shared }}
+              search={{ panel: "snippets" }}
+              className="text-accent underline-offset-4 hover:underline"
+            >
+              Open it in that chat's Snippets
+            </Link>
+          </p>
+        )}
         <TextField store={store} path={["title"]} label="Name" />
         <TextField store={store} path={["content"]} label="Content" rows={6} />
       </div>
     )
-  const card = owner?.card !== undefined
   return (
     <div className="flex flex-col gap-3">
       <TextField store={store} path={["title"]} label="Name" />
@@ -481,251 +537,67 @@ export function NoteFields({
       ) : (
         <SharedBanner chatNote={chatNote} link={link} onUnlink={() => onUnlink?.()} onRestore={() => onRestore?.()} />
       )}
-      <PlacementField store={store} path={["placement"]} label="Position" card={card} />
-      <ConditionField store={store} cards={cards} />
-      <SwitchField
-        store={store}
-        path={["scan_lore"]}
-        label="Lorebook entries can trigger on this note"
-        description="Its text is scanned with the chat, as ST's “Include in World Info Scanning”."
-      />
-      {card && (
-        <>
-          <SwitchField
-            store={store}
-            path={["on_by_default"]}
-            label="On in every chat"
-            description="On in every chat with the card, unless a chat switches it off."
-          />
-          <Switch
-            checked={!exportable}
-            onCheckedChange={(hidden) => store.setValue(["exportable"], !hidden)}
-            description="A private note never leaves in an export."
-          >
-            Private (not exported)
-          </Switch>
-        </>
-      )}
-      <SwitchField
-        store={store}
-        path={["agent_editable"]}
-        label="The agent may edit it"
-        description="Kept for agents, which aren't built yet. A file never turns this on."
-      />
+      <NoteSettings store={store} cards={cards} />
     </div>
   )
 }
 
-/** A note: an entity of its own, saved on its own; deleting it is up to `onDeleted`'s owner. */
-export function NoteEditor({
-  noteRef,
-  call,
-  onDeleted,
-  notice,
-  chatNote,
-  cards,
-  onRelinked
-}: {
-  noteRef: LibraryRef
-  call: Caller
-  /** Without it, the note can't be deleted from here. */
-  onDeleted?: (item: BinItem) => void
-  /** Said above the fields. */
-  notice?: ReactNode
-  chatNote?: ChatNotePosition
-  cards?: ReadonlyArray<NoteCard>
-  /** Told after it was saved as a shared note or unlinked from one, which changes what it is. */
-  onRelinked?: () => void
-}) {
-  const userId = useSession().user.id
-  const [store] = useState(() => new EditorStore(noteRef.id, userId, call, browserEnv, chatNote))
-  const [error, setError] = useState<AppError | null>(null)
-  const state = useEditorState(store)
-  const link = useValue<EntityId | undefined>(store, ["link"])
-  useEffect(() => {
-    void store.load()
-  }, [store])
-  useLeaveGuard(store)
-  if (state.snapshot === null) return <p className="text-sm text-muted">Loading the note…</p>
-  const position = chatNote ? { chatNote } : {}
-  const remove = async () => {
-    // What's typed goes with the note to the bin, and comes back with it. A change that can't
-    // reach the server stays in this browser until the note can be opened again.
-    await store.flush()
-    const result = await call((client) => client("DeleteNote", { noteRefId: noteRef.id }), ["library"])
-    if (result.ok) onDeleted?.(result.value)
-    else setError(result.error)
-  }
-  /** Saving as or unlinking from a shared note takes the saved note: its changes are saved first. */
-  const relink = async (action: "share" | "unlink") => {
-    await store.flush()
-    if (store.state().dirty > 0) {
-      const saved = await store.commit(null)
-      if (!saved.ok) return setError(saved.error)
-    }
-    const result = await call(
-      (client) =>
-        action === "share"
-          ? client("CreateSharedNote", { title: "", content: "", fromNoteRefId: noteRef.id, ...position })
-          : client("UnlinkNote", { noteRefId: noteRef.id, ...position }),
-      ["library"]
-    )
-    if (!result.ok) return setError(result.error)
-    setError(null)
-    onRelinked?.()
-  }
-  const restore = async () => {
-    const bin = await call((client) => client("ListBin", { limit: 500, before: null }))
-    if (!bin.ok) return setError(bin.error)
-    const item = bin.value.find((entry) => entry.kind === "entity" && entry.targetId === link)
-    if (!item)
-      return setError({
-        tag: "NotFound",
-        message: "The shared note isn't in the bin any more.",
-        problems: [],
-        reason: null
-      })
-    const restored = await call((client) => client("RestoreBinItem", { itemId: item.id }), ["library"])
-    if (!restored.ok) return setError(restored.error)
-    setError(null)
-    onRelinked?.()
-  }
-  const shareable = link === undefined
-  return (
-    <section aria-label={`Note ${noteRef.label}`} className="flex flex-col gap-3 rounded-md border border-border p-3">
-      {notice}
-      <RestoredNotice count={state.restored} />
-      <RecoveredNotice store={store} />
-      <NoteFields
-        chatNote={chatNote}
-        store={store}
-        {...(cards ? { cards } : {})}
-        onUnlink={() => void relink("unlink")}
-        onRestore={() => void restore()}
-      />
-      <ErrorAlert error={error} />
-      <div className="flex flex-wrap items-center gap-2">
-        <SaveRevision store={store} />
-        <Menu
-          label="Note actions"
-          align="start"
-          trigger={
-            <Button variant="ghost" aria-label={`More actions for ${noteRef.label}`}>
-              <Icon name="more" />
-            </Button>
-          }
-        >
-          {shareable && (
-            <MenuItem
-              icon="link"
-              description="Makes its text a shared note this one shows, so other cards and chats can use it too."
-              onClick={() => void relink("share")}
-            >
-              Save as shared note
-            </MenuItem>
-          )}
-          {onDeleted && (
-            <MenuItem
-              icon="trash"
-              tone="danger"
-              description="Moves it to the bin, where it can be restored."
-              onClick={() => void remove()}
-            >
-              Delete the note
-            </MenuItem>
-          )}
-        </Menu>
-      </div>
-    </section>
-  )
-}
-
-/** A note's name for its row: its own, else "Untitled" and its first line. */
-const rowTitle = (doc: Doc, label: string) => {
-  const title = typeof doc["title"] === "string" ? doc["title"].trim() : ""
-  if (title !== "") return { title, muted: null }
-  const first = String(doc["content"] ?? "")
+/** A note's name for its header: its own, else its library label, else "Untitled" (and its first line). */
+export const noteTitle = (title: unknown, content: unknown, label: string) => {
+  const own = typeof title === "string" ? title.trim() : ""
+  if (own !== "") return { title: own, derived: false }
+  const first = String(content ?? "")
     .split("\n")
     .find((line) => line.trim() !== "")
-  return { title: label && label !== "Note" ? label : "Untitled", muted: first?.trim().slice(0, 80) ?? null }
+  if (label && label !== "Note") return { title: label, derived: true }
+  return { title: first?.trim().slice(0, 80) || "Untitled", derived: true }
+}
+
+/** Where a note goes and when, in a few words, for the line under its name: "End of tail · Aria's turn". */
+export const noteState = (doc: Doc, cards: ReadonlyArray<NoteCard>) =>
+  [shortPlace(doc["placement"] as Placement | undefined), conditionText(doc["condition"], cards) ?? "always"].join(
+    " · "
+  )
+
+/** A note's settings in a few words, for its settings section while folded. */
+export const settingsSummary = (doc: Doc) => {
+  const placement = (doc["placement"] as Placement | undefined) ?? END_OF_TAIL
+  const role = placement.mode === "none" ? null : (placement.role ?? "system")
+  return [
+    role === null ? null : `as ${role}`,
+    doc["scan_lore"] === true ? "lorebook scan" : null,
+    doc["on_by_default"] === true ? "on in every chat" : null,
+    doc["exportable"] === false && Predicate.isObject(doc["owner"]) && "card" in doc["owner"] ? "private" : null,
+    doc["agent_editable"] === true ? "agent may edit" : null
+  ]
+    .filter((part) => part !== null)
+    .join(" · ")
 }
 
 /**
- * A note collapsed to one row (DESIGN §4.1): its switch when it has one, its name, where it
- * goes and when, and whether it's shared or private. Opening it shows `children`, its editor.
+ * A note's settings as History reads them (owner, 2026-11-01: words, never JSON): "Position:
+ * in the history, depth 1, as system", "When: Aria's turn".
  */
-export function NoteRow({
-  doc,
-  label,
-  cards,
-  open,
-  onOpenChange,
-  control,
-  shared,
-  detail,
-  keepMounted = false,
-  children
-}: {
-  doc: Doc
-  label: string
-  cards: ReadonlyArray<NoteCard>
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  /** Its on/off switch in a chat. */
-  control?: ReactNode
-  /** The shared note it shows: its name, or that it's in the bin. */
-  shared?: { readonly title: string; readonly binned: boolean } | null
-  /** A line under the row, shown collapsed too. */
-  detail?: ReactNode
-  /**
-   * Keep the editor mounted while collapsed, so a note's unsaved text is still guarded on
-   * leaving and a copy kept in this browser comes back as the page opens.
-   */
-  keepMounted?: boolean
-  children: ReactNode
-}) {
-  const { title, muted } = rowTitle(doc, label)
-  const condition = conditionText(doc["condition"], cards)
-  const kind = doc["kind"]
-  return (
-    <li className="flex flex-col gap-2 py-2">
-      <div className="flex min-w-0 items-start gap-2">
-        {control && <div className="pt-1.5">{control}</div>}
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => onOpenChange(!open)}
-          className="flex min-w-0 flex-1 flex-col gap-1 rounded-md px-1 py-1 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          <span className="flex min-w-0 items-center gap-1.5">
-            {doc["link"] !== undefined && (
-              <span className="shrink-0 text-muted" title="Shows a shared note">
-                <Icon name="link" />
-                <span className="sr-only">Shared note</span>
-              </span>
-            )}
-            <span className="truncate text-sm font-medium">{title}</span>
-            {muted && <span className="min-w-0 truncate text-sm text-muted">{muted}</span>}
-          </span>
-          <span className="flex flex-wrap items-center gap-1 text-xs text-muted">
-            <span>{shortPlace(doc["placement"] as Placement | undefined)}</span>
-            {condition && <Badge tone="accent">{condition}</Badge>}
-            {/* Without a switch (the card editor), whether a card's note is on in every chat. */}
-            {!control && doc["on_by_default"] === true && <Badge>On in every chat</Badge>}
-            {shared?.binned && <Badge tone="warning">linked note is in the bin</Badge>}
-            {doc["exportable"] === false && "card" in Object(doc["owner"]) && <Badge>Private</Badge>}
-            {kind === "imported_summary" && <Badge>summary</Badge>}
-          </span>
-        </button>
-        <span aria-hidden="true" className={`pt-2 text-muted transition-transform ${open ? "rotate-180" : ""}`}>
-          <Icon name="down" />
-        </span>
-      </div>
-      {detail}
-      {keepMounted ? <div hidden={!open}>{children}</div> : open && children}
-    </li>
-  )
-}
+export const noteSettingLines =
+  (cards: ReadonlyArray<NoteCard>) =>
+  (path: ReadonlyArray<string | number>): ((value: unknown) => ReadonlyArray<string>) | undefined => {
+    if (path.length !== 1) return undefined
+    if (path[0] === "placement")
+      return (value) => {
+        const placement = (value as Placement | undefined) ?? END_OF_TAIL
+        const role = placement.mode === "none" ? "" : `, as ${placement.role ?? "system"}`
+        const place =
+          placement.mode === "depth"
+            ? `in the history, depth ${placement.depth}`
+            : shortPlace(placement)
+                .toLowerCase()
+                .replace(/^start of tail$/, "start of the tail")
+                .replace(/^end of tail$/, "end of the tail")
+        return [`Position: ${place}${role}`]
+      }
+    if (path[0] === "condition") return (value) => [`When: ${conditionText(value, cards) ?? "always"}`]
+    return undefined
+  }
 
 /** The shared named notes, filtered by name, to fill a note slot with one (DESIGN §4.1). */
 export function SharedNotePicker({

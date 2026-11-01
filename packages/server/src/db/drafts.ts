@@ -14,6 +14,7 @@ import {
   invertPatch,
   isDestructive,
   isEmptyPatch,
+  parseDraftTarget,
   type Patch
 } from "@rp/shared/drafts.ts"
 import { getAt, isHeldField, parseField } from "@rp/shared/editing.ts"
@@ -617,7 +618,7 @@ export const makeDraftStore = (
           id: string
         }>`SELECT r.id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
              JOIN entity_revisions r ON r.id = ${options.baseRevision} AND r.entity_id IN (e.id, e.forked_from_entity_id)
-           WHERE f.id = ${options.key.targetId} AND e.owner_user_id = ${options.userId}`
+           WHERE f.id = ${parseDraftTarget(options.key.targetId).refId} AND e.owner_user_id = ${options.userId}`
         if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
       }
       const fieldBase =

@@ -1,15 +1,7 @@
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
-import {
-  Snippet,
-  SnippetContext,
-  CreateSnippetFields,
-  SaveSnippetFields,
-  GlobalSnippetFields,
-  SnippetHistoryFields,
-  RestoreSnippetFields
-} from "@rp/shared/snippetsApi.ts"
+import { Snippet, SnippetContext, CreateSnippetFields, SnippetScopeFields } from "@rp/shared/snippetsApi.ts"
 import { historyReadRpcs, historyWriteRpcs, HistoryRejected } from "@rp/shared/historyApi.ts"
 import { InsertBody, InsertRefused } from "@rp/shared/messagesApi.ts"
 import { PlannedJob, SummaryJob, SummaryChunk, SummaryPlan } from "./lcmJobs.ts"
@@ -456,20 +448,11 @@ export class WriteOps extends RpcGroup.make(
     success: Snippet,
     error: Schema.Union([NotFound, DraftTooLarge, StorageError])
   }),
-  Rpc.make("SaveSnippet", {
-    payload: { userId: UserId, ...SaveSnippetFields },
+  /** A snippet for all chats, or only the chat shown; narrowing one shown elsewhere is refused. */
+  Rpc.make("SetSnippetScope", {
+    payload: { userId: UserId, ...SnippetScopeFields },
     success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
-  }),
-  Rpc.make("MakeSnippetGlobal", {
-    payload: { userId: UserId, ...GlobalSnippetFields },
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, StorageError])
-  }),
-  Rpc.make("RestoreSnippet", {
-    payload: { userId: UserId, ...RestoreSnippetFields },
-    success: Snippet,
-    error: Schema.Union([NotFound, StaleWrite, DraftTooLarge, StorageError])
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   historyWriteRpcs[0]
     .setPayload(Schema.Struct({ ...historyWriteRpcs[0].payloadSchema.fields, userId: UserId }))
@@ -2023,7 +2006,13 @@ export class WriteOps extends RpcGroup.make(
   }),
   /** A new revision on the head with an earlier revision's content. */
   Rpc.make("RestoreRevision", {
-    payload: { userId: UserId, refId: RefId, revisionId: RevisionId, expectedRowVersion: Schema.Int },
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      revisionId: RevisionId,
+      expectedRowVersion: Schema.Int,
+      chatNote: Schema.optionalKey(ChatNotePosition)
+    },
     success: RefChange,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
@@ -2327,11 +2316,6 @@ export class ReadOps extends RpcGroup.make(
     success: Schema.Array(Snippet),
     error: Schema.Union([NotFound, StorageError])
   }),
-  Rpc.make("SnippetHistory", {
-    payload: { userId: UserId, ...SnippetHistoryFields },
-    success: Schema.Array(DraftState),
-    error: Schema.Union([NotFound, StorageError])
-  }),
   Rpc.make("PreviewForkNotes", {
     payload: { userId: UserId, chatId: ChatId, fromForkId: Schema.NullOr(ForkId), atSlotId: Schema.NullOr(SlotId) },
     success: Schema.Array(ForkNote),
@@ -2632,7 +2616,8 @@ export class ReadOps extends RpcGroup.make(
       userId: UserId,
       refId: RefId,
       limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 })),
-      before: Schema.optionalKey(RevisionId)
+      before: Schema.optionalKey(RevisionId),
+      chatNote: Schema.optionalKey(ChatNotePosition)
     },
     success: Schema.Array(Revision),
     error: Schema.Union([NotFound, StorageError])

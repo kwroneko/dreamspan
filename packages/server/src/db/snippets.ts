@@ -1,15 +1,19 @@
+// Snippets (DESIGN §4.1): shared notes kept beside chats. One is for "All chats" (`owner.shared`
+// "global") or for one chat, every branch of it ("This chat", owner 2026-11-01: not inherited by
+// forks); its text is the library head and the live text of its drafts, as every library field's.
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { DraftKey } from "@rp/shared/drafts.ts"
+import { textField } from "@rp/shared/editing.ts"
 import { Snippet } from "@rp/shared/snippetsApi.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
-import { effectiveOverride, viewAt } from "./forkState.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef, type RefRow } from "./library.ts"
 import { NotFound } from "./ops.ts"
 
-export const snippetFork = Effect.fnUntraced(function* (
+/** The user's live chat, and its fork shown (the current one when none is named). */
+export const chatFork = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   userId: UserId,
   chatId: ChatId | null,
@@ -23,47 +27,30 @@ export const snippetFork = Effect.fnUntraced(function* (
   return row.id
 })
 
-/** A scoped snippet exists only in forks with a binding, including frozen inherited ones. */
-export const snippetRevision = Effect.fnUntraced(function* (
-  sql: SqlClient.SqlClient,
-  chatId: string,
-  entity: string,
-  forkId?: string
-) {
-  const fork = forkId ?? (yield* viewAt(sql, chatId, null))
-  const [binding] = yield* sql<{
-    revision: string
-  }>`SELECT o.value_id AS revision FROM entities se JOIN fork_overrides o
-    ON o.id = ${effectiveOverride(sql, "snippet_revision", fork, "se.id")} WHERE se.id = ${entity}`
-  return binding?.revision ?? null
-})
-
-export const snippetKey = (ref: string, fork: string | null) =>
-  new DraftKey({ targetKind: "snippet", targetId: ref, field: fork ?? "" })
-
+/**
+ * A snippet as the list shows it, with its live text (what's typed since its last revision), or
+ * null when it isn't one here: not a shared note, or another chat's.
+ */
 export const readSnippet = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   userId: UserId,
   ref: RefRow,
-  chatId: string | null,
-  fork: string | null
+  chatId: string | null
 ) {
   const lib = makeLibraryQueries(sql)
   const head = yield* lib.loadDoc(ref.head_revision_id)
   const scope = (head.owner as { shared?: string } | undefined)?.shared
   if (ref.kind !== "note" || scope === undefined || (scope !== "global" && scope !== chatId)) return null
-  const revision =
-    scope === "global" ? ref.head_revision_id : yield* snippetRevision(sql, chatId!, ref.entity_id, fork!)
-  if (revision === null) return null
-  const doc = yield* lib.loadDoc(revision)
   const drafts = makeDraftStore(sql)
-  const draft = yield* drafts.find(userId, snippetKey(ref.id, scope === "global" ? null : fork))
+  const live = (path: string, saved: unknown) =>
+    Effect.map(
+      drafts.find(userId, new DraftKey({ targetKind: "entity_field", targetId: ref.id, field: textField([path]) })),
+      (draft) => (draft !== null && draft.status === "active" ? draft.content : String(saved ?? ""))
+    )
   return new Snippet({
     ref: toLibraryRef(ref),
-    revision: revision as Snippet["revision"],
-    title: String(doc.title ?? ""),
-    content: String(doc.content ?? ""),
-    global: scope === "global",
-    draft: draft === null ? null : drafts.toDraft(draft)
+    title: yield* live("title", head.title),
+    content: yield* live("content", head.content),
+    global: scope === "global"
   })
 })

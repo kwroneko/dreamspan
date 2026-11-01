@@ -84,7 +84,8 @@ export function TextField({
   mono = false,
   readOnly = false,
   expandable = false,
-  labelHidden = false
+  labelHidden = false,
+  source
 }: {
   store: EditorStore
   path: FieldPath
@@ -97,6 +98,8 @@ export function TextField({
   expandable?: boolean
   /** The label is for assistive technology only (a prompt's text, named in its block's header). */
   labelHidden?: boolean
+  /** A snippet's own text: its editor offers no sending to a snippet. */
+  source?: "snippet" | undefined
 }) {
   const [large, setLarge] = useState(false)
   const match = useSearchMatch(path)
@@ -156,6 +159,7 @@ export function TextField({
             fullHeight={kind === "preset"}
             mono={mono}
             readOnly={readOnly}
+            source={source}
             onChange={(value) => store.setText(path, value)}
             onBlur={props.onBlur}
           />
@@ -286,18 +290,26 @@ export function SwitchField({
   path,
   label,
   description,
+  hint,
   checkbox = false
 }: {
   store: EditorStore
   path: FieldPath
   label: string
   description?: ReactNode
+  /** What switching it does, on hover and focus (explain): when the label doesn't say. */
+  hint?: string
   checkbox?: boolean
 }) {
   const value = useValue<boolean | undefined>(store, path) === true
   const Control = checkbox ? Checkbox : Switch
   return (
-    <Control checked={value} onCheckedChange={(checked) => store.setValue(path, checked)} description={description}>
+    <Control
+      checked={value}
+      onCheckedChange={(checked) => store.setValue(path, checked)}
+      description={description}
+      hint={hint}
+    >
       {label}
     </Control>
   )

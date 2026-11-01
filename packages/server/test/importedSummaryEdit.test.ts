@@ -107,6 +107,7 @@ it.each([0, 1])("corrects an imported summary at older leaf %i without changing 
       const draft = yield* api.SaveEditorDraft({
         refId,
         field,
+        scope: opened.chatNote!.scope,
         draftId: null,
         content: "CORRECTED SUMMARY",
         expectedRowVersion: null,

@@ -248,7 +248,6 @@ interface OverrideValue {
     | "hide"
     | "suppress_event"
     | "image_exclude"
-    | "snippet_revision"
     | "summary_revision"
     | "summary_choice"
     | "summary_rerun"
