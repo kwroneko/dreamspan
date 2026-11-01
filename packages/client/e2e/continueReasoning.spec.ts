@@ -93,7 +93,7 @@ for (const width of [1440, 390]) {
     )
     const originalVersion = source.entries.at(-1)!.version
     await showActions(reply)
-    await reply.getByRole("button", { name: /^Continue:/ }).click()
+    await reply.getByRole("button", { name: "Continue", exact: true }).click()
     await expect(reply.getByText("generating", { exact: true })).toBeVisible()
     await expect(reply.locator(".markdown").last()).toContainText(original)
     await expect(reasoning).toHaveAttribute("aria-expanded", "true")
@@ -142,7 +142,7 @@ for (const width of [1440, 390]) {
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText("Finish the thought.")
     await shoot(page, "07-reasoning-reloaded")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    await messageMenu(reply, "Context it was generated from")
+    await messageMenu(reply, "Request it was generated from")
     const prefill = page.getByRole("link", { name: /as it was, continued from its end/ })
     await prefill.scrollIntoViewIfNeeded()
     await expect(prefill).toBeVisible()
@@ -198,7 +198,7 @@ for (const width of [1440, 390]) {
       )
     ).entries.at(-1)!.version
     const sentBefore = provider.requests.length
-    await reply.getByRole("button", { name: /^Continue: write on/ }).click()
+    await reply.getByRole("button", { name: "Continue", exact: true }).click()
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20000 })
     await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes")
     await shoot(page, "09-continued-without-prefill")
@@ -219,7 +219,7 @@ for (const width of [1440, 390]) {
     await reasoning.click()
     await expect(reply.getByRole("region", { name: "Reasoning" })).toContainText(THOUGHT)
     // The inspector names the nudge by its preset setting.
-    await messageMenu(reply, "Context it was generated from")
+    await messageMenu(reply, "Request it was generated from")
     const nudge = page.getByText("End of request: when you continue a reply").first()
     await nudge.scrollIntoViewIfNeeded()
     await expect(nudge).toBeVisible()
@@ -247,7 +247,7 @@ for (const width of [1440, 390]) {
       await expect(reply.getByText("stopped", { exact: true })).toBeVisible()
       const original = await reply.locator(".markdown").last().innerText()
       await showActions(reply)
-      await reply.getByRole("button", { name: /^Continue:/ }).click()
+      await reply.getByRole("button", { name: "Continue", exact: true }).click()
       await expect(reply.locator(".markdown").last()).toContainText(original)
       await expect(reply.locator(".markdown").last()).toContainText("Before the watch changes", { timeout: 30000 })
       await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
@@ -255,7 +255,7 @@ for (const width of [1440, 390]) {
       const sent = provider.requests.at(-1)!
       if (adapter === "deepseek") expect(sent.messages.at(-1)?.prefix).toBe(true)
       else expect(sent.tools).toHaveLength(1)
-      await messageMenu(reply, "Context it was generated from")
+      await messageMenu(reply, "Request it was generated from")
       const label = adapter === "deepseek" ? "DeepSeek prefix: true" : "Forced tool schema prefill"
       await expect(page.getByText(label, { exact: true })).toBeVisible()
       if (adapter === "schema") {
@@ -307,7 +307,7 @@ for (const width of [1440, 390]) {
     await expect(reply.locator(".markdown").last()).toHaveText("The ledger is wrong,")
     await showActions(reply)
     await shoot(page, "07-edited-continue")
-    await reply.getByRole("button", { name: /^Continue:/ }).click()
+    await reply.getByRole("button", { name: "Continue", exact: true }).click()
     await expect(reply.locator(".markdown").last()).toContainText("The ledger is wrong," + MORE.trimEnd())
     await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
     expect(provider.requests.at(-1)!.messages.at(-1)).toEqual({ role: "assistant", content: "The ledger is wrong," })
@@ -350,7 +350,7 @@ for (const width of [1440, 390]) {
     await shoot(page, "08-metrics")
     await page.keyboard.press("Escape")
     // The inspector's usage gives each request's times.
-    await messageMenu(reply, "Context it was generated from")
+    await messageMenu(reply, "Request it was generated from")
     await expect(page.getByText("First token", { exact: true }).locator("visible=true")).toBeVisible()
     await expect(page.getByText("Tokens/s", { exact: true }).locator("visible=true")).toBeVisible()
     await page.getByText("Tokens/s", { exact: true }).locator("visible=true").scrollIntoViewIfNeeded()

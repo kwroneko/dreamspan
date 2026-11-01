@@ -97,7 +97,17 @@ const displayFields = {
   /** How preset lists sort (the composer's picker, the Prompt preset tab's, the library's). */
   presetSort: PresetSort,
   /** How model lists sort (the composer's picker and the Model tab's). */
-  modelSort: Schema.Literals(["name", "used"])
+  modelSort: Schema.Literals(["name", "used"]),
+  /**
+   * Which message actions show as buttons on a message, by action id: the user's choices
+   * over each action's default. An id no action has is kept and ignored.
+   */
+  messageToolbar: Schema.Record(Schema.String, Schema.Boolean).check(
+    Schema.isMaxProperties(200),
+    Schema.makeFilter((choices: Record<string, boolean>) => Object.keys(choices).every((id) => id.length <= 200), {
+      expected: "action ids of at most 200 characters"
+    })
+  )
 }
 export const DisplayPrefs = Schema.Struct(displayFields)
 /** Writes merge only the named choices, so independent controls never reset each other. */
@@ -116,7 +126,9 @@ export const DisplayPrefsChange = Schema.Struct({
   guidance: Schema.optionalKey(displayFields.guidance),
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
-  modelSort: Schema.optionalKey(displayFields.modelSort)
+  modelSort: Schema.optionalKey(displayFields.modelSort),
+  /** Merged by id with what's stored, so a write names only the choices it changes. */
+  messageToolbar: Schema.optionalKey(displayFields.messageToolbar)
 })
 export type DisplayPrefsChange = typeof DisplayPrefsChange.Type
 export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
@@ -134,7 +146,8 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   guidance: false,
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
-  modelSort: "name"
+  modelSort: "name",
+  messageToolbar: {}
 }
 export type DisplayPrefs = typeof DisplayPrefs.Type
 

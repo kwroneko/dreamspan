@@ -686,9 +686,7 @@ export const Message = memo(function Message({
         ? "Empty: there's no text to send to the model."
         : null
 
-  const actions = (
-    <MessageActions context={{ entry, session, branchFork, generated, generating, hidden, report, toast }} />
-  )
+  const actionContext = { entry, session, branchFork, generated, generating, hidden, report, toast }
 
   let marks: ReactNode = null
   if (hidden)
@@ -784,19 +782,18 @@ export const Message = memo(function Message({
           {generating && <Badge tone="accent">generating</Badge>}
           {version.mark === "refused" && <Badge tone="warning">refused</Badge>}
           {marks}
-          <span className="flex-1" />
-          {!editing && (
-            <div
-              className={`hidden items-center transition-opacity duration-100 sm:flex ${
+          {editing ? (
+            <span className="flex-1" />
+          ) : (
+            // The rest of the header's width: the pinned buttons that fit, then More actions.
+            <MessageActions
+              context={actionContext}
+              className={`hidden justify-end transition-opacity duration-100 sm:flex ${
                 revealed
                   ? "opacity-100"
                   : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100"
               }`}
-              role="toolbar"
-              aria-label="Message actions"
-            >
-              {actions}
-            </div>
+            />
           )}
           {entry.branchCount > 1 && <Branches entry={entry} onBranch={onBranch} />}
         </header>
@@ -915,12 +912,12 @@ export const Message = memo(function Message({
           <div ref={footer} className="flex flex-col gap-1">
             {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
             <footer className="-mb-1 flex min-h-8 items-center">
-              {revealed && !editing && (
-                <div className="-ml-1.5 flex items-center sm:hidden" role="toolbar" aria-label="Message actions">
-                  {actions}
-                </div>
+              {revealed && !editing ? (
+                // The footer's width before the versions: the pinned buttons that fit, then More actions.
+                <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />
+              ) : (
+                <span className="flex-1" />
               )}
-              <span className="flex-1" />
               {savedAs !== null && (
                 <span role="status" className="mr-1 text-xs text-muted">
                   Saved as version {savedAs}

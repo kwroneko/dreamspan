@@ -7,10 +7,9 @@
 // isn't available, and a click (or a tap, where there's no tooltip) shows the reason in full.
 import { originalReply } from "@rp/shared/replySections.ts"
 import { useSyncExternalStore } from "react"
-import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession } from "./session.ts"
 
-import { invokeMessageAction, type MessageActionContext, type MessageActionProps } from "./messageActions.tsx"
+import { invokeMessageAction, type MessageActionContext, type MessageActionDescribeProps } from "./messageActions.tsx"
 
 type NextModel = NonNullable<ReturnType<ChatSession["snapshot"]>["history"]>["model"]
 
@@ -43,16 +42,19 @@ export const runContinue = async (context: MessageActionContext, source: "button
   context.report(await context.session.continueVersion(context.entry, source !== "keyboard"))
 }
 
-export function ContinueAction(context: MessageActionProps) {
+/** Continue's view: why it can't be used yet follows the next request's model as it resolves. */
+export function ContinueView({ show, ...context }: MessageActionDescribeProps) {
   const { session } = context
-  const model = useSyncExternalStore(session.subscribe, () => session.snapshot().history?.model)
+  const read = () => session.snapshot().history?.model
+  const model = useSyncExternalStore(session.subscribe, read, read)
   const blocked = continueBlocked(model)
-  return (
-    <IconButton
-      label={blocked ?? "Continue: write on from the end of this reply (Alt+Enter; keeps composer text)"}
-      icon="continue"
-      className={blocked === null ? undefined : "opacity-50"}
-      onClick={() => void invokeMessageAction("message.continue", context, "button")}
-    />
-  )
+  return show({
+    label: "Continue",
+    icon: "continue",
+    hint:
+      blocked ??
+      "Write on from the end of this message, as a new version that starts with its text (Alt+Enter; keeps the composer's text).",
+    dimmed: blocked !== null,
+    onSelect: () => invokeMessageAction("message.continue", context, "button")
+  })
 }

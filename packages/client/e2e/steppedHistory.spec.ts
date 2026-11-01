@@ -132,7 +132,7 @@ test("a changed prefix shows the rewrite estimate without a TTL or countdown", a
   await expect(estimate.getByRole("button", { name: /countdown/ })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(estimate).toHaveCount(0)
-  await messageMenu(reply, "Context it was generated from")
+  await messageMenu(reply, "Request it was generated from")
   await expect(page.getByText(/older ones don't fit/)).toBeVisible()
 })
 
