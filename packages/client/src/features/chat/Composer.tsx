@@ -524,7 +524,8 @@ export function Composer({
     recent: recent.map((id) => ({
       id,
       name: nameOf(castView, id) ?? "?",
-      mediaId: castView.cards.get(id)?.avatarMediaId ?? null
+      mediaId: castView.cards.get(id)?.avatarMediaId ?? null,
+      crop: castView.cards.get(id)?.avatarCrop
     })),
     onRecent: setPicked,
     guidance,

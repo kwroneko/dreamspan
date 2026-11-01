@@ -110,7 +110,13 @@ function Greeting({
       className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-4 py-3"
     >
       <header className="flex items-center gap-2 text-sm">
-        <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} size="sm" />
+        <Avatar
+          id={card.card.entityId}
+          name={name}
+          mediaId={card.card.avatarMediaId}
+          crop={card.card.avatarCrop}
+          size="sm"
+        />
         <span className="min-w-0 truncate font-medium">{name}</span>
         {count > 1 && (
           <div className="ml-auto flex shrink-0 items-center gap-1" role="group" aria-label={`${name}'s greetings`}>
@@ -459,7 +465,7 @@ function Pending({
               })
             }}
           >
-            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} />
+            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} crop={card.card.avatarCrop} />
           </button>
         ) : (
           <span className="block aspect-[2/3] w-12 shrink-0 overflow-hidden rounded-lg">

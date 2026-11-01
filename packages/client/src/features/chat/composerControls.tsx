@@ -9,6 +9,7 @@
 // - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) under the box.
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
 import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
+import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
@@ -27,7 +28,7 @@ export interface ComposerControlContext {
   /** Opens a side panel tab. */
   readonly onSettings: (tab: "model" | "preset" | "cast") => void
   readonly speaker: ComponentProps<typeof SpeakerSwitcher>
-  readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null }>
+  readonly recent: ReadonlyArray<{ id: EntityId; name: string; mediaId: string | null; crop?: AvatarCrop | undefined }>
   readonly onRecent: (id: EntityId) => void
   readonly guidance: boolean
   readonly prefsReady: boolean

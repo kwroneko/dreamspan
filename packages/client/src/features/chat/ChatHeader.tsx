@@ -297,7 +297,7 @@ export function ChatHeader({
                     })
                   }
                 >
-                  <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} size="md" />
+                  <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="md" />
                 </button>
               ))}
               {characters.length > 4 && (

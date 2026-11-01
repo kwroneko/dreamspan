@@ -236,7 +236,7 @@ export const registerComposerControls = () => [
         <SpeakerSwitcher {...speaker} compact={compact ?? false} />
         {/* The speakers used last, one tap each, where the box can spare the width. */}
         {!compact &&
-          recent.map(({ id, name, mediaId }) => (
+          recent.map(({ id, name, mediaId, crop }) => (
             <Tooltip key={id} label={`Speak as ${name}`}>
               <button
                 type="button"
@@ -244,7 +244,7 @@ export const registerComposerControls = () => [
                 onClick={() => onRecent(id)}
                 className="hidden shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus @min-[760px]:inline-flex"
               >
-                <Avatar id={id} name={name} mediaId={mediaId} size="chip" />
+                <Avatar id={id} name={name} mediaId={mediaId} crop={crop} size="chip" />
               </button>
             </Tooltip>
           ))}

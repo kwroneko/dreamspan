@@ -55,7 +55,13 @@ function Choices({ needle, onPick }: { needle: string; onPick: () => void }) {
               onClick={onPick}
               className="flex items-center gap-2 rounded-md px-1 py-1 text-left outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
             >
-              <Avatar id={c.card.entityId} name={c.card.name} mediaId={c.card.avatarMediaId} size="sm" />
+              <Avatar
+                id={c.card.entityId}
+                name={c.card.name}
+                mediaId={c.card.avatarMediaId}
+                crop={c.card.avatarCrop}
+                size="sm"
+              />
               <span className="flex min-w-0 flex-col">
                 <span className="truncate text-sm" title={c.card.label}>
                   {c.card.label}

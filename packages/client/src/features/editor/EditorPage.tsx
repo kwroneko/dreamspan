@@ -117,7 +117,6 @@ export function Editor({
   const [searching, setSearching] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [more, setMore] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
   // The page shows the state: loads, and fields starting or ending unsaved changes.
   const state = useEditorState(store)
   const toolbar = useRef<HTMLDivElement>(null)
@@ -169,18 +168,6 @@ export function Editor({
   if (state.snapshot === null) return <Loading label="Opening the editor…" onRetry={() => void store.load()} />
   const { ref, usedByChats, variants } = state.snapshot
   const { dirty } = state
-
-  const upload = async (file: File) => {
-    setUploadError(null)
-    const response = await fetch(`/library/avatar?ref=${ref.id}&rowVersion=${ref.rowVersion}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: file
-    })
-    if (response.ok) return store.refresh()
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown }
-    setUploadError(typeof body.error === "string" ? body.error : "The avatar couldn't be uploaded.")
-  }
 
   return (
     <SearchNavigation value={searchMatch}>
@@ -356,11 +343,6 @@ export function Editor({
             error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
           />
         )}
-        {uploadError && (
-          <Alert tone="danger" title="The avatar wasn't changed">
-            <p>{uploadError}</p>
-          </Alert>
-        )}
         <RestoredNotice count={state.restored} />
         <RecoveredNotice store={store} />
         {notice && (
@@ -390,7 +372,7 @@ export function Editor({
         )}
 
         {ref.kind === "card" && <CardSurface placement="family" entityId={ref.entityId} whenForked />}
-        {ref.kind === "card" && <CardEditor store={store} call={call} onUpload={(file) => void upload(file)} />}
+        {ref.kind === "card" && <CardEditor store={store} call={call} />}
         {ref.kind === "preset" && <PresetEditor store={store} call={call} context={context} focus={focus} />}
         {ref.kind === "note" && (
           <Card>

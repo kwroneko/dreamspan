@@ -1,8 +1,11 @@
 // A card's avatar: its image when it has one, else its initials on a tint picked from its
 // id, so the same card always looks the same. A stack shows a chat's cast together.
 
+import type { AvatarCrop } from "@rp/shared/media.ts"
+import type { CSSProperties } from "react"
 import { PortraitFrame, useOpenPortrait } from "./Portrait.tsx"
-import { mediaUrl, useMediaWidth } from "./mediaImage.ts"
+import { useMediaWidth } from "./mediaImage.ts"
+import { portraitUrl } from "./portraitParts.ts"
 
 const TINTS = [
   "bg-accent/15 text-accent",
@@ -40,10 +43,22 @@ const SIZES = {
 
 export type AvatarSize = keyof typeof SIZES
 
+/**
+ * Where `object-cover` puts an image that isn't already the cutout: an animated or very large
+ * one, which the server serves whole (§14.5b). The cutout's centre is kept in view; a cut-out
+ * thumbnail is 2:3 already, so this moves nothing.
+ */
+const cutoutPosition = (crop: AvatarCrop | null | undefined): CSSProperties | undefined => {
+  if (!crop) return { objectPosition: "50% 0%" }
+  const along = (start: number, size: number) => (size >= 1 ? 50 : (start / (1 - size)) * 100)
+  return { objectPosition: `${along(crop.x, crop.width)}% ${along(crop.y, crop.height)}%` }
+}
+
 export function Avatar({
   id,
   name,
   mediaId = null,
+  crop = null,
   size = "md",
   shape: _shape,
   className = "",
@@ -53,6 +68,8 @@ export function Avatar({
   id: string
   name: string
   mediaId?: string | null
+  /** The avatar's chosen cutout (§14.5c): what the portrait shows. Absent or null: the default. */
+  crop?: AvatarCrop | null | undefined
   size?: AvatarSize
   /** Compatibility for tile callers; portraits always use rectangular corners. */
   shape?: "circle" | "square"
@@ -67,7 +84,8 @@ export function Avatar({
     <>
       {mediaId !== null && width !== undefined && (
         <img
-          src={mediaUrl(mediaId, width)}
+          src={portraitUrl(mediaId, width, crop)}
+          style={cutoutPosition(crop)}
           alt={alt}
           loading="lazy"
           decoding="async"
@@ -109,6 +127,7 @@ interface Face {
   readonly id: string
   readonly name: string
   readonly mediaId?: string | null
+  readonly crop?: AvatarCrop | null | undefined
 }
 
 /** A chat's cast as a compact row of consistently shaped portraits. */
@@ -130,6 +149,7 @@ export function AvatarStack({
           id={face.id}
           name={face.name}
           mediaId={face.mediaId ?? null}
+          crop={face.crop ?? null}
           size={size}
           preview={preview}
         />

@@ -59,7 +59,7 @@ export function CharacterPanel({
     <div className="flex flex-col gap-4">
       {card && (
         <header className="flex items-start gap-3">
-          <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} size="xl" />
+          <Avatar id={entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="xl" />
           <div>
             <h2 className="text-lg font-semibold">{card.label}</h2>
             <p className="text-sm text-muted">{card.subtitle}</p>

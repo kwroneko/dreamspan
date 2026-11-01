@@ -121,7 +121,13 @@ function CardOptions({
               className="absolute top-0 left-0 flex h-11 w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+              <Avatar
+                id={card.entityId}
+                name={card.name}
+                mediaId={card.avatarMediaId}
+                crop={card.avatarCrop}
+                size="md"
+              />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{card.name}</span>
                 {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
@@ -171,7 +177,7 @@ function SectionRow({
       onClick={() => onPick(card)}
       className="flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-sm aria-[current]:font-medium aria-selected:bg-surface-raised aria-selected:ring-1 aria-selected:ring-border"
     >
-      <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+      <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="[overflow-wrap:anywhere]">{card.name}</span>
         {card.subtitle && <span className="truncate text-xs text-muted">{card.subtitle}</span>}
@@ -447,6 +453,7 @@ export const SpeakerSwitcher = memo(function SpeakerSwitcher({
                 id={speaker}
                 name={name}
                 mediaId={(view.cards.get(speaker) ?? names.get(speaker))?.avatarMediaId ?? null}
+                crop={(view.cards.get(speaker) ?? names.get(speaker))?.avatarCrop}
                 size="chip"
               />
             ) : (

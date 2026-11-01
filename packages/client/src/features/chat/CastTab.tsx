@@ -77,7 +77,7 @@ function AddCharacter({
         }}
         className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
       >
-        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="md" />
+        <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="md" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate">{card.name}</span>
           {version && <span className="truncate text-xs text-muted">{version}</span>}
@@ -223,7 +223,7 @@ function Member({
   return (
     <li aria-label={name} className="flex items-center gap-3 py-2">
       <span className={muted ? "opacity-50" : ""}>
-        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} size="lg" preview />
+        <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
       </span>
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
         <button
@@ -269,7 +269,16 @@ function You({ session, card }: { session: ChatSession; card: CastCard | undefin
   const showPanel = useShowPanel()
   return (
     <div role="group" aria-label="Your persona" className="flex items-center gap-3">
-      {card && <Avatar id={card.entityId} name={card.name} mediaId={card.avatarMediaId} size="lg" preview />}
+      {card && (
+        <Avatar
+          id={card.entityId}
+          name={card.name}
+          mediaId={card.avatarMediaId}
+          crop={card.avatarCrop}
+          size="lg"
+          preview
+        />
+      )}
       <div className="flex min-w-0 flex-1 flex-col items-start">
         <span className="text-xs text-muted">You play</span>
         {card ? (
