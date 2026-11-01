@@ -211,6 +211,8 @@ for (const width of [1440, 390])
       await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
       await page.mouse.down()
       await page.mouse.move(from.x + from.width / 2, target.y + target.height * 0.75, { steps: 8 })
+      // A bar shows where it would land.
+      await expect(panel.locator('[class*="before:bg-accent"]')).toHaveCount(1)
       await shot("mid-drag")
       await page.mouse.up()
       await expect
