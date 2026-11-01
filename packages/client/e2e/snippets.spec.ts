@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { expect, type Locator, test } from "@playwright/test"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { serverPerFile, withAdmin, apiLogin, ADMIN } from "./support/server.ts"
-import { asUser } from "./support/rpc.ts"
+import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
 import { noteText } from "./support/notes.ts"
 import { saveRevision } from "./support/saveRevision.ts"
@@ -16,7 +16,10 @@ import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = process.env.SCREENSHOT_DIR
-const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+// One login for the file: polling the server through a login each time meets its rate limit.
+let cookie: Promise<string> | null = null
+const admin = async <A>(use: Parameters<typeof withCookie<A>>[2]) =>
+  withCookie(server(), await (cookie ??= loginCookie(server(), ADMIN.handle, ADMIN.password)), use)
 
 const snippetBlock = (scope: Locator, title: string) => scope.getByRole("region", { name: `Snippet ${title}` })
 
