@@ -5,7 +5,7 @@
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 
-export const CARD_FAVOURITES = "cards.favourites"
+const CARD_FAVOURITES = "cards.favourites"
 
 interface Favourites {
   readonly on: ReadonlyArray<string>
