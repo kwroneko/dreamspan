@@ -63,7 +63,11 @@ for (const width of [1440, 390]) {
           slotId: null,
           change: { _tag: "Lorebook", ref: added.id, active: true }
         })
-        yield* api.SetGlobalLorebook({ ref: global.id, global: true })
+        yield* api.ChangeCast({
+          chatId: made.id,
+          slotId: null,
+          change: { _tag: "Lorebook", ref: global.id, active: true }
+        })
         return made
       })
     )

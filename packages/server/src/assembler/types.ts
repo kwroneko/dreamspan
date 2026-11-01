@@ -13,7 +13,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 43
+export const ASSEMBLER_VERSION = 44
 
 export type Role = "system" | "user" | "assistant"
 
@@ -393,8 +393,6 @@ export interface SourcePins {
     readonly key: string
     readonly found: ReadonlyArray<{ readonly entity: string; readonly ref: string | null; readonly revision: string }>
   }>
-  /** The user's global lorebook refs; absent in snapshots from before global books. */
-  readonly globalLorebooks?: ReadonlyArray<string>
   /** The account's global regex scripts as read; absent in snapshots from before them (none). */
   readonly globalRegex?: ReadonlyArray<import("@rp/shared/docs/regexScript.ts").RegexScript>
   readonly lorebooks?: ReadonlyArray<{

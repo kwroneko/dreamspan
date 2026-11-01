@@ -17,7 +17,7 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
       preset: null,
       lorebooks: [],
       cardLorebooksOff: [],
-      globalLorebooksOff: [],
+      listedLorebooks: [],
       loreBelowHistory: true,
       macroBindings: {},
       macroNames: { user: "User", char: "" },

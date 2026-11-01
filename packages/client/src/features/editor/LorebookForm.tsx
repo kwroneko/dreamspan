@@ -18,11 +18,18 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
     <details className="group rounded-lg border border-border p-3">
       <summary className="cursor-pointer text-sm font-medium">
         Book settings{" "}
-        <span className="hidden font-normal text-muted sm:inline">· name, description, scan depth, budget</span>
+        <span className="hidden font-normal text-muted sm:inline">· description, scan depth, budget, recursion</span>
       </summary>
       <div className="mt-3 flex flex-col gap-4">
-        <TextField store={store} path={[...root, "name"]} label="Lorebook name" />
-        <TextField store={store} path={[...root, "description"]} label="Lorebook description" rows={3} />
+        {/* A library lorebook is renamed by the pencil beside its name, which sets this too. */}
+        {root.length > 0 && <TextField store={store} path={[...root, "name"]} label="Lorebook name" />}
+        <TextField
+          store={store}
+          path={[...root, "description"]}
+          label="Lorebook description"
+          description="For you: it isn't sent to the model."
+          rows={3}
+        />
         <div className="grid gap-4 sm:grid-cols-3">
           <NumberField
             store={store}

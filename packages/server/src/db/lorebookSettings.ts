@@ -1,6 +1,7 @@
 // What the preset in use does with a card's own prompts (DESIGN §5.0), read in the reader workers.
-import { CardPromptUse } from "@rp/shared/chatSetupApi.ts"
+import { CardPromptUse, type LorebookPreset } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import type { RefId } from "@rp/shared/library.ts"
 import { BUILTIN_PRESET_LABEL } from "@rp/shared/generation.ts"
 import { LegacyPresetDoc } from "@rp/shared/docs/preset.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
@@ -48,3 +49,23 @@ export const readCardPromptUse = (sql: SqlClient.SqlClient, userId: UserId) =>
       jailbreak: use("jailbreak", "Post-History Instructions")
     })
   })
+
+/**
+ * The user's live presets whose HEAD lists the lorebook `ref`, a chat's own preset copy too
+ * while its chat isn't binned. Owner-scoped: another user's presets never show.
+ */
+export const readLorebookPresets = (sql: SqlClient.SqlClient, userId: UserId, ref: RefId) =>
+  Effect.map(
+    sql<{ ref_id: string; label: string; enabled: number }>`
+      SELECT r.id AS ref_id, r.label, json_extract(l.value, '$.enabled') AS enabled
+      FROM entity_refs r JOIN entities e ON e.id = r.entity_id
+      JOIN entity_revisions h ON h.id = r.head_revision_id
+      LEFT JOIN chats c ON c.id = r.chat_id
+      JOIN json_each(h.doc_json, '$.lorebooks') l
+      WHERE e.owner_user_id = ${userId} AND e.kind = 'preset' AND e.deleted_at IS NULL
+        AND (r.chat_id IS NULL OR c.deleted_at IS NULL)
+        AND json_extract(l.value, '$.id') = ${ref}
+      ORDER BY r.label, r.id`,
+    (rows): ReadonlyArray<LorebookPreset> =>
+      rows.map((row) => ({ refId: row.ref_id as RefId, label: row.label, enabled: row.enabled === 1 }))
+  )

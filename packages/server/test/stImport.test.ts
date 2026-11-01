@@ -3,6 +3,7 @@
 // over HTTP as the client does, and the chats, library and report checked. Cross-user
 // probes are in isolation.test.ts.
 import { DatabaseSync } from "node:sqlite"
+import { readFileSync } from "node:fs"
 import { assert, describe, layer } from "@effect/vitest"
 import { type ChatId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import { foldState } from "@rp/shared/state.ts"
@@ -13,6 +14,7 @@ import { Reader, Writer } from "../src/db/Database.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { ALICE_MAIN, largeChat, stFolder } from "./support/stFolder.ts"
 import { importStFolder, sendFile, sendStFile } from "./support/stUpload.ts"
+import { worldInfo } from "./formats/support.ts"
 
 const eventually = (check: () => boolean, ms = 10_000) =>
   Effect.gen(function* () {
@@ -106,6 +108,21 @@ const revisionDoc = (id: string) => {
   return JSON.parse(row!.doc_json as string) as Record<string, unknown>
 }
 
+/** A ref's head document. */
+const headDoc = (refId: string) => {
+  const conn = db()
+  const row = conn
+    .prepare(`SELECT h.doc_json FROM entity_refs r JOIN entity_revisions h ON h.id = r.head_revision_id WHERE r.id = ?`)
+    .get(refId)
+  conn.close()
+  return JSON.parse(row!.doc_json as string) as Record<string, unknown>
+}
+const presetRevisions = (entityId: string) => {
+  const conn = db()
+  const row = conn.prepare(`SELECT count(*) AS n FROM entity_revisions WHERE entity_id = ?`).get(entityId)
+  conn.close()
+  return row!.n as number
+}
 const entityByLabel = (label: string, tag?: string) => {
   const conn = db()
   const row = conn
@@ -370,8 +387,19 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
       const api = yield* client()
       const before = yield* api.ListChats({ limit: 500, before: null })
       const library = yield* api.ListLibrary({ kind: "card" })
+      const preset = (yield* api.ListLibrary({ kind: "preset" })).find((ref) => ref.label === "Default")!
+      const revisions = presetRevisions(preset.entityId)
       const { report } = yield* importStFolder(folder, { partBytes: 600 })
       assert.deepStrictEqual({ ...report.counts.card }, { added: 0, updated: 0, unchanged: 6, skipped: 0, failed: 0 })
+      // ST's global book stays attached to its selected preset once, with no new revision.
+      assert.strictEqual(report.counts.preset?.unchanged, 1)
+      assert.strictEqual(presetRevisions(preset.entityId), revisions)
+      const hollow = (yield* api.ListLibrary({ kind: "lorebook" })).find((ref) => ref.label === "Hollow")!
+      assert.deepStrictEqual(headDoc(preset.id).lorebooks, [{ id: hollow.id, enabled: true }])
+      assert.deepStrictEqual(
+        (yield* api.LorebookPresets({ ref: hollow.id })).map((p) => [p.refId, p.enabled]),
+        [[preset.id, true]]
+      )
       assert.strictEqual(report.counts.chat?.added ?? 0, 0)
       assert.strictEqual(report.counts.chat?.updated ?? 0, 0)
       assert.strictEqual(report.counts.chat?.unchanged, 5)
@@ -605,6 +633,92 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
             role: role === 1 ? "user" : "assistant"
           })
       }
+    })
+  )
+
+  it.effect("attaches ST's global World Info books to the preset ST had selected, once, and nowhere else", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const world = (content: string) => encode({ entries: { "1": { ...worldInfo().entries["3"], uid: 1, content } } })
+      const presetFile = (extra: Record<string, unknown>) =>
+        encode({
+          ...JSON.parse(readFileSync(new URL("fixtures/presets/default.json", import.meta.url), "utf8")),
+          ...extra
+        })
+      const settings = (selected: string | null) =>
+        encode({
+          world_info_settings: { world_info: { globalSelect: ["Fen", "Marsh", "Gone"] } },
+          ...(selected === null ? {} : { oai_settings: { preset_settings_openai: selected } })
+        })
+      const files = (selected: string | null) =>
+        new Map([
+          ["settings.json", settings(selected)],
+          ["worlds/Fen.json", world("Fen water.")],
+          ["worlds/Marsh.json", world("Marsh reeds.")],
+          ["OpenAI Settings/Plain.json", presetFile({ temperature: 0.42 })],
+          ["OpenAI Settings/Other.json", presetFile({ temperature: 0.43 })]
+        ])
+      const settingsIssues = (report: {
+        readonly issues: ReadonlyArray<{ path: string; level: string; code: string; message: string }>
+      }) =>
+        report.issues
+          .filter((i) => i.path === "settings.json" && i.code.startsWith("st.global_world"))
+          .map((i) => [i.level, i.code, i.message])
+      const missing = [
+        "warning",
+        "st.global_world_missing",
+        "ST applies the lorebook “Gone” to every chat, but it wasn't in the folder, so it isn't used here."
+      ]
+      const first = yield* importStFolder(files("Plain"))
+      assert.deepStrictEqual(settingsIssues(first.report), [
+        [
+          "info",
+          "st.global_worlds_attached",
+          "Attached ST's global World Info books “Fen”, “Marsh” to the preset “Plain”."
+        ],
+        missing
+      ])
+      const presets = yield* api.ListLibrary({ kind: "preset" })
+      const plain = presets.find((ref) => ref.label === "Plain")!
+      const other = presets.find((ref) => ref.label === "Other")!
+      const books = yield* api.ListLibrary({ kind: "lorebook" })
+      const fen = books.find((ref) => ref.label === "Fen")!
+      const marsh = books.find((ref) => ref.label === "Marsh")!
+      // In ST's order, each on; only the selected preset has them.
+      assert.deepStrictEqual(headDoc(plain.id).lorebooks, [
+        { id: fen.id, enabled: true },
+        { id: marsh.id, enabled: true }
+      ])
+      assert.isUndefined(headDoc(other.id).lorebooks)
+      assert.deepStrictEqual(
+        (yield* api.LorebookPresets({ ref: marsh.id })).map((p) => p.label),
+        ["Plain"]
+      )
+      // Again: nothing added, no duplicate entry, the same report.
+      const revisions = presetRevisions(plain.entityId)
+      const again = yield* importStFolder(files("Plain"))
+      assert.strictEqual(again.report.counts.preset?.unchanged, 2)
+      assert.strictEqual(presetRevisions(plain.entityId), revisions)
+      assert.lengthOf(headDoc(plain.id).lorebooks as ReadonlyArray<unknown>, 2)
+      assert.deepStrictEqual(settingsIssues(again.report), settingsIssues(first.report))
+      // With no preset selected, or one not in the folder, the books stay unattached, and the report says why.
+      const none = yield* importStFolder(files(null))
+      assert.deepStrictEqual(settingsIssues(none.report), [
+        [
+          "warning",
+          "st.global_worlds_unattached",
+          "ST applies the World Info books “Fen”, “Marsh” to every chat; they are in your library but attached to no preset, since ST had no preset selected."
+        ],
+        missing
+      ])
+      const absent = yield* importStFolder(files("Lost"))
+      assert.deepStrictEqual(settingsIssues(absent.report)[0], [
+        "warning",
+        "st.global_worlds_unattached",
+        "ST applies the World Info books “Fen”, “Marsh” to every chat; they are in your library but attached to no preset, since ST's selected preset “Lost” wasn't imported."
+      ])
+      assert.isUndefined(headDoc(other.id).lorebooks)
+      assert.lengthOf(headDoc(plain.id).lorebooks as ReadonlyArray<unknown>, 2)
     })
   )
 })

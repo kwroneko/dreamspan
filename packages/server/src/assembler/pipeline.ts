@@ -84,8 +84,6 @@ export class AssemblySources extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<CardInput>, SourceError>
     readonly messageCount: (leaf: string | null) => Effect.Effect<number, SourceError>
     readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
-    /** The refs of the lorebooks the user marked global (DESIGN §5.0), in the order they were marked. */
-    readonly globalLorebooks: Effect.Effect<ReadonlyArray<string>, SourceError>
     /** The account's global regex scripts (ST's "Global scripts"); fixtures without it have none. */
     readonly globalRegex?: Effect.Effect<ReadonlyArray<RegexScript>, SourceError>
     /** The notes these cards own, at the revision `bound` pins or their head. */

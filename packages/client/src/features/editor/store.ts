@@ -397,6 +397,22 @@ export class EditorStore {
     return result
   }
 
+  /**
+   * An earlier revision as a new one (`RestoreRevision`): the fields changed since take it too.
+   * A change to many lorebook entries undoes itself this way (lorebookMass.ts).
+   */
+  async restoreRevision(revisionId: RevisionId) {
+    const result = await this.call((client) =>
+      client("RestoreRevision", {
+        refId: this.refId,
+        revisionId,
+        expectedRowVersion: this.snapshot!.ref.rowVersion
+      })
+    )
+    if (result.ok || result.error.tag === "StaleWrite") await this.refresh()
+    return result
+  }
+
   /** Applies the held changes to the live document, for a save: the order as arranged, the prompts deleted. */
   private async applyHeld() {
     const held = this.held()

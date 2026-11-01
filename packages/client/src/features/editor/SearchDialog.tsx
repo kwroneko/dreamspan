@@ -9,6 +9,8 @@ import { Alert } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { editorTextFields, type Searchable, searchable } from "./fields.ts"
 import type { SearchMatch } from "./searchNavigation.ts"
+import { inScope, rememberedScope, rememberScope, type SearchScopes } from "./searchScopes.ts"
+import { Segmented } from "../../ui/Segmented.tsx"
 import { runSearch, type SearchResponse } from "./search.ts"
 import { type EditorStore, useWorkingDoc } from "./store.ts"
 
@@ -68,12 +70,18 @@ export function SearchDialog({
   store,
   onClose,
   onReveal,
-  inline = false
+  inline = false,
+  scopes,
+  idPrefix = "search"
 }: {
   store: EditorStore
   onClose?: () => void
   onReveal: (match: SearchMatch) => void
   inline?: boolean
+  /** What it can look through ("Look in"): every text field without. */
+  scopes?: SearchScopes | undefined
+  /** Ids in the page: two inline searches (the panel's and the large editor's) can both show. */
+  idPrefix?: string
 }) {
   const navigating = useRef(false)
   const [find, setFind] = useState("")
@@ -87,15 +95,18 @@ export function SearchDialog({
   const chosen = [wholeWord, preserveCase, regex, caseSensitive].filter(Boolean).length
   const [found, setFound] = useState<Found | null>(null)
   const [pending, setPending] = useState(false)
+  const [scope, setScope] = useState(() => (scopes ? rememberedScope(scopes) : ""))
+  const fieldsOf = (doc: Parameters<typeof searchable>[1], entries?: Parameters<typeof searchable>[2]) =>
+    inScope(searchable(store.snapshot!.ref.kind, doc, entries), scopes, scope)
 
   const working = useWorkingDoc(store)
   // Registration changes invalidate previews, just as document changes do.
   const contributions = useSyncExternalStore(editorTextFields.subscribe, editorTextFields.snapshot)
-  const current = searchable(store.snapshot!.ref.kind, working, contributions.entries)
-  const asked = JSON.stringify([find, replace, wholeWord, preserveCase, regex, caseSensitive])
+  const current = fieldsOf(working, contributions.entries)
+  const asked = JSON.stringify([find, replace, wholeWord, preserveCase, regex, caseSensitive, scope])
 
   const search = async (replacement: string | null) => {
-    const fields = searchable(store.snapshot!.ref.kind, store.working().doc)
+    const fields = fieldsOf(store.working().doc)
     setPending(true)
     const response = await runSearch({
       texts: fields.map((field) => field.text),
@@ -119,7 +130,7 @@ export function SearchDialog({
   /** Replaces in the fields `only` names, or in every field. */
   const replaceIn = async (only: number | null) => {
     const result = await search(replace)
-    const now = searchable(store.snapshot!.ref.kind, store.working().doc)
+    const now = fieldsOf(store.working().doc)
     if (!sameFields(result.fields, now)) {
       setFound({
         asked,
@@ -181,8 +192,27 @@ export function SearchDialog({
         <Field label="Replace with">
           <Input value={replace} onChange={(event) => setReplace(event.currentTarget.value)} />
         </Field>
+        {scopes && (
+          <div className="col-span-2 flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-sm text-muted">Look in</span>
+            <Segmented
+              label="Look in"
+              wrap
+              value={scope}
+              onValueChange={(next) => {
+                setScope(next)
+                rememberScope(scopes, next)
+              }}
+              options={scopes.options.map((option) => ({
+                value: option.value,
+                label: option.label,
+                description: option.hint
+              }))}
+            />
+          </div>
+        )}
         <div
-          id={inline ? "search-options" : undefined}
+          id={inline ? `${idPrefix}-options` : undefined}
           className={`${inline ? `col-span-2 sm:col-span-1 ${options ? "flex" : "hidden"} sm:flex` : "flex"} flex-wrap gap-4`}
         >
           <SearchOption
@@ -206,9 +236,13 @@ export function SearchDialog({
           >
             Regular expression
           </SearchOption>
-          <Checkbox checked={caseSensitive} onCheckedChange={setCaseSensitive}>
+          <SearchOption
+            checked={caseSensitive}
+            onCheckedChange={setCaseSensitive}
+            hint="Capitals and lower case count as different letters."
+          >
             Match case
-          </Checkbox>
+          </SearchOption>
         </div>
         {actions(
           <>
@@ -217,7 +251,7 @@ export function SearchDialog({
                 variant="ghost"
                 className="mr-auto sm:hidden"
                 aria-expanded={options}
-                aria-controls="search-options"
+                aria-controls={`${idPrefix}-options`}
                 onClick={() => setOptions(!options)}
               >
                 Options{chosen > 0 ? ` (${chosen})` : ""}
@@ -226,12 +260,18 @@ export function SearchDialog({
             <Button
               disabled={find === "" || !response?.ok || response.matches.length === 0}
               pending={pending}
-              hint="Replaces every match in every field, as unsaved changes."
+              hint="Replaces every match in every field it looks in. Each field keeps its edit history, and Revert beside Save undoes it."
               onClick={() => void replaceIn(null)}
             >
               Replace all
             </Button>
-            <Button type="submit" variant="primary" pending={pending} disabled={find === ""}>
+            <Button
+              type="submit"
+              variant="primary"
+              pending={pending}
+              disabled={find === ""}
+              hint="Lists every match with its replacement, before anything is changed."
+            >
               Find
             </Button>
           </>
@@ -283,13 +323,18 @@ export function SearchDialog({
                     <span className="text-success [overflow-wrap:anywhere]">→ {match.replacement}</span>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-1">
-                    <Button variant="ghost" onClick={reveal} aria-label={`Go to ${field.label}`}>
+                    <Button
+                      variant="ghost"
+                      onClick={reveal}
+                      aria-label={`Go to ${field.label}`}
+                      hint="Shows the field with the match selected."
+                    >
                       Go to
                     </Button>
                     <Button
                       variant="ghost"
                       aria-label={`Replace in ${field.label}`}
-                      hint="Replaces every match in this field, as an unsaved change."
+                      hint="Replaces every match in this field only."
                       onClick={() => void replaceIn(match.index)}
                     >
                       Replace in this field

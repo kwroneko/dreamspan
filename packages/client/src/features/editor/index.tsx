@@ -17,6 +17,7 @@ import { CardRegexScripts } from "./RegexScripts.tsx"
 import { lorebookFields, standaloneLorebookFields } from "./lorebookFields.ts"
 import { LorebookUse, StandaloneLorebook } from "./StandaloneLorebook.tsx"
 import { registerLorebookTable } from "./lorebookColumns.tsx"
+import { registerLorebookMassSettings } from "./lorebookMassDefaults.ts"
 import { lazy, Suspense } from "react"
 import { routes } from "../../routes.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -61,6 +62,7 @@ export const register = () => {
   cardEditorSections.register({ id: "card.regex", order: 110, component: CardRegexScripts })
   editorTextFields.register({ id: "card.regex", kind: "card", fields: (doc) => regexScriptFields("card", doc) })
   registerLorebookTable()
+  registerLorebookMassSettings()
   presetEditorSections.register({ id: "preset.end-of-request", order: 100, component: EndOfRequest })
   presetEditorSections.register({ id: "preset.reply-sections", order: 110, component: ReplySectionsSettings })
   registerPresetWarnings()
