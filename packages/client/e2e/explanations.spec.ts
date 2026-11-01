@@ -165,6 +165,52 @@ for (const theme of ["light", "dark"] as const) {
       page.getByRole("menuitem", { name: "Pick a shared note…" }).getByText(/shows a shared note's text/)
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `menu-390-${theme}.png`) })
+    await page.keyboard.press("Escape")
+
+    // A choice: the chosen one's explanation under the row, as nothing hovers.
+    await panelTab(page, "Lorebooks")
+    const where = page.getByRole("group", { name: "Where entries go" })
+    await expect(where.locator("..").locator("p")).toHaveText(/one block just after the history/)
+    await page.screenshot({ path: join(shots, `choice-390-${theme}.png`) })
+    await context.close()
+  })
+
+  test(`${theme}, spot checks with a mouse: a panel tab, a choice, the chat menu, a button`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: theme })
+    const page = await context.newPage()
+    await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/chats/${chatId}`)
+    const lore = await openPanel(page, "Lorebooks")
+    // A panel tab says what it holds.
+    await page.getByRole("tablist", { name: "Chat panel" }).getByRole("tab", { name: "Lorebooks" }).hover()
+    await expect(
+      page.getByText("The lorebooks this chat reads, each with its switch, and where their entries go.")
+    ).toBeVisible()
+    // A choice explains itself on hover, and to a screen reader.
+    const below = lore
+      .getByRole("group", { name: "Where entries go" })
+      .getByRole("button", { name: "Below the history" })
+    await expect(below).toHaveAccessibleDescription(/one block just after the history/)
+    await below.hover()
+    await expect(page.getByText(/one block just after the history, so the history stays cached/).last()).toBeVisible()
+    await page.screenshot({ path: join(shots, `choice-1440-${theme}.png`) })
+
+    // The chat's menu: its commands, explained beside them.
+    await page.getByRole("button", { name: "Chat actions" }).click()
+    const menu = page.getByRole("menu")
+    await page.getByRole("menuitem", { name: "Branches…" }).hover()
+    await expect(explanation(page)).toHaveText("Switch to, rename or delete this chat's branches.")
+    await beside(menu, explanation(page))
+    await page.screenshot({ path: join(shots, `chat-menu-1440-${theme}.png`) })
+    await page.keyboard.press("Escape")
+
+    // A button: its hint on hover and as its description.
+    await page.goto(`${server().url}/settings/keys`)
+    const save = page.getByRole("button", { name: "Save a key" })
+    await expect(save).toHaveAccessibleDescription("Saves a key once, for any number of connections to use.")
+    await save.hover()
+    await expect(page.getByText("Saves a key once, for any number of connections to use.").last()).toBeVisible()
+    await page.screenshot({ path: join(shots, `button-1440-${theme}.png`) })
     await context.close()
   })
 }

@@ -305,9 +305,9 @@ for (const width of [1440, 390])
       await expect(page.getByRole("option", { name: "With the definitions" })).toHaveAccessibleDescription(
         /this card's own part of the definitions/
       )
-      await expect(page.getByRole("option", { name: "Before the author's note" })).toHaveAccessibleDescription(
-        /Imported from ST/
-      )
+      await expect(
+        page.getByRole("option", { name: "Before the author's note", exact: true })
+      ).toHaveAccessibleDescription(/Imported from ST/)
       await shoot("card-note-positions")
       await page.keyboard.press("Escape")
 

@@ -121,7 +121,13 @@ export function PanelToggles({
     // Icons, as ST's panel buttons are, so the header keeps room for the chat's name.
     <div role="group" aria-label="Chat panel" className="flex shrink-0 gap-0.5">
       {tabs.map((tab) => (
-        <IconButton key={tab.value} label={tab.label} icon={tab.descriptor.icon} onClick={() => onToggle(tab.value)} />
+        <IconButton
+          key={tab.value}
+          label={tab.label}
+          hint={tab.descriptor.description ? `${tab.label}: ${tab.descriptor.description}` : tab.label}
+          icon={tab.descriptor.icon}
+          onClick={() => onToggle(tab.value)}
+        />
       ))}
     </div>
   )
