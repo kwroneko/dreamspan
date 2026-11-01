@@ -33,7 +33,8 @@ const copied = [
   "macro_mode",
   "frozen_macros",
   "connection_id",
-  "model_id"
+  "model_id",
+  "recorded_model_json"
 ].join(", ")
 
 type Handlers = Parameters<typeof WriteOps.of>[0]

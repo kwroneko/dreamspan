@@ -1,13 +1,16 @@
-// A reply's generation time and tokens in its header (parity finding 5; the
-// `message.header-details` slot): elapsed seconds and output tokens, summed over the
-// requests behind its text (retries, and the versions it continued), from the usage ledger
-// (`GetVersionMetrics`). Its tooltip, and the panel a click opens, give time to first token,
-// reasoning time, tokens per second and the last request apart. Unknown figures say so.
-import type { PathEntry } from "@rp/shared/chat.ts"
+// A reply's generation time and tokens under its portrait, as ST shows them ("12.4s",
+// "384t"; parity finding 5, msgmeta): two message details (messageDetails.tsx). For a reply
+// generated here, elapsed seconds and output tokens summed over the requests behind its text
+// (retries, and the versions it continued), from the usage ledger (`GetVersionMetrics`); for
+// an imported one, what SillyTavern recorded (`Version.recorded`: its own token count of the
+// text and reasoning). Each one's tooltip, and the panel a click opens, give time to first
+// token, reasoning time, tokens per second and the last request apart. Unknown figures say so;
+// one not recorded at all isn't shown.
+import type { RecordedGeneration } from "@rp/shared/chat.ts"
 import type { VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { Popover } from "../../ui/Popover.tsx"
-import { messageHeaderDetails } from "./presentation.tsx"
+import { formatFullTime, type MessageDetailProps, messageDetails } from "./messageDetails.tsx"
 import { MetricsLoader } from "./metricsLoader.ts"
 import type { ChatSession } from "./session.ts"
 
@@ -72,27 +75,86 @@ export const metricsDetails = (m: VersionMetrics, hasReasoning: boolean): Readon
   return rows
 }
 
-function Metrics({ entry, session, generating }: { entry: PathEntry; session: ChatSession; generating: boolean }) {
+/** The short forms under the portrait, as ST writes them: "12.4s", "384t". */
+const shortTime = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+const shortTokens = (n: number, estimated = false, partial = false) =>
+  `${estimated ? "~" : ""}${n}${partial ? "+" : ""}t`
+
+/** One version's figures as the details show them: the short forms (null: unknown) and the full rows. */
+export interface Figures {
+  readonly time: string | null
+  readonly tokens: string | null
+  /** "12.3 s · 340 tokens", the panel trigger's name. */
+  readonly summary: string
+  readonly rows: ReadonlyArray<readonly [string, string]>
+}
+
+const ownFigures = (m: VersionMetrics, reasoning: boolean): Figures => {
+  const ended = m.requests - (m.running ? 1 : 0)
+  const counted = ended > 0 && m.outputUnknown < ended
+  return {
+    time: m.elapsedMs === null ? null : shortTime(m.elapsedMs),
+    tokens: counted ? shortTokens(m.output, m.estimated, m.outputUnknown > 0) : null,
+    summary: metricsSummary(m),
+    rows: metricsDetails(m, reasoning)
+  }
+}
+
+/** What SillyTavern recorded for an imported version, in the same rows (ST's own timer tooltip's). */
+export const recordedFigures = (r: RecordedGeneration): Figures => {
+  const span = r.startedAt !== undefined && r.finishedAt !== undefined ? r.finishedAt - r.startedAt : null
+  const rows: Array<[string, string]> = []
+  if (span !== null) {
+    rows.push(["Started", formatFullTime(r.startedAt!)])
+    rows.push(["Finished", formatFullTime(r.finishedAt!)])
+    rows.push(["Generation time", seconds(span)])
+  }
+  if (r.firstTokenMs !== undefined) rows.push(["Time to first token", seconds(r.firstTokenMs)])
+  if (r.reasoningMs !== undefined) rows.push(["Reasoning time", seconds(r.reasoningMs)])
+  if (r.tokens !== undefined) {
+    rows.push(["Tokens", `${count(r.tokens)} (SillyTavern's count of the text and its reasoning)`])
+    if (span !== null && span > 0) rows.push(["Speed", `${(r.tokens / (span / 1000)).toFixed(1)} tokens/s`])
+  }
+  rows.push(["Recorded by", "SillyTavern"])
+  return {
+    time: span === null ? null : shortTime(span),
+    tokens: r.tokens === undefined ? null : shortTokens(r.tokens),
+    summary: `${span === null ? "time unknown" : seconds(span)} · ${
+      r.tokens === undefined ? "tokens unknown" : `${count(r.tokens)} tokens`
+    }`,
+    rows
+  }
+}
+
+/** A version's figures: what its import recorded, else its requests here once it's finished; null for none. */
+function useFigures({ entry, session, generating }: MessageDetailProps): Figures | null {
   const { version } = entry
   const loader = loaderOf(session)
   const key = version.status
-  const metrics = useSyncExternalStore(loader.subscribe, () => loader.peek(version.id, key))
-  const [open, setOpen] = useState(false)
-  const wanted = version.writer === "model" && !generating
+  const own = version.recorded === undefined && version.writer === "model" && !generating
+  const metrics = useSyncExternalStore(loader.subscribe, () => (own ? loader.peek(version.id, key) : undefined))
   useEffect(() => {
-    if (wanted) loader.want(version.id, key)
-  }, [loader, wanted, version.id, key])
-  if (!wanted || !metrics) return null
-  const rows = metricsDetails(metrics, Boolean(version.reasoning))
-  const summary = metricsSummary(metrics)
+    if (own) loader.want(version.id, key)
+  }, [loader, own, version.id, key])
+  if (version.recorded !== undefined) return recordedFigures(version.recorded)
+  return own && metrics ? ownFigures(metrics, Boolean(version.reasoning)) : null
+}
+
+function Figure({ which, ...props }: MessageDetailProps & { which: "time" | "tokens" }) {
+  const figures = useFigures(props)
+  const [open, setOpen] = useState(false)
+  const shown = figures === null ? null : which === "time" ? figures.time : figures.tokens
+  if (figures === null || shown === null) return null
+  const rows = figures.rows
   return (
     <Popover
       open={open}
       onOpenChange={setOpen}
       title="Generation"
-      triggerLabel={`Generation: ${summary}`}
-      triggerClassName="shrink-0 rounded-sm text-xs text-muted tabular-nums outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-      trigger={summary}
+      triggerLabel={which === "time" ? `Generation: ${figures.summary}` : `Tokens: ${figures.summary}`}
+      triggerClassName="rounded-sm tabular-nums outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+      trigger={shown}
+      align="start"
       hint={rows.map(([label, value]) => (
         <div key={label}>
           {label}: {value}
@@ -111,6 +173,29 @@ function Metrics({ entry, session, generating }: { entry: PathEntry; session: Ch
   )
 }
 
+function GenerationTime(props: MessageDetailProps) {
+  return <Figure which="time" {...props} />
+}
+function TokenCount(props: MessageDetailProps) {
+  return <Figure which="tokens" {...props} />
+}
+
 export const registerVersionMetrics = () => [
-  messageHeaderDetails.register({ id: "message.metrics", order: 10, component: Metrics })
+  messageDetails.register({
+    id: "message.timer",
+    place: "portrait",
+    order: 20,
+    label: "Generation time",
+    description: "How long the model took to write a reply. Click it for time to first token and speed.",
+    component: GenerationTime
+  }),
+  messageDetails.register({
+    id: "message.tokens",
+    place: "portrait",
+    order: 30,
+    label: "Token count",
+    description:
+      "How many tokens a message came to: the provider's count for replies written here, SillyTavern's count for imported messages.",
+    component: TokenCount
+  })
 ]

@@ -1,0 +1,241 @@
+// What a message says about itself (msgmeta, owner 2026-11-01): the model that wrote the
+// shown version, with its lab's mark, in the header, changing as the versions are stepped
+// through; the date and time; the number, generation time and tokens under the portrait, as
+// ST shows them; a reply generated here showing the same; and the Display settings hiding
+// each. At 1440 and 390, in both themes. Synthetic ST files only.
+import { expect, type Locator, type Page, test } from "@playwright/test"
+import { Effect } from "effect"
+import { mkdirSync } from "node:fs"
+import { join } from "node:path"
+import { card, header, jsonl } from "../../server/test/support/stFolder.ts"
+import { startProvider, type FakeProvider } from "./support/provider.ts"
+import { asUser, loginCookie } from "./support/rpc.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+const server = serverPerFile(withAdmin)
+let provider: FakeProvider
+
+const shoot = async (page: Page, name: string) => {
+  if (!process.env.SCREENSHOT_DIR) return
+  mkdirSync(process.env.SCREENSHOT_DIR, { recursive: true })
+  await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `${name}.png`) })
+}
+
+const iso = (at: number) => new Date(at).toISOString()
+const LAST_YEAR = Date.UTC(new Date().getUTCFullYear() - 1, 2, 1, 9, 0)
+// The last reply was written a minute ago: its time shows alone.
+const RECENT = Date.now() - 60_000
+
+const swipeRecord = (end: number, seconds: number, extra: Record<string, unknown>) => ({
+  send_date: iso(end),
+  gen_started: iso(end - seconds * 1000),
+  gen_finished: iso(end),
+  extra
+})
+const openai = swipeRecord(RECENT - 120_000, 12, { api: "openai", model: "gpt-4o", token_count: 380 })
+const claude = swipeRecord(RECENT, 8, { api: "claude", model: "claude-3-opus-20240229", token_count: 214 })
+
+const chat = [
+  header({}),
+  {
+    name: "Mira",
+    is_user: false,
+    send_date: iso(LAST_YEAR),
+    mes: '*Mira looks up from the map.* "You\'re late."',
+    swipe_id: 0,
+    swipes: ['*Mira looks up from the map.* "You\'re late."'],
+    swipe_info: [{ send_date: iso(LAST_YEAR), extra: {} }],
+    extra: {}
+  },
+  {
+    name: "Sam",
+    is_user: true,
+    send_date: iso(LAST_YEAR + 60_000),
+    mes: '"The snow held me up." *Sam stamps his boots by the door.*',
+    extra: { token_count: 17 }
+  },
+  {
+    name: "Mira",
+    is_user: false,
+    mes: '*She folds the map into her coat.* "Then we leave at first light."',
+    send_date: claude.send_date,
+    gen_started: claude.gen_started,
+    gen_finished: claude.gen_finished,
+    extra: claude.extra,
+    swipe_id: 1,
+    swipes: [
+      '*She taps the ridge on the map.* "We go over, not around."',
+      '*She folds the map into her coat.* "Then we leave at first light."'
+    ],
+    swipe_info: [openai, claude]
+  }
+]
+
+const lastReply = (page: Page) => page.getByRole("article", { name: "Reply" }).last()
+const portrait = (message: Locator) => message.locator("[data-portrait-details]")
+/** A tooltip showing this text (its hidden description copy left out). */
+const tip = (page: Page, text: string | RegExp) => page.getByText(text).filter({ visible: true }).last()
+
+const themes = async (page: Page, each: (width: number, theme: string) => Promise<void>) => {
+  for (const width of [1440, 390])
+    for (const theme of ["light", "dark"] as const) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.evaluate((value) => localStorage.setItem("rp.theme", value), theme)
+      await page.reload()
+      await each(width, theme)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+    }
+  await page.setViewportSize({ width: 1440, height: 900 })
+}
+
+test.setTimeout(240_000)
+
+test.beforeAll(async () => {
+  provider = await startProvider()
+})
+test.afterAll(async () => {
+  await provider.stop()
+})
+
+test("a message shows its model with its lab's mark, its date and time, and its figures under the portrait", async ({
+  page
+}) => {
+  const { importId } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    Effect.gen(function* () {
+      const connection = yield* api.CreateConnection({
+        kind: "openai-chat",
+        settings: {
+          name: "Local server",
+          baseUrl: provider.baseUrl,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "sk-msgmeta-test-key"
+      })
+      yield* api.RefreshModels({ connectionId: connection.id })
+      const model = (yield* api.ListModels({ connectionId: connection.id, includeHidden: false })).find(
+        (m) => m.key === "fake-large"
+      )!
+      yield* api.SetGenerationDefaults({
+        defaults: { model: { connection: connection.id, model: model.id }, preset: null }
+      })
+      return yield* api.StartStImport({ unsupported: [] })
+    })
+  )
+  const cookie = await loginCookie(server(), ADMIN.handle, ADMIN.password)
+  const upload = async (path: string, body: Uint8Array) => {
+    const response = await fetch(`${server().url}/st-import/file?${new URLSearchParams({ import: importId, path })}`, {
+      method: "POST",
+      headers: { origin: server().url, cookie, "content-type": "application/octet-stream" },
+      body: new Uint8Array(body)
+    })
+    expect(response.status).toBe(200)
+  }
+  await upload("characters/Mira.png", card("Mira", '*Mira looks up from the map.* "You\'re late."'))
+  await upload("chats/Mira/Pass.jsonl", jsonl(chat))
+  const { id } = await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+    api.ListChats({ limit: 10, before: null }).pipe(Effect.map((chats) => chats.find((c) => c.title === "Pass")!))
+  )
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${server().url}/chats/${id}`)
+
+  const reply = lastReply(page)
+  const head = reply.locator("header")
+  // The shown swipe: Anthropic's model, written a minute ago (the time alone), 8 s and 214 tokens.
+  await expect(head.locator('[data-model-mark="anthropic"]')).toBeVisible()
+  await expect(head).toContainText("claude-3-opus-20240229")
+  await expect(head.locator("time")).toHaveText(/^\d{1,2}[:.]\d{2}/)
+  await expect(head.locator("time")).not.toContainText(String(new Date().getFullYear()))
+  await expect(portrait(reply)).toHaveText(/#3\s*8\.0s\s*214t/)
+  // The first message is from last year: its date, with the year, before its time.
+  const first = page.getByRole("article").first()
+  await expect(first.locator("header time")).toContainText(String(new Date(LAST_YEAR).getFullYear()))
+  await expect(portrait(first)).toHaveText("#1")
+  // The user's turn has ST's count, and no model or time.
+  const turn = page.getByRole("article", { name: "Your message" })
+  await expect(portrait(turn)).toHaveText(/#2\s*17t/)
+  await expect(turn.locator("[data-model-mark]")).toHaveCount(0)
+
+  // Each detail explains itself on hover.
+  await head.locator('[data-model-mark="anthropic"]').hover()
+  await expect(tip(page, "Anthropic's model claude-3-opus-20240229")).toBeVisible()
+  await head.locator("time").hover()
+  await expect(tip(page, /^Written /)).toBeVisible()
+  await portrait(reply).getByText("#3").hover()
+  await expect(tip(page, "Message 3")).toBeVisible()
+  await portrait(reply)
+    .getByRole("button", { name: /^Generation: 8\.0 s · 214 tokens/ })
+    .hover()
+  await expect(tip(page, "SillyTavern's count")).toBeVisible()
+  await shoot(page, "01-imported-1440")
+
+  // The other swipe: another lab, its own figures.
+  await reply.hover()
+  await reply.getByRole("button", { name: "Previous version" }).click()
+  await expect(reply).toContainText("We go over, not around.")
+  await expect(head.locator('[data-model-mark="openai"]')).toBeVisible()
+  await expect(head).toContainText("OpenAI · gpt-4o")
+  await expect(portrait(reply)).toHaveText(/#3\s*12\.0s\s*380t/)
+  await shoot(page, "02-swiped-1440")
+
+  await themes(page, async (width, theme) => {
+    const shown = lastReply(page)
+    await expect(shown.locator('header [data-model-mark="openai"]')).toBeVisible()
+    await expect(portrait(shown)).toBeVisible()
+    // Under the portrait, never wider than it.
+    const column = (await portrait(shown).boundingBox())!
+    const face = (await shown.locator(".chat-portrait").boundingBox())!
+    expect(column.width).toBeLessThanOrEqual(face.width + 1)
+    expect(column.y).toBeGreaterThan(face.y + face.height - 1)
+    await shoot(page, `03-details-${width}-${theme}`)
+  })
+
+  // A version generated here: its connection and model, and its time and tokens from the ledger.
+  await reply.hover()
+  await reply.getByRole("button", { name: "Next version" }).click()
+  await reply.hover()
+  await reply.getByRole("button", { name: "Generate another version" }).click()
+  await expect(reply).toContainText("The bridge holds.")
+  await expect(reply.getByText("generating", { exact: true })).toHaveCount(0)
+  await expect(head).toContainText("fake-large")
+  await expect(head.locator('[data-model-mark="generic"]')).toBeVisible()
+  await expect(portrait(reply)).toHaveText(/#3\s*\d+\.\ds\s*6t/)
+  await shoot(page, "04-generated-1440")
+
+  // The Display settings hide each detail, on every message.
+  await page.goto(`${server().url}/settings/display`)
+  const details = page.getByRole("group", { name: "Message details" })
+  for (const name of ["Date and time", "Model icon", "Model name", "Message number", "Generation time", "Token count"])
+    await expect(details.getByRole("switch", { name })).toBeChecked()
+  await details.getByRole("switch", { name: "Model icon" }).hover()
+  await expect(tip(page, "Turn off to hide")).toBeVisible()
+  await shoot(page, "05-settings-1440")
+  for (const name of ["Date and time", "Model icon", "Message number", "Generation time", "Token count"]) {
+    await details.getByRole("switch", { name }).click()
+    await expect(details.getByRole("switch", { name })).not.toBeChecked()
+  }
+  await expect
+    .poll(
+      async () =>
+        Object.keys(
+          (await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.GetDisplayPrefs({}))).messageDetails
+        ).length
+    )
+    .toBe(5)
+  await page.goto(`${server().url}/chats/${id}`)
+  await expect(lastReply(page)).toContainText("The bridge holds.")
+  await expect(page.locator("article header time")).toHaveCount(0)
+  await expect(page.locator("article [data-model-mark]")).toHaveCount(0)
+  await expect(lastReply(page).locator("header")).toContainText("fake-large")
+  await expect(page.locator("article [data-portrait-details]:not(:empty)")).toHaveCount(0)
+  await shoot(page, "06-hidden-1440")
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.reload()
+  await expect(lastReply(page)).toContainText("The bridge holds.")
+  await expect(page.locator("article [data-portrait-details]:not(:empty)")).toHaveCount(0)
+  await shoot(page, "07-hidden-390")
+})

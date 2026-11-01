@@ -36,8 +36,9 @@ export const makeDisplayPrefsReadHandlers = Effect.gen(function* () {
 const MAX_TOOLBAR_CHOICES = 200
 
 /**
- * The message toolbar's choices merge by action id: a write names the ones it changes, so
- * two devices pinning different actions don't undo each other. The ones written go last.
+ * The message toolbar's choices merge by action id, and the message details' by detail id:
+ * a write names the ones it changes, so two devices pinning different actions (or hiding
+ * different details) don't undo each other. The ones written go last.
  */
 const mergeChoices = (stored: DisplayPrefs["messageToolbar"], changed: DisplayPrefs["messageToolbar"] | undefined) => {
   if (changed === undefined) return stored
@@ -54,7 +55,8 @@ export const makeDisplayPrefsWriteHandlers = Effect.gen(function* () {
         const merged = {
           ...stored,
           ...prefs,
-          messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar)
+          messageToolbar: mergeChoices(stored.messageToolbar, prefs.messageToolbar),
+          messageDetails: mergeChoices(stored.messageDetails, prefs.messageDetails)
         }
         yield* sql`INSERT INTO user_prefs (user_id, key, value_json) VALUES (${userId}, ${KEY}, ${JSON.stringify(merged)})
           ON CONFLICT (user_id, key) DO UPDATE SET value_json = excluded.value_json`
