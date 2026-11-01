@@ -163,9 +163,9 @@ for (const [width, height] of [
 
       // Editing a reply's guidance: the bar is the box's first line, the text directly under it.
       const reply = page.getByRole("article").filter({ hasText: "Direction: Ethan answers without looking up." })
-      await reply.getByRole("button", { name: "Edit guidance" }).click()
+      await reply.getByRole("button", { name: "New version with this guidance" }).click()
       const bar = page.getByTestId("guidance-edit-bar")
-      await expect(bar).toContainText("Editing guidance for Ethan's reply")
+      await expect(bar).toContainText("Guidance for a new version of Ethan's reply")
       const frame = await bounds(composerBox(page))
       const barAt = await bounds(bar)
       const textAt = await bounds(box(page))
@@ -176,7 +176,7 @@ for (const [width, height] of [
       expect(Math.abs(textAt.width - input.width)).toBeLessThanOrEqual(1)
       await noSideScroll(page)
       await shoot(page, `guidance-edit-${width}-${theme}`)
-      await bar.getByRole("button", { name: "Stop editing this guidance" }).click()
+      await bar.getByRole("button", { name: "Close: back to new messages" }).click()
       await expect(bar).toHaveCount(0)
 
       // A message sent while a reply is being written waits in the queue, directly above the box.
