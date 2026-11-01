@@ -134,7 +134,8 @@ export function TextField({
   description,
   mono = false,
   readOnly = false,
-  expandable = false
+  expandable = false,
+  labelHidden = false
 }: {
   store: EditorStore
   path: FieldPath
@@ -145,6 +146,8 @@ export function TextField({
   readOnly?: boolean
   /** A button opening the field large over the page, as ST's maximize does: a narrow panel's long field. */
   expandable?: boolean
+  /** The label is for assistive technology only (a prompt's text, named in its block's header). */
+  labelHidden?: boolean
 }) {
   const [large, setLarge] = useState(false)
   const match = useSearchMatch(path)
@@ -186,7 +189,11 @@ export function TextField({
         />
       )}
       {large && <LargeField store={store} path={path} field={field} label={label} onClose={() => setLarge(false)} />}
-      <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
+      <Field
+        label={labelHidden ? label : <FieldLabel store={store} field={field} label={label} />}
+        labelHidden={labelHidden}
+        description={description}
+      >
         {rows === undefined ? (
           <Input {...props} onChange={(event) => store.setText(path, event.currentTarget.value)} />
         ) : card ? (

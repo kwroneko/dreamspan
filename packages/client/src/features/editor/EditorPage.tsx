@@ -16,6 +16,7 @@ import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { Alert, Badge, Card } from "../../ui/Surface.tsx"
 import { AppClient } from "../../rpc.ts"
@@ -27,9 +28,9 @@ import { RecoveredNotice, RestoredNotice } from "./controls.tsx"
 import { CardEditor } from "./CardEditor.tsx"
 import { NoteFields } from "./notes.tsx"
 import { PresetEditor } from "./PresetEditor.tsx"
-import { ForkDialog, RenameDialog } from "./RefDialogs.tsx"
+import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
-import { SaveDialog } from "./SaveDialog.tsx"
+import { SaveRevert } from "./SaveRevert.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { EditorStore, useEditorState, useLeaveGuard, useText } from "./store.ts"
@@ -37,7 +38,7 @@ import { UpdateDialog } from "./UpdateDialog.tsx"
 
 const KINDS: Record<string, string> = { card: "card", preset: "preset", note: "note", lorebook: "lorebook" }
 
-type Open = "save" | "history" | "search" | "fork" | "rename" | "update" | null
+type Open = "history" | "search" | "fork" | "update" | null
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
@@ -182,6 +183,23 @@ export function Editor({
     setUploadError(typeof body.error === "string" ? body.error : "The avatar couldn't be uploaded.")
   }
 
+  /** A preset's editor over the chat: its name lives in the sticky bar instead of a heading. */
+  const overPreset = onClose !== undefined && ref.kind === "preset"
+  /** The entry's name, renamed in place (a card's name is its own field), and what kind it is. */
+  const title = (size: string) => (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <h1 className={`min-w-0 ${size} font-semibold [overflow-wrap:anywhere]`}>
+        {ref.kind === "card" ? ref.label : <RefName store={store} />}
+      </h1>
+      {ref.kind !== "card" && <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>}
+      {ref.kind !== "card" && ref.refKind !== "upstream" && (
+        <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
+          {ref.refKind === "variant" ? "variant" : "edited for this chat"}
+        </Badge>
+      )}
+    </div>
+  )
+
   return (
     <SearchNavigation value={searchMatch}>
       <div className="flex flex-col gap-6">
@@ -195,15 +213,8 @@ export function Editor({
               ← Library
             </Link>
           )}
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <h1 className="min-w-0 text-2xl font-semibold [overflow-wrap:anywhere]">{ref.label}</h1>
-            {ref.kind !== "card" && <Badge>{KINDS[ref.kind] ?? ref.kind}</Badge>}
-            {ref.kind !== "card" && ref.refKind !== "upstream" && (
-              <Badge tone={ref.refKind === "variant" ? "accent" : "neutral"}>
-                {ref.refKind === "variant" ? "variant" : "edited for this chat"}
-              </Badge>
-            )}
-          </div>
+          {/* Over a chat, a preset's name is in the sticky bar, once. */}
+          {!overPreset && title("text-2xl")}
           {ref.kind === "card" && <CardSurface placement="provenance" entityId={ref.entityId} />}
           {ref.subtitle && <p className="text-muted [overflow-wrap:anywhere]">{ref.subtitle}</p>}
           <p className="text-sm text-muted">
@@ -253,10 +264,12 @@ export function Editor({
           {onClose &&
             (ref.kind === "preset" ? (
               <div className="flex min-w-0 items-center justify-between gap-2">
-                <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{ref.label}</span>
-                <Button className="shrink-0" onClick={onClose}>
-                  Close preset editor
-                </Button>
+                {title("text-base")}
+                <Tooltip label="Back to the chat; unsaved changes stay as drafts">
+                  <Button className="shrink-0" onClick={onClose}>
+                    Close preset editor
+                  </Button>
+                </Tooltip>
               </div>
             ) : (
               // A card's name is the heading just above: the bar keeps only the way back.
@@ -267,22 +280,27 @@ export function Editor({
                 </Button>
               </div>
             ))}
-          <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-            <Button variant="primary" disabled={dirty === 0 || clash !== null} onClick={() => setOpen("save")}>
-              Save{dirty > 0 ? ` (${dirty})` : ""}
-            </Button>
+          <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
+            <SaveRevert
+              store={store}
+              current={current}
+              saveDisabled={clash !== null}
+              onSaved={(saved) => setNotice(savedNotice(saved))}
+            />
             {ref.kind !== "preset" && <Button onClick={() => setOpen("search")}>Search</Button>}
-            <Button onClick={() => setOpen("history")}>History</Button>
+            <Tooltip label="Earlier revisions: compare them or bring one back">
+              <Button onClick={() => setOpen("history")}>History</Button>
+            </Tooltip>
             {ref.kind === "card" && (
               <CardSurface placement="actions" overflow={false} entityId={ref.entityId} store={store} />
             )}
-            {ref.kind === "preset" ? (
-              <>
-                {ref.refKind !== "chat_override" && <Button onClick={() => setOpen("fork")}>Make a variant</Button>}
-                <Button variant="ghost" onClick={() => setOpen("rename")}>
-                  Rename
-                </Button>
-              </>
+            {ref.kind !== "card" ? (
+              ref.kind !== "note" &&
+              ref.refKind !== "chat_override" && (
+                <Tooltip label={`A copy under its own name that still takes this ${KINDS[ref.kind]}'s later changes`}>
+                  <Button onClick={() => setOpen("fork")}>Make a variant</Button>
+                </Tooltip>
+              )
             ) : (
               // What's used less, grouped; each opens its own dialog.
               <Popover
@@ -305,13 +323,7 @@ export function Editor({
                   className="flex flex-col items-stretch gap-1 *:justify-start [&_button]:w-full [&_button]:justify-start"
                   onClickCapture={() => setMore(false)}
                 >
-                  {ref.kind === "card" && (
-                    <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
-                  )}
-                  {ref.kind !== "card" && ref.kind !== "note" && ref.refKind !== "chat_override" && (
-                    <Button onClick={() => setOpen("fork")}>Make a variant</Button>
-                  )}
-                  {ref.kind !== "card" && <Button onClick={() => setOpen("rename")}>Rename</Button>}
+                  <CardSurface placement="actions" overflow entityId={ref.entityId} store={store} />
                 </div>
               </Popover>
             )}
@@ -326,16 +338,18 @@ export function Editor({
                     : `${plural(dirty, "field has", "fields have")} changes, kept as drafts until you save a revision.`}
               </p>
               {ref.kind === "preset" && (
-                <Button
-                  variant="ghost"
-                  className="h-7! shrink-0 px-2!"
-                  aria-expanded={searching}
-                  aria-controls="preset-search"
-                  onClick={() => setSearching(!searching)}
-                >
-                  <Icon name="search" />
-                  Search
-                </Button>
+                <Tooltip label="Find, and find and replace, across every prompt">
+                  <Button
+                    variant="ghost"
+                    className="h-7! shrink-0 px-2!"
+                    aria-expanded={searching}
+                    aria-controls="preset-search"
+                    onClick={() => setSearching(!searching)}
+                  >
+                    <Icon name="search" />
+                    Search
+                  </Button>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -399,31 +413,10 @@ export function Editor({
         )}
         {ref.kind === "lorebook" && <SlotOutlet slot={lorebookEditorSections} props={{ store, call }} />}
 
-        {open === "save" && (
-          <SaveDialog
-            store={store}
-            current={current}
-            onClose={() => setOpen(null)}
-            onSaved={(saved) => {
-              setOpen(null)
-              setNotice(savedNotice(saved))
-            }}
-          />
-        )}
         {open === "history" && <RevisionsDialog store={store} call={call} onClose={() => setOpen(null)} />}
         {open === "search" && <SearchDialog store={store} onClose={() => setOpen(null)} onReveal={setSearchMatch} />}
         {open === "fork" && <ForkDialog store={store} onClose={() => setOpen(null)} />}
         {open === "update" && <UpdateDialog store={store} call={call} onClose={() => setOpen(null)} />}
-        {open === "rename" && (
-          <RenameDialog
-            store={store}
-            onClose={() => setOpen(null)}
-            onRenamed={() => {
-              setOpen(null)
-              void store.refresh()
-            }}
-          />
-        )}
       </div>
     </SearchNavigation>
   )

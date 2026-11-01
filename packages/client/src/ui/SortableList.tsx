@@ -1,11 +1,21 @@
 // A list the user reorders: drag an item's handle with a mouse, finger or pen, or focus the
-// handle and press the up and down arrows. The handle keeps its focus as its item moves.
-import { type ReactNode, useId, useRef, useState } from "react"
+// handle and press the up and down arrows. The handle keeps its focus as its item moves. Held
+// near the top or bottom of the list's scrolling container, a drag scrolls it.
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 interface Drag {
   readonly from: number
   /** Where the item would land: the index it would have once dropped. */
   readonly to: number
+}
+
+/** The nearest ancestor that scrolls vertically. */
+const scrollerOf = (element: HTMLElement) => {
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY
+    if ((overflow === "auto" || overflow === "scroll") && parent.scrollHeight > parent.clientHeight) return parent
+  }
+  return null
 }
 
 export function SortableList<Item>({
@@ -33,6 +43,8 @@ export function SortableList<Item>({
   const handles = useRef(new Map<string, HTMLButtonElement>())
   const [drag, setDrag] = useState<Drag | null>(null)
   const hint = useId()
+  /** While dragging: the pointer's height and the container that scrolls under it. */
+  const pointer = useRef<{ y: number; scroller: HTMLElement | null } | null>(null)
 
   /** The index a pointer at `y` would drop at, from the rows' middles. */
   const target = (y: number) => {
@@ -42,6 +54,31 @@ export function SortableList<Item>({
     })
     return index === -1 ? items.length : index
   }
+
+  const dragging = drag !== null
+  useEffect(() => {
+    if (!dragging) return
+    let frame = requestAnimationFrame(function step() {
+      const held = pointer.current
+      const box = held?.scroller?.getBoundingClientRect()
+      if (held?.scroller && box) {
+        // The edges' bands, deeper at the bottom, where a panel's sticky bar may sit.
+        const speed =
+          held.y < box.top + 48
+            ? -Math.ceil((box.top + 48 - held.y) / 4)
+            : held.y > box.bottom - 72
+              ? Math.ceil((held.y - (box.bottom - 72)) / 4)
+              : 0
+        if (speed !== 0) {
+          const before = held.scroller.scrollTop
+          held.scroller.scrollTop += speed
+          if (held.scroller.scrollTop !== before) setDrag((current) => current && { ...current, to: target(held.y) })
+        }
+      }
+      frame = requestAnimationFrame(step)
+    })
+    return () => cancelAnimationFrame(frame)
+  })
 
   const handleFor = (item: Item, index: number) => {
     const key = itemKey(item)
@@ -67,19 +104,25 @@ export function SortableList<Item>({
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.currentTarget.setPointerCapture(event.pointerId)
+          pointer.current = { y: event.clientY, scroller: scrollerOf(event.currentTarget) }
           setDrag({ from: index, to: index })
         }}
         onPointerMove={(event) => {
+          if (pointer.current) pointer.current.y = event.clientY
           if (drag !== null) setDrag({ ...drag, to: target(event.clientY) })
         }}
         onPointerUp={() => {
           if (drag === null) return
           // Dropping below itself counts the gap it leaves.
           const to = drag.to > drag.from ? drag.to - 1 : drag.to
+          pointer.current = null
           setDrag(null)
           if (to !== drag.from) onMove(drag.from, to)
         }}
-        onPointerCancel={() => setDrag(null)}
+        onPointerCancel={() => {
+          pointer.current = null
+          setDrag(null)
+        }}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <circle cx="5.5" cy="3.5" r="1.25" />
@@ -89,7 +132,11 @@ export function SortableList<Item>({
           <circle cx="5.5" cy="12.5" r="1.25" />
           <circle cx="10.5" cy="12.5" r="1.25" />
         </svg>
-        {namesAsHandles && <span className="min-w-0 flex-1 break-words">{itemLabel(item)}</span>}
+        {namesAsHandles && (
+          <span className="min-w-0 flex-1 truncate" title={itemLabel(item)}>
+            {itemLabel(item)}
+          </span>
+        )}
       </button>
     )
   }
@@ -111,9 +158,16 @@ export function SortableList<Item>({
                 if (element) rows.current.set(key, element)
                 else rows.current.delete(key)
               }}
-              className={`border-y-2 border-transparent ${before ? "border-t-accent" : ""} ${after ? "border-b-accent" : ""} ${
-                drag?.from === index ? "opacity-60" : ""
-              }`}
+              // Where it would land: a bar across the gap, above (or, at the end, below) a row.
+              className={`relative border-y-2 border-transparent ${
+                before
+                  ? "before:absolute before:inset-x-0 before:-top-1 before:z-10 before:h-1 before:rounded-full before:bg-accent"
+                  : ""
+              } ${
+                after
+                  ? "after:absolute after:inset-x-0 after:-bottom-1 after:z-10 after:h-1 after:rounded-full after:bg-accent"
+                  : ""
+              } ${drag?.from === index ? "opacity-50" : ""}`}
             >
               {children(item, handleFor(item, index))}
             </li>

@@ -16,9 +16,12 @@ export function Field({
   description,
   error,
   children,
-  className = ""
+  className = "",
+  labelHidden = false
 }: {
   label: ReactNode
+  /** The label names the control for assistive technology only: what's around it already says. */
+  labelHidden?: boolean
   description?: ReactNode
   /** Shown under the control, and marks it invalid. */
   error?: string | null | undefined
@@ -27,7 +30,7 @@ export function Field({
 }) {
   return (
     <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <BaseField.Label className="text-sm font-medium text-text">{label}</BaseField.Label>
+      <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
       {children}
       {description && <BaseField.Description className="text-sm text-muted">{description}</BaseField.Description>}
       {error && (

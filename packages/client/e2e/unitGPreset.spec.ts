@@ -9,7 +9,7 @@ import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
-import { openPanel } from "./support/panel.ts"
+import { openPanel, openPresetAt } from "./support/panel.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "60" })
@@ -100,7 +100,7 @@ for (const width of [1440, 390])
         await page.screenshot({ path: join(shots, `${name}-${width}-${theme}.png`) })
       }
       await shoot("panel")
-      await panel.getByRole("button", { name: "Edit Post-History Instructions", exact: true }).click()
+      await openPresetAt(page, panel, "Post-History Instructions")
       const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
       await expect(overlay).toBeVisible()
       expect(new URL(page.url()).pathname).toBe(chatUrl)
@@ -206,20 +206,22 @@ for (const width of [1440, 390])
     })
   }
 
-test("panel toggles share drafts with the overlay and discard restores the saved switch", async ({ page }) => {
+test("panel toggles share drafts with the overlay and Revert restores the saved switch", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
   const panel = await openPanel(page, "Prompt preset")
   const toggle = panel.getByRole("switch", { name: "Send Main Prompt", exact: true })
   const was = await toggle.isChecked()
   await toggle.click()
-  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await openPresetAt(page, panel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await expect(overlay.getByRole("switch", { name: "Send Main Prompt", exact: true })).toBeChecked({ checked: !was })
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await panel.getByRole("button", { name: "Discard", exact: true }).click()
+  const bar = panel.getByRole("region", { name: "Unsaved changes" })
+  // A switch is quick to redo: Revert doesn't ask.
+  await bar.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(toggle).toBeChecked({ checked: was })
-  await expect(panel.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  await expect(bar).toHaveCount(0)
   const opened = await admin((api) =>
     Effect.map(api.OpenEditor({ refId: preset.id }), (editor) =>
       editor.drafts.filter((draft) => draft.status === "active")
@@ -228,51 +230,56 @@ test("panel toggles share drafts with the overlay and discard restores the saved
   expect(opened).toHaveLength(0)
 })
 
-test("the panel's Discard asks first when the overlay changed more than the switches", async ({ page }) => {
+test("the panel's Revert asks first when it would throw away text typed in the overlay", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
   const panel = await openPanel(page, "Prompt preset")
-  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await openPresetAt(page, panel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill("An hour of careful prompt work.")
   await expect(overlay.getByText("1 field has changes")).toBeVisible()
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await panel.getByRole("button", { name: "Discard", exact: true }).click()
-  const confirm = page.getByRole("alertdialog", { name: "Discard 1 unsaved change?" })
-  await expect(confirm).toContainText("prompt text")
+  const bar = panel.getByRole("region", { name: "Unsaved changes" })
+  await expect(bar).toContainText("text of Main Prompt")
+  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  const confirm = page.getByRole("alertdialog", { name: "Revert 1 unsaved change?" })
+  await expect(confirm).toContainText("text you typed")
   await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
-  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await openPresetAt(page, panel, "Main Prompt")
   await expectTextBox(main, "An hour of careful prompt work.")
+  // The overlay's toolbar has the same Revert, beside Save.
+  await overlay.getByRole("button", { name: "Revert", exact: true }).click()
+  await page.getByRole("button", { name: "Revert them", exact: true }).click()
+  await expect(overlay.getByRole("button", { name: "Revert", exact: true })).toBeDisabled()
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await panel.getByRole("button", { name: "Discard", exact: true }).click()
-  await page.getByRole("button", { name: "Discard them", exact: true }).click()
-  await expect(panel.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  await expect(bar).toHaveCount(0)
 })
 
-test("the panel's Discard asks first when the overlay reordered blocks", async ({ page }) => {
+test("the panel's Revert puts back an order the overlay changed, without asking", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
   const panel = await openPanel(page, "Prompt preset")
-  const names = async () =>
-    (await panel.getByRole("list", { name: "Preset blocks" }).getByRole("listitem").allTextContents()).join("|")
+  const names = () =>
+    panel
+      .getByRole("list", { name: "Preset blocks" })
+      .locator("[data-prompt]")
+      .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-prompt")).join("|"))
   // Read the order once the blocks and their estimates are shown, not while the panel loads.
   const blocks = panel.getByRole("list", { name: "Preset blocks" }).getByRole("listitem")
   await expect(blocks.first()).toContainText(/~[\d,]+ tokens/)
   await expect(blocks.last()).toContainText(/~[\d,]+ tokens/)
   const before = await names()
-  await panel.getByRole("button", { name: "Edit Main Prompt", exact: true }).click()
+  await openPresetAt(page, panel, "Main Prompt")
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await overlay.getByRole("list", { name: "Prompt order" }).getByRole("button", { name: "Move Main Prompt" }).focus()
   await page.keyboard.press("ArrowDown")
   await expect.poll(names).not.toBe(before)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await panel.getByRole("button", { name: "Discard", exact: true }).click()
-  const confirm = page.getByRole("alertdialog", { name: "Discard 1 unsaved change?" })
-  await expect(confirm).toBeVisible()
-  await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
-  expect(await names()).not.toBe(before)
-  await panel.getByRole("button", { name: "Discard", exact: true }).click()
-  await page.getByRole("button", { name: "Discard them", exact: true }).click()
+  const bar = panel.getByRole("region", { name: "Unsaved changes" })
+  await expect(bar).toContainText("new order")
+  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect.poll(names).toBe(before)
+  await expect(bar).toHaveCount(0)
 })

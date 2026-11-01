@@ -77,6 +77,19 @@ export function PresetEditor({
         />
         <PromptDocument store={store} context={context} focus={focus} goTo={goTo} />
       </Card>
+      <PresetSettings store={store} call={call} />
+    </>
+  )
+}
+
+/**
+ * Everything of a preset after its prompt order: the registered sections (the end of request,
+ * reply sections), text switches, prefill, utility prompts and regex scripts. The large editor
+ * and the side panel's Prompt preset tab both show it.
+ */
+export function PresetSettings({ store, call }: { store: EditorStore; call: Caller }) {
+  return (
+    <>
       <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>
         <CardHeader title="Text and context" description="SillyTavern's prompt text switches." />

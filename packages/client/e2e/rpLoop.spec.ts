@@ -114,7 +114,10 @@ const guidanceSwitch = (page: Page) => page.getByRole("switch", { name: "Guidanc
 const lastMessage = (page: Page) => page.locator("article[data-slot]").last()
 /** The latest reply's › past its last version, shown without a hover at every width. */
 const regenerateLatest = (page: Page) =>
-  lastMessage(page).getByRole("group", { name: "Versions" }).getByRole("button", { name: "Generate another version" }).click()
+  lastMessage(page)
+    .getByRole("group", { name: "Versions" })
+    .getByRole("button", { name: "Generate another version" })
+    .click()
 /** The inspector's list draws rows as they scroll in: its end, where the tail is. */
 const inspectorEnd = async (page: Page, text: string) => {
   await expect
@@ -300,6 +303,8 @@ for (const width of [1440, 390])
       const style = editor.locator('[data-prompt="night-impersonation-style"]')
       // ST's triggers stay a per-prompt option of their own beside the condition (owner 2026-10-28).
       await expect(style).toContainText("impersonate")
+      // The options fold under the block's header (owner, 2026-11-01).
+      await style.getByRole("button", { name: /^Options of / }).click()
       await expect(style.getByRole("combobox", { name: "Condition" })).toContainText("Always")
       const types = style.getByRole("group", { name: "Generation types" })
       await expect(types.getByRole("checkbox", { name: "Impersonate" })).toBeChecked()

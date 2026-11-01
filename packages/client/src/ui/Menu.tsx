@@ -62,17 +62,28 @@ const itemClass = (tone: "default" | "danger") =>
 export function MenuItem({
   icon,
   tone = "default",
+  hint,
   children,
   ...props
-}: { icon?: IconName; tone?: "default" | "danger"; children: ReactNode } & Omit<
-  ComponentProps<typeof BaseMenu.Item>,
-  "children" | "className"
->) {
-  return (
+}: {
+  icon?: IconName
+  tone?: "default" | "danger"
+  /** What the item does, beside the menu while it's pointed at or focused, so its label can stay short. */
+  hint?: ReactNode
+  children: ReactNode
+} & Omit<ComponentProps<typeof BaseMenu.Item>, "children" | "className">) {
+  const item = (
     <BaseMenu.Item className={itemClass(tone)} {...props}>
       {icon ? <Icon name={icon} className="text-muted" /> : <span className="w-4" />}
       <span className="min-w-0 flex-1">{children}</span>
     </BaseMenu.Item>
+  )
+  return hint ? (
+    <Tooltip label={hint} side="right">
+      {item}
+    </Tooltip>
+  ) : (
+    item
   )
 }
 

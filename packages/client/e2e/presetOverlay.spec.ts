@@ -81,10 +81,7 @@ const open = async (page: Page, chatId: string) => {
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
   const panel = await openPanel(page, "Prompt preset")
-  await panel
-    .getByRole("button", { name: /^Edit /, exact: false })
-    .first()
-    .click()
+  await panel.getByRole("button", { name: "Open the preset in the large editor", exact: true }).click()
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await expect(overlay).toBeVisible()
   return overlay
