@@ -39,7 +39,7 @@ import { query } from "./tx.ts"
  * The library entries an assembly read, each once: the preset, the cards, the lorebooks, the
  * notes and the shared notes they show. `CheckpointLiveText` cuts revisions of their live text.
  */
-export const usedEntries = (snapshot: ContextSnapshot): ReadonlyArray<UsedEntry> => {
+const usedEntries = (snapshot: ContextSnapshot): ReadonlyArray<UsedEntry> => {
   const used = new Map<string, UsedEntry>()
   const add = (entity: string, ref: string | null, revision: string | null) => {
     if (revision === null) return

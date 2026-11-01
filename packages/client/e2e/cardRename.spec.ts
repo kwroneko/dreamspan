@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { openPanel } from "./support/panel.ts"
+import { saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -60,13 +61,8 @@ const texts = (f: Seed) =>
       return results
     })
   )
-const save = async (page: Page) => {
-  await page.getByRole("button", { name: /^Save(?: \(|$)/ }).click()
-  await page
-    .getByRole("dialog", { name: "Save a revision" })
-    .getByRole("button", { name: "Save revision", exact: true })
-    .click()
-}
+/** Saves the card; a rename then offers to rename it in chats (Save itself asks nothing). */
+const save = (page: Page) => saveButton(page).click()
 const shot = async (page: Page, name: string) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
   expect(await page.getByRole("dialog").evaluate((dialog) => dialog.scrollWidth - dialog.clientWidth)).toBe(0)

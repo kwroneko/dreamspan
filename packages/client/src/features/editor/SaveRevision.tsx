@@ -30,13 +30,16 @@ export function SaveRevision({
   store,
   current,
   onSaved,
-  showState = true
+  showState = true,
+  compact = false
 }: {
   store: EditorStore
   /** The chat it's edited from, for the rename offer after a card's save; else the URL's (`renameChat`). */
   current?: { readonly chatId: string; readonly forkId: string | null } | undefined
   onSaved?: (saved: SavedRef) => void
   showState?: boolean
+  /** A crowded toolbar (`SaveControls` `compact`). */
+  compact?: boolean
 }) {
   const state = useEditorState(store)
   const held = useHeld(store)
@@ -138,6 +141,7 @@ export function SaveRevision({
         pending={pending}
         blocked={clash}
         showState={showState}
+        compact={compact}
         onSave={save}
       />
       {error && <ErrorAlert error={error} />}

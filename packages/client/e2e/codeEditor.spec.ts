@@ -5,6 +5,7 @@ import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
@@ -51,42 +52,45 @@ const open = async (page: Page, id: string, initial = description) => {
 }
 
 for (const width of [1440, 390])
-  test(`card markers, save diff and revision comparisons at ${width}px`, async ({ page }) => {
+  test(`card markers, a saved revision's diff and revision comparisons at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await open(page, await create())
     await field(page, "Description").fill(newDescription)
     await field(page, "Scenario").fill(newScenario)
     await expect(field(page, "Description").locator("..").locator(".rp-line-modified")).toHaveCount(1)
     await expect(field(page, "Scenario").locator("..").locator(".rp-line-added")).toHaveCount(1)
-    await page.getByRole("button", { name: "Save (2)", exact: true }).click()
-    const save = page.getByRole("dialog", { name: "Save a revision" })
-    const rows = save.getByRole("list", { name: "Changes" }).getByRole("listitem")
-    await expect(rows).toHaveCount(2)
-    if (width > 639) {
-      await expectTextBox(rows.first().getByRole("textbox", { name: "Before", exact: true }), description)
-      await expectTextBox(rows.first().getByRole("textbox", { name: "After", exact: true }), newDescription)
-    } else {
-      await expect(rows.first().locator(".cm-deletedChunk")).toContainText("The lamp burns.")
-      await expectTextBox(rows.first().getByRole("textbox", { name: "Changes", exact: true }), newDescription)
-    }
-    await save.getByRole("textbox", { name: "What changed (optional)" }).fill("Night watch")
-    await save.getByRole("button", { name: "Save revision", exact: true }).click()
-    await expect(page.getByRole("status").filter({ hasText: "Everything is saved" })).toBeVisible()
+    // Save asks nothing; History's comparison shows what it saved.
+    await saveRevision(page, "Night watch")
+    await expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
     await expect(page.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)
     await field(page, "Description").fill(`${newDescription}\nA draft after saving.`)
     await page.getByRole("button", { name: "History", exact: true }).click()
     const history = page.getByRole("dialog", { name: "History", exact: true })
     const revisions = history.getByRole("list", { name: "Revisions" }).getByRole("listitem")
     await expect(revisions).toHaveCount(3)
-    await revisions.first().getByRole("button").click()
+    await expect(revisions.first()).toContainText("Night watch")
+    await revisions
+      .first()
+      .getByRole("button", { name: /^Revision \d+ / })
+      .click()
     const changes = history.locator("details")
     await expect(changes).toHaveCount(2)
     await history.getByText("Description", { exact: true }).click()
     await expect(history.locator(".cm-editor").first()).toBeVisible()
-    await history.getByRole("radio", { name: "Current draft / head" }).click()
+    if (width > 639) {
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Before", exact: true }), description)
+      await expectTextBox(changes.first().getByRole("textbox", { name: "After", exact: true }), newDescription)
+    } else {
+      await expect(changes.first().locator(".cm-deletedChunk")).toContainText("The lamp burns.")
+      await expectTextBox(changes.first().getByRole("textbox", { name: "Changes", exact: true }), newDescription)
+    }
+    await history.getByRole("radio", { name: "As it is now" }).click()
     await expect(changes).toHaveCount(1)
     await expect(changes.first()).toContainText("Description")
-    await revisions.nth(1).getByRole("button").click()
+    await revisions
+      .nth(1)
+      .getByRole("button", { name: /^Revision \d+ / })
+      .click()
     await expect(history.getByRole("radio", { name: "Parent revision" })).toBeChecked()
     await expect(changes).toHaveCount(2)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
@@ -113,11 +117,27 @@ test("changes propagate exactly, native undo works, and external replacements do
         )?.content
     )
     .toBe(pasted)
-  await page.getByRole("button", { name: "Revert Description", exact: true }).click()
+  // History's Restore on the latest revision puts every field back to it, from outside the box.
+  await page.getByRole("button", { name: "History", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "History", exact: true })
+  await history
+    .getByRole("list", { name: "Revisions" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
+  await history.getByRole("button", { name: "Restore", exact: true }).click()
+  await history.getByRole("button", { name: "Close", exact: true }).click()
   await expectTextBox(box, description)
   await expect(page.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)
-  const snapshot = await admin((api) => api.OpenEditor({ refId: id }))
-  expect(snapshot.drafts.find((draft) => draft.key.field === textField(["description"]))?.status).toBe("discarded")
+  await expect
+    .poll(async () => {
+      const draft = (await admin((api) => api.OpenEditor({ refId: id }))).drafts.find(
+        (draft) => draft.key.field === textField(["description"]) && draft.status === "active"
+      )
+      return draft?.content ?? description
+    })
+    .toBe(description)
 })
 
 test("paste and IME composition reach the draft without truncation", async ({ page }) => {
@@ -171,7 +191,7 @@ test("paste and IME composition reach the draft without truncation", async ({ pa
     .toBe("日本語の港")
 })
 
-test("a stale draft's gutter and save diff retain its original revision base", async ({ page, browser }) => {
+test("a draft typed on after another tab saved saves over that tab's revision", async ({ page, browser }) => {
   const id = await create()
   await open(page, id)
   await field(page, "Description").fill(newDescription)
@@ -181,17 +201,30 @@ test("a stale draft's gutter and save diff retain its original revision base", a
     await open(other, id, newDescription)
     // The shared server draft is already visible here; save a different head from it.
     await field(other, "Description").fill("A different saved head.")
-    await other.getByRole("button", { name: /^Save \(/ }).click()
-    await other.getByRole("dialog").getByRole("button", { name: "Save revision", exact: true }).click()
-    await expect(other.getByRole("status").filter({ hasText: "Everything is saved" })).toBeVisible()
+    await saveRevision(other)
+    await expect(other.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
     await field(page, "Description").fill(`${newDescription}\nStill based on the original.`)
-    await page.getByRole("button", { name: /^Save \(/ }).click()
-    const save = page.getByRole("dialog", { name: "Save a revision" })
-    await expectTextBox(save.getByRole("textbox", { name: "Before", exact: true }), description)
-    await expectTextBox(
-      save.getByRole("textbox", { name: "After", exact: true }),
-      `${newDescription}\nStill based on the original.`
-    )
+    await expect(
+      field(page, "Description").locator("..").locator(".rp-line-added, .rp-line-modified").first()
+    ).toBeVisible()
+    // The first Save meets the stale editor ("This ref changed since you opened it"), which then
+    // has the other tab's revision loaded; the next saves this tab's text, maybe after the picker.
+    await saveButton(page).click()
+    const stale = page.getByRole("alert").filter({ hasText: "changed since you opened it" })
+    const conflict = page.getByRole("dialog", { name: "Changed meanwhile" })
+    const done = saveButton(page).and(page.locator(":disabled"))
+    await expect(stale.or(conflict).or(done).first()).toBeVisible()
+    if (await stale.isVisible()) {
+      await saveButton(page).click()
+      await expect(conflict.or(done).first()).toBeVisible()
+    }
+    if (await conflict.isVisible()) {
+      // Each field starts on this tab's version.
+      await conflict.getByRole("button", { name: "Use these and save", exact: true }).click()
+    }
+    await expect(saveButton(page)).toBeDisabled()
+    const opened = await admin((api) => api.OpenEditor({ refId: id }))
+    expect(opened.doc.description).toBe(`${newDescription}\nStill based on the original.`)
   } finally {
     await context.close()
   }
@@ -250,12 +283,15 @@ test("realistic synthetic folder walkthrough", async ({ page }) => {
     await expect(box.locator("..").locator(".rp-line-added, .rp-line-modified").first()).toBeVisible()
     await page.screenshot({ path: join(dir, `editor-markers-${width}.png`) })
   }
-  await page.getByRole("button", { name: /^Save \(/ }).click()
-  await expect(page.getByRole("dialog").locator(".cm-editor").first()).toBeVisible()
-  await shoot("save-diff")
-  await page.getByRole("dialog").getByRole("button", { name: "Save revision", exact: true }).click()
+  // Save asks nothing: what it saved is in History's comparison, shot below (no save diff to shoot).
+  await saveRevision(page)
   await page.getByRole("button", { name: "History", exact: true }).click()
-  await page.getByRole("list", { name: "Revisions" }).getByRole("listitem").first().getByRole("button").click()
+  await page
+    .getByRole("list", { name: "Revisions" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
   await page.getByRole("dialog").getByText("Description", { exact: true }).click()
   await expect(page.getByRole("dialog").locator(".cm-editor").first()).toBeVisible()
   await shoot("revision-browser")

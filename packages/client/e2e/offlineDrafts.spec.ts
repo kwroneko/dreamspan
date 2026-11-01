@@ -4,6 +4,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
+import { saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
 
 const offline = "A synthetic thought typed in the offline browser."
@@ -99,9 +100,8 @@ for (const kind of ["composer", "editor"] as const) {
               await expect(other.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
               await expectTextBox(box(other), "")
             } else {
-              await other.getByRole("button", { name: /^Save/ }).click()
-              await other.getByRole("dialog").getByRole("button", { name: /^Save/ }).click()
-              await expect(other.getByRole("status").filter({ hasText: "Everything is saved" })).toBeVisible()
+              await saveRevision(other)
+              await expect(other.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
             }
           }
           await second.close()
@@ -159,7 +159,12 @@ for (const kind of ["composer", "editor"] as const) {
                 .first()
                 .click()
             } else {
-              await back.getByRole("button", { name: "Undo Description", exact: true }).click()
+              // One step back in the field's edit history: this browser's text, put back as the newest.
+              await back.getByRole("button", { name: "Edit history of Description", exact: true }).click()
+              const states = back.getByRole("dialog", { name: "Edit history: Description" })
+              await expect(states.getByLabel("Text of the state")).toHaveText(offline)
+              await states.getByRole("button", { name: "Put this text in the box", exact: true }).click()
+              await expect(states).toHaveCount(0)
             }
             await expectTextBox(box(back), offline)
             await expect.poll(async () => (await saved())?.content).toBe(offline)
@@ -173,10 +178,10 @@ for (const kind of ["composer", "editor"] as const) {
               const revision = await rpc((api) => api.OpenEditor({ refId: card.id }))
               expect(revision.doc.description).toBe(elsewhere)
               // Saving this alternative must meet the editor's existing revision conflict picker.
-              await back.getByRole("button", { name: /^Save/ }).click()
-              await back.getByRole("dialog").getByRole("button", { name: /^Save/ }).click()
-              await expect(back.getByRole("dialog").getByText(elsewhere, { exact: true })).toBeVisible()
-              await expect(back.getByRole("dialog").getByText(offline, { exact: true })).toBeVisible()
+              await saveButton(back).click()
+              const conflict = back.getByRole("dialog", { name: "Changed meanwhile" })
+              await expect(conflict.getByText(elsewhere, { exact: true })).toBeVisible()
+              await expect(conflict.getByText(offline, { exact: true })).toBeVisible()
             }
           }
         }

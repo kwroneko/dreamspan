@@ -8,6 +8,7 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, openPresetAt } from "./support/panel.ts"
 import { expectTextBox } from "./support/textbox.ts"
@@ -193,23 +194,26 @@ for (const width of [1440, 390])
         editor.getByRole("textbox", { name: "Prompt: Post-History Instructions", exact: true }),
         `Keep coherence ${width} ${theme}.`
       )
-      await editor.getByRole("button", { name: /^Save \(/ }).click()
-      const diff = page.getByRole("dialog", { name: "Save a revision", exact: true })
-      await expect(diff.getByRole("list", { name: "Changes", exact: true })).toContainText("Main Prompt")
-      await expect(diff.getByRole("list", { name: "Changes", exact: true })).toContainText("Post-History Instructions")
-      await shoot("save-diff")
-      await diff.getByRole("button", { name: "Save revision", exact: true }).click()
-      await expect(diff).toHaveCount(0)
+      // Save asks nothing; History's comparison shows both prompts changed.
+      await saveRevision(editor)
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+      await shoot("saved")
       await editor.getByRole("button", { name: "History", exact: true }).first().click()
       const revisions = page.getByRole("dialog", { name: "History", exact: true })
-      await revisions.getByRole("list", { name: "Revisions", exact: true }).getByRole("button").first().click()
+      await revisions
+        .getByRole("list", { name: "Revisions", exact: true })
+        .getByRole("button", { name: /^Revision \d+ / })
+        .first()
+        .click()
+      await expect(revisions.getByLabel("Revision changes")).toContainText("Main Prompt")
+      await expect(revisions.getByLabel("Revision changes")).toContainText("Post-History Instructions")
       await revisions.locator("summary").first().click()
       await expect(revisions.getByLabel("Revision changes")).toBeVisible()
       await shoot("revisions")
     })
   }
 
-test("panel toggles share drafts with the overlay and Revert restores the saved switch", async ({ page }) => {
+test("a panel switch is shared with the overlay as flipped, with no unsaved bar", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
   const panel = await openPanel(page, "Prompt preset")
@@ -220,11 +224,13 @@ test("panel toggles share drafts with the overlay and Revert restores the saved 
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   await expect(overlay.getByRole("switch", { name: "Send Main Prompt", exact: true })).toBeChecked({ checked: !was })
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  const bar = panel.getByRole("region", { name: "Unsaved changes" })
-  // A switch is quick to redo: Revert doesn't ask.
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  // A switch is live: no bar holds it; flipping it back is the way back.
+  await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
+  await toggle.click()
   await expect(toggle).toBeChecked({ checked: was })
-  await expect(bar).toHaveCount(0)
+  // The next tests share the preset: leave it saved.
+  if (await saveButton(panel).isEnabled()) await saveRevision(panel)
+  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
   const opened = await admin((api) =>
     Effect.map(api.OpenEditor({ refId: preset.id }), (editor) =>
       editor.drafts.filter((draft) => draft.status === "active")
@@ -233,7 +239,7 @@ test("panel toggles share drafts with the overlay and Revert restores the saved 
   expect(opened).toHaveLength(0)
 })
 
-test("the panel's Revert asks first when it would throw away text typed in the overlay", async ({ page }) => {
+test("text typed in the overlay is live in the panel too, and the overlay's Save saves it", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${library.forks.find((f) => f.current)!.chat.id}`)
   const panel = await openPanel(page, "Prompt preset")
@@ -241,22 +247,19 @@ test("the panel's Revert asks first when it would throw away text typed in the o
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill("An hour of careful prompt work.")
-  await expect(overlay.getByText("1 field has changes")).toBeVisible()
+  await expect(revisionStatus(overlay)).toHaveText(/^Changed since revision \d+$/)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
+  // No bar holds typed text; the tab's state line says it changed.
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
-  await expect(bar).toContainText("text of Main Prompt")
-  await bar.getByRole("button", { name: "Revert", exact: true }).click()
-  const confirm = page.getByRole("alertdialog", { name: "Revert 1 unsaved change?" })
-  await expect(confirm).toContainText("text you typed")
-  await confirm.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
   await openPresetAt(page, panel, "Main Prompt")
   await expectTextBox(main, "An hour of careful prompt work.")
-  // The overlay's toolbar has the same Revert, beside Save.
-  await overlay.getByRole("button", { name: "Revert", exact: true }).click()
-  await page.getByRole("button", { name: "Revert them", exact: true }).click()
-  await expect(overlay.getByRole("button", { name: "Revert", exact: true })).toBeDisabled()
+  // The overlay's toolbar saves it, asking nothing.
+  await saveRevision(overlay)
+  await expect(revisionStatus(overlay)).toHaveText(/^Saved as revision \d+$/)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await expect(bar).toHaveCount(0)
+  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
 })
 
 test("the panel's Revert puts back an order the overlay changed, without asking", async ({ page }) => {

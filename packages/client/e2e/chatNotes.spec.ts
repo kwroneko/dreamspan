@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import type { RefId } from "@rp/shared/library.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
+import { revisionStatus, saveRevision } from "./support/saveRevision.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -79,9 +80,8 @@ test("a note made in the chat goes into the request once on, and out once off", 
   await editor.getByRole("textbox", { name: /^Content/ }).fill("Lanterns burn along the levee.")
   // No frequency: a note goes every turn (DESIGN §4.1).
   await expect(editor.getByRole("spinbutton")).toHaveCount(0)
-  await editor.getByRole("button", { name: "Save the note" }).click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(editor.getByText("unsaved changes")).toHaveCount(0)
+  await saveRevision(editor)
+  await expect(revisionStatus(editor)).toHaveText(/^Saved as revision \d+$/)
   const storedChat = await admin((api) => api.GetChat({ chatId: chatId as never }))
   const storedNotes = await admin((api) =>
     api.ListChatNotes({ chatId: storedChat.id, slotId: storedChat.activeLeafSlotId })
@@ -213,9 +213,8 @@ test("editing at a displayed leaf keeps the sibling branch's note revision", asy
   await openAt(leftFork)
   await expectTextBox(editor.getByRole("textbox", { name: "Content" }), "RAIN")
   await editor.getByRole("textbox", { name: "Content" }).fill("SUN")
-  await editor.getByRole("button", { name: "Save the note" }).click()
-  await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-  await expect(editor.getByText("unsaved changes")).toHaveCount(0)
+  await saveRevision(editor)
+  await expect(revisionStatus(editor)).toHaveText(/^Saved as revision \d+$/)
   const listed = await admin((api) => api.ListChatNotes({ chatId: chat.id, slotId: left }))
   expect(listed.find((n) => n.ref.id === note.id)?.doc.content).toBe("SUN")
   await openAt(rightFork)

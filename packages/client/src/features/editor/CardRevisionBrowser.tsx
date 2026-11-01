@@ -163,7 +163,12 @@ function RevisionComparison({ store, call, revision }: { store: EditorStore; cal
       ) : (
         <div aria-label="Revision changes" className="flex min-w-0 flex-col gap-2">
           {changes.map((change) => {
-            const label = fieldLabel(state.snapshot!.ref.kind, mode === "parent" ? docs!.doc : current, change.path)
+            const label = fieldLabel(
+              state.snapshot!.ref.kind,
+              mode === "parent" ? docs!.doc : current,
+              change.path,
+              mode === "parent" ? docs!.parent : docs!.doc
+            )
             return (
               <FieldComparison
                 key={JSON.stringify(change.path)}

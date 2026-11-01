@@ -5,6 +5,7 @@
 // cancels), which History can add or change later too. Editors bind it to their store.
 import { useState } from "react"
 import { Button } from "./Button.tsx"
+import { Icon } from "./Icon.tsx"
 import { OneLineField } from "./OneLineField.tsx"
 
 /** The state line: whether the live text has changed since the head revision. */
@@ -17,8 +18,11 @@ export function SaveControls({
   pending = false,
   blocked = null,
   onSave,
-  showState = true
+  showState = true,
+  compact = false
 }: {
+  /** A crowded toolbar: on a phone, "Save with a message…" shows as its pen icon only. */
+  compact?: boolean
   /** The head revision's number. */
   revision: number
   /** The live text differs from it. */
@@ -72,13 +76,22 @@ export function SaveControls({
           <Button
             variant="ghost"
             disabled={disabled || pending}
+            aria-label="Save with a message…"
+            className={compact ? "max-sm:px-2!" : ""}
             hint={
               why ??
               "Saves a revision with a one-line message saying what changed. History can add or change a message later."
             }
             onClick={() => setWriting(true)}
           >
-            Save with a message…
+            {compact ? (
+              <>
+                <Icon name="edit" />
+                <span className="max-sm:hidden">Save with a message…</span>
+              </>
+            ) : (
+              "Save with a message…"
+            )}
           </Button>
         </>
       )}

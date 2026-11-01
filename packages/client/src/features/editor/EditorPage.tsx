@@ -341,6 +341,7 @@ export function Editor({
               store={store}
               current={current}
               showState={false}
+              compact
               onSaved={(saved) => setNotice(savedNotice(saved))}
             />
             {ref.kind !== "preset" && (

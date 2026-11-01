@@ -464,7 +464,16 @@ export class EditorStore {
     // A preset's order as the user made it: switches and additions live, moves held (heldOrder.ts).
     if (this.snapshot?.ref.kind === "preset" && path.length === 1 && path[0] === "order" && Array.isArray(value)) {
       const held = this.held()
-      const split = splitOrder(this.liveOrder(), value as ReadonlyArray<PromptOrderEntry>, held?.deleted ?? [])
+      // The order as stored: a prompt just added, which the shown order lists at the end until
+      // it has a place, is new to it, and goes live where it was put.
+      const stored = new Set(
+        ((getAt(this.liveDoc, ["order"]) as PromptOrderEntry[] | undefined) ?? []).map((e) => e.identifier)
+      )
+      const split = splitOrder(
+        this.liveOrder().filter((e) => stored.has(e.identifier) || e.identifier === "main"),
+        value as ReadonlyArray<PromptOrderEntry>,
+        held?.deleted ?? []
+      )
       const live = JSON.stringify(split.live)
       if (live !== JSON.stringify(this.liveOrder())) this.change(valueField(path), live)
       const text = heldText(split.held)

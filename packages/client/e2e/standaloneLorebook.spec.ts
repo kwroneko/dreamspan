@@ -4,17 +4,29 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+const saved = (page: Page) => page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })
 const save = async (page: Page) => {
-  await page.getByRole("button", { name: /^Save \(/ }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  await dialog.getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+  await saveRevision(page)
+  await expect(saved(page)).toBeVisible()
+}
+/** The labels of what the latest revision changed, in History's comparison with its parent. */
+const latestChanges = async (page: Page) => {
+  await page.getByRole("button", { name: "History", exact: true }).click()
+  const history = page.getByRole("dialog", { name: "History", exact: true })
+  await history
+    .getByRole("list", { name: "Revisions" })
+    .getByRole("listitem")
+    .first()
+    .getByRole("button", { name: /^Revision \d+ / })
+    .click()
+  return history
 }
 
 // A synthetic ST world info file; nothing here comes from a real book.
@@ -69,7 +81,7 @@ for (const width of [1440, 390]) {
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)
     await expect(page.getByRole("switch", { name: /Use in every chat/ })).toBeVisible()
-    await expect(page.getByText("Added to 1 chat: saving changes it there.")).toBeVisible()
+    await expect(page.getByText("Added to 1 chat: what you change here is used there as you type.")).toBeVisible()
     await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("3 entries")
     // One row per entry, highest order first, as ST's Priority sort; rows open to the whole entry.
     const titles = () =>
@@ -116,13 +128,14 @@ for (const width of [1440, 390]) {
     await page.reload()
     await page.getByRole("button", { name: "Open Harbour", exact: true }).click()
     await expectTextBox(harbour.getByRole("textbox", { name: "Entry content" }), "Boats rock at the old quay.")
-    // The row's own fields have their Undo, History and Revert in the opened entry.
-    await expect(harbour.getByRole("button", { name: "Revert Trigger %", exact: true })).toBeVisible()
-    await page.getByRole("button", { name: /^Save \(/ }).click()
-    // The diff names the entry by its title.
-    await expect(page.getByRole("dialog", { name: "Save a revision" })).toContainText("Entry “Harbour”")
-    await page.getByRole("dialog", { name: "Save a revision" }).getByRole("button", { name: "Save revision" }).click()
-    await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+    // The opened entry's text has its edit history; settings like Trigger % have no controls of their own.
+    await expect(harbour.getByRole("button", { name: "Edit history of Entry content", exact: true })).toBeVisible()
+    await expect(harbour.getByRole("button", { name: /Trigger %$/ })).toHaveCount(0)
+    await save(page)
+    // History's comparison names the entry by its title.
+    const history = await latestChanges(page)
+    await expect(history.getByLabel("Revision changes")).toContainText("Entry “Harbour”")
+    await history.getByRole("button", { name: "Close", exact: true }).click()
     const book = async () => (await admin((api) => api.OpenEditor({ refId: ref.id }))).doc as unknown as LorebookDoc
     expect((await book()).entries[0]).toMatchObject({
       uid: 0,
@@ -174,7 +187,7 @@ for (const width of [1440, 390]) {
     await expect(copy).toHaveCount(0)
     const otherBook = (await admin((api) => api.OpenEditor({ refId: otherRef.id }))).doc as unknown as LorebookDoc
     expect(otherBook.entries.map((e) => [e.comment, e.content])).toEqual([["Gulls", "Gulls gather on the roofs."]])
-    await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
+    await expect(saved(page)).toBeVisible()
 
     // Search and replace reaches closed entries and their keys.
     await page.getByRole("button", { name: "Search", exact: true }).click()
@@ -354,17 +367,17 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   expect((await doc(other.id)).entries.map((e) => e.comment)).toEqual(["Place 398"])
   await expect(page.getByRole("status").filter({ hasText: "Deleted, until you save:" })).toContainText("Place 398")
 
-  // The diff names entries by title, the removed one too, and the fields as the table does.
-  await page.getByRole("button", { name: /^Save \(/ }).click()
-  const dialog = page.getByRole("dialog", { name: "Save a revision" })
-  const labels = dialog.getByRole("list", { name: "Changes" }).locator(":scope > li > span")
+  // Save asks nothing; History's comparison names entries by title, the removed one too, and
+  // the fields as the table does.
+  await save(page)
+  const history = await latestChanges(page)
+  const labels = history.getByLabel("Revision changes").locator("summary")
   await expect
     .poll(() => labels.allTextContents())
     .toEqual(
       expect.arrayContaining([
         "Entry “Lighthouse”",
         "Entry “Lighthouse (copy)”",
-        "Entry “Place 398”",
         "Entry “Place 123”: Strategy (constant)",
         "Entry “Place 123”: Position",
         "Entry “Place 123”: Position (role)",
@@ -374,11 +387,12 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
         "Entry “Place 123”: Content"
       ])
     )
-  await dialog.getByRole("button", { name: "Save revision" }).click()
-  await expect(page.getByRole("status").filter({ hasText: "Everything is saved." })).toBeVisible()
-  const saved = await doc(ref.id)
-  expect(saved.entries).toHaveLength(401)
-  expect(saved.entries.find((e) => e.uid === 123)).toMatchObject({
+  // History names a removed entry by its title, from the revision before.
+  expect(await labels.allTextContents()).toContain("Entry “Place 398”")
+  await history.getByRole("button", { name: "Close", exact: true }).click()
+  const book = await doc(ref.id)
+  expect(book.entries).toHaveLength(401)
+  expect(book.entries.find((e) => e.uid === 123)).toMatchObject({
     constant: true,
     position: "at_depth",
     role: "assistant",
@@ -387,5 +401,5 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
     probability: 40,
     content: "Text of place 123. The bridge is out."
   })
-  expect(saved.entries.some((e) => e.comment === "Place 398")).toBe(false)
+  expect(book.entries.some((e) => e.comment === "Place 398")).toBe(false)
 })
