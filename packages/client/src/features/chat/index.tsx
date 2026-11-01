@@ -10,6 +10,8 @@ import { registerGuidanceEdit } from "./guidanceEdit.tsx"
 import { registerReasoningActions } from "./reasoningActions.tsx"
 import { registerReasoningPanels } from "./Reasoning.tsx"
 import { registerVersionMetrics } from "./versionMetrics.tsx"
+import { registerMessageDetails } from "./messageDetails.tsx"
+import { registerModelMarks } from "./modelMarks.tsx"
 import { registerReplyCommands } from "./replyCommands.ts"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
@@ -72,6 +74,8 @@ export const register = () => {
   registerGuidanceEdit()
   registerReasoningActions()
   registerReasoningPanels()
+  registerMessageDetails()
+  registerModelMarks()
   registerVersionMetrics()
   registerPanels()
   registerHistoryCommands()

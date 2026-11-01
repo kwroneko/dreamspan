@@ -8,6 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
 import { openPanel } from "./support/panel.ts"
+import { addToCast } from "./support/cast.ts"
 
 // About four seconds a reply.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -123,12 +124,7 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
 
   // Add Tobin, searching for him, then write as him (under his row's ⋯).
   await openCast(page)
-  await page.getByRole("button", { name: "Add character" }).click()
-  const picker = page.getByRole("dialog", { name: "Add a character to this chat" })
-  await picker.getByRole("searchbox", { name: "Search your cards" }).fill("tob")
-  const addable = picker.getByRole("list", { name: "Characters", exact: true })
-  await expect(addable.getByRole("button")).toHaveCount(1)
-  await addable.getByRole("button", { name: /^Tobin/ }).click()
+  await addToCast(page, "Tobin")
   await expect(member(page, "Tobin")).toBeVisible()
   await page.getByRole("button", { name: "More for Tobin" }).click()
   await page.getByRole("button", { name: "Write as Tobin" }).click()

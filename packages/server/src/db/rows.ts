@@ -10,12 +10,42 @@ import {
   type ForkId,
   type LaneId,
   PathEntry,
+  RecordedGeneration,
   type SlotId,
   Version,
   type VersionId,
   versionInContext
 } from "@rp/shared/chat.ts"
 import { User, type UserId } from "@rp/shared/domain.ts"
+import { recordedModelLabel } from "@rp/shared/stApis.ts"
+import { Schema } from "effect"
+
+/**
+ * Who generated an imported version and how, as the app it came from recorded it
+ * (formats/stChat.ts `StGeneration`). Stored in two columns, null for none and for this app's
+ * own generations (whose model is `model_id`, and figures the usage ledger):
+ * `recorded_model_json` (`api`, `model`), which a duplicate or an edited copy keeps as it
+ * keeps `model_id`, and `recorded_generation_json` (the figures), which they leave behind
+ * with `usage_json`, since they weren't generated in that time.
+ */
+export const StoredGeneration = Schema.Struct({
+  api: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
+  model: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
+  ...RecordedGeneration.fields
+})
+export type StoredGeneration = typeof StoredGeneration.Type
+
+/** The two columns `StoredGeneration` is kept in. */
+export const recordedColumns = (generation: StoredGeneration | undefined) => {
+  const { api, model, ...figures } = generation ?? {}
+  return {
+    recorded_model_json:
+      api !== undefined || model !== undefined
+        ? JSON.stringify({ ...(api !== undefined ? { api } : {}), ...(model !== undefined ? { model } : {}) })
+        : null,
+    recorded_generation_json: Object.keys(figures).length > 0 ? JSON.stringify(figures) : null
+  }
+}
 
 export interface UserRow {
   readonly id: string
@@ -129,6 +159,11 @@ export interface VersionRow {
   readonly has_context?: number
   /** Its model as "connection · model" (`versionExtras`); absent on a row just inserted. */
   readonly model_label?: string | null
+  /** Its model's connection kind and key, as JSON (`versionExtras`); absent on a row just inserted. */
+  readonly model_ref_json?: string | null
+  /** What an imported version's app recorded about its model and generation (`StoredGeneration`). */
+  readonly recorded_model_json?: string | null
+  readonly recorded_generation_json?: string | null
 }
 
 /** The columns `toVersion` reads beyond the version's own: its row version, its context's issues and its model's name. */
@@ -140,7 +175,9 @@ export const versionExtras = (alias: string) =>
   EXISTS (SELECT 1 FROM rollout_payloads p WHERE p.rollout_id = ${alias}.rollout_id
     AND p.context_snapshot_json IS NOT NULL) AS has_context,
   (SELECT c.name || ' · ' || m.model_key FROM models m JOIN connections c ON c.id = m.connection_id
-    WHERE m.id = ${alias}.model_id) AS model_label`
+    WHERE m.id = ${alias}.model_id) AS model_label,
+  (SELECT json_object('provider', c.kind, 'model', m.model_key) FROM models m JOIN connections c ON c.id = m.connection_id
+    WHERE m.id = ${alias}.model_id) AS model_ref_json`
 
 const toVersionError = (json: string | null) => {
   if (json === null) return null
@@ -188,6 +225,25 @@ export const rewriteColumns = (rewrite: StoredRewrite | undefined) => ({
       : null
 })
 
+/** Its model's label and reference: the user's model where one is recorded, else what an import recorded. */
+const modelOf = (row: VersionRow) => {
+  const imported = row.recorded_model_json
+    ? (JSON.parse(row.recorded_model_json) as { api?: string; model?: string })
+    : null
+  const ref = row.model_ref_json
+    ? (JSON.parse(row.model_ref_json) as { provider: string; model: string })
+    : imported
+      ? { provider: imported.api ?? "", model: imported.model ?? "" }
+      : null
+  return {
+    model: row.model_label ?? (imported ? recordedModelLabel(imported.api, imported.model) : null),
+    ...(ref ? { modelRef: ref } : {}),
+    ...(row.recorded_generation_json
+      ? { recorded: JSON.parse(row.recorded_generation_json) as RecordedGeneration }
+      : {})
+  }
+}
+
 export const toVersion = (row: VersionRow) =>
   new Version({
     id: row.id as VersionId,
@@ -205,7 +261,7 @@ export const toVersion = (row: VersionRow) =>
     hidden: row.hidden === 1,
     starred: row.starred === 1,
     createdAt: row.created_at,
-    model: row.model_label ?? null,
+    ...modelOf(row),
     error: toVersionError(row.error_json),
     ...(row.reasoning ? { reasoning: row.reasoning } : {}),
     ...(row.reply_sections ? { replySections: JSON.parse(row.reply_sections) as ReplySections } : {}),

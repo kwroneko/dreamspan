@@ -8,6 +8,7 @@ import {
   chatComposer,
   chatComposerNotes,
   chatCardActions,
+  castSections,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
@@ -51,6 +52,9 @@ const ForkChatCard = deferred<Parameters<typeof import("./CardForkDialogs.tsx").
 )
 const ChooseChatCard = deferred<Parameters<typeof import("./CardForkDialogs.tsx").ChooseChatCard>[0]>(() =>
   import("./CardForkDialogs.tsx").then((m) => ({ default: m.ChooseChatCard }))
+)
+const CastAddSection = deferred<Parameters<typeof import("./CastAdd.tsx").CastAddSection>[0]>(() =>
+  import("./CastAdd.tsx").then((m) => ({ default: m.CastAddSection }))
 )
 const RetryWith = deferred<Parameters<typeof import("./VersionControls.tsx").RetryWith>[0]>(() =>
   import("./VersionControls.tsx").then((m) => ({ default: m.RetryWith }))
@@ -117,6 +121,7 @@ export const registerPresentation = () => [
   chatCardActions.register({ id: "card.edit", order: 10, component: EditChatCard }),
   chatCardActions.register({ id: "card.fork-for-chat", order: 20, component: ForkChatCard }),
   chatCardActions.register({ id: "card.choose-version", order: 30, component: ChooseChatCard }),
+  castSections.register({ id: "cast.add-characters", order: 10, component: CastAddSection }),
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),

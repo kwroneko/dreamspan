@@ -37,7 +37,9 @@ const numbered = async (page: Page) =>
     ? []
     : await messages(page).evaluateAll((rows) =>
         rows.map((row) => {
-          const number = [...row.querySelectorAll("header span")].find((s) => /^#\d+$/.test(s.textContent ?? ""))
+          const number = [...row.querySelectorAll("[data-portrait-details] span")].find((s) =>
+            /^#\d+$/.test(s.textContent ?? "")
+          )
           const text = row.querySelector(".markdown")?.textContent?.trim().slice(0, 24) ?? ""
           return `${number?.textContent ?? "?"} ${text}`
         })
@@ -327,7 +329,7 @@ for (const width of [1440, 390])
       await expect(page.getByText("generating", { exact: true })).toHaveCount(0, { timeout: 20_000 })
       const original = messages(page).last()
       const text = (await original.locator(".markdown").first().textContent())!.trim().slice(0, 40)
-      const number = Number(/#(\d+)/.exec((await original.locator("header").first().textContent()) ?? "")![1])
+      const number = Number(/#(\d+)/.exec((await original.locator("[data-portrait-details]").textContent()) ?? "")![1])
       await messageMenu(original, "Duplicate")
       // The copy, right below it, numbered next; the list is virtualized, so by text, not by index.
       await expect(messages(page).filter({ hasText: text })).toHaveCount(2)

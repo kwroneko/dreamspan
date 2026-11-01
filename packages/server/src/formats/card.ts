@@ -150,9 +150,11 @@ export const cardFromJson = (
   root: unknown,
   limits: Limits,
   issues: ReportBuilder
-): { card: CardDoc; version: CardVersion; stCreatedAt: number | null } => {
+): { card: CardDoc; version: CardVersion; stCreatedAt: number | null; stChat: string | null } => {
   if (!Predicate.isObject(root)) return fail("card.not_a_card", "The file isn't a character card.")
   const stCreatedAt = parseStCreatedAt(root.create_date)
+  // The chat ST opens the card on (its file name without `.jsonl`): the one last opened.
+  const stChat = typeof root.chat === "string" && root.chat.trim() !== "" ? root.chat.slice(0, 1024) : null
   if (root.spec !== undefined && Predicate.isObject(root.data)) {
     const version: CardVersion = root.spec === "chara_card_v2" ? "v2" : "v3"
     if (root.spec !== "chara_card_v2" && root.spec !== "chara_card_v3") {
@@ -168,7 +170,12 @@ export const cardFromJson = (
     }
     const card = fromData(root.data, ["data"], limits, issues)
     const { unknown_fields } = new Fields(root, [], issues).unknown(ROOT_KEYS)
-    return { card: unknown_fields ? { ...card, unknown_root_fields: unknown_fields } : card, version, stCreatedAt }
+    return {
+      card: unknown_fields ? { ...card, unknown_root_fields: unknown_fields } : card,
+      version,
+      stCreatedAt,
+      stChat
+    }
   }
   if (root.spec !== undefined) {
     issues.add(
@@ -178,6 +185,6 @@ export const cardFromJson = (
       ["data"]
     )
   }
-  if (typeof root.name === "string") return { card: fromV1(root, limits, issues), version: "v1", stCreatedAt }
+  if (typeof root.name === "string") return { card: fromV1(root, limits, issues), version: "v1", stCreatedAt, stChat }
   return fail("card.not_a_card", "The file isn't a character card.")
 }

@@ -270,7 +270,15 @@ describe("ST settings and groups", () => {
       "g.json",
       new ReportBuilder()
     )
-    expect(group).toEqual({ id: "g", name: "G", members: ["a.png"], disabledMembers: ["a.png"], chats: ["c1", "c2"] })
+    // `chat_id` is the chat ST opens the group on: the one last opened.
+    expect(group).toEqual({
+      id: "g",
+      name: "G",
+      members: ["a.png"],
+      disabledMembers: ["a.png"],
+      chats: ["c1", "c2"],
+      chatId: "c2"
+    })
   })
 })
 

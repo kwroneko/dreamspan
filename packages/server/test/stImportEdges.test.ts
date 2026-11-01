@@ -894,7 +894,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           const slot = query("SELECT slot_id FROM versions WHERE content = ?", `${tag}-reply`)[0]!.slot_id as SlotId
           const alt = query("SELECT id FROM versions WHERE content = ?", `${tag}-alt`)[0]!.id as VersionId
           const shown = shownAt(slot)
-          yield* (yield* Writer).SelectVersion({
+          // The fork the choice is made in: the chat may open on another once the branch finishes.
+          const { forkId: chosenIn } = yield* (yield* Writer).SelectVersion({
             userId: user.id,
             slotId: slot,
             versionId: alt,
@@ -904,7 +905,10 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "180 seconds" }
           yield* first.api.DeleteMessage({ slotId: binned })
           const next = yield* begin
           yield* sendStFile(next.importId, branch, jsonl(header, ...lines, message(`${tag}-tail`, 4)), { card: "none" })
-          assert.strictEqual(shownAt(slot), alt)
+          assert.strictEqual(
+            query(`SELECT ${selectedInSql(`'${chosenIn}'`, "s")} AS id FROM slots s WHERE s.id = ?`, slot)[0]!.id,
+            alt
+          )
           assert.strictEqual(present(`${tag}-reply`), 1)
           const rows = query(
             "SELECT s.deleted_at FROM slots s JOIN versions v ON v.slot_id = s.id WHERE v.content = ?",

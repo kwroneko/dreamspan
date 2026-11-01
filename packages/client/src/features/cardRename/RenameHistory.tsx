@@ -11,6 +11,7 @@ import { Select } from "../../ui/Select.tsx"
 import { useCaller } from "../editor/caller.ts"
 import type { CardSaved } from "../editor/cardSaved.ts"
 import { readableChatTitle } from "../chat/chatTitle.ts"
+import { branchLabel } from "../chat/forks.ts"
 
 type Target = NonNullable<CardSaved["current"]> & { label: string }
 
@@ -40,7 +41,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: (
             const fork = forks.find((f) => f.id === target.forkId)
             result.push({
               ...target,
-              label: `${readableChatTitle(chat.title)} · ${fork?.name || (fork?.current ? "Current branch" : `Branch ${forks.findIndex((f) => f.id === target.forkId) + 1}`)} · ${fork?.tipExcerpt || "Before the first message"}`
+              label: `${readableChatTitle(chat.title)} · ${fork ? branchLabel(fork) : "Branch"} · ${fork?.tipExcerpt || "Before the first message"}`
             })
           }
         }

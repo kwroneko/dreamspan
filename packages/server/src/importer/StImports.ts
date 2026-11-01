@@ -45,7 +45,7 @@ import {
   linkChat,
   speakerMap,
   stem,
-  stForkName,
+  stChatTitle,
   authorNotePlace
 } from "./stMapping.ts"
 
@@ -144,8 +144,10 @@ interface ChatProgress {
   readonly into: ChatId | null
   readonly isNew: boolean
   readonly branch: boolean
-  /** A branch's name from ST, and its parent file's record, where the name goes. */
-  readonly fork: { readonly name: string | null; readonly parentRecordId: string } | null
+  /** A branch's parent file's record. */
+  readonly fork: { readonly parentRecordId: string } | null
+  /** ST opens the file's card or group on it (a card's `chat`, a group's `chat_id`): its last-opened chat. */
+  readonly stCurrent: boolean
   readonly prevState: ChatState | null
   readonly prevNotes: Readonly<Record<string, EntityId>>
   /** Where the file ended when last imported, and the first slot an unfinished run added. */
@@ -560,7 +562,8 @@ export class StImports extends Context.Service<
               entityId: imported.entity.entityId,
               label: imported.entity.label,
               file: stem(file),
-              characterNote
+              characterNote,
+              lastChat: parsed.parsed.stChat ?? null
             })
           }
           return imported.outcome
@@ -811,16 +814,9 @@ export class StImports extends Context.Service<
             lastMessageAt: progress.lastMessageAt,
             sha256: hash(progress.partHashes.join("")),
             stateJson: JSON.stringify(applies ? change.state : progress.prevState),
-            fork: progress.fork
+            fork: progress.fork,
+            stCurrent: progress.stCurrent
           })
-          if (finished.fork === "same" && progress.fork?.name != null) {
-            report.issue(
-              progress.path,
-              "info",
-              "st.fork_same",
-              `This branch is named “${shownText(progress.fork!.name)}” in ST, but it has no message of its own apart from its parent chat's, so no branch was given the name.`
-            )
-          }
           session.records.set(progress.path, {
             ...target,
             complete: true,
@@ -948,14 +944,18 @@ export class StImports extends Context.Service<
         // A branch is a file that went into another file's chat; an orphan is a chat of its own.
         const branch = own !== undefined ? own.merged : parentLive !== undefined
         const into = own === undefined && branch ? parentLive! : undefined
-        const forkName = branch && parent !== undefined ? stForkName(file.name, mainChat) : null
+        // ST's record of the chat it opens the card or group on, which the chat opens on here.
+        const stCurrent =
+          file.kind === "group_chat"
+            ? link.group !== null && link.group.chatId === file.name
+            : link.card !== null && link.card.file === file.folder && link.card.lastChat === file.name
         // Its state so far: the record's when complete; for a branch not yet finished, its parent's.
         const previous = own?.complete ? own : branch ? parentLive : undefined
         return {
           path,
           countAs: file.kind,
           nextPart: 0,
-          title: file.kind === "group_chat" && link.group !== null ? `${link.group.name}: ${file.name}` : file.name,
+          title: stChatTitle(file.name, mainChat, file.kind === "group_chat" ? (link.group?.name ?? null) : null),
           header,
           link,
           target: own === undefined ? null : { chatId: own.chatId, recordId: own.recordId },
@@ -963,7 +963,8 @@ export class StImports extends Context.Service<
           // A chat whose first import never finished has no state yet: it's finished as new.
           isNew: !branch && !(own?.complete ?? false),
           branch,
-          fork: branch && parent !== undefined ? { name: forkName, parentRecordId: parent.recordId } : null,
+          fork: branch && parent !== undefined ? { parentRecordId: parent.recordId } : null,
+          stCurrent,
           prevState: previous?.state ?? null,
           prevNotes: previous?.notes ?? {},
           prevEnd: own?.complete ? own.end : null,
