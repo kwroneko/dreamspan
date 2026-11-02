@@ -83,7 +83,11 @@ export function Input({
     return <BaseInput className={`h-9 ${control} ${width} ${className}`} {...props} />
   return (
     <FieldFrame side="end" tools={tools} status={status} className={`${width} ${frameClassName}`}>
-      <BaseInput className={`h-9 ${framedControl} ${className}`} {...props} />
+      <BaseInput
+        data-layout-audit-ignore="inset: The text fills its own bordered field"
+        className={`h-9 ${framedControl} ${className}`}
+        {...props}
+      />
     </FieldFrame>
   )
 }
@@ -219,6 +223,7 @@ export function Textarea({
         <BaseField.Control
           render={
             <textarea
+              data-layout-audit-ignore="inset: The text fills its own bordered field"
               className={`min-h-24 py-2 ${framedControl} ${className}`}
               {...props}
               onSelect={(event) => {
