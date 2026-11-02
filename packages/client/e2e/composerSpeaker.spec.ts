@@ -219,6 +219,41 @@ test("Next: Auto's pick, a name in the box, a pick for one reply, and an empty S
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
 })
 
+test("Manual order posts an image-only message without requesting a reply", async ({ page }) => {
+  const chatId = await chatWith(["Mira", "Tobin"])
+  await admin((api) => api.ChangeCast({ chatId, slotId: null, change: { _tag: "ReplyOrder", order: "manual" } }))
+  const submissions: string[] = []
+  page.on("websocket", (socket) =>
+    socket.on("framesent", ({ payload }) => {
+      if (String(payload).includes('"tag":"SendMessage"')) submissions.push(String(payload))
+    })
+  )
+  await page.goto(`${server().url}/chats/${chatId}`)
+  await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Ana/)
+  await expect(page.getByRole("button", { name: "Attach images", exact: true })).toBeEnabled()
+  const buffer = Buffer.from(
+    await page.evaluate(() => {
+      const canvas = document.createElement("canvas")
+      canvas.width = canvas.height = 16
+      canvas.getContext("2d")!.fillRect(0, 0, 16, 16)
+      return canvas.toDataURL("image/png").split(",")[1]!
+    }),
+    "base64"
+  )
+  await page.getByLabel("Choose images").setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer })
+  await expect(page.getByRole("list", { name: "Attached images" }).getByRole("img")).toHaveCount(1)
+  await expect(nextChip(page)).toHaveAccessibleName(nextName("no one"))
+  await page.getByRole("button", { name: "Send as Ana", exact: true }).click()
+  await expect(page.getByRole("list", { name: "Attached images" })).toHaveCount(0)
+  expect(submissions).toHaveLength(1)
+  expect(submissions[0]).toContain('"reply":false')
+  await expect(page.locator("article[data-slot]")).toHaveCount(1)
+  await expect(lastHeader(page)).toContainText("Ana")
+  await page.reload()
+  await expect(page.locator("article[data-slot]")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "View image 1", exact: true })).toBeVisible()
+})
+
 test("the speaker stays chosen through a reload and in every tab; the switcher searches", async ({ page }) => {
   const chatId = await chatWith(["Mira", "Tobin"], true)
   await page.goto(`${server().url}/chats/${chatId}`)
