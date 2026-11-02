@@ -27,15 +27,19 @@ export const subscribeOpenEditors = (listener: () => void) => {
   }
 }
 
-/** Counts one more place guarding `editor`; the returned function undoes it. */
+/**
+ * Counts one more place guarding `editor`; the returned function undoes it. Listeners hear of
+ * it after the effect that called this: told within it, a listener's re-render ran inside
+ * another component's commit and lost a message editor's focus (snippets.spec).
+ */
 export const trackOpenEditor = (editor: OpenEditor) => {
   open.set(editor, (open.get(editor) ?? 0) + 1)
-  changed()
+  queueMicrotask(changed)
   return () => {
     const count = (open.get(editor) ?? 1) - 1
     if (count > 0) open.set(editor, count)
     else open.delete(editor)
-    changed()
+    queueMicrotask(changed)
   }
 }
 
