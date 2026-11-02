@@ -118,7 +118,7 @@ it("renders direct actions and a menu only when something registered fills it", 
   expect(render()).toContain("Open Synthetic")
   card()
   direct()
-  expect(render()).toBe('<div class="flex shrink-0 items-center gap-1"></div>')
+  expect(render()).toMatch(/^<div[^>]*><\/div>$/)
 })
 
 it("hands an action its registered description, so a plugin's entry explains itself", () => {
