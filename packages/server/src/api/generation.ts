@@ -29,10 +29,13 @@ export const makeGenerationHandlers = Effect.gen(function* () {
       Effect.flatMap(CurrentUser, (user) => reader.GetTokenCounting({ userId: user.id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], serverError("GetTokenCounting"))
       ),
-    SetTokenCounting: ({ connectionId, enabled }) =>
-      Effect.flatMap(CurrentUser, (user) => writer.SetTokenCounting({ userId: user.id, connectionId, enabled })).pipe(
-        Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetTokenCounting"))
-      ),
+    SetTokenCounting: ({ connectionId, via }) =>
+      Effect.flatMap(CurrentUser, (user) =>
+        // Open chats' image estimates are made again: a provider chosen now counts their images.
+        writer
+          .SetTokenCounting({ userId: user.id, connectionId, via })
+          .pipe(Effect.tap(() => warmth.refreshUser(user.id)))
+      ).pipe(Effect.catchTag(["StorageError", "RpcClientError"], serverError("SetTokenCounting"))),
     GetGenerationDefaults: () =>
       Effect.flatMap(CurrentUser, (user) => reader.GetGenerationDefaults({ userId: user.id })).pipe(
         Effect.catchTag(["StorageError", "RpcClientError"], serverError("GetGenerationDefaults"))

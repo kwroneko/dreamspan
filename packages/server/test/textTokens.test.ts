@@ -1,6 +1,7 @@
 // Token counts with the chat model's own tokenizer (owner, 2026-11-02; ARCHITECTURE §6 "Text
 // tokens"): OpenAI's models counted locally in the format worker, Claude through Anthropic's
-// counting endpoint (a mock here) only once its connection opts in, cached per model and text, and an approximation that says so
+// counting endpoint (a mock here) only once its connection chooses it, or through another
+// connection chosen only for counting, cached per model and text, and an approximation that says so
 // when there's no model, no tokenizer for it, or its count fails. Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
@@ -80,10 +81,12 @@ describe("text token counts", () => {
       assert.include(local.tokenizer.note ?? "", "is off for this connection")
       assert.lengthOf(provider.requests(), 0)
       // Opted in, and out again.
-      assert.deepStrictEqual(yield* api.SetTokenCounting({ connectionId, enabled: true }), [connectionId])
+      assert.deepStrictEqual(yield* api.SetTokenCounting({ connectionId, via: connectionId }), [
+        { connectionId, via: connectionId }
+      ])
       assert.isTrue((yield* api.CountTokens({ texts: ["one two"] })).tokenizer.exact)
       assert.isAbove(provider.requests().length, 0)
-      yield* api.SetTokenCounting({ connectionId, enabled: false })
+      yield* api.SetTokenCounting({ connectionId, via: null })
       const asked = provider.requests().length
       assert.isFalse((yield* api.CountTokens({ texts: ["three four"] })).tokenizer.exact)
       assert.lengthOf(provider.requests(), asked)
@@ -95,7 +98,7 @@ describe("text token counts", () => {
       const provider = yield* mock(anthropicCount)
       const api = yield* client()
       const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
-      yield* api.SetTokenCounting({ connectionId, enabled: true })
+      yield* api.SetTokenCounting({ connectionId, via: connectionId })
       const counted = yield* api.CountTokens({ texts: ["one two three", "", "four"] })
       // A text's count less a one-token text's, plus one: the framing drops out.
       assert.deepStrictEqual(counted.counts, [3, 0, 1])
@@ -114,12 +117,54 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live("a separate connection counts, used only for counting: its provider gets the text, the chat's doesn't", () =>
+    Effect.gen(function* () {
+      const chat = yield* mock((_request, res) => res.writeHead(500).end())
+      const counting = yield* mock(anthropicCount)
+      const api = yield* client()
+      // The chat's model through a router with no counting endpoint of its own.
+      const connectionId = yield* useModel(api, "openrouter", `${chat.url}/api/v1`, "anthropic/claude-synthetic-4.5")
+      const direct = yield* api.CreateConnection({
+        kind: "anthropic",
+        settings: {
+          name: "Anthropic direct",
+          baseUrl: counting.url,
+          compat: {},
+          cacheTtlS: null,
+          maxConcurrent: null,
+          presetOverrideRefId: null
+        },
+        apiKey: "counting-key"
+      })
+      yield* api.AddUserModel({ connectionId: direct.id, key: "claude-synthetic-4-5", overrides: {} })
+      // By default neither is asked.
+      assert.isFalse((yield* api.CountTokens({ texts: ["one two three"] })).tokenizer.exact)
+      assert.lengthOf(counting.requests(), 0)
+      assert.deepStrictEqual(yield* api.SetTokenCounting({ connectionId, via: direct.id }), [
+        { connectionId, via: direct.id }
+      ])
+      const counted = yield* api.CountTokens({ texts: ["one two three"] })
+      assert.deepStrictEqual(counted.counts, [3])
+      assert.isTrue(counted.tokenizer.exact)
+      assert.include(counted.tokenizer.label, "through Anthropic direct")
+      const asked = counting.requests().filter((r) => r.path === "/v1/messages/count_tokens")
+      assert.isAbove(asked.length, 0)
+      // The counting connection's own model name and key; the chat's provider got nothing.
+      assert.strictEqual(asked[0]!.body?.model, "claude-synthetic-4-5")
+      assert.strictEqual(asked[0]!.headers["x-api-key"], "counting-key")
+      assert.lengthOf(chat.requests(), 0)
+      // A deleted counting connection counts on this server again.
+      yield* api.DeleteConnection({ connectionId: direct.id })
+      assert.deepStrictEqual(yield* api.GetTokenCounting(), [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
   it.live("a failed count falls back to o200k_base and says why; DeepSeek has no tokenizer here", () =>
     Effect.gen(function* () {
       const provider = yield* mock((_request, res) => res.writeHead(429).end("slow down"))
       const api = yield* client()
       const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
-      yield* api.SetTokenCounting({ connectionId, enabled: true })
+      yield* api.SetTokenCounting({ connectionId, via: connectionId })
       const failed = yield* api.CountTokens({ texts: ["Hello world"] })
       assert.deepStrictEqual(failed.counts, [2])
       assert.isFalse(failed.tokenizer.exact)

@@ -57,6 +57,7 @@ import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } fr
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
 import type { TextCountRequest } from "./textCounters.ts"
+import { countingModelKey } from "./countingModel.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 
 export { ProviderError } from "./errors.ts"
@@ -348,8 +349,10 @@ export interface ProvidersShape {
   /** The provider kinds in effect, built-in and from plugins, in picker order. */
   readonly kinds: () => ReadonlyArray<ProviderKindInfo>
   /**
-   * One image's exact token count for a model, from the provider's counting endpoint
-   * (ARCHITECTURE §6); null when no registered counter applies. Never part of a send.
+   * One image's exact token count for a model, from a registered image counter (ARCHITECTURE
+   * §6); null when none applies. Never part of a send. A counter that asks a provider runs only
+   * through `via`, the connection the user chose to count with (DESIGN §11: nothing goes to a
+   * provider the user didn't choose); with `via` null only a local counter can count.
    */
   readonly countImageTokens: (input: {
     readonly userId: UserId
@@ -357,6 +360,7 @@ export interface ProvidersShape {
     readonly modelKey: string
     readonly image: { readonly data: string; readonly mimeType: string }
     readonly detail: string
+    readonly via: ConnectionId | null
   }) => Effect.Effect<number | null, ProviderError | ServerError>
   /**
    * Each text's tokens with the model's own tokenizer, from the newest registered text counter
@@ -370,10 +374,11 @@ export interface ProvidersShape {
     readonly texts: ReadonlyArray<string>
     readonly encode: TextCountRequest["encode"]
     /**
-     * The user opted this connection in to its provider's counting (owner, 2026-11-02: off by
-     * default, since the text goes to the provider); without it, remote counters are skipped.
+     * The connection whose provider the user chose to count with: this one or another of theirs
+     * (owner, 2026-11-02: off by default, since the text goes to that provider); null, and
+     * remote counters are skipped.
      */
-    readonly remote: boolean
+    readonly via: ConnectionId | null
   }) => Effect.Effect<
     | { readonly counts: ReadonlyArray<number>; readonly id: string; readonly label: string }
     /** A provider's counter would apply, but the connection isn't opted in: its label. */
@@ -1455,21 +1460,55 @@ export const layer = (options: ProvidersOptions = {}) =>
           )
         })
 
+      /**
+       * Where a count goes: the chat's own connection, or the one the user chose to count with
+       * (`via`), whose model of the same name is asked (`countingModel.ts`). Local counters
+       * apply by the chat's connection and never send anything.
+       */
+      const countingTargets = (
+        userId: UserId,
+        connectionId: ConnectionId,
+        modelKey: string,
+        via: ConnectionId | null
+      ) =>
+        Effect.gen(function* () {
+          const own = yield* prepare(userId, connectionId)
+          const ownTarget = { kind: own.kind.id, api: own.api, model: modelKey, baseUrl: own.baseUrl }
+          if (via === null || via === connectionId)
+            return { own, ownTarget, remote: via === null ? null : { prepared: own, target: ownTarget } }
+          const other = yield* prepare(userId, via)
+          const listed = yield* fromStorage(reader.ListModels({ userId, connectionId: via, includeHidden: true }))
+          const model = countingModelKey(
+            modelKey,
+            listed.map((m) => m.key)
+          )
+          return {
+            own,
+            ownTarget,
+            remote: { prepared: other, target: { kind: other.kind.id, api: other.api, model, baseUrl: other.baseUrl } }
+          }
+        })
+
       const countImageTokens: ProvidersShape["countImageTokens"] = ({
         userId,
         connectionId,
         modelKey,
         image,
-        detail
+        detail,
+        via
       }) =>
         Effect.gen(function* () {
-          const prepared = yield* prepare(userId, connectionId)
-          const target = { kind: prepared.kind.id, api: prepared.api, model: modelKey, baseUrl: prepared.baseUrl }
-          const counter = registry.imageCounters
-            .list()
-            .toReversed()
-            .find((c) => c.appliesTo(target))
-          if (!counter) return null
+          const { own, ownTarget, remote } = yield* countingTargets(userId, connectionId, modelKey, via)
+          const counters = registry.imageCounters.list().toReversed()
+          const local = counters.find((c) => !c.remote && c.appliesTo(ownTarget))
+          const sent = remote ? counters.find((c) => c.remote && c.appliesTo(remote.target)) : undefined
+          const chosen = local
+            ? { counter: local, prepared: own, model: modelKey }
+            : remote && sent
+              ? { counter: sent, prepared: remote.prepared, model: remote.target.model }
+              : null
+          if (!chosen) return null
+          const { counter, prepared, model } = chosen
           return yield* counter
             .count({
               baseUrl: prepared.baseUrl,
@@ -1477,7 +1516,7 @@ export const layer = (options: ProvidersOptions = {}) =>
               headers: prepared.headers,
               fetch: fetchFor(prepared, () => {}),
               scrub: prepared.scrub,
-              model: modelKey,
+              model,
               image,
               detail
             })
@@ -1490,17 +1529,27 @@ export const layer = (options: ProvidersOptions = {}) =>
         modelKey,
         texts,
         encode,
-        remote
+        via
       }) =>
         Effect.gen(function* () {
-          const prepared = yield* prepare(userId, connectionId)
-          const target = { kind: prepared.kind.id, api: prepared.api, model: modelKey, baseUrl: prepared.baseUrl }
-          const applying = registry.textCounters
-            .list()
-            .toReversed()
-            .filter((c) => c.appliesTo(target))
-          const counter = applying.find((c) => remote || !c.remote)
-          if (!counter) return applying[0] ? { optIn: applying[0].label(modelKey) } : null
+          const { own, ownTarget, remote } = yield* countingTargets(userId, connectionId, modelKey, via)
+          const counters = registry.textCounters.list().toReversed()
+          const onOwn = counters.filter((c) => c.appliesTo(ownTarget))
+          const local = onOwn.find((c) => !c.remote)
+          // The connection's own provider keeps the registry's order; another connection is
+          // asked only where nothing local applies.
+          const sent =
+            remote && remote.prepared !== own ? counters.find((c) => c.remote && c.appliesTo(remote.target)) : undefined
+          const chosen =
+            remote && remote.prepared === own && onOwn[0]
+              ? { counter: onOwn[0], prepared: own, model: modelKey }
+              : local
+                ? { counter: local, prepared: own, model: modelKey }
+                : remote && sent
+                  ? { counter: sent, prepared: remote.prepared, model: remote.target.model }
+                  : null
+          if (!chosen) return onOwn[0] ? { optIn: onOwn[0].label(modelKey) } : null
+          const { counter, prepared, model } = chosen
           const counts = yield* counter
             .count({
               baseUrl: prepared.baseUrl,
@@ -1508,12 +1557,17 @@ export const layer = (options: ProvidersOptions = {}) =>
               headers: prepared.headers,
               fetch: fetchFor(prepared, () => {}),
               scrub: prepared.scrub,
-              model: modelKey,
+              model,
               texts,
               encode
             })
             .pipe(Effect.mapError((error) => providerError("unknown", prepared.scrub(error.message))))
-          return { counts, id: counter.id, label: counter.label(modelKey) }
+          const label = counter.label(model)
+          return {
+            counts,
+            id: counter.id,
+            label: prepared === own ? label : `${label}, through ${prepared.connection.name}`
+          }
         })
 
       return Providers.of({

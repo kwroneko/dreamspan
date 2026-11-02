@@ -394,7 +394,7 @@ for (const width of [1440, 390])
 
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
-    test(`a connection's provider counting is off until opted in, and says it sends the text (${width}, ${theme})`, async ({
+    test(`a connection's token counts stay on this server until the user chooses a provider, and say which one gets the text (${width}, ${theme})`, async ({
       page
     }) => {
       test.setTimeout(90_000)
@@ -402,29 +402,63 @@ for (const width of [1440, 390])
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const settings = (name: string, baseUrl: string) => ({
+        name,
+        baseUrl,
+        compat: {},
+        cacheTtlS: null,
+        maxConcurrent: null,
+        presetOverrideRefId: null
+      })
       const connection = await admin((api) =>
         api.CreateConnection({
+          kind: "openrouter",
+          settings: settings(`Router ${width} ${theme}`, "http://127.0.0.1:9/api/v1")
+        })
+      )
+      const counter = await admin((api) =>
+        api.CreateConnection({
           kind: "anthropic",
-          settings: {
-            name: `Counting ${width} ${theme}`,
-            baseUrl: "http://127.0.0.1:9",
-            compat: {},
-            cacheTtlS: null,
-            maxConcurrent: null,
-            presetOverrideRefId: null
-          }
+          settings: settings(`Counter ${width} ${theme}`, "http://127.0.0.1:9")
         })
       )
       await page.goto(`${server().url}/settings/connections/${connection.id}`)
-      const counting = page.getByRole("switch", { name: /^Count with the provider/ })
-      await expect(counting).not.toBeChecked({ timeout: 30_000 })
-      await expect(counting).toHaveAccessibleDescription(/is sent to this provider's token-counting endpoint/)
-      await counting.scrollIntoViewIfNeeded()
+      const picker = page.getByRole("combobox", { name: "Count with" })
+      await expect(picker).toHaveText("Local estimate", { timeout: 30_000 })
+      await expect(picker).toHaveAccessibleDescription(/^Counted on this server; nothing is sent\./)
+      await picker.scrollIntoViewIfNeeded()
       await shoot(page, `connection-counting-${width}-${theme}`)
-      await counting.click()
-      await expect(counting).toBeChecked()
-      expect(await admin((api) => api.GetTokenCounting())).toContain(connection.id)
-      await counting.click()
-      await expect(counting).not.toBeChecked()
-      expect(await admin((api) => api.GetTokenCounting())).not.toContain(connection.id)
+      await picker.click()
+      const another = page.getByRole("option", { name: `Another: Counter ${width} ${theme}` })
+      await another.hover()
+      // The option's explanation, beside it or under it, names the provider that gets the text.
+      await expect(another).toHaveAccessibleDescription(
+        /sent to Anthropic \(http:\/\/127\.0\.0\.1:9\) through “Counter/
+      )
+      // The explanation beside the highlighted option comes after a short delay (ui/Explanation.tsx).
+      if (width > 640) await expect(page.locator(".bg-text.text-canvas", { hasText: "through “Counter" })).toBeVisible()
+      await shoot(page, `connection-counting-open-${width}-${theme}`)
+      await another.click()
+      await expect(picker).toHaveText(`Another: Counter ${width} ${theme}`)
+      await expect(picker).toHaveAccessibleDescription(
+        `The text and images being counted are sent to Anthropic (http://127.0.0.1:9) through “Counter ${width} ${theme}”, under that provider's retention policy. Replies still go to this connection.`
+      )
+      expect(await admin((api) => api.GetTokenCounting())).toContainEqual({
+        connectionId: connection.id,
+        via: counter.id
+      })
+      await shoot(page, `connection-counting-other-${width}-${theme}`)
+      await picker.click()
+      await page.getByRole("option", { name: "This connection's provider" }).click()
+      await expect(picker).toHaveAccessibleDescription(
+        /OpenRouter \(http:\/\/127\.0\.0\.1:9\), this connection's provider/
+      )
+      expect(await admin((api) => api.GetTokenCounting())).toContainEqual({
+        connectionId: connection.id,
+        via: connection.id
+      })
+      await picker.click()
+      await page.getByRole("option", { name: "Local estimate" }).click()
+      await expect(picker).toHaveText("Local estimate")
+      expect((await admin((api) => api.GetTokenCounting())).map((c) => c.connectionId)).not.toContain(connection.id)
     })

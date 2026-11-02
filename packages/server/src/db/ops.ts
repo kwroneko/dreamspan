@@ -110,7 +110,7 @@ import {
   ProviderKind,
   ProxyMode
 } from "@rp/shared/providers.ts"
-import { GenerationDefaults, GenerationDefaultsChange } from "@rp/shared/generation.ts"
+import { GenerationDefaults, GenerationDefaultsChange, TokenCountingChoice } from "@rp/shared/generation.ts"
 import { NextContext, RunContext, VersionMetrics } from "@rp/shared/inspectorApi.ts"
 import { GlobalRegex, GlobalScripts, RawText, StoredRewrite, TextRewrite } from "@rp/shared/regexScripts.ts"
 import { FoldableEvent, StateEventData, StoredStateEventData } from "@rp/shared/state.ts"
@@ -2270,10 +2270,13 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError, LcmSettingsInvalid])
   }),
-  /** Opts a connection of the user's in to provider token counting, or out; NotFound when it isn't theirs. */
+  /**
+   * How a connection of the user's counts tokens: `via` null on this server, else through that
+   * connection's provider; NotFound when either connection isn't theirs.
+   */
   Rpc.make("SetTokenCounting", {
-    payload: { userId: UserId, connectionId: ConnectionId, enabled: Schema.Boolean },
-    success: Schema.Array(ConnectionId),
+    payload: { userId: UserId, connectionId: ConnectionId, via: Schema.NullOr(ConnectionId) },
+    success: Schema.Array(TokenCountingChoice),
     error: Schema.Union([NotFound, StorageError])
   }),
   /** The user's display choices, merged in one writer transaction. */
@@ -3127,10 +3130,10 @@ export class ReadOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: StorageError
   }),
-  /** The user's live connections opted in to provider token counting (`tokenCounting.ts`). */
+  /** The user's live connections that count through a provider, and whose (`tokenCounting.ts`). */
   Rpc.make("GetTokenCounting", {
     payload: { userId: UserId },
-    success: Schema.Array(ConnectionId),
+    success: Schema.Array(TokenCountingChoice),
     error: StorageError
   }),
   /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */
