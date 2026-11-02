@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router"
 import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
@@ -301,11 +301,6 @@ function LargeField({
         />
       </div>
       <FieldTools store={store} field={field} label={label} history={false} />
-      <DialogActions>
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </DialogActions>
     </Dialog>
   )
 }

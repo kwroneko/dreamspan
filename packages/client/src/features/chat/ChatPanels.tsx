@@ -289,7 +289,7 @@ export function ChatSidePanel({
   )
   if (!wide)
     return (
-      <Sheet open onOpenChange={(open) => !open && onClose()} title={title} closeLabel="Close">
+      <Sheet open onOpenChange={(open) => !open && onClose()} title={title}>
         <div className="flex min-h-0 flex-1 flex-col">
           {nav}
           {panels}

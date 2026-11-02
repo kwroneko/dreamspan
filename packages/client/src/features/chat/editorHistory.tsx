@@ -132,7 +132,6 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
           Earlier states
         </Button>
       )}
-      <Button onClick={onClose}>Close history</Button>
     </Dialog>
   )
 }
@@ -183,7 +182,6 @@ function EditHistoryMenu({ draft, base }: { draft: MessageDraft; base: string })
         description="The saved text, and this edit as it is now."
       >
         {open === "changes" && <RevisionDiff before={base} after={text} beforeLabel="Saved" afterLabel="This edit" />}
-        <Button onClick={() => setOpen(null)}>Close</Button>
       </Dialog>
     </>
   )
@@ -259,7 +257,6 @@ function Amendments({ session, entry, closeDialog, report }: MessageActionProps)
           ))}
         </ol>
       )}
-      <Button onClick={closeDialog}>Close history</Button>
     </Dialog>
   )
 }

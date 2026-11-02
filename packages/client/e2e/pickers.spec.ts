@@ -11,7 +11,7 @@ import { join, resolve } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { LibraryRef } from "@rp/shared/library.ts"
 import { Effect } from "effect"
-import { openPanel } from "./support/panel.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { startProvider, type FakeProvider } from "./support/provider.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -329,7 +329,7 @@ for (const width of [1440, 390]) {
       const other = names.find((name) => !before!.includes(name!))!
       await list.getByRole("radio", { name: other!, exact: true }).click()
       await expect(trigger).toHaveAccessibleName(`Model for the next reply: ${other}. Change it`)
-      if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
+      if (width === 390) await closePanel(page)
       await expect(modelChip(page)).toHaveAccessibleName(modelName(other!))
     }
     // Manage connections…: Settings → Connections in this tab, the chat a Back away.

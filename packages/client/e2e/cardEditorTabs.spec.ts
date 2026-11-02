@@ -240,7 +240,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await renameNickname(tab, "Mio")
   await dialog.getByRole("button", { name: "Yes, only in this chat.", exact: true }).click()
   await expect(dialog.getByRole("list", { name: "History diffs and undo" })).toBeVisible()
-  await dialog.getByRole("button", { name: "Done", exact: true }).click()
+  await dialog.getByRole("button", { name: "Close", exact: true }).click()
   await expect(tab.getByText("In chat: Mio", { exact: true })).toBeVisible()
   expect(await messages(chat.id)).toContain("Mio waves from the pier.")
 
@@ -262,7 +262,7 @@ test("a rename asks about past messages on confirm, as the owner's matrix says",
   await renameDisplay(tab, "Mio")
   await dialog.getByRole("button", { name: "In all 1 chat", exact: true }).click()
   await expect(dialog.getByRole("status").filter({ hasText: "No matching text was found" })).toBeVisible()
-  await dialog.getByRole("button", { name: "Done", exact: true }).click()
+  await dialog.getByRole("button", { name: "Close", exact: true }).click()
   // Just change it: the new name from now on, the history untouched.
   await renameDisplay(tab, "Mira")
   await dialog.getByRole("button", { name: "Just change it", exact: true }).click()

@@ -2,8 +2,7 @@
 // loaded with the chat rather than with the app.
 import { useNavigate } from "@tanstack/react-router"
 import { useSyncExternalStore } from "react"
-import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import type { ChatHeaderActionProps } from "./ChatHeader.tsx"
 import { PinButton } from "../characters/ShellBrowser.tsx"
@@ -81,9 +80,6 @@ export function ShortcutsDialog({ onClose }: ChatCommandDialogProps) {
             )
           })}
       </ul>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
     </Dialog>
   )
 }

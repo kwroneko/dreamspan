@@ -355,7 +355,7 @@ test("a 400-entry book: rows virtualized, cells edited in place, new entries kep
   await large.getByRole("textbox").click()
   await page.keyboard.press("Control+End")
   await page.keyboard.type(" The bridge is out.")
-  await large.getByRole("button", { name: "Done", exact: true }).click()
+  await large.getByRole("button", { name: "Close", exact: true }).click()
   await expect(
     page.getByRole("group", { name: "Lorebook entry 123", exact: true }).getByRole("textbox", { name: "Entry content" })
   ).toHaveValue("Text of place 123. The bridge is out.")

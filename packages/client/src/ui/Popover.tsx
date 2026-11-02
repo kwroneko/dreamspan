@@ -1,9 +1,10 @@
 // A panel anchored to its trigger. Base UI moves focus into it, closes it on Escape or an
 // outside click and returns focus to the trigger.
 import { Popover as BasePopover } from "@base-ui/react/popover"
-import type { ReactNode, RefObject } from "react"
+import { useRef, type ReactNode, type RefObject } from "react"
 import { buttonClass } from "./Button.tsx"
 import { Tooltip } from "./Tooltip.tsx"
+import { WindowClose } from "./WindowClose.tsx"
 
 export function Popover({
   open,
@@ -42,6 +43,17 @@ export function Popover({
   /** Stays mounted, hidden, while closed: what its controls opened (a dialog, say) stays open. */
   keepMounted?: boolean
 }) {
+  const content = useRef<HTMLDivElement>(null)
+  const focusOnOpen = () =>
+    [
+      ...(content.current?.querySelectorAll<HTMLElement>("button, input, textarea, select, a[href], [tabindex]") ?? [])
+    ].find(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.matches(":disabled, [data-window-close]") &&
+        !element.closest("[hidden], [inert]") &&
+        element.getClientRects().length > 0
+    ) ?? true
   const button = (
     <BasePopover.Trigger aria-label={triggerLabel} className={triggerClassName}>
       {trigger}
@@ -66,10 +78,16 @@ export function Popover({
           collisionPadding={8}
         >
           <BasePopover.Popup
-            {...(initialFocus === undefined ? {} : { initialFocus })}
+            ref={content}
+            initialFocus={initialFocus ?? focusOnOpen}
             className={`flex ${wide ? "max-h-[min(36rem,var(--available-height))] w-[min(30rem,calc(100vw-2rem))]" : "max-h-[min(28rem,var(--available-height))] w-[min(22rem,calc(100vw-2rem))]"} origin-[var(--transform-origin)] flex-col gap-2 overflow-hidden rounded-lg border border-border bg-surface p-3 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none`}
           >
-            <BasePopover.Title className="text-sm font-semibold">{title}</BasePopover.Title>
+            <div className="flex shrink-0 items-start gap-3">
+              <BasePopover.Title className="min-w-0 flex-1 text-sm font-semibold [overflow-wrap:anywhere]">
+                {title}
+              </BasePopover.Title>
+              <WindowClose onClick={() => onOpenChange(false)} />
+            </div>
             {children}
           </BasePopover.Popup>
         </BasePopover.Positioner>

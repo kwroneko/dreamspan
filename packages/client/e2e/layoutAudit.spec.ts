@@ -374,6 +374,37 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_DIALOGS_ONLY === "1") {
+          await go("library-before-dialogs", "/library")
+          for (const name of ["New card", "New prompt preset"]) {
+            await page.getByRole("main").getByRole("button", { name, exact: true }).click()
+            await expect(page.getByRole("dialog", { name, exact: true })).toBeVisible()
+            await audit(`dialog-${name}`)
+            await page.keyboard.press("Escape")
+          }
+          await go("card-before-large", `/library/${cardRef}`)
+          await page.getByRole("button", { name: "Open Description large", exact: true }).click()
+          const large = page.getByRole("dialog", { name: "Description", exact: true })
+          await expect(large).toBeVisible()
+          await audit("dialog-large-text")
+          await page.keyboard.press("Escape")
+          await go("chat-before-sheet", `/chats/${chatId}`)
+          await openPanel(page, "This chat")
+          if (width < 1024) await audit("dialog-panel-sheet")
+          await closePanel(page)
+          await page.getByRole("button", { name: "Chat actions", exact: true }).click()
+          await page.getByRole("menuitem", { name: "Branches…", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "Branches of this chat" })).toBeVisible()
+          await audit("dialog-branches")
+          await page.keyboard.press("Escape")
+          await go("home-before-picker", "/")
+          await showAppNavigation(page)
+          if (width < 1024) await audit("dialog-navigation-drawer")
+          await page.getByRole("button", { name: "Start a chat", exact: true }).click()
+          await expect(page.getByRole("dialog", { name: "Start a chat with…", exact: true })).toBeVisible()
+          await audit("dialog-start-chat-popover")
+          return
+        }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")

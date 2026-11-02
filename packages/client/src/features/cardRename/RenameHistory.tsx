@@ -9,7 +9,7 @@ import { Link } from "@tanstack/react-router"
 import { Effect } from "effect"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { useCaller } from "../editor/caller.ts"
@@ -173,11 +173,6 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: C
               </ul>
             </>
           )}
-          <DialogActions>
-            <Button hint="Closes this; the name is changed." onClick={() => finish("replaced")}>
-              Done
-            </Button>
-          </DialogActions>
         </>
       ) : (
         <>

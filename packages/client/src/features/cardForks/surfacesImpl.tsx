@@ -121,9 +121,6 @@ function FamilyDialog({ entityId, onClose }: CardSurfaceContext & { onClose: () 
       <AsyncView atom={atom} loading="Loading the family…">
         {(family) => <FamilyTree family={family} entityId={entityId} />}
       </AsyncView>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
     </Dialog>
   )
 }
@@ -469,9 +466,6 @@ function CompareDialog({ family, member, onClose }: { family: CardFamily; member
             : "This card’s saved content is unavailable; it was deleted for good or is no longer in this family."}
         </p>
       )}
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
     </Dialog>
   )
 }

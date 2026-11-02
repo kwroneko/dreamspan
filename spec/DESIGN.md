@@ -2,6 +2,8 @@
 
 # Design: requirements and decisions
 
+**Built 2026-11-02 (dialogclose):** The dismissible-window corner-close rule in §10.1 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §5.
+
 **Built 2026-11-02 (composerrow):** The Generate label and even composer-control spacing requirement in §2.2 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §12.
 
 **Implementation audit 2026-10-30:** Built entries below are obsolete as implementation plans, retaining their [P]/[O] provenance unless a cited owner decision supersedes them. Open and later work remains unbuilt.
@@ -804,6 +806,9 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+
+- **[D] Decided (owner, 2026-11-02):** “Every modal that can be dismissed without a decision (closing it loses nothing, or simply cancels) must have a visible close button: an X in the top-right corner. Clicking outside still closes it too.” “Modals that demand a specific resolution (confirm/cancel choices such as ‘Discard changes?’, destructive confirmations, anything where outside-click is already disabled) don't get the X; their buttons are the way out.” **Built, obsolete as an implementation requirement:** shared dialog, sheet and popover behavior is documented in ARCHITECTURE §5; portrait/picture viewers are reserved for the separate portraitview work.
+
 - **[D]** Tile favourites (owner, 2026-11-02): "Favourite buttons should only appear when the image is hovered, although toggled-on favourite stars stay on regardless. There's no need to show 1000 turned off buttons." Off stars appear on tile hover or keyboard focus within it; on stars remain visible. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 - **[P]** (hovertoggles, 2026-11-02, implementation choice) Tile pins and message-image context toggles follow the same rule. Opacity preserves layout and tab order, including explanations on focus; coarse-pointer or no-hover devices keep toggles visible because tapping the tile already opens it. **Built; obsolete as an implementation proposal** (ARCHITECTURE §5).
 - **[D]** Sidebar branch widths (owner, 2026-11-02): "a max width was given to chat listings in the left-hand sidebar, but never applied to branch listings." Apply the chat list's 40rem cap to branch listings and the other sidebar row lists. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).

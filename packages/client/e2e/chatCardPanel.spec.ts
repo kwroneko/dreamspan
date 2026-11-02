@@ -215,7 +215,7 @@ for (const width of [1440, 390])
     await page.keyboard.press("Control+End")
     await page.keyboard.type(" The kettle is on.")
     await shoot(page, `expanded-${width}`)
-    await large.getByRole("button", { name: "Done", exact: true }).click()
+    await large.getByRole("button", { name: "Close", exact: true }).click()
     await expect(textBox(tab, "Scenario")).toContainText("The kettle is on.")
     await expectSaveState(tab, UNSAVED)
     // Save asks nothing.

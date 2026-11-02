@@ -1,6 +1,5 @@
 // All revisioned library documents use the same full-text history browser.
-import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 import type { Caller } from "./caller.ts"
 import { CardRevisionBrowser, type SettingLines } from "./CardRevisionBrowser.tsx"
 import type { EditorStore } from "./store.ts"
@@ -29,11 +28,6 @@ export function RevisionsDialog({
       description="Restore an earlier version. Later saves stay in History."
     >
       <CardRevisionBrowser store={store} call={call} settingLines={settingLines} />
-      <DialogActions>
-        <Button onClick={onClose} hint="Closes the history; nothing changes.">
-          Close
-        </Button>
-      </DialogActions>
     </Dialog>
   )
 }
