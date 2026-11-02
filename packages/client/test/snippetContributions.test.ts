@@ -31,9 +31,10 @@ it("registers the workspace, panel and transfers as individually replaceable con
       context.text
     ])
   expect(offered("")).toEqual([["snippets.send-text", "Whole text"]])
+  // The selection's first: the strip is end-aligned, so it comes and goes without moving the other.
   expect(offered("text")).toEqual([
-    ["snippets.send-text", "Whole text"],
-    ["snippets.send", "text"]
+    ["snippets.send", "text"],
+    ["snippets.send-text", "Whole text"]
   ])
   expect(offered("text", "snippet")).toEqual([])
   // No Insert (owner, 2026-11-01: copy and paste); a plugin can still replace a transfer.

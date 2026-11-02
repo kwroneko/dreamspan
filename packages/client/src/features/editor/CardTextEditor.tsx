@@ -23,6 +23,7 @@ export function CardTextEditor({
   status,
   expand,
   autoFocus,
+  flash,
   onChange,
   onBlur
 }: {
@@ -45,6 +46,8 @@ export function CardTextEditor({
   expand?: boolean | undefined
   /** Focused when it opens, the caret at the end. */
   autoFocus?: boolean | undefined
+  /** Text just added, marked briefly and scrolled into view. */
+  flash?: { readonly at: number; readonly length: number } | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -78,6 +81,7 @@ export function CardTextEditor({
         value={value}
         autoFocus={autoFocus}
         selection={searchMatch}
+        flash={flash}
         onRevealSelection={scrollToSearchField}
         base={comparison?.revision === revision ? comparison.value : value}
         label={label}

@@ -7,6 +7,8 @@ export interface CodeEditorProps {
   /** Select and reveal a range; a fresh object requests another visit. */
   selection?: { readonly at: number; readonly length: number } | undefined
   onRevealSelection?: ((host: HTMLElement, top: number) => void) | undefined
+  /** Briefly mark a range and scroll it into view, leaving focus where it is: text just added. A fresh object marks again. */
+  flash?: { readonly at: number; readonly length: number } | undefined
   label: string
   fullHeight?: boolean | undefined
   /** Focus it when it opens, with the caret at the end of the text, in view. */

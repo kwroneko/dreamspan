@@ -17,12 +17,15 @@ export function Menu({
   label,
   defaultOpen = false,
   onOpenChange,
+  open,
+  finalFocus,
+  marker,
   hint
 }: {
   /** The element that opens it, usually a button; it receives the trigger's props. */
   trigger: ReactElement
   /** What the trigger opens, on hover and focus: an icon-only ⋯ says what's in it. */
-  hint?: string | undefined
+  hint?: ReactNode
   children: ReactNode
   side?: "top" | "bottom"
   align?: "start" | "center" | "end"
@@ -31,14 +34,23 @@ export function Menu({
   /** Open as it mounts: a menu mounted only once its trigger is first used, as a long list's rows do. */
   defaultOpen?: boolean
   /** Told when it opens and closes: to read what it lists, say. */
-  onOpenChange?: (open: boolean) => void
+  onOpenChange?: (open: boolean, reason: string) => void
+  /** Controlled: open while true, `onOpenChange` asked for every change. */
+  open?: boolean | undefined
+  /** Where focus goes when it closes, instead of back to the trigger. */
+  finalFocus?: (() => boolean | HTMLElement | null | void) | undefined
+  /** `data-menu` on the list, for code that must know focus is in it (an editor's own menu, say). */
+  marker?: string | undefined
 }) {
   const [popup, setPopup] = useState<HTMLElement | null>(null)
   return (
     <BaseMenu.Root
       modal={false}
       defaultOpen={defaultOpen}
-      {...(onOpenChange ? { onOpenChange: (open: boolean) => onOpenChange(open) } : {})}
+      {...(open === undefined ? {} : { open })}
+      {...(onOpenChange
+        ? { onOpenChange: (next: boolean, details: { reason: string }) => onOpenChange(next, details.reason) }
+        : {})}
     >
       {hint ? (
         <Tooltip label={hint}>
@@ -59,6 +71,8 @@ export function Menu({
           <BaseMenu.Popup
             ref={setPopup}
             aria-label={label}
+            data-menu={marker}
+            {...(finalFocus ? { finalFocus } : {})}
             className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {children}

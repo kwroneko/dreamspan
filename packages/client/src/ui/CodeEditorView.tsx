@@ -1,7 +1,7 @@
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands"
-import { Compartment, EditorState, Transaction } from "@codemirror/state"
-import { EditorView, keymap } from "@codemirror/view"
+import { Compartment, EditorState, StateEffect, StateField, Transaction } from "@codemirror/state"
+import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
@@ -107,6 +107,24 @@ export default function CodeEditorView(props: CodeEditorProps) {
   )
 }
 
+/** Text just added, marked for a moment (`flash`); the mark follows edits until it fades. */
+const setFlash = StateEffect.define<{ from: number; to: number } | null>()
+const flashMark = Decoration.mark({ class: "rp-flash" })
+const flashField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(marks, transaction) {
+    marks = marks.map(transaction.changes)
+    for (const effect of transaction.effects)
+      if (effect.is(setFlash))
+        marks =
+          effect.value && effect.value.to > effect.value.from
+            ? Decoration.set([flashMark.range(effect.value.from, effect.value.to)])
+            : Decoration.none
+    return marks
+  },
+  provide: (field) => EditorView.decorations.from(field)
+})
+
 function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (text: string) => void) {
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" })
   const options = new Compartment()
@@ -133,6 +151,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         keymap.of([...defaultKeymap, ...historyKeymap]),
         lineChanges,
         changeGutter,
+        flashField,
         initial.quietMarkers ? quietMarkers : [],
         options.of(attributes()),
         EditorView.updateListener.of((update) => {
@@ -179,6 +198,8 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
     }
   }
   let selection: CodeEditorProps["selection"]
+  let flash: CodeEditorProps["flash"]
+  let fade: ReturnType<typeof setTimeout> | undefined
   let base: string | null = null
   const update = (next: CodeEditorProps) => {
     const oldProps = props
@@ -209,6 +230,15 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
         })
       })
     }
+    if (next.flash && flash !== next.flash) {
+      flash = next.flash
+      const from = Math.min(flash.at, view.state.doc.length)
+      const to = Math.min(from + flash.length, view.state.doc.length)
+      // Scrolls the editor and the panel around it, without taking focus from where the text came from.
+      view.dispatch({ effects: [setFlash.of({ from, to }), EditorView.scrollIntoView(to, { y: "nearest" })] })
+      clearTimeout(fade)
+      fade = setTimeout(() => view.dispatch({ effects: setFlash.of(null) }), 1600)
+    }
     if (base !== next.base) {
       base = next.base
       view.dispatch({ effects: comparisonBase.of(base) })
@@ -237,6 +267,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
       }
     },
     destroy: () => {
+      clearTimeout(fade)
       view.destroy()
     }
   }

@@ -69,12 +69,15 @@ describe("the Snippets workspace", () => {
     expect(workspace.snapshot().selected).toBe("s1")
   })
 
-  it("sends text to a new snippet when none is open, without opening the panel", async () => {
+  it("sends text to a new snippet chosen from the menu, without opening the panel", async () => {
     const { workspace, calls } = setup()
     let opened = 0
     workspace.setOpener(() => opened++)
-    await workspace.send("A passage kept from a swipe.")
+    expect(workspace.target()).toBeNull()
+    await workspace.appendNew("A passage kept from a swipe.")
     expect(opened).toBe(0)
+    expect(workspace.snapshot().selected).toBeNull()
+    expect(workspace.snapshot().recent).toEqual(["s1"])
     expect(workspace.snapshot().floating).toBe(false)
     const notice = showToast.mock.lastCall![0]
     expect(notice.title).toBe("Added to snippet “Harbour”")
@@ -90,7 +93,7 @@ describe("the Snippets workspace", () => {
 
   it("sends outside a chat without opening the floating sheet until asked", async () => {
     const { workspace } = setup()
-    await workspace.send("A synthetic passage.")
+    await workspace.appendNew("A synthetic passage.")
     expect(workspace.snapshot().floating).toBe(false)
     showToast.mock.lastCall![0].actions[0].onClick()
     expect(workspace.snapshot().floating).toBe(true)
