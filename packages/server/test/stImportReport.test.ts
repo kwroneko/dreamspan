@@ -28,7 +28,7 @@ const say = (name: string, mes: string, minute: number, user = false) =>
  * note, and the persona's description is in the prompt. The default author's note is at depth 4;
  * every chat's own at depth 2.
  */
-const folder = () =>
+const folder = (entry: Record<string, unknown> = {}) =>
   new Map<string, Uint8Array>(
     (
       [
@@ -78,7 +78,8 @@ const folder = () =>
                 depth: 4,
                 role: 0,
                 probability: 100,
-                useProbability: false
+                useProbability: false,
+                ...entry
               }
             }
           })
@@ -200,6 +201,27 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       assert.strictEqual(latest!.createdAt, chats.find((chat) => chat.id === latest!.chatId)!.createdAt)
       assert.isArray(latest!.names)
       assert.isAbove(latest!.names.length, 0)
+    })
+  )
+
+  it.effect("doesn't warn about lorebook entries that cannot contribute any text", () =>
+    Effect.gen(function* () {
+      for (const entry of [{ disable: true }, { content: "" }]) {
+        const { report } = yield* importStFolder(folder(entry))
+        const riders = report.issues.filter((issue) => issue.code === "st.author_note_riders")
+        // Dax's own note still rides; the group's only possible rider is the book.
+        assert.deepStrictEqual(
+          riders.map((issue) => issue.path),
+          ["chats/Dax/Dax - a.jsonl"]
+        )
+        assert.notInclude(riders[0]!.detail!, "Signs")
+      }
+      // A later import enabling that entry must warn again, even with unchanged chats.
+      const { report } = yield* importStFolder(folder())
+      assert.include(
+        report.issues.filter((issue) => issue.code === "st.author_note_riders").map((issue) => issue.path),
+        "group chats/Both - 1.jsonl"
+      )
     })
   )
 })

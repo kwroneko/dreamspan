@@ -294,6 +294,32 @@ describe("reply sections", () => {
     }
   })
 
+  it("recognizes literal tags with leading whitespace in replies and prefills", () => {
+    const settings: ReplySectionSettings = {
+      enabled: true,
+      pairs: [{ open: "\n<think>", close: "</think>", case_sensitive: true }],
+      send_back: 0
+    }
+    for (const lead of ["", " ", "\n", " \n\t"]) {
+      const text = `${lead}\n<think>Plan.</think>\nBody.`
+      for (const chunks of splits(text)) {
+        const result = run(chunks, { settings })
+        expect(result.body).toBe("Body.")
+        expect(result.panel).toBe("Plan.")
+        expect(originalReply(result.body, result.sections)).toBe(text)
+        for (const body of result.bodies) expect("Body.".startsWith(body)).toBe(true)
+      }
+      const prefill = `${lead}\n<think>Pl`
+      for (const chunks of splits("an.</think>\nBody.")) {
+        const result = run(chunks, { settings, prefill })
+        expect(result.body).toBe("Body.")
+        expect(result.panel).toBe("Plan.")
+        expect(result.sections!.sections[0]).toMatchObject({ lead, open: "\n<think>", prefilled: prefill.length })
+        expect(originalReply(result.body, result.sections)).toBe(text)
+      }
+    }
+  })
+
   it("parses regex tags split across deltas anywhere", () => {
     const settings: ReplySectionSettings = {
       enabled: true,

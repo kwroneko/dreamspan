@@ -109,13 +109,17 @@ it.live("a slot linked in two chats shows one shared note; unlinking copies it, 
       assert.include(yield* assembled(userId, chat.chat.id, chat.entry.slotId), "Snow on the roofs.")
     }
 
-    // Unlinked in A from its first message on: A keeps a copy, B stays linked.
+    // Unlinked in A: A keeps a copy, B stays linked. A note edit is at the branch's latest
+    // message, whatever message it names (DESIGN [D], owner 2026-11-02): here the reply the last
+    // context read above left as A's tip.
     yield* api.UnlinkNote({ noteRefId: slots[0]!.id, chatNote: { chatId: a.chat.id, slotId: a.entry.slotId } })
+    const tip = (yield* api.ReadPath({ chatId: a.chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 10 }))
+      .leafSlotId!
     yield* edit(api, userId, shared.id, { content: "Fog on the roofs." })
-    const copied = yield* listed(a)
+    const copied = yield* listed(a, tip)
     assert.isNull(copied.linked)
     assert.strictEqual(copied.doc["content"], "Snow on the roofs.")
-    assert.include(yield* assembled(userId, a.chat.id, a.entry.slotId), "Snow on the roofs.")
+    assert.include(yield* assembled(userId, a.chat.id, tip), "Snow on the roofs.")
     assert.strictEqual((yield* listed(b)).doc["content"], "Fog on the roofs.")
     assert.include(yield* assembled(userId, b.chat.id, b.entry.slotId), "Fog on the roofs.")
     // Before that message, A's slot still shows the shared note: the unlink is branch-local.

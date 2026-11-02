@@ -213,10 +213,17 @@ for (const width of [1440, 390])
         expect(frame.thinking, `thinking frame "${frame.thinking}"`).not.toContain("PRIVATE")
         expect(frame.reasoning, `reasoning frame "${frame.reasoning}"`).not.toContain("PRIVATE")
       }
-      // No jump at the end: the body only ever grew towards the stored text.
+      // No jump at the end: the body only ever grew towards the stored text. Streamed text gets
+      // no hold-back for a regex script (DESIGN [D] Rejected, owner 2026-11-02), so the start of
+      // `<cot>` may show at the end until the tag is whole and the script strips it.
       const bodies = streamed.map((frame) => frame.body).filter((text) => text !== "")
-      for (const text of bodies)
-        expect(finalText.startsWith(text.replace(/\*/g, "").trimEnd()) || text === finalText).toBe(true)
+      for (const text of bodies) {
+        const grown = text
+          .replace(/\*/g, "")
+          .replace(/<(?:c(?:o(?:t>?)?)?)?$/, "")
+          .trimEnd()
+        expect(finalText.startsWith(grown) || text === finalText, `body frame "${text}"`).toBe(true)
+      }
 
       await notes.click()
       await expect(region).toContainText("Plan: take the [hidden] road")

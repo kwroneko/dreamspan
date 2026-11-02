@@ -5,8 +5,6 @@
 // revision" (without them), or Cancel. With nothing unsaved it downloads at once, as before.
 // The changes are the ones an open editor has (its typing flushed first), or the server's
 // drafts when none is open.
-import type { NoteEntry } from "@rp/shared/editorApi.ts"
-import type { RefId } from "@rp/shared/library.ts"
 import { useEffect, useRef, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -14,62 +12,15 @@ import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { showToast } from "../../ui/Toast.tsx"
-import { type Caller, useCaller } from "../editor/caller.ts"
-import { openEditorStore } from "../editor/openEditors.ts"
-import { EditorStore } from "../editor/store.ts"
+import { useCaller } from "../editor/caller.ts"
 import { downloadExport } from "../library/files.ts"
 import { endExport, type ExportRequest } from "./exportRequests.ts"
-import { unsavedFieldNames } from "./unsaved.ts"
-
-/** One ref the export takes, with its unsaved fields by name. */
-interface Unsaved {
-  readonly store: EditorStore
-  readonly names: ReadonlyArray<string>
-}
-
-/** The editor open on `refId`, else one opened on the server's drafts; null if it can't open. */
-const storeFor = async (refId: RefId, userId: string, call: Caller) => {
-  const open = openEditorStore(refId)
-  const store = open instanceof EditorStore ? open : new EditorStore(refId, userId, call)
-  if (store.snapshot === null && !(await store.load()).ok) return null
-  await store.flush()
-  return store
-}
-
-const unsavedOf = (store: EditorStore, prefix = ""): Unsaved => ({
-  store,
-  names: unsavedFieldNames(
-    store.snapshot?.ref.kind ?? "card",
-    store.working().doc,
-    store.head,
-    store.dirtyFields()
-  ).map((name) => `${prefix}${name}`)
-})
-
-/** A card's exportable notes as the export takes them: each slot, or the shared note it shows. */
-const noteStores = async (cardRefId: RefId, userId: string, call: Caller) => {
-  const listed = await call((client) => client("ListCardNotes", { cardRefId }))
-  if (!listed.ok) return []
-  const notes = listed.value.filter(({ doc }) => doc.exportable === true)
-  const linked = notes.some(({ doc }) => typeof doc.link === "string")
-  const shared = linked ? await call((client) => client("ListLibrary", { kind: "note" })) : null
-  const sharedRef = new Map(shared?.ok ? shared.value.map((ref) => [ref.entityId as string, ref.id]) : [])
-  const refOf = ({ ref, doc }: NoteEntry) => (typeof doc.link === "string" ? sharedRef.get(doc.link) : ref.id)
-  const found = await Promise.all(
-    notes.map(async (note) => {
-      const refId = refOf(note)
-      const store = refId ? await storeFor(refId, userId, call) : null
-      const title = typeof note.doc.title === "string" && note.doc.title !== "" ? note.doc.title : note.ref.label
-      return store ? [unsavedOf(store, `Note “${title}”: `)] : []
-    })
-  )
-  return found.flat()
-}
+import { exportDrafts, type UnsavedExport } from "./exportDrafts.ts"
 
 export default function ExportCheck({ request }: { request: ExportRequest }) {
   const userId = useSession().user.id
   const call = useCaller()
-  const [asking, setAsking] = useState<ReadonlyArray<Unsaved> | null>(null)
+  const [asking, setAsking] = useState<ReadonlyArray<UnsavedExport> | null>(null)
   const [pending, setPending] = useState<"save" | "last" | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const started = useRef(false)
@@ -84,16 +35,12 @@ export default function ExportCheck({ request }: { request: ExportRequest }) {
     if (started.current) return
     started.current = true
     void (async () => {
-      const store = await storeFor(request.refId, userId, call)
-      if (store === null) {
-        // Not openable here: the export itself says what's wrong.
-        await download()
+      const checked = await exportDrafts(request.refId, userId, call)
+      if (!checked.ok) {
+        showToast({ title: `Couldn’t check ${request.label} for unsaved changes`, description: checked.error.message })
         return done()
       }
-      const all = [
-        unsavedOf(store),
-        ...(store.snapshot?.ref.kind === "card" ? await noteStores(request.refId, userId, call) : [])
-      ].filter((entry) => entry.names.length > 0)
+      const all = checked.value
       if (all.length === 0) {
         await download()
         return done()
