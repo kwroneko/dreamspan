@@ -259,8 +259,8 @@ export const exportLorebook = (book: LorebookDoc) => {
       ...present({
         characterFilter: entry.character_filter && {
           isExclude: entry.character_filter.is_exclude,
-          names: entry.character_filter.names,
-          tags: entry.character_filter.tags
+          names: [...entry.character_filter.names, ...(entry.character_filter.cards ?? []).map((card) => card.name)],
+          tags: entry.character_filter.tags.map((tag) => entry.character_filter?.tag_ids?.[tag] ?? tag)
         },
         displayIndex: entry.display_index
       }),

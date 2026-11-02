@@ -1,3 +1,4 @@
+import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 import type { SummaryPrefix } from "../lcm/prefix.ts"
 // The assembler's data, all plain JSON (DATA-MODEL §7.1; ARCHITECTURE §15).
 import type { ContextDisplay, ContextMessage, ContextSource, SourceActivation } from "@rp/shared/inspectorApi.ts"
@@ -13,7 +14,7 @@ import type { LegacyPresetDoc as PresetDoc, PromptCondition } from "@rp/shared/d
 import { Schema } from "effect"
 
 /** Bump whenever identical inputs would assemble differently. Missing means version 0. */
-export const ASSEMBLER_VERSION = 44
+export const ASSEMBLER_VERSION = 45
 
 export type Role = "system" | "user" | "assistant"
 
@@ -327,6 +328,7 @@ export interface ContextSnapshot {
   /** Variable writes the preset's and cards' macros made, in order, to record as state. */
   readonly effects: ReadonlyArray<VariableEffect>
   /** An emergency deadline outcome: reuse it instead of racing the clock on rebuild. */
+  readonly loreTiming?: ReadonlyArray<LoreReceipt>
   readonly loreFallback?: ReturnType<typeof matchLorebooks> & {
     readonly previewEffects?: {
       readonly frozen: Readonly<Record<string, FrozenValues>>
@@ -413,6 +415,10 @@ export interface SourcePins {
     }>
   }>
   /** Absent in snapshots from before notes had intervals, which never counted. */
+  readonly loreStates?: ReadonlyArray<{
+    readonly key: string
+    readonly state: LoreTimingState
+  }>
   readonly messageCount?: ReadonlyArray<{ readonly key: string; readonly count: number }>
   readonly userMessages?: ReadonlyArray<{ readonly key: string; readonly count: number }>
 }

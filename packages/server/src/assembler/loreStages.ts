@@ -1,6 +1,8 @@
 import { modelName } from "@rp/shared/cardNames.ts"
 // Lorebook reads and keyword activation, in the reader worker's registered pipeline.
 import { Effect } from "effect"
+import { loreIdentity, loreEntryKey } from "./loreTiming.ts"
+import { characterFilterPasses } from "@rp/shared/lorebookFilters.ts"
 import { matchLorebooks } from "./lorebook.ts"
 import { loreAllowance, loreBudget } from "./budget.ts"
 import { estimateTokens } from "./st.ts"
@@ -59,12 +61,24 @@ export const lorebooksStage: AssemblerStage = {
           : []
       )
       assembly.lorebooks = [...attached, ...embedded]
+      const target = need(assembly, "target")
+      const timed = assembly.lorebooks.some((book) => book.doc.entries.some((entry) => entry.sticky || entry.cooldown))
+      if (timed && sources.loreState)
+        assembly.loreState = yield* sources.loreState(
+          historyLeafOf(need(assembly, "target")),
+          assembly.lorebooks.flatMap((book) =>
+            book.doc.entries
+              .filter((entry) => entry.sticky || entry.cooldown)
+              .map((entry) => loreIdentity(book.id, entry))
+          ),
+          target.continues?.version
+        )
       // Counting walks the whole path: only an entry delayed by a message count needs it.
-      assembly.loreMessageCount = assembly.lorebooks.some((book) =>
-        book.doc.entries.some((entry) => entry.delay !== null)
-      )
-        ? yield* sources.messageCount(historyLeafOf(need(assembly, "target")))
-        : 0
+      assembly.loreMessageCount =
+        assembly.loreState?.count ??
+        (assembly.lorebooks.some((book) => book.doc.entries.some((entry) => entry.delay !== null))
+          ? yield* sources.messageCount(historyLeafOf(need(assembly, "target")))
+          : 0) + (target.continues?.text ? 1 : 0)
       assembly.loreScanDepth = assembly.lorebooks.reduce(
         (depth, book) =>
           book.doc.entries.reduce(
@@ -83,10 +97,25 @@ export const loreActivationStage: AssemblerStage = {
   run: (assembly) =>
     Effect.sync(() => {
       const inputs = need(assembly, "lorebooks")
+      assembly.loreTiming = []
       if (!inputs.length) {
         assembly.lore = []
         return assembly
       }
+      const timedEntries = new Map(
+        inputs.flatMap((book) =>
+          book.doc.entries.flatMap((entry) =>
+            entry.sticky || entry.cooldown
+              ? [
+                  [
+                    loreEntryKey(book.id, entry),
+                    { key: loreIdentity(book.id, entry), sticky: entry.sticky ?? 0, cooldown: entry.cooldown ?? 0 }
+                  ] as const
+                ]
+              : []
+          )
+        )
+      )
       const env = need(assembly, "macros")
       const cast = need(assembly, "cast")
       const sharedWork = { remaining: 4_000_000 }
@@ -125,6 +154,8 @@ export const loreActivationStage: AssemblerStage = {
           const text = assembly.scripted?.get(p.entry.versionId)?.text ?? env.text(p.piece)
           return `${p.name}: ${text}`
         })
+      const continuing = need(assembly, "target").continues
+      if (continuing?.text) messages.unshift(`${cast.speaker ? modelName(cast.speaker.doc) : ""}: ${continuing.text}`)
       const char = cast.characters[0]
       const preview = (field: string, text: string) => env.preview(`lore:scan:${field}`, text, { sharedWork })
       // Due notes with `scan_lore`, whole and expanded, as ST's `addInject` scans its extension
@@ -140,7 +171,19 @@ export const loreActivationStage: AssemblerStage = {
         )
         return [{ text, scan: true, name: note.doc.title || "Untitled note" }]
       })
+      const speaker = cast.speaker ? { entity: cast.speaker.entity, tags: cast.speaker.doc.tags } : undefined
+      const timing = new Map(
+        (assembly.loreState?.effects ?? []).map(({ key, sticky, cooldown }) => [key, { sticky, cooldown }])
+      )
+      const effects = new Map(
+        [...timedEntries].flatMap(([entry, receipt]) => {
+          const effect = timing.get(receipt.key)
+          return effect ? [[entry, effect] as const] : []
+        })
+      )
       const scan = {
+        effects,
+        ...(speaker ? { speaker } : {}),
         injections,
         messages,
         messageCount: need(assembly, "loreMessageCount"),
@@ -193,6 +236,7 @@ export const loreActivationStage: AssemblerStage = {
             return sharedWork.remaining ? text : undefined
           }
         )
+      assembly.loreTiming = result.activated.flatMap((a) => timedEntries.get(loreEntryKey(a.book, a.entry)) ?? [])
       if (!fallback && !sharedWork.remaining)
         assembly.issues.push({
           kind: "lorebook_issue",
@@ -253,7 +297,7 @@ export const loreActivationStage: AssemblerStage = {
         if (lore.some((e) => e.book === pin.book && e.entry.uid === pin.uid)) continue
         const book = inputs.find((b) => b.id === pin.book && b.revision === pin.revision)
         const entry = book?.doc.entries.find((e) => e.uid === pin.uid && e.enabled)
-        if (!book || !entry) continue
+        if (!book || !entry || !characterFilterPasses(entry.character_filter, speaker)) continue
         const content = env.preview(`lore:${book.id}:${entry.uid}:content`, entry.content, optionsFor(book))
         lore.push({
           entry: { ...entry, content },

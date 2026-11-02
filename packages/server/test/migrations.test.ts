@@ -1,4 +1,4 @@
-// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5 and the token-estimate ledger fields/index, edited in as the baseline allows), and the migrator's refusal of a database
+// The baseline against its frozen schema dump (the 56-step chain it replaced, plus the fork deletion triggers and `history_changes` of unit 5 and the token-estimate ledger fields/index, and the compact lore activation receipts, edited in as the baseline allows), and the migrator's refusal of a database
 // made before it.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"

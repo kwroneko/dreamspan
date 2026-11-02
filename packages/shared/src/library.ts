@@ -36,6 +36,7 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   subtitle: Schema.String,
   /** For cards, the saved nickname with its display-name fallback. */
   modelName: Schema.optionalKey(Schema.String),
+  filterData: Schema.optionalKey(Schema.Struct({ name: Schema.String, tags: Schema.Array(Schema.String) })),
   headRevisionId: RevisionId,
   followsRefId: Schema.NullOr(RefId),
   chatId: Schema.NullOr(ChatId),

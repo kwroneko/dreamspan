@@ -514,6 +514,11 @@ export const baseline: ReadonlyArray<string> = [
     transcript_json TEXT CHECK (transcript_json IS NULL OR json_valid(transcript_json))
   , sent_context_json TEXT
       CHECK (sent_context_json IS NULL OR json_valid(sent_context_json))) STRICT`,
+  `CREATE TABLE lore_activations (
+    rollout_id TEXT PRIMARY KEY REFERENCES rollouts(id) ON DELETE CASCADE,
+    entries_json TEXT NOT NULL CHECK (json_valid(entries_json)),
+    message_offset INTEGER NOT NULL DEFAULT 0 CHECK (message_offset IN (0, 1))
+  ) STRICT`,
   `CREATE TABLE rollout_branches (
     rollout_id TEXT NOT NULL REFERENCES rollouts(id) ON DELETE CASCADE,
     branch_no INTEGER NOT NULL CHECK (branch_no >= 1),

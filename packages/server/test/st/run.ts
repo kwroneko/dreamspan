@@ -15,6 +15,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { chromium } from "@playwright/test"
 import { checkPreviewOverlap } from "./previewOverlap.ts"
+import { compareLoreTiming } from "./loreTiming.ts"
 import { compareAssembly } from "./assembly.ts"
 import { compareRewrites } from "./rewrites.ts"
 import { checkFixtures, compareMacros, comparePresetRoundTrips } from "./comparisons.ts"
@@ -65,6 +66,7 @@ const main = async () => {
     ["fixtures", async () => [await checkFixtures(browser, st.url, mock, fixtures)]],
     ["macros", () => compareMacros(browser, st.url, fixtures)],
     ["presets", async () => [await comparePresetRoundTrips(browser, st.url, mock, fixtures)]],
+    ["lore-timing", () => compareLoreTiming(browser, st.url, fixtures)],
     ["rewrites", async () => [await compareRewrites(browser, st.url, fixtures)]],
     [
       "assembly",

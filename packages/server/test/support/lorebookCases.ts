@@ -15,6 +15,9 @@ interface Case {
   injections?: Input[1]["injections"]
   trigger?: string
   random?: number
+  effects?: Partial<Record<"sticky" | "cooldown", Record<string, { start: number; end: number }>>>
+  speaker?: Input[1]["speaker"]
+  dryRun?: boolean
 }
 export const activationCases: ReadonlyArray<Case> = [
   {
@@ -953,8 +956,7 @@ export const activationCases: ReadonlyArray<Case> = [
     entries: [{ keys: ["cat"], delay: 2 }],
     messages: ["cat"],
     expected: [],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: []
   },
   {
     id: "T02",
@@ -962,89 +964,89 @@ export const activationCases: ReadonlyArray<Case> = [
     entries: [{ keys: ["cat"], delay: 2 }],
     messages: ["cat", "dog"],
     expected: [0],
-    stExpected: [0],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: [0]
   },
   {
     id: "T03",
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
     title: "Existing sticky bypasses missing key",
     entries: [{ keys: ["cat"], sticky: 3 }],
     messages: ["dog", "dog"],
-    expected: [],
-    stExpected: [0],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [0],
+    stExpected: [0]
   },
   {
     id: "T04",
+    effects: { sticky: { "0": { start: 1, end: 2 } } },
     title: "Sticky expires at end",
     entries: [{ keys: ["cat"], sticky: 3 }],
     messages: ["dog", "dog"],
     expected: [],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: []
   },
   {
     id: "T05",
+    effects: { cooldown: { "0": { start: 1, end: 4 } } },
     title: "Existing cooldown blocks key",
     entries: [{ keys: ["cat"], cooldown: 3 }],
     messages: ["cat", "dog"],
-    expected: [0],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "T06",
+    effects: { cooldown: { "0": { start: 1, end: 2 } } },
     title: "Cooldown expires at end",
     entries: [{ keys: ["cat"], cooldown: 3 }],
     messages: ["cat", "dog"],
     expected: [0],
-    stExpected: [0],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: [0]
   },
   {
     id: "T07",
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
     title: "Same count unprotected sticky discarded",
     entries: [{ keys: ["cat"], sticky: 3 }],
     messages: ["dog"],
     expected: [],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: []
   },
   {
     id: "T08",
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
     title: "Sticky bypasses probability zero",
     entries: [{ keys: ["cat"], sticky: 3, probability: 0 }],
     messages: ["dog", "dog"],
-    expected: [],
-    stExpected: [0],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [0],
+    stExpected: [0]
   },
   {
     id: "T09",
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
     title: "Disabled still blocks sticky",
     entries: [{ keys: ["cat"], sticky: 3, enabled: false }],
     messages: ["dog", "dog"],
     expected: [],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: []
   },
   {
     id: "T10",
+    effects: { sticky: { "0": { start: 1, end: 2 } } },
     title: "Sticky ending starts protected cooldown",
     entries: [{ keys: ["cat"], sticky: 1, cooldown: 3 }],
     messages: ["cat", "dog"],
-    expected: [0],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "T11",
+    dryRun: true,
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
     title: "Dry run ignores sticky",
     entries: [{ keys: ["cat"], sticky: 3 }],
     messages: ["dog", "dog"],
     expected: [],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    stExpected: []
   },
   {
     id: "G01",
@@ -1146,69 +1148,69 @@ export const activationCases: ReadonlyArray<Case> = [
   },
   {
     id: "G09",
+    effects: { sticky: { "0": { start: 1, end: 4 } }, cooldown: { "0": { start: 1, end: 4 } } },
     title: "Sticky and cooldown same entry removed by group filter",
     entries: [
       { keys: ["cat"], group: "g", sticky: 3, cooldown: 3 },
       { keys: ["cat"], group: "g" }
     ],
     messages: ["cat", "dog"],
-    expected: [0],
-    stExpected: [],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "F01",
+    speaker: { entity: "alice", name: "alice" },
     title: "Name inclusion exact avatar stem",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: ["alice"], tags: [] } }],
     messages: ["cat"],
     expected: [0],
-    stExpected: [0],
-    difference: "Character identity filters are deferred and reported."
+    stExpected: [0]
   },
   {
     id: "F02",
+    speaker: { entity: "alice", name: "alice" },
     title: "Name inclusion case sensitive",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: ["Alice"], tags: [] } }],
     messages: ["cat"],
-    expected: [0],
-    stExpected: [],
-    difference: "Character identity filters are deferred and reported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "F03",
+    speaker: { entity: "alice", name: "alice" },
     title: "Name exclusion",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: true, names: ["alice"], tags: [] } }],
     messages: ["cat"],
-    expected: [0],
-    stExpected: [],
-    difference: "Character identity filters are deferred and reported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "F04",
+    speaker: { entity: "alice", name: "alice", tags: ["t1"] },
     title: "Tag inclusion intersection",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: [], tags: ["t1"] } }],
     messages: ["cat"],
     expected: [0],
-    stExpected: [0],
-    difference: "Character identity filters are deferred and reported."
+    stExpected: [0]
   },
   {
     id: "F05",
+    speaker: { entity: "alice", name: "alice", tags: [] },
     title: "Tag inclusion empty mapped array",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: [], tags: ["t1"] } }],
     messages: ["cat"],
-    expected: [0],
-    stExpected: [],
-    difference: "Character identity filters are deferred and reported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "F06",
+    speaker: { entity: "alice", name: "alice" },
     title: "Tag inclusion no mapped array bypass",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: [], tags: ["t1"] } }],
     messages: ["cat"],
     expected: [0],
-    stExpected: [0],
-    difference: "Character identity filters are deferred and reported."
+    stExpected: [0]
   },
   {
     id: "F07",
@@ -1454,21 +1456,21 @@ export const activationCases: ReadonlyArray<Case> = [
   },
   {
     id: "T12",
+    effects: { sticky: { "0": { start: 1, end: 4 } }, cooldown: { "0": { start: 1, end: 4 } } },
     title: "Sticky plus cooldown outside group still active",
     entries: [{ keys: ["cat"], sticky: 3, cooldown: 3 }],
     messages: ["dog", "dog"],
-    expected: [],
-    stExpected: [0],
-    difference: "Sticky/cooldown state is deferred; message-count delay alone is supported."
+    expected: [0],
+    stExpected: [0]
   },
   {
     id: "F09",
+    speaker: { entity: "alice", name: "alice", tags: [] },
     title: "Names and tags must both pass",
     entries: [{ keys: ["cat"], character_filter: { is_exclude: false, names: ["alice"], tags: ["t1"] } }],
     messages: ["cat"],
-    expected: [0],
-    stExpected: [],
-    difference: "Character identity filters are deferred and reported."
+    expected: [],
+    stExpected: []
   },
   {
     id: "R22",
@@ -1541,5 +1543,54 @@ export const activationCases: ReadonlyArray<Case> = [
     messages: ["cat dragon"],
     expected: [1],
     stExpected: [1]
+  },
+  {
+    id: "T13",
+    title: "Delay still suppresses sticky",
+    entries: [{ keys: ["cat"], sticky: 3, delay: 3 }],
+    messages: ["dog", "dog"],
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
+    expected: [],
+    stExpected: []
+  },
+  {
+    id: "T14",
+    title: "Sticky bypasses delay until recursion",
+    entries: [{ keys: ["cat"], sticky: 3, delay_until_recursion: 4, probability: 0 }],
+    messages: ["dog", "dog"],
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
+    expected: [0],
+    stExpected: [0]
+  },
+  {
+    id: "T15",
+    title: "Sticky displaces a higher order group override",
+    entries: [
+      { keys: ["cat"], sticky: 3, group: "g" },
+      { keys: ["dog"], group: "g", order: 200, group_override: true }
+    ],
+    messages: ["dog", "dog"],
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
+    expected: [0],
+    stExpected: [0]
+  },
+  {
+    id: "T16",
+    title: "Sticky content triggers recursive entries",
+    entries: [{ keys: ["cat"], sticky: 3, content: "dragon" }, { keys: ["dragon"] }],
+    messages: ["dog", "dog"],
+    effects: { sticky: { "0": { start: 1, end: 4 } } },
+    settings: { recursive: true },
+    expected: [0, 1],
+    stExpected: [0, 1]
+  },
+  {
+    id: "F10",
+    title: "Tag exclusion rejects intersection",
+    entries: [{ keys: ["cat"], character_filter: { is_exclude: true, names: [], tags: ["t1"] } }],
+    messages: ["cat"],
+    speaker: { entity: "alice", name: "alice", tags: ["t1"] },
+    expected: [],
+    stExpected: []
   }
 ]

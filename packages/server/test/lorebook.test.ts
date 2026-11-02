@@ -1,5 +1,6 @@
 import type { LorebookEntry } from "@rp/shared/docs/lorebook.ts"
 import { describe, expect, it } from "vitest"
+import { loreEffectsAt, loreEntryKey, loreIdentity } from "../src/assembler/loreTiming.ts"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { loreEntry as entry, loreBook as book } from "./support/loreFixtures.ts"
 import { activationCases } from "./support/lorebookCases.ts"
@@ -21,6 +22,36 @@ describe("ST 1.19.0 activation table", () => {
         [book(c.entries.map((fields, uid) => entry(fields, uid)))],
         {
           messages: c.messages,
+          ...(c.speaker ? { speaker: c.speaker } : {}),
+          effects: new Map(
+            c.entries.map((fields, uid) => {
+              const value = entry(fields, uid)
+              const sticky = c.effects?.sticky?.[String(uid)]
+              const cooldown = c.effects?.cooldown?.[String(uid)]
+              const key = loreIdentity("synthetic", value)
+              const at = sticky?.start ?? cooldown?.start ?? 0
+              const effects = loreEffectsAt({
+                count: c.messages.length,
+                activations:
+                  c.effects && !c.dryRun
+                    ? [
+                        {
+                          id: c.id,
+                          at,
+                          entries: [
+                            {
+                              key,
+                              sticky: sticky ? sticky.end - sticky.start : 0,
+                              cooldown: cooldown ? cooldown.end - cooldown.start : (value.cooldown ?? 0)
+                            }
+                          ]
+                        }
+                      ]
+                    : []
+              })
+              return [loreEntryKey("synthetic", value), effects.get(key) ?? { sticky: false, cooldown: false }]
+            })
+          ),
           ...(c.descriptions ? { descriptions: c.descriptions } : {}),
           ...(c.injections ? { injections: c.injections } : {}),
           ...(c.trigger ? { trigger: c.trigger } : {})
@@ -37,10 +68,6 @@ describe("ST 1.19.0 activation table", () => {
       expect(result.activated.map(({ entry }) => entry.uid)).toEqual(sorted)
       expect(result.activated.length + result.skipped.length).toBe(c.entries.length)
       if (c.id === "R08") expect(result.issues).toContainEqual(expect.objectContaining({ code: "unsafe_regex" }))
-      if (c.id.startsWith("T") && c.id !== "T01" && c.id !== "T02")
-        expect(result.issues).toContainEqual(expect.objectContaining({ code: "unsupported" }))
-      if (c.entries.some((entry) => entry.character_filter))
-        expect(result.issues).toContainEqual(expect.objectContaining({ code: "unsupported" }))
     })
   }
 })

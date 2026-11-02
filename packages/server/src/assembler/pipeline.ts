@@ -1,3 +1,4 @@
+import type { LoreReceipt, LoreTimingState } from "./loreTiming.ts"
 // The assembler's stage pipeline and its sources (PLUGINS §8; ARCHITECTURE §15).
 import type { SourceActivation } from "@rp/shared/inspectorApi.ts"
 import type { FoldableEvent, ChatState } from "@rp/shared/state.ts"
@@ -82,6 +83,11 @@ export class AssemblySources extends Context.Service<
       entities: ReadonlyArray<string>,
       bindings: Readonly<Record<string, Binding>>
     ) => Effect.Effect<ReadonlyArray<CardInput>, SourceError>
+    readonly loreState?: (
+      leaf: string | null,
+      identities: ReadonlyArray<string>,
+      continuing?: string
+    ) => Effect.Effect<LoreTimingState, SourceError>
     readonly messageCount: (leaf: string | null) => Effect.Effect<number, SourceError>
     readonly lorebooks: (refs: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<LorebookInput>, SourceError>
     /** The account's global regex scripts (ST's "Global scripts"); fixtures without it have none. */
@@ -228,6 +234,8 @@ export interface Assembly {
   loreFallback?: ContextSnapshot["loreFallback"]
   lorebooks?: ReadonlyArray<LorebookInput>
   loreScanDepth?: number
+  loreState?: LoreTimingState
+  loreTiming?: ReadonlyArray<LoreReceipt>
   loreMessageCount?: number
   lore?: ReadonlyArray<{
     readonly entry: import("@rp/shared/docs/lorebook.ts").LorebookEntry
@@ -413,6 +421,7 @@ export const assemble = (stages: StageRegistry, request: AssemblyRequest, transf
       issues: assembly.issues,
       frozen: assembly.frozen,
       effects: assembly.effects,
+      ...(assembly.loreTiming ? { loreTiming: assembly.loreTiming } : {}),
       ...(assembly.loreFallback ? { loreFallback: assembly.loreFallback } : {}),
       ...(assembly.cardOverrides?.length ? { cardOverrides: assembly.cardOverrides } : {}),
       ...(assembly.skippedPrompts?.length ? { skippedPrompts: assembly.skippedPrompts } : {}),

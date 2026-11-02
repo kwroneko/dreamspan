@@ -1106,6 +1106,12 @@
     },
     {
       "type": "table",
+      "name": "lore_activations",
+      "tbl_name": "lore_activations",
+      "sql": "CREATE TABLE lore_activations ( rollout_id TEXT PRIMARY KEY REFERENCES rollouts(id) ON DELETE CASCADE, entries_json TEXT NOT NULL CHECK (json_valid(entries_json)), message_offset INTEGER NOT NULL DEFAULT 0 CHECK (message_offset IN (0, 1)) ) STRICT"
+    },
+    {
+      "type": "table",
       "name": "media_assets",
       "tbl_name": "media_assets",
       "sql": "CREATE TABLE media_assets ( id TEXT PRIMARY KEY, sha256 TEXT NOT NULL UNIQUE, mime TEXT NOT NULL, width INTEGER, height INTEGER, byte_size INTEGER NOT NULL, path TEXT NOT NULL, created_at INTEGER NOT NULL ) STRICT"
