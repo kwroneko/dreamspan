@@ -998,9 +998,9 @@ describe("context assembly from the database", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("saves chat note drafts at the displayed leaf without moving sibling revisions", () =>
+  it.live("saves chat note drafts at the branch's latest message without moving sibling revisions", () =>
     Effect.gen(function* () {
-      const { writer, reader, userId, entity, chat, state, sent, assemble } = yield* setup()
+      const { writer, reader, userId, entity, chat, state, sent, generating } = yield* setup()
       const note = yield* entity("note", "Weather", {
         schema_version: 1,
         title: "Weather",
@@ -1037,17 +1037,22 @@ describe("context assembly from the database", () => {
         message: null,
         chatNote: position
       })
-      const events = yield* reader.StateEventsAt({ userId, chatId: chat.id, slotId: sent.slotId })
+      // Named with the message before the latest, it's still bound at the latest (owner, 2026-11-02).
+      const events = yield* reader.StateEventsAt({ userId, chatId: chat.id, slotId: generating.slotId })
       assert.isTrue(
         events.some((e) => e.data.key === "note.binding" && e.data.value.revision === committed.ref.headRevisionId)
       )
-      assert.include(texts(yield* assemble()), "system: SUN")
-      const elsewhere = yield* reader.OpenEditor({
+      // From there on: the reply being written there was assembled from the message before it.
+      const atLatest = yield* reader.ChatNoteEntries({ userId, chatId: chat.id, slotId: generating.slotId, cards: [] })
+      assert.strictEqual(atLatest.find((entry) => entry.ref.id === note.ref.id)?.doc.content, "SUN")
+      // The earlier message keeps what it had (a positional read; an editor edits the latest).
+      const elsewhere = yield* reader.ChatNoteEntries({
         userId,
-        refId: note.ref.id,
-        chatNote: { chatId: chat.id, slotId: chat.activeLeafSlotId }
+        chatId: chat.id,
+        slotId: chat.activeLeafSlotId,
+        cards: []
       })
-      assert.strictEqual(elsewhere.doc.content, "RAIN")
+      assert.strictEqual(elsewhere.find((entry) => entry.ref.id === note.ref.id)?.doc.content, "RAIN")
       const here = yield* reader.OpenEditor({ userId, refId: note.ref.id, chatNote: position })
       assert.strictEqual(here.doc.content, "SUN")
       assert.strictEqual(here.ref.headRevisionId, committed.ref.headRevisionId)

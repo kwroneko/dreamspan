@@ -169,8 +169,7 @@ test("forks with equal display names are separate library entries", async ({ pag
         refId: original.id,
         name: original.label,
         nickname: "",
-        characterVersion: "second-version",
-        moveDrafts: false
+        characterVersion: "second-version"
       })
       return original
     })

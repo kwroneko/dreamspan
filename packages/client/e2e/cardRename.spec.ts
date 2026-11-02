@@ -285,8 +285,7 @@ test("using a renamed family member can replace history only in the viewed fork"
       refId: f.card.id,
       name: "Family replacement",
       nickname: "Ari",
-      characterVersion: "",
-      moveDrafts: false
+      characterVersion: ""
     })
   )
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)

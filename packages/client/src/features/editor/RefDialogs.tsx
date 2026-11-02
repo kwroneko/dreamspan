@@ -38,7 +38,9 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
   const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
   const nameCheck = useCardNameCheck(label.trim(), subtitle.trim())
   const clash = ref.kind === "card" ? nameCheck : null
+  // A card's fork always takes its unsaved changes (owner, 2026-11-02); a variant asks.
   const [moveDrafts, setMoveDrafts] = useState(dirty)
+  const moving = ref.kind === "card" ? dirty : moveDrafts
   const [preparing, setPreparing] = useState(false)
   const pending = preparing || action.pending
 
@@ -49,7 +51,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
     await store.flush()
     // And its notes' editors: a card's fork takes their unsaved text (carryDrafts.ts).
     if (ref.kind === "card") await flushOpenEditors().catch(() => undefined)
-    if (moveDrafts && store.saveError) {
+    if (moving && store.saveError) {
       setPreparing(false)
       return
     }
@@ -64,8 +66,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
                   refId: ref.id,
                   name: label.trim(),
                   nickname,
-                  characterVersion: subtitle.trim(),
-                  moveDrafts
+                  characterVersion: subtitle.trim()
                 })
               return yield* client("ForkVariant", {
                 refId: ref.id,
@@ -91,7 +92,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       title={ref.kind === "card" ? "Fork card" : "Make a variant"}
       description={
         ref.kind === "card"
-          ? `Creates an independent card and copies its notes from “${ref.label}”, their unsaved text included. Parent edits never reach it.`
+          ? `Creates an independent card and copies its notes from “${ref.label}”. Unsaved changes to them move to the fork, but the names, which you set here; “${ref.label}” goes back to its last revision. Parent edits never reach it.`
           : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
       }
     >
@@ -115,17 +116,13 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
             <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
           </Field>
         )}
-        {dirty && (
+        {dirty && ref.kind !== "card" && (
           <Checkbox
             checked={moveDrafts}
             onCheckedChange={setMoveDrafts}
-            description={
-              ref.kind === "card"
-                ? "Drafts of the display name, in-character name and version stay here."
-                : "They leave this one and become the variant's unsaved changes."
-            }
+            description="They leave this one and become the variant's unsaved changes."
           >
-            Take my unsaved changes to the {ref.kind === "card" ? "fork" : "variant"}
+            Take my unsaved changes to the variant
           </Checkbox>
         )}
         {clash && (

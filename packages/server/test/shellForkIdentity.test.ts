@@ -42,8 +42,7 @@ it.live("card swaps keep user-played speaking turns out of shell activity", () =
       entityId: card.entityId,
       name: "Copied pilot",
       nickname: "",
-      characterVersion: "1",
-      moveDrafts: false
+      characterVersion: "1"
     })
     const secondTurn = yield* posted(
       api.SendMessage({
@@ -62,8 +61,7 @@ it.live("card swaps keep user-played speaking turns out of shell activity", () =
       entityId: copy.entityId,
       name: "Twice copied pilot",
       nickname: "",
-      characterVersion: "2",
-      moveDrafts: false
+      characterVersion: "2"
     })
     const rows = (yield* api.GetShellLibrary()).forks
     assert.isEmpty(rows.find((f) => f.forkId === original.id)!.activity)
@@ -192,8 +190,7 @@ it.live("shell rows retain interior checkpoints, same-tip peers and empty forks 
       entityId: b.entityId,
       name: "Shell Cora",
       nickname: "",
-      characterVersion: "1",
-      moveDrafts: false
+      characterVersion: "1"
     })
     const swapped = (yield* api.GetShellLibrary()).forks.find((f) => f.forkId === original.id)!
     assert.include(swapped.joined, b.entityId)

@@ -58,15 +58,13 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
       refId,
       name,
       nickname,
-      characterVersion,
-      moveDrafts
+      characterVersion
     }: {
       userId: UserId
       refId: RefId
       name: string
       nickname: string
       characterVersion: string
-      moveDrafts: boolean
     },
     sourceRevision?: string
   ) =>
@@ -145,22 +143,28 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           userId,
           "note",
           { target: note.id, revision: note.head_revision_id, doc: noteDoc },
-          { target: copy.id, revision: copy.head_revision_id, sameEntity: false }
+          { target: copy.id, revision: copy.head_revision_id }
         )
         yield* sql`INSERT INTO entity_tags (entity_id, tag)
                      SELECT ${copy.entity_id}, tag FROM entity_tags WHERE entity_id = ${note.entity_id}`
       }
 
-      // The ref's unsaved drafts, but its names, which the dialog gave. One that started from
-      // the head copied starts from the fork's first revision, the same content; an older
-      // base stays the parent's, which the commit reads through the relationship.
-      if (moveDrafts) {
-        yield* sql`UPDATE drafts SET target_id = ${fork.id},
-                       base_revision = CASE WHEN base_revision = ${source} THEN ${fork.head_revision_id} ELSE base_revision END,
-                       row_version = row_version + 1, updated_at = ${at}
-                     WHERE user_id = ${userId} AND target_kind = 'entity_field' AND target_id = ${refId}
-                       AND status = 'active' AND field NOT IN ${sql.in(NAME_FIELDS)}`
-      }
+      // The card's own unsaved fields go with the fork too, without asking (owner, 2026-11-02),
+      // but its names, which the dialog gave: the original goes back to its last revision, the
+      // text one step back in each field's edit history. One typed on the revision copied
+      // starts from the fork's first revision, the same content; an older base stays the
+      // parent's, which the commit reads through the relationship.
+      yield* carry.carryFieldDrafts(
+        userId,
+        "card",
+        { target: refId, revision: ref.head_revision_id, doc: yield* lib.loadDoc(ref.head_revision_id) },
+        {
+          target: fork.id,
+          revision: fork.head_revision_id,
+          base: (typed) => (typed === null || typed === source ? fork.head_revision_id : typed)
+        },
+        (field) => NAME_FIELDS.includes(field)
+      )
       return { ref: toLibraryRef(yield* steps.reload(fork.id)), noteCopies }
     })
 

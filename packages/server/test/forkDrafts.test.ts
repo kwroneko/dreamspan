@@ -13,6 +13,24 @@ import { client, posted, testConfig, withServer } from "./support/config.ts"
 type Api = Effect.Success<ReturnType<typeof client>>
 
 const CONTENT = textField(["content"])
+const DESCRIPTION = textField(["description"])
+const NAME = textField(["name"])
+
+/** Typed into a library field with no branch (a card's). */
+const typeField = (api: Api, refId: RefId, field: string, content: string) =>
+  Effect.gen(function* () {
+    const opened = yield* api.OpenEditor({ refId })
+    const draft = opened.drafts.find((d) => d.key.field === field)
+    return yield* api.SaveEditorDraft({
+      refId,
+      field,
+      draftId: draft?.id ?? null,
+      content,
+      expectedRowVersion: draft?.rowVersion ?? null,
+      expectedSession: draft?.session ?? null,
+      baseRevisionId: opened.ref.headRevisionId
+    })
+  })
 
 /** Typed into the note's editor at `at` (none: a card's note), on that position's drafts. */
 const type = (api: Api, refId: RefId, at: ChatNotePosition | undefined, content: string) =>
@@ -54,18 +72,24 @@ const shown = (api: Api, refId: RefId, at?: ChatNotePosition) =>
   })
 
 /** The field's edit history at `at`, and restoring the state that holds `text`. */
-const restoreFromHistory = (api: Api, refId: RefId, at: ChatNotePosition | undefined, text: string) =>
+const restoreFromHistory = (
+  api: Api,
+  refId: RefId,
+  at: ChatNotePosition | undefined,
+  text: string,
+  field: string = CONTENT
+) =>
   Effect.gen(function* () {
     const opened = yield* api.OpenEditor({ refId, ...(at ? { chatNote: at } : {}) })
     const scope = opened.chatNote ? { scope: opened.chatNote.scope } : {}
-    const draft = opened.drafts.find((d) => d.key.field === CONTENT)!
-    const states = yield* api.EditorDraftHistory({ refId, field: CONTENT, ...scope, limit: 50 })
+    const draft = opened.drafts.find((d) => d.key.field === field)!
+    const states = yield* api.EditorDraftHistory({ refId, field, ...scope, limit: 50 })
     for (const state of states) {
-      const full = yield* api.EditorDraftState({ refId, field: CONTENT, ...scope, seq: state.seq })
+      const full = yield* api.EditorDraftState({ refId, field, ...scope, seq: state.seq })
       if (full !== text) continue
       return yield* api.RestoreEditorDraft({
         refId,
-        field: CONTENT,
+        field,
         ...scope,
         draftId: draft.id,
         seq: state.seq,
@@ -174,7 +198,7 @@ describe("unsaved note text and forks", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("text typed at an earlier message stays at it", () =>
+  it.live("text typed through an earlier message's position is the branch's, and goes with a branch", () =>
     Effect.gen(function* () {
       const { api, chatId, main, first, note, at } = yield* chatWithNote
       const second = yield* posted(
@@ -182,24 +206,25 @@ describe("unsaved note text and forks", () => {
       )
       yield* type(api, note.id, at(main, first), "Typed at the first message.")
       const made = yield* api.CreateFork({ chatId, fromForkId: main, atSlotId: second.entry.slotId })
-      assert.isNull((yield* shown(api, note.id, at(made.fork.id, second.entry.slotId))).unsaved)
-      assert.strictEqual((yield* shown(api, note.id, at(main, first))).unsaved, "Typed at the first message.")
+      // An edit is at the current state (owner, 2026-11-02): it was the branch's unsaved text.
+      assert.strictEqual(
+        (yield* shown(api, note.id, at(made.fork.id, second.entry.slotId))).unsaved,
+        "Typed at the first message."
+      )
+      assert.isNull((yield* shown(api, note.id, at(main, second.entry.slotId))).unsaved)
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("a card's fork takes its notes' unsaved text; the original goes back, with it in its history", () =>
+  it.live("a card's fork takes its own and its notes' unsaved text but the names; the original goes back", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Mira", name: "Mira", nickname: "Mira", version: "1" })
       const note = yield* api.CreateCardNote({ cardRefId: card.id, title: "Coat" })
       yield* type(api, note.id, undefined, "A grey coat.")
-      const fork = yield* api.ForkCard({
-        refId: card.id,
-        name: "Mira",
-        nickname: "Mira",
-        characterVersion: "2",
-        moveDrafts: false
-      })
+      yield* typeField(api, card.id, DESCRIPTION, "A pilot in the rain.")
+      yield* typeField(api, card.id, NAME, "Mira the pilot")
+      const fork = yield* api.ForkCard({ refId: card.id, name: "Mira", nickname: "Mira", characterVersion: "2" })
+      // Its notes: the copy has the text, unsaved; the original went back, the text in its history.
       const copy = (yield* api.ListCardNotes({ cardRefId: fork.id })).find((entry) => entry.ref.label === "Coat")!
       const there = yield* shown(api, copy.ref.id)
       assert.deepStrictEqual([there.saved, there.unsaved], ["", "A grey coat."])
@@ -207,6 +232,17 @@ describe("unsaved note text and forks", () => {
       assert.deepStrictEqual([source.saved, source.unsaved], ["", null])
       yield* restoreFromHistory(api, note.id, undefined, "A grey coat.")
       assert.strictEqual((yield* shown(api, note.id)).unsaved, "A grey coat.")
+      // Its own fields too, without asking (owner, 2026-11-02), but the names the fork was given.
+      const forked = yield* api.OpenEditor({ refId: fork.id })
+      const live = (opened: typeof forked, field: string) =>
+        opened.drafts.find((d) => d.key.field === field && d.status === "active")?.content ?? null
+      assert.strictEqual(live(forked, DESCRIPTION), "A pilot in the rain.")
+      assert.isNull(live(forked, NAME))
+      const original = yield* api.OpenEditor({ refId: card.id })
+      assert.isNull(live(original, DESCRIPTION))
+      assert.strictEqual(live(original, NAME), "Mira the pilot")
+      yield* restoreFromHistory(api, card.id, undefined, "A pilot in the rain.", DESCRIPTION)
+      assert.strictEqual(live(yield* api.OpenEditor({ refId: card.id }), DESCRIPTION), "A pilot in the rain.")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 })

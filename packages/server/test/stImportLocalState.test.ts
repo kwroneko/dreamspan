@@ -73,8 +73,7 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           refId: original.refId,
           name: "Independent Alice",
           nickname: "",
-          characterVersion: "fork",
-          moveDrafts: false
+          characterVersion: "fork"
         })
         const forkBefore = yield* api.OpenEditor({ refId: fork.id })
         yield* writer.EditRef({

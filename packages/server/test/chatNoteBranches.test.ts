@@ -1,6 +1,6 @@
 // A chat's own note is tied to its branch (owner, 2026-11-01): each branch has its own unsaved
-// text, a change applies from the branch's latest message on (or, at an earlier message, only up
-// to the next one), and History says where each change took effect. Synthetic text only.
+// text, a change applies from the branch's latest message on, and History says where each change
+// took effect. Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
 import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import { textField } from "@rp/shared/editing.ts"
@@ -59,8 +59,6 @@ describe("a chat's own note on its branches", () => {
 
       yield* type(api, note.id, here, "Rain on the main branch.")
       const mine = yield* api.OpenEditor({ refId: note.id, chatNote: here })
-      assert.strictEqual(mine.chatNote!.message, 1)
-      assert.isTrue(mine.chatNote!.latest)
       assert.isFalse(mine.chatNote!.otherBranches)
       assert.strictEqual(mine.drafts.find((d) => d.key.field === CONTENT)!.content, "Rain on the main branch.")
       // The other branch has none of it, and is told this one differs.
@@ -83,7 +81,7 @@ describe("a chat's own note on its branches", () => {
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 
-  it.live("a change at an earlier message applies up to the next one; later messages keep theirs", () =>
+  it.live("an edit is always at the branch's latest message, whatever position the editor names", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const chat = yield* api.CreateChat({ title: "Earlier point" })
@@ -100,40 +98,35 @@ describe("a chat's own note on its branches", () => {
           content: "Two."
         })
       )
-      const third = yield* posted(
-        api.SendMessage({
-          chatId: chat.id,
-          forkId: fork,
-          parentSlotId: second.entry.slotId,
-          branch: false,
-          content: "Three."
-        })
-      )
       const note = yield* api.CreateChatNote({ chatId: chat.id, forkId: fork, title: "Weather" })
-      const latest: ChatNotePosition = { chatId: chat.id, forkId: fork, slotId: third.entry.slotId }
+      const latest: ChatNotePosition = { chatId: chat.id, forkId: fork, slotId: second.entry.slotId }
       yield* type(api, note.id, latest, "Fog.")
       yield* save(api, note.id, latest)
+      // Named with an earlier message (a stale tab's), the editor still shows and edits the
+      // branch's current note, with the same unsaved text (owner, 2026-11-02).
       const earlier: ChatNotePosition = { chatId: chat.id, forkId: fork, slotId: first.entry.slotId }
       const opened = yield* api.OpenEditor({ refId: note.id, chatNote: earlier })
-      assert.isFalse(opened.chatNote!.latest)
-      assert.strictEqual(opened.chatNote!.message, 1)
-      // What's typed at the earlier message isn't the latest message's unsaved text.
-      yield* type(api, note.id, earlier, "Sun at the start.")
-      assert.isUndefined(
+      assert.strictEqual(opened.doc.content, "Fog.")
+      assert.strictEqual(
+        opened.chatNote!.scope,
+        (yield* api.OpenEditor({ refId: note.id, chatNote: latest })).chatNote!.scope
+      )
+      yield* type(api, note.id, earlier, "Fog, then sun.")
+      assert.strictEqual(
         (yield* api.OpenEditor({ refId: note.id, chatNote: latest })).drafts.find(
           (d) => d.key.field === CONTENT && d.status === "active"
-        )
+        )?.content,
+        "Fog, then sun."
       )
       yield* save(api, note.id, earlier)
-      const at = (slotId: string) =>
+      // Saved from the latest message on: the first message still had none.
+      const listed = (slotId: string) =>
         Effect.map(
-          api.OpenEditor({ refId: note.id, chatNote: { chatId: chat.id, forkId: fork, slotId: slotId as never } }),
-          (o) => o.doc.content
+          api.ListChatNotes({ chatId: chat.id, forkId: fork, slotId: slotId as never }),
+          (notes) => notes.find((n) => n.ref.id === note.id)?.doc.content
         )
-      assert.strictEqual(yield* at(first.entry.slotId), "Sun at the start.")
-      // The message after it is bound to what it had: the empty note before the fog.
-      assert.strictEqual(yield* at(second.entry.slotId), "")
-      assert.strictEqual(yield* at(third.entry.slotId), "Fog.")
+      assert.strictEqual(yield* listed(first.entry.slotId), "")
+      assert.strictEqual(yield* listed(second.entry.slotId), "Fog, then sun.")
     }).pipe(Effect.scoped, withServer(testConfig()))
   )
 })

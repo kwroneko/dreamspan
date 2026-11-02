@@ -2044,8 +2044,8 @@ export class WriteOps extends RpcGroup.make(
   }),
   /**
    * A card of its own forked from the ref's head (spec/CARD-FORKS-DELTA.md §2): its content
-   * with the three names given, its tags and its notes copied, optionally the ref's unsaved
-   * drafts moved to it. Refused for a display name and version another card has.
+   * with the three names given, its tags and its notes copied, and the unsaved
+   * text of the ref and its notes moved to it (but the names). Refused for a display name and version another card has.
    */
   Rpc.make("ForkCard", {
     payload: {
@@ -2053,8 +2053,7 @@ export class WriteOps extends RpcGroup.make(
       refId: RefId,
       name: Schema.String,
       nickname: Schema.String,
-      characterVersion: Schema.String,
-      moveDrafts: Schema.Boolean
+      characterVersion: Schema.String
     },
     success: LibraryRef,
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])
@@ -2068,8 +2067,7 @@ export class WriteOps extends RpcGroup.make(
       entityId: EntityId,
       name: Schema.String,
       nickname: Schema.String,
-      characterVersion: Schema.String,
-      moveDrafts: Schema.Boolean
+      characterVersion: Schema.String
     },
     success: Schema.Struct({ ref: LibraryRef, choices: Schema.Array(ComposerChoice) }),
     error: Schema.Union([NotFound, RefOperationRefused, StorageError])

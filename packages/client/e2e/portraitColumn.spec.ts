@@ -203,8 +203,7 @@ test("the column follows its card's name when another version is swapped in; Esc
         refId: root.id,
         name: "Pilot Storm",
         nickname: "Pilot",
-        characterVersion: "Storm",
-        moveDrafts: false
+        characterVersion: "Storm"
       })
       const chat = yield* api.CreateChat({ title: "The harbor" })
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: root.entityId } })

@@ -42,22 +42,24 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
     })
 
   /**
-   * Moves the unsaved fields at `from.target` to `to.target`, still unsaved, typed on
-   * `to.revision` (or, for the same entity, on the revision they were typed on); `from` goes
-   * back to `from.revision`, keeping the moved text in its history. Returns how many moved.
+   * Moves the unsaved fields at `from.target` (but those `skip` names) to `to.target`, still
+   * unsaved, typed on `to.base` of the revision they were typed on (by default `to.revision`);
+   * `from` goes back to `from.revision`, keeping the moved text in its history. Returns how
+   * many moved.
    */
   const carryFieldDrafts = (
     userId: UserId,
     kind: string,
     from: { readonly target: string; readonly revision: string; readonly doc: Doc },
-    to: { readonly target: string; readonly revision: string; readonly sameEntity: boolean }
+    to: { readonly target: string; readonly revision: string; readonly base?: (typed: string | null) => string },
+    skip: (field: string) => boolean = () => false
   ) =>
     Effect.gen(function* () {
       const saved = editedDoc(kind, from.doc)
       let moved = 0
       for (const row of yield* liveAt(userId, from.target)) {
         const back = fieldContent(saved, row.field)
-        if (back === null) continue
+        if (back === null || skip(row.field)) continue
         yield* drafts
           .save({
             userId,
@@ -65,7 +67,7 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
             draftId: null,
             content: row.content,
             base: null,
-            baseRevision: to.sameEntity ? (row.base_revision ?? to.revision) : to.revision,
+            baseRevision: to.base ? to.base(row.base_revision) : to.revision,
             checkTarget: Effect.void
           })
           // Its text was taken by a draft already: it fits.
@@ -80,8 +82,7 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
    * A new branch `to` of `from`: each of the chat's own notes with unsaved text at `from`'s
    * latest message moves it to `to`, when `to` starts with the version of the note that text
    * was typed on. A note the branch takes as it was at an earlier message (its "As it was
-   * then", in `keep` by entity) keeps the text where it was typed. Text typed at an earlier
-   * message of `from` stays there.
+   * then", in `keep` by entity) keeps the text where it was typed.
    */
   const carryChatNoteDrafts = (
     userId: UserId,
@@ -96,8 +97,8 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
           AND target_id LIKE '%/' || ${from.id} ORDER BY target_id`
       let moved = 0
       for (const { target_id } of scoped) {
-        const { refId, fork, slot } = parseDraftTarget(target_id)
-        if (fork !== from.id || slot !== null) continue
+        const { refId, fork } = parseDraftTarget(target_id)
+        if (fork !== from.id) continue
         const owned = yield* lib.ownedRef(userId, refId).pipe(Effect.catchTag("NotFound", () => Effect.succeed(null)))
         if (owned === null || keep.has(owned.entity_id)) continue
         const at = (end: ForkEnd) =>
@@ -113,7 +114,12 @@ export const makeDraftCarry = (sql: SqlClient.SqlClient, drafts: ReturnType<type
           userId,
           owned.kind,
           { target: entityDraftTarget(refId, here.scope), revision: here.ref.head_revision_id, doc: here.doc },
-          { target: entityDraftTarget(refId, there.scope), revision: there.ref.head_revision_id, sameEntity: true }
+          {
+            target: entityDraftTarget(refId, there.scope),
+            revision: there.ref.head_revision_id,
+            // The same note: its text keeps the revision it was typed on.
+            base: (typed) => typed ?? there.ref.head_revision_id
+          }
         )
       }
       return moved

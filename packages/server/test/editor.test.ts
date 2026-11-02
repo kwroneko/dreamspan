@@ -194,8 +194,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: card.id,
         name: "Fork display",
         nickname: "Model",
-        characterVersion: "3.0",
-        moveDrafts: true
+        characterVersion: "3.0"
       })
       const source = yield* api.OpenEditor({ refId: card.id })
       assert.strictEqual(source.drafts.find((d) => d.key.field === textField(["name"]))!.content, "Pending display")
@@ -229,7 +228,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a save names its draft: one that moved to a fork never takes over the new draft here", () =>
+  it.effect("a save typed before a fork took the text lands back on the original, never on the fork's", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const card = yield* api.CreateCard({ label: "Moved draft", name: "Moved draft" })
@@ -243,24 +242,17 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         expectedRowVersion: null,
         baseRevisionId: card.headRevisionId
       })
-      const variant = yield* api.ForkCard({
-        refId: card.id,
-        name: "Variant",
-        nickname: "",
-        characterVersion: "",
-        moveDrafts: true
-      })
-      const b = yield* api.SaveEditorDraft({
-        expectedSession: null,
-        refId: card.id,
-        field,
-        draftId: null,
-        content: "base B",
-        expectedRowVersion: null,
-        baseRevisionId: card.headRevisionId
-      })
-      // A's counters match B's: only the draft's id tells them apart.
-      assert.deepStrictEqual([a.rowVersion, a.session], [b.rowVersion, b.session])
+      // The fork takes the text as a draft of its own; the original's draft went back to its
+      // revision, the text in its history (owner, 2026-11-02).
+      const variant = yield* api.ForkCard({ refId: card.id, name: "Variant", nickname: "", characterVersion: "" })
+      const theirs = (yield* api.OpenEditor({ refId: variant.id })).drafts.find((d) => d.key.field === field)!
+      assert.notStrictEqual(theirs.id, a.id)
+      assert.strictEqual(theirs.content, "base A")
+      const mine = (yield* api.OpenEditor({ refId: card.id })).drafts.find((d) => d.key.field === field)!
+      assert.strictEqual(mine.id, a.id)
+      assert.notStrictEqual(mine.status, "active")
+      assert.include(yield* fieldTexts(api, card.id, field), "base A")
+      // A tab that typed on before the fork saves onto the original's draft, in a new session.
       const stale = yield* api.SaveEditorDraft({
         refId: card.id,
         field,
@@ -270,28 +262,24 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         expectedSession: a.session,
         baseRevisionId: card.headRevisionId
       })
-      assert.strictEqual(stale.id, b.id)
-      // B's text is one step back, and stays in the field's edit history past the commit.
-      const saved = yield* api.CommitEditorDrafts({
-        refId: card.id,
-        expectedRowVersion: card.rowVersion,
-        fields: [{ field, draftId: stale.id, expectedRowVersion: stale.rowVersion }],
-        message: null
-      })
-      assert.strictEqual(saved.recovered, 0)
-      assert.include(yield* fieldTexts(api, card.id, field), "base B")
-      // A, in the variant, is as it was; and committing it by its old id here is stale.
-      assert.strictEqual((yield* api.OpenEditor({ refId: variant.id })).drafts[0]!.content, "base A")
+      assert.strictEqual(stale.id, a.id)
+      assert.strictEqual(stale.content, "base A2")
+      assert.include(yield* fieldTexts(api, card.id, field), "base A")
+      // The fork's draft is as it was, and the original's id commits nothing there.
       assert.strictEqual(
+        (yield* api.OpenEditor({ refId: variant.id })).drafts.find((d) => d.key.field === field)!.content,
+        "base A"
+      )
+      assert.include(
+        ["StaleWrite", "NotFound"],
         yield* outcome(
           api.CommitEditorDrafts({
             refId: variant.id,
             expectedRowVersion: variant.rowVersion,
-            fields: [{ field, draftId: b.id, expectedRowVersion: a.rowVersion }],
+            fields: [{ field, draftId: a.id, expectedRowVersion: stale.rowVersion }],
             message: null
           })
-        ),
-        "StaleWrite"
+        )
       )
     })
   )
@@ -570,8 +558,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: card.id,
         name: "Noir",
         nickname: "",
-        characterVersion: "rainy",
-        moveDrafts: true
+        characterVersion: "rainy"
       })
       const opened = yield* api.OpenEditor({ refId: variant.id })
       assert.deepStrictEqual(
@@ -583,7 +570,8 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         []
       )
       assert.strictEqual(opened.usedByChats, 0)
-      assert.isEmpty((yield* api.OpenEditor({ refId: card.id })).drafts)
+      // The original went back to its revision: nothing unsaved there, the text in its history.
+      assert.isEmpty((yield* api.OpenEditor({ refId: card.id })).drafts.filter((d) => d.status === "active"))
       // Swapping the card puts the fork to use in that chat.
       yield* api.ChangeCast({
         chatId: chat.id,

@@ -172,8 +172,7 @@ describe("shell fork summaries", () => {
         refId: mira.ref.id,
         name: "Nell",
         nickname: "Nell",
-        characterVersion: "2",
-        moveDrafts: false
+        characterVersion: "2"
       })
       yield* check("card made", [])
       yield* writer.AddStateEvent({

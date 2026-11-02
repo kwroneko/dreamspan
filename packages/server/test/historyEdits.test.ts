@@ -483,8 +483,7 @@ describe("history edits", () => {
         refId: card.ref.id,
         name: "Other cast",
         nickname: "Other",
-        characterVersion: "fork",
-        moveDrafts: false
+        characterVersion: "fork"
       })
       yield* f.api.ChangeCast({
         chatId: f.chatId,

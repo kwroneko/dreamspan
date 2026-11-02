@@ -571,8 +571,7 @@ describe("library", () => {
         refId: created.ref.id,
         name: "Mira",
         nickname: "",
-        characterVersion: "v",
-        moveDrafts: false
+        characterVersion: "v"
       })
       const reimport = (d: Doc) => importInto(writer, userId, created.ref.id, "card", d)
 

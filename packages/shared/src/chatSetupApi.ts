@@ -532,8 +532,7 @@ export class ChatSetupApi extends RpcGroup.make(
       entityId: EntityId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
-      characterVersion: Schema.String,
-      moveDrafts: Schema.Boolean
+      characterVersion: Schema.String
     },
     success: LibraryRef,
     error: Schema.Union([...Errors, EditRefused])

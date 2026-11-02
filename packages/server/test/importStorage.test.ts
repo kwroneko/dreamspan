@@ -118,8 +118,7 @@ describe("library import storage", () => {
         refId: first.ref.id,
         name: "Mira",
         nickname: "",
-        characterVersion: "older",
-        moveDrafts: false
+        characterVersion: "older"
       })
       yield* writer.EditRef({
         userId: ana,
