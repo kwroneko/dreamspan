@@ -1,5 +1,6 @@
-import { offeredGreetings, greetingPick } from "@rp/shared/greetings.ts"
-import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
+import { greetingPick } from "@rp/shared/greetings.ts"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingComposerControls,
   invokePendingComposer,
@@ -9,6 +10,11 @@ import {
 // pick from and `{{user}}` following the persona picked, and a composer. The chat is made
 // only on the first send, so opening cards leaves no greeting-only chats behind. Pending
 // prose has a private server draft and browser copy before that chat exists (DESIGN §6.2).
+//
+// It looks and works like any other chat (owner, 2026-11-02): the saved chat's header, message
+// column, composer and side panel, resizable, with the same tabs in the same places. Its state
+// is a `PendingChat` (pendingChat.ts) the panel's tabs change: who's in it (Cast, with Add
+// characters), who the user plays, who answers first. Tabs that need a saved chat say so.
 //
 // A new chat of a group (`/groups/$chatId/new`) is the same, with the group's characters:
 // each member greets in turn, as ST starts a group chat (`getGroupChat` in its
@@ -20,24 +26,18 @@ import type { CardForChat, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { FrozenValues } from "@rp/shared/macros/expand.ts"
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { Effect } from "effect"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type CSSProperties, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
-import { CharacterPanel } from "../characters/CharacterPanel.tsx"
-import { rememberPanel, useWide } from "./ChatPanels.tsx"
-import { Sheet } from "../../ui/Sheet.tsx"
-import { type ReactNode } from "react"
+import { SlotOutlet } from "../../slots.tsx"
 import { AutoGrowTextarea } from "../../ui/AutoGrowTextarea.tsx"
-import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
-import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
-import { CastContext, castView } from "./cast.ts"
-import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
-import { Field } from "../../ui/Field.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
-import { Select } from "../../ui/Select.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import { IconButton, TooltipProvider } from "../../ui/Tooltip.tsx"
+import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
+import { useCaller } from "../editor/caller.ts"
 import {
   copiesOf,
   type Copy,
@@ -47,46 +47,22 @@ import {
   pendingChatCopy,
   pendingGroupChatCopy
 } from "../editor/backup.ts"
-import { GroupFaces } from "../characters/GroupFaces.tsx"
 import { useTitle } from "../shell.tsx"
+import { CastContext, castView } from "./cast.ts"
+import { PendingChatHeader } from "./ChatHeader.tsx"
+import { ChatSidePanel, usePanel } from "./ChatPanels.tsx"
 import { composerCarryCopy } from "./composerCarry.ts"
 import { ComposerBox, useCompactComposer } from "./Composer.tsx"
+import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
+import { useIsPanelTab } from "./panels.tsx"
+import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
+import { chatColumns } from "./presentation.tsx"
 
-const PERSONA_KEY = "rp.lastPersona"
-const NONE = "none"
-
-const savedPersona = () => {
-  try {
-    return localStorage.getItem(PERSONA_KEY)
-  } catch {
-    return null
-  }
-}
-const savePersona = (id: string) => {
-  try {
-    localStorage.setItem(PERSONA_KEY, id)
-  } catch {
-    // Not remembered, then.
-  }
-}
-
-/** A group the new chat is of: its name, its characters, the chat that names it, and each character's greetings. */
-interface PendingGroup {
-  readonly group: ChatGroup
-  readonly chatId: ChatId
-  /** Each member's card, in the group's order: each greets in turn. */
-  readonly cards: ReadonlyArray<CardForChat>
-}
-
-interface PendingCast {
-  readonly greeters: ReadonlyArray<CardForChat>
-  readonly picks: ReadonlyArray<number>
-  readonly persona: string
-  readonly fallbackNote: string
-}
-
-/** One greeting of the chat not made yet, with its card's alternates to pick from. */
+/**
+ * One greeting of the chat not made yet, as the saved chat shows a message: the portrait, the
+ * name, the text, and its card's alternates to step through at its end, as a message's versions.
+ */
 function Greeting({
   card,
   index,
@@ -107,118 +83,81 @@ function Greeting({
   return (
     <article
       aria-label={`Greeting from ${name}`}
-      className="flex flex-col gap-2 rounded-lg border border-border bg-surface px-4 py-3"
+      className="group flex gap-3 rounded-lg border border-transparent px-3 py-2.5 hover:bg-surface-raised/40 max-sm:gap-2.5 max-sm:px-2.5"
     >
-      <header className="flex items-center gap-2 text-sm">
+      <div className="flex shrink-0 flex-col items-center gap-1.5">
         <Avatar
           id={card.card.entityId}
           name={name}
           mediaId={card.card.avatarMediaId}
           crop={card.card.avatarCrop}
-          size="sm"
+          size="chat"
+          preview
+          className="mt-0.5"
         />
-        <span className="min-w-0 truncate font-medium">{name}</span>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <header className="flex min-h-8 min-w-0 items-center gap-x-2 text-sm max-sm:flex-wrap max-sm:gap-y-1">
+          <span className="min-w-0 font-semibold max-sm:w-full max-sm:[overflow-wrap:anywhere] sm:max-w-48 sm:shrink-0 sm:truncate">
+            {name}
+          </span>
+          {groupOnly && <span className="shrink-0 text-xs text-muted">group greeting</span>}
+        </header>
+        <Markdown text={text} streaming={false} />
         {count > 1 && (
-          <div className="ml-auto flex shrink-0 items-center gap-1" role="group" aria-label={`${name}'s greetings`}>
-            <Button
-              variant="ghost"
-              aria-label={`Previous greeting from ${name}`}
-              disabled={index === 0}
-              onClick={() => onIndex(index - 1)}
-            >
-              ‹
-            </Button>
-            <span className="min-w-12 text-center text-muted tabular-nums">
-              {index + 1} / {count}
-            </span>
-            <Button
-              variant="ghost"
-              aria-label={`Next greeting from ${name}`}
-              disabled={index === count - 1}
-              onClick={() => onIndex(index + 1)}
-            >
-              ›
-            </Button>
-          </div>
+          <footer className="-mb-1 flex min-h-8 items-center">
+            <span className="flex-1" />
+            <div className="flex shrink-0 items-center" role="group" aria-label={`${name}'s greetings`}>
+              <IconButton
+                label={`Previous greeting from ${name}`}
+                hint="Shows their previous greeting: the chat starts with the one shown"
+                icon="left"
+                className="max-sm:size-7"
+                disabled={index === 0}
+                onClick={() => onIndex(index - 1)}
+              />
+              <span className="inline-flex h-8 min-w-9 items-center justify-center px-1 text-xs text-muted tabular-nums">
+                {index + 1}/{count}
+              </span>
+              <IconButton
+                label={`Next greeting from ${name}`}
+                hint="Shows their next greeting: the chat starts with the one shown"
+                icon="right"
+                className="max-sm:size-7"
+                disabled={index === count - 1}
+                onClick={() => onIndex(index + 1)}
+              />
+            </div>
+          </footer>
         )}
-      </header>
-      {groupOnly && <span className="text-xs text-muted">group greeting</span>}
-      <Markdown text={text} streaming={false} />
+      </div>
     </article>
   )
 }
 
 function Pending({
+  pending,
   card,
-  personas,
-  cards,
-  group = null
+  groupMembers
 }: {
-  /** The card that greets: the chat's card, or the group's first character. */
+  pending: PendingChat
+  /** The card that greets first: the chat's card, or the group's first character. */
   card: CardForChat
-  personas: ReadonlyArray<CastCard>
-  /** Every card that could be the persona (any card can be, DESIGN §2.2). */
-  cards: ReadonlyArray<CastCard>
-  group?: PendingGroup | null
+  /** A group's characters as the group names them: its pending copy's key. */
+  groupMembers: ReadonlyArray<string> | null
 }) {
   const action = useAction()
   const navigate = useNavigate()
   const navigationSearch = useSearch({ strict: false }) as { panel?: string; character?: string }
-  // Keep cast and choices together: an in-flight card read must apply to the latest
-  // persona, members and greeting selections, including edits made while it loaded.
-  const [{ persona, greeters, picks, fallbackNote }, setPendingCast] = useState<PendingCast>(() => {
-    const saved = savedPersona()
-    const persona = cards.find((p) => p.entityId === saved)?.entityId ?? personas[0]?.entityId ?? NONE
-    const greeters = group?.cards ?? [card]
-    const count = new Set(greeters.filter((item) => item.card.entityId !== persona).map((item) => item.card.entityId))
-      .size
-    return {
-      persona,
-      greeters,
-      picks: greeters.map((greeter) => {
-        const options = offeredGreetings(greeter, count)
-        return group === null ? 0 : (options[Math.floor(Math.random() * Math.max(1, options.length))]?.index ?? 0)
-      }),
-      fallbackNote: ""
-    }
-  })
-  const listCards = useCallback(() => Promise.resolve({ ok: true as const, value: cards }), [cards])
-  // No chat yet: the switcher names cards from the list, and there are no members to join.
-  const pendingView = useMemo(() => castView(null, cards), [cards])
-  const characterCount = new Set(
-    greeters.filter((item) => item.card.entityId !== persona).map((item) => item.card.entityId)
-  ).size
-  const options = greeters.map((item) => offeredGreetings(item, characterCount))
+  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
+  const view = pending.view()
+  const { greeters, picks, persona, fallbackNote } = state
+  const group = pending.group
+  const options = pendingOptions(state)
   const effectivePicks = options.map((list, at) => greetingPick(list, picks[at] ?? 0)?.index ?? -1)
-  const changePendingCast = (change: (current: PendingCast) => PendingCast) => {
-    setPendingCast((current) => {
-      const next = change(current)
-      const count = new Set(
-        next.greeters.filter((item) => item.card.entityId !== next.persona).map((item) => item.card.entityId)
-      ).size
-      const adjusted = next.greeters.map(
-        (item, at) => greetingPick(offeredGreetings(item, count), next.picks[at] ?? 0)?.index ?? -1
-      )
-      const fellBack = next.greeters.some(
-        (item, at) =>
-          item.groupGreetings.length > 0 &&
-          (next.picks[at] ?? -1) >= item.greetings.length &&
-          adjusted[at] !== next.picks[at]
-      )
-      return {
-        ...next,
-        picks: adjusted,
-        fallbackNote: fellBack
-          ? "The selected group greeting is no longer available. Using the card’s first greeting."
-          : next.fallbackNote
-      }
-    })
-  }
   const members = group === null && greeters.length === 1 ? null : greeters.map((item) => item.card)
-  const availableCharacters = [...(group?.cards.map((item) => item.card) ?? []), ...cards]
   // Who replies: in a group, the character picked (its first, as the chat's default speaker).
   const [selectedSpeaker, setSelectedSpeaker] = useState<EntityId | null>(null)
-  const [replier, setReplier] = useState<string>(card.card.entityId)
   const [text, setTextState] = useState("")
   // The latest text, for what's typed while the first send is on its way (read after it).
   const typed = useRef("")
@@ -231,13 +170,7 @@ function Pending({
   // This browser's copy of the text, and the text on its way in the first send.
   const userId = useSession().user.id
   const entityId = card.card.entityId
-  const copyKey =
-    group === null
-      ? pendingChatCopy(entityId)
-      : pendingGroupChatCopy(
-          group.group.name,
-          group.group.members.map((member) => member.entityId)
-        )
+  const copyKey = group === null ? pendingChatCopy(entityId) : pendingGroupChatCopy(group.name, groupMembers ?? [])
   const durable = useUserDraft(copyKey, "First message", "")
   const sending = useRef<string | null>(null)
   const destination = useRef<string | null>(null)
@@ -257,14 +190,7 @@ function Pending({
     }
     copy.current =
       destination.current !== null
-        ? composerCarryCopy(
-            userId,
-            destination.current,
-            entityId,
-            group?.group.name ?? card.card.name,
-            content,
-            previous
-          )
+        ? composerCarryCopy(userId, destination.current, entityId, group?.name ?? card.card.name, content, previous)
         : makeCopy(
             userId,
             copyKey,
@@ -274,9 +200,9 @@ function Pending({
               payload:
                 group === null
                   ? { entityId, name: card.card.name, content }
-                  : { entityId, name: group.group.name, content, groupChatId: group.chatId }
+                  : { entityId, name: group.name, content, groupChatId: group.chatId }
             },
-            // eslint-disable-next-line react-hooks/purity -- keep runs from input/request handlers; registered controls carry start as a callback.
+
             Date.now()
           )
     return keepCopy(copy.current, previous)
@@ -296,48 +222,21 @@ function Pending({
       current = false
     }
   }, [userId, copyKey])
-  const playing = cards.find((p) => p.entityId === persona) ?? null
+  const playing = pending.playing(state)
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()
   const { compact: phone, ref: composerRef } = useCompactComposer()
   const guidance = viewPrefs.prefs.guidance
-  const name = card.card.name
-  /** What the chat is with: the card, or the group. */
-  const title = group?.group.name ?? name
   const repliers = greeters.filter((item) => item.card.entityId !== persona)
-  const replyId = (repliers.find((item) => item.card.entityId === replier) ?? repliers[0] ?? card).card.entityId
-  const castCards = [
-    ...new Map(
-      [...greeters.map((greeter) => greeter.card), ...(playing ? [playing] : [])].map((item) => [item.entityId, item])
-    ).values()
-  ]
+  const replyId = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0] ?? card).card.entityId
+  const castCards = view.cast?.cards ?? []
   const speakerId = castCards.some((item) => item.entityId === selectedSpeaker)
     ? selectedSpeaker
     : (playing?.entityId ?? null)
   const speakerName = castCards.find((item) => item.entityId === speakerId)?.name ?? "You"
-  const speakerView = castView({
-    participants: castCards.map((item) => item.entityId),
-    playedByMe: playing ? [playing.entityId] : [],
-    cards: castCards,
-    slotId: null,
-    absent: [],
-    model: null,
-    preset: null,
-    lorebooks: [],
-    cardLorebooksOff: [],
-    listedLorebooks: [],
-    loreBelowHistory: true,
-    macroBindings: {},
-    macroNames: {
-      user: playing?.modelName ?? playing?.name ?? "User",
-      char: castCards
-        .filter((item) => item.entityId !== playing?.entityId)
-        .map((item) => item.modelName ?? item.name)
-        .join(", ")
-    },
-    rolesProjection: null,
-    roleProjections: []
-  })
+  // Rows and the composer read the cast from context, as in a saved chat.
+  const castState = view.cast
+  const cast = useMemo(() => castView(castState), [castState])
   // What each greeting's random and time macros drew when first shown, by greeter and
   // greeting: the chat keeps them, so a greeting reads the same after the send (DESIGN §5.6).
   const [frozen] = useState(() => new Map<string, Map<number, FrozenValues>>())
@@ -363,6 +262,11 @@ function Pending({
     draws(at).set(index, result.frozen)
     return result.text
   }
+  // The side panel: the saved chat's, its tab in the URL and remembered the same way.
+  const urlPanel = useIsPanelTab(navigationSearch.panel) ? navigationSearch.panel! : null
+  const { panel, show, wide } = usePanel(urlPanel, view)
+  const title = pendingTitle(pending, state)
+  const prefs = viewPrefs.prefs
 
   const start = async (first: "send" | "generate") => {
     if (!viewPrefs.ready || action.pending || (first === "send" && text.trim() === "")) return
@@ -383,7 +287,7 @@ function Pending({
             cards: greeters.map((greeter) => greeter.card.entityId),
             persona: personaId,
             greeting: null,
-            ...(group === null ? {} : { title: group.group.name }),
+            ...(group === null ? {} : { title: group.name }),
             greeters: greeters.map((greeter, at) => {
               const shown = draws(at).get(effectivePicks[at] ?? 0)
               return {
@@ -426,11 +330,13 @@ function Pending({
     destination.current = result.value.chat.id
     await keep(typed.current)
     await durable.commit(durable.text, async () => true)
+    // The saved chat opens in place: the same page, its panel at the same tab.
     void navigate({
       to: "/chats/$chatId",
       params: { chatId: result.value.chat.id },
+      replace: true,
       search: {
-        ...(navigationSearch.panel ? { panel: navigationSearch.panel } : {}),
+        ...(panel !== null ? { panel } : {}),
         ...(navigationSearch.character ? { character: navigationSearch.character } : {})
       }
     })
@@ -446,232 +352,146 @@ function Pending({
     changeGuidance: (next) => void viewPrefs.change({ guidance: next }),
     busy: action.pending,
     hasText: text.trim() !== "",
-    start
+    start,
+    view,
+    onSettings: show
   }
 
   return (
-    <>
-      <header className="chat-column flex flex-wrap items-center gap-3 pb-2">
-        {members === null ? (
-          <button
-            type="button"
-            aria-label={`Show ${name}'s card`}
-            className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            onClick={() => {
-              rememberPanel(userId, `card:${card.card.entityId}`)
-              void navigate({
-                to: ".",
-                search: (prev: Record<string, unknown>) => ({ ...prev, panel: `card:${card.card.entityId}` })
-              })
-            }}
-          >
-            <Avatar id={card.card.entityId} name={name} mediaId={card.card.avatarMediaId} crop={card.card.avatarCrop} />
-          </button>
-        ) : (
-          <span className="block aspect-[2/3] w-12 shrink-0 overflow-hidden rounded-lg">
-            <GroupFaces members={members} />
-          </span>
-        )}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="text-lg font-semibold [overflow-wrap:anywhere]">
-            {members === null ? name : `New chat: ${title}`}
-          </h1>
-          {members === null && card.card.subtitle && <p className="text-sm text-muted">{card.card.subtitle}</p>}
-          {members !== null && (
-            <p className="text-sm text-muted [overflow-wrap:anywhere]">
-              With {members.map((member) => member.name).join(", ")}, who greet in turn. Saved when you send the first
-              message.
+    <CastContext value={cast}>
+      <div
+        className="flex min-h-0 flex-1"
+        style={
+          {
+            "--chat-portrait-width": `${{ small: 48, default: 60, large: 72, largest: 84 }[prefs.portraitSize]}px`
+          } as CSSProperties
+        }
+      >
+        <SlotOutlet slot={chatColumns} props={{ wide }} />
+        <div data-chat-main className="relative flex min-w-0 flex-1 flex-col">
+          <PendingChatHeader
+            pending={pending}
+            view={view}
+            title={title}
+            panel={{ userId, open: panel, wide, onToggle: (tab) => show(panel === tab ? null : tab) }}
+          />
+          {fallbackNote && (
+            <p role="status" className="chat-column border-b border-border px-2 py-1 text-sm text-muted">
+              {fallbackNote}
             </p>
           )}
-        </div>
-        {/* A group's chat picks who replies too: both fields on a row of their own. */}
-        <div className={`flex gap-3 ${members === null ? "w-full sm:w-56" : "w-full"}`}>
-          {/* The same persona control as the chat's Cast tab, on Personas (DESIGN §2.2). */}
+          <TooltipProvider>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              {/* The message list's column, its padding and its gap between rows. */}
+              <div className="chat-column flex flex-col gap-1.5 py-4">
+                {options.every((list) => list.length === 0) && (
+                  <p className="px-3 text-sm text-muted">
+                    {members === null ? `${card.card.name} has no greeting.` : "None of them has a greeting."} Your
+                    first message starts the chat.
+                  </p>
+                )}
+                {greeters.map((greeter, at) =>
+                  options[at]!.length === 0 ? (
+                    members !== null && (
+                      <p key={greeter.card.entityId} className="px-3 text-sm text-muted">
+                        {greeter.card.name} has no greeting.
+                      </p>
+                    )
+                  ) : (
+                    <Greeting
+                      key={greeter.card.entityId}
+                      card={greeter}
+                      count={options[at]!.length}
+                      groupOnly={greetingPick(options[at]!, effectivePicks[at]!)!.groupOnly}
+                      index={options[at]!.findIndex((option) => option.index === effectivePicks[at])}
+                      onIndex={(index) => pending.pick(at, options[at]![index]!.index)}
+                      text={expandGreeting(at, effectivePicks[at]!)}
+                    />
+                  )
+                )}
+              </div>
+            </div>
+          </TooltipProvider>
+          {/* What to know before sending, above the composer as the saved chat's notes are. */}
+          <PendingComposerControls placement="notes" context={controls} />
+          {/* The chat's composer: its column, the box, and what's said under it. */}
           <div
-            role="group"
-            aria-label="Your persona"
-            className={`flex flex-col gap-1 ${members === null ? "w-full" : "flex-1 sm:w-56 sm:flex-none"}`}
+            ref={composerRef}
+            className="@container chat-column flex flex-col gap-1.5 border-t border-border pt-2 pb-2 max-sm:px-2"
           >
-            <span className="text-sm font-medium">Playing as</span>
-            <CastContext value={pendingView}>
-              <SpeakerSwitcher
-                listCards={listCards}
-                speaker={playing?.entityId ?? null}
-                recent={[]}
-                persona
-                pending
-                onPick={(picked) => {
-                  changePendingCast((current) => ({ ...current, persona: picked.entityId }))
-                  savePersona(picked.entityId)
-                }}
-                onNone={() => {
-                  changePendingCast((current) => ({ ...current, persona: NONE }))
-                  savePersona(NONE)
+            <ComposerBox
+              guidance={guidance}
+              header={<UserDraftNotices draft={durable} />}
+              start={
+                <>
+                  <PendingComposerControls placement="speaker" context={controls} />
+                  {/* Where the saved composer has its earlier text. */}
+                  <UserDraftUndo draft={durable} />
+                </>
+              }
+              end={
+                <>
+                  <PendingComposerControls placement="guidance" context={controls} />
+                  <PendingComposerControls placement="actions" context={controls} />
+                </>
+              }
+            >
+              {guidance && (
+                <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
+                  Guidance
+                </span>
+              )}
+              <label htmlFor="composer" className="sr-only">
+                {guidance ? "Guidance" : "Message"}
+              </label>
+              <AutoGrowTextarea
+                id="composer"
+                data-testid="composer"
+                value={text}
+                // Short, so it fits one line on a phone, as the chat's composer does.
+                placeholder={guidance ? "Guidance for the next message…" : "Message…"}
+                aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
+                onKeyDown={(event) =>
+                  composerKeyDown(async () => {
+                    await invokePendingComposer(controls)
+                  }, viewPrefs.prefs.enterSends)(event)
+                }
+                onChange={(event) => {
+                  const value = event.currentTarget.value
+                  typed.current = value
+                  setText(value)
+                  // While the first send is out, the copy keeps both, as a failed send leaves them.
+                  const out = sending.current
+                  void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
                 }}
               />
-            </CastContext>
-          </div>
-          {members !== null && (
-            <Field label="Reply from" className="flex-1 sm:w-56 sm:flex-none">
-              <Select
-                items={repliers.map(({ card: member }) => ({
-                  value: member.entityId as string,
-                  label: `${member.name}${member.subtitle ? ` · ${member.subtitle}` : ""}`
-                }))}
-                value={replyId}
-                onValueChange={setReplier}
-              />
-            </Field>
-          )}
-        </div>
-      </header>
-      <div className="chat-column flex flex-wrap items-center gap-2" aria-label="Pending cast">
-        {greeters.map((item, at) => (
-          <span key={item.card.entityId} className="flex items-center gap-1 text-sm">
-            {item.card.name}
-            {at > 0 && (
-              <Button
-                variant="ghost"
-                aria-label={`Remove ${item.card.name} from pending cast`}
-                hint="Leaves them out of the new chat, with their greeting."
-                onClick={() => {
-                  changePendingCast((current) => ({
-                    ...current,
-                    greeters: current.greeters.filter((greeter) => greeter.card.entityId !== item.card.entityId),
-                    picks: current.picks.filter(
-                      (_, index) => current.greeters[index]!.card.entityId !== item.card.entityId
-                    )
-                  }))
-                }}
-              >
-                Remove
-              </Button>
-            )}
-          </span>
-        ))}
-        <Field label="Add character" className="w-full sm:w-56">
-          <Select
-            value={null}
-            items={availableCharacters
-              .filter(
-                (item) =>
-                  item.entityId !== persona && !greeters.some((greeter) => greeter.card.entityId === item.entityId)
-              )
-              .map((item) => ({ value: item.entityId, label: item.name }))}
-            placeholder="Add character"
-            onValueChange={(id) => {
-              void action
-                .run((client) => client("GetCardForChat", { entityId: id as EntityId }))
-                .then((result) => {
-                  if (result.ok) {
-                    changePendingCast((current) =>
-                      current.persona === result.value.card.entityId ||
-                      current.greeters.some((item) => item.card.entityId === result.value.card.entityId)
-                        ? current
-                        : { ...current, greeters: [...current.greeters, result.value], picks: [...current.picks, 0] }
-                    )
-                  }
-                })
-            }}
-          />
-        </Field>
-      </div>
-      {fallbackNote && (
-        <p role="status" className="chat-column text-sm text-muted">
-          {fallbackNote}
-        </p>
-      )}
-      <div className="chat-column flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-2">
-        {options.every((list) => list.length === 0) && (
-          <p className="text-sm text-muted">
-            {members === null ? `${name} has no greeting.` : "None of them has a greeting."} Your first message starts
-            the chat.
-          </p>
-        )}
-        {greeters.map((greeter, at) =>
-          options[at]!.length === 0 ? (
-            members !== null && (
-              <p key={greeter.card.entityId} className="text-sm text-muted">
-                {greeter.card.name} has no greeting.
+            </ComposerBox>
+            {(guidance || text.trim() !== "") && (
+              <p id="composer-hint" className="text-xs text-muted">
+                {guidance
+                  ? `Guidance: one-turn guidance for ${speakerName}'s first reply. It leaves the box when you submit it.`
+                  : "Write doesn't use this text: turn guidance on to direct the reply with it."}
               </p>
-            )
-          ) : (
-            <Greeting
-              key={greeter.card.entityId}
-              card={greeter}
-              count={options[at]!.length}
-              groupOnly={greetingPick(options[at]!, effectivePicks[at]!)!.groupOnly}
-              index={options[at]!.findIndex((option) => option.index === effectivePicks[at])}
-              onIndex={(index) => {
-                setPendingCast((current) => ({
-                  ...current,
-                  fallbackNote: "",
-                  picks: effectivePicks.map((pick, i) => (i === at ? options[at]![index]!.index : pick))
-                }))
-              }}
-              text={expandGreeting(at, effectivePicks[at]!)}
-            />
-          )
-        )}
-      </div>
-      <div ref={composerRef} className="chat-column flex flex-col gap-2 border-t border-border pt-2 pb-2">
-        <PendingComposerControls placement="notes" context={controls} />
-        <UserDraftStatus draft={durable} />
-        {/* The chat's composer box: the text on its own row, who's speaking and the actions under it. */}
-        <ComposerBox
-          guidance={guidance}
-          start={
-            <CastContext value={speakerView}>
-              <PendingComposerControls placement="speaker" context={controls} />
-            </CastContext>
-          }
-          end={
-            <>
-              <PendingComposerControls placement="guidance" context={controls} />
-              <PendingComposerControls placement="actions" context={controls} />
-            </>
-          }
-        >
-          {guidance && (
-            <span aria-hidden className="px-2 pt-0.5 text-xs font-medium text-guidance">
-              Guidance
-            </span>
-          )}
-          <label htmlFor="composer" className="sr-only">
-            {guidance ? "Guidance" : "Message"}
-          </label>
-          <AutoGrowTextarea
-            id="composer"
-            data-testid="composer"
-            value={text}
-            // Short, so it fits one line on a phone, as the chat's composer does.
-            placeholder={guidance ? "Guidance for the next message…" : "Message…"}
-            aria-describedby={text.trim() !== "" || guidance ? "composer-hint" : undefined}
-            onKeyDown={(event) =>
-              composerKeyDown(async () => {
-                await invokePendingComposer(controls)
-              }, viewPrefs.prefs.enterSends)(event)
-            }
-            onChange={(event) => {
-              const value = event.currentTarget.value
-              typed.current = value
-              setText(value)
-              // While the first send is out, the copy keeps both, as a failed send leaves them.
-              const out = sending.current
-              void keep(out === null || out === "" ? value : value === "" ? out : `${out}\n\n${value}`)
-            }}
+            )}
+            <ErrorAlert error={action.error} />
+            <StripRow scroll={phone}>
+              <PendingComposerControls placement="strip" context={controls} />
+            </StripRow>
+          </div>
+        </div>
+        {panel !== null && (
+          <ChatSidePanel
+            tab={panel}
+            wide={wide}
+            title={title}
+            onTab={show}
+            onClose={() => show(null)}
+            pending={pending}
+            view={view}
           />
-        </ComposerBox>
-        {(guidance || text.trim() !== "") && (
-          <p id="composer-hint" className="text-xs text-muted">
-            {guidance
-              ? `Guidance: one-turn guidance for ${speakerName}'s first reply. It leaves the box when you submit it.`
-              : "Generate doesn't use this text: turn guidance on to direct the reply with it."}
-          </p>
         )}
-        <ErrorAlert error={action.error} />
       </div>
-    </>
+    </CastContext>
   )
 }
 
@@ -683,13 +503,31 @@ function RetryButton({ onRetry }: { onRetry: () => void }) {
   )
 }
 
+/** Holds the pending chat for as long as the page shows this card or group. */
+function PendingFor({
+  card,
+  cards,
+  greeters,
+  group
+}: {
+  card: CardForChat
+  cards: ReadonlyArray<CastCard>
+  greeters: ReadonlyArray<CardForChat>
+  group: { name: string; chatId: ChatId; members: ReadonlyArray<string> } | null
+}) {
+  const call = useCaller()
+  const [pending] = useState(
+    () => new PendingChat(cards, greeters, group && { name: group.name, chatId: group.chatId }, call)
+  )
+  return <Pending pending={pending} card={card} groupMembers={group?.members ?? null} />
+}
+
 /** /cards/$entityId/chat: a new chat with a card, made on its first send. */
 export function StartChatPage() {
   const { entityId } = useParams({ strict: false }) as { entityId: EntityId }
   const action = useAction()
   const [loaded, setLoaded] = useState<{
     card: CardForChat
-    personas: ReadonlyArray<CastCard>
     cards: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? loaded.card.card.name : "New chat")
@@ -708,25 +546,25 @@ export function StartChatPage() {
         })
       )
       .then((result) => {
-        if (result.ok) {
-          const cards = result.value.cards.filter((c) => c.entityId !== entityId)
-          setLoaded({ card: result.value.card, personas: cards.filter((c) => c.persona), cards })
-        }
+        if (result.ok)
+          setLoaded({ card: result.value.card, cards: result.value.cards.filter((c) => c.entityId !== entityId) })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card and attempt
   }, [entityId, attempt])
   return (
-    <PendingLayout entityId={entityId}>
-      <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
-        {loaded ? (
-          <Pending key={entityId} card={loaded.card} personas={loaded.personas} cards={loaded.cards} />
-        ) : action.error ? (
+    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {loaded ? (
+        <PendingFor key={entityId} card={loaded.card} cards={loaded.cards} greeters={[loaded.card]} group={null} />
+      ) : action.error ? (
+        <div className="chat-column pt-4">
           <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
-        ) : (
+        </div>
+      ) : (
+        <div className="chat-column pt-4">
           <Loading label="Loading the card…" onRetry={retry} />
-        )}
-      </div>
-    </PendingLayout>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -737,7 +575,6 @@ export function StartGroupChatPage() {
   const [loaded, setLoaded] = useState<{
     group: ChatGroup
     cards: ReadonlyArray<CardForChat>
-    personas: ReadonlyArray<CastCard>
     all: ReadonlyArray<CastCard>
   } | null>(null)
   useTitle(loaded ? `New chat: ${loaded.group.name}` : "New chat")
@@ -770,64 +607,33 @@ export function StartGroupChatPage() {
         if (!result.ok) return
         const { group, greeters, cards } = result.value
         const inGroup = new Set<string>(group.members.map((member) => member.entityId))
-        const all = cards.filter((c) => !inGroup.has(c.entityId))
-        setLoaded({ group, cards: greeters, personas: all.filter((c) => c.persona), all })
+        setLoaded({ group, cards: greeters, all: cards.filter((c) => !inGroup.has(c.entityId)) })
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once per group and attempt
   }, [chatId, attempt])
   return (
-    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-4">
+    <div data-fill className="flex min-h-0 min-w-0 flex-1 flex-col">
       {loaded ? (
-        <Pending
+        <PendingFor
           key={chatId}
           card={loaded.cards[0]!}
-          personas={loaded.personas}
           cards={loaded.all}
-          group={{ group: loaded.group, chatId, cards: loaded.cards }}
+          greeters={loaded.cards}
+          group={{
+            name: loaded.group.name,
+            chatId,
+            members: loaded.group.members.map((member) => member.entityId)
+          }}
         />
       ) : action.error ? (
-        <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
+        <div className="chat-column pt-4">
+          <ErrorAlert error={action.error} actions={<RetryButton onRetry={retry} />} />
+        </div>
       ) : (
-        <Loading label="Loading the group…" onRetry={retry} />
+        <div className="chat-column pt-4">
+          <Loading label="Loading the group…" onRetry={retry} />
+        </div>
       )}
-    </div>
-  )
-}
-
-function PendingLayout({ entityId, children }: { entityId: EntityId; children: ReactNode }) {
-  const search = useSearch({ strict: false }) as { panel?: string }
-  const navigate = useNavigate()
-  const wide = useWide()
-  const open = search.panel?.startsWith("card:") ?? false
-  const userId = useSession().user.id
-  const close = () => {
-    rememberPanel(userId, null)
-    void navigate({ to: ".", search: ({ panel: _panel, ...prev }: Record<string, unknown>) => prev, replace: true })
-  }
-  const body = (
-    <>
-      <Button variant="ghost" onClick={close}>
-        Close the panel
-      </Button>
-      <CharacterPanel entityId={entityId} />
-    </>
-  )
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1">
-      {children}
-      {open &&
-        (wide ? (
-          <aside
-            aria-label="Character panel"
-            className="w-80 shrink-0 overflow-y-auto border-l border-border bg-surface p-4"
-          >
-            {body}
-          </aside>
-        ) : (
-          <Sheet open onOpenChange={(v) => !v && close()} title="Character">
-            {body}
-          </Sheet>
-        ))}
     </div>
   )
 }

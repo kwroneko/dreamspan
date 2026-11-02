@@ -89,5 +89,10 @@ export function NoModelNote({ view }: { view: ChatView }) {
 export function PendingNoModel() {
   const defaults = useAtomValue(generationDefaultsAtom)
   if (!AsyncResult.isSuccess(defaults) || defaults.value.model) return null
-  return <NoModel className="rounded-md border border-warning/50 bg-surface px-3 py-2" />
+  // Where the open chat's note is: above the composer, in the chat's column.
+  return (
+    <div className="chat-column pb-2">
+      <NoModel className="rounded-md border border-warning/50 bg-surface px-3 py-2" />
+    </div>
+  )
 }

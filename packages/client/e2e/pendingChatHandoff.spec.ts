@@ -168,12 +168,12 @@ for (const target of ["card", "group"] as const) {
       }
       const composer = page.getByLabel("Message", { exact: true })
       const send = page.getByRole("button", { name: "Send", exact: true })
-      const generate = page.getByRole("button", { name: /^Generate / })
+      const generate = page.getByRole("button", { name: /^Write for / })
       await expect(composer).toBeEditable()
       await expect(send).toBeDisabled()
       // The chat's composer box at every width: the text on a row of its own, the actions on the
-      // control row under it; on a phone, Generate is an icon.
-      await expect(generate).toHaveText(width === 390 ? "" : "Generate")
+      // control row under it; on a phone, Write is an icon.
+      await expect(generate).toHaveText(width === 390 ? "" : "Write")
       await expect(send.locator("svg")).toBeVisible()
       const empty = (await composer.boundingBox())!
       expect(empty.height).toBeLessThan(45)

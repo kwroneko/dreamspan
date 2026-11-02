@@ -32,7 +32,8 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
   ) : null
 }
 
-export function HeaderPanel({ view, panel }: ChatHeaderActionProps) {
+/** The panel's button, in a saved chat's header and in a pending one's. */
+export function HeaderPanel({ view, panel }: Pick<ChatHeaderActionProps, "view" | "panel">) {
   return (
     <PanelToggles
       compact

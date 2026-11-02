@@ -30,8 +30,11 @@ import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
 import { EditorStore, useEditorState, useLeaveGuard } from "../editor/store.ts"
 import { ChatDefinition } from "./ChatDefinition.tsx"
-import type { PanelProps } from "./panels.tsx"
-import { PersonaSwitch } from "./PersonaSwitch.tsx"
+import type { ChatCardInfo } from "./CardForkDialogs.tsx"
+import type { PanelProps, PendingPanelProps } from "./panels.tsx"
+import type { PendingChat } from "./pendingChat.ts"
+import { usePendingCardInfo } from "./pendingCardInfo.ts"
+import { PendingPersonaSwitch, PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
@@ -40,6 +43,31 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
 export function CharacterTab({ session, view, tab }: PanelProps) {
   const entityId = tab.slice(5) as EntityId
   return <ChatCharacterPanel session={session} view={view} entityId={entityId} />
+}
+
+/**
+ * The same tab in a chat not made yet: the card editor and the card's actions, its entry read
+ * from the library (pendingCardInfo.ts); what needs the saved chat (Fork for this chat, Use
+ * another version) comes once it's saved.
+ */
+export function PendingCharacterTab({ pending, view, tab }: PendingPanelProps) {
+  const entityId = tab.slice(5) as EntityId
+  const card = view.cast?.cards.find((item) => item.entityId === entityId)
+  const info = usePendingCardInfo()(entityId)
+  const persona = view.cast?.playedByMe.includes(entityId) ?? false
+  if (!card) return <p className="text-sm text-muted">This character isn't in the chat.</p>
+  if (!info) return <p className="text-sm text-muted">Loading the card…</p>
+  return (
+    <CardPanel
+      key={info.refId}
+      session={null}
+      pending={pending}
+      view={view}
+      card={card}
+      info={info}
+      persona={persona}
+    />
+  )
 }
 
 function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession; view: ChatView; entityId: EntityId }) {
@@ -117,15 +145,18 @@ function NewChat({ card }: { card: CastCard }) {
 
 function CardPanel({
   session,
+  pending = null,
   view,
   card,
   info,
   persona
 }: {
-  session: ChatSession
+  /** Null in a chat not made yet, which `pending` is. */
+  session: ChatSession | null
+  pending?: PendingChat | null
   view: ChatView
   card: CastCard
-  info: ChatCard
+  info: ChatCardInfo & Partial<Pick<ChatCard, "definition">>
   /** The card you play: saving changes it wherever you play it. */
   persona: boolean
 }) {
@@ -139,7 +170,12 @@ function CardPanel({
   }, [store])
   useLeaveGuard(store)
   const portrait = { id: card.entityId, name: card.name, mediaId: card.avatarMediaId }
-  const others = info.usedByChats - 1
+  // The chats a change reaches besides this one, which a pending chat isn't counted in yet.
+  const others = session === null ? info.usedByChats : info.usedByChats - 1
+  // A new chat with only them is this one, while it's pending with no one else.
+  const alone =
+    pending !== null &&
+    view.cast?.participants.every((id) => id === card.entityId || view.cast?.playedByMe.includes(id))
   return (
     <div className="flex flex-col gap-4">
       <header className="flex items-start gap-3">
@@ -149,13 +185,17 @@ function CardPanel({
           id={card.entityId}
           shown={{ name: card.name, mediaId: card.avatarMediaId, crop: card.avatarCrop ?? null }}
           onViewFull={viewer && card.avatarMediaId !== null ? () => viewer.show(portrait) : undefined}
-          onChanged={() => void session.rereadCast()}
+          {...(session === null ? {} : { onChanged: () => void session.rereadCast() })}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {persona && <p className="text-xs text-muted">You play</p>}
           {state.snapshot ? (
             <>
-              <CardNameHeader store={store} call={call} current={{ chatId: session.id, forkId: view.forkId }} />
+              <CardNameHeader
+                store={store}
+                call={call}
+                current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
+              />
               <CardTokens store={store} />
             </>
           ) : (
@@ -164,9 +204,14 @@ function CardPanel({
         </div>
       </header>
       <div className="-mx-2 flex flex-wrap items-center gap-x-1">
-        {!persona && <NewChat card={card} />}
+        {!persona && !alone && <NewChat card={card} />}
         <ChatCardActions session={session} card={card} info={info} persona={persona} />
-        {persona && <PersonaSwitch session={session} trigger="Switch persona" />}
+        {persona &&
+          (session === null ? (
+            pending && <PendingPersonaSwitch pending={pending} trigger="Switch persona" />
+          ) : (
+            <PersonaSwitch session={session} trigger="Switch persona" />
+          ))}
       </div>
       {state.loadError && <ErrorAlert error={state.loadError} />}
       {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
@@ -180,9 +225,13 @@ function CardPanel({
                 ? `What you change is used for ${card.name} as you type, in every chat where you play them.`
                 : others === 0
                   ? `What you change is used for ${card.name} as you type; no other chat uses it.`
-                  : `What you change is used for ${card.name} as you type, in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
+                  : session === null
+                    ? `What you change is used for ${card.name} as you type, in this chat and ${plural(others, "other", "others")}.`
+                    : `What you change is used for ${card.name} as you type, in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
           </p>
-          {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
+          {info.binding === "revision" && info.definition && (
+            <ChatDefinition name={card.name} info={{ ...info, definition: info.definition }} />
+          )}
           {/* Save stays in sight while a field further down is edited; what's typed is used as it's typed. */}
           <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">
             <SaveRevision store={store} />

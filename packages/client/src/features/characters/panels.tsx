@@ -1,5 +1,7 @@
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import { chatPanels, lazyPanel, type PanelTabEntry } from "../chat/panels.tsx"
+import { lazy, Suspense } from "react"
+import { chatPanels, lazyPanel, type PanelTabEntry, type PendingPanelProps } from "../chat/panels.tsx"
+import { Loading } from "../../ui/Spinner.tsx"
 
 /** The character feature contributes the card tab family: the cast strip, a portrait each. */
 export const registerCharacterPanels = () =>
@@ -44,5 +46,18 @@ export const registerCharacterPanels = () =>
     component: lazyPanel(
       () => import("../chat/CharacterTab.tsx").then((module) => ({ default: module.CharacterTab })),
       "character"
-    )
+    ),
+    pending: PendingCharacter
   })
+
+const LazyPendingCharacter = lazy(() =>
+  import("../chat/CharacterTab.tsx").then((module) => ({ default: module.PendingCharacterTab }))
+)
+/** The same tab in a chat not made yet. */
+function PendingCharacter(props: PendingPanelProps) {
+  return (
+    <Suspense fallback={<Loading label="Loading the character…" />}>
+      <LazyPendingCharacter {...props} />
+    </Suspense>
+  )
+}

@@ -19,6 +19,10 @@ export function ChatCardActions(props: ChatCardActionProps) {
 export const chatSettingSections = defineSlot<{ session: ChatSession }>("chat.setting-sections")
 /** Sections of the Cast tab under the cast itself: Add characters (CastAdd.tsx). */
 export const castSections = defineSlot<{ session: ChatSession }>("chat.cast-sections")
+/** The same sections in a chat not made yet: who answers first, Add characters. */
+export const pendingCastSections = defineSlot<{ pending: import("./pendingChat.ts").PendingChat }>(
+  "chat.pending-cast-sections"
+)
 /** Actions in an opened chat note's row, above its editor; `onChanged` reads the notes again. */
 export const chatNoteActions = defineSlot<{ note: ChatNote; session: ChatSession; onChanged: () => void }>(
   "chat.note-actions"
@@ -135,6 +139,9 @@ export const chatComposer = defineSlot<ComponentProps<typeof import("./Composer.
 export const chatBranchControls = defineSlot<import("./BranchControl.tsx").BranchControlProps>("chat.branch-controls")
 /** The header's buttons at the end of its row, after the branch control: the pin, the panel, ⋯. */
 export const chatHeaderActions = defineSlot<import("./ChatHeader.tsx").ChatHeaderActionProps>("chat.header-actions")
+/** The same buttons in a chat not made yet (before the first send): the panel. */
+export const pendingChatHeaderActions =
+  defineSlot<import("./ChatHeader.tsx").PendingHeaderActionProps>("chat.pending-header-actions")
 export const messagePreviews = defineSlot<{ entry: PathEntry; session: ChatSession }>("message.previews")
 export const summaryPreviews = defineSlot<{ summary: import("@rp/shared/lcm.ts").LcmSummary; session: ChatSession }>(
   "summary.previews"

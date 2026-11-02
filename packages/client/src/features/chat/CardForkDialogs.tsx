@@ -18,10 +18,14 @@ import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { ChatSession } from "./session.ts"
 
+/** What a card's actions need of its library entry: the ref to edit, and how far a change reaches. */
+export type ChatCardInfo = Pick<ChatCard, "entityId" | "refId" | "usedByChats" | "binding">
+
 export interface ChatCardActionProps {
-  session: ChatSession
+  /** Null in a chat not made yet (before the first send): actions on this chat's copy aren't offered. */
+  session: ChatSession | null
   card: CastCard
-  info: ChatCard | undefined
+  info: ChatCardInfo | undefined
   /** The card the user plays here (the persona's tab): actions for a character in the chat leave it out. */
   persona?: boolean | undefined
 }
@@ -43,7 +47,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
         void navigate({
           to: "/library/$refId",
           params: { refId: info.refId },
-          search: { renameChat: session.id, renameFork: session.snapshot().forkId }
+          ...(session === null ? {} : { search: { renameChat: session.id, renameFork: session.snapshot().forkId } })
         })
       }}
     >
@@ -53,7 +57,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
 }
 export function ForkChatCard({ session, card, info, persona }: ChatCardActionProps) {
   const [open, setOpen] = useState(false)
-  if (persona) return null
+  if (persona || session === null) return null
   return (
     <>
       <Button
@@ -72,7 +76,7 @@ export function ForkChatCard({ session, card, info, persona }: ChatCardActionPro
 }
 export function ChooseChatCard({ session, card, info, persona }: ChatCardActionProps) {
   const [open, setOpen] = useState(false)
-  if (persona) return null
+  if (persona || session === null) return null
   return (
     <>
       <Button
@@ -98,7 +102,7 @@ function ChatCardForkDialog({
 }: {
   session: ChatSession
   card: CastCard
-  info: ChatCard
+  info: ChatCardInfo
   onClose: () => void
 }) {
   // Keep the position the dialog was opened at even if another tab moves the chat.

@@ -5,6 +5,7 @@ import type { CastCard } from "@rp/shared/chat.ts"
 import { type ReactNode, useCallback, useMemo, useState, useSyncExternalStore } from "react"
 import type { AppError } from "../../errors.ts"
 import { castView, CastContext } from "./cast.ts"
+import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession } from "./session.ts"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 
@@ -37,5 +38,28 @@ export function PersonaSwitch({ session, trigger }: { session: ChatSession; trig
         </p>
       )}
     </>
+  )
+}
+
+/** The same switch in a chat not made yet: who `{{user}}` is from its greetings on, or no persona. */
+export function PendingPersonaSwitch({ pending, trigger }: { pending: PendingChat; trigger?: ReactNode }) {
+  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
+  const view = useMemo(
+    () => castView(null, [...state.greeters.map((item) => item.card), ...pending.cards]),
+    [state.greeters, pending.cards]
+  )
+  return (
+    <CastContext value={view}>
+      <SpeakerSwitcher
+        listCards={pending.listCards}
+        speaker={state.persona}
+        recent={[]}
+        persona
+        pending
+        trigger={trigger}
+        onPick={(card) => pending.setPersona(card.entityId)}
+        onNone={() => pending.setPersona(null)}
+      />
+    </CastContext>
   )
 }

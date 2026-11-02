@@ -1,17 +1,17 @@
 import { SlotOutlet } from "../../slots.tsx"
-import { chatBranchControls, chatHeaderActions } from "./presentation.tsx"
+import { chatBranchControls, chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 // The open chat's header, one row: whose chat it is (the cast's faces, the chat's readable
 // name, never ST's file name, which a click renames in place, and the cast's names under it),
 // then the branch control and the chat's buttons (the pin, the side panel, ⋯), which are
 // contributions (`chatBranchControls`, `chatHeaderActions`). On a phone it replaces the app's
 // top bar (shell.tsx), with ← to the chats. While the chat loads it shows placeholders, not
 // a name it doesn't know yet.
-import type { Chat, SlotId } from "@rp/shared/chat.ts"
+import type { CastCard, Chat, SlotId } from "@rp/shared/chat.ts"
 import type { ChatName } from "@rp/shared/chatName.ts"
 import type { ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import { importState } from "@rp/shared/stImportApi.ts"
 import { Link, useNavigate } from "@tanstack/react-router"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import type { AppError } from "../../errors.ts"
 import { RadioGroup } from "../../ui/Choice.tsx"
 import { Fieldset, Input } from "../../ui/Field.tsx"
@@ -19,11 +19,13 @@ import { showToast } from "../../ui/Toast.tsx"
 import { NameDialog } from "./NameDialog.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Icon } from "../../ui/Icon.tsx"
+import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { openAppMenu, sidebarToggle, useTitle } from "../shell.tsx"
 import { ChatBadges } from "./ChatsPage.tsx"
 import { castCharacters, chatName, formatDay } from "./chatTitle.ts"
 import type { PanelTab } from "./ChatPanels.tsx"
+import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, ChatView, Outcome } from "./session.ts"
 
 /** Runs a session write, keeping its pending state and error. */
@@ -226,6 +228,26 @@ export interface ChatHeaderActionProps {
   readonly onRename: () => void
 }
 
+/** What a pending chat's header buttons (`pendingChatHeaderActions`) are given. */
+export interface PendingHeaderActionProps {
+  readonly pending: PendingChat
+  readonly view: ChatView
+  readonly panel: PanelControl
+}
+
+/** Under the name: who else is in it, by name only (versions are on their cards). */
+const aboutLine = (characters: ReadonlyArray<CastCard>, name: string | undefined, started: Date | null) => {
+  const others = characters.map((card) => card.name).filter((n) => n !== name)
+  // With no one else, the day ST started it, which tells same-named chats apart.
+  return others.length > 0
+    ? others.length < characters.length
+      ? `with ${others.join(", ")}`
+      : others.join(", ")
+    : started
+      ? `started ${formatDay(started)}`
+      : null
+}
+
 export function ChatHeader({
   session,
   view,
@@ -240,22 +262,92 @@ export function ChatHeader({
   onJump: (slotId: SlotId) => void
 }) {
   const characters = castCharacters(view)
-  const navigate = useNavigate()
   const [renameRequest, setRenameRequest] = useState(0)
   const name = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
   useTitle(name?.name ?? "Chat")
-  // Under the name: who else is in it, by name only (versions are on their cards); with no
-  // one else, the day ST started it, which tells same-named chats apart.
-  const others = characters.map((card) => card.name).filter((n) => n !== name?.name)
-  const about =
-    others.length > 0
-      ? others.length < characters.length
-        ? `with ${others.join(", ")}`
-        : others.join(", ")
-      : name?.started
-        ? `started ${formatDay(name.started)}`
-        : null
   const loading = view.chat === null
+  return (
+    <ChatHeaderFrame
+      characters={characters}
+      loading={loading}
+      title={
+        <>
+          <ChatTitle session={session} view={view} name={name} request={renameRequest} />
+          {view.chat && <ChatBadges chat={view.chat} />}
+        </>
+      }
+      about={aboutLine(characters, name?.name, name?.started ?? null)}
+      actions={
+        !loading && (
+          <>
+            <SlotOutlet slot={chatBranchControls} props={{ session, view, onJump }} />
+            <SlotOutlet
+              slot={chatHeaderActions}
+              props={{ session, view, panel, onHistory, onJump, onRename: () => setRenameRequest((n) => n + 1) }}
+            />
+          </>
+        )
+      }
+    />
+  )
+}
+
+/**
+ * A chat not made yet has the same header (owner, 2026-11-02: it looks and works like any
+ * other chat): the name it will be saved under, its cast's faces, and its buttons
+ * (`pendingChatHeaderActions`: the side panel). The name isn't renamed until it's saved.
+ */
+export function PendingChatHeader({
+  pending,
+  view,
+  title,
+  panel
+}: {
+  pending: PendingChat
+  view: ChatView
+  title: string
+  panel: PanelControl
+}) {
+  const characters = castCharacters(view)
+  useTitle(title)
+  return (
+    <ChatHeaderFrame
+      characters={characters}
+      loading={false}
+      title={
+        <>
+          <h1 className="min-w-0 truncate text-base font-semibold">{title}</h1>
+          <Tooltip label="Not saved yet: sending the first message saves the chat.">
+            <span
+              tabIndex={0}
+              className="shrink-0 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            >
+              <Badge>new</Badge>
+            </span>
+          </Tooltip>
+        </>
+      }
+      about={aboutLine(characters, title, null)}
+      actions={<SlotOutlet slot={pendingChatHeaderActions} props={{ pending, view, panel }} />}
+    />
+  )
+}
+
+/** The header's row, the same for a saved chat and one not made yet. */
+function ChatHeaderFrame({
+  characters,
+  loading,
+  title,
+  about,
+  actions
+}: {
+  characters: ReadonlyArray<CastCard>
+  loading: boolean
+  title: ReactNode
+  about: string | null
+  actions: ReactNode
+}) {
+  const navigate = useNavigate()
   return (
     <TooltipProvider>
       <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-1.5 sm:gap-3 sm:px-4">
@@ -312,25 +404,14 @@ export function ChatHeader({
           )
         )}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex min-w-0 items-center gap-2">
-            <ChatTitle session={session} view={view} name={name} request={renameRequest} />
-            {view.chat && <ChatBadges chat={view.chat} />}
-          </div>
+          <div className="flex min-w-0 items-center gap-2">{title}</div>
           {about !== null && (
             <p className="truncate text-xs text-muted" title={about}>
               {about}
             </p>
           )}
         </div>
-        {!loading && (
-          <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
-            <SlotOutlet slot={chatBranchControls} props={{ session, view, onJump }} />
-            <SlotOutlet
-              slot={chatHeaderActions}
-              props={{ session, view, panel, onHistory, onJump, onRename: () => setRenameRequest((n) => n + 1) }}
-            />
-          </div>
-        )}
+        {actions && <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">{actions}</div>}
       </header>
     </TooltipProvider>
   )

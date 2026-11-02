@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { openPanel } from "./support/panel.ts"
+import { pickPendingPersona } from "./support/cast.ts"
 import { hideAppNavigation, showAppNavigation } from "./support/appMenu.ts"
 import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -42,8 +43,7 @@ const chat = async (page: Page) => {
   await prepare(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).click()
-  await page.getByLabel("Playing as").click()
-  await page.getByRole("option", { name: "Bo", exact: true }).click()
+  await pickPendingPersona(page, "Bo")
   await page.getByLabel("Message", { exact: true }).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
   await expect(page).toHaveURL(/\/chats\//)

@@ -397,9 +397,12 @@ test("the pending chat's Playing as is the persona control, and guidance generat
     .getByRole("link", { name: /^Start a chat with / })
     .first()
     .click()
+  // Who you play is the Cast tab's, as in a saved chat.
+  await openPanel(page, "Cast")
   await page.getByRole("button", { name: /^Playing as / }).click()
   await expect(page.getByRole("tab", { name: "Personas", selected: true })).toBeVisible()
   await page.keyboard.press("Escape")
+  await closePanel(page)
   const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
   await guidance.fill("Open on the docks at dawn.")
   const sent = provider.completions.length

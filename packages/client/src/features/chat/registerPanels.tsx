@@ -1,6 +1,17 @@
 import { Loading } from "../../ui/Spinner.tsx"
 import { SlotOutlet } from "../../slots.tsx"
-import { chatPanels, lazyPanel, type PanelProps } from "./panels.tsx"
+import { chatPanels, lazyPanel, type PanelProps, type PendingPanelProps } from "./panels.tsx"
+import { lazy, Suspense, type ComponentType } from "react"
+
+/** A tab's body in a chat not made yet, loaded when first shown. */
+const lazyPending = (load: () => Promise<{ default: ComponentType<PendingPanelProps> }>, label: string) => {
+  const Body = lazy(load)
+  return (props: PendingPanelProps) => (
+    <Suspense fallback={<Loading label={`Loading the ${label}…`} />}>
+      <Body {...props} />
+    </Suspense>
+  )
+}
 import { summaryPanelSections } from "./presentation.tsx"
 
 const loadNotes = () =>
@@ -32,6 +43,11 @@ export const registerPanels = () => [
           )
         })),
       "model"
+    ),
+    // The model is the account's: it's chosen here before the first send too; its settings show once saved.
+    pending: lazyPending(
+      () => import("../pickers/PanelPickers.tsx").then((p) => ({ default: () => <p.ModelTabPicker session={null} /> })),
+      "model"
     )
   }),
   chatPanels.register({
@@ -52,6 +68,11 @@ export const registerPanels = () => [
           )
         })),
       "preset"
+    ),
+    pending: lazyPending(
+      () =>
+        import("../pickers/PanelPickers.tsx").then((p) => ({ default: () => <p.PresetTabPicker session={null} /> })),
+      "preset"
     )
   }),
   chatPanels.register({
@@ -65,6 +86,13 @@ export const registerPanels = () => [
       () =>
         import("./CastTab.tsx").then((m) => ({
           default: ({ session }: PanelProps) => <m.CastTab session={session} />
+        })),
+      "cast"
+    ),
+    pending: lazyPending(
+      () =>
+        import("./CastTab.tsx").then((m) => ({
+          default: ({ pending }: PendingPanelProps) => <m.PendingCastTab pending={pending} />
         })),
       "cast"
     )

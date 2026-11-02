@@ -42,6 +42,8 @@ export const registerDisplay = () => [
     description: "How your chats look to you: Enter to send, colours, macros and display scripts.",
     order: 85,
     icon: "type",
-    component: DisplaySettings
+    component: DisplaySettings,
+    // The account's, so the same before the first send.
+    pending: DisplaySettings
   })
 ]

@@ -5,11 +5,11 @@
 // the chat (headerParts.tsx, chatExport.tsx), not with the app.
 import { type ComponentType, lazy, Suspense } from "react"
 import { showToast } from "../../ui/Toast.tsx"
-import type { ChatHeaderActionProps } from "./ChatHeader.tsx"
+import type { ChatHeaderActionProps, PendingHeaderActionProps } from "./ChatHeader.tsx"
 import { castCharacters } from "./chatTitle.ts"
 import { type ChatCommandDialogProps, chatCommands } from "./commands.tsx"
 import { requestBranches } from "./forks.ts"
-import { chatHeaderActions } from "./presentation.tsx"
+import { chatHeaderActions, pendingChatHeaderActions } from "./presentation.tsx"
 
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
   const Component = lazy(load)
@@ -21,6 +21,9 @@ function deferred<P extends object>(load: () => Promise<{ default: ComponentType
 }
 const part = <K extends "HeaderPin" | "HeaderPanel" | "HeaderMenu">(name: K) =>
   deferred<ChatHeaderActionProps>(() => import("./headerParts.tsx").then((m) => ({ default: m[name] })))
+const PendingPanel = deferred<PendingHeaderActionProps>(() =>
+  import("./headerParts.tsx").then((m) => ({ default: m.HeaderPanel }))
+)
 const ShortcutsDialog = deferred<ChatCommandDialogProps>(() =>
   import("./headerParts.tsx").then((m) => ({ default: m.ShortcutsDialog }))
 )
@@ -32,6 +35,8 @@ export const registerChatHeader = () => [
   chatHeaderActions.register({ id: "chat.pin", order: 10, component: part("HeaderPin") }),
   chatHeaderActions.register({ id: "chat.panel", order: 20, component: part("HeaderPanel") }),
   chatHeaderActions.register({ id: "chat.menu", order: 30, component: part("HeaderMenu") }),
+  // A chat not made yet has no pin (no branch to pin) and no ⋯ (its commands need a saved chat).
+  pendingChatHeaderActions.register({ id: "chat.panel", order: 20, component: PendingPanel }),
   chatCommands.register({
     id: "chat.rename",
     label: "Rename",

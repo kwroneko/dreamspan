@@ -9,8 +9,8 @@ import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
-import { openPanel } from "./support/panel.ts"
-import { addToCast } from "./support/cast.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
+import { addToCast, pickPendingPersona } from "./support/cast.ts"
 
 // About four seconds a reply: long enough to queue behind and to stop.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -86,8 +86,7 @@ const login = async (page: Page) => {
 const chatWithMira = async (page: Page) => {
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).click()
-  await page.getByLabel("Playing as").click()
-  await page.getByRole("option", { name: "Bo" }).click()
+  await pickPendingPersona(page, "Bo")
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
@@ -108,8 +107,7 @@ test("a new chat from a card: the greeting follows the persona until the first s
 
   await greeting.getByRole("button", { name: "Next greeting" }).click()
   await expect(greeting).toContainText("Mira waves at Ana from the pier.")
-  await page.getByLabel("Playing as").click()
-  await page.getByRole("option", { name: "Bo" }).click()
+  await pickPendingPersona(page, "Bo")
   await expect(greeting).toContainText("Mira waves at Bo from the pier.")
   await expect(page.getByRole("listbox")).toHaveCount(0)
   await shoot(page, "new-chat-from-card")
@@ -374,7 +372,7 @@ test("a card with 1,001 greetings and a huge random draw starts like any other",
   await login(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Crowd" }).click()
-  await expect(page.getByRole("article", { name: /^Greeting from / })).toContainText("1 / 1001")
+  await expect(page.getByRole("article", { name: /^Greeting from / })).toContainText("1/1001")
   await composer(page).fill("Hello, everyone.")
   await page.getByRole("button", { name: /^Send/ }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
@@ -401,10 +399,9 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await page.goto(`${server().url}/`)
   await page.goto(`${server().url}/groups/${chatId}/new`)
   await expect(page).toHaveURL(`${server().url}/groups/${chatId}/new`)
-  await expect(page.getByRole("heading", { level: 1, name: "New chat: The Pier" })).toBeVisible()
-  await expect(
-    page.getByText("With Mira, Tobin, who greet in turn. Saved when you send the first message.")
-  ).toBeVisible()
+  // The chat page, under the name it's saved with, marked new until the first send.
+  await expect(page.getByRole("heading", { level: 1, name: "The Pier" })).toBeVisible()
+  await expect(page.locator("header").getByText("new", { exact: true })).toBeVisible()
   // Each member's greeting, in the group's order, as ST starts a group chat; each has its alternates.
   const greetings = page.getByRole("article", { name: /^Greeting from / })
   await expect(greetings).toHaveCount(2)
@@ -413,7 +410,7 @@ test("a new chat of a group: each character greets in turn, and the first send m
   const previous = greetings.nth(0).getByRole("button", { name: "Previous greeting from Mira" })
   if (await previous.isEnabled()) await previous.click()
   await expect(greetings.nth(0)).toContainText("The bell rings for Ana.")
-  await expect(greetings.nth(0)).toContainText("1 / 2")
+  await expect(greetings.nth(0)).toContainText("1/2")
   await expect(greetings.nth(1)).toContainText("Tobin nods.")
   // Opening it made no chat: the group still has one.
   await page.goto(`${server().url}/groups/${chatId}`)
@@ -425,10 +422,13 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await composer(page).fill("Is the ferry running?")
   await page.reload()
   await expect(composer(page)).toHaveValue("Is the ferry running?")
-  await page.getByLabel("Reply from").click()
+  // Who answers first is picked in the Cast tab, as who replies is in a saved chat.
+  const cast = await openPanel(page, "Cast")
+  await cast.getByLabel("Reply from").click()
   await page.getByRole("option", { name: "Tobin" }).click()
-  // Reply from is independent of the speaker that Generate writes.
-  await expect(page.getByRole("button", { name: "Generate Ana" })).toBeVisible()
+  await closePanel(page)
+  // Reply from is independent of the speaker that Write writes.
+  await expect(page.getByRole("button", { name: "Write for Ana" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
   // Reopening draws again. Pick the alternate explicitly before sending.

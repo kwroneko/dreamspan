@@ -7,6 +7,7 @@ import { makeRegistry } from "../../registry.ts"
 import { Button } from "../../ui/Button.tsx"
 import type { IconName } from "../../ui/Icon.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
+import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 export interface PanelProps {
@@ -22,6 +23,14 @@ export interface PanelProps {
   readonly onEnable: () => void
 }
 
+/** What a tab's body is given in a chat not made yet (pendingChat.ts): the pending chat in place of a session. */
+export interface PendingPanelProps {
+  readonly tab: string
+  readonly active: boolean
+  readonly pending: PendingChat
+  readonly view: ChatView
+}
+
 export interface PanelDescriptor {
   readonly id: string
   readonly label: string
@@ -30,6 +39,11 @@ export interface PanelDescriptor {
   readonly order: number
   readonly icon: IconName
   readonly component: ComponentType<PanelProps>
+  /**
+   * Its body in a chat not made yet (before the first send). Without one the tab is still
+   * there, in its place, and says it opens once the chat is saved.
+   */
+  readonly pending?: ComponentType<PendingPanelProps>
   readonly available?: (view: ChatView) => boolean
   /**
    * Where its tabs go: "tools" (the default), a row of icons and labels that never wraps, what
@@ -133,6 +147,16 @@ export const useShowPanel = () => {
 
 export function PanelContent({ descriptor, ...props }: PanelProps & { descriptor: PanelDescriptor }) {
   return <descriptor.component {...props} />
+}
+
+/** A tab's body in a chat not made yet: its pending body, or what it waits for. */
+export function PendingPanelContent({ descriptor, ...props }: PendingPanelProps & { descriptor: PanelDescriptor }) {
+  if (descriptor.pending) return <descriptor.pending {...props} />
+  return (
+    <p role="note" className="text-sm text-muted">
+      Available once the chat is saved, when you send the first message.
+    </p>
+  )
 }
 
 /** Starts loading a lazy panel's code (`lazyPanel`), if it is one: the panel does this for every tab once it's open. */
