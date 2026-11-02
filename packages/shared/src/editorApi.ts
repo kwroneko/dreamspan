@@ -79,7 +79,16 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
   )
 }) {}
 
-export class NoteEntry extends Schema.Class<NoteEntry>("NoteEntry")({ ref: LibraryRef, doc: Doc }) {}
+export class NoteEntry extends Schema.Class<NoteEntry>("NoteEntry")({
+  ref: LibraryRef,
+  doc: Doc,
+  /**
+   * The note as chats send it: its live text (its active drafts on `doc`, §14.2a), with a
+   * linked slot's `content` its shared note's, live too. Absent when it sends nothing: a slot
+   * linked to a shared note in the bin, or a note whose content isn't text.
+   */
+  sent: Schema.optionalKey(Doc)
+}) {}
 
 /** A shared named note (DESIGN §4.1), as the picker lists it: how many slots link to it. */
 export class SharedNote extends Schema.Class<SharedNote>("SharedNote")({

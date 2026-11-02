@@ -5,6 +5,7 @@ import { chatFork, readSnippet } from "./snippets.ts"
 import { EditorSnapshot, NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { entityDraftTarget } from "@rp/shared/drafts.ts"
+import { applyDrafts } from "@rp/shared/editing.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
 import { Effect } from "effect"
@@ -105,8 +106,33 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
              '$.owner.card') = ?`,
           [userId, card.entity_id]
         )
+        // Live text is what's sent (§14.2a): a note as typed, its active drafts on its head.
+        const live = (refId: string, head: Doc) =>
+          Effect.map(
+            sql<{ field: string; content: string }>`SELECT field, content FROM drafts WHERE user_id = ${userId}
+              AND target_kind = 'entity_field' AND target_id = ${refId} AND status = 'active' ORDER BY field`,
+            (rows) => (rows.length === 0 ? head : applyDrafts("note", head, rows).doc)
+          )
         return yield* Effect.forEach(notes, (note) =>
-          Effect.map(lib.loadDoc(note.head_revision_id), (doc) => new NoteEntry({ ref: toLibraryRef(note), doc }))
+          Effect.gen(function* () {
+            const doc = yield* lib.loadDoc(note.head_revision_id)
+            const sent = yield* live(note.id, doc)
+            // A linked slot sends its shared note's text, as the assembler reads it; one linked
+            // to a shared note in the bin sends nothing.
+            const link = typeof sent.link === "string" ? sent.link : null
+            const shared = link === null ? null : yield* sharedNote(sql, userId, link)
+            const content =
+              link === null
+                ? sent.content
+                : shared && shared.deleted !== 1
+                  ? (yield* live(shared.ref_id, { content: shared.content ?? "" })).content
+                  : undefined
+            return new NoteEntry({
+              ref: toLibraryRef(note),
+              doc,
+              ...(typeof content === "string" ? { sent: { ...sent, content } } : {})
+            })
+          })
         )
       }).pipe(query("ListCardNotes")),
 

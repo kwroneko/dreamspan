@@ -1,12 +1,12 @@
 import { eventAppliesSql, eventOrder } from "./forkState.ts"
-import { cardNames, modelName } from "@rp/shared/cardNames.ts"
+import { cardNames } from "@rp/shared/cardNames.ts"
 // Read handlers for chat setup, speakers and the send queue (DESIGN §2.1, §2.2). They run
 // in the reader workers; every one touches only the acting user's rows.
 import { makeShellReadHandlers } from "./shellReads.ts"
 import type { Chat } from "@rp/shared/chat.ts"
 import { type ChatId, ChatSummary, type EntityId } from "@rp/shared/chat.ts"
 import { chatName } from "@rp/shared/chatName.ts"
-import { avatarCropField, avatarCropFieldFromJson } from "@rp/shared/media.ts"
+import { avatarCropField } from "@rp/shared/media.ts"
 import { CardDefinition, CardForChat, CardUsage, ChatCard, ChatGroup } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -14,7 +14,7 @@ import { importState } from "@rp/shared/stImportApi.ts"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
-import { chatCast, castCardAt, loadCards } from "./cards.ts"
+import { type CardSummaryRow, cardSummary, chatCast, castCardAt, loadCards, loadCastCards } from "./cards.ts"
 import { type CardBinding, makeLibraryQueries } from "./library.ts"
 import { NotFound, type ReadOps, StorageError } from "./ops.ts"
 import { chatQueue } from "./queueRows.ts"
@@ -83,32 +83,24 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         FROM chats c WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL
         ORDER BY c.last_message_at IS NOT NULL DESC, coalesce(c.last_message_at, c.created_at) DESC, c.id DESC`
       if (chats.length === 0) return []
-      const cards = yield* sql<{
-        entity_id: string
-        label: string
-        subtitle: string
-        name: unknown
-        avatar: unknown
-        crop: unknown
-      }>`
-        SELECT e.id AS entity_id, r.label, r.subtitle, json_extract(rev.doc_json, '$.name') AS name,
-          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar, json_extract(rev.doc_json, '$.avatar_crop') AS crop
+      const cards = yield* sql<CardSummaryRow & { entity_id: string; label: string; subtitle: string }>`
+        SELECT e.id AS entity_id, r.label, r.subtitle, cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries
         FROM entities e
         JOIN entity_refs r ON r.id = (
           SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
           LIMIT 1)
-        JOIN entity_revisions rev ON rev.id = r.head_revision_id
+        LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL`
       const characters = new Map<string, Member>()
       for (const card of cards) {
-        const name = typeof card.name === "string" ? card.name : ""
+        const summary = cardSummary(card)
         characters.set(card.entity_id, {
           entityId: card.entity_id as EntityId,
-          name: name === "" ? card.label : name,
+          name: summary.name === "" ? card.label : summary.name,
           label: card.label,
           subtitle: card.subtitle,
-          avatarMediaId: typeof card.avatar === "string" ? card.avatar : null,
-          ...avatarCropFieldFromJson(card.avatar, card.crop)
+          avatarMediaId: summary.avatarMediaId,
+          ...summary.crop
         })
       }
       const decoded = yield* Effect.forEach(chats, (row) =>
@@ -194,11 +186,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
         return found
       }).pipe(query("GroupChats")),
 
-    ListCards: ({ userId }) =>
-      loadCards(sql, userId, null).pipe(
-        Effect.map((cards) => cards.map(({ card }) => card)),
-        query("ListCards")
-      ),
+    ListCards: ({ userId }) => loadCastCards(sql, userId, null).pipe(query("ListCards")),
 
     // One query for the whole grid (DESIGN §2.1): each live card that isn't a persona, read
     // from the ref loadCards picks, with the chats it joined on any branch (a card that left a
@@ -209,18 +197,16 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
     // CROSS JOIN keeps the indexed participant seek first: reordering chats first probes
     // every live chat for every card (5 million probes in the scale fixture).
     CardUsage: ({ userId }) =>
-      sql<{
-        entity_id: string
-        ref_id: string
-        head_revision_id: string
-        label: string
-        subtitle: string
-        nickname: unknown
-        name: unknown
-        avatar: unknown
-        crop: unknown
-        used: string
-      }>`
+      sql<
+        CardSummaryRow & {
+          entity_id: string
+          ref_id: string
+          head_revision_id: string
+          label: string
+          subtitle: string
+          used: string
+        }
+      >`
         WITH cards AS (
           SELECT e.id AS entity_id, r.id AS ref_id, r.head_revision_id, r.label, r.subtitle
           FROM entities e
@@ -231,8 +217,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             AND e.deleted_at IS NULL AND e.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona')
         )
-        SELECT cards.*, json_extract(rev.doc_json, '$.name') AS name, json_extract(rev.doc_json, '$.nickname') AS nickname,
-          json_extract(rev.doc_json, '$.avatar_media_id') AS avatar, json_extract(rev.doc_json, '$.avatar_crop') AS crop,
+        SELECT cards.*, cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries,
           (SELECT json_object(
               'chats', count(DISTINCT c.id),
               'last', max(c.last_message_at),
@@ -242,22 +227,22 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
             WHERE json_extract(s.value_json, '$.entity') = +cards.entity_id
               AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
-        FROM cards JOIN entity_revisions rev ON rev.id = cards.head_revision_id
+        FROM cards LEFT JOIN card_summaries cs ON cs.revision_id = cards.head_revision_id
         ORDER BY cards.label COLLATE NOCASE, cards.entity_id`.pipe(
         Effect.map((rows) =>
           rows.map((row) => {
             const used = JSON.parse(row.used) as { chats: number; last: number | null; latest: string | null }
-            const name = typeof row.name === "string" ? row.name : ""
+            const summary = cardSummary(row)
             return new CardUsage({
               entityId: row.entity_id as EntityId,
               refId: row.ref_id as RefId,
               headRevisionId: row.head_revision_id as RevisionId,
               label: row.label,
               subtitle: row.subtitle,
-              name: name === "" ? row.label : name,
-              modelName: modelName({ name, nickname: text(row.nickname) }),
-              avatarMediaId: typeof row.avatar === "string" ? row.avatar : null,
-              ...avatarCropFieldFromJson(row.avatar, row.crop),
+              name: summary.name === "" ? row.label : summary.name,
+              modelName: summary.modelName,
+              avatarMediaId: summary.avatarMediaId,
+              ...summary.crop,
               chats: used.chats,
               lastMessageAt: used.last,
               latestChatId: (used.latest || null) as ChatId | null
@@ -301,7 +286,7 @@ export const makeChatSetupReadHandlers = Effect.gen(function* () {
 
     CastCards: ({ userId, entityIds, chat }) =>
       Effect.gen(function* () {
-        const cards = (yield* loadCards(sql, userId, entityIds)).map(({ card }) => card)
+        const cards = yield* loadCastCards(sql, userId, entityIds)
         if (chat === undefined) return cards
         // The name the chat uses is the one the model reads: its own version's, say.
         return yield* Effect.forEach(cards, (card) =>

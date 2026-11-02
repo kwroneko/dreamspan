@@ -10,10 +10,11 @@ import { useAtomValue } from "@effect/atom-react"
 import { cardTokenTexts, sumCardTokens } from "@rp/shared/cardTokens.ts"
 import { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
+import type { NoteEntry } from "@rp/shared/editorApi.ts"
 import { useSearch } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { AsyncResult } from "effect/reactivity"
-import { type ReactNode, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
@@ -22,7 +23,8 @@ import type { Caller } from "./caller.ts"
 import { type CardSaved, type RenameAnswer, showCardSaved } from "./cardSaved.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 import { useSearchMatch } from "./searchNavigation.ts"
-import { type EditorStore, useEditorState, useText, useWorkingDoc } from "./store.ts"
+import { EditorStore, useEditorState, useText, useWorkingDoc } from "./store.ts"
+import { openEditorStore, subscribeOpenEditors } from "./openEditors.ts"
 import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
 import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
@@ -39,23 +41,59 @@ const VERSION_HINT =
 const NICKNAME_HINT =
   "The chat name (the card's nickname): what chats and the model call them, and what {{char}} becomes. Empty: the display name."
 
-/** A card's notes on in every chat by default, by their own text: what ST counts as its Character's Note. */
+/**
+ * The text of a card's notes on in every chat by default, as chats send it (what ST counts as
+ * its Character's Note): a note's own text, a linked note's shared note's, nothing for a link
+ * to a shared note in the bin.
+ */
 function useDefaultNotes(refId: string): ReadonlyArray<string> {
   const atom = useMemo(
     () => AppClient.query("ListCardNotes", { cardRefId: refId as never }, { reactivityKeys: ["library"] }),
     [refId]
   )
   const notes = useAtomValue(atom)
-  const texts = AsyncResult.isSuccess(notes)
-    ? notes.value.flatMap(({ doc }) =>
-        doc.on_by_default === true && doc.link === undefined && typeof doc.content === "string" ? [doc.content] : []
-      )
-    : NO_NOTES
-  const joined = texts.join("\u0000")
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the texts, by value
-  return useMemo(() => texts, [joined])
+  const entries = AsyncResult.isSuccess(notes) ? notes.value : NO_ENTRIES
+  // A note open in an editor here counts as it's typed, as the card's own fields do; the read
+  // has the rest as they were last sent to the server (their drafts included).
+  const sentTexts = () =>
+    entries
+      .flatMap(({ ref, sent }) => {
+        if (sent === undefined) return []
+        const store = openEditorStore(ref.id)
+        const working = store instanceof EditorStore && store.snapshot !== null ? store.working().doc : null
+        const on = (working ?? sent).on_by_default === true
+        // A linked slot's text is its shared note's, which its own editor doesn't hold.
+        const content = typeof sent.link === "string" || working === null ? sent.content : working.content
+        return on && typeof content === "string" ? [content] : []
+      })
+      .join("\u0000")
+  const subscribe = useMemo(() => subscribeLiveNotes(entries.map(({ ref }) => ref.id)), [entries])
+  const joined = useSyncExternalStore(subscribe, sentTexts)
+  return useMemo(() => (joined === "" ? NO_NOTES : joined.split("\u0000")), [joined])
 }
 const NO_NOTES: ReadonlyArray<string> = []
+const NO_ENTRIES: ReadonlyArray<NoteEntry> = []
+
+/** Told when one of `refIds`' open editors changes, or one opens or closes. */
+const subscribeLiveNotes = (refIds: ReadonlyArray<string>) => (listener: () => void) => {
+  let stores: Array<() => void> = []
+  const watch = () => {
+    for (const stop of stores) stop()
+    stores = refIds.flatMap((refId) => {
+      const store = openEditorStore(refId)
+      return store instanceof EditorStore ? [store.subscribe("working")(listener)] : []
+    })
+  }
+  watch()
+  const stopOpen = subscribeOpenEditors(() => {
+    watch()
+    listener()
+  })
+  return () => {
+    stopOpen()
+    for (const stop of stores) stop()
+  }
+}
 
 /**
  * The card's total and permanent token counts, as ST's character panel has them
