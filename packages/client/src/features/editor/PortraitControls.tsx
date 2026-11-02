@@ -4,10 +4,8 @@
 // (`POST /library/avatar?crop=`) or SetCardAvatarCrop, never through a draft.
 import { avatarCropOf, type AvatarCrop, cropKey } from "@rp/shared/media.ts"
 import { Effect } from "effect"
-import { type ReactNode, useEffect, useRef, useState } from "react"
+import { type DragEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { Avatar, type AvatarSize } from "../../ui/Avatar.tsx"
-import { Button } from "../../ui/Button.tsx"
-import { FileDrop } from "../../ui/FileDrop.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { useCutoutChooser } from "../../ui/portraitParts.ts"
@@ -26,7 +24,7 @@ interface Choosing {
 }
 
 /** The card's portrait as the store has it, and the two ways of changing it. */
-function usePortraitChange(store: EditorStore, call: Caller, onChanged?: () => void) {
+function usePortraitChange(store: EditorStore, call: Caller, onChanged?: () => void, pickerLabel?: string) {
   const { snapshot } = useEditorState(store)
   const name = useValue<string>(store, ["name"]) || snapshot?.ref.label || "Card"
   const mediaId = useValue<string | null>(store, ["avatar_media_id"]) ?? null
@@ -117,7 +115,7 @@ function usePortraitChange(store: EditorStore, call: Caller, onChanged?: () => v
       accept={ACCEPT}
       className="sr-only"
       tabIndex={-1}
-      aria-hidden="true"
+      {...(pickerLabel ? { "aria-label": pickerLabel } : { "aria-hidden": true })}
       data-portrait-picker
       onChange={(event) => {
         pick(event.currentTarget.files?.[0])
@@ -190,50 +188,105 @@ function ChangeablePortrait({
   )
 }
 
-/** The card editor's portrait: the picture (a click changes it), a drop zone, Adjust cutout. */
+/** What a new picture can be, and what happens to it: the explanation of every way to add one. */
+const PICTURE_HINT =
+  "PNG, JPEG, GIF or WebP, up to 16 MB. You then choose the part small portraits show; the whole image is kept."
+
+/** A portrait that takes a dropped image file: `over` while one is dragged over it. */
+function useImageDrop(onFile: (file: File) => void, enabled: boolean) {
+  const [over, setOver] = useState(false)
+  const files = (event: DragEvent) => enabled && event.dataTransfer.types.includes("Files")
+  return {
+    over,
+    props: {
+      onDragOver: (event: DragEvent<HTMLElement>) => {
+        if (!files(event)) return
+        event.preventDefault()
+        setOver(true)
+      },
+      onDragLeave: (event: DragEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false)
+      },
+      onDrop: (event: DragEvent<HTMLElement>) => {
+        if (!files(event)) return
+        event.preventDefault()
+        setOver(false)
+        const file = event.dataTransfer.files[0]
+        if (file) onFile(file)
+      }
+    }
+  }
+}
+
+/**
+ * The full editor's Picture (Metadata; owner, 2026-11-02: "not really made for a wide screen"):
+ * one large portrait that is its own drop target, a click or Replace picking a new image, and
+ * Replace and Adjust cutout over its corner; without a picture, a dashed 2:3 box of the same
+ * size that adds one. What a picture can be is in the explanations, not a standing line.
+ */
 export function EditorPortrait({ store, call }: { store: EditorStore; call: Caller }) {
-  const portrait = usePortraitChange(store, call)
+  const portrait = usePortraitChange(store, call, undefined, "Choose an avatar, or drop it here")
+  const drop = useImageDrop(portrait.pick, portrait.ready)
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      {portrait.mediaId ? (
-        <div className="flex shrink-0 flex-col items-start gap-2">
+    <div className="flex flex-col gap-2">
+      <CardHeaderPortrait
+        size="large"
+        drop={drop}
+        controls={
+          portrait.mediaId !== null && (
+            <>
+              <IconButton
+                icon="camera"
+                label="Replace the picture"
+                hint={`Replace the picture: choose another, or drop one on it. ${PICTURE_HINT}`}
+                className="size-7! text-text!"
+                disabled={!portrait.ready}
+                onClick={portrait.openPicker}
+              />
+              {portrait.canAdjust && (
+                <IconButton
+                  icon="crop"
+                  label="Adjust cutout"
+                  hint="Adjust cutout: which part of the picture small portraits show"
+                  className="size-7! text-text!"
+                  disabled={!portrait.ready}
+                  onClick={portrait.adjust}
+                />
+              )}
+            </>
+          )
+        }
+      >
+        {portrait.mediaId ? (
           <ChangeablePortrait
             id="editor"
             alt="The card's avatar"
             name={portrait.name}
             mediaId={portrait.mediaId}
             crop={portrait.crop}
-            size="2xl"
+            size="fill"
+            className="size-full"
             disabled={!portrait.ready}
             onClick={portrait.openPicker}
           />
-          {portrait.canAdjust && (
-            <Tooltip label="Choose again which part of the picture the small portraits show, without a new image">
-              <Button onClick={portrait.adjust} disabled={!portrait.ready}>
-                <Icon name="crop" />
-                Adjust cutout
-              </Button>
-            </Tooltip>
-          )}
-        </div>
-      ) : (
-        <div className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted">
-          No avatar
-        </div>
-      )}
-      <div className="min-w-0 flex-1">
-        <FileDrop
-          label="Choose an avatar, or drop it here"
-          description="PNG, JPEG, GIF or WebP, up to 16 MB. You choose the part small portraits show; the whole image is kept. It's saved as a revision of its own."
-          accept={ACCEPT}
-          disabled={!portrait.ready}
-          onFiles={(files) => portrait.pick(files[0])}
-        />
-      </div>
+        ) : (
+          <Tooltip label={`Add a picture: choose one, or drop it here. ${PICTURE_HINT}`}>
+            <button
+              type="button"
+              disabled={!portrait.ready}
+              onClick={portrait.openPicker}
+              className="flex size-full flex-col items-center justify-center gap-2 rounded-sm border-2 border-dashed border-border text-sm text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60"
+            >
+              <Icon name="camera" size={24} />
+              Add a picture
+            </button>
+          </Tooltip>
+        )}
+      </CardHeaderPortrait>
       {portrait.input}
       {portrait.chooser}
       {portrait.error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="max-w-48 text-sm text-danger">
           {portrait.error}
         </p>
       )}
@@ -242,8 +295,9 @@ export function EditorPortrait({ store, call }: { store: EditorStore; call: Call
 }
 
 /**
- * The full editor's header portrait: `TabPortrait` showing the card's own picture and cutout. A
- * click changes it; Adjust cutout and the drop zone are in the Metadata tab's Picture.
+ * The full editor's header portrait: `TabPortrait` showing the card's own picture and cutout,
+ * the same as a character tab's (owner, 2026-11-02: "the big version's header has the same
+ * annoyances as the side bar one").
  */
 export function StorePortrait({ store, call, id }: { store: EditorStore; call: Caller; id: string }) {
   const stored = useValue<unknown>(store, ["avatar_media_id"])
@@ -257,7 +311,6 @@ export function StorePortrait({ store, call, id }: { store: EditorStore; call: C
       call={call}
       id={id}
       shown={{ name, mediaId, crop }}
-      adjust={false}
       size="page"
       onViewFull={viewer && mediaId !== null ? () => viewer.show({ id, name, mediaId }) : undefined}
     />
@@ -271,7 +324,9 @@ export function StorePortrait({ store, call, id }: { store: EditorStore; call: C
  */
 const HEADER_PORTRAIT = {
   panel: "h-34 w-[calc(var(--spacing)*34*2/3)] @xs:h-36 @xs:w-24 @xl:h-40 @xl:w-[calc(var(--spacing)*40*2/3)]",
-  page: "h-36 w-24 @xl:h-44 @xl:w-[calc(var(--spacing)*44*2/3)]"
+  page: "h-36 w-24 @xl:h-44 @xl:w-[calc(var(--spacing)*44*2/3)]",
+  /** The full editor's Picture. */
+  large: "h-72 w-48"
 } as const
 
 /**
@@ -284,15 +339,23 @@ export function CardHeaderPortrait({
   size = "panel",
   badge,
   controls,
+  drop,
   children
 }: {
   size?: keyof typeof HEADER_PORTRAIT
   badge?: ReactNode
   controls?: ReactNode
+  /** An image dropped on it replaces the picture (`useImageDrop`). */
+  drop?: ReturnType<typeof useImageDrop> | undefined
   children: ReactNode
 }) {
   return (
-    <div data-card-header-portrait className={`group/portrait relative flex shrink-0 ${HEADER_PORTRAIT[size]}`}>
+    <div
+      {...drop?.props}
+      data-over={drop?.over || undefined}
+      {...(size === "large" ? {} : { "data-card-header-portrait": true })}
+      className={`group/portrait relative flex shrink-0 rounded-sm data-over:ring-2 data-over:ring-accent ${HEADER_PORTRAIT[size]}`}
+    >
       {children}
       {badge && (
         <span className="pointer-events-none absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm">
@@ -335,12 +398,13 @@ export function TabPortrait({
   onViewFull: (() => void) | undefined
   /** After a change is saved: the chat reads its cast again, so its portraits follow. */
   onChanged?: () => void
-  /** Adjust cutout over it; off where the page shows the picture's own controls (the full editor). */
+  /** Adjust cutout over it. */
   adjust?: boolean
   badge?: ReactNode
   size?: "panel" | "page"
 }) {
   const portrait = usePortraitChange(store, call, onChanged)
+  const drop = useImageDrop(portrait.pick, portrait.ready)
   const controls = shown.mediaId !== null && ((adjust && portrait.canAdjust) || onViewFull) && (
     <>
       {adjust && portrait.canAdjust && (
@@ -366,7 +430,7 @@ export function TabPortrait({
   )
   return (
     <div className="flex shrink-0 flex-col gap-1">
-      <CardHeaderPortrait size={size} badge={badge} controls={controls || undefined}>
+      <CardHeaderPortrait size={size} badge={badge} controls={controls || undefined} drop={drop}>
         <ChangeablePortrait
           id={id}
           name={shown.name}

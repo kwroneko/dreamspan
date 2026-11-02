@@ -31,7 +31,11 @@ const LONG = "Seraphina Valentina Montgomery-Blackwood of the Silver Marches"
 const CARDS: ReadonlyArray<{ name: string; data?: Record<string, unknown>; image?: boolean }> = [
   { name: PERSONA, image: true },
   { name: PLAIN },
-  { name: NAMED, data: { character_version: "Winter 2.1", nickname: "Mio-chan" }, image: true },
+  {
+    name: NAMED,
+    data: { character_version: "Winter 2.1", nickname: "Mio-chan", tags: ["lighthouse", "coast", "slow burn"] },
+    image: true
+  },
   {
     name: LONG,
     data: {
@@ -209,6 +213,70 @@ test("the full editor's header is the same", async ({ page }) => {
         expect
           .soft(Math.abs(portrait.y + portrait.height - (last.y + last.height)), `${name}: bottom`)
           .toBeLessThanOrEqual(1)
+        // The same picture controls over it as in a character tab (View full image only over a chat).
+        const over = page.locator("[data-card-header-portrait]")
+        await expect(over.getByRole("button", { name: "Adjust cutout", exact: true })).toHaveCount(
+          name === NAMED ? 1 : 0
+        )
+        // Metadata's Picture: one large portrait, its own drop target, with Replace and Adjust
+        // cutout over it, or an Add a picture box of the same size; the tags beside it.
+        const metadata = await cardFieldsTab(page, "Metadata")
+        const picture = metadata.getByRole("region", { name: "Picture" })
+        if (name === NAMED) {
+          await expect(picture.getByRole("button", { name: "Replace the picture", exact: true })).toBeAttached()
+          await expect(picture.getByRole("button", { name: "Adjust cutout", exact: true })).toBeAttached()
+        } else await expect(picture.getByRole("button", { name: "Add a picture", exact: true })).toBeVisible()
+        await page.mouse.move(0, 0)
+        await page.waitForTimeout(200)
+        await shoot(page, `editor-metadata-${width}-${scheme}-${name.split(" ")[0]!.toLowerCase()}`)
       }
     }
+})
+
+test("a tag is added from a short field at the end of the chips", async ({ page }) => {
+  for (const [width, panel] of [
+    [1440, false],
+    [1440, true]
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    let scope: Locator
+    if (panel) scope = await open(page, NAMED)
+    else {
+      const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
+      await page.goto(`${server().url}/library/${refs.find((ref) => ref.label === NAMED)!.id}`)
+      scope = page.locator("main")
+    }
+    const metadata = await cardFieldsTab(scope, "Metadata")
+    const tags = metadata.getByRole("list", { name: "Tags" })
+    const field = tags.getByRole("textbox", { name: "New tag" })
+    await expect(field).toBeVisible({ timeout: 30_000 })
+    await shoot(
+      panel ? page.getByRole("complementary", { name: "Chat panel" }) : page,
+      `tags-before-${panel ? "panel" : "editor"}`
+    )
+    // In the chips' row, as tall as a chip, and short.
+    const chip = await box(tags.getByRole("listitem").first())
+    const entry = await box(metadata.locator("[data-new-tag]"))
+    expect(Math.abs(chip.height - entry.height)).toBeLessThanOrEqual(1)
+    // On the last chip's line, or starting the next line where the chips start.
+    const last = await box(tags.getByRole("listitem").nth(-2))
+    expect(
+      Math.abs(last.y - entry.y) <= 1 || Math.abs(chip.x - entry.x) <= 1,
+      JSON.stringify([chip, last, entry])
+    ).toBe(true)
+    expect(entry.width).toBeLessThan(200)
+    const tag = panel ? "fog" : "harbour"
+    await field.fill(tag)
+    await field.press("Enter")
+    await expect(tags.getByRole("listitem").filter({ hasText: tag })).toHaveCount(1)
+    await expect(field).toHaveValue("")
+    await field.fill(`${tag} two`)
+    await tags.getByRole("button", { name: "Add the tag", exact: true }).click()
+    await expect(tags.getByRole("listitem").filter({ hasText: `${tag} two` })).toHaveCount(1)
+    await shoot(
+      panel ? page.getByRole("complementary", { name: "Chat panel" }) : page,
+      `tags-${panel ? "panel" : "editor"}`
+    )
+  }
 })

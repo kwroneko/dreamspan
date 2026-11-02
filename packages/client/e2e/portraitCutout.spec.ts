@@ -123,7 +123,7 @@ test("at 1440: a new picture is cut out before it's saved, adjusted later, and e
   const portrait = page.getByRole("tabpanel", { name: "Metadata" }).locator("[data-change-portrait] img")
   const first = await named(portrait)
   expect(first.crop).not.toBe("auto")
-  await page.getByRole("button", { name: "Adjust cutout" }).click()
+  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Adjust cutout" }).click()
   const adjust = page.getByRole("dialog", { name: "Adjust Tall's cutout" })
   await expect(adjust).toBeVisible()
   const original = new URL(
@@ -240,7 +240,7 @@ test("at 390: the chooser fits a phone, drags by touch, and follows the blur set
   // Blurred images stay blurred in the chooser.
   await page.keyboard.press("Alt+Shift+B")
   await expect(page.locator("html")).toHaveAttribute("data-images", "blur")
-  await page.getByRole("button", { name: "Adjust cutout" }).click()
+  await page.getByRole("tabpanel", { name: "Metadata" }).getByRole("button", { name: "Adjust cutout" }).click()
   const adjust = page.getByRole("dialog", { name: "Adjust Tall's cutout" })
   const whole = adjust.getByRole("img", { name: "Tall's whole image" })
   await expect(whole).toBeVisible()
