@@ -13,6 +13,10 @@ const lazyPending = (load: () => Promise<{ default: ComponentType<PendingPanelPr
   )
 }
 import { summaryPanelSections } from "./presentation.tsx"
+import { NOTE_FOCUS, workspaceViews, type WorkspaceViewProps } from "../editor/workspaceViews.ts"
+
+/** A note in the large editor over the chat, loaded when first opened. */
+const NoteLarge = lazy(() => import("./ChatNotes.tsx").then((module) => ({ default: module.ChatNoteLarge })))
 
 const loadNotes = () =>
   import("./ChatNotes.tsx").then((module) => ({
@@ -135,6 +139,15 @@ export const registerPanels = () => [
     order: 40,
     icon: "note",
     component: lazyPanel(loadNotes, "notes")
+  }),
+  workspaceViews.register({
+    id: NOTE_FOCUS,
+    label: "Note editor",
+    component: (props: WorkspaceViewProps) => (
+      <Suspense fallback={<Loading label="Loading the note…" />}>
+        <NoteLarge {...props} />
+      </Suspense>
+    )
   }),
   chatPanels.register({
     id: "summaries",

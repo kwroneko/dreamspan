@@ -1,5 +1,6 @@
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
+import type { ChatNotePosition } from "@rp/shared/editorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import {
   createContext,
@@ -10,14 +11,17 @@ import {
   useEffect,
   useEffectEvent,
   useMemo,
-  useState
+  useState,
+  useSyncExternalStore
 } from "react"
 import { useSession } from "../../session.ts"
 import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
 import { useCaller } from "./caller.ts"
 import { CARD_LOREBOOK_FOCUS } from "./cardSections.ts"
+import { browserEnv } from "./backup.ts"
 import { EditorStore, useEditorState } from "./store.ts"
+import { type WorkspaceViewProps, workspaceViews } from "./workspaceViews.ts"
 
 const Editor = lazy(() => import("./EditorPage.tsx").then((m) => ({ default: m.Editor })))
 /** The chat the workspace is in, for what a card's save offers after it (a rename in the history). */
@@ -30,7 +34,8 @@ interface WorkspaceChat {
  * full editor, which opens over the chat's column (a preset, or a card from its panel tab).
  */
 interface Workspace {
-  store: (ref: RefId) => EditorStore
+  /** A chat's own note is edited at its position, so its store is that position's. */
+  store: (ref: RefId, chatNote?: ChatNotePosition) => EditorStore
   open: (ref: RefId, focus?: string) => void
   close: () => void
   selection: { ref: RefId; focus?: string | undefined } | null
@@ -56,7 +61,7 @@ export function PresetWorkspace({
 }) {
   const call = useCaller()
   const userId = useSession().user.id
-  const [stores] = useState(() => new Map<RefId, EditorStore>())
+  const [stores] = useState(() => new Map<string, EditorStore>())
   const search = useSearch({ strict: false }) as Record<string, unknown>
   const navigate = useNavigate()
   const selection = useMemo<Workspace["selection"]>(
@@ -86,11 +91,12 @@ export function PresetWorkspace({
   useEffect(() => {
     if (selection !== null) notifyOpen()
   }, [selection, compact])
-  const store = (ref: RefId) => {
-    let value = stores.get(ref)
+  const store = (ref: RefId, chatNote?: ChatNotePosition) => {
+    const key = chatNote ? `${ref}\n${chatNote.chatId}\n${chatNote.forkId ?? ""}\n${chatNote.slotId ?? ""}` : ref
+    let value = stores.get(key)
     if (!value) {
-      value = new EditorStore(ref, userId, call)
-      stores.set(ref, value)
+      value = new EditorStore(ref, userId, call, browserEnv, chatNote)
+      stores.set(key, value)
     }
     return value
   }
@@ -112,10 +118,34 @@ export function PresetWorkspace({
   )
 }
 
-export function PresetOverlayHost({ page = false }: { page?: boolean }) {
+export function PresetOverlayHost({
+  page = false,
+  session,
+  view
+}: { page?: boolean } & Pick<WorkspaceViewProps, "session" | "view">) {
   const workspace = usePresetWorkspace()
   const selection = workspace?.selection
+  const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
   if (!selection) return null
+  // A feature's own view for this focus (a snippet's, a note's), in place of the library editor.
+  const registered = selection.focus === undefined ? undefined : views.entries.find((v) => v.id === selection.focus)
+  if (registered)
+    return (
+      <ColumnOverlay page={page} onClose={workspace.close} label={registered.label}>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-(--scroll-pad) [--scroll-pad:0.75rem] sm:[--scroll-pad:1rem]"
+          data-testid="preset-scroll"
+        >
+          <registered.component
+            key={selection.ref}
+            refId={selection.ref}
+            onClose={workspace.close}
+            session={session}
+            view={view}
+          />
+        </div>
+      </ColumnOverlay>
+    )
   return <WorkspaceOverlay workspace={workspace} selection={selection} page={page} />
 }
 
@@ -140,7 +170,9 @@ function WorkspaceOverlay({
           ? "Lorebook editor"
           : kind === "card"
             ? "Card editor"
-            : "Preset editor"
+            : kind === "note"
+              ? "Note editor"
+              : "Preset editor"
       }
     >
       <div

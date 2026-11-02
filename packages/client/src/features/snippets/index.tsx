@@ -31,8 +31,26 @@ import { DeleteSnippet } from "./delete.tsx"
 import { SnippetHistory } from "./history.tsx"
 import { snippetTools } from "./slots.ts"
 import { SnippetWorkspace } from "./workspace.ts"
+import { useNavigate } from "@tanstack/react-router"
+import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
+import { SNIPPET_FOCUS, workspaceViews } from "../editor/workspaceViews.ts"
+import { SnippetLarge } from "./SnippetLarge.tsx"
 
 let workspace: SnippetWorkspace | null = null
+/** Told when the workspace is made or goes, for a view that may render before it (a reload). */
+const workspaceListeners = new Set<() => void>()
+const setWorkspace = (next: SnippetWorkspace | null) => {
+  workspace = next
+  for (const listener of workspaceListeners) listener()
+}
+const useCurrentWorkspace = () =>
+  useSyncExternalStore(
+    (listener) => {
+      workspaceListeners.add(listener)
+      return () => workspaceListeners.delete(listener)
+    },
+    () => workspace
+  )
 function Scope({ session, onOpenPanel, children }: ChatSurfaceProps) {
   useEffect(() => {
     workspace?.setChat(session.id)
@@ -49,12 +67,12 @@ function Tools() {
   const user = useSession().user.id
   const store = useMemo(() => new SnippetWorkspace(call, user), [call, user])
   useEffect(() => {
-    workspace = store
+    setWorkspace(store)
     void store.refresh()
     const stop = onLibraryChange(() => void store.refresh())
     return () => {
       stop()
-      if (workspace === store) workspace = null
+      if (workspace === store) setWorkspace(null)
     }
   }, [store])
   const state = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot)
@@ -98,6 +116,32 @@ const firstLine = (text: string) =>
     .map((line) => line.trim())
     .find((line) => line !== "") ?? ""
 
+/**
+ * The large editor for a snippet (owner, 2026-11-02): over the chat, the workspace's overlay in
+ * the centre column; outside one (the floating sheet), the snippet's library page.
+ */
+function useOpenLarge(refId: RefId) {
+  const chat = usePresetWorkspace()
+  const navigate = useNavigate()
+  return chat
+    ? {
+        hint: "Opens the snippet over the chat, where it stays while the side panel changes",
+        open: () => chat.open(refId, SNIPPET_FOCUS)
+      }
+    : {
+        hint: "Opens the snippet on its own page, in a bigger editor",
+        open: () => {
+          workspace?.close()
+          void navigate({ to: "/library/$refId", params: { refId }, search: { focus: SNIPPET_FOCUS } })
+        }
+      }
+}
+
+function SnippetLargeView({ refId, onClose }: { refId: RefId; onClose?: (() => void) | undefined }) {
+  const current = useCurrentWorkspace()
+  return current ? <SnippetLarge workspace={current} refId={refId} onClose={onClose} /> : <p>Opening snippets…</p>
+}
+
 /** One snippet as a block: its header always shown, its text when open. */
 function SnippetBlock({
   workspace,
@@ -124,6 +168,7 @@ function SnippetBlock({
   // Read from the state, so it's read again as editors come and go and the target moves.
   const target = shown && workspace.target(state) === item.ref.id
   const flash = state.added?.refId === item.ref.id ? state.added : undefined
+  const large = useOpenLarge(item.ref.id)
   const detail = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted">
       <span>{scope}</span>
@@ -187,6 +232,12 @@ function SnippetBlock({
             icon="copy"
             disabled={content === ""}
             onClick={() => void copy(content, "Snippet")}
+          />
+          <IconButton
+            label={`Open ${title} in the large editor`}
+            hint={large.hint}
+            icon="expand"
+            onClick={large.open}
           />
         </BlockHeader>
         {open && (
@@ -373,6 +424,7 @@ export const register = () => [
   snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
   snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
   appTools.register({ id: "snippets.tools", order: 20, component: Tools }),
+  workspaceViews.register({ id: SNIPPET_FOCUS, label: "Snippet editor", page: true, component: SnippetLargeView }),
   chatSurfaceProviders.register({ id: "snippets.scope", order: 20, component: Scope }),
   chatPanels.register({
     id: "snippets",

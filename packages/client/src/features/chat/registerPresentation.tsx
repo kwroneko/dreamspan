@@ -187,6 +187,10 @@ export const registerPresentation = () => [
     )
   }),
   chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),
-  chatOverlays.register({ id: "chat.preset-overlay", order: 10, component: () => <PresetOverlayHost /> }),
+  chatOverlays.register({
+    id: "chat.preset-overlay",
+    order: 10,
+    component: (props) => <PresetOverlayHost {...props} />
+  }),
   ...registerImages()
 ]

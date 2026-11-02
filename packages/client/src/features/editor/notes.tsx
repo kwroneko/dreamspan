@@ -8,6 +8,8 @@ import { type FieldPath, valueField } from "@rp/shared/editing.ts"
 import type { ChatNotePosition, SharedNote } from "@rp/shared/editorApi.ts"
 import type { Doc } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
+import { usePresetWorkspace } from "./PresetWorkspace.tsx"
+import { SNIPPET_FOCUS } from "./workspaceViews.ts"
 import { Predicate } from "effect"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
@@ -370,6 +372,8 @@ export function SharedBanner({
   const { loading, note } = useSharedNote(link, chatNote)
   const actions = useSyncExternalStore(textActions.subscribe, textActions.snapshot, textActions.snapshot)
   const openSnippet = actions.entries.find((action) => action.id === "snippets.open")
+  // Over a chat, the shared note (a snippet) opens in the large editor too.
+  const workspace = usePresetWorkspace()
   if (loading) return <p className="text-sm text-muted">Loading the shared note…</p>
   if (note === null)
     return (
@@ -404,6 +408,14 @@ export function SharedBanner({
             <Link to="/library/$refId" params={{ refId: note.ref.id }} className={buttonClass()}>
               Open shared note
             </Link>
+          )}
+          {workspace && (
+            <Button
+              hint="Opens the shared note over the chat, where it stays while the side panel changes"
+              onClick={() => workspace.open(note.ref.id, SNIPPET_FOCUS)}
+            >
+              Large editor
+            </Button>
           )}
           <Button onClick={onUnlink}>Unlink</Button>
         </>

@@ -17,7 +17,7 @@ import {
 } from "./cardSections.ts"
 import { SlotOutlet } from "../../slots.tsx"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -39,6 +39,7 @@ import { CARD_TAB_LOREBOOK } from "./cardTabs.ts"
 import { StorePortrait } from "./PortraitControls.tsx"
 import { EnsurePortraitViewer } from "../../ui/Portrait.tsx"
 import { NoteFields } from "./notes.tsx"
+import { workspaceViews } from "./workspaceViews.ts"
 import { PresetEditor } from "./PresetEditor.tsx"
 import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
@@ -508,6 +509,10 @@ export function EditorPage() {
   const { refId }: { refId?: string } = useParams({ strict: false })
   // `?focus=lorebook` opens a card on its own lorebook, as the chat's workspace does.
   const { focus } = useSearch({ strict: false }) as { focus?: unknown }
+  // A feature's own view of the entry (a snippet's large editor), opened with its focus.
+  const views = useSyncExternalStore(workspaceViews.subscribe, workspaceViews.snapshot, workspaceViews.snapshot)
+  const own = views.entries.find((view) => view.page === true && view.id === focus)
+  if (own) return <own.component key={refId} refId={refId as RefId} />
   return (
     <EnsurePortraitViewer>
       <Editor key={refId} refId={refId as RefId} focus={typeof focus === "string" ? focus : undefined} />
