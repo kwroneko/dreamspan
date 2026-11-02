@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { apiLogin, serverPerFile, withAdmin, ADMIN } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
-import { saveButton, saveRevision } from "./support/saveRevision.ts"
+import { UNSAVED, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { chatNameLine, renameCard } from "./support/cardEditor.ts"
 const server = serverPerFile(withAdmin)
 test("another tab creating the same pair must disable Create in the waiting tab", async ({ context, page }) => {
@@ -106,7 +106,7 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
   await renameCard(page, "version", "2")
   const description = "Synthetic CodeMirror text beside the three identity fields."
   await page.getByRole("textbox", { name: "Description", exact: true }).fill(description)
-  await expect(page.getByRole("status").filter({ hasText: "Changed since revision 1" })).toBeVisible()
+  await expectSaveState(page, UNSAVED)
   await page.reload()
   await expect(page.getByRole("heading", { level: 1, name: "History renamed", exact: true })).toBeVisible()
   await expect(chatNameLine(page, "Model renamed")).toBeVisible()

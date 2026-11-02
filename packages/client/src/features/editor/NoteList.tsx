@@ -253,6 +253,8 @@ function NoteBlock({
           ) : (
             <span className="flex min-w-0 flex-1">{toggle}</span>
           )}
+          {/* The open note's save cluster, in its header row (DESIGN §10.1). */}
+          {open && loaded && <SaveRevision store={store} />}
           <Menu
             label={`Actions for ${title}`}
             hint="More: its History, Save as shared note, Delete"
@@ -331,11 +333,6 @@ function NoteBlock({
               >
                 <NoteSettings store={store} cards={cards} />
               </BlockSection>
-            )}
-            {loaded && (
-              <div className="flex flex-wrap items-center gap-2 border-t border-border px-2 py-1.5">
-                <SaveRevision store={store} compact />
-              </div>
             )}
           </>
         )}

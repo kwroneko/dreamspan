@@ -258,6 +258,7 @@ function CardPanel({
             store={store}
             call={call}
             layout="panel"
+            saveControls={<SaveRevision store={store} />}
             onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
           />
         </>

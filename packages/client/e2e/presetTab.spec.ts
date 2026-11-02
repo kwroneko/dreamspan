@@ -10,7 +10,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
-import { revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -165,7 +165,7 @@ for (const width of [1440, 390])
       await expect(panel.getByRole("button", { name: "Expand Unnamed prompt", exact: true })).toBeVisible()
       await expect(panel.locator('[data-prompt="chatHistory"]')).toContainText(/[\d,]+ tokens/)
       await expect(panel.getByRole("region", { name: "Unsaved changes" })).toHaveCount(0)
-      await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
+      await expectSaveState(panel, NOTHING_TO_SAVE)
       await shot("collapsed")
 
       // Expand: the text in the code editor; the header's Options open the prompt's options.
@@ -180,9 +180,9 @@ for (const width of [1440, 390])
       await pacing.click()
       await page.keyboard.press("Control+End")
       await page.keyboard.type(" Slow down for quiet scenes.")
-      // Typed text is live: the state line says so, and no unsaved bar holds it.
+      // Typed text is live: Save says there's something to save, and no unsaved bar holds it.
       const bar = panel.getByRole("region", { name: "Unsaved changes" })
-      await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+      await expectSaveState(panel, UNSAVED)
       await expect(bar).toHaveCount(0)
       await block.scrollIntoViewIfNeeded()
       await shot("expanded-options")
@@ -270,7 +270,7 @@ for (const width of [1440, 390])
         again.getByRole("textbox", { name: "Prompt: 🧭 Agency", exact: true }),
         "Never decide what {{user}} does, says or feels. Not even in a time skip."
       )
-      await expect(revisionStatus(again)).toHaveText(/^Changed since revision \d+$/)
+      await expectSaveState(again, UNSAVED)
       if (width < 600) await closePanel(page)
     })
 
@@ -283,7 +283,7 @@ test("switches are live; a reorder waits for Save, and Revert puts it back witho
   await expect(pacing).toBeChecked()
   await pacing.click()
   await expect(pacing).not.toBeChecked()
-  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+  await expectSaveState(panel, UNSAVED)
   await expect(bar).toHaveCount(0)
 
   // A reorder waits; Revert puts it back without asking, and the switch stays as flipped.
@@ -305,7 +305,7 @@ test("switches are live; a reorder waits for Save, and Revert puts it back witho
   await bar.getByRole("button", { name: "Save", exact: true }).click()
   await expect(bar).toHaveCount(0)
   await expect(page.getByRole("dialog")).toHaveCount(0)
-  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
+  await expectSaveState(panel, NOTHING_TO_SAVE)
   const saved = await admin((api) => api.OpenEditor({ refId: refId as never }))
   const doc = saved.doc as { order: Array<{ identifier: string; enabled: boolean }> }
   const at = (id: string) => doc.order.findIndex((e) => e.identifier === id)

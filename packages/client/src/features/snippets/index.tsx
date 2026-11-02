@@ -187,7 +187,7 @@ function SnippetBlock({
               >
                 All chats
               </Switch>
-              {loaded && <SaveRevision store={store} compact />}
+              {loaded && <SaveRevision store={store} />}
               <span className="flex flex-wrap items-center gap-1">
                 <SlotOutlet slot={snippetTools} props={{ store: workspace, item }} />
               </span>

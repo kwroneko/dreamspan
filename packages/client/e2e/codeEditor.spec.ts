@@ -5,7 +5,7 @@ import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { asUser } from "./support/rpc.ts"
-import { saveButton, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, expectSaveState, saveButton, saveCluster, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox, textBoxValue } from "./support/textbox.ts"
 
@@ -61,7 +61,7 @@ for (const width of [1440, 390])
     await expect(field(page, "Scenario").locator("..").locator(".rp-line-added")).toHaveCount(1)
     // Save asks nothing; History's comparison shows what it saved.
     await saveRevision(page, "Night watch")
-    await expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+    await expectSaveState(page, NOTHING_TO_SAVE)
     await expect(page.locator(".rp-line-added, .rp-line-modified, .rp-line-deleted")).toHaveCount(0)
     await field(page, "Description").fill(`${newDescription}\nA draft after saving.`)
     await page.getByRole("button", { name: "History", exact: true }).click()
@@ -202,17 +202,17 @@ test("a draft typed on after another tab saved saves over that tab's revision", 
     // The shared server draft is already visible here; save a different head from it.
     await field(other, "Description").fill("A different saved head.")
     await saveRevision(other)
-    await expect(other.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+    await expectSaveState(other, NOTHING_TO_SAVE)
     await field(page, "Description").fill(`${newDescription}\nStill based on the original.`)
     await expect(
       field(page, "Description").locator("..").locator(".rp-line-added, .rp-line-modified").first()
     ).toBeVisible()
-    // The first Save meets the stale editor ("This ref changed since you opened it"), which then
+    // The first Save meets the stale editor (Save says it failed: the ref changed), which then
     // has the other tab's revision loaded; the next saves this tab's text, maybe after the picker.
     await saveButton(page).click()
-    const stale = page.getByRole("alert").filter({ hasText: "changed since you opened it" })
+    const stale = saveCluster(page).and(page.locator('[data-save-state="failed"]'))
     const conflict = page.getByRole("dialog", { name: "Changed meanwhile" })
-    const done = saveButton(page).and(page.locator(":disabled"))
+    const done = saveCluster(page).and(page.locator('[data-save-state="clean"], [data-save-state="saved"]'))
     await expect(stale.or(conflict).or(done).first()).toBeVisible()
     if (await stale.isVisible()) {
       await saveButton(page).click()

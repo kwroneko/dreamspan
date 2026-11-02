@@ -522,7 +522,8 @@ export function LorebookTable({
   book,
   added = null,
   panel = false,
-  tools
+  tools,
+  saveControls
 }: {
   store: EditorStore
   root: FieldPath
@@ -533,6 +534,8 @@ export function LorebookTable({
   panel?: boolean
   /** Extra toolbar controls (the panel's search and replace toggle). */
   tools?: ReactNode
+  /** The save cluster, leading the entries' toolbar row (DESIGN §10.1). */
+  saveControls?: ReactNode
 }) {
   const columns = useRegistry(lorebookColumns)
   const sorts = useRegistry(lorebookSorts)
@@ -748,8 +751,10 @@ export function LorebookTable({
         <div
           role="toolbar"
           aria-label="All entries"
-          className={`flex flex-wrap items-center ${panel ? "gap-0.5" : "gap-1.5"}`}
+          className={`flex flex-wrap items-center ${panel ? "gap-0.5" : "gap-1.5"} ${saveControls ? "justify-end" : ""}`}
         >
+          {/* The save cluster leads the row, the toolbar's buttons on the right (DESIGN §10.1). */}
+          {saveControls && <div className="mr-auto flex">{saveControls}</div>}
           <Button
             variant="ghost"
             className={small}

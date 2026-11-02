@@ -596,9 +596,12 @@ export function PromptDocument({
   goTo,
   layout = "document",
   onOpenLarge,
-  onOpenLorebook
+  onOpenLorebook,
+  saveControls
 }: {
   store: EditorStore
+  /** The save cluster, at the start of the list's own toolbar row (DESIGN §10.1). */
+  saveControls?: ReactNode
   context?: PresetContext | null | undefined
   focus?: string | undefined
   /** A prompt to open and scroll to, asked for again by a new object (a warning's link). */
@@ -796,39 +799,43 @@ export function PromptDocument({
   const small = column ? "h-7 px-2" : ""
   const variant = column ? "ghost" : "secondary"
   const controls = (
-    <div className="flex flex-wrap items-center justify-between gap-1">
-      {addButtons}
-      <ExpandCollapseAll
-        compact={column}
-        anyOpen={anyOpen}
-        allOpen={false}
-        expandHint="Show every prompt's text"
-        collapseHint="Fold every prompt to its header: an outline of the preset"
-        onExpand={() => setOpened({ all: true, except: new Set() })}
-        onCollapse={() => setOpened({ all: false, except: new Set() })}
+    // One toolbar row: the save cluster, New prompt and the definitions block, then expand and options.
+    <ExpandCollapseAll
+      compact={column}
+      start={
+        <div className="flex flex-wrap items-center gap-1">
+          {saveControls}
+          {addButtons}
+        </div>
+      }
+      anyOpen={anyOpen}
+      allOpen={false}
+      expandHint="Show every prompt's text"
+      collapseHint="Fold every prompt to its header: an outline of the preset"
+      onExpand={() => setOpened({ all: true, except: new Set() })}
+      onCollapse={() => setOpened({ all: false, except: new Set() })}
+    >
+      <Tooltip
+        label={
+          options.all
+            ? "Fold every prompt's options away again (remembered in this browser)"
+            : "Open every prompt's options at once (remembered in this browser)"
+        }
       >
-        <Tooltip
-          label={
-            options.all
-              ? "Fold every prompt's options away again (remembered in this browser)"
-              : "Open every prompt's options at once (remembered in this browser)"
-          }
+        <Button
+          variant={variant}
+          className={small}
+          aria-pressed={options.all}
+          onClick={() => {
+            keepOptionsOpen(!options.all)
+            setOptions({ all: !options.all, except: new Set() })
+          }}
         >
-          <Button
-            variant={variant}
-            className={small}
-            aria-pressed={options.all}
-            onClick={() => {
-              keepOptionsOpen(!options.all)
-              setOptions({ all: !options.all, except: new Set() })
-            }}
-          >
-            <Icon name="sliders" />
-            {options.all ? "Hide all options" : "Show all options"}
-          </Button>
-        </Tooltip>
-      </ExpandCollapseAll>
-    </div>
+          <Icon name="sliders" />
+          {options.all ? "Hide all options" : "Show all options"}
+        </Button>
+      </Tooltip>
+    </ExpandCollapseAll>
   )
   const list = (
     <div className="@container min-w-0 flex-1">

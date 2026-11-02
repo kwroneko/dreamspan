@@ -84,6 +84,21 @@ const paths = {
   back: ["m12 19-7-7 7-7", "M19 12H5"],
   undo: ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 0 11H11"],
   check: ["M20 6 9 17l-5-5"],
+  /** Keeps this version (a floppy disk, the familiar save mark). */
+  save: [
+    "M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+    "M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7",
+    "M7 3v4a1 1 0 0 0 1 1h7"
+  ],
+  /** Save with a note: the same disk, smaller, with a speech bubble at its corner. */
+  "save-message": [
+    "M10 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7.2a2 2 0 0 1 1.4.6l1.8 1.8a2 2 0 0 1 .6 1.4V10",
+    "M5.5 2v2.5a1 1 0 0 0 1 1H11",
+    "M5.5 15v-4a1 1 0 0 1 1-1H10",
+    "M14 13h7a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-5l-3 2.5V14a1 1 0 0 1 1-1z"
+  ],
+  /** Something went wrong: a circled exclamation mark. */
+  alert: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 8v4", "M12 16h.01"],
   close: ["M18 6 6 18", "m6 6 12 12"],
   stop: ["M7 6h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"],
   ghost: ["M9 10h.01", "M15 10h.01", "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8z"],

@@ -4,7 +4,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import { textField } from "@rp/shared/editing.ts"
 import { loginCookie, withCookie } from "./support/rpc.ts"
-import { saveButton, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, startServer, withAdmin } from "./support/server.ts"
 
 const offline = "A synthetic thought typed in the offline browser."
@@ -101,7 +101,7 @@ for (const kind of ["composer", "editor"] as const) {
               await expectTextBox(box(other), "")
             } else {
               await saveRevision(other)
-              await expect(other.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+              await expectSaveState(other, NOTHING_TO_SAVE)
             }
           }
           await second.close()

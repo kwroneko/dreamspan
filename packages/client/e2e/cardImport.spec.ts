@@ -9,6 +9,7 @@ import { crc32, deflateSync } from "node:zlib"
 import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
+import { NOTHING_TO_SAVE, saveCluster } from "./support/saveRevision.ts"
 
 const server = serverPerFile(withAdmin)
 const screens = process.env.SCREENSHOT_DIR ?? join(tmpdir(), "rp-card-import-screens")
@@ -60,12 +61,7 @@ for (const width of [1440, 390])
       const refId = ((await response.json()) as { library: { ref: { id: string } } }).library.ref.id
 
       await page.goto(`${server().url}/library/${refId}`)
-      await expect(
-        page
-          .getByRole("status")
-          .filter({ hasText: /^Saved as revision \d+$/ })
-          .first()
-      ).toBeVisible()
+      await expect(saveCluster(page).first()).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
       // In the header itself, beside Fork and Export….
       await page.getByRole("button", { name: "Import a new version…", exact: true }).click()
       const dialog = page.getByRole("dialog", { name: "Import a new version of Wren" })
@@ -97,12 +93,7 @@ for (const width of [1440, 390])
       await dialog.getByRole("button", { name: "Replace", exact: true }).click()
       await expect(dialog).toHaveCount(0)
       await expectTextBox(field(page, "Description"), "A retired lighthouse keeper.")
-      await expect(
-        page
-          .getByRole("status")
-          .filter({ hasText: /^Saved as revision 2$/ })
-          .first()
-      ).toBeVisible()
+      await expect(saveCluster(page).first()).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
 
       await page.getByRole("button", { name: "History", exact: true }).click()
       const history = page.getByRole("dialog", { name: "History" })

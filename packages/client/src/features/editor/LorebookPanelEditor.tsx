@@ -104,7 +104,6 @@ export function LorebookPanelEditor({
         )}
         {saveControls && (
           <>
-            <SaveRevision store={store} compact />
             <RestoredNotice count={state.restored} />
             <RecoveredNotice store={store} />
           </>
@@ -126,6 +125,7 @@ export function LorebookPanelEditor({
             root={root}
             book={book}
             panel
+            saveControls={saveControls ? <SaveRevision store={store} /> : undefined}
             tools={
               <Button
                 variant="ghost"

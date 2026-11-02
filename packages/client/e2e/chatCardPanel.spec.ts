@@ -10,7 +10,14 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import { closePortrait, portraitView, portraitPng } from "./support/portrait.ts"
 import { asUser } from "./support/rpc.ts"
-import { editHistoryTexts, revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
+import {
+  NOTHING_TO_SAVE,
+  UNSAVED,
+  editHistoryTexts,
+  expectSaveState,
+  saveButton,
+  saveRevision
+} from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 
@@ -197,7 +204,7 @@ for (const width of [1440, 390])
     await description.click()
     await page.keyboard.press("Control+End")
     await page.keyboard.type(" Added in the panel.")
-    await expect(revisionStatus(tab)).toHaveText(/^Changed since revision \d+$/)
+    await expectSaveState(tab, UNSAVED)
     await page.waitForTimeout(1500)
     await expect(tab.getByText(/in the bin/)).toHaveCount(0)
     await shoot(page, `edit-in-panel-${width}`)
@@ -210,10 +217,10 @@ for (const width of [1440, 390])
     await shoot(page, `expanded-${width}`)
     await large.getByRole("button", { name: "Done", exact: true }).click()
     await expect(textBox(tab, "Scenario")).toContainText("The kettle is on.")
-    await expect(revisionStatus(tab)).toHaveText(/^Changed since revision \d+$/)
+    await expectSaveState(tab, UNSAVED)
     // Save asks nothing.
     await saveRevision(tab)
-    await expect(revisionStatus(tab)).toHaveText(/^Saved as revision \d+$/)
+    await expectSaveState(tab, NOTHING_TO_SAVE)
     // (On a phone the panel is itself a dialog; no other opened.)
     await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toHaveCount(0)
     await expect(tab.getByText(/in the bin/)).toHaveCount(0)

@@ -8,7 +8,7 @@ import type { LibraryRef } from "@rp/shared/library.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
 import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
-import { revisionStatus, saveButton, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveButton, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, openPresetAt } from "./support/panel.ts"
 import { openNoteSettings } from "./support/notes.ts"
@@ -230,7 +230,7 @@ test("a panel switch is shared with the overlay as flipped, with no unsaved bar"
   await expect(toggle).toBeChecked({ checked: was })
   // The next tests share the preset: leave it saved.
   if (await saveButton(panel).isEnabled()) await saveRevision(panel)
-  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
+  await expectSaveState(panel, NOTHING_TO_SAVE)
   const opened = await admin((api) =>
     Effect.map(api.OpenEditor({ refId: preset.id }), (editor) =>
       editor.drafts.filter((draft) => draft.status === "active")
@@ -247,19 +247,19 @@ test("text typed in the overlay is live in the panel too, and the overlay's Save
   const overlay = page.getByRole("dialog", { name: "Preset editor", exact: true })
   const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
   await main.fill("An hour of careful prompt work.")
-  await expect(revisionStatus(overlay)).toHaveText(/^Changed since revision \d+$/)
+  await expectSaveState(overlay, UNSAVED)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  // No bar holds typed text; the tab's state line says it changed.
+  // No bar holds typed text; the tab's Save says there's something to save.
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
   await expect(bar).toHaveCount(0)
-  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+  await expectSaveState(panel, UNSAVED)
   await openPresetAt(page, panel, "Main Prompt")
   await expectTextBox(main, "An hour of careful prompt work.")
   // The overlay's toolbar saves it, asking nothing.
   await saveRevision(overlay)
-  await expect(revisionStatus(overlay)).toHaveText(/^Saved as revision \d+$/)
+  await expectSaveState(overlay, NOTHING_TO_SAVE)
   await overlay.getByRole("button", { name: "Close preset editor", exact: true }).click()
-  await expect(revisionStatus(panel)).toHaveText(/^Saved as revision \d+$/)
+  await expectSaveState(panel, NOTHING_TO_SAVE)
 })
 
 test("the panel's Revert puts back an order the overlay changed, without asking", async ({ page }) => {

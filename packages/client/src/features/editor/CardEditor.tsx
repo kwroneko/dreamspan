@@ -514,6 +514,7 @@ export function CardEditor({
   initial = CARD_TAB_DEFINITION,
   onOpenBook,
   header,
+  saveControls,
   reveal = false
 }: {
   store: EditorStore
@@ -525,6 +526,11 @@ export function CardEditor({
   reveal?: boolean
   /** Above the tabs' panels, under the tab row: nothing by default. */
   header?: ReactNode
+  /**
+   * The save cluster, at the end of the tab row, which then stays in sight while a field
+   * further down is edited (the chat's character tab; DESIGN §10.1).
+   */
+  saveControls?: ReactNode
 }) {
   const snapshot = useSyncExternalStore(cardEditorTabs.subscribe, cardEditorTabs.snapshot, cardEditorTabs.snapshot)
   const tabs = [...snapshot.entries].sort((a, b) => a.order - b.order)
@@ -581,6 +587,8 @@ export function CardEditor({
         value={shown}
         onValueChange={setTab}
         wrap={layout === "panel"}
+        end={saveControls}
+        rowClassName={saveControls ? "sticky -top-4 z-10 -mx-4 -mt-2 items-start! bg-surface px-4 pt-2" : ""}
         tabs={tabs.map((entry) => ({
           value: entry.id,
           label: entry.label,

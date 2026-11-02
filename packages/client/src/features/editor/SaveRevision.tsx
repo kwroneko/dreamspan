@@ -1,7 +1,7 @@
-// Saving a revision from an editor (owner, 2026-11-01; ARCHITECTURE §14.6): `ui/SaveControls`
-// bound to the store. Save asks nothing: what's typed is used as it's typed, and a revision is a
-// checkpoint. Only fields another tab or an update changed meanwhile open a dialog, to pick per
-// field. A card's chat name asks about past messages where it's renamed (`CardNameHeader`),
+// Saving a revision from an editor (owner, 2026-11-01 and 2026-11-02; ARCHITECTURE §14.6):
+// `ui/SaveControls` bound to the store; a failed save shows on Save itself. Save asks nothing:
+// what's typed is used as it's typed, and a revision is a checkpoint. Only fields another tab
+// or an update changed meanwhile open a dialog, to pick per field. A card's chat name asks about past messages where it's renamed (`CardNameHeader`),
 // never after a save. Every editor uses it: the library page, the chat's tabs, a card's or
 // chat's notes.
 import { parseField } from "@rp/shared/editing.ts"
@@ -21,18 +21,7 @@ import { type EditorStore, useEditorState, useHeld, useText } from "./store.ts"
 const contentOf = (field: string, value: unknown) =>
   parseField(field)?.kind === "value" ? JSON.stringify(value) : typeof value === "string" ? value : ""
 
-export function SaveRevision({
-  store,
-  onSaved,
-  showState = true,
-  compact = false
-}: {
-  store: EditorStore
-  onSaved?: (saved: SavedRef) => void
-  showState?: boolean
-  /** A crowded toolbar (`SaveControls` `compact`). */
-  compact?: boolean
-}) {
+export function SaveRevision({ store, onSaved }: { store: EditorStore; onSaved?: (saved: SavedRef) => void }) {
   const state = useEditorState(store)
   const held = useHeld(store)
   const ref = state.snapshot!.ref
@@ -41,6 +30,8 @@ export function SaveRevision({
   const nameCheck = useCardNameCheck(name, version, ref)
   const clash = ref.kind === "card" ? nameCheck : null
   const [pending, setPending] = useState(false)
+  /** Why the last save failed: shown on Save itself, in its explanation. */
+  const [failure, setFailure] = useState<string | null>(null)
   const [error, setError] = useState<AppError | null>(null)
   const [conflicts, setConflicts] = useState<{ list: ReadonlyArray<Conflict>; message: string | null } | null>(null)
   const [choices, setChoices] = useState<Record<string, Choice>>({})
@@ -48,6 +39,7 @@ export function SaveRevision({
   const save = async (message: string | null): Promise<boolean> => {
     if (clash) return false
     setPending(true)
+    setFailure(null)
     setError(null)
     const result = await store.commit(message)
     setPending(false)
@@ -69,12 +61,13 @@ export function SaveRevision({
       setChoices(Object.fromEntries(result.cause.fields.map(({ field }) => [field, { side: "mine" } as Choice])))
       return false
     }
-    setError(result.error)
+    setFailure(result.error.message)
     return false
   }
 
   /** Revert: every changed field back to the last revision, its text now kept in its edit history. */
   const revert = async () => {
+    setFailure(null)
     setError(null)
     const result = await store.revert()
     if (!result.ok) setError(result.error)
@@ -92,7 +85,7 @@ export function SaveRevision({
       )
       if (result && !result.ok) {
         setPending(false)
-        return setError(result.error)
+        return setFailure(result.error.message)
       }
     }
     setPending(false)
@@ -104,12 +97,10 @@ export function SaveRevision({
   return (
     <>
       <SaveControls
-        revision={store.revisionNumber}
         changed={state.dirty > 0 || held !== ""}
         pending={pending}
         blocked={clash}
-        showState={showState}
-        compact={compact}
+        failed={failure}
         onSave={save}
         onRevert={revert}
       />

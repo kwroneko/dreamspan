@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { tmpdir } from "node:os"
 import { expect, test } from "@playwright/test"
-import { saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -37,11 +37,11 @@ for (const width of [1440, 390])
         await control.click()
         await expect(control).toBeChecked()
       }
-      await expect(page.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+      await expectSaveState(page, UNSAVED)
       await page.reload()
       for (const name of names) await expect(page.getByRole("switch", { name, exact: true })).toBeChecked()
       await saveRevision(page)
-      await expect(page.getByText("Saved a revision.")).toBeVisible()
+      await expectSaveState(page, NOTHING_TO_SAVE)
       await page.reload()
       for (const name of names) await expect(page.getByRole("switch", { name, exact: true })).toBeChecked()
       await page.getByRole("switch", { name: names[0], exact: true }).scrollIntoViewIfNeeded()

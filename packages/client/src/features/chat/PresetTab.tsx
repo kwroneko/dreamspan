@@ -58,7 +58,6 @@ function PresetColumn({ store }: { store: EditorStore }) {
       {state.saveError && (
         <ErrorAlert error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }} />
       )}
-      <SaveRevision store={store} />
       <RestoredNotice count={state.restored} />
       <RecoveredNotice store={store} />
       <SlotOutlet slot={presetEditorWarnings} props={{ store, onGoTo: (identifier) => setGoTo({ identifier }) }} />
@@ -66,6 +65,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
         store={store}
         context={workspace?.context}
         layout="column"
+        saveControls={<SaveRevision store={store} />}
         goTo={goTo}
         onOpenLarge={(identifier) => workspace?.open(store.refId, identifier)}
         onOpenLorebook={workspace ? (ref) => workspace.open(ref) : undefined}
