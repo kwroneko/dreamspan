@@ -275,6 +275,9 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
         if (parentEntityId === null) {
           yield* sql`UPDATE entities SET forked_from_entity_id = NULL, forked_from_revision_id = NULL,
                      forked_in_chat_id = NULL, forked_at = NULL WHERE id = ${entityId}`
+          yield* sql`UPDATE entity_refs SET merge_base_revision_id = CASE WHEN EXISTS (
+            SELECT 1 FROM entity_revisions i WHERE i.entity_id = ${entityId} AND i.origin = 'import'
+          ) THEN merge_base_revision_id ELSE NULL END, row_version = row_version + 1 WHERE entity_id = ${entityId}`
           return yield* family(userId, entityId)
         }
         yield* liveCard(userId, parentEntityId)
@@ -298,6 +301,9 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
         }
         yield* sql`UPDATE entities SET forked_from_entity_id = ${parentEntityId}, forked_from_revision_id = NULL,
                    forked_in_chat_id = NULL, forked_at = ${Date.now()} WHERE id = ${entityId}`
+        yield* sql`UPDATE entity_refs SET merge_base_revision_id = CASE WHEN EXISTS (
+            SELECT 1 FROM entity_revisions i WHERE i.entity_id = ${entityId} AND i.origin = 'import'
+          ) THEN merge_base_revision_id ELSE NULL END, row_version = row_version + 1 WHERE entity_id = ${entityId}`
         return yield* family(userId, entityId)
       }).pipe(transaction(sql, "SetCardParent"))
   } satisfies Partial<Parameters<typeof WriteOps.of>[0]>

@@ -208,8 +208,8 @@ export const layer = Layer.unwrap(
       // `replace` makes the file's content the card's next revision, if its head is still `head`.
       const mode = query.get("mode")
       const head = query.get("head")
-      if (mode !== null && mode !== "preview" && mode !== "replace")
-        return jsonError(400, "mode must be preview or replace")
+      if (mode !== null && mode !== "preview" && mode !== "replace" && mode !== "merge")
+        return jsonError(400, "mode must be preview, replace or merge")
       if (mode !== null && into === null) return jsonError(400, "a new version needs the card it's for (into)")
       if (mode === "replace" && (head === null || head.length > 100))
         return jsonError(400, "replace needs the head the preview showed")
@@ -300,6 +300,7 @@ export const layer = Layer.unwrap(
                     sourceName: fileName,
                     sourceHash: parsed.sha256,
                     media: parsed.media.map(({ bytes: _, ...file }) => file),
+                    ...(mode === "merge" ? { stageMerge: true } : {}),
                     ...(mode === "replace" ? { replace: { expectedHeadRevisionId: head! } } : {})
                   })
                 })

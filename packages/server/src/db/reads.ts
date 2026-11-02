@@ -1,3 +1,4 @@
+import { makeForkMergeQueries } from "./forkMerge.ts"
 import { revisionNumber, revisionUse } from "./revisionNumbers.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { BinLimitDefaults, readBinLimits } from "./binLimits.ts"
@@ -259,6 +260,7 @@ export const makeReadHandlers = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
   const binLimits = yield* BinLimitDefaults
   const lib = makeLibraryQueries(sql)
+  const forkMerge = makeForkMergeQueries(sql)
   const drafts = makeDraftStore(sql)
 
   const ownedChat = (userId: UserId, chatId: ChatId) =>
@@ -663,6 +665,14 @@ export const makeReadHandlers = Effect.gen(function* () {
         }
         return out
       }).pipe(query("RefHistory")),
+
+    ForkMergeStatus: ({ userId, refId }) => forkMerge.status(userId, refId).pipe(query("ForkMergeStatus")),
+    PreviewForkMerge: ({ userId, refId, theirsRevisionId }) =>
+      forkMerge.preview(userId, refId, theirsRevisionId).pipe(
+        Effect.map((p) => p.value),
+        query("PreviewForkMerge")
+      ),
+    LibraryGenealogy: ({ userId, refId }) => forkMerge.genealogy(userId, refId).pipe(query("LibraryGenealogy")),
 
     PreviewMerge: ({ userId, refId }) =>
       Effect.gen(function* () {

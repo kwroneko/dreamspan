@@ -302,7 +302,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
     })
   )
 
-  it.effect("a re-import merges into a variant the user edited", () =>
+  it.effect("a re-import offers an explicit merge into an edited fork", () =>
     Effect.gen(function* () {
       const writer = yield* Writer
       const reader = yield* Reader
@@ -346,10 +346,12 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       )
       assert.isFalse(second.library!.created)
       assert.strictEqual(second.library!.outcome, "fast_forward")
-      assert.deepStrictEqual(
-        second.library!.followers.map((f) => [f.refId, f.label, f.outcome]),
-        [[variant.id, "Narrator", "merged"]]
+      assert.deepStrictEqual(second.library!.followers, [])
+      assert.strictEqual(
+        mainPrompt((yield* reader.GetRef({ userId, refId: variant.id })).doc),
+        "Write vivid prose. Avoid speaking for {{user}} unless asked."
       )
+      yield* writer.MergeFollowed({ userId, refId: variant.id })
       assert.strictEqual(
         mainPrompt((yield* reader.GetRef({ userId, refId: variant.id })).doc),
         "Write vivid, sensory prose. Avoid speaking for {{user}} unless asked."

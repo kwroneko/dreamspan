@@ -56,6 +56,42 @@ const counts = (db: DatabaseSync) => ({
 })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("import a new version", (it) => {
+  it.effect("stages a creator update for Merge and commits it through the shared RPCs", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const first = Schema.decodeUnknownSync(ImportResult)(
+        yield* ok(yield* send(wren(), { name: "merge-1.png" }))
+      ).library!
+      const refId = first.ref.id
+      const opened = yield* api.OpenEditor({ refId })
+      const staged = Schema.decodeUnknownSync(ImportResult)(
+        yield* ok(
+          yield* send(wren({ description: "Creator update", note: "Updated note sidecar" }), {
+            name: "merge-2.png",
+            into: refId,
+            mode: "merge"
+          })
+        )
+      ).library!
+      assert.isDefined(staged.stagedRevisionId)
+      assert.strictEqual(staged.ref.headRevisionId, opened.ref.headRevisionId)
+      assert.isNull(staged.outcome)
+      assert.strictEqual((yield* api.OpenEditor({ refId })).doc.description, "A lighthouse keeper.")
+      const preview = yield* api.PreviewForkMerge({ refId, theirsRevisionId: staged.stagedRevisionId! })
+      yield* api.CommitForkMerge({
+        refId,
+        theirsRevisionId: preview.theirsRevisionId,
+        baseRevisionId: preview.baseRevisionId,
+        expectedRowVersion: preview.ref.rowVersion,
+        selection: { excluded: [], resolutions: [] },
+        message: "Take creator description"
+      })
+      assert.strictEqual((yield* api.OpenEditor({ refId })).doc.description, "Creator update")
+      assert.strictEqual((yield* api.ListCardNotes({ cardRefId: refId }))[0]!.doc.content, "Wren smells of oil.")
+      assert.strictEqual((yield* api.ForkMergeStatus({ refId })).records.length, 1)
+    })
+  )
+
   it.effect("previews without storing, then replaces wholesale keeping what a file can't carry", () =>
     Effect.gen(function* () {
       const api = yield* client()

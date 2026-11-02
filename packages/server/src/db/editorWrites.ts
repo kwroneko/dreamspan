@@ -464,6 +464,7 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           head_revision_id: ref.head_revision_id,
           follows_ref_id: ref.id,
           merge_base_revision_id: ref.head_revision_id,
+          forked_from_revision_id: ref.head_revision_id,
           label,
           subtitle,
           created_at: at,

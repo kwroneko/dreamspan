@@ -1,3 +1,4 @@
+import { ForkMergePreview, MergeSelection, MergeStatus, LibraryGenealogy } from "@rp/shared/forkMerge.ts"
 import { StArrival } from "@rp/shared/stImportApi.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
@@ -1038,11 +1039,29 @@ export class WriteOps extends RpcGroup.make(
     success: LibraryRef,
     error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
   }),
+  Rpc.make("CommitForkMerge", {
+    payload: {
+      userId: UserId,
+      refId: RefId,
+      theirsRevisionId: RevisionId,
+      baseRevisionId: Schema.NullOr(RevisionId),
+      expectedRowVersion: Schema.Int,
+      selection: MergeSelection,
+      message: Schema.NullOr(Schema.String)
+    },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, InvalidDocument, StorageError])
+  }),
+  Rpc.make("UndoForkMerge", {
+    payload: { userId: UserId, refId: RefId, mergeRevisionId: RevisionId, expectedRowVersion: Schema.Int },
+    success: RefChange,
+    error: Schema.Union([NotFound, StaleWrite, RefOperationRefused, StorageError])
+  }),
   /** Merges in what the ref follows, if it can be done without conflicts. */
   Rpc.make("MergeFollowed", {
     payload: { userId: UserId, refId: RefId },
     success: MergeAndFlow,
-    error: Schema.Union([NotFound, StorageError])
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /**
    * Commits a merge the user resolved by hand: `doc` merged with `theirsRevisionId`,
@@ -1462,6 +1481,7 @@ export class WriteOps extends RpcGroup.make(
        * its merge base that import. Refused unless the head is still the one previewed. The
        * card's notes and favourite stay as they are.
        */
+      stageMerge: Schema.optionalKey(Schema.Boolean),
       replace: Schema.optionalKey(Schema.Struct({ expectedHeadRevisionId: Schema.String }))
     },
     success: LibraryImport,
@@ -2669,6 +2689,21 @@ export class ReadOps extends RpcGroup.make(
     },
     success: Schema.Array(Revision),
     error: Schema.Union([NotFound, StorageError])
+  }),
+  Rpc.make("ForkMergeStatus", {
+    payload: { userId: UserId, refId: RefId },
+    success: MergeStatus,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("PreviewForkMerge", {
+    payload: { userId: UserId, refId: RefId, theirsRevisionId: Schema.optionalKey(RevisionId) },
+    success: ForkMergePreview,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
+  }),
+  Rpc.make("LibraryGenealogy", {
+    payload: { userId: UserId, refId: RefId },
+    success: LibraryGenealogy,
+    error: Schema.Union([NotFound, RefOperationRefused, StorageError])
   }),
   /** What merging in the followed ref would produce, for the conflict resolver. */
   Rpc.make("PreviewMerge", {

@@ -320,6 +320,27 @@ export const makeEditorHandlers = Effect.gen(function* () {
         writer.SetCardAvatarCrop({ userId: id, refId, crop, expectedRowVersion }).pipe(changed(id))
       ).pipe(Effect.map(saved), settle("SetCardAvatarCrop")),
 
+    ForkMergeStatus: (input) =>
+      Effect.flatMap(userId, (id) => reader.ForkMergeStatus({ userId: id, ...input })).pipe(settle("ForkMergeStatus")),
+    PreviewForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => reader.PreviewForkMerge({ userId: id, ...input })).pipe(
+        settle("PreviewForkMerge")
+      ),
+    LibraryGenealogy: (input) =>
+      Effect.flatMap(userId, (id) => reader.LibraryGenealogy({ userId: id, ...input })).pipe(
+        settle("LibraryGenealogy")
+      ),
+    CommitForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => writer.CommitForkMerge({ userId: id, ...input }).pipe(changed(id))).pipe(
+        Effect.map(saved),
+        settle("CommitForkMerge")
+      ),
+    UndoForkMerge: (input) =>
+      Effect.flatMap(userId, (id) => writer.UndoForkMerge({ userId: id, ...input }).pipe(changed(id))).pipe(
+        Effect.map(saved),
+        settle("UndoForkMerge")
+      ),
+
     PreviewUpdate: ({ refId }) =>
       Effect.flatMap(userId, (id) => reader.PreviewMerge({ userId: id, refId })).pipe(settle("PreviewUpdate")),
 

@@ -116,7 +116,7 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("a re-import flows into variants: untouched ones fast-forward, edited ones merge (DESIGN §4)", () =>
+  it.live("a re-import leaves forks unchanged until each explicitly merges", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, upstream, doc, edit, reimport } = yield* setup()
       const pristine = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "as is" })
@@ -133,13 +133,11 @@ describe("library", () => {
       // Upstream v2 rewrites the first sentence and changes the prefill.
       const v2 = preset(MAIN.replace("You are {{char}}.", "You are {{char}}, the narrator."), [], 0.8)
       const { change } = yield* reimport(v2)
-      assert.deepStrictEqual(
-        change.followers.map((f) => [f.refId, f.outcome]),
-        [
-          [pristine.id, "fast_forward"],
-          [mine.id, "merged"]
-        ]
-      )
+      assert.deepStrictEqual(change.followers, [])
+      assert.deepStrictEqual(yield* doc(pristine.id), preset(MAIN))
+      assert.isTrue((yield* reader.GetRef({ userId, refId: pristine.id })).ref.updateAvailable)
+      yield* writer.MergeFollowed({ userId, refId: pristine.id })
+      yield* writer.MergeFollowed({ userId, refId: mine.id })
 
       assert.deepStrictEqual(yield* doc(pristine.id), v2)
       assert.deepStrictEqual(
@@ -175,10 +173,7 @@ describe("library", () => {
       )
       const { change } = yield* reimport(preset(theirMain, [], 0.8))
 
-      assert.deepStrictEqual(
-        change.followers.map((f) => f.outcome),
-        ["conflicts"]
-      )
+      assert.deepStrictEqual(change.followers, [])
       assert.strictEqual((yield* doc(mine.id)).prompts[0]!.content, myMain)
       const [listed] = (yield* reader.ListLibrary({ userId, kind: "preset", tag: null, archived: false })).filter(
         (r) => r.id === mine.id
@@ -229,7 +224,7 @@ describe("library", () => {
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("changes cascade from upstream through a variant to a chat override, and an override can be promoted", () =>
+  it.live("forks and chat overrides each wait for an explicit merge, and overrides can be promoted", () =>
     Effect.gen(function* () {
       const { writer, reader, userId, upstream, doc, edit, reimport, rowVersion } = yield* setup()
       const variant = yield* writer.ForkRef({ userId, refId: upstream.id, label: "Narrator", subtitle: "noir" })
@@ -246,13 +241,11 @@ describe("library", () => {
       yield* edit(override.id, preset(MAIN, [{ identifier: "scene", content: "It is raining." }]))
 
       const { change } = yield* reimport(preset(MAIN, [], 0.5))
-      assert.deepStrictEqual(
-        change.followers.map((f) => [f.refId, f.outcome]),
-        [
-          [variant.id, "fast_forward"],
-          [override.id, "merged"]
-        ]
-      )
+      assert.deepStrictEqual(change.followers, [])
+      assert.strictEqual((yield* doc(override.id)).prefill.assistant, "1")
+      yield* writer.MergeFollowed({ userId, refId: variant.id })
+      assert.strictEqual((yield* doc(override.id)).prefill.assistant, "1")
+      yield* writer.MergeFollowed({ userId, refId: override.id })
       const overridden = yield* doc(override.id)
       assert.strictEqual(overridden.prefill.assistant, "0.5")
       assert.deepStrictEqual(
@@ -280,7 +273,7 @@ describe("library", () => {
   )
 
   for (const kind of ["lorebook", "note"] as const)
-    it.live(`${kind} re-imports still merge through variants and chat overrides after removing card following`, () =>
+    it.live(`${kind} forks and chat overrides require separate explicit merges`, () =>
       Effect.gen(function* () {
         const writer = yield* Database.Writer
         const reader = yield* Database.Reader
@@ -323,13 +316,10 @@ describe("library", () => {
           ...original,
           [textField]: "Changed file text."
         })
-        assert.deepStrictEqual(
-          result.change.followers.map((f) => [f.refId, f.outcome]),
-          [
-            [variant.id, "fast_forward"],
-            [override.id, "merged"]
-          ]
-        )
+        assert.deepStrictEqual(result.change.followers, [])
+        assert.strictEqual((yield* reader.GetRef({ userId, refId: override.id })).doc[textField], "Original text.")
+        yield* writer.MergeFollowed({ userId, refId: variant.id })
+        yield* writer.MergeFollowed({ userId, refId: override.id })
         const merged = yield* reader.GetRef({ userId, refId: override.id })
         assert.strictEqual(merged.doc[textField], "Changed file text.")
         assert.strictEqual(merged.doc[nameField], "Local name")
@@ -444,10 +434,9 @@ describe("library", () => {
       const merged = yield* reimport(preset(v2))
       assert.strictEqual(merged.outcome, "merged")
       assert.deepStrictEqual(yield* doc(upstream.id), preset(v2, [summary]))
-      assert.deepStrictEqual(
-        merged.change.followers.map((f) => [f.refId, f.outcome]),
-        [[variant.id, "fast_forward"]]
-      )
+      assert.deepStrictEqual(merged.change.followers, [])
+      assert.deepStrictEqual(yield* doc(variant.id), preset(MAIN))
+      yield* writer.MergeFollowed({ userId, refId: variant.id })
       assert.deepStrictEqual(yield* doc(variant.id), preset(v2, [summary]))
 
       // The user rewrites a sentence that the next version rewrites too.
@@ -501,10 +490,8 @@ describe("library", () => {
       const protoVariant = yield* writer.ForkRef({ userId, refId: proto.ref.id, label: "Card", subtitle: "v" })
       yield* edit(protoVariant.id, JSON.parse('{"ext":{"__proto__":{"a":2},"k":1}}'))
       const protoChange = yield* reimport(proto.ref.id, JSON.parse('{"ext":{"__proto__":{"a":1},"k":2}}'))
-      assert.deepStrictEqual(
-        protoChange.change.followers.map((f) => f.outcome),
-        ["merged"]
-      )
+      assert.deepStrictEqual(protoChange.change.followers, [])
+      yield* writer.MergeFollowed({ userId, refId: protoVariant.id })
       assert.strictEqual(JSON.stringify(yield* doc(protoVariant.id)), '{"ext":{"__proto__":{"a":2},"k":2}}')
 
       const named = yield* entity({ x: 1 })
@@ -545,15 +532,13 @@ describe("library", () => {
       // The same content at the library's version still merges, and flows on.
       const accepted = yield* reimport(v2)
       assert.strictEqual(accepted.outcome, "merged")
-      assert.deepStrictEqual(
-        accepted.change.followers.map((f) => f.outcome),
-        ["fast_forward"]
-      )
+      assert.deepStrictEqual(accepted.change.followers, [])
+      yield* writer.MergeFollowed({ userId, refId: variant.id })
       assert.deepStrictEqual(yield* doc(variant.id), { ...v2, prefill: { ...v2.prefill, assistant: "0.7" } })
     }).pipe(Effect.provide(database()))
   )
 
-  it.live("a first import equal to a user-created document only records the import", () =>
+  it.live("a first import equal to a user-created document records a merge without changing content", () =>
     Effect.gen(function* () {
       const { writer, reader, userId } = yield* setup()
       const created = yield* writer.CreateEntity({
@@ -581,7 +566,7 @@ describe("library", () => {
       assert.isFalse(same.change.ref.updateAvailable)
       const origins = (refId: RefId) =>
         reader.RefHistory({ userId, refId, limit: 10 }).pipe(Effect.map((revs) => revs.map((r) => r.origin)))
-      assert.deepStrictEqual(yield* origins(created.ref.id), ["user"])
+      assert.deepStrictEqual(yield* origins(created.ref.id), ["merge", "user"])
       assert.deepStrictEqual(yield* origins(variant.id), ["user"])
 
       // That import is now the merge base, so the next one merges cleanly.

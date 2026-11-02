@@ -1074,10 +1074,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         JSON.stringify([...before.order, { identifier: "x", enabled: true }])
       )
       const saved = yield* commit(api, refId)
-      assert.deepStrictEqual(
-        saved.followers.map((f) => f.outcome),
-        ["conflicts"]
-      )
+      assert.deepStrictEqual(saved.followers, [])
       assert.deepStrictEqual(yield* doc(api, variant.id), variantDoc)
       const preview = yield* api.PreviewUpdate({ refId: variant.id })
       assert.deepStrictEqual(
@@ -1271,16 +1268,15 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const variant = yield* api.ForkVariant({ refId: note.id, label: "Revoked", subtitle: "", moveDrafts: false })
       yield* draft(api, note.id, valueField(["agent_editable"]), "true")
       const saved = yield* commit(api, note.id)
-      assert.deepStrictEqual(
-        saved.followers.map((f) => f.outcome),
-        ["merged"]
-      )
+      assert.deepStrictEqual(saved.followers, [])
+      yield* api.ApplyUpdate({ refId: variant.id })
       assert.isFalse((yield* doc(api, variant.id)).agent_editable)
       // The same holds for a preset's regex approval.
       const presetId = (yield* importPreset(preset("full"))).ref.id
       const follower = yield* api.ForkVariant({ refId: presetId, label: "Unapproved", subtitle: "", moveDrafts: false })
       const opened = yield* api.OpenEditor({ refId: presetId })
       yield* api.SetRegexApproval({ refId: presetId, approved: true, expectedRowVersion: opened.ref.rowVersion })
+      yield* api.ApplyUpdate({ refId: follower.id })
       assert.isFalse((yield* doc(api, follower.id)).regex_approved)
     })
   )
