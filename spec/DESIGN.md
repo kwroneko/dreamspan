@@ -761,6 +761,8 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+- **[D]** Tile favourites (owner, 2026-11-02): "Favourite buttons should only appear when the image is hovered, although toggled-on favourite stars stay on regardless. There's no need to show 1000 turned off buttons." Off stars appear on tile hover or keyboard focus within it; on stars remain visible. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
+- **[P]** (hovertoggles, 2026-11-02, implementation choice) Tile pins and message-image context toggles follow the same rule. Opacity preserves layout and tab order, including explanations on focus; coarse-pointer or no-hover devices keep toggles visible because tapping the tile already opens it. **Built; obsolete as an implementation proposal** (ARCHITECTURE §5).
 - **[D]** Row-action spacing (owner, 2026-11-02): "The archive button for presets touches the edge of the box it's in. This is such a basic UI visual mistake." Trailing actions in scrolling lists keep at least the left content inset before the box edge and scrollbar, at every width, with or without scrolling; tooltips use shared placement and stay inside the viewport. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
 **Built (fieldwidth, 2026-11-02):** the short-field width requirement below is implemented and obsolete as a plan; see ARCHITECTURE §12.

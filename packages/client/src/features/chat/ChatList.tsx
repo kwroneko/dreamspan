@@ -84,7 +84,7 @@ function Row({
     .filter((card) => card.name !== name.name || card.subtitle)
     .map((card) => `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`)
   return (
-    <li className="group relative">
+    <li className="tile-toggle-surface group relative">
       <Link
         to="/chats/$chatId"
         params={{ chatId: chat.id }}
@@ -149,7 +149,7 @@ function Row({
       </Link>
       {fork && (
         <span className="absolute right-2.5 bottom-1">
-          <PinButton fork={fork} />
+          <PinButton fork={fork} className="tile-toggle" />
         </span>
       )}
       <Tooltip label="Moves the chat, with all its branches, to the bin, with Undo.">
@@ -157,7 +157,7 @@ function Row({
           type="button"
           onClick={onDelete}
           aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
-          className="absolute top-2 right-2.5 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
+          className="absolute top-2 right-2.5 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:block"
         >
           Delete
         </button>

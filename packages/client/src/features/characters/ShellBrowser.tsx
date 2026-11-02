@@ -37,7 +37,7 @@ import {
   type ShellLibrary
 } from "./shellData.tsx"
 
-export function PinButton({ fork }: { fork: ShellFork }) {
+export function PinButton({ fork, className = "" }: { fork: ShellFork; className?: string }) {
   const action = useAction()
   return (
     <span className="shrink-0">
@@ -49,7 +49,7 @@ export function PinButton({ fork }: { fork: ShellFork }) {
         aria-pressed={fork.pinned}
         hint={fork.pinned ? "Takes it out of Pinned chats." : "Keeps this branch in Pinned chats, above the rest."}
         disabled={action.pending}
-        className={fork.pinned ? "text-text!" : ""}
+        className={`${fork.pinned ? "text-text!" : ""} ${className}`}
         onClick={() =>
           void action.run(
             (client) =>
@@ -105,7 +105,7 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
 export function GroupTile({ fork }: { fork: ShellFork }) {
   const open = useOpenFork(fork, true)
   return (
-    <div className="relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
+    <div className="tile-toggle-surface relative flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
       <button
         type="button"
         onClick={open}
@@ -127,8 +127,8 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
         </span>
       </button>
-      <span className="absolute right-1 top-1 rounded bg-surface">
-        <PinButton fork={fork} />
+      <span className="absolute right-1 top-1">
+        <PinButton fork={fork} className="tile-toggle bg-surface" />
       </span>
     </div>
   )

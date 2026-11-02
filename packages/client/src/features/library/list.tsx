@@ -242,7 +242,7 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
   return (
     <li
       ref={ref}
-      className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface [contain-intrinsic-size:auto_22rem] [content-visibility:auto]"
+      className="tile-toggle-surface flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-surface [contain-intrinsic-size:auto_22rem] [content-visibility:auto]"
     >
       <OpenLink item={item} picture className="block aspect-[2/3] w-full overflow-hidden">
         <Picture item={item} size="fill" />
@@ -258,7 +258,7 @@ function Tile({ item, formats }: { item: Item; formats: ReadonlyArray<ExportForm
           <Badges item={item} seen={seen} />
         </span>
         <div className="mt-auto flex items-center justify-end gap-0.5 pt-1">
-          {item.shell && <FavouriteStar card={item.shell} />}
+          {item.shell && <FavouriteStar card={item.shell} className="tile-toggle" />}
           <LibraryItemActions context={{ entry: item.entry, persona: persona(item), exportFormats: formats }} />
         </div>
       </div>
