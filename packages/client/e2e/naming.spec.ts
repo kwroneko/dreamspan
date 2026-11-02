@@ -119,7 +119,7 @@ for (const width of [1440, 390]) {
       .filter({ has: page.getByRole("link", { name: /A renamed chat/ }) })
     await row.hover()
     await row.getByRole("button", { name: /Delete/ }).click()
-    await expect(page.getByText(`Deleted: A renamed chat ${width}`, { exact: true })).toBeVisible()
+    await expect(page.getByText(`A renamed chat ${width} moved to the bin.`, { exact: true })).toBeVisible()
     await page.getByRole("button", { name: "Open the bin" }).click()
     await expect(page.getByRole("main").getByText(`A renamed chat ${width}`, { exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)

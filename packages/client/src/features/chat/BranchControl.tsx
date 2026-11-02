@@ -145,7 +145,7 @@ function BranchRow({
           hint={
             only
               ? "The only branch: delete the chat instead"
-              : "Moves it to the bin, with Undo. Branches made from it keep their messages."
+              : "Moves this branch to the bin. You can undo this, or restore it from the bin later. Branches made from this branch keep their messages."
           }
           icon="trash"
           tone="danger"

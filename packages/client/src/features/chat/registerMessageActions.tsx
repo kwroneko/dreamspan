@@ -160,16 +160,16 @@ export const registerMessageActions = () => [
             label: "Delete version",
             icon: "trash",
             tone: "danger",
-            hint: `Delete the version shown; the message keeps its ${entry.versionCount - 1} other${
-              entry.versionCount > 2 ? "s" : ""
-            }. It goes to the bin, with Undo.`,
+            hint: `Moves this version to the bin. You can undo this, or restore it from the bin later. The message keeps its ${entry.versionCount - 1} other${
+              entry.versionCount > 2 ? " versions" : " version"
+            }.`,
             onSelect: async () => toast(await session.deleteVersion(entry.version.id))
           }
         : {
             label: "Delete message",
             icon: "trash-all",
             tone: "danger",
-            hint: "Delete this message. It goes to the bin, with Undo.",
+            hint: "Moves this message to the bin. You can undo this, or restore it from the bin later.",
             onSelect: async () => toast(await session.deleteMessage(entry.slotId))
           }
     )
@@ -183,7 +183,7 @@ export const registerMessageActions = () => [
       label: "Delete message",
       icon: "trash-all",
       tone: "danger",
-      hint: `Delete this message with ${versions(entry.versionCount)}. It goes to the bin, with Undo.`,
+      hint: `Moves this message with ${versions(entry.versionCount)} to the bin. You can undo this, or restore it from the bin later.`,
       onSelect: async () => toast(await session.deleteMessage(entry.slotId))
     }))
   })

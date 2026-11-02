@@ -112,7 +112,7 @@ for (const kind of ["message", "summary"] as const) {
         .getByRole("button", { name: /Edit the summary of messages 1–8/ })
         .click()
       box = panel.getByRole("textbox", { name: /Text of the summary of messages 1–8/ })
-      cancel = panel.getByRole("button", { name: "Discard the edit", exact: true })
+      cancel = panel.getByRole("button", { name: "Discard the summary edit", exact: true })
     } else {
       const { chat, slotId } = await chatWithMessage()
       await page.goto(`${server().url}/chats/${chat.id}`)

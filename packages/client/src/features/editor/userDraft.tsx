@@ -556,9 +556,9 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
       )}
       {draft.recovered > 0 && (
         <span>
-          Earlier text was kept in{" "}
+          Earlier text from this draft is kept in{" "}
           <a className="underline" href="/bin?section=recovered">
-            recovered texts in the bin
+            the bin, under Recovered text
           </a>
           .
         </span>
@@ -576,7 +576,7 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
           ) : (
             <span>
               Another device finished this draft. Your text is still here. Reload to read the saved value; your current
-              text will be kept in recovered texts in the bin.
+              text will be kept in the bin, under Recovered text.
             </span>
           )}
           <div className="flex flex-wrap gap-2">

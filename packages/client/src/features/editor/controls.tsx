@@ -533,8 +533,8 @@ export function RecoveredNotice({ store }: { store: EditorStore }) {
     <Alert tone="neutral" title={one ? "Your earlier text is in the bin" : "Your earlier texts are in the bin"}>
       <p>
         {fields.length > 0
-          ? `What ${listed(fields)} had before you replaced most of it is kept in the bin, under Recovered text, in case you want it back.`
-          : `What you replaced or deleted is kept in the bin, under Recovered text, in case you want it back.`}
+          ? `Earlier text from ${listed(fields)} is kept in the bin, under Recovered text.`
+          : `Text you replaced or deleted in this editor is kept in the bin, under Recovered text.`}
       </p>
       {/* Under the text, so a narrow panel keeps the sentence readable. */}
       <div className="mt-1 flex flex-wrap gap-2">

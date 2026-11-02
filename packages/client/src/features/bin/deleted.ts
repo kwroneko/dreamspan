@@ -36,7 +36,7 @@ export const useDeletedToast = () => {
     /** `onRestored`: for a view that doesn't read the restored lists again by itself. */
     (item: BinItem, onRestored?: () => void) =>
       showToast({
-        title: `Deleted: ${binTitle(item)}`,
+        title: `${binTitle(item)} moved to the bin.`,
         // Long enough to reach Undo after reading it; hovering or focusing it holds it.
         timeout: 10_000,
         ...(item.excerpt && item.kind !== "entity" && item.kind !== "connection" ? { description: item.excerpt } : {}),

@@ -284,7 +284,7 @@ for (const scope of ["account", "fork"] as const)
       ).toBe(`Submitted ${scope} instruction`)
     if (scope === "fork") {
       await page.getByRole("button", { name: "Use account default", exact: true }).click()
-      await expect(page.getByRole("link", { name: "recovered texts in the bin", exact: true })).toBeVisible()
+      await expect(page.getByRole("link", { name: "the bin, under Recovered text", exact: true })).toBeVisible()
       await expect
         .poll(() =>
           api((client) =>
@@ -615,7 +615,7 @@ for (const width of [1440, 390])
         await page.getByRole("button", { name: "Use the other edit", exact: true }).click()
         await expect(box).toHaveValue(other)
         await page.getByRole("button", { name: "Save summarization instruction", exact: true }).click()
-        await expect(page.getByRole("link", { name: "recovered texts in the bin", exact: true })).toBeVisible()
+        await expect(page.getByRole("link", { name: "the bin, under Recovered text", exact: true })).toBeVisible()
       } finally {
         await context.close()
       }

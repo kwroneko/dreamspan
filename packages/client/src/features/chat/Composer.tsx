@@ -615,10 +615,10 @@ export function Composer({
               <p role="status" className="text-sm text-muted">
                 Some text from this composer is in the{" "}
                 <Link to="/bin" search={{ section: "recovered" }}>
-                  bin, under recovered text
+                  bin, under Recovered text
                 </Link>
-                : text typed in this browser while offline whose session ended elsewhere, or earlier text another tab's
-                typing went over.
+                . This includes text typed in this browser while offline after the draft was finished on another device,
+                or earlier text replaced by another tab's typing.
               </p>
             )}
           </>

@@ -90,7 +90,7 @@ test("a group's chats are listed on its page, and deleting one names it readably
     .getByRole("button", { name: new RegExp(`^Delete The Lantern Inn, started ${startedDay(latestCreatedAt)}`) })
     .click()
   // A bin item has only the title, so its name keeps the file stamp's day (importreport).
-  await expect(page.getByText("Deleted: The Lantern Inn, started May 1, 2026")).toBeVisible()
+  await expect(page.getByText("The Lantern Inn, started May 1, 2026 moved to the bin.")).toBeVisible()
   await expect(page).toHaveURL(`${server().url}/groups/${older}`)
   await expect(chats).toHaveCount(1)
 
