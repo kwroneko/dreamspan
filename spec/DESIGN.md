@@ -761,6 +761,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+- **[D]** Sidebar branch widths (owner, 2026-11-02): "a max width was given to chat listings in the left-hand sidebar, but never applied to branch listings." Apply the chat list's 40rem cap to branch listings and the other sidebar row lists. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[D]** Row-action spacing (owner, 2026-11-02): "The archive button for presets touches the edge of the box it's in. This is such a basic UI visual mistake." Trailing actions in scrolling lists keep at least the left content inset before the box edge and scrollbar, at every width, with or without scrolling; tooltips use shared placement and stay inside the viewport. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
 **Built (fieldwidth, 2026-11-02):** the short-field width requirement below is implemented and obsolete as a plan; see ARCHITECTURE §12.

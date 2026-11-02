@@ -198,7 +198,7 @@ export function ForkRow({
   const opensHere = perFork && fork.current && fork.branches > 1
   return (
     <div
-      className={`flex min-w-0 items-center gap-1 rounded-md border py-1 ps-1 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+      className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-1 ps-1 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
         label={
@@ -320,7 +320,7 @@ export function OpenChatBranches() {
       aria-label="Branches of the open chat"
       className="flex max-h-[45%] min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
     >
-      <div className="flex min-w-0 items-center gap-1">
+      <div className="flex max-w-controls min-w-0 items-center gap-1">
         <Tooltip label={expanded ? "Hides the open chat's branches." : "Shows the open chat's branches here."}>
           <button
             type="button"
