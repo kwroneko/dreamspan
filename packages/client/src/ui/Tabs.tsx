@@ -13,7 +13,8 @@ export function Tabs<Value extends string>({
   keepMounted = false,
   wrap = false,
   end,
-  rowClassName = ""
+  rowClassName = "",
+  rowOverlay
 }: {
   tabs: ReadonlyArray<{
     readonly value: Value
@@ -37,6 +38,8 @@ export function Tabs<Value extends string>({
   end?: ReactNode
   /** The row of tabs and `end`, placed by its user: kept in sight while scrolling, say. */
   rowClassName?: string
+  /** Why the row may cover what scrolls under it (a sticky row), for the layout audit. */
+  rowOverlay?: string | undefined
 }) {
   const list = (
     <BaseTabs.List
@@ -79,7 +82,10 @@ export function Tabs<Value extends string>({
       className={`flex min-h-0 flex-col ${fill ? "flex-1" : "gap-2"}`}
     >
       {fill || end ? (
-        <div className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""} ${rowClassName}`}>
+        <div
+          data-layout-overlay={rowOverlay}
+          className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""} ${rowClassName}`}
+        >
           {list}
           {end}
         </div>
