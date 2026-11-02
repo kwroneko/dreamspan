@@ -8,7 +8,7 @@ export const registerHistoryCommands = () => [
     // In the menu too: it's also an action, not only a key.
     menu: true,
     label: "Search and replace",
-    description: "Finds text in this branch's messages, swipes and summaries, and replaces it.",
+    description: "Finds text in this branch's messages, swipes and summaries, and replaces it (Ctrl+H).",
     order: 10,
     icon: "search",
     panel: "history",

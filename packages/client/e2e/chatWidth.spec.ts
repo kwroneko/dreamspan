@@ -329,7 +329,6 @@ for (const scale of [1, 2])
       await open(page, 1440, 900, "light", chatId)
       const strip = nextReply(page)
       const chips = [
-        strip.getByRole("button", { name: "Keyboard shortcuts", exact: true }),
         strip.getByRole("button", { name: /replies now$/ }),
         page.getByRole("button", { name: "Earlier text of this message", exact: true }),
         page.getByRole("button", { name: "Attach images", exact: true }),
@@ -370,7 +369,6 @@ for (const scale of [1, 2])
         try {
           const big = await zoom.newPage()
           await open(big, 1440, 900, "light", chatId)
-          const help = await bounds(nextReply(big).getByRole("button", { name: "Keyboard shortcuts", exact: true }))
           const now = await bounds(nextReply(big).getByRole("button", { name: /replies now$/ }))
           const around = (at: { x: number; y: number; width: number; height: number }, left: number) => ({
             x: at.x - left,
@@ -378,7 +376,6 @@ for (const scale of [1, 2])
             width: at.width + left + 16,
             height: at.height + 16
           })
-          await big.screenshot({ path: join(shots, "help-chip-zoom-4x.png"), clip: around(help, 16) })
           await big.screenshot({ path: join(shots, "reply-now-chip-zoom-4x.png"), clip: around(now, 120) })
           const row = await bounds(big.getByTestId("composer-controls"))
           await big.screenshot({ path: join(shots, "composer-controls-zoom-4x.png"), clip: row })
