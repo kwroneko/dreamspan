@@ -33,6 +33,7 @@ type Activity = ShellFork["activity"][number]
 /** What every shell read is made of: the cards, each fork row newest first, and what it had to walk. */
 interface ShellState {
   readonly cards: ReadonlyArray<ShellCard>
+  readonly personas: ReadonlyArray<ShellCard>
   readonly forks: ReadonlyArray<Fork>
   readonly pinsCollapsed: boolean
   readonly fresh: ReadonlyArray<ChatSummaries>
@@ -391,7 +392,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
       }
       const favourites = new Set((yield* readFavourites(sql, userId)).on)
       const shellCards = metadata
-        .filter((m) => !m.persona && byCard.has(m.id))
+        .filter((m) => byCard.has(m.id))
         .map((m) => {
           const c = byCard.get(m.id)!
           const { used, spoke, recent } = usage.get(c.entityId) ?? { used: [], spoke: [], recent: null }
@@ -427,8 +428,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   name: c.name,
                   avatarMediaId: c.avatarMediaId,
                   ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),
-                  chats: used.length,
-                  lastMessageAt: spoke[0]?.a.at ?? null,
+                  chats: m.persona ? new Set(used.map((f) => f.chat.id)).size : used.length,
+                  lastMessageAt: spoke[0]?.a.at ?? (m.persona ? recent : null),
                   latestChatId: (latest?.chat.id as ChatId) ?? null
                 },
                 trusted
@@ -445,7 +446,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                       leaf: open.leaf,
                       slot: (turn(open)?.slot as SlotId | undefined) ?? null
                     },
-              recentAt: recent
+              recentAt: m.persona ? (spoke[0]?.a.at ?? recent) : recent
             },
             trusted
           )
@@ -454,7 +455,8 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         pins_collapsed: number
       }>`SELECT pins_collapsed FROM shell_preferences WHERE user_id = ${userId}`
       const state: ShellState = {
-        cards: shellCards,
+        cards: shellCards.filter((c) => !byCard.get(c.card.entityId)!.persona),
+        personas: shellCards.filter((c) => byCard.get(c.card.entityId)!.persona),
         forks,
         pinsCollapsed: prefs?.pins_collapsed === 1,
         fresh: [...fresh].map(([chatId, list]) => ({
@@ -480,6 +482,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
     ShellCards: ({ userId }) =>
       Effect.map(shellState(userId, false), (state) => ({
         cards: state.cards,
+        personas: state.personas,
         pinsCollapsed: state.pinsCollapsed,
         fresh: state.fresh
       })).pipe(query("ShellCards")),

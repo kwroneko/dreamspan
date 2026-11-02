@@ -162,7 +162,9 @@ export function useOpenCharacter() {
   const userId = useSession().user.id
   return (entity: EntityId) => {
     navigation.picked()
-    const card = AsyncResult.isSuccess(result) ? result.value.cards.find((c) => c.card.entityId === entity) : undefined
+    const card = AsyncResult.isSuccess(result)
+      ? [...result.value.cards, ...result.value.personas].find((c) => c.card.entityId === entity)
+      : undefined
     const latest = card?.open ?? null
     const panel = `card:${entity}`
     try {

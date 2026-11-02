@@ -306,6 +306,16 @@ export function Editor({
               </>
             ) : ref.kind === "lorebook" ? (
               addedTo(usedByChats)
+            ) : ref.kind === "card" ? (
+              <Tooltip label="Shows this card's chats.">
+                <Link
+                  to="/cards/$entityId"
+                  params={{ entityId: ref.entityId }}
+                  className="text-accent underline-offset-4 hover:underline"
+                >
+                  {usedBy(usedByChats)}
+                </Link>
+              </Tooltip>
             ) : (
               usedBy(usedByChats)
             )}

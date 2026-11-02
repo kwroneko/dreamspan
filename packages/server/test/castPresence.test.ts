@@ -106,6 +106,41 @@ const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 
 describe("cast participation", () => {
+  it.live("writing as the selected persona establishes presence and dates its usage without generation", () =>
+    run(
+      Effect.gen(function* () {
+        const t = yield* setup
+        const { api, writer, userId, guest, chatId, forkId } = t
+        yield* writer.SetEntityTags({ userId, entityId: guest.entityId, tags: ["persona"] })
+        yield* api.ChangeCast({
+          chatId,
+          forkId,
+          slotId: t.tip.slotId,
+          change: { _tag: "Persona", entityId: guest.entityId }
+        })
+        const sent = yield* t.append(t.tip.slotId, forkId, guest.entityId)
+        const shell = yield* api.GetShellCards()
+        const persona = shell.personas.find((c) => c.card.entityId === guest.entityId)!
+        assert.strictEqual(persona.card.chats, 1)
+        assert.strictEqual(persona.card.lastMessageAt, sent.version.createdAt)
+        assert.strictEqual(persona.open?.slot, sent.slotId)
+        assert.isFalse(shell.cards.some((c) => c.card.entityId === guest.entityId))
+        assert.deepStrictEqual(
+          (yield* api.ListChats({ entityId: guest.entityId, limit: 50, before: null })).map((c) => c.id),
+          [chatId]
+        )
+        // A later alternative written by the user remains evidence after selecting another author.
+        const swipe = yield* t.swipe(t.root.slotId, guest.entityId)
+        const after = (yield* api.GetShellCards()).personas.find((c) => c.card.entityId === guest.entityId)!
+        assert.strictEqual(after.card.lastMessageAt, swipe.createdAt)
+        assert.strictEqual(after.open?.slot, t.root.slotId)
+        yield* api.CreateFork({ chatId, fromForkId: forkId, atSlotId: sent.slotId })
+        const branched = (yield* api.GetShellCards()).personas.find((c) => c.card.entityId === guest.entityId)!
+        assert.strictEqual(branched.card.chats, 1, "branches of one chat count once for a persona")
+      })
+    )
+  )
+
   it.live("add then remove changes none of the membership, recency, group, search, impact or export reads", () =>
     run(
       Effect.gen(function* () {

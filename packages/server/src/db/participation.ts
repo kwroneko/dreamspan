@@ -30,3 +30,10 @@ export const slotParticipantsSql = (slot: string) => `(SELECT json_group_array(D
   FROM versions pv JOIN version_participants p ON p.version_id = pv.id
     JOIN entities pe ON pe.id = p.entity_id AND pe.purged_at IS NULL
   WHERE pv.slot_id = ${slot}.id AND pv.purged_at IS NULL)`
+
+/** Human-authored alternatives count as use even when another swipe is selected. */
+export const slotHumanAuthorsSql = (slot: string) => `(SELECT json_group_array(json_object(
+  'entity', v.speaker_entity_id, 'at', CASE WHEN v.origin IN ('edited', 'changeset')
+    THEN ${slot}.created_at ELSE v.created_at END))
+  FROM versions v WHERE v.slot_id = ${slot}.id AND v.writer = 'human'
+    AND v.speaker_entity_id IS NOT NULL AND v.purged_at IS NULL)`
