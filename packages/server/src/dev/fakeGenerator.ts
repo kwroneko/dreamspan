@@ -11,6 +11,8 @@ export interface FakeGeneratorOptions {
   readonly tokensPerSecond: number
   /** About how many tokens each generation has. */
   readonly tokens: number
+  /** Fixed prose for fixtures; absent, each version gets its own stable seed. */
+  readonly seed?: number | undefined
   /** Bursty: the tokens due come all at once this often, at the same average rate. */
   readonly burstMs?: number | undefined
   /** About how many tokens of reasoning come before the text, as a reasoning model's would; none when unset. */
@@ -38,7 +40,7 @@ export const layer = (options: FakeGeneratorOptions) =>
     Option.some({
       generate: (request) =>
         Stream.suspend(() => {
-          const seed = seedOf(request.versionId)
+          const seed = options.seed ?? seedOf(request.versionId)
           const reasoning: ReadonlyArray<GenerationChunk> = options.reasoningTokens
             ? tokenize(syntheticReasoning(seed, options.reasoningTokens)).map((token) => ({ reasoning: token }))
             : []

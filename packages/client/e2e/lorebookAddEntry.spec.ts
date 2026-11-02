@@ -5,6 +5,7 @@
 // editor and the side panel's book, at 1440 and 390. Synthetic books and chat only.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
+import type { RefId } from "@rp/shared/library.ts"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
@@ -28,7 +29,7 @@ const upload = async (page: Page, name: string) => {
     headers: { origin: server().url, "content-type": "application/octet-stream" }
   })
   expect(response.status()).toBe(200)
-  return (await response.json()).library.ref as { id: string }
+  return (await response.json()).library.ref as { id: RefId }
 }
 
 /** Runs `move` on the element's scrolling ancestor (null: the page), and returns where it's scrolled to. */
@@ -76,9 +77,9 @@ const check = async (page: Page, scope: Locator, shot: string) => {
   await add.click()
   const title = scope.getByRole("textbox", { name: "Title of Untitled entry", exact: true })
   await expect(title).toBeFocused()
-  await page.waitForTimeout(300)
+  // Focus is set after the conditional reveal completes.
+  await expect.poll(() => headerInView(title)).toBe(true)
   expect(await onScroller(add, "read")).toBe(before)
-  expect(await headerInView(title)).toBe(true)
   if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${shot}-added.png` })
   await page.keyboard.type("Gulls")
 
@@ -106,7 +107,7 @@ for (const theme of ["light", "dark"] as const)
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      const ref = await upload(page, `Coast ${width}`)
+      const ref = await upload(page, `Coast ${width} ${theme}`)
       await page.goto(`${server().url}/library/${ref.id}`)
       const list = page.getByRole("list", { name: "Entries" })
       await expect(list.getByRole("textbox", { name: "Title of Place 39", exact: true })).toBeVisible()
@@ -121,10 +122,10 @@ for (const theme of ["light", "dark"] as const)
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await upload(page, `Tides ${width} ${theme}`)
+      const label = `Tides ${width} ${theme}`
+      const ref = await upload(page, label)
       const chatId = await admin((api) =>
         Effect.gen(function* () {
-          const ref = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === `Tides ${width} ${theme}`)!
           const chat = yield* api.CreateChat({ title: `Lore ${width}` })
           yield* api.ChangeCast({
             chatId: chat.id,
@@ -138,9 +139,9 @@ for (const theme of ["light", "dark"] as const)
       const panel = await openPanel(page, "Lorebooks")
       await panel
         .getByRole("list", { name: "Lorebooks in this chat" })
-        .getByRole("button", { name: new RegExp(`^Tides ${width} ${theme}`) })
+        .getByRole("button", { name: new RegExp(`^${label}`) })
         .click()
-      const editor = panel.getByRole("region", { name: `Lorebook Tides ${width} ${theme}` })
+      const editor = panel.getByRole("region", { name: `Lorebook ${label}` })
       await expect(editor.getByRole("list", { name: "Entries" })).toBeVisible()
       await check(page, editor, `lorebook-panel-${width}-${theme}`)
     })

@@ -24,7 +24,7 @@ lcmTest("cap cold cache and maximum allowed output", (server) =>
           })
         )
       },
-      { hidden: 20, visible: 180 }
+      { hidden: 20, visible: 90 }
     )
     const p = yield* h.prepare("Bob - cold")
     const args = { chatId: p.chatId, leafSlotId: p.leaf }
@@ -32,6 +32,15 @@ lcmTest("cap cold cache and maximum allowed output", (server) =>
     yield* h.api.EnableLcm({ ...args, choice: "scratch" })
     yield* h.settle(p.chatId, p.leaf)
     const state = yield* h.api.GetLcmBackfill(args)
+    // Keep the functional fixture small, but require both phases at worst-case
+    // usage so shrinking it cannot silently remove condensation coverage.
+    const ledger = (yield* h.ledger(p.chatId)).filter((r) => r.status === "complete")
+    assert.isTrue(ledger.some((r) => r.purpose === "summarize"))
+    assert.isTrue(ledger.some((r) => r.purpose === "condense"))
+    for (const request of ledger) {
+      assert.strictEqual(request.counts.cacheRead ?? 0, 0)
+      assert.strictEqual(request.counts.output, request.purpose === "condense" ? 375 : 250)
+    }
     assert.isAtMost(state!.spentCost!, state!.capCost!)
     assert.isNull(yield* h.writer.ClaimSummaryJob({ userId: h.userId }))
   }).pipe(Effect.scoped)

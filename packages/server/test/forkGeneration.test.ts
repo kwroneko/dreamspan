@@ -2,16 +2,15 @@
 // fork when it gets to it. A swipe in one fork waits for summaries first
 // (Summarizer.beforeReply); the user chatting meanwhile in another fork whose path holds the
 // message must not give the swipe that fork's choices (here its greeting).
-import { DatabaseSync } from "node:sqlite"
 import { assert, describe, it } from "@effect/vitest"
 import { type EntityId, type ForkId, NewVersion, type SlotId, type VersionId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Deferred, Effect, Layer } from "effect"
-import { databaseFile } from "../src/db/connection.ts"
 import { Reader, Writer } from "../src/db/Database.ts"
 import { Summarizer } from "../src/lcm/Summarizer.ts"
 import { client, serverLayer, testConfig } from "./support/config.ts"
 import { eventually, generateReply } from "./support/generation.ts"
+import { fixtureSql } from "./support/lcmFixtures.ts"
 import { completionChunks, sse, startMockProvider } from "./support/mockProvider.ts"
 
 describe("generation in a fork", () => {
@@ -46,6 +45,9 @@ describe("generation in a fork", () => {
         connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
         model: {}
       })
+      // A completed Version event precedes afterReply; finish that turn's plan
+      // before recording the swipe's two calls.
+      yield* eventually(() => planned.some((p) => p.when === "after"))
       const userId = (yield* api.Whoami()).id as UserId
       const main = chat.currentForkId! as ForkId
       const greeting = chat.activeLeafSlotId! as SlotId
@@ -79,7 +81,10 @@ describe("generation in a fork", () => {
       gate = yield* Deferred.make<void>()
       const before = mock.requests().length
       const atReply = yield* reader.GetSlot({ userId, slotId: reply, forkId: main })
+      const mark = planned.length
       const swipe = yield* api.Regenerate({ slotId: reply, forkId: main, expectedRowVersion: atReply.entry.rowVersion })
+      yield* eventually(() => planned.length === mark + 1)
+      assert.deepStrictEqual(planned[mark], { when: "before", forkId: main })
       // Meanwhile the user chats in fork B.
       yield* writer.AppendMessage({
         userId,
@@ -97,31 +102,29 @@ describe("generation in a fork", () => {
         }),
         commitDraft: null
       })
-      const mark = planned.length
-      Deferred.doneUnsafe(gate, Effect.void)
+      yield* Deferred.succeed(gate, undefined)
       gate = null
       yield* eventually(() => mock.requests().length > before)
       const body = JSON.stringify(mock.requests().at(-1)!.body)
       assert.notInclude(body, "ALT GREETING", "the main fork's swipe uses the main fork's greeting")
       assert.include(body, "Late again")
-      const db = new DatabaseSync(databaseFile(config.dataDir), { readOnly: true })
-      try {
-        const rollout = db
-          .prepare("SELECT r.fork_id FROM versions v JOIN rollouts r ON r.id = v.rollout_id WHERE v.id = ?")
-          .get(swipe.version.id) as { fork_id: string } | undefined
-        assert.strictEqual(rollout?.fork_id, main)
-      } finally {
-        db.close()
-      }
-      // Its summaries are planned in the main fork too, not in B, current by now.
-      yield* eventually(() => planned.slice(mark).some((p) => p.when === "after"))
-      // Under load the previous turn's "after" plan can land late, and this swipe's "before" after the mark.
-      const recent = planned.slice(mark - 1)
-      assert.deepStrictEqual(recent.slice(-2), [
+      const [rollouts] = yield* fixtureSql(
+        config.dataDir,
+        [
+          {
+            sql: "SELECT r.fork_id FROM versions v JOIN rollouts r ON r.id = v.rollout_id WHERE v.id = ?",
+            params: [swipe.version.id]
+          }
+        ],
+        { readOnly: true }
+      )
+      assert.strictEqual(rollouts![0]?.fork_id, main)
+      // Both calls belong to this swipe; no previous turn can satisfy the wait.
+      yield* eventually(() => planned.length === mark + 2)
+      assert.deepStrictEqual(planned.slice(mark), [
         { when: "before", forkId: main },
         { when: "after", forkId: main }
       ])
-      assert.isTrue(recent.every((p) => p.forkId === main))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, undefined, summaries)))
   })
 })

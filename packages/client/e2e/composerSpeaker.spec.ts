@@ -10,7 +10,14 @@ import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
 import { openPanel } from "./support/panel.ts"
 
-const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
+// Seed 1's prose mentions none of this file's cast. Random synthetic names can
+// legitimately override talkativeness, changing Auto's next pick after a reply.
+const server = serverPerFile({
+  ...withAdmin,
+  FAKE_GENERATOR_TPS: "400",
+  FAKE_GENERATOR_TOKENS: "40",
+  FAKE_GENERATOR_SEED: "1"
+})
 // One session for the file's setup calls: the server allows 50 logins per address in 15 minutes.
 let adminCookie: string
 test.beforeAll(async () => {
