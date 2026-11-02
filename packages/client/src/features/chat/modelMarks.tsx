@@ -4,12 +4,13 @@
 // from the provider (a connection's kind, or the API SillyTavern recorded), so a router or a
 // lab's own API both show the lab when the key names one. The marks are the labs' logos from
 // Simple Icons (CC0, vendored below; labicons, owner 2026-11-01), monochrome in the text
-// colour; OpenAI, xAI and Cohere aren't in that set, so theirs are simple drawings of our own.
-// ST's icons are AGPL-3.0 and this app is not, so none of those is copied. Each mark is a
+// colour; OpenAI, xAI and Cohere aren't in that set, so theirs come from LobeHub's icon set
+// (MIT, vendored below; owner approved, importreport 2026-11-02). ST's icons are AGPL-3.0 and
+// this app is not, so none of those is copied. Each mark is a
 // registry entry (spec/PLUGINS.md §8): a plugin adds a lab, or replaces a mark, by id.
 import type { ModelRef } from "@rp/shared/chat.ts"
 import { stApiLabel } from "@rp/shared/stApis.ts"
-import type { ComponentType, ReactNode } from "react"
+import type { ComponentType } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import { Icon } from "../../ui/Icon.tsx"
@@ -76,6 +77,38 @@ const simpleIcons = {
     "M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z"
 } as const
 
+/**
+ * The labs Simple Icons doesn't have, from LobeHub Icons 1.101.0 (https://github.com/lobehub/lobe-icons,
+ * the `@lobehub/icons-static-svg` npm package): each mono icon's paths in a 24-unit box, copied
+ * verbatim from `icons/<id>.svg` (xAI's is `xai.svg`). The logos remain their owners' trademarks.
+ *
+ * MIT License. Copyright (c) 2023 LobeHub. Permission is hereby granted, free of charge, to any
+ * person obtaining a copy of this software and associated documentation files (the "Software"), to
+ * deal in the Software without restriction, including without limitation the rights to use, copy,
+ * modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit
+ * persons to whom the Software is furnished to do so, subject to the following conditions: The above
+ * copyright notice and this permission notice shall be included in all copies or substantial
+ * portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+ * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ * LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+const lobeIcons = {
+  openai: [
+    "M9.205 8.658v-2.26c0-.19.072-.333.238-.428l4.543-2.616c.619-.357 1.356-.523 2.117-.523 2.854 0 4.662 2.212 4.662 4.566 0 .167 0 .357-.024.547l-4.71-2.759a.797.797 0 00-.856 0l-5.97 3.473zm10.609 8.8V12.06c0-.333-.143-.57-.429-.737l-5.97-3.473 1.95-1.118a.433.433 0 01.476 0l4.543 2.617c1.309.76 2.189 2.378 2.189 3.948 0 1.808-1.07 3.473-2.76 4.163zM7.802 12.703l-1.95-1.142c-.167-.095-.239-.238-.239-.428V5.899c0-2.545 1.95-4.472 4.591-4.472 1 0 1.927.333 2.712.928L8.23 5.067c-.285.166-.428.404-.428.737v6.898zM12 15.128l-2.795-1.57v-3.33L12 8.658l2.795 1.57v3.33L12 15.128zm1.796 7.23c-1 0-1.927-.332-2.712-.927l4.686-2.712c.285-.166.428-.404.428-.737v-6.898l1.974 1.142c.167.095.238.238.238.428v5.233c0 2.545-1.974 4.472-4.614 4.472zm-5.637-5.303l-4.544-2.617c-1.308-.761-2.188-2.378-2.188-3.948A4.482 4.482 0 014.21 6.327v5.423c0 .333.143.571.428.738l5.947 3.449-1.95 1.118a.432.432 0 01-.476 0zm-.262 3.9c-2.688 0-4.662-2.021-4.662-4.519 0-.19.024-.38.047-.57l4.686 2.71c.286.167.571.167.856 0l5.97-3.448v2.26c0 .19-.07.333-.237.428l-4.543 2.616c-.619.357-1.356.523-2.117.523zm5.899 2.83a5.947 5.947 0 005.827-4.756C22.287 18.339 24 15.84 24 13.296c0-1.665-.713-3.282-1.998-4.448.119-.5.19-.999.19-1.498 0-3.401-2.759-5.947-5.946-5.947-.642 0-1.26.095-1.88.31A5.962 5.962 0 0010.205 0a5.947 5.947 0 00-5.827 4.757C1.713 5.447 0 7.945 0 10.49c0 1.666.713 3.283 1.998 4.448-.119.5-.19 1-.19 1.499 0 3.401 2.759 5.946 5.946 5.946.642 0 1.26-.095 1.88-.309a5.96 5.96 0 004.162 1.713z"
+  ],
+  xai: [
+    "M6.469 8.776L16.512 23h-4.464L2.005 8.776H6.47zm-.004 7.9l2.233 3.164L6.467 23H2l4.465-6.324zM22 2.582V23h-3.659V7.764L22 2.582zM22 1l-9.952 14.095-2.233-3.163L17.533 1H22z"
+  ],
+  cohere: [
+    "M8.128 14.099c.592 0 1.77-.033 3.398-.703 1.897-.781 5.672-2.2 8.395-3.656 1.905-1.018 2.74-2.366 2.74-4.18A4.56 4.56 0 0018.1 1H7.549A6.55 6.55 0 001 7.55c0 3.617 2.745 6.549 7.128 6.549z",
+    "M9.912 18.61a4.387 4.387 0 012.705-4.052l3.323-1.38c3.361-1.394 7.06 1.076 7.06 4.715a5.104 5.104 0 01-5.105 5.104l-3.597-.001a4.386 4.386 0 01-4.386-4.387z",
+    "M4.776 14.962A3.775 3.775 0 001 18.738v.489a3.776 3.776 0 007.551 0v-.49a3.775 3.775 0 00-3.775-3.775z"
+  ]
+} as const satisfies Record<string, ReadonlyArray<string>>
+
 /** A Simple Icons logo: its path in the 24-unit box, filled in the text colour, hidden from assistive technology. */
 function SimpleIcon({ size, path }: { size: number; path: string }) {
   return (
@@ -93,8 +126,8 @@ function SimpleIcon({ size, path }: { size: number; path: string }) {
   )
 }
 
-/** A mark's drawing: 24-unit box, filled in the text colour, hidden from assistive technology. */
-function Mark({ size, children, stroke = false }: { size: number; children: ReactNode; stroke?: boolean }) {
+/** A LobeHub logo: its paths in the 24-unit box, filled in the text colour (even-odd, as the set draws them). */
+function LobeIcon({ size, paths }: { size: number; paths: ReadonlyArray<string> }) {
   return (
     <svg
       width={size}
@@ -102,14 +135,13 @@ function Mark({ size, children, stroke = false }: { size: number; children: Reac
       viewBox="0 0 24 24"
       aria-hidden="true"
       className="shrink-0"
-      data-mark-source="drawn"
-      fill={stroke ? "none" : "currentColor"}
-      stroke={stroke ? "currentColor" : "none"}
-      strokeWidth={stroke ? 2 : undefined}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      fill="currentColor"
+      fillRule="evenodd"
+      data-mark-source="lobehub"
     >
-      {children}
+      {paths.map((d) => (
+        <path key={d} d={d} />
+      ))}
     </svg>
   )
 }
@@ -134,14 +166,7 @@ const builtins: ReadonlyArray<ModelMark> = [
     order: 20,
     models: /(^|\/)(gpt|chatgpt|o[1-9](-|$)|davinci|babbage)|openai/,
     providers: ["openai-responses", "openai", "azure_openai"],
-    // Three rings crossed into a six-petalled knot.
-    component: ({ size }) => (
-      <Mark size={size} stroke>
-        <ellipse cx="12" cy="12" rx="9" ry="4" />
-        <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(60 12 12)" />
-        <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(120 12 12)" />
-      </Mark>
-    )
+    component: ({ size }) => <LobeIcon size={size} paths={lobeIcons.openai} />
   },
   {
     id: "google",
@@ -181,14 +206,7 @@ const builtins: ReadonlyArray<ModelMark> = [
     order: 70,
     models: /grok|x-ai\//,
     providers: ["xai"],
-    // An X with one stroke broken.
-    component: ({ size }) => (
-      <Mark size={size} stroke>
-        <path d="M4 4l16 16" />
-        <path d="M20 4l-5.5 5.5" />
-        <path d="M9.5 14.5 4 20" />
-      </Mark>
-    )
+    component: ({ size }) => <LobeIcon size={size} paths={lobeIcons.xai} />
   },
   {
     id: "qwen",
@@ -203,14 +221,7 @@ const builtins: ReadonlyArray<ModelMark> = [
     order: 90,
     models: /cohere|command-|^command|(^|\/)aya/,
     providers: ["cohere"],
-    // Three rounded shapes.
-    component: ({ size }) => (
-      <Mark size={size}>
-        <path d="M9 3h8a4.5 4.5 0 0 1 0 9H9a4.5 4.5 0 0 1 0-9Z" />
-        <circle cx="7" cy="17" r="4" />
-        <circle cx="17.5" cy="17.5" r="2.5" />
-      </Mark>
-    )
+    component: ({ size }) => <LobeIcon size={size} paths={lobeIcons.cohere} />
   },
   {
     id: "moonshot",

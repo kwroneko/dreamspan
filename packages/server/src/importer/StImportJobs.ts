@@ -50,9 +50,15 @@ const NotSentJson = Schema.fromJsonString(Schema.Array(StNotSent))
 const decodeNotSent = Schema.decodeUnknownSync(NotSentJson)
 const encodeNotSent = Schema.encodeSync(NotSentJson)
 
-/** What a report asks the user to act on, with the files that didn't go in. */
+/**
+ * What a report asks the user to act on, with the files that didn't go in: an issue on many
+ * files counts once, as the report shows it once.
+ */
 const attentionOf = (report: StImportReport, notSent: number) =>
-  report.issues.length + report.links.length + report.hiddenRuns.length + notSent
+  new Set(report.issues.map((issue) => JSON.stringify([issue.level, issue.code, issue.message]))).size +
+  report.links.length +
+  report.hiddenRuns.length +
+  notSent
 
 /** A job running in this process. */
 interface Live {

@@ -113,7 +113,8 @@ it.live("message edit and scratchpad history survive reopening, restore and end 
         expectedSession: first.session
       })
       const history = yield* api.MessageDraftHistory({ target, limit: 1000 })
-      assert.strictEqual(history.length, 2)
+      // An edit's first state is the version's text (owner, 2026-11-02).
+      assert.strictEqual(history.length, target._tag === "Edit" ? 3 : 2)
       const reopened = (yield* api.MessageDrafts({ chatId: chat.id })).find((d) => d.id === first.id)!
       const restored = yield* api.RestoreMessageDraft({
         target,
@@ -149,10 +150,22 @@ it.live("message edit and scratchpad history survive reopening, restore and end 
       })
       assert.strictEqual(switched.content, "Other tab's recovered text")
       yield* api.DiscardMessageDraft({ target, draftId: switched.id, expectedRowVersion: switched.rowVersion })
-      assert.deepStrictEqual(
-        (yield* api.MessageDraftHistory({ target, limit: 1000 })).map((s) => s.length),
-        [0]
-      )
+      const left = yield* api.MessageDraftHistory({ target, limit: 1000 })
+      // An edit's cancel goes back to the version's text, the cancelled text one step back;
+      // a written version's session ends with its history.
+      if (target._tag === "Edit")
+        assert.deepStrictEqual(
+          left.slice(0, 2).map((s) => [s.kind, s.length]),
+          [
+            ["revision", "original".length],
+            ["restore", "Other tab's recovered text".length]
+          ]
+        )
+      else
+        assert.deepStrictEqual(
+          left.map((s) => s.length),
+          [0]
+        )
     }
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
@@ -198,10 +211,21 @@ for (const kind of ["edit", "write", "summary"] as const) {
           expectedRowVersion: draft.rowVersion
         })
       const limit = DraftHistoryPolicy.maxEntries + 1
-      const states = yield* kind === "summary"
-        ? api.SummaryDraftHistory({ ...summaryKey, limit })
-        : api.MessageDraftHistory({ target, limit })
+      const page = (before?: number) => {
+        const more = before === undefined ? {} : { before }
+        return kind === "summary"
+          ? api.SummaryDraftHistory({ ...summaryKey, limit, ...more })
+          : api.MessageDraftHistory({ target, limit, ...more })
+      }
+      let states = yield* page()
       assert.strictEqual(states.length, limit)
+      // A message's or a summary's edit keeps whichever is more, its last 200 states or its
+      // last 30 days (owner, 2026-11-02), so nothing here was dropped: the history starts at
+      // the text the edit was typed on, the page before reached with `before`.
+      if (kind !== "write") {
+        states = [...states, ...(yield* page(states.at(-1)!.seq))]
+        assert.strictEqual(states.length, DraftHistoryPolicy.maxEntries + 2)
+      }
       assert.strictEqual(states.at(-1)!.kind, "initial")
       const restore = {
         draftId: draft.id,
@@ -211,7 +235,10 @@ for (const kind of ["edit", "write", "summary"] as const) {
       const restored = yield* kind === "summary"
         ? api.RestoreSummaryDraft({ ...summaryKey, ...restore })
         : api.RestoreMessageDraft({ target, ...restore })
-      assert.strictEqual(restored.content, initial)
+      assert.strictEqual(
+        restored.content,
+        kind === "write" ? initial : kind === "edit" ? "original" : (summary.content ?? "")
+      )
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, Generator.none)))
   )
 }

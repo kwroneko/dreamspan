@@ -213,7 +213,7 @@ function Limit({
         : `${sourceTitle(resolved.source, model)}.`
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-start gap-2">
+      <div className="flex max-w-controls items-start gap-2">
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-sm font-medium">{label}</span>
           <span className="text-sm">
@@ -627,7 +627,13 @@ export function ModelSettingsEditor({
           ) : undefined
         }
       />
-      <Button type="submit" variant="primary" pending={action.pending}>
+      <Button
+        type="submit"
+        variant="primary"
+        pending={action.pending}
+        className="self-start"
+        hint="Saves these settings for this model, in every chat that uses it."
+      >
         Save model settings
       </Button>
     </form>

@@ -60,6 +60,74 @@ export const writeStFolder = (root: string, chats: ReadonlyArray<string>) => {
   return writeFiles(root, files)
 }
 
+const turns = (metadata: Record<string, unknown>, character: string, from: number, count: number, avatar?: string) =>
+  [
+    { chat_metadata: metadata, user_name: "unused", character_name: "unused" },
+    ...Array.from({ length: count }, (_, i) => ({
+      name: i % 2 ? "Sam" : character,
+      is_user: i % 2 === 1,
+      is_system: false,
+      send_date: at(from + i),
+      mes: i % 2 ? `Sam's turn ${i}.` : `${character}'s turn ${i}.`,
+      ...(i % 2 === 0 && avatar ? { original_avatar: avatar } : {}),
+      extra: {}
+    }))
+  ]
+    .map((line) => JSON.stringify(line))
+    .join("\n")
+
+/** ST's author's note at depth 2 in a chat's metadata, where the folder's default is at depth 4. */
+const noteAtTwo = { note_prompt: "Rain.", note_position: 1, note_depth: 2, note_role: 0, note_interval: 1 }
+
+/**
+ * A folder whose import report has one warning on many chats and a rarer one: Dax's own author's
+ * note (which ST applies) rode on each of his twelve chats' notes, at depth 2 rather than the
+ * default's depth 4, and one of Cleo's chats names a lorebook that isn't there. Cleo's latest chat
+ * is named by an older ST stamp from years before its first message, and the group of the two
+ * replies in list order.
+ */
+export const writeStReportFolder = (root: string) => {
+  const files: Record<string, string | Buffer> = {
+    "settings.json": JSON.stringify({
+      username: "Sam",
+      user_avatar: "user.png",
+      power_user: {
+        personas: { "user.png": "Sam" },
+        persona_descriptions: { "user.png": { description: "Sam is tall.", position: 0, depth: 2, role: 0 } },
+        default_persona: "user.png"
+      },
+      extension_settings: {
+        note: {
+          default: "",
+          defaultPosition: 1,
+          defaultDepth: 4,
+          defaultRole: 0,
+          defaultInterval: 1,
+          chara: [{ name: "Dax", prompt: "Dax squints.", useChara: true, position: 1 }]
+        },
+        disabledExtensions: []
+      }
+    }),
+    "characters/Dax.png": card("Dax", "Dax's turn 0."),
+    "characters/Cleo.png": card("Cleo", "Cleo's turn 0."),
+    ...Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [`chats/Dax/Dax - ${i + 1}.jsonl`, turns(noteAtTwo, "Dax", i, 4)])
+    ),
+    "chats/Cleo/Cleo - lost.jsonl": turns({ ...noteAtTwo, world_info: "Gone Book" }, "Cleo", 0, 4),
+    "chats/Cleo/2024-9-10 @13h 44m 41s 16ms.jsonl": turns({}, "Cleo", 40, 6),
+    "groups/g.json": JSON.stringify({
+      id: "g",
+      name: "Both",
+      members: ["Cleo.png", "Dax.png"],
+      disabled_members: [],
+      chats: ["Both - 1"],
+      activation_strategy: 1
+    }),
+    "group chats/Both - 1.jsonl": turns({}, "Cleo", 20, 4, "Cleo.png")
+  }
+  return writeFiles(root, files)
+}
+
 const writeFiles = (root: string, files: Record<string, string | Buffer>) => {
   for (const [path, content] of Object.entries(files)) {
     const file = join(root, "ST/data/default-user", path)

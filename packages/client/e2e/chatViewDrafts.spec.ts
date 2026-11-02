@@ -62,7 +62,7 @@ test("the text of a version being written, and of an edit, survives a reload and
   await page.waitForTimeout(1000)
   await page.reload()
   await expectTextBox(row.getByLabel("Message text", { exact: true }), "An edit half done.")
-  // Cancelling closes it for good: its text goes to the recovered texts, not back into the box.
+  // Cancelling closes it: its text stays in the edit's history (owner, 2026-11-02), not back in the box.
   await row.getByRole("button", { name: "Cancel" }).click()
   await expect(row.getByLabel("Message text", { exact: true })).toHaveCount(0)
   await page.reload()

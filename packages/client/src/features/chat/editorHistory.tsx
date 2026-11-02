@@ -25,7 +25,10 @@ export const summaryEditorTools = defineSlot<{ draft: SummaryDraft; base: string
 export const messageTextEditor = defineSlot<CodeEditorProps>("message.text-editor")
 export const summaryTextEditor = defineSlot<CodeEditorProps>("summary.text-editor")
 
-const EARLIER_DRAFTS = "Every earlier state of this edit as you typed it, to restore one."
+const EARLIER_DRAFTS =
+  "Every earlier state of this edit as you typed it, from before its saves too, to restore one. Restoring makes it the newest state."
+/** How many states a page of the history lists. */
+const HISTORY_PAGE = 100
 
 function CurrentChanges({ draft, base }: { draft: MessageDraft | SummaryDraft; base: string }) {
   const text = useSyncExternalStore(draft.subscribe, () => draft.snapshot().text)
@@ -49,17 +52,30 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
   const [states, setStates] = useState<ReadonlyArray<DraftState> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The history outlives saves (owner, 2026-11-02), so it comes in pages.
+  const [more, setMore] = useState(false)
   useEffect(() => {
     let live = true
-    void draft.history().then((result) => {
+    void draft.history(undefined, HISTORY_PAGE).then((result) => {
       if (!live) return
-      if (result.ok) setStates(result.value)
-      else setError(result.error.message)
+      if (result.ok) {
+        setStates(result.value)
+        setMore(result.value.length >= HISTORY_PAGE)
+      } else setError(result.error.message)
     })
     return () => {
       live = false
     }
   }, [draft])
+  const earlier = async () => {
+    if (!states?.length) return
+    setBusy(true)
+    const result = await draft.history(states.at(-1)!.seq, HISTORY_PAGE)
+    setBusy(false)
+    if (!result.ok) return setError(result.error.message)
+    setStates([...states, ...result.value])
+    setMore(result.value.length >= HISTORY_PAGE)
+  }
   return (
     <Dialog
       open
@@ -88,6 +104,7 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
               </p>
               <Button
                 disabled={busy}
+                hint="Puts this text back in the editor as its newest state; the text there now stays in this history."
                 onClick={async () => {
                   setBusy(true)
                   const restored = await draft.restoreState(state.seq)
@@ -104,6 +121,11 @@ function DraftHistoryDialog({ draft, onClose }: { draft: MessageDraft | SummaryD
             </li>
           ))}
         </ol>
+      )}
+      {more && (
+        <Button pending={busy} hint="Lists the states before these." onClick={() => void earlier()}>
+          Earlier states
+        </Button>
       )}
       <Button onClick={onClose}>Close history</Button>
     </Dialog>

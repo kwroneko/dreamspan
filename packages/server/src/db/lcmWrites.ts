@@ -295,7 +295,8 @@ export const makeLcmWriteHandlers = (bin: Bin) =>
           const { recovered } = yield* bin.drafts.commit(userId, commitDraft, {
             targetKind: "summary_edit",
             targetId: summaryId,
-            content
+            content,
+            revision: revisionId
           })
           return { summary: yield* readSummary(sql, userId, summaryId), recovered }
         }).pipe(inSummaryFork(sql, userId, summaryId, forkId), transaction(sql, "EditSummary")),
