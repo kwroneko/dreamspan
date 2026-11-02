@@ -2,12 +2,15 @@
 // sent to and moved between the two scopes. Its text edits through editor stores (tested with
 // them), so these cover the workspace's own calls. Synthetic text only.
 import { Effect } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Snippet } from "@rp/shared/snippetsApi.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { SnippetWorkspace } from "../src/features/snippets/workspace.ts"
 import type { Caller } from "../src/features/editor/caller.ts"
+
+const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }))
+vi.mock("../src/ui/Toast.tsx", () => ({ showToast }))
 
 const snippet = (id: string, content: string, global = false): Snippet =>
   ({ ref: { id: id as RefId }, title: "Harbour", content, global }) as Snippet
@@ -66,16 +69,31 @@ describe("the Snippets workspace", () => {
     expect(workspace.snapshot().selected).toBe("s1")
   })
 
-  it("sends text to a new snippet when none is open, and opens the panel", async () => {
+  it("sends text to a new snippet when none is open, without opening the panel", async () => {
     const { workspace, calls } = setup()
     let opened = 0
     workspace.setOpener(() => opened++)
     await workspace.send("A passage kept from a swipe.")
+    expect(opened).toBe(0)
+    expect(workspace.snapshot().floating).toBe(false)
+    const notice = showToast.mock.lastCall![0]
+    expect(notice.title).toBe("Added to snippet “Harbour”")
+    workspace.select("another-snippet" as RefId)
+    notice.actions[0].onClick()
     expect(opened).toBe(1)
     expect(calls.find((c) => c.tag === "CreateSnippet")?.args).toMatchObject({
       chatId: null,
       content: "A passage kept from a swipe."
     })
+    expect(workspace.snapshot().selected).toBe("s1")
+  })
+
+  it("sends outside a chat without opening the floating sheet until asked", async () => {
+    const { workspace } = setup()
+    await workspace.send("A synthetic passage.")
+    expect(workspace.snapshot().floating).toBe(false)
+    showToast.mock.lastCall![0].actions[0].onClick()
+    expect(workspace.snapshot().floating).toBe(true)
     expect(workspace.snapshot().selected).toBe("s1")
   })
 
