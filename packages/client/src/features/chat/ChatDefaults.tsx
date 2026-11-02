@@ -238,7 +238,7 @@ export function SummaryDefaults({
         </Switch>
         <Field
           label="Summarization instruction"
-          description="The default for new chats, which copy it when they're made; a chat's own instruction takes precedence. Use {{words}} for the summary's length; leave empty for the built-in instruction."
+          description="What new chats ask for when summarizing. {{words}} is the summary's length; empty uses the built-in instruction."
         >
           <Textarea
             textActions

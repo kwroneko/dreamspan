@@ -35,7 +35,7 @@ export function EditChatCard({ session, card, info }: ChatCardActionProps) {
       variant="ghost"
       className="h-8! px-2!"
       aria-label={`Open ${card.name} in the full editor`}
-      hint="Every field of the card, opened over the chat."
+      hint="Edit every field of the card, over the chat."
       disabled={!info}
       onClick={() => {
         if (!info) return
@@ -61,7 +61,7 @@ export function ForkChatCard({ session, card, info, persona }: ChatCardActionPro
         className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Fork for this chat: ${card.name}`}
-        hint="Makes a copy of the card for this branch, to change without changing other chats."
+        hint="Change the card for this branch only, as a copy."
         onClick={() => setOpen(true)}
       >
         Fork for this chat
@@ -80,7 +80,7 @@ export function ChooseChatCard({ session, card, info, persona }: ChatCardActionP
         className="h-8! px-2!"
         disabled={!info || card.inBin}
         aria-label={`Use another version: ${card.name}`}
-        hint="Swaps in another card of its family, such as a fork, on this branch."
+        hint="Use another card of its family, such as a fork, on this branch."
         onClick={() => setOpen(true)}
       >
         Use another version
@@ -224,7 +224,7 @@ function CardVersionDialog({ session, card, onClose }: { session: ChatSession; c
       open
       onOpenChange={(open) => !open && !pending && onClose()}
       title="Use another version"
-      description="Choose from this card’s family. This branch and future branches use it; existing branches keep their cards."
+      description="Choose from this card’s family. Other branches keep their cards."
     >
       <ul aria-label="Card family" className="flex flex-col gap-2">
         {tree(null).map(({ member, depth }) => (

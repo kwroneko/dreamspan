@@ -256,7 +256,7 @@ function BranchList({
             </button>
           </Tooltip>
         )}
-        <Tooltip label="Lists this chat's branches in the left panel.">
+        <Tooltip label="Show this chat's branches in the sidebar.">
           <Link
             to="."
             className="text-accent hover:underline"

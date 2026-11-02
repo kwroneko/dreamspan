@@ -154,7 +154,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
             Undo
           </Button>
         </Tooltip>
-        <Tooltip label="Closes the edit and keeps the summary as it was. What you typed goes to the bin's recovered texts.">
+        <Tooltip label="Keep the summary as it was. What you typed goes to the bin's recovered texts.">
           <Button onClick={() => void finish(() => store.discard())} pending={pending} aria-label="Discard the edit">
             Discard
           </Button>
@@ -765,7 +765,7 @@ export function SummaryPanel({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <Tooltip label="What the model is sent in place of the older messages on this branch. Nothing here is written until your next reply, except with Summarize now.">
+        <Tooltip label="What the model reads in place of the older messages. New ones are written with your next reply, or at once with Summarize now.">
           <p
             tabIndex={0}
             className="self-start rounded-sm text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -777,7 +777,7 @@ export function SummaryPanel({
         {lcm.enabled ? (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <TimelineToggle />
-            <Tooltip label="Bars beside the messages, one lane per level, showing which summary covers them. Click a bar to open its summary here.">
+            <Tooltip label="See which summary covers each message, as bars beside the messages. Click one to open its summary.">
               <span className="inline-flex">
                 <Switch
                   checked={viewer.prefs.coverageRail}

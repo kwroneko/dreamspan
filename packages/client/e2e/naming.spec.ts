@@ -94,7 +94,7 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/chats/${started.second}`)
     await page.getByRole("heading", { level: 1 }).getByRole("button").click()
     const dialog = page.getByRole("dialog", { name: "Rename chat" })
-    await expect(dialog.getByText(/It leaves/)).toContainText("appears under its new name")
+    await expect(dialog.getByText(/it leaves/)).toContainText("shows under its new name")
     await dialog.getByLabel("Name", { exact: true }).fill(`Side story ${width}`)
     await dialog.getByRole("button", { name: "Rename", exact: true }).click()
     await page.goto(`${server().url}/groups/${started.first}/new`)

@@ -152,7 +152,7 @@ export function EnableLcmDialog({
       open
       onOpenChange={onOpenChange}
       title="Summarize older messages"
-      description="Summaries stand in for older messages, so the story stays in what the model is sent. Nothing is sent until your next reply, or Summarize now in the Summaries tab."
+      description="Keep the story in what the model reads: summaries stand in for older messages. They're written with your next reply, or at once with Summarize now."
     >
       {offer === null ? (
         error ? (

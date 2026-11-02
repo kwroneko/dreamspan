@@ -23,7 +23,7 @@ export function LearnContextLimit({ version }: { version: Version }) {
           <span>The provider says this model takes {limit.tokens.toLocaleString()} tokens.</span>
           <Button
             pending={action.pending}
-            hint="Saved as the model's learned context size, which every chat with it then uses."
+            hint="Use this as the model's context size, in every chat with it."
             onClick={async () => {
               const result = await action.run(
                 (client) => client("SaveLearnedContext", { modelId: limit.modelId as ModelId, context: limit.tokens }),

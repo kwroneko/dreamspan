@@ -214,7 +214,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ openDialog }) => ({
       label: "Branch from here",
       icon: "branch",
-      hint: "Start a new branch of the chat that goes on from this message. The branch you're on keeps everything after it; unsaved note text goes to the new branch.",
+      hint: "Start a new branch from this message. The branch you're on keeps everything after it.",
       onSelect: () => openDialog("message.branch")
     })),
     dialog: ForkNotesDialog
@@ -240,7 +240,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "Request it was generated from",
       icon: "layers",
-      hint: "Open the request this version was generated from: everything the model was sent, and where each part came from.",
+      hint: "See everything the model was sent for this version, and where each part came from.",
       link: (
         <Link
           to="/chats/$chatId/context/$versionId"

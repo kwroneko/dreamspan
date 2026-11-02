@@ -44,7 +44,7 @@ function PresetColumn({ store }: { store: EditorStore }) {
             <RefName store={store} />
           </span>
         </div>
-        <Tooltip label="The preset editor over the chat, with room to work and search">
+        <Tooltip label="Edit the preset in a large editor over the chat">
           <Button
             className="h-8 shrink-0 px-2.5"
             aria-label="Open the preset in the large editor"

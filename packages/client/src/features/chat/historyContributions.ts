@@ -17,7 +17,7 @@ export const registerHistoryCommands = () => [
   chatCommands.register({
     id: "history.edits",
     label: "History edits",
-    description: "What search and replace or a card's rename changed in this branch, to see or undo.",
+    description: "See or undo what search and replace or a card's rename changed in this branch.",
     order: 20,
     icon: "edit",
     panel: "history",
