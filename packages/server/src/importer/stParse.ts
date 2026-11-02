@@ -21,6 +21,7 @@ const parseChatPart = (input: {
   readonly first: boolean
   readonly firstIndex: number
   readonly carryAt: number | null
+  readonly fallbackAt?: number
 }) => {
   const issues = new ReportBuilder()
   return attempt(() => parseStChatPart(input.bytes, input, issues)).pipe(

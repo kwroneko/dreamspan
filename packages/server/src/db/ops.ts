@@ -383,6 +383,8 @@ export const StImportNote = Schema.Struct({
   title: Schema.String,
   /** Its texts, oldest first, as the note's revisions; the last is current. */
   contents: Schema.NonEmptyArray(Schema.String),
+  /** Source file time; summary revisions prefer their individual source messages. */
+  modifiedAt: Schema.optionalKey(Schema.Number),
   /** For a summary, the message each text was saved on, in the same order, where it's known. */
   sources: Schema.optionalKey(Schema.Array(Schema.NullOr(SlotId))),
   placement: NoteDoc.fields.placement,
@@ -1420,6 +1422,8 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("ImportFile", {
     payload: {
+      /** Source modification time for an ST folder import; absent for ordinary uploads. */
+      modifiedAt: Schema.optionalKey(Schema.Number),
       createdAt: Schema.optionalKey(Schema.Number),
       userId: UserId,
       intoRefId: Schema.NullOr(RefId),
@@ -1735,6 +1739,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("StImportCharacterNote", {
     payload: {
+      modifiedAt: Schema.optionalKey(Schema.Number),
       userId: UserId,
       cardEntityId: EntityId,
       prompt: Schema.String,

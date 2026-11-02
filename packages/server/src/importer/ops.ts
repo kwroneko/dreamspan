@@ -38,6 +38,7 @@ export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
 /** A parsed file: its report, and what goes into the library, if anything. */
 export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
   stCreatedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  stModifiedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** A card's ST `chat`: the chat file (without `.jsonl`) ST last opened it on. */
   stChat: Schema.optionalKey(Schema.String),
   report: ImportReport,
@@ -236,7 +237,8 @@ export class FormatOps extends RpcGroup.make(
       parser,
       first: Schema.Boolean,
       firstIndex: Schema.Int,
-      carryAt: Schema.NullOr(Schema.Number)
+      carryAt: Schema.NullOr(Schema.Number),
+      fallbackAt: Schema.optionalKey(Schema.Number)
     },
     success: StChatPart
   }),

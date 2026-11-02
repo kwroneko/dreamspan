@@ -92,7 +92,7 @@ export const sendStFile = (
 /** Imports the folder's user `prefix` (one of `findStRoots`), returning each file's answer. */
 export const importStFolder = (
   files: ReadonlyMap<string, Uint8Array>,
-  options: { prefix?: string; partBytes?: number } = {}
+  options: { prefix?: string; partBytes?: number; modifiedAt?: ReadonlyMap<string, number> } = {}
 ) =>
   Effect.gen(function* () {
     const roots = findStRoots([...files.keys()])
@@ -133,10 +133,14 @@ export const importStFolder = (
       ordered.length,
       ...ordered.map((f) => (f.file.kind === "chat" || f.file.kind === "group_chat" ? chats[nextChat++]! : f))
     )
+    const times = (path: string) => {
+      const at = options.modifiedAt?.get(prefix + path)
+      return at === undefined ? {} : { modifiedAt: String(at) }
+    }
     const answers = new Map<string, StFileResult>()
     const deferred: typeof ordered = []
     for (const file of ordered) {
-      const answer = yield* sendStFile(importId, file.path, file.bytes, {}, options.partBytes)
+      const answer = yield* sendStFile(importId, file.path, file.bytes, times(file.path), options.partBytes)
       if (answer.outcome === "deferred") deferred.push(file)
       else answers.set(file.path, answer)
     }
@@ -145,7 +149,7 @@ export const importStFolder = (
     while (deferred.length > 0 && progress) {
       progress = false
       for (const file of deferred.splice(0)) {
-        const answer = yield* sendStFile(importId, file.path, file.bytes, {}, options.partBytes)
+        const answer = yield* sendStFile(importId, file.path, file.bytes, times(file.path), options.partBytes)
         if (answer.outcome === "deferred") deferred.push(file)
         else {
           answers.set(file.path, answer)
@@ -154,7 +158,10 @@ export const importStFolder = (
       }
     }
     for (const file of deferred) {
-      answers.set(file.path, yield* sendStFile(importId, file.path, file.bytes, { orphan: "1" }, options.partBytes))
+      answers.set(
+        file.path,
+        yield* sendStFile(importId, file.path, file.bytes, { ...times(file.path), orphan: "1" }, options.partBytes)
+      )
     }
     return { importId, answers, report: yield* api.GetStImportReport({ importId }), api }
   })

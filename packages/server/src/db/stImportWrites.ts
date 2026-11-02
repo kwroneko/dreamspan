@@ -267,6 +267,13 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         const check = validateDoc("note", doc)
         if (!check.ok)
           return yield* Effect.die(new Error(`refusing to store an invalid note: ${check.problems.join("; ")}`))
+        const sourceSlot = note.sources?.[index]
+        const [sourceMessage] =
+          sourceSlot == null
+            ? []
+            : yield* sql<{ created_at: number }>`
+          SELECT created_at FROM slots WHERE id = ${sourceSlot} AND chat_id = ${chatId}`
+        const revisionAt = sourceMessage?.created_at ?? note.modifiedAt ?? at
         const id = uuidv7()
         yield* sql`INSERT INTO entity_revisions ${sql.insert({
           id,
@@ -279,7 +286,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           origin_ref: JSON.stringify({ file: source }),
           message: null,
           search_text: searchText(doc),
-          created_at: at
+          created_at: revisionAt
         })}`
         parent = id
       }
@@ -293,6 +300,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
       const entityId = uuidv7()
       yield* sql`INSERT INTO entities ${sql.insert({ id: entityId, owner_user_id: userId, kind: "note", created_at: at })}`
       const parent = yield* insertNoteRevisions(entityId, chatId, source, note, null, at)
+      const [head] = yield* sql<{ created_at: number }>`SELECT created_at FROM entity_revisions WHERE id = ${parent}`
       yield* sql`INSERT INTO entity_refs ${sql.insert({
         id: uuidv7(),
         entity_id: entityId,
@@ -303,7 +311,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         subtitle: "",
         source_path: `${source}#${note.kind}`,
         created_at: at,
-        updated_at: at
+        updated_at: head!.created_at
       })}`
       return entityId as EntityId
     })

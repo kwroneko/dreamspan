@@ -19,6 +19,7 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { shownText } from "@rp/shared/importReport.ts"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
+import { sourceTime } from "../formats/sourceTime.ts"
 import { StFileResult, StHiddenRun, type StImportReport, StIssue, StLinkChoice } from "@rp/shared/stImportApi.ts"
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
@@ -87,6 +88,8 @@ const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
 /** What a chat request names besides its path. */
 export interface ChatRequest {
+  /** File.lastModified for uploads; stat.mtimeMs for server folders. */
+  readonly modifiedAt?: number
   readonly createdAt?: number
   readonly part: number
   /** The file's last part: the client needn't know how many parts it has. */
@@ -132,6 +135,7 @@ interface Batch {
 }
 
 interface ChatProgress {
+  readonly modifiedAt: number
   readonly path: string
   readonly countAs: "chat" | "group_chat"
   nextPart: number
@@ -191,6 +195,8 @@ interface ChatProgress {
 }
 
 interface Session extends FolderContext {
+  readonly importedAt: number
+  settingsModifiedAt: number | null
   readonly id: string
   touched: number
   readonly report: Report
@@ -308,6 +314,8 @@ export class StImports extends Context.Service<
           const sources = yield* reader.StImportSources({ userId: user.id })
           const session: Session = {
             id: uuidv7(),
+            importedAt: Date.now(),
+            settingsModifiedAt: null,
             touched: Date.now(),
             report: new Report(),
             settings: null,
@@ -389,7 +397,8 @@ export class StImports extends Context.Service<
         countAs: string,
         parsed: ParsedFile,
         createdAt?: number,
-        presetLorebooks?: ReadonlyArray<RefId>
+        presetLorebooks?: ReadonlyArray<RefId>,
+        modifiedAt?: number
       ) =>
         Effect.gen(function* () {
           const { report } = session
@@ -435,6 +444,7 @@ export class StImports extends Context.Service<
                 intoRefId: (earlier ?? (unchanged ? same : undefined))?.refId ?? null,
                 ...(attaching ? { presetLorebooks } : {}),
                 ...(createdAt === undefined ? {} : { createdAt }),
+                modifiedAt: modifiedAt ?? session.importedAt,
                 ...library,
                 sourceName: path,
                 sourceHash: parsed.sha256,
@@ -490,7 +500,14 @@ export class StImports extends Context.Service<
           }
         })
 
-      const personaFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array) =>
+      const personaFile = (
+        session: Session,
+        user: User,
+        path: string,
+        file: string,
+        bytes: Uint8Array,
+        modifiedAt: number
+      ) =>
         Effect.gen(function* () {
           const persona: StPersona | null = session.settings?.personas.find((p) => p.avatar === file) ?? null
           // At the author's note's top or bottom: where the folder's default author's note is.
@@ -501,7 +518,16 @@ export class StImports extends Context.Service<
             persona,
             authorNotePlace(session.settings?.defaultAuthorNote ?? null).note
           )
-          const imported = yield* importLibrary(session, user, path, "persona", parsed)
+          const imported = yield* importLibrary(
+            session,
+            user,
+            path,
+            "persona",
+            parsed,
+            undefined,
+            undefined,
+            persona === null ? modifiedAt : Math.max(modifiedAt, session.settingsModifiedAt ?? modifiedAt)
+          )
           if (imported.entity === null) return imported.outcome
           // Only a new card goes into the persona folder: the user may have refiled it since.
           if (imported.created) {
@@ -540,7 +566,8 @@ export class StImports extends Context.Service<
               // Before, after or in place of the author's note: where the folder's default one is.
               placement: authorNotePlace(settings.defaultAuthorNote).note,
               scanLore: settings.allowWIScan,
-              sourcePath: path
+              sourcePath: path,
+              modifiedAt: session.settingsModifiedAt ?? session.importedAt
             })
             .pipe(
               Effect.catchTags({
@@ -555,7 +582,15 @@ export class StImports extends Context.Service<
           return imported !== null && chara.useChara ? imported.entity : null
         })
 
-      const cardFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array, ctime?: number) =>
+      const cardFile = (
+        session: Session,
+        user: User,
+        path: string,
+        file: string,
+        bytes: Uint8Array,
+        modifiedAt: number,
+        ctime?: number
+      ) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(bytes, file, "card")
           const card = parsed.card
@@ -567,7 +602,9 @@ export class StImports extends Context.Service<
             path,
             "card",
             parsed.parsed,
-            Math.trunc(parsed.parsed.stCreatedAt ?? ctime ?? Date.now())
+            Math.trunc(parsed.parsed.stCreatedAt ?? ctime ?? Date.now()),
+            undefined,
+            parsed.parsed.stModifiedAt ?? modifiedAt
           )
           if (imported.entity !== null && card !== null) {
             const characterNote = yield* characterAuthorNote(session, user, path, stem(file), imported.entity.entityId)
@@ -590,7 +627,8 @@ export class StImports extends Context.Service<
         file: string,
         bytes: Uint8Array,
         kind: "lorebook" | "preset",
-        name: string
+        name: string,
+        modifiedAt: number
       ) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(
@@ -617,7 +655,11 @@ export class StImports extends Context.Service<
             kind,
             parsed.parsed,
             undefined,
-            globals.map((book) => book.ref)
+            globals.map((book) => book.ref),
+            // These mapped fields came from settings.json, not the preset/book file.
+            (kind === "preset" && (session.settings?.textSwitches !== undefined || globals.length > 0)) || anEntries
+              ? Math.max(modifiedAt, session.settingsModifiedAt ?? modifiedAt)
+              : modifiedAt
           )
           if (imported.entity !== null && kind === "lorebook") {
             session.worlds.set(name, imported.entity.refId)
@@ -841,7 +883,15 @@ export class StImports extends Context.Service<
             recordId: target.recordId,
             position,
             events: applies ? change.events : [],
-            notes: applies ? change.notes : [],
+            notes: applies
+              ? change.notes.map((note) => ({
+                  ...note,
+                  modifiedAt:
+                    note.kind === "author_note" && progress.header?.authorNote == null
+                      ? (session.settingsModifiedAt ?? progress.modifiedAt)
+                      : progress.modifiedAt
+                }))
+              : [],
             removedNotes: applies ? change.removedNotes : [],
             previousNotes: progress.prevNotes,
             leaf,
@@ -990,6 +1040,7 @@ export class StImports extends Context.Service<
         return {
           path,
           countAs: file.kind,
+          modifiedAt: request.modifiedAt ?? session.importedAt,
           nextPart: 0,
           title: stChatTitle(file.name, mainChat, file.kind === "group_chat" ? (link.group?.name ?? null) : null),
           header,
@@ -1051,7 +1102,8 @@ export class StImports extends Context.Service<
             bytes,
             first: request.part === 0,
             firstIndex: session.chat?.index ?? 0,
-            carryAt: session.chat?.lastAt ?? null
+            carryAt: session.chat?.lastAt ?? null,
+            fallbackAt: session.chat?.modifiedAt ?? request.modifiedAt ?? session.importedAt
           })
           report.file(path, part.report)
           if (part.report.issues.some((issue) => issue.level === "error")) {
@@ -1156,7 +1208,15 @@ export class StImports extends Context.Service<
             session.report.count(kind.kind, "failed")
             return result("failed", message)
           }
-          return yield* handler.run({ session, user, importId, path, file: kind, bytes, request })
+          return yield* handler.run({
+            session,
+            user,
+            importId,
+            path,
+            file: kind,
+            bytes,
+            request: { ...request, modifiedAt: sourceTime(request.modifiedAt) ?? session.importedAt }
+          })
         })
 
       const chatHandler = (kind: "chat" | "group_chat") =>
@@ -1195,7 +1255,7 @@ export class StImports extends Context.Service<
       // The built-in handlers register the way a plugin's will (PLUGINS §8): its own, under
       // the same kind, replaces one for the scope it is registered in.
       const builtins: ReadonlyArray<StFolderHandler> = [
-        on("settings", ({ session, user, importId, path, bytes }) =>
+        on("settings", ({ session, user, importId, path, bytes, request }) =>
           Effect.gen(function* () {
             const parsed = yield* formats.st.settings(bytes)
             session.report.file(path, parsed.report)
@@ -1213,6 +1273,7 @@ export class StImports extends Context.Service<
               settings: JSON.stringify(settings.summary)
             })
             session.settings = settings
+            session.settingsModifiedAt = request.modifiedAt ?? session.importedAt
             session.report.selectedPreset =
               settings.selectedPreset === null
                 ? null
@@ -1232,17 +1293,17 @@ export class StImports extends Context.Service<
             return result("added")
           })
         ),
-        on("persona_avatar", ({ session, user, path, file, bytes }) =>
-          personaFile(session, user, path, file.file, bytes)
+        on("persona_avatar", ({ session, user, path, file, bytes, request }) =>
+          personaFile(session, user, path, file.file, bytes, request.modifiedAt!)
         ),
         on("card", ({ session, user, path, file, bytes, request }) =>
-          cardFile(session, user, path, file.file, bytes, request.createdAt)
+          cardFile(session, user, path, file.file, bytes, request.modifiedAt!, request.createdAt)
         ),
-        on("world", ({ session, user, path, file, bytes }) =>
-          libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name)
+        on("world", ({ session, user, path, file, bytes, request }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name, request.modifiedAt!)
         ),
-        on("preset", ({ session, user, path, file, bytes }) =>
-          libraryFile(session, user, path, `${file.name}.json`, bytes, "preset", file.name)
+        on("preset", ({ session, user, path, file, bytes, request }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "preset", file.name, request.modifiedAt!)
         ),
         on("group", ({ session, path, file, bytes }) =>
           Effect.gen(function* () {

@@ -37,6 +37,7 @@ import { transaction } from "./tx.ts"
 
 /** Where an imported revision came from: the file's name and hash. */
 interface ImportSource {
+  readonly modifiedAt?: number
   readonly originRef: string
   readonly sourcePath: string
   readonly sourceHash: string
@@ -109,6 +110,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly origin: "import" | "user" | "merge" | "generation"
       readonly originRef: string | null
       readonly message: string | null
+      readonly modifiedAt?: number
     }) =>
       Effect.gen(function* () {
         const id = uuidv7()
@@ -137,22 +139,22 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           origin_ref: options.originRef,
           message: options.message,
           search_text: doc.searchText,
-          created_at: Date.now()
+          created_at: options.modifiedAt ?? Date.now()
         })}`
         return id
       })
 
     const reload = (refId: string) => lib.refsWhere("r.id = ?", [refId]).pipe(Effect.map(([row]) => row!))
 
-    const moveHead = (refId: string, head: string, mergeBase: string | null) =>
+    const moveHead = (refId: string, head: string, mergeBase: string | null, modifiedAt = Date.now()) =>
       sql`UPDATE entity_refs SET head_revision_id = ${head}, merge_base_revision_id = coalesce(${mergeBase}, merge_base_revision_id),
-          row_version = row_version + 1, updated_at = ${Date.now()}
+          row_version = row_version + 1, updated_at = ${modifiedAt}
         WHERE id = ${refId}`
 
     /** A revision's content hash and document schema version. */
     const revision = (id: string) =>
-      sql<{ doc_hash: string; schema_version: number }>`
-      SELECT doc_hash, schema_version FROM entity_revisions WHERE id = ${id}`.pipe(Effect.map(([r]) => r!))
+      sql<{ doc_hash: string; schema_version: number; created_at: number }>`
+      SELECT doc_hash, schema_version, created_at FROM entity_revisions WHERE id = ${id}`.pipe(Effect.map(([r]) => r!))
 
     /**
      * A merge grants nothing the head didn't have: a preset's or card's regex approval survives only with
@@ -221,7 +223,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           case "up_to_date":
             // What it follows moved on but brought nothing new, so only the merge base moves.
             if (ref.followed_head !== null && plan.theirsHead !== ref.merge_base_revision_id) {
-              yield* moveHead(ref.id, ref.head_revision_id, plan.theirsHead)
+              yield* moveHead(ref.id, ref.head_revision_id, plan.theirsHead, ref.updated_at)
             }
             break
           case "fast_forward": {
@@ -229,7 +231,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             // there and not here: then it's a merge revision with the permission kept off.
             const doc = yield* withoutGrants(ref, plan.merged)
             if (docHash(doc) === docHash(plan.merged)) {
-              yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead)
+              yield* moveHead(ref.id, plan.theirsHead, plan.theirsHead, (yield* revision(plan.theirsHead)).created_at)
               break
             }
             const merge = yield* insertRevision({
@@ -314,6 +316,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
       readonly sourcePath: string | null
       readonly sourceHash: string | null
       readonly createdAt?: number
+      readonly modifiedAt?: number
       readonly message?: string | null
     }) =>
       Effect.gen(function* () {
@@ -328,7 +331,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           parents: [],
           origin: options.origin,
           originRef: options.originRef,
-          message: options.message ?? null
+          message: options.message ?? null,
+          ...(options.modifiedAt === undefined ? {} : { modifiedAt: options.modifiedAt })
         })
         yield* sql`INSERT INTO entity_refs ${sql.insert({
           id: refId,
@@ -342,7 +346,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           source_path: options.sourcePath,
           source_hash: options.sourceHash,
           created_at: at,
-          updated_at: at
+          updated_at: options.modifiedAt ?? at
         })}`
         return yield* reload(refId)
       })
@@ -356,6 +360,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
         readonly originRef: string | null
         readonly sourcePath: string | null
         readonly sourceHash: string | null
+        readonly modifiedAt?: number
       }
     ) =>
       Effect.gen(function* () {
@@ -384,6 +389,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             parents: ref.followed_head === null ? [] : [ref.followed_head],
             origin: "import",
             originRef: options.originRef,
+            ...(options.modifiedAt === undefined ? {} : { modifiedAt: options.modifiedAt }),
             message: null
           })
         }
@@ -551,7 +557,16 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
     const handlers = {
       RecordMessageImage: ({ userId, media }) =>
         recordMedia(userId, media).pipe(transaction(sql, "RecordMessageImage")),
-      StImportCharacterNote: ({ userId, cardEntityId, prompt, useChara, placement, scanLore, sourcePath }) =>
+      StImportCharacterNote: ({
+        userId,
+        cardEntityId,
+        prompt,
+        useChara,
+        placement,
+        scanLore,
+        sourcePath,
+        modifiedAt
+      }) =>
         Effect.gen(function* () {
           const [card] = yield* sql<{ n: number }>`
             SELECT count(*) AS n FROM entities WHERE id = ${cardEntityId} AND owner_user_id = ${userId} AND kind = 'card'`
@@ -571,6 +586,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
           }
           const source = {
             originRef: JSON.stringify({ file: sourcePath }),
+            ...(modifiedAt === undefined ? {} : { modifiedAt }),
             sourcePath: `${sourcePath}#character_author_note`,
             sourceHash: null
           }
@@ -855,6 +871,7 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             if (lorebooks.length > 0) doc = encode({ ...(JSON.parse(doc.json) as Doc), lorebooks })
           }
           const source: ImportSource = {
+            ...(input.modifiedAt === undefined ? {} : { modifiedAt: input.modifiedAt }),
             originRef: JSON.stringify({ file: input.sourceName, sha256: input.sourceHash }),
             sourcePath: input.sourceName,
             sourceHash: input.sourceHash

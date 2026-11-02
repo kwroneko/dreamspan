@@ -88,6 +88,7 @@ export const sendStFile = async (
     new URLSearchParams({
       import: importId,
       path: entry.path,
+      modifiedAt: String(entry.item.file.lastModified),
       ...(extra.card === undefined ? {} : { card: extra.card }),
       ...(extra.orphan ? { orphan: "1" } : {}),
       ...more
