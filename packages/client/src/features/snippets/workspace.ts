@@ -7,6 +7,7 @@ import type { ChatId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import type { Snippet } from "@rp/shared/snippetsApi.ts"
+import { showToast } from "../../ui/Toast.tsx"
 import { browserEnv } from "../editor/backup.ts"
 import type { Caller } from "../editor/caller.ts"
 import { EditorStore } from "../editor/store.ts"
@@ -107,20 +108,42 @@ export class SnippetWorkspace {
     this.update({ items: [...this.state.items, result.value], error: null })
     this.select(result.value.ref.id)
     void this.refresh()
+    return result.value
+  }
+
+  private added(refId: RefId, title: string, content: string) {
+    const name = title && title !== "Untitled snippet" ? title : content.trim().replace(/\s+/g, " ").slice(0, 60)
+    showToast({
+      title: `Added to snippet “${name || "Untitled snippet"}”`,
+      actions: [
+        {
+          label: "Open",
+          hint: "Open this snippet in Snippets",
+          onClick: () => {
+            this.select(refId)
+            this.open()
+          }
+        }
+      ]
+    })
   }
 
   /** Adds text to the end of the snippet open last, or to a new one. */
   send = async (text: string) => {
-    this.open()
     const target = this.state.selected
-    if (target === null) return this.create(text)
-    const store = this.store(target)
-    if (store.snapshot === null) await store.load()
-    if (store.snapshot === null) return this.create(text)
+    const store = target === null ? null : this.store(target)
+    if (store !== null && store.snapshot === null) await store.load()
+    if (store === null || store.snapshot === null) {
+      const made = await this.create(text)
+      if (made) this.added(made.ref.id, made.title, made.content)
+      return
+    }
     const current = store.text(CONTENT) ?? ""
     store.setText(CONTENT, current === "" ? text : `${current.replace(/\n*$/, "")}\n\n${text}`)
     await store.save(textField(CONTENT))
-    this.select(target)
+    this.select(store.refId)
+    if (store.saveError) return this.update({ error: store.saveError.message })
+    this.added(store.refId, store.text(["title"]) ?? "", store.text(CONTENT) ?? text)
   }
 
   /** For all chats, or only the chat shown (every branch of it). */

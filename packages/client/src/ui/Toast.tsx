@@ -1,10 +1,12 @@
 // Toasts: short notices in a corner, announced politely, with up to two actions. Base UI
 // carries the timing, focus and announcements; `showToast` works from anywhere.
 import { Toast as BaseToast } from "@base-ui/react/toast"
+import { Tooltip } from "./Tooltip.tsx"
 import { buttonClass } from "./Button.tsx"
 
 interface ToastAction {
   readonly label: string
+  readonly hint?: string
   readonly onClick: () => void
 }
 
@@ -37,6 +39,7 @@ function ToastList() {
     <BaseToast.Root
       key={toast.id}
       toast={toast}
+      data-toast
       className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-sm text-text shadow-lg outline-none transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none"
     >
       <div className="flex items-start gap-2">
@@ -51,17 +54,18 @@ function ToastList() {
       {(toast.data?.actions.length ?? 0) > 0 && (
         <div className="flex flex-wrap gap-2">
           {toast.data!.actions.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              className={buttonClass("secondary")}
-              onClick={() => {
-                close(toast.id)
-                action.onClick()
-              }}
-            >
-              {action.label}
-            </button>
+            <Tooltip key={action.label} label={action.hint ?? action.label}>
+              <button
+                type="button"
+                className={buttonClass("secondary")}
+                onClick={() => {
+                  close(toast.id)
+                  action.onClick()
+                }}
+              >
+                {action.label}
+              </button>
+            </Tooltip>
           ))}
         </div>
       )}
@@ -75,7 +79,10 @@ export function Toasts({ children }: { children: React.ReactNode }) {
     <BaseToast.Provider toastManager={manager} limit={3}>
       {children}
       <BaseToast.Portal>
-        <BaseToast.Viewport className="fixed right-4 bottom-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2 outline-none">
+        <BaseToast.Viewport
+          data-layout-overlay="Notices float over the page; their own contents keep normal spacing"
+          className="fixed right-4 bottom-4 z-50 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2 outline-none"
+        >
           <ToastList />
         </BaseToast.Viewport>
       </BaseToast.Portal>
