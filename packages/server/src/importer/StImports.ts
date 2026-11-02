@@ -19,7 +19,15 @@ import { uuidv7 } from "@rp/shared/id.ts"
 import { shownText } from "@rp/shared/importReport.ts"
 import type { EntityKind, RefId } from "@rp/shared/library.ts"
 import { classifyStPath, type StFile, stParentPath } from "@rp/shared/stFolder.ts"
-import { StFileResult, StHiddenRun, type StImportReport, StIssue, StLinkChoice } from "@rp/shared/stImportApi.ts"
+import { sourceTime, stIdTime } from "../formats/sourceTime.ts"
+import {
+  StFileResult,
+  StHiddenRun,
+  type StImportReport,
+  type StArrival,
+  StIssue,
+  StLinkChoice
+} from "@rp/shared/stImportApi.ts"
 import { createHash } from "node:crypto"
 import { lstat, rm } from "node:fs/promises"
 import { join } from "node:path"
@@ -87,7 +95,10 @@ const hash = (text: string) => createHash("sha256").update(text).digest("hex")
 
 /** What a chat request names besides its path. */
 export interface ChatRequest {
-  readonly createdAt?: number
+  /** File.lastModified for uploads; stat.mtimeMs for server folders. */
+  readonly modifiedAt?: number
+  readonly birthAt?: number
+  readonly arrival?: StArrival
   readonly part: number
   /** The file's last part: the client needn't know how many parts it has. */
   readonly last: boolean
@@ -132,6 +143,7 @@ interface Batch {
 }
 
 interface ChatProgress {
+  readonly modifiedAt: number
   readonly path: string
   readonly countAs: "chat" | "group_chat"
   nextPart: number
@@ -191,6 +203,9 @@ interface ChatProgress {
 }
 
 interface Session extends FolderContext {
+  readonly arrivalRefs: Map<EntityId, RefId>
+  readonly importedAt: number
+  settingsModifiedAt: number | null
   readonly id: string
   touched: number
   readonly report: Report
@@ -308,6 +323,9 @@ export class StImports extends Context.Service<
           const sources = yield* reader.StImportSources({ userId: user.id })
           const session: Session = {
             id: uuidv7(),
+            importedAt: Date.now(),
+            arrivalRefs: new Map(),
+            settingsModifiedAt: null,
             touched: Date.now(),
             report: new Report(),
             settings: null,
@@ -389,7 +407,9 @@ export class StImports extends Context.Service<
         countAs: string,
         parsed: ParsedFile,
         createdAt?: number,
-        presetLorebooks?: ReadonlyArray<RefId>
+        presetLorebooks?: ReadonlyArray<RefId>,
+        modifiedAt?: number,
+        arrival?: StArrival
       ) =>
         Effect.gen(function* () {
           const { report } = session
@@ -416,7 +436,7 @@ export class StImports extends Context.Service<
           // A preset taking ST's global books goes to the writer even unchanged: the books may be
           // new. What it stores is the import's line (§3.9), so the same books add no revision.
           const attaching = presetLorebooks !== undefined && presetLorebooks.length > 0
-          if (unchanged && !attaching) {
+          if (unchanged && !attaching && arrival === undefined) {
             report.count(countAs, "unchanged")
             const note =
               library.noteDocJson === null
@@ -435,6 +455,8 @@ export class StImports extends Context.Service<
                 intoRefId: (earlier ?? (unchanged ? same : undefined))?.refId ?? null,
                 ...(attaching ? { presetLorebooks } : {}),
                 ...(createdAt === undefined ? {} : { createdAt }),
+                modifiedAt: modifiedAt ?? session.importedAt,
+                ...(arrival === undefined ? {} : { arrival }),
                 ...library,
                 sourceName: path,
                 sourceHash: parsed.sha256,
@@ -466,6 +488,7 @@ export class StImports extends Context.Service<
             sourceHash: parsed.sha256,
             binned: false
           }
+          if (arrival !== undefined) session.arrivalRefs.set(entry.entityId, entry.refId)
           session.library.set(path, entry)
           session.libraryByHash.set(`${entry.kind}:${parsed.sha256}`, entry)
           const counted = imported.created
@@ -490,7 +513,15 @@ export class StImports extends Context.Service<
           }
         })
 
-      const personaFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array) =>
+      const personaFile = (
+        session: Session,
+        user: User,
+        path: string,
+        file: string,
+        bytes: Uint8Array,
+        modifiedAt: number,
+        arrival: StArrival
+      ) =>
         Effect.gen(function* () {
           const persona: StPersona | null = session.settings?.personas.find((p) => p.avatar === file) ?? null
           // At the author's note's top or bottom: where the folder's default author's note is.
@@ -501,7 +532,17 @@ export class StImports extends Context.Service<
             persona,
             authorNotePlace(session.settings?.defaultAuthorNote ?? null).note
           )
-          const imported = yield* importLibrary(session, user, path, "persona", parsed)
+          const imported = yield* importLibrary(
+            session,
+            user,
+            path,
+            "persona",
+            parsed,
+            arrival.at,
+            undefined,
+            persona === null ? modifiedAt : Math.max(modifiedAt, session.settingsModifiedAt ?? modifiedAt),
+            arrival
+          )
           if (imported.entity === null) return imported.outcome
           // Only a new card goes into the persona folder: the user may have refiled it since.
           if (imported.created) {
@@ -540,7 +581,8 @@ export class StImports extends Context.Service<
               // Before, after or in place of the author's note: where the folder's default one is.
               placement: authorNotePlace(settings.defaultAuthorNote).note,
               scanLore: settings.allowWIScan,
-              sourcePath: path
+              sourcePath: path,
+              modifiedAt: session.settingsModifiedAt ?? session.importedAt
             })
             .pipe(
               Effect.catchTags({
@@ -555,10 +597,20 @@ export class StImports extends Context.Service<
           return imported !== null && chara.useChara ? imported.entity : null
         })
 
-      const cardFile = (session: Session, user: User, path: string, file: string, bytes: Uint8Array, ctime?: number) =>
+      const cardFile = (
+        session: Session,
+        user: User,
+        path: string,
+        file: string,
+        bytes: Uint8Array,
+        modifiedAt: number,
+        arrivalFile: StArrival
+      ) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(bytes, file, "card")
           const card = parsed.card
+          const arrival: StArrival =
+            parsed.parsed.stCreatedAt == null ? arrivalFile : { at: parsed.parsed.stCreatedAt, basis: 0 }
           const size = card === null ? 0 : card.name.length + card.greetings.reduce((sum, g) => sum + g.length, 0)
           if (!hold(session, path, "card", size + file.length)) return result("failed", "too much in one import")
           const imported = yield* importLibrary(
@@ -567,7 +619,10 @@ export class StImports extends Context.Service<
             path,
             "card",
             parsed.parsed,
-            Math.trunc(parsed.parsed.stCreatedAt ?? ctime ?? Date.now())
+            card?.authoredAt ?? arrival.at,
+            undefined,
+            parsed.parsed.stModifiedAt ?? modifiedAt,
+            arrival
           )
           if (imported.entity !== null && card !== null) {
             const characterNote = yield* characterAuthorNote(session, user, path, stem(file), imported.entity.entityId)
@@ -590,7 +645,8 @@ export class StImports extends Context.Service<
         file: string,
         bytes: Uint8Array,
         kind: "lorebook" | "preset",
-        name: string
+        name: string,
+        modifiedAt: number
       ) =>
         Effect.gen(function* () {
           const parsed = yield* formats.st.libraryFile(
@@ -617,7 +673,11 @@ export class StImports extends Context.Service<
             kind,
             parsed.parsed,
             undefined,
-            globals.map((book) => book.ref)
+            globals.map((book) => book.ref),
+            // These mapped fields came from settings.json, not the preset/book file.
+            (kind === "preset" && (session.settings?.textSwitches !== undefined || globals.length > 0)) || anEntries
+              ? Math.max(modifiedAt, session.settingsModifiedAt ?? modifiedAt)
+              : modifiedAt
           )
           if (imported.entity !== null && kind === "lorebook") {
             session.worlds.set(name, imported.entity.refId)
@@ -668,6 +728,15 @@ export class StImports extends Context.Service<
             source: progress.path,
             ...(progress.fork === null ? {} : { parentRecordId: progress.fork.parentRecordId }),
             title: progress.title,
+            ...(progress.link.group?.arrival === undefined
+              ? {}
+              : {
+                  groupId: progress.link.group.id,
+                  arrival:
+                    progress.link.group.arrival.basis > 1 && progress.header?.createdAt != null
+                      ? { at: progress.header.createdAt, basis: 1 as const }
+                      : progress.link.group.arrival
+                }),
             // When ST started it: its header's date, else its first message's (never its last's).
             createdAt: progress.header?.createdAt ?? progress.firstAt ?? progress.lastAt ?? Date.now(),
             chatId: progress.into,
@@ -708,8 +777,18 @@ export class StImports extends Context.Service<
             parentSlotId: progress.cursor,
             matching: progress.matching,
             messagesJson: batch.messagesJson,
+            ...(progress.link.group?.arrival === undefined
+              ? {}
+              : { groupArrival: progress.link.group.arrival, groupId: progress.link.group.id }),
             // Only this batch's, so the map is sent once per speaker, not once per batch.
-            speakers: Object.fromEntries(batch.speakers.map((key) => [key, speakers.get(key) ?? null]))
+            speakers: Object.fromEntries(batch.speakers.map((key) => [key, speakers.get(key) ?? null])),
+            arrivalRefs: Object.fromEntries(
+              batch.speakers.flatMap((key) => {
+                const entity = speakers.get(key)
+                const ref = entity == null ? undefined : session.arrivalRefs.get(entity)
+                return ref === undefined ? [] : [[key, ref]]
+              })
+            )
           })
           if (written.added > 0 && progress.firstAdded === null) {
             progress.firstAdded = written.slotIds[written.slotIds.length - written.added]!
@@ -841,7 +920,15 @@ export class StImports extends Context.Service<
             recordId: target.recordId,
             position,
             events: applies ? change.events : [],
-            notes: applies ? change.notes : [],
+            notes: applies
+              ? change.notes.map((note) => ({
+                  ...note,
+                  modifiedAt:
+                    note.kind === "author_note" && progress.header?.authorNote == null
+                      ? (session.settingsModifiedAt ?? progress.modifiedAt)
+                      : progress.modifiedAt
+                }))
+              : [],
             removedNotes: applies ? change.removedNotes : [],
             previousNotes: progress.prevNotes,
             leaf,
@@ -990,6 +1077,7 @@ export class StImports extends Context.Service<
         return {
           path,
           countAs: file.kind,
+          modifiedAt: request.modifiedAt ?? session.importedAt,
           nextPart: 0,
           title: stChatTitle(file.name, mainChat, file.kind === "group_chat" ? (link.group?.name ?? null) : null),
           header,
@@ -1051,7 +1139,8 @@ export class StImports extends Context.Service<
             bytes,
             first: request.part === 0,
             firstIndex: session.chat?.index ?? 0,
-            carryAt: session.chat?.lastAt ?? null
+            carryAt: session.chat?.lastAt ?? null,
+            fallbackAt: session.chat?.modifiedAt ?? request.modifiedAt ?? session.importedAt
           })
           report.file(path, part.report)
           if (part.report.issues.some((issue) => issue.level === "error")) {
@@ -1142,6 +1231,13 @@ export class StImports extends Context.Service<
           return result(outcome)
         })
 
+      const fileArrival = (request: ChatRequest, importedAt: number): StArrival => {
+        const times = [sourceTime(request.birthAt), sourceTime(request.modifiedAt)].filter(
+          (at): at is number => at !== null && at > 0
+        )
+        return times.length ? { at: Math.min(...times), basis: 2 } : { at: importedAt, basis: 3 }
+      }
+
       const file = (user: User, importId: string, path: string, bytes: Uint8Array, request: ChatRequest) =>
         Effect.gen(function* () {
           const session = yield* sessionOf(user, importId)
@@ -1156,7 +1252,19 @@ export class StImports extends Context.Service<
             session.report.count(kind.kind, "failed")
             return result("failed", message)
           }
-          return yield* handler.run({ session, user, importId, path, file: kind, bytes, request })
+          return yield* handler.run({
+            session,
+            user,
+            importId,
+            path,
+            file: kind,
+            bytes,
+            request: {
+              ...request,
+              modifiedAt: sourceTime(request.modifiedAt) ?? session.importedAt,
+              arrival: fileArrival(request, session.importedAt)
+            }
+          })
         })
 
       const chatHandler = (kind: "chat" | "group_chat") =>
@@ -1195,7 +1303,7 @@ export class StImports extends Context.Service<
       // The built-in handlers register the way a plugin's will (PLUGINS §8): its own, under
       // the same kind, replaces one for the scope it is registered in.
       const builtins: ReadonlyArray<StFolderHandler> = [
-        on("settings", ({ session, user, importId, path, bytes }) =>
+        on("settings", ({ session, user, importId, path, bytes, request }) =>
           Effect.gen(function* () {
             const parsed = yield* formats.st.settings(bytes)
             session.report.file(path, parsed.report)
@@ -1213,6 +1321,7 @@ export class StImports extends Context.Service<
               settings: JSON.stringify(settings.summary)
             })
             session.settings = settings
+            session.settingsModifiedAt = request.modifiedAt ?? session.importedAt
             session.report.selectedPreset =
               settings.selectedPreset === null
                 ? null
@@ -1232,19 +1341,27 @@ export class StImports extends Context.Service<
             return result("added")
           })
         ),
-        on("persona_avatar", ({ session, user, path, file, bytes }) =>
-          personaFile(session, user, path, file.file, bytes)
+        on("persona_avatar", ({ session, user, path, file, bytes, request }) =>
+          personaFile(
+            session,
+            user,
+            path,
+            file.file,
+            bytes,
+            request.modifiedAt!,
+            stIdTime(file.file) === null ? request.arrival! : { at: stIdTime(file.file)!, basis: 0 }
+          )
         ),
         on("card", ({ session, user, path, file, bytes, request }) =>
-          cardFile(session, user, path, file.file, bytes, request.createdAt)
+          cardFile(session, user, path, file.file, bytes, request.modifiedAt!, request.arrival!)
         ),
-        on("world", ({ session, user, path, file, bytes }) =>
-          libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name)
+        on("world", ({ session, user, path, file, bytes, request }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "lorebook", file.name, request.modifiedAt!)
         ),
-        on("preset", ({ session, user, path, file, bytes }) =>
-          libraryFile(session, user, path, `${file.name}.json`, bytes, "preset", file.name)
+        on("preset", ({ session, user, path, file, bytes, request }) =>
+          libraryFile(session, user, path, `${file.name}.json`, bytes, "preset", file.name, request.modifiedAt!)
         ),
-        on("group", ({ session, path, file, bytes }) =>
+        on("group", ({ session, path, file, bytes, request }) =>
           Effect.gen(function* () {
             const parsed = yield* formats.st.group(bytes, file.file)
             session.report.file(path, parsed.report)
@@ -1258,7 +1375,11 @@ export class StImports extends Context.Service<
               0
             )
             if (!hold(session, path, "group", size)) return result("failed", "too much in one import")
-            for (const chat of group.chats) session.groups.set(chat, group)
+            for (const chat of group.chats)
+              session.groups.set(chat, {
+                ...group,
+                arrival: group.stAddedAt == null ? request.arrival! : { at: group.stAddedAt, basis: 0 }
+              })
             // A group isn't kept as an entry, only read for its chats' casts: counted as read.
             session.report.count("group", "unchanged")
             return result("added")

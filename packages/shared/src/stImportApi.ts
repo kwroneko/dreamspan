@@ -149,6 +149,10 @@ export class StImportJob extends Schema.Class<StImportJob>("StImportJob")({
   seen: Schema.Boolean
 }) {}
 
+/** Arrival evidence: 0 metadata, 1 chat, 2 file, 3 import; ties keep the earliest date. */
+export const StArrival = Schema.Struct({ at: Schema.Number, basis: Schema.Literals([0, 1, 2, 3]) })
+export type StArrival = typeof StArrival.Type
+
 /** A chat an ST import made, for the report's "Continue your latest chat". */
 export class StImportedChat extends Schema.Class<StImportedChat>("StImportedChat")({
   chatId: ChatId,

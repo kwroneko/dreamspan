@@ -8,9 +8,6 @@ import type { CardSort } from "./cardRecency.ts"
 import { PAGE_ROWS, useShellForks } from "./shellData.tsx"
 import { GroupTile, ShowMore } from "./ShellBrowser.tsx"
 
-/** A group has no Added of its own: it sorts by its chat's making, as Created does. */
-const forkSort = (sort: CardSort) => (sort === "added" ? "created" : sort)
-
 export function GroupGrid({
   needle,
   sort,
@@ -30,7 +27,7 @@ export function GroupGrid({
     entity: null,
     chat: null,
     search: needle,
-    sort: forkSort(sort),
+    sort,
     ...(reversed ? { reversed } : {}),
     sections: [{ id: "groups", limit: shown }]
   })

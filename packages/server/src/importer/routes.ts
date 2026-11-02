@@ -463,6 +463,8 @@ export const layer = Layer.unwrap(
       const card = query.get("card")
       if (card !== null && card !== "none" && !/^[0-9a-f-]{36}$/.test(card))
         return jsonError(400, "card must name a card")
+      const modified = query.get("modifiedAt")
+      const modifiedAt = modified === null || modified.trim() === "" ? undefined : Number(modified)
       const maxBytes = chat ? ST_CHAT_PART_BYTES : MAX_UPLOAD_BYTES
       if (Number(request.headers["content-length"]) > maxBytes) return jsonError(413, `at most ${maxBytes} bytes`)
       // Before the body is read: another user's import, or none, reads nothing.
@@ -488,6 +490,7 @@ export const layer = Layer.unwrap(
               const answer = yield* stImports
                 .file(user, importId, path, body, {
                   part,
+                  ...(modifiedAt === undefined ? {} : { modifiedAt }),
                   last: query.get("last") !== "0",
                   card: card as EntityId | "none" | null,
                   orphan: query.get("orphan") === "1"

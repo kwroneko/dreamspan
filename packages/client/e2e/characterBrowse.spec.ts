@@ -33,8 +33,8 @@ const favourites = async () =>
 test.beforeAll(async () => {
   // Bram and Dora come from ST, Dora a favourite there; Ava and Cleo are written here after.
   await stImport([
-    ["characters/Bram.png", card("Bram", "Bram nods.", { fav: false })],
-    ["characters/Dora.png", card("Dora", "Dora smiles.", { fav: true })]
+    ["characters/Bram.png", card("Bram", "Bram nods.", { fav: false }, {}, { create_date: "2021-01-01T00:00:00Z" })],
+    ["characters/Dora.png", card("Dora", "Dora smiles.", { fav: true }, {}, { create_date: "2022-01-01T00:00:00Z" })]
   ])
   await admin((api) =>
     Effect.gen(function* () {
@@ -100,14 +100,20 @@ for (const width of [1440, 390]) {
     await expect.poll(async () => (await labels(tiles(main))).sort()).toEqual(["Bram", "Dora"])
     await show.getByRole("button", { name: "All", exact: true }).click()
 
-    // Added: when each came in here, newest first, the date at the end of the tile's last line.
+    // Added inherits ST arrival for the imported cards; native cards use their arrival here.
     const sort = main.getByRole("group", { name: "Sort by", exact: true })
     await sort.getByRole("button", { name: "Added", exact: true }).click()
     await expect.poll(() => labels(tiles(main))).toEqual(["Cleo", "Ava", "Dora", "Bram"])
     const dates = main.getByLabel("Characters", { exact: true }).locator("[data-sort-date]")
     await expect(dates).toHaveCount(4)
     await expect(dates.first()).toHaveText(/^(now|\d+m ago)$/)
-    await expect(dates.first()).toHaveAttribute("aria-label", /^Added to this app: /)
+    await expect(dates.first()).toHaveAttribute("aria-label", /^Added: /)
+    const inheritedDate = await page.evaluate(() =>
+      new Date("2022-01-01T00:00:00Z").toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    )
+    await expect(
+      main.getByRole("button", { name: /^Open Dora(?: ·.*)?$/ }).locator("[data-sort-date]")
+    ).toHaveAttribute("aria-label", `Added: ${inheritedDate}`)
     // The tile keeps its height: the date shares the line with the chat count.
     const tile = tiles(main).first()
     const line = tile.locator("[data-sort-date]").locator("..")
@@ -117,10 +123,8 @@ for (const width of [1440, 390]) {
       // The tooltip, and the option's description (a hidden copy of the same text).
       const created = sort.getByRole("button", { name: "Created", exact: true })
       await created.hover()
-      await expect(
-        page.getByText(/^By when the card was made: for a SillyTavern import/).filter({ visible: true })
-      ).toBeVisible()
-      await expect(created).toHaveAccessibleDescription(/^By when the card was made: for a SillyTavern import/)
+      await expect(page.getByText(/^By when the card was made: its author/).filter({ visible: true })).toBeVisible()
+      await expect(created).toHaveAccessibleDescription(/^By when the card was made: its author/)
     }
     await shoot(page, `characters-added-${width}`)
     await main.getByRole("button", { name: "Order: Newest first", exact: true }).click()

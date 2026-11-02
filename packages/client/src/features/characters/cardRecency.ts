@@ -1,8 +1,8 @@
 // How characters sort: the home grid, the left panel's grid and Start a chat share these.
 // "Recent" is the shell read's `ShellCard.recentAt` (db/shellReads.ts): the latest activity in
 // any of the card's chats, imported dates included, as ST sorts by date_last_chat; null while it
-// has none. "Created" is `createdAt` (an ST import's card file date), "Added" `addedAt` (when it
-// came into this app).
+// has none. "Created" is `createdAt` (author creation, else earliest arrival evidence);
+// "Added" is `addedAt` (ST arrival for full imports, otherwise arrival in this app).
 
 interface SortableCard {
   readonly card: { readonly entityId: string; readonly label: string; readonly subtitle: string }

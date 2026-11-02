@@ -230,6 +230,8 @@ const stGenerationOf = (holder: unknown, extra: unknown): StGeneration | undefin
 
 /** A message as the writer takes it: a slot with its versions. */
 export interface StMessage {
+  /** An actual recorded message date, before synthetic fallbacks; arrival evidence only. */
+  readonly arrivalAt?: number | null
   readonly user: boolean
   readonly hidden: boolean
   /** Who spoke, as a key into the speaker map the main thread resolves; null for the narrator. */
@@ -364,7 +366,12 @@ const ATTACHMENTS = ["image", "media", "files", "file", "video", "inline_image"]
  */
 export const parseStChatPart = (
   bytes: Uint8Array,
-  options: { readonly first: boolean; readonly firstIndex: number; readonly carryAt: number | null },
+  options: {
+    readonly first: boolean
+    readonly firstIndex: number
+    readonly carryAt: number | null
+    readonly fallbackAt?: number
+  },
   issues: ReportBuilder
 ): StChatPart => {
   if (bytes.byteLength > stChatLimits.maxPartBytes) {
@@ -424,7 +431,7 @@ export const parseStChatPart = (
     const user = value.is_user === true
     const hidden = value.is_system === true
     const mes = text(value.mes) ?? ""
-    const sentAt = parseStDate(value.send_date) ?? lastAt ?? 0
+    const sentAt = parseStDate(value.send_date) ?? lastAt ?? options.fallbackAt ?? 0
     lastAt = sentAt
     firstAt ??= sentAt
     const swipeInfo = Array.isArray(value.swipe_info) ? value.swipe_info : []
@@ -521,7 +528,7 @@ export const parseStChatPart = (
       attachments++
     }
 
-    const message: StMessage = { user, hidden, speaker, selected, versions }
+    const message: StMessage = { user, hidden, speaker, selected, versions, arrivalAt: parseStDate(value.send_date) }
     const json = JSON.stringify(message)
     if (
       batch.length >= stChatLimits.maxBatchMessages ||
