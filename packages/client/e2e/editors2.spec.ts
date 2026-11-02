@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
+import { textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
@@ -150,6 +151,74 @@ test("the library's item menu asks too, from the server's unsaved drafts", async
   await page.goto(`${server().url}/library/${ref.id}`)
   await expectTextBox(description, "Corin mends nets on the slipway.")
   await expect(revisionStatus(page)).toHaveText(/^Saved as revision 2$/)
+})
+
+test("a card's note with unsaved typing is asked about too, and saved with the card", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Maren Notes"
+  const ref = await importCard(page, name)
+  // A note on the card, exported with it, typed into and not saved.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const note = yield* api.CreateCardNote({ cardRefId: ref.id, title: "Lamp oil" })
+      const opened = yield* api.OpenEditor({ refId: note.id })
+      yield* api.SaveEditorDraft({
+        refId: note.id,
+        field: textField(["content"]),
+        draftId: null,
+        content: "Maren smells of lamp oil.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+    })
+  )
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Note “Lamp oil”: Content")
+  // The last revisions: the note's text isn't in the file.
+  const last = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Export the last revision", exact: true }).click()
+  )
+  expect(JSON.stringify(last)).not.toContain("lamp oil.")
+  // Save and export saves the note too, and the file has it (ST's depth prompt).
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const saved = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(JSON.stringify(saved)).toContain("Maren smells of lamp oil.")
+  // Nothing unsaved now: the next export asks nothing.
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await downloaded(page, () => page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click())
+  await expect(dialog).toHaveCount(0)
+})
+
+test("token counts expand {{char}} and {{user}} first, as ST does", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const ref = await importCard(page, "Bartholomew Longname")
+  await page.goto(`${server().url}/library/${ref.id}`)
+  const scenario = page.getByRole("textbox", { name: "Scenario", exact: true })
+  const counts = page.locator("[data-field-tokens]")
+  // Scenario is the third counted field: {{char}} counts as the name it becomes, typed out.
+  // {{user}} outside a chat is "User", as in ST.
+  const settled = async () => {
+    await expect(counts.nth(2)).toHaveAttribute("aria-busy", "true")
+    await expect.poll(() => counts.nth(2).getAttribute("aria-busy"), { timeout: 30_000 }).toBeNull()
+  }
+  await scenario.fill("Bartholomew Longname waits by User's pier, then by the long harbour wall.")
+  await settled()
+  const plain = await counts.nth(2).textContent()
+  expect(plain).toMatch(/^~\d+ tokens$/)
+  await scenario.fill("{{char}} waits by {{user}}'s pier, then by the long harbour wall.")
+  await settled()
+  await expect(counts.nth(2)).toHaveText(plain!)
+  await counts.nth(2).hover()
+  await expect(page.getByText(/^Counted with macros as they become/).last()).toBeVisible()
 })
 
 test("the character tab's Export asks with the tab's own unsaved typing", async ({ page }) => {

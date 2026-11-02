@@ -23,6 +23,7 @@ import { type CardSaved, type RenameAnswer, showCardSaved } from "./cardSaved.ts
 import { checkCardNames } from "./checkCardNames.ts"
 import { useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useWorkingDoc } from "./store.ts"
+import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
 import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** The chat the editor is opened from, for "only in this chat". */
@@ -63,7 +64,8 @@ const NO_NOTES: ReadonlyArray<string> = []
 export function CardTokens({ store }: { store: EditorStore }) {
   const notes = useDefaultNotes(store.refId)
   const parts = cardTokenTexts(useWorkingDoc(store), notes)
-  const { counts, tokenizer, pending } = useTokenCounts(parts.map((part) => part.text))
+  const expand = useCountMacros(store)
+  const { counts, tokenizer, pending } = useTokenCounts(parts.map((part) => expand(part.text)))
   const known = counts.every((count) => count !== null)
   const sums = sumCardTokens(
     parts,
@@ -77,7 +79,7 @@ export function CardTokens({ store }: { store: EditorStore }) {
           Total: every card field a chat can send: its name, description, personality, scenario, first message, example
           messages, its own system prompt and post-history instructions, and its notes on by default. Permanent: what
           every request carries, as SillyTavern counts it: the name, description, personality, scenario and those notes.{" "}
-          {tokenizerText(tokenizer)}
+          {MACROS_COUNTED} {tokenizerText(tokenizer)}
         </>
       }
     >

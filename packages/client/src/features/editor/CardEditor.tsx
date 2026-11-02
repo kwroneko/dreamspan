@@ -33,6 +33,7 @@ import { EditorPortrait } from "./PortraitControls.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
+import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
 import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** What each field is for, on hover over its label. */
@@ -52,13 +53,17 @@ const HINTS = {
   tags: "Words to find and sort cards by in the library; never sent to the model."
 } as const
 
-/** A field's tokens with the chat model's tokenizer, at the end of its label, counted as you type. */
+/**
+ * A field's tokens with the chat model's tokenizer, its macros expanded first as ST does
+ * (`useCountMacros`), at the end of its label, counted as you type.
+ */
 function FieldTokens({ store, path }: { store: EditorStore; path: FieldPath }) {
   const text = useText(store, path) ?? ""
-  const texts = useMemo(() => [text], [text])
+  const expand = useCountMacros(store)
+  const texts = useMemo(() => [expand(text)], [expand, text])
   const { counts, tokenizer, pending } = useTokenCounts(texts)
   return (
-    <Tooltip label={tokenizerText(tokenizer)}>
+    <Tooltip label={`${MACROS_COUNTED} ${tokenizerText(tokenizer)}`}>
       <span
         tabIndex={0}
         data-field-tokens
