@@ -46,6 +46,7 @@ export function ColumnOverlay({
         >
           <Dialog.Portal container={container}>
             <Dialog.Popup
+              data-layout-overlay="Editor covers its column"
               aria-label={label}
               className={`${page ? "fixed top-[var(--preset-overlay-top,0px)] right-0 bottom-0 left-[var(--preset-overlay-left,0px)]" : "absolute inset-0"} z-30 flex min-h-0 flex-col bg-canvas text-text shadow-xl outline-none`}
             >

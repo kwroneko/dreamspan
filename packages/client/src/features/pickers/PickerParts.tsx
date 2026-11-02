@@ -169,7 +169,7 @@ export function PickerList({
     setRefocus(null)
   }, [values]) // eslint-disable-line react-hooks/exhaustive-deps -- once the rows have changed
   return (
-    <div ref={list} id={id} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col overflow-y-auto">
+    <div ref={list} id={id} role="radiogroup" aria-label={title} className="flex min-h-0 flex-col overflow-y-auto p-2">
       {items.length === 0 && <div className="px-2 py-1.5 text-sm text-muted">{empty}</div>}
       {items.map((item, index) => {
         const checked = item.value === value

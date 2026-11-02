@@ -897,7 +897,7 @@ export const Message = memo(function Message({
           // scrolls the start of the reason away.
           <div ref={footer} className="flex flex-col gap-1">
             {revealed && !editing && reason !== null && <p className="text-xs text-muted sm:hidden">{reason}</p>}
-            <footer className="-mb-1 flex min-h-8 items-center">
+            <footer className="flex min-h-8 items-center">
               {revealed && !editing ? (
                 // The footer's width before the versions: the pinned buttons that fit, then More actions.
                 <MessageActions context={actionContext} className="-ml-1.5 flex sm:hidden" />

@@ -24,6 +24,7 @@ export function Segmented<Value extends string>({
   const chosen = options.find((option) => option.value === value)?.description
   const row = (
     <div
+      data-layout-audit-ignore="inset: Joined segments share a single outer border"
       role="group"
       aria-label={label}
       className={`inline-flex w-fit rounded-md border border-border bg-surface p-0.5 ${wrap ? "max-w-full flex-wrap" : "shrink-0"}`}

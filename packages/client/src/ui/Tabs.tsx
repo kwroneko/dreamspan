@@ -50,6 +50,7 @@ export function Tabs<Value extends string>({
       {tabs.map((tab) => {
         const button = (
           <BaseTabs.Tab
+            data-layout-audit-ignore="inset: Tabs meet their panel divider"
             key={tab.value}
             value={tab.value}
             onClick={(event) => {
@@ -92,7 +93,7 @@ export function Tabs<Value extends string>({
           key={tab.value}
           value={tab.value}
           keepMounted={keepMounted}
-          className={`min-h-0 overflow-y-auto outline-none ${fill ? "flex-1 px-4 py-4" : ""}`}
+          className={`min-h-0 outline-none ${fill ? "flex-1 overflow-y-auto px-4 py-4" : ""}`}
         >
           {tab.panel}
         </BaseTabs.Panel>

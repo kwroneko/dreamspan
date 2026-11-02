@@ -327,6 +327,7 @@ export function Editor({
           ref={toolbar}
           // Whether typing is still on its way to the server: for tests, never shown.
           data-keeping={state.saving ? "true" : "false"}
+          data-layout-overlay="Sticky editor toolbar covers scrolled document content"
           className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 flex flex-col gap-2 border-b border-border bg-canvas/95 py-2 backdrop-blur"
         >
           {onClose &&

@@ -56,7 +56,7 @@ function Choices({
       </p>
     )
   return (
-    <ul aria-label="Characters" className="-mx-1 flex min-h-0 flex-col overflow-y-auto">
+    <ul aria-label="Characters" className="-mx-1 flex min-h-0 flex-col overflow-y-auto p-2">
       {matches.slice(0, SHOWN).map((c) => {
         const last = c.recentAt ?? undefined
         return (

@@ -16,14 +16,16 @@ const focusRing =
 function ChoiceLabel({
   children,
   description,
-  hint
+  hint,
+  hidden = false
 }: {
   children: ReactNode
+  hidden?: boolean
   description?: ReactNode
   hint?: { readonly id: string; readonly text: string } | undefined
 }) {
   return (
-    <span className="flex min-w-0 flex-col">
+    <span className={hidden ? "sr-only" : "flex min-w-0 flex-col"}>
       <span className="text-sm text-text">{children}</span>
       {description && <span className="text-sm text-muted">{description}</span>}
       {hint && (
@@ -83,6 +85,7 @@ export function Switch({
   description,
   hint,
   describedBy,
+  labelHidden = false,
   disabled = false
 }: {
   checked: boolean
@@ -93,6 +96,8 @@ export function Switch({
   hint?: string | undefined
   /** An explanation shown elsewhere (a row's own line), read as its description. */
   describedBy?: string | undefined
+  /** A switch beside its own visible title: keep its label out of the flex layout. */
+  labelHidden?: boolean
   disabled?: boolean
 }) {
   const id = useId()
@@ -108,7 +113,7 @@ export function Switch({
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
       </BaseSwitch.Root>
-      <ChoiceLabel description={description} hint={hint ? { id, text: hint } : undefined}>
+      <ChoiceLabel hidden={labelHidden} description={description} hint={hint ? { id, text: hint } : undefined}>
         {children}
       </ChoiceLabel>
     </label>

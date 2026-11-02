@@ -182,7 +182,7 @@ export function NotesTab({
                   }
                 >
                   <span className="inline-flex">
-                    <Switch checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
+                    <Switch labelHidden checked={note.active} onCheckedChange={(active) => void toggle(note, active)}>
                       <span className="sr-only">{titleOf(note)}: on in this chat</span>
                     </Switch>
                   </span>
@@ -205,7 +205,7 @@ export function NotesTab({
               </div>
               {/* The chat's and each card's notes side by side as the panel widens (26rem each at least). */}
               <div className="grid gap-5 @4xl:grid-cols-[repeat(auto-fill,minmax(26rem,1fr))] @4xl:gap-x-8">
-                <section aria-label="This chat's notes" className="flex flex-col gap-1.5">
+                <section aria-label="This chat's notes" className="flex min-w-0 flex-col gap-1.5">
                   <h3 className="text-sm font-semibold">This chat</h3>
                   {own.length === 0 ? (
                     <p className="text-sm text-muted">
@@ -237,7 +237,7 @@ export function NotesTab({
                         else sections.current.delete(entity)
                       }}
                       aria-label={`${name}'s notes`}
-                      className="flex scroll-mt-2 flex-col gap-1.5"
+                      className="flex min-w-0 scroll-mt-2 flex-col gap-1.5"
                     >
                       <h3 className="text-sm font-semibold">{name}</h3>
                       {theirs.length === 0 ? (

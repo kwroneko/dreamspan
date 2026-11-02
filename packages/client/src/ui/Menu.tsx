@@ -49,6 +49,7 @@ export function Menu({
       )}
       <BaseMenu.Portal>
         <BaseMenu.Positioner
+          data-layout-overlay="Menu floats above the page"
           className="z-50 outline-none"
           positionMethod="fixed"
           side={side}
@@ -58,7 +59,7 @@ export function Menu({
           <BaseMenu.Popup
             ref={setPopup}
             aria-label={label}
-            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="max-h-[min(28rem,var(--available-height))] max-w-[min(22rem,calc(100vw-1rem))] min-w-48 origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {children}
           </BaseMenu.Popup>
@@ -314,10 +315,16 @@ export function ActionMenu({
         </BaseMenu.Trigger>
       </Tooltip>
       <BaseMenu.Portal>
-        <BaseMenu.Positioner className="z-50 outline-none" positionMethod="fixed" sideOffset={4} align="end">
+        <BaseMenu.Positioner
+          data-layout-overlay="Menu floats above the page"
+          className="z-50 outline-none"
+          positionMethod="fixed"
+          sideOffset={4}
+          align="end"
+        >
           <BaseMenu.Popup
             ref={setPopup}
-            className="flex min-w-48 origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="flex min-w-48 origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             {items.map((entry) =>
               "checked" in entry ? (

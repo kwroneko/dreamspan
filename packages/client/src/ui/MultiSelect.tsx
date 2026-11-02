@@ -106,7 +106,13 @@ export function MultiSelect<Value extends string>({
         </Combobox.Trigger>
       </Combobox.Chips>
       <Combobox.Portal>
-        <Combobox.Positioner className="z-50 outline-none" sideOffset={4} anchor={chips} align="start">
+        <Combobox.Positioner
+          data-layout-overlay="Choices float above the field"
+          className="z-50 outline-none"
+          sideOffset={4}
+          anchor={chips}
+          align="start"
+        >
           <Combobox.Popup
             aria-label={listLabel}
             className="flex max-h-[min(var(--available-height),24rem)] w-[var(--anchor-width)] max-w-[calc(100vw-2rem)] origin-[var(--transform-origin)] flex-col rounded-md border border-border bg-surface text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"

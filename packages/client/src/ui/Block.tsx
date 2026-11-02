@@ -6,8 +6,8 @@
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
-import { rowActionInsetClass } from "./rowSpacing.ts"
 import { IconButton, Tooltip } from "./Tooltip.tsx"
+import { rowActionInsetClass } from "./rowSpacing.ts"
 
 /** The block: a bordered card; `dashed` for a slim row standing for something else (a marker). */
 export function Block({
@@ -166,6 +166,7 @@ export function BlockSection({
       <Tooltip label={hint}>
         <button
           type="button"
+          data-layout-audit-ignore="inset: Disclosure is the full-width section header"
           aria-expanded={open}
           aria-label={`${title} of ${label}`}
           onClick={onToggle}

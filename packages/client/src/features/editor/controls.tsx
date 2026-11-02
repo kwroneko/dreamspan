@@ -195,6 +195,8 @@ export function TextField({
           (card, preset and note text) has its own, in `ui/CodeEditorView`. */}
       {rows !== undefined && !card && !mono && !readOnly && (
         <IconButton
+          data-layout-overlay="Expand action sits above the field in its label row"
+          data-layout-audit-ignore="inset: Expand action belongs to the field label, outside the editable box"
           label={`Open ${label} large`}
           hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
           icon="expand"

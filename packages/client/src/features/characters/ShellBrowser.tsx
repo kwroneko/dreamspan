@@ -16,8 +16,8 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
-import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { Badge } from "../../ui/Surface.tsx"
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { browseCards, useCardBrowse } from "./cardBrowse.tsx"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
@@ -109,6 +109,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
       <button
         type="button"
         onClick={open}
+        data-layout-audit-ignore="inset: Whole group tile is the open control"
         aria-label={`Open chat ${fork.chatName}`}
         className="flex w-full flex-1 flex-col text-left"
       >
@@ -127,7 +128,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
         </span>
       </button>
-      <span className="absolute right-1 top-1">
+      <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-1 top-1">
         <PinButton fork={fork} className="tile-toggle bg-surface" />
       </span>
     </div>
@@ -586,7 +587,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       />
       {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
-      <div className="@container -mr-1 min-h-0 flex-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
+      <div className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
         {grid ? (
           // Two tiles a row at the sidebar's usual width, more as it widens (8.5rem each at least).
           browse.filter === "groups" ? (
