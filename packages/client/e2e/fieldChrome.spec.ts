@@ -69,6 +69,16 @@ const expectStill = async (page: Page, box: Locator, text: string) => {
   const frame = frameOf(box)
   await expect(frame).toHaveCount(1)
   await page.mouse.move(0, 0)
+  // An entry that has just opened is still turning its chevron (a transform transition, which
+  // moves its box by a fraction of a pixel as it ends): measure once every animation is over.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined))
+    )
+  )
   const size = async () => frame.evaluate((e) => [e.getBoundingClientRect().width, e.getBoundingClientRect().height])
   const outer = await size()
   await page.evaluate(() => delete (window as unknown as { fieldScrolls?: unknown }).fieldScrolls)
@@ -233,11 +243,7 @@ test("every multi-line versioned field opens large from its strip, editing the s
   await expectOpensLarge(page, description, (await description.getAttribute("aria-label"))!, "Description")
 
   await cardFieldsTab(page, "Notes")
-  await page
-    .getByRole("button", { name: /^Add a note/ })
-    .first()
-    .click()
-  await page.getByRole("menuitem", { name: /New note/ }).click()
+  await page.getByRole("button", { name: "New note", exact: true }).first().click()
   const anyNote = page.getByRole("textbox", { name: /^Text of / }).first()
   await expect(anyNote).toBeVisible()
   const noteName = (await anyNote.getAttribute("aria-label"))!
