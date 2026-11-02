@@ -4,6 +4,7 @@ import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { useRef, type ReactNode } from "react"
 import { Button } from "./Button.tsx"
+import { WindowClose } from "./WindowClose.tsx"
 
 const backdrop =
   "fixed inset-0 z-40 min-h-dvh bg-overlay transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0 motion-reduce:transition-none supports-[-webkit-touch-callout:none]:absolute"
@@ -36,21 +37,18 @@ export function Dialog({
   const focusOnOpen = () => {
     if (initialFocus) return initialFocus() ?? true
     const root = content.current
-    // Adding help beside the first field must not take its initial focus. Explicit
-    // autofocus and dialogs whose first control isn't help keep Base UI's defaults.
+    // Keep explicit autofocus; otherwise start in the content, skipping help and the X.
     if (!root || (document.activeElement !== root && root.contains(document.activeElement))) return true
     const controls = [
       ...root.querySelectorAll<HTMLElement>("button, input, textarea, select, a[href], [tabindex]")
     ].filter(
       (element) =>
         element.tabIndex >= 0 &&
-        !element.matches(":disabled") &&
+        !element.matches(":disabled, [data-window-close]") &&
         !element.closest("[hidden], [inert]") &&
         element.getClientRects().length > 0
     )
-    return controls[0]?.hasAttribute("data-about-hint")
-      ? (controls.find((element) => !element.hasAttribute("data-about-hint")) ?? true)
-      : true
+    return controls.find((element) => !element.hasAttribute("data-about-hint")) ?? true
   }
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
@@ -63,11 +61,14 @@ export function Dialog({
           initialFocus={focusOnOpen}
           className={wide ? `${popup} sm:max-w-5xl` : popup}
         >
-          <div className="flex flex-col gap-1">
-            <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
-            {description && (
-              <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>
-            )}
+          <div className="flex shrink-0 items-start gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-1 [overflow-wrap:anywhere]">
+              <BaseDialog.Title className="text-base font-semibold">{title}</BaseDialog.Title>
+              {description && (
+                <BaseDialog.Description className="text-sm text-muted">{description}</BaseDialog.Description>
+              )}
+            </div>
+            <WindowClose onClick={() => onOpenChange(false)} />
           </div>
           {children}
         </BaseDialog.Popup>

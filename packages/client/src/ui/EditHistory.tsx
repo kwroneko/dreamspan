@@ -192,9 +192,6 @@ function EditHistoryDialog({
         </div>
       )}
       <DialogActions>
-        <Button onClick={onClose} hint="Closes the edit history; the box stays as it is.">
-          Close
-        </Button>
         <Button
           variant="primary"
           pending={pending}

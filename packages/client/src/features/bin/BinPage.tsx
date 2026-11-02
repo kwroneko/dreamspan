@@ -351,7 +351,6 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
         >
           <Textarea textActions aria-label="Recovered text" readOnly rows={10} value={full} />
           <DialogActions>
-            <Button onClick={() => setFull(null)}>Close</Button>
             <Button
               variant="primary"
               onClick={async () => {

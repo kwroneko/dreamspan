@@ -25,6 +25,7 @@ import { describeCause } from "../errors.ts"
 import { fullPath, navEntries, routes } from "../routes.tsx"
 import { logout, SessionContext, sessionAtom, useSession } from "../session.ts"
 import { Button } from "../ui/Button.tsx"
+import { WindowClose } from "../ui/WindowClose.tsx"
 import { ImageControls } from "../ui/ImageControls.tsx"
 import { ResizeHandle, usePanelWidth } from "../ui/ResizeHandle.tsx"
 import { Loading } from "../ui/Spinner.tsx"
@@ -223,6 +224,9 @@ function PhoneBar() {
           className="fixed inset-0 z-40 flex lg:hidden"
         >
           <div className="flex w-[min(22rem,88vw)] flex-col border-r border-border bg-surface shadow-xl">
+            <div className="flex justify-end p-3">
+              <WindowClose onClick={() => setOpen(false)} />
+            </div>
             <Sidebar onNavigate={() => setOpen(false)} />
           </div>
           <button

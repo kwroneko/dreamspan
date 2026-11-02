@@ -222,7 +222,14 @@ const expectOpensLarge = async (page: Page, box: Locator, name: string, label = 
   await expect(large).toBeVisible()
   await page.keyboard.press("Control+End")
   await page.keyboard.type(" Written large.")
-  await dialog.getByRole("button", { name: "Done", exact: true }).click()
+  const close = dialog.getByRole("button", { name: "Close", exact: true })
+  await expect(close).toHaveCount(1)
+  const target = (await close.boundingBox())!
+  expect(target.width).toBeGreaterThanOrEqual(32)
+  expect(target.height).toBeGreaterThanOrEqual(32)
+  await close.hover()
+  await expect(page.getByText("Close", { exact: true })).toBeVisible()
+  await close.click()
   await expect(dialog).toHaveCount(0)
   await expect.poll(() => textBoxValue(box)).toMatch(/ Written large\.$/)
   await expect

@@ -6,8 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { proseTheme } from "./codeTheme.ts"
-import { Button } from "./Button.tsx"
-import { Dialog, DialogActions } from "./Dialog.tsx"
+import { Dialog } from "./Dialog.tsx"
 import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
 import { IconButton } from "./Tooltip.tsx"
 
@@ -102,11 +101,6 @@ export default function CodeEditorView(props: CodeEditorProps) {
             minHeight="min(65dvh, 48rem)"
             fullHeight
           />
-          <DialogActions>
-            <Button variant="primary" onClick={() => setLarge(false)}>
-              Done
-            </Button>
-          </DialogActions>
         </Dialog>
       )}
     </div>

@@ -107,7 +107,6 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
         </div>
       )}
       <DialogActions>
-        <Button onClick={closeDialog}>Close</Button>
         <Button
           variant="primary"
           pending={pending}

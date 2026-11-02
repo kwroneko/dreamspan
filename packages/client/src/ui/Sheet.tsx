@@ -3,20 +3,18 @@
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
 import { type ReactNode, useRef } from "react"
 import { ImageControls } from "./ImageControls.tsx"
-import { Button } from "./Button.tsx"
+import { WindowClose } from "./WindowClose.tsx"
 
 export function Sheet({
   open,
   onOpenChange,
   title,
-  closeLabel = "Close",
   children
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Its heading, beside the close button. */
   title: ReactNode
-  closeLabel?: string
   /** Fills the rest of the height; it scrolls itself. */
   children: ReactNode
 }) {
@@ -34,9 +32,7 @@ export function Sheet({
             <div className="max-sm:order-3 max-sm:flex max-sm:w-full max-sm:justify-end">
               <ImageControls />
             </div>
-            <BaseDialog.Close ref={closeRef} render={<Button variant="secondary" />}>
-              {closeLabel}
-            </BaseDialog.Close>
+            <WindowClose ref={closeRef} onClick={() => onOpenChange(false)} />
           </div>
           {children}
         </BaseDialog.Popup>

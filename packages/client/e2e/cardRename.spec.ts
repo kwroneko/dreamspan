@@ -182,7 +182,7 @@ test("a failed history action survives reload without saving the card twice", as
   await expect(page.getByRole("status").filter({ hasText: "in 3 chats" })).toBeVisible()
   expect(await texts(f)).toEqual(Array(3).fill("Ari lights the lantern."))
   expect((await admin((api) => api.OpenEditor({ refId: f.card.id }))).ref.headRevisionId).toBe(revision)
-  await page.getByRole("button", { name: "Done", exact: true }).click()
+  await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(page.getByRole("button", { name: "Resume history replacement", exact: true })).toHaveCount(0)
 })
 

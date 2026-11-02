@@ -238,7 +238,7 @@ export function InsertEditor({
   )
   if (phone)
     return (
-      <Sheet open onOpenChange={(open) => !open && void cancel()} title={title} closeLabel="Cancel">
+      <Sheet open onOpenChange={(open) => !open && void cancel()} title={title}>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">{body}</div>
       </Sheet>
     )

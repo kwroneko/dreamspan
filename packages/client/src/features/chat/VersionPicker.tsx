@@ -8,7 +8,7 @@ import { useAtomValue } from "@effect/atom-react"
 import type { PathEntry, Version } from "@rp/shared/chat.ts"
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
+import { Dialog } from "../../ui/Dialog.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Markdown } from "../../ui/Markdown.tsx"
 import { Popover } from "../../ui/Popover.tsx"
@@ -357,9 +357,6 @@ function Compare({
           </div>
         )}
       </>
-      <DialogActions>
-        <Button onClick={onClose}>Close</Button>
-      </DialogActions>
     </Dialog>
   )
 }

@@ -55,7 +55,11 @@ test.describe("with an admin password", () => {
     await carol.close()
 
     await users.locator("li", { hasText: "Carol" }).getByRole("button", { name: "Disable" }).click()
-    await page.getByRole("alertdialog").getByRole("button", { name: "Disable" }).click()
+    const confirmation = page.getByRole("alertdialog")
+    await expect(confirmation.getByRole("button", { name: "Close", exact: true })).toHaveCount(0)
+    await page.mouse.click(1, 1)
+    await expect(confirmation).toBeVisible()
+    await confirmation.getByRole("button", { name: "Disable" }).click()
     await expect(users.locator("li", { hasText: "Carol" })).toContainText("disabled")
     await users.locator("li", { hasText: "Carol" }).getByRole("button", { name: "Enable" }).click()
     await expect(users.locator("li", { hasText: "Carol" })).not.toContainText("disabled")
