@@ -81,6 +81,7 @@ export const makeWriteHandlers = (bin: Bin) =>
       ownedVersion,
       ownedFork,
       createFork,
+      carryChatNoteDrafts,
       placeAsShown,
       chatIn,
       checkSpeaker,
@@ -696,6 +697,12 @@ export const makeWriteHandlers = (bin: Bin) =>
                 fork.id as ForkId
               )
           }
+          // The unsaved note text typed on the source goes with the branch, for each note it
+          // starts with the version of (owner, 2026-11-02): the choices above are made first.
+          const kept = comparison.filter(
+            (row) => (notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then") === "then"
+          )
+          yield* carryChatNoteDrafts(userId, chatId, from, fork, new Set(kept.map((row) => row.note)))
           const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return { fork: yield* forkOut(fork.id), chat: toChat(chat!) }
         }).pipe(transaction("CreateFork")),

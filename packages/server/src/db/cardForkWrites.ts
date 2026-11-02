@@ -10,6 +10,7 @@ import { Effect, Schema } from "effect"
 import { FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { makeGraphWrites } from "./graphWrites.ts"
+import { makeDraftCarry } from "./carryDrafts.ts"
 import { noteSwitchesOnPath, stateEventsThrough } from "./stateRead.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { onForkPath } from "./forks.ts"
@@ -50,6 +51,7 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
   const family = (userId: UserId, entityId: string) => Effect.map(lib.cardFamily(userId, entityId), (found) => found!)
 
   const graph = makeGraphWrites(sql, steps.drafts)
+  const carry = makeDraftCarry(sql, steps.drafts)
   const copyCard = (
     {
       userId,
@@ -137,6 +139,14 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           message: "Copied with the card's fork"
         })
         noteCopies.set(note.entity_id, copy.entity_id as EntityId)
+        // Its unsaved text goes with the fork, still unsaved; the original goes back to its
+        // last revision, the text one step back in its edit history (owner, 2026-11-02).
+        yield* carry.carryFieldDrafts(
+          userId,
+          "note",
+          { target: note.id, revision: note.head_revision_id, doc: noteDoc },
+          { target: copy.id, revision: copy.head_revision_id, sameEntity: false }
+        )
         yield* sql`INSERT INTO entity_tags (entity_id, tag)
                      SELECT ${copy.entity_id}, tag FROM entity_tags WHERE entity_id = ${note.entity_id}`
       }

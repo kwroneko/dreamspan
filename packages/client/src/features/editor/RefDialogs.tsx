@@ -14,6 +14,7 @@ import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { type EditorStore, useEditorState } from "./store.ts"
+import { flushOpenEditors, refreshOpenEditors } from "./openEditors.ts"
 
 export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: () => void }) {
   const state = useEditorState(store)
@@ -46,6 +47,8 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
     if (clash || pending) return
     setPreparing(true)
     await store.flush()
+    // And its notes' editors: a card's fork takes their unsaved text (carryDrafts.ts).
+    if (ref.kind === "card") await flushOpenEditors().catch(() => undefined)
     if (moveDrafts && store.saveError) {
       setPreparing(false)
       return
@@ -74,6 +77,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
           ["library"]
         )
         setPreparing(false)
+        if (result.ok && ref.kind === "card") void refreshOpenEditors()
         if (result.ok) void navigate({ to: "/library/$refId", params: { refId: result.value.id } })
         return result.ok
       })
@@ -87,7 +91,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       title={ref.kind === "card" ? "Fork card" : "Make a variant"}
       description={
         ref.kind === "card"
-          ? `Creates an independent card and copies its notes from “${ref.label}”. Parent edits never reach it.`
+          ? `Creates an independent card and copies its notes from “${ref.label}”, their unsaved text included. Parent edits never reach it.`
           : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
       }
     >

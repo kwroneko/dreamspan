@@ -9,6 +9,8 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { RevisionDiff } from "../../ui/RevisionDiff.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { flushOpenEditors, refreshOpenEditors } from "../editor/openEditors.ts"
 import { forksChanged } from "./forks.ts"
 import type { MessageActionProps } from "./messageActions.tsx"
 
@@ -18,16 +20,39 @@ const options = [
 ] as const
 type Choice = "then" | "now"
 
+/**
+ * A note's choices. Unsaved text is the latest state (owner, 2026-11-02): "now" takes it to the
+ * new branch, still unsaved, and "then" leaves it on the branch it was typed on.
+ */
+const noteOptions = (note: ForkNote) =>
+  note.unsaved === undefined
+    ? options
+    : ([
+        {
+          value: "then",
+          label: "As it was then",
+          description: "Its text and switch as they were at this message. Your unsaved changes stay on this branch."
+        },
+        {
+          value: "now",
+          label: "As it is now",
+          description: "Its text and switch as they are now, with your unsaved changes, which move to the new branch."
+        }
+      ] as const)
+
 function NoteDiff({ note }: { note: ForkNote }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="grid grid-cols-2 gap-3 text-sm text-muted">
         <span>Then · {note.then.enabled ? "On" : "Off"}</span>
-        <span>Now · {note.now.enabled ? "On" : "Off"}</span>
+        <span>
+          Now · {note.now.enabled ? "On" : "Off"}
+          {note.unsaved === undefined ? "" : " · unsaved changes"}
+        </span>
       </div>
       <RevisionDiff
         before={note.then.content}
-        after={note.now.content}
+        after={note.unsaved ?? note.now.content}
         sideBySide
         beforeLabel="As it was then"
         afterLabel="As it is now"
@@ -70,6 +95,8 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
       return
     }
     closeDialog()
+    // The notes' unsaved text moved to the new branch: open editors read again.
+    void refreshOpenEditors()
     // Back returns to the fork it came from, which is no longer the current one: the entry
     // left behind names it. (Rewritten in place: a navigation there would open it first.)
     // `source` is the fork the server resolved, so this holds when the URL named none too.
@@ -85,13 +112,17 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
   }
   useEffect(() => {
     let live = true
-    void action
-      .run((client) =>
-        client("PreviewForkNotes", {
-          chatId: session.id,
-          fromForkId: source,
-          atSlotId: entry.slotId
-        })
+    // What's typed in the notes reaches the server first: the branch takes it (carryDrafts.ts).
+    void flushOpenEditors()
+      .catch(() => undefined)
+      .then(() =>
+        action.run((client) =>
+          client("PreviewForkNotes", {
+            chatId: session.id,
+            fromForkId: source,
+            atSlotId: entry.slotId
+          })
+        )
       )
       .then((result) => {
         if (live && result.ok) {
@@ -145,11 +176,14 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium break-words">{note.title}</p>
-                      <p className="text-xs text-muted">{note.owner}</p>
+                      <p className="text-xs text-muted">
+                        {note.owner}
+                        {note.unsaved === undefined ? "" : " · Unsaved changes"}
+                      </p>
                     </div>
                     <Segmented
                       label={`Inherit ${note.title}`}
-                      options={options}
+                      options={noteOptions(note)}
                       value={choices[note.note] ?? "then"}
                       onValueChange={(choice) => setChoices((current) => ({ ...current, [note.note]: choice }))}
                       wrap
@@ -159,12 +193,19 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
                     Then: {note.then.enabled ? "on" : "off"} · Now: {note.now.enabled ? "on" : "off"}
                   </p>
                   {buttons ? (
-                    <Button onClick={() => setDiff(note)}>Compare {note.title}</Button>
+                    <Button
+                      onClick={() => setDiff(note)}
+                      hint="Shows the two versions side by side, with the choice beside them."
+                    >
+                      Compare {note.title}
+                    </Button>
                   ) : (
                     <details>
-                      <summary className="cursor-pointer text-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
-                        Compare text and switches
-                      </summary>
+                      <Tooltip label="Shows the note as it was then and as it is now, side by side.">
+                        <summary className="cursor-pointer text-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                          Compare text and switches
+                        </summary>
+                      </Tooltip>
                       <div className="mt-3">
                         <NoteDiff note={note} />
                       </div>
@@ -176,7 +217,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
           </>
         )}
         <DialogActions>
-          <Button disabled={pending} onClick={closeDialog}>
+          <Button disabled={pending} onClick={closeDialog} hint="Closes this without making a branch.">
             Cancel
           </Button>
           <Button
@@ -184,6 +225,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
             disabled={notes === null || action.pending}
             pending={pending}
             onClick={() => void branch()}
+            hint="Makes the branch with these notes and opens it at this message. Unsaved note text goes with each note taken as it is now."
           >
             Create branch
           </Button>
@@ -200,13 +242,15 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
           <NoteDiff note={diff} />
           <Segmented
             label={`Inherit ${diff.title}`}
-            options={options}
+            options={noteOptions(diff)}
             value={choices[diff.note] ?? "then"}
             onValueChange={(choice) => setChoices((current) => ({ ...current, [diff.note]: choice }))}
             wrap
           />
           <DialogActions>
-            <Button onClick={() => setDiff(null)}>Back to notes</Button>
+            <Button onClick={() => setDiff(null)} hint="Back to the list of notes, keeping this choice.">
+              Back to notes
+            </Button>
           </DialogActions>
         </Dialog>
       )}

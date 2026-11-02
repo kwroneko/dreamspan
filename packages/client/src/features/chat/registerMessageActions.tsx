@@ -214,7 +214,7 @@ export const registerMessageActions = () => [
     describe: viewOf(({ openDialog }) => ({
       label: "Branch from here",
       icon: "branch",
-      hint: "Start a new branch of the chat that goes on from this message. The branch you're on keeps everything after it.",
+      hint: "Start a new branch of the chat that goes on from this message. The branch you're on keeps everything after it; unsaved note text goes to the new branch.",
       onSelect: () => openDialog("message.branch")
     })),
     dialog: ForkNotesDialog

@@ -14,6 +14,7 @@ import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
+import { flushOpenEditors, refreshOpenEditors } from "../editor/openEditors.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { ChatSession } from "./session.ts"
@@ -127,15 +128,17 @@ function ChatCardForkDialog({
       open
       onOpenChange={(open) => !open && !action.pending && onClose()}
       title="Fork for this chat"
-      description={`Makes an independent copy of ${card.name} and its notes. This branch uses the copy; existing branches keep their cards. Editing the copy changes every chat that uses it.`}
+      description={`Makes an independent copy of ${card.name} and its notes, their unsaved text included. This branch uses the copy; existing branches keep their cards. Editing the copy changes every chat that uses it.`}
     >
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
           if (clash || !name.trim() || action.pending) return
-          void durable.commit(durable.text, () =>
-            action
+          // What's typed in its notes reaches the server first: the copies take it (carryDrafts.ts).
+          void durable.commit(durable.text, async () => {
+            await flushOpenEditors().catch(() => undefined)
+            return action
               .run(
                 (client) =>
                   client("ForkCardForChat", {
@@ -151,6 +154,8 @@ function ChatCardForkDialog({
               )
               .then((result) => {
                 if (result.ok) {
+                  // Its notes' unsaved text moved to the copies: open editors read again.
+                  void refreshOpenEditors()
                   const change: CardSaved = {
                     entityId: result.value.entityId,
                     oldName: card.modelName ?? card.name,
@@ -163,7 +168,7 @@ function ChatCardForkDialog({
                 }
                 return result.ok
               })
-          )
+          })
         }}
       >
         <UserDraftStatus draft={durable} />

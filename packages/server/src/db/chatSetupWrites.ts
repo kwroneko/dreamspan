@@ -413,10 +413,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 const through = (yield* onForkPath(sql, chatId, fork, parentSlotId))
                   ? fork
                   : ((yield* forkThrough(sql, chatId, parentSlotId)) ?? fork)
-                fork =
-                  through.tip_slot_id === parentSlotId
-                    ? through
-                    : yield* graph.createFork(chatId, through, parentSlotId, at, true)
+                if (through.tip_slot_id === parentSlotId) fork = through
+                else {
+                  fork = yield* graph.createFork(chatId, through, parentSlotId, at, true)
+                  yield* graph.carryChatNoteDrafts(userId, chatId, through, fork)
+                }
               }
               const [next] = yield* sql<{ n: number }>`
                 SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
