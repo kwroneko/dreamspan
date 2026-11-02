@@ -495,6 +495,76 @@ test("swipe through versions", async ({ page }) => {
   expect(frameStats(measured).longFramesOver100).toBeLessThanOrEqual(budgets.longFramesOver100)
 })
 
+test("switch the chat panel's tabs in the 100,000-message chat", async ({ page }) => {
+  const tabs = ["Model", "Prompt preset", "Lorebooks", "Summaries", "Notes", "Cast", "This chat"]
+  await openPage(page)
+  await page.addInitScript(() => {
+    const w = window as unknown as { __tabs: { clickedAt: number; codeWaits: number } }
+    w.__tabs = { clickedAt: 0, codeWaits: 0 }
+    addEventListener("pointerdown", () => (w.__tabs.clickedAt = performance.now()), true)
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const node of r.addedNodes)
+          if (node instanceof HTMLElement && node.matches("[data-panel-code-loading]")) w.__tabs.codeWaits++
+    }).observe(document, { childList: true, subtree: true })
+  })
+  await page.goto(chatUrl(fixture.long.chatId, "?panel=chat"))
+  await onScreen(page)
+  const toolTabs = page.getByRole("tablist", { name: "Chat panel" })
+  await expect(toolTabs).toBeVisible()
+  // The panel loads every tab's code once it's idle.
+  await page.waitForTimeout(2000)
+  await page.evaluate(() => ((window as unknown as { __tabs: { codeWaits: number } }).__tabs.codeWaits = 0))
+  const rowRenders = () =>
+    page.evaluate(() => (window as unknown as { __rpPerf: { rowRenders: number } }).__rpPerf.rowRenders)
+  /** From the click to the tab's content, with nothing in it still loading. */
+  const shown = (name: string) =>
+    page.evaluate(
+      (name) =>
+        new Promise<number>((done) => {
+          const start = (window as unknown as { __tabs: { clickedAt: number } }).__tabs.clickedAt
+          const check = () => {
+            const panel = [...document.querySelectorAll<HTMLElement>('[role="tabpanel"]')].find(
+              (p) => p.getAttribute("aria-label") === name && !p.hidden
+            )
+            const loading = [...(panel?.querySelectorAll('[role="status"]') ?? [])].some((s) =>
+              /Loading/.test(s.textContent ?? "")
+            )
+            if (panel && panel.innerText.trim() !== "" && !loading) done(performance.now() - start)
+            else requestAnimationFrame(check)
+          }
+          check()
+        }),
+      name
+    )
+  const from = await now(page)
+  const times: Record<string, number> = {}
+  let rows = 0
+  for (const round of [1, 2])
+    for (const name of tabs) {
+      const before = await rowRenders()
+      const tab = toolTabs
+        .getByRole("tab", { name, exact: true })
+        .or(page.getByRole("tablist", { name: "Characters", exact: true }).getByRole("tab", { name, exact: true }))
+      if ((await tab.count()) > 0) await tab.click()
+      else {
+        await page.getByRole("button", { name: "More tools", exact: true }).click()
+        await page.getByRole("menuitem", { name, exact: true }).click()
+      }
+      const ms = await shown(name)
+      if (round === 1) times[name] = Math.round(ms)
+      await page.waitForTimeout(300)
+      rows += (await rowRenders()) - before
+    }
+  const measured = await since(page, from)
+  const codeWaits = await page.evaluate(() => (window as unknown as { __tabs: { codeWaits: number } }).__tabs.codeWaits)
+  const slowest = Math.max(...Object.values(times))
+  record("panelTabs", { slowest, rows, codeWaits, ...times, ...frameStats(measured) })
+  expect(rows).toBeLessThanOrEqual(budgets.rowRendersPerTabSwitch)
+  expect(codeWaits).toBeLessThanOrEqual(budgets.tabCodeWaits)
+  expect(slowest).toBeLessThan(budgets.tabShownMs)
+})
+
 test("switch chats mid-stream", async ({ page }) => {
   await openPage(page)
   await page.goto(chatUrl(fixture.long.chatId))
