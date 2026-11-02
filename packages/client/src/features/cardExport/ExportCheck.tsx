@@ -37,7 +37,7 @@ export default function ExportCheck({ request }: { request: ExportRequest }) {
     void (async () => {
       const checked = await exportDrafts(request.refId, userId, call)
       if (!checked.ok) {
-        await download()
+        showToast({ title: `Couldn’t check ${request.label} for unsaved changes`, description: checked.error.message })
         return done()
       }
       const all = checked.value

@@ -1,4 +1,5 @@
-// The draft fields an export can leave out: the ref, a card’s note slots, and shared text.
+// Read every revision and draft that an export can take. A failed read must stop the export:
+// otherwise a working HTTP download could silently bypass a failed draft check over RPC.
 import { HELD_FIELD } from "@rp/shared/editing.ts"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
@@ -41,7 +42,7 @@ export async function exportDrafts(
   const all = [unsavedOf(opened.value)]
   if (opened.value.snapshot!.ref.kind === "card") {
     const listed = await call((client) => client("ListCardNotes", { cardRefId: refId }))
-    if (!listed.ok) return { ok: true, value: all.filter((entry) => entry.names.length > 0) }
+    if (!listed.ok) return listed
     // A shared note can supply several slots. Reuse its store and commit it only once.
     const stores = new Map<RefId, EditorStore>([[refId, opened.value]])
     const getStore = async (id: RefId): Promise<CallResult<EditorStore>> => {
@@ -59,7 +60,7 @@ export async function exportDrafts(
     }
     for (const note of listed.value) {
       const slot = await getStore(note.ref.id)
-      if (!slot.ok) continue
+      if (!slot.ok) return slot
       const working = slot.value.working().doc
       // Include a note being made exportable as well as one the last revision exports.
       if (note.doc.exportable !== true && working.exportable !== true) continue
@@ -70,11 +71,11 @@ export async function exportDrafts(
       const links = new Set([note.doc.link, working.link].filter((link): link is string => typeof link === "string"))
       for (const entityId of links) {
         const shared = await call((client) => client("ListSharedNotes", { entityId: entityId as EntityId }))
-        if (!shared.ok) continue
+        if (!shared.ok) return shared
         const ref = shared.value[0]?.ref
         if (!ref) continue // A deleted shared note has no text in the export either.
         const store = await getStore(ref.id)
-        if (!store.ok) continue
+        if (!store.ok) return store
         add(store.value, prefix)
       }
     }

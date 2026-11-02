@@ -88,4 +88,17 @@ describe("drafts checked before an export", () => {
     const checked = await check()
     expect(checked.ok && checked.value.map((v) => v.store.refId)).toEqual(["slot"])
   })
+
+  for (const fail of ["OpenEditor", "OpenEditor:slot", "OpenEditor:shared", "ListCardNotes", "ListSharedNotes"])
+    it(`refuses to proceed when ${fail} fails`, async () => {
+      const { check } = fixture(
+        [
+          snapshot("card", "card", {}),
+          snapshot("slot", "note", { owner: { card: "card" }, exportable: true, link: "shared-entity" }),
+          snapshot("shared", "note", { content: "Shared" })
+        ],
+        fail
+      )
+      expect((await check()).ok).toBe(false)
+    })
 })
