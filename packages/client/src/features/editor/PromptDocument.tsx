@@ -906,7 +906,19 @@ export function PromptDocument({
     </div>
   )
   return (
-    <div ref={root} className="flex min-w-0 flex-col gap-3">
+    <div
+      ref={root}
+      className="flex min-w-0 flex-col gap-3"
+      // The user moved on before the new prompt's editor mounted (renaming it, say): its text
+      // doesn't take the focus back. A menu handing focus back to its trigger isn't moving on.
+      onFocusCapture={(event) => {
+        if (added === null || !(event.target instanceof HTMLElement)) return
+        if (event.target.hasAttribute("aria-haspopup")) return
+        const own = `[data-prompt="${CSS.escape(added)}"]`
+        if (event.target.closest(`${own} [contenteditable], ${own} textarea`)) return
+        setAdded(null)
+      }}
+    >
       {controls}
       {column ? (
         list
