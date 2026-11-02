@@ -29,6 +29,10 @@ const message = (page: Page, text: string) => page.locator("article[data-slot]")
 const pinned = async (page: Page, text: string) =>
   page.locator(`article[data-slot="${await message(page, text).getAttribute("data-slot")}"]`)
 
+/** How the app writes the day a chat started: its `createdAt`, not its ST file name's stamp (importreport). */
+const startedDay = (createdAt: number) =>
+  new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" }).format(new Date(createdAt))
+
 /** A chat titled the way ST titles its files, three messages long, branching at the second. */
 const forked = () =>
   admin((api) =>
@@ -38,16 +42,16 @@ const forked = () =>
       const m1 = yield* send(api, chat.id, m0, "We walk the flats.")
       yield* send(api, chat.id, m1, "The fog rolls in.")
       yield* send(api, chat.id, m0, "We wait for the tide.", true)
-      return { chatId: chat.id, m0 }
+      return { chatId: chat.id, m0, createdAt: chat.createdAt }
     })
   )
 
 test("the header names the chat as people do and switches branches from anywhere", async ({ page }) => {
-  const { chatId } = await forked()
+  const { chatId, createdAt } = await forked()
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Harbor")
-  await expect(page.getByRole("main").getByText("started Apr 3, 2026", { exact: true })).toBeVisible()
+  await expect(page.getByRole("main").getByText(`started ${startedDay(createdAt)}`, { exact: true })).toBeVisible()
   await expect(page).toHaveTitle(/Harbor/)
   // The newest branch is shown, named by where it splits off; the header offers the other.
   const branches = page.getByRole("button", { name: /switch branch/ })

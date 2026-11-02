@@ -376,6 +376,8 @@ export class ChatSession {
   // there (DESIGN §5.6): a greeting's `{{user}}` is whoever the user played before it.
 
   private readonly positionCasts = new Map<string, Cast | "loading">()
+  /** Bumped when position state changes, including a switch away and back to the same fork. */
+  private positionGeneration = 0
   private readonly positionListeners = new Set<() => void>()
 
   readonly subscribePositions = (listener: () => void) => {
@@ -393,13 +395,14 @@ export class ChatSession {
     this.positionCasts.set(key, "loading")
     const forkId = this.view.forkId
     if (this.castBatch === null || this.castBatch.forkId !== forkId) {
-      const batch = { forkId, slots: [] as Array<SlotId | null> }
+      const batch = { forkId, generation: this.positionGeneration, slots: [] as Array<SlotId | null> }
       this.castBatch = batch
       // The rows on screen ask as they render: one request for all of them (night/tabperf: a
       // chat opened with a GetCast per message, 22 on a page, each reading the cards again).
       setTimeout(() => {
-        if (this.castBatch === batch) this.castBatch = null
-        void this.readCasts(batch.forkId, batch.slots)
+        if (this.castBatch !== batch) return
+        this.castBatch = null
+        void this.readCasts(batch.forkId, batch.slots, batch.generation)
       }, 0)
     }
     this.castBatch.slots.push(slotId)
@@ -407,13 +410,19 @@ export class ChatSession {
   }
 
   /** Positions waiting for their cast, asked for together. */
-  private castBatch: { readonly forkId: ForkId | null; readonly slots: Array<SlotId | null> } | null = null
+  private castBatch: {
+    readonly forkId: ForkId | null
+    readonly generation: number
+    readonly slots: Array<SlotId | null>
+  } | null = null
 
-  private async readCasts(forkId: ForkId | null, slots: ReadonlyArray<SlotId | null>) {
+  private async readCasts(forkId: ForkId | null, slots: ReadonlyArray<SlotId | null>, generation: number) {
+    const current = () => !this.disposed && this.view.forkId === forkId && this.positionGeneration === generation
     for (let start = 0; start < slots.length; start += 200) {
+      if (!current()) return
       const page = slots.slice(start, start + 200)
       const result = await this.call((client) => client("GetCasts", { chatId: this.chatId, slotIds: page, forkId }))
-      if (this.disposed || this.view.forkId !== forkId) return
+      if (!current()) return
       page.forEach((slotId, i) => {
         const key = slotId ?? ""
         if (result.ok && result.value[i]) this.positionCasts.set(key, result.value[i])
@@ -424,6 +433,8 @@ export class ChatSession {
   }
 
   private forgetPositions() {
+    this.positionGeneration++
+    this.castBatch = null
     this.positionCasts.clear()
     for (const listener of this.positionListeners) listener()
   }
@@ -574,6 +585,8 @@ export class ChatSession {
 
   dispose() {
     this.disposed = true
+    this.positionGeneration++
+    this.castBatch = null
     // Text typed in a message editor and not saved yet goes to the server on the way out.
     for (const editor of this.editors.values()) void editor.save()
     if (typeof window !== "undefined") window.removeEventListener("pagehide", this.saveEditors)
@@ -827,8 +840,9 @@ export class ChatSession {
   /** Shows another fork (null: the chat's current one), at a message or at its bottom. */
   showFork(fork: ForkId | null, anchor: SlotId | null) {
     this.requestedFork = fork
-    this.forgetPositions()
     this.update({ forkId: fork, leafSlotId: null, entries: [], loading: true })
+    // Position subscribers can read synchronously when notified: they must see the new fork.
+    this.forgetPositions()
     void this.open(anchor)
   }
 

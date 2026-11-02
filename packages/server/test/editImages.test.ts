@@ -239,6 +239,106 @@ describe("editing a message's images", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
+  it.live("keeps the full initial image set when edit history is restored after Save", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const image = yield* upload(png(textChunk("fixture", "initial history")))
+      const chat = yield* api.CreateChat({ title: "Initial image history" })
+      const { entry } = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Sketch", images: [image] })
+      )
+      const target = { _tag: "Edit" as const, versionId: entry.version.id }
+      const typed = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        content: "Edited sketch",
+        images: [],
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      yield* api.AmendVersion({
+        versionId: entry.version.id,
+        content: typed.content,
+        images: [],
+        expectedRowVersion: entry.version.rowVersion,
+        draft: { draftId: typed.id, session: typed.session }
+      })
+      const resting = yield* api.GetMessageDraft({ target })
+      const history = yield* api.MessageDraftHistory({ target, limit: 10 })
+      const restored = yield* api.RestoreMessageDraft({
+        target,
+        draftId: resting.id,
+        seq: history.at(-1)!.seq,
+        expectedRowVersion: resting.rowVersion
+      })
+      assert.strictEqual(restored.content, "Sketch")
+      assert.deepStrictEqual(
+        restored.images?.map((i) => i.mediaId),
+        [image.mediaId]
+      )
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
+  it.live("keeps inherited images in text-only edit states across Save and Cancel", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const image = yield* upload(png(textChunk("fixture", "text history")))
+      const chat = yield* api.CreateChat({ title: "Inherited image history" })
+      const { entry } = yield* posted(
+        api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Sketch", images: [image] })
+      )
+      const target = { _tag: "Edit" as const, versionId: entry.version.id }
+      const typed = yield* api.SaveMessageDraft({
+        target,
+        draftId: null,
+        content: "Text only",
+        expectedRowVersion: null,
+        expectedSession: null
+      })
+      const removed = yield* api.SaveMessageDraft({
+        target,
+        draftId: typed.id,
+        content: "Text only",
+        images: [],
+        expectedRowVersion: typed.rowVersion,
+        expectedSession: typed.session
+      })
+      const history = yield* api.MessageDraftHistory({ target, limit: 10 })
+      const amended = yield* api.AmendVersion({
+        versionId: entry.version.id,
+        content: removed.content,
+        images: [],
+        expectedRowVersion: entry.version.rowVersion,
+        draft: { draftId: removed.id, session: removed.session }
+      })
+      const resting = yield* api.GetMessageDraft({ target })
+      const restored = yield* api.RestoreMessageDraft({
+        target,
+        draftId: resting.id,
+        seq: history[1]!.seq,
+        expectedRowVersion: resting.rowVersion
+      })
+      assert.deepStrictEqual(
+        restored.images?.map((i) => i.mediaId),
+        [image.mediaId]
+      )
+      const cancelled = yield* api.DiscardMessageDraft({
+        target,
+        draftId: restored.id,
+        expectedRowVersion: restored.rowVersion
+      })
+      assert.deepStrictEqual(cancelled.images, [], "Cancel records the currently saved set")
+      const restoredCancel = yield* api.RestoreMessageDraft({
+        target,
+        draftId: cancelled.id,
+        seq: (yield* api.MessageDraftHistory({ target, limit: 10 }))[0]!.seq,
+        expectedRowVersion: cancelled.rowVersion
+      })
+      assert.deepStrictEqual(restoredCancel.images, [])
+      assert.deepStrictEqual(amended.images, [])
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+  )
+
   it.live("keeps editor images in server drafts and history, and a stale device cannot commit newer images", () =>
     Effect.gen(function* () {
       const api = yield* client()
@@ -283,13 +383,13 @@ describe("editing a message's images", () => {
         "the stale commit must not end the newer image draft"
       )
       const history = yield* api.MessageDraftHistory({ target, limit: 10 })
-      // The oldest state is the version as it was, with its own images (owner, 2026-11-02:
-      // an edit's first state is the text it was typed on); the one after it is the first save.
+      // The first save exactly matches the original text and images, so the oldest state
+      // is that complete snapshot without a redundant edit state.
       assert.strictEqual(history.at(-1)!.kind, "initial")
       const restored = yield* api.RestoreMessageDraft({
         target,
         draftId: changed.id,
-        seq: history.at(-2)!.seq,
+        seq: history.at(-1)!.seq,
         expectedRowVersion: changed.rowVersion
       })
       assert.deepStrictEqual(

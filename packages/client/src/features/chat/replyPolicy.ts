@@ -72,13 +72,14 @@ const natural = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
-  input: string | null = null
+  input: string | null = null,
+  hasImages = false
 ): NextInTurn | null => {
   const candidates = replyCandidates(cast, speaker)
   if (cast === null || candidates.length === 0) return null
   const after = lastCharacter(cast, entries)
   const tip = entries.at(-1)?.version
-  const typed = input !== null && input.trim() !== ""
+  const typed = (input !== null && input.trim() !== "") || hasImages
   const tipSpeaker = tip?.speakerEntityId ?? null
   const banned = !typed && tipSpeaker !== null && tipSpeaker === after ? tipSpeaker : null
   const members = candidates.map((id) => {
@@ -86,7 +87,7 @@ const natural = (
     return { id, name: card?.name ?? "", talkativeness: card?.talkativeness ?? TALKATIVENESS_DEFAULT }
   })
   const seed = hashSeed([tip?.id ?? "", ...members.flatMap((m) => [m.id, String(m.talkativeness)])])
-  const [id] = naturalOrder(members, typed ? input : (tip?.content ?? ""), banned, mulberry32(seed))
+  const [id] = naturalOrder(members, typed ? (input ?? "") : (tip?.content ?? ""), banned, mulberry32(seed))
   return id === undefined ? null : { id, after }
 }
 
@@ -123,11 +124,12 @@ const list = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
-  input: string | null = null
+  input: string | null = null,
+  hasImages = false
 ): NextInTurn | null => {
   const candidates = replyCandidates(cast, speaker)
   if (cast === null || candidates.length === 0) return null
-  const last = sinceUser(cast, entries, typedText(input)).at(-1) ?? null
+  const last = sinceUser(cast, entries, typedText(input) || hasImages).at(-1) ?? null
   const id = listOrder(cast.participants, candidates, last)
   return id === null ? null : { id, after: lastCharacter(cast, entries) }
 }
@@ -137,11 +139,12 @@ const pooled = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
-  input: string | null = null
+  input: string | null = null,
+  hasImages = false
 ): NextInTurn | null => {
   const candidates = replyCandidates(cast, speaker)
   if (cast === null || candidates.length === 0) return null
-  const spoke = sinceUser(cast, entries, typedText(input))
+  const spoke = sinceUser(cast, entries, typedText(input) || hasImages)
   const id = pooledOrder(candidates, spoke, spoke.at(-1) ?? null, rollsFor(entries, candidates))
   return id === null ? null : { id, after: lastCharacter(cast, entries) }
 }
@@ -151,11 +154,12 @@ const manual = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
-  input: string | null = null
+  input: string | null = null,
+  hasImages = false
 ): NextInTurn | null => {
   const candidates = replyCandidates(cast, speaker)
   if (cast === null || candidates.length === 0) return null
-  const id = manualOrder(candidates, typedText(input), rollsFor(entries, candidates))
+  const id = manualOrder(candidates, typedText(input) || hasImages, rollsFor(entries, candidates))
   return id === null ? null : { id, after: lastCharacter(cast, entries) }
 }
 
@@ -167,12 +171,13 @@ export interface ReplyPolicy {
   readonly description?: string
   /** How Auto picks under it, in the Next chooser. */
   readonly autoDetail?: string
-  /** `input`: the text being sent; null or blank when nothing is typed (Reply now, an empty box). */
+  /** `input`: text being sent; `hasImages`: attachments make a posted turn even with blank text. */
   readonly next: (
     cast: Cast | null,
     entries: ReadonlyArray<PathEntry>,
     speaker: EntityId | null,
-    input?: string | null
+    input?: string | null,
+    hasImages?: boolean
   ) => NextInTurn | null
   /** Whether Send can request an unnamed reply when this policy selects no character. */
   readonly unnamedReply?: (cast: Cast | null) => boolean
@@ -235,8 +240,9 @@ export const nextInTurn = (
   cast: Cast | null,
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
-  input: string | null = null
-): NextInTurn | null => replyPolicyOf(cast)?.next(cast, entries, speaker, input) ?? null
+  input: string | null = null,
+  hasImages = false
+): NextInTurn | null => replyPolicyOf(cast)?.next(cast, entries, speaker, input, hasImages) ?? null
 
 /** One decision for the preview, immediate sends and queued sends (`input`: the text being
  * sent, so the preview follows the box as Send does). A null speaker
@@ -246,10 +252,11 @@ export const planReply = (
   entries: ReadonlyArray<PathEntry> | null,
   speaker: EntityId | null,
   picked: EntityId | null,
-  input: string | null = null
+  input: string | null = null,
+  hasImages = false
 ) => {
   const policy = replyPolicyOf(cast)
-  const next = entries === null ? null : nextInTurn(cast, entries, speaker, input)
+  const next = entries === null ? null : nextInTurn(cast, entries, speaker, input, hasImages)
   return {
     next,
     replier: picked ?? next?.id ?? null,

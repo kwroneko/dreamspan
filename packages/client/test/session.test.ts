@@ -113,6 +113,99 @@ const boundCast = (macroBindings: Record<string, string> = {}) =>
   })
 
 describe("ChatSession", () => {
+  it("reads a shared message's cast in the new fork when position subscribers recheck synchronously", async () => {
+    vi.useFakeTimers()
+    const { s } = session()
+    const requests: Array<string | null> = []
+    const current = boundCast({ user: "New fork" })
+    const internals = s as unknown as {
+      view: ReturnType<typeof s.snapshot>
+      call: (
+        request: (client: (method: string, payload: { forkId: string | null }) => unknown) => unknown
+      ) => Promise<unknown>
+    }
+    internals.view = { ...s.snapshot(), forkId: "old" as ForkId }
+    internals.call = async (request) => ({
+      ok: true,
+      value: request((method, payload) => {
+        if (method !== "GetCasts") return chat
+        requests.push(payload.forkId)
+        return [current]
+      })
+    })
+    // useSyncExternalStore checks its snapshot in the subscription callback, before a render.
+    const unsubscribe = s.subscribePositions(() => s.castAfter(first.slotId))
+    try {
+      s.showFork("new" as ForkId, null)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(requests).toEqual(["new"])
+      expect(s.castAfter(first.slotId)).toBe(current)
+    } finally {
+      unsubscribe()
+      s.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  for (const stale of ["success", "failure"] as const)
+    it(`ignores a positional cast batch's stale ${stale} after a state change`, async () => {
+      vi.useFakeTimers()
+      const { s, receive } = session()
+      try {
+        const answers: Array<(value: unknown) => void> = []
+        const internals = s as unknown as {
+          call: () => Promise<unknown>
+          refreshCast: () => Promise<void>
+          scheduleLcm: () => void
+        }
+        internals.call = () => new Promise((resolve) => answers.push(resolve))
+        internals.refreshCast = async () => {}
+        internals.scheduleLcm = () => {}
+        const original = boundCast({ user: "Before" })
+        const current = boundCast({ user: "After" })
+        s.castAfter(first.slotId)
+        await vi.advanceTimersByTimeAsync(0)
+        receive({ _tag: "State" })
+        s.castAfter(first.slotId)
+        await vi.advanceTimersByTimeAsync(0)
+        expect(answers).toHaveLength(2)
+        answers[1]!({ ok: true, value: [current] })
+        await Promise.resolve()
+        expect(s.castAfter(first.slotId)).toBe(current)
+        answers[0]!(stale === "success" ? { ok: true, value: [original] } : { ok: false })
+        await Promise.resolve()
+        expect(s.castAfter(first.slotId)).toBe(current)
+      } finally {
+        s.dispose()
+        vi.useRealTimers()
+      }
+    })
+
+  for (const change of ["state", "dispose"] as const)
+    it(`drops a queued positional cast batch on ${change}`, async () => {
+      vi.useFakeTimers()
+      const { s, receive } = session()
+      try {
+        const call = vi.fn(async () => ({ ok: true, value: [] }))
+        const internals = s as unknown as {
+          call: () => Promise<unknown>
+          refreshCast: () => Promise<void>
+          scheduleLcm: () => void
+        }
+        internals.call = call
+        internals.refreshCast = async () => {}
+        internals.scheduleLcm = () => {}
+        s.castAfter(first.slotId)
+        if (change === "state") receive({ _tag: "State" })
+        else s.dispose()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(call).not.toHaveBeenCalled()
+      } finally {
+        s.dispose()
+        vi.useRealTimers()
+      }
+    })
+
   for (const moved of ["fork", "leaf", "disposed"] as const) {
     it(`does not apply a prompt-name pin's old cast after the view is ${moved}`, async () => {
       const { s } = session()

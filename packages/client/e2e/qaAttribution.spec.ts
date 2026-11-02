@@ -240,7 +240,8 @@ for (const width of [1440, 390])
           label.evaluate((node) => node.scrollHeight <= node.clientHeight && node.scrollWidth <= node.clientWidth)
         )
         .toBeTruthy()
-      if (width === 1440) expect((await label.boundingBox())!.width).toBeGreaterThan(240)
+      // Since the one-row header (4c46cbd5) the name's box is as wide as its text, not the room
+      // around it, so the check above (nothing cut off) is what "the full name has room" means.
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
       await shoot(page, `group-title-${width}-${theme}`)
     })
