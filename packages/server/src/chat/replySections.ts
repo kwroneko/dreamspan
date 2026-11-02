@@ -47,7 +47,7 @@ interface Pair {
   readonly closeFirst: string | null
   readonly caseless: boolean
   /** A literal pair's tags as written (the default; null: a regex pair), so a hold is exact. */
-  readonly literal: { readonly open: string; readonly close: string } | null
+  readonly literal: { readonly open: string; readonly close: string; readonly leading: number } | null
 }
 
 /** A pattern's first character when it's a literal one every match starts with. */
@@ -99,7 +99,7 @@ export const compilePairs = (settings: ReplySectionSettings): ReadonlyArray<Pair
         first: firstLiteral(openPattern),
         closeFirst: firstLiteral(closePattern),
         caseless,
-        literal: regex ? null : { open: pair.open, close: pair.close }
+        literal: regex ? null : { open: pair.open, close: pair.close, leading: /^\s*/.exec(pair.open)![0].length }
       }
     ]
   })
@@ -172,19 +172,33 @@ export const parseReply = (
    * (`<b>` goes through at once); for a pattern, while it's short, on one line and allowed
    * by the pattern's plain first character.
    */
-  const mayOpen = (rest: string) =>
-    pairs.some((pair) =>
-      pair.literal
-        ? beginsTag(pair.literal.open, rest, pair.caseless)
-        : rest.length < TAG_HOLD &&
-          !rest.includes("\n") &&
-          (pair.first === null || startsWith(pair, pair.first, rest[0]!))
-    )
+  const mayOpen = (text: string, lead: string) =>
+    pairs.some((pair) => {
+      if (pair.literal) {
+        // Only the whitespace before the tag is optional; its own whitespace is literal.
+        const at = lead.length - pair.literal.leading
+        return at >= 0 && beginsTag(pair.literal.open, text.slice(at), pair.caseless)
+      }
+      const possible = (rest: string) =>
+        rest.length < TAG_HOLD &&
+        !rest.includes("\n") &&
+        (pair.first === null || startsWith(pair, pair.first, rest[0]!))
+      return possible(text.slice(lead.length)) || (lead !== "" && possible(text))
+    })
 
-  const opening = (rest: string) => {
+  /** A complete opening tag, keeping its own whitespace separate from the optional lead. */
+  const opening = (text: string) => {
+    // Prefer a tag at the start, including one made entirely of whitespace.
     for (const pair of pairs) {
-      const match = pair.open.exec(rest)
-      if (match && match[0] !== "") return { pair, tag: match[0] }
+      const match = pair.open.exec(text)
+      if (match && match[0] !== "") return { pair, tag: match[0], lead: "" }
+    }
+    const lead = /^\s*/.exec(text)![0]
+    for (const pair of pairs) {
+      const at = pair.literal ? lead.length - pair.literal.leading : lead.length
+      if (at <= 0) continue
+      const match = pair.open.exec(text.slice(at))
+      if (match && match[0] !== "") return { pair, tag: match[0], lead: text.slice(0, at) }
     }
     return null
   }
@@ -224,19 +238,16 @@ export const parseReply = (
   const beforeSection = (final: boolean) => {
     const lead = /^\s*/.exec(buffer)![0]
     const rest = buffer.slice(lead.length)
-    // A tag that itself starts with blank space (a literal `\n<think>`) matches from the start.
-    const whole = lead !== "" ? opening(buffer) : null
-    const open = whole ?? (rest !== "" ? opening(rest) : null)
+    const open = opening(buffer)
     if (open) {
-      const before = whole ? "" : lead
-      sections = [...sections, { lead: before, open: open.tag, text: "", close: null }]
+      sections = [...sections, { lead: open.lead, open: open.tag, text: "", close: null }]
       closing = open.pair
       state = "inside"
-      buffer = buffer.slice(before.length + open.tag.length)
+      buffer = buffer.slice(open.lead.length + open.tag.length)
       emitSections(sections.length > 1 ? "\n\n" : "")
       return inside(final)
     }
-    if (!final && (rest === "" || mayOpen(rest) || (lead !== "" && mayOpen(buffer)))) return hold("body")
+    if (!final && (rest === "" || mayOpen(buffer, lead))) return hold("body")
     // No section here: the body starts. After a section, the whitespace before it is the gap.
     if (state === "after") {
       gap = lead
@@ -283,11 +294,10 @@ export const parseReply = (
 
   // A preset prefill that opens a section ("Start reply with" `<thinking>`): the reply starts in it.
   if (!initial && prefill) {
-    const lead = /^\s*/.exec(prefill)![0]
-    const open = opening(prefill.slice(lead.length))
-    const rest = open ? prefill.slice(lead.length + open.tag.length) : ""
+    const open = opening(prefill)
+    const rest = open ? prefill.slice(open.lead.length + open.tag.length) : ""
     if (open && !findCloseIn(open.pair, rest)) {
-      sections = [{ lead, open: open.tag, text: rest, close: null, prefilled: prefill.length }]
+      sections = [{ lead: open.lead, open: open.tag, text: rest, close: null, prefilled: prefill.length }]
       closing = open.pair
       state = "inside"
     }
