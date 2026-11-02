@@ -24,6 +24,7 @@ import { ComposerChoice } from "@rp/shared/composerApi.ts"
 import { Effect } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { DraftTooLarge, NotFound, StaleWrite } from "./ops.ts"
+import { makeLibraryQueries } from "./library.ts"
 
 interface DraftRow {
   readonly id: string
@@ -241,6 +242,7 @@ export const makeDraftStore = (
   ) => Effect.Effect<void, SqlError.SqlError> = () => Effect.void,
   now: () => number = Date.now
 ) => {
+  const lib = makeLibraryQueries(sql)
   const find = (userId: UserId, key: DraftKey) =>
     sql<DraftRow>`
       SELECT d.*, (SELECT count(*) FROM draft_history h WHERE h.draft_id = d.id) AS history_length
@@ -645,11 +647,11 @@ export const makeDraftStore = (
       yield* tooLarge(options.content)
       yield* checkIdentity(options.userId, options.draftId)
       if (options.baseRevision !== null && options.key.targetKind === "entity_field") {
-        const [revision] = yield* sql<{
-          id: string
-        }>`SELECT r.id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
-             JOIN entity_revisions r ON r.id = ${options.baseRevision} AND r.entity_id IN (e.id, e.forked_from_entity_id)
+        const [target] = yield* sql<{
+          entity_id: string
+        }>`SELECT e.id AS entity_id FROM entity_refs f JOIN entities e ON e.id = f.entity_id
            WHERE f.id = ${parseDraftTarget(options.key.targetId).refId} AND e.owner_user_id = ${options.userId}`
+        const revision = target ? yield* lib.draftBase(target.entity_id, options.baseRevision) : null
         if (!revision) return yield* new NotFound({ entity: "revision", id: options.baseRevision })
       }
       const keeps = keepsHistory({ target_kind: options.key.targetKind })

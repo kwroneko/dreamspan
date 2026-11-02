@@ -78,6 +78,45 @@ const fork = (api: Api, refId: RefId, characterVersion: string, name?: string) =
   })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("card forks", (it) => {
+  it.effect("a fork of a fork carries an older draft base and keeps its conflict", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = yield* me(api)
+      const parent = yield* card(api, "Nested draft", { description: "A cook." })
+      const start = parent.ref.headRevisionId
+      yield* draft(api, parent.ref.id, textField(["description"]), "A chef.")
+      const opened = yield* api.OpenEditor({ refId: parent.ref.id })
+      yield* writer.EditRef({
+        userId,
+        refId: parent.ref.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        doc: { ...opened.doc, description: "A baker." },
+        message: null,
+        commitDraft: null
+      })
+      const child = yield* fork(api, parent.ref.id, "child")
+      const grandchild = yield* fork(api, child.id, "grandchild")
+      const carried = (yield* api.OpenEditor({ refId: grandchild.id })).drafts.find(
+        (d) => d.key.field === textField(["description"]) && d.status === "active"
+      )!
+      assert.strictEqual(carried.content, "A chef.")
+      assert.strictEqual(carried.baseRevision, start)
+      assert.strictEqual((yield* api.GetRevision({ refId: grandchild.id, revisionId: start })).description, "A cook.")
+      yield* api.SaveEditorDraft({
+        refId: grandchild.id,
+        draftId: carried.id,
+        field: carried.key.field,
+        content: "A chef, typed on.",
+        expectedRowVersion: carried.rowVersion,
+        expectedSession: carried.session,
+        baseRevisionId: start
+      })
+      assert.strictEqual(yield* outcome(commit(api, grandchild.id), () => "allowed"), "EditConflict")
+      assert.isUndefined((yield* api.OpenEditor({ refId: child.id })).drafts.find((d) => d.status === "active"))
+    })
+  )
+
   it.effect("fork names accept the same unbounded strings as card fields", () =>
     Effect.gen(function* () {
       const api = yield* client()
