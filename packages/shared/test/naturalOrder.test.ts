@@ -1,9 +1,47 @@
 // ST's natural order with seeded rolls: synthetic members only.
 import { describe, expect, it } from "vitest"
-import { hashSeed, mulberry32, naturalOrder, type NaturalMember, talkativenessOf } from "../src/naturalOrder.ts"
+import {
+  hashSeed,
+  listOrder,
+  manualOrder,
+  mulberry32,
+  naturalOrder,
+  type NaturalMember,
+  pooledOrder,
+  ST_REPLY_ORDERS,
+  talkativenessOf
+} from "../src/naturalOrder.ts"
 
 const member = (id: string, talkativeness: number, name = id): NaturalMember<string> => ({ id, name, talkativeness })
 const seeds = Array.from({ length: 200 }, (_, i) => i * 7919 + 1)
+
+describe("ST's other reply strategies", () => {
+  it("maps activation_strategy as ST numbers it", () => {
+    expect(ST_REPLY_ORDERS).toEqual({ 0: "natural", 1: "list", 2: "manual", 3: "pooled" })
+  })
+
+  it("list order: the next after the last to reply, wrapping, the first when no one has", () => {
+    const order = ["a", "b", "c", "d"]
+    expect(listOrder(order, ["a", "c", "d"], null)).toBe("a")
+    expect(listOrder(order, ["a", "c", "d"], "a")).toBe("c")
+    expect(listOrder(order, ["a", "c", "d"], "b")).toBe("c")
+    expect(listOrder(order, ["a", "c", "d"], "d")).toBe("a")
+    expect(listOrder(order, [], null)).toBeNull()
+  })
+
+  it("pooled order: someone who hasn't spoken, else anyone but the last", () => {
+    for (const seed of seeds) {
+      expect(pooledOrder(["a", "b", "c"], ["a", "b"], "b", mulberry32(seed))).toBe("c")
+      expect(pooledOrder(["a", "b", "c"], ["a", "b", "c"], "c", mulberry32(seed))).not.toBe("c")
+    }
+    expect(pooledOrder(["a"], ["a"], "a", mulberry32(1))).toBe("a")
+  })
+
+  it("manual order: no one for a sent message, a random member for an empty send", () => {
+    expect(manualOrder(["a", "b"], true, mulberry32(1))).toBeNull()
+    expect(["a", "b"]).toContain(manualOrder(["a", "b"], false, mulberry32(1)))
+  })
+})
 
 describe("talkativeness", () => {
   it("reads numbers and numeric strings, clamps, and defaults to ST's 0.5", () => {

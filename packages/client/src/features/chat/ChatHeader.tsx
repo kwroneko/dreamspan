@@ -242,7 +242,7 @@ export function ChatHeader({
   const characters = castCharacters(view)
   const navigate = useNavigate()
   const [renameRequest, setRenameRequest] = useState(0)
-  const name = view.chat ? chatName(importState(view.chat.title).title, characters) : null
+  const name = view.chat ? chatName(importState(view.chat.title).title, characters, view.chat.createdAt) : null
   useTitle(name?.name ?? "Chat")
   // Under the name: who else is in it, by name only (versions are on their cards); with no
   // one else, the day ST started it, which tells same-named chats apart.

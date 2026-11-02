@@ -106,10 +106,7 @@ export const registerPanels = () => [
     description: "What the model is sent with this chat: the chat's own notes and its characters'.",
     order: 40,
     icon: "note",
-    component: lazyPanel(loadNotes, "notes"),
-    preload: () => {
-      void loadNotes().catch(() => undefined)
-    }
+    component: lazyPanel(loadNotes, "notes")
   }),
   chatPanels.register({
     id: "summaries",

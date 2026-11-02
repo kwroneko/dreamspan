@@ -9,7 +9,7 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
-import { chatPanels, isPanelTab, PanelContent, usePanelTabs } from "./panels.tsx"
+import { chatPanels, isPanelTab, PanelContent, preloadPanel, usePanelTabs } from "./panels.tsx"
 export { isPanelTab } from "./panels.tsx"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
@@ -165,8 +165,20 @@ export function ChatSidePanel({
     setNotesFocus(card)
     onTab("notes")
   }
+  // Every tab's code, once the shown one is up: a first visit then shows the tab at once.
   useEffect(() => {
-    for (const descriptor of chatPanels.list()) descriptor.preload?.()
+    const preload = () => {
+      for (const descriptor of chatPanels.list()) {
+        descriptor.preload?.()
+        preloadPanel(descriptor.component)
+      }
+    }
+    if (typeof requestIdleCallback === "function") {
+      const id = requestIdleCallback(preload, { timeout: 1000 })
+      return () => cancelIdleCallback(id)
+    }
+    const id = setTimeout(preload, 200)
+    return () => clearTimeout(id)
   }, [])
   if (!visited.has(tab)) setVisited(new Set([...visited, tab]))
   const all = usePanelTabs(content.view, tab)

@@ -171,7 +171,8 @@ describe("ST's notes on import (DESIGN §4.1)", () => {
       members: ["aria.png", "bram.png"],
       disabledMembers: [],
       chats: [],
-      chatId: null
+      chatId: null,
+      replyOrder: "natural"
     }
     const first = mapped({}, {}, { cards }, { card: null, group })
     expect(first.events).toContainEqual({ key: "note.deactivate", value: { note: "note-aria" } })
