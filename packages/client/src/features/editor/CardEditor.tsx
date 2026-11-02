@@ -28,7 +28,7 @@ import { LorebookForm } from "./LorebookForm.tsx"
 import { LorebookPanelEditor } from "./LorebookPanelEditor.tsx"
 import { addEntry } from "./lorebookTable.ts"
 import { NoteList, NoteListControls, useNoteBlocks } from "./NoteList.tsx"
-import { AddNoteMenu, SharedNotePicker } from "./notes.tsx"
+import { AddNoteButtons, SharedNotePicker } from "./notes.tsx"
 import { EditorPortrait } from "./PortraitControls.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
@@ -329,7 +329,7 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
         </>
       )}
       <div>
-        <AddNoteMenu label="Add a note" onNew={() => void add()} onPick={() => setPicking(true)} />
+        <AddNoteButtons onNew={() => void add()} onPick={() => setPicking(true)} />
       </div>
       <SharedNotePicker
         open={picking}

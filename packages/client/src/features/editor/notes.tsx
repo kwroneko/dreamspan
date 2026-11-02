@@ -18,12 +18,10 @@ import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
-import { Icon } from "../../ui/Icon.tsx"
-import { Menu, MenuItem } from "../../ui/Menu.tsx"
 import { MultiSelect } from "../../ui/MultiSelect.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert } from "../../ui/Surface.tsx"
-import { Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
 import { FieldTools, SwitchField, TextField } from "./controls.tsx"
 import { type EditorStore, useEditorState, useValue } from "./store.ts"
@@ -677,37 +675,17 @@ export function SharedNotePicker({
   )
 }
 
-/** "Add note": a new one, or one showing a shared note. */
-export function AddNoteMenu({
-  label = "Add note",
-  onNew,
-  onPick
-}: {
-  label?: string
-  onNew: () => void
-  onPick: () => void
-}) {
+/** A new note, or one showing a shared note. */
+export function AddNoteButtons({ onNew, onPick }: { onNew: () => void; onPick: () => void }) {
   return (
-    <Menu
-      align="start"
-      label={label}
-      hint="A new note here, or one that shows a shared note (a snippet)"
-      trigger={
-        <Button>
-          {label} <Icon name="down" />
-        </Button>
-      }
-    >
-      <MenuItem icon="write" description="An empty note of its own here." onClick={onNew}>
-        New note
-      </MenuItem>
-      <MenuItem
+    <div className="inline-flex items-center gap-1">
+      <IconButton label="New note" hint="An empty note of its own here." icon="write" onClick={onNew} />
+      <IconButton
+        label="Pick a shared note"
+        hint="A note that shows a shared note's text: editing it changes it everywhere it's used."
         icon="link"
-        description="A note that shows a shared note's text: editing it changes it everywhere it's used."
         onClick={onPick}
-      >
-        Pick a shared note…
-      </MenuItem>
-    </Menu>
+      />
+    </div>
   )
 }

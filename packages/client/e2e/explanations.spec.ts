@@ -1,7 +1,7 @@
 // Explanations on menu items and select options (`ui/Explanation.tsx`): with a mouse, beside
 // the highlighted item, hovered or reached with the arrow keys, outside the list so it covers no
 // row; on a phone, under each label in muted text. Either way it's the item's description, and
-// never part of its name. A note's Position select and the Add note menu, at 1440 and 390, light
+// never part of its name. A note's Position select and a note's actions menu, at 1440 and 390, light
 // and dark, with screenshots outside the repository (SCREENSHOT_DIR). The card is made up.
 import { mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -102,7 +102,7 @@ for (const theme of ["light", "dark"] as const) {
     await apiLogin(context.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/chats/${chatId}`)
     await openPanel(page, "Notes")
-    const { notes, note } = await openOutfit(page)
+    const { note } = await openOutfit(page)
 
     await note.getByRole("combobox", { name: "Position" }).click()
     const list = page.getByRole("listbox")
@@ -126,18 +126,18 @@ for (const theme of ["light", "dark"] as const) {
     await expect(explanation(page)).toHaveCount(0)
 
     // A menu: the first item reached with the keys, then the next, then one hovered.
-    await notes.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
-    const menu = page.getByRole("menu", { name: "Add note" })
+    await note.getByRole("button", { name: "Actions for Outfit" }).click()
+    const menu = page.getByRole("menu", { name: "Actions for Outfit" })
     await expect(menu).toBeVisible()
     await page.keyboard.press("ArrowDown")
-    await expect(explanation(page)).toHaveText("An empty note of its own here.")
+    await expect(explanation(page)).toHaveText(/Its revisions, what changed in each/)
     await beside(menu, explanation(page))
     await page.keyboard.press("ArrowDown")
-    await expect(explanation(page)).toHaveText(/shows a shared note's text/)
-    await page.getByRole("menuitem", { name: "New note" }).hover()
-    await expect(explanation(page)).toHaveText("An empty note of its own here.")
-    await expect(page.getByRole("menuitem", { name: "Pick a shared note…" })).toHaveAccessibleDescription(
-      /shows a shared note's text/
+    await expect(explanation(page)).toHaveText(/Makes its text a shared note/)
+    await page.getByRole("menuitem", { name: "History", exact: true }).hover()
+    await expect(explanation(page)).toHaveText(/Its revisions, what changed in each/)
+    await expect(page.getByRole("menuitem", { name: "Save as shared note", exact: true })).toHaveAccessibleDescription(
+      /Makes its text a shared note/
     )
     await page.screenshot({ path: join(shots, `menu-1440-${theme}.png`) })
     // Leaving the list puts it away.
@@ -159,7 +159,7 @@ for (const theme of ["light", "dark"] as const) {
     await page.goto(`${server().url}/chats/${chatId}`)
     await page.getByRole("button", { name: "Chat panel" }).click()
     await panelTab(page, "Notes")
-    const { notes, note } = await openOutfit(page)
+    const { note } = await openOutfit(page)
 
     await note.getByRole("combobox", { name: "Position" }).tap()
     const start = page.getByRole("option", { name: "Start of context", exact: true })
@@ -175,12 +175,12 @@ for (const theme of ["light", "dark"] as const) {
     await page.screenshot({ path: join(shots, `select-390-${theme}.png`) })
     await start.tap()
 
-    await notes.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).tap()
+    await note.getByRole("button", { name: "Actions for Outfit" }).tap()
     await expect(
-      page.getByRole("menuitem", { name: "New note" }).getByText("An empty note of its own here.")
+      page.getByRole("menuitem", { name: "History", exact: true }).getByText(/Its revisions, what changed in each/)
     ).toBeVisible()
     await expect(
-      page.getByRole("menuitem", { name: "Pick a shared note…" }).getByText(/shows a shared note's text/)
+      page.getByRole("menuitem", { name: "Save as shared note", exact: true }).getByText(/Makes its text a shared note/)
     ).toBeVisible()
     await page.screenshot({ path: join(shots, `menu-390-${theme}.png`) })
     await page.keyboard.press("Escape")

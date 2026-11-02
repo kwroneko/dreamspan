@@ -20,7 +20,7 @@ import { Tooltip } from "../../ui/Tooltip.tsx"
 import { useDeletedToast } from "../bin/deleted.ts"
 import { useCaller } from "../editor/caller.ts"
 import { NoteList, type NoteListEntry, NoteListControls, useNoteBlocks } from "../editor/NoteList.tsx"
-import { AddNoteMenu, type NoteCard, SharedNotePicker } from "../editor/notes.tsx"
+import { AddNoteButtons, type NoteCard, SharedNotePicker } from "../editor/notes.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useCast } from "./cast.ts"
 import { chatNoteActions } from "./presentation.tsx"
@@ -223,7 +223,7 @@ export function NotesTab({
                     />
                   )}
                   <div>
-                    <AddNoteMenu onNew={() => void add({ card: null })} onPick={() => setPicking({ card: null })} />
+                    <AddNoteButtons onNew={() => void add({ card: null })} onPick={() => setPicking({ card: null })} />
                   </div>
                 </section>
                 {named.map(({ entity, name }) => {
@@ -256,7 +256,7 @@ export function NotesTab({
                         </>
                       )}
                       <div>
-                        <AddNoteMenu onNew={() => void add(group)} onPick={() => setPicking(group)} />
+                        <AddNoteButtons onNew={() => void add(group)} onPick={() => setPicking(group)} />
                       </div>
                     </section>
                   )
