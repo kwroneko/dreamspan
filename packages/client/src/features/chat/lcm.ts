@@ -144,12 +144,21 @@ export interface BoundaryCounts {
   readonly rerun: number
 }
 
+/**
+ * A failed redo of a summary the user edited: the user's text, over the same level and range,
+ * stays in use, so nothing the model reads is missing (owner, 2026-11-02). It's listed in the
+ * Summaries tab under Failed, with Retry, and isn't counted on the divider.
+ */
+export const userTextKept = (lcm: LcmState, range: { level: number; from: number; to: number }) =>
+  lcm.layer.some((s) => s.origin === "user" && s.level === range.level && s.from === range.from && s.to === range.to)
+
 export const countsOf = (lcm: LcmState): BoundaryCounts => ({
   stale: lcm.layer.filter((s) => healthOf(s) === "stale").length,
-  failed: new Set([
-    ...lcm.failed.map((s) => `${s.level}:${s.from}:${s.to}`),
-    ...lcm.jobs.filter((j) => j.status === "failed").map((j) => `${j.level}:${j.from}:${j.to}`)
-  ]).size,
+  failed: new Set(
+    [...lcm.failed, ...lcm.jobs.filter((j) => j.status === "failed")]
+      .filter((range) => !userTextKept(lcm, range))
+      .map((range) => `${range.level}:${range.from}:${range.to}`)
+  ).size,
   running: lcm.jobs.filter((j) => j.status === "processing"),
   queued: lcm.jobs.filter((j) => j.status === "pending").length,
   rerun:
