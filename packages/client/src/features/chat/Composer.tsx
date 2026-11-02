@@ -37,7 +37,7 @@ import { requestCastAdd } from "./castAddState.ts"
 /** A phone's width, the composers' compact layout's breakpoint. */
 const COMPACT_WIDTH = 640
 /**
- * The narrowest composer whose control row holds the speaker's name and Write's word beside
+ * The narrowest composer whose control row holds the speaker's name and Generate's word beside
  * the tools and Send. A desktop chat between both panels at their widest is narrower.
  */
 const FULL_ROW_WIDTH = 480
@@ -71,7 +71,7 @@ export const useCompactComposer = () => {
  * row of its own, the whole box's width, with everything about it inside the same border. On
  * top, `header`, what says how the box stands (editing a reply's guidance, replayed or restored
  * text), shown only while it has something; under the text what's attached; then one row of
- * controls, `start` (who speaks, tools) at its left and `end` (guidance, write, send) at its
+ * controls, `start` (who speaks, tools) at its left and `end` (guidance, generate, send) at its
  * right, wrapping rather than ever narrowing the text.
  */
 export function ComposerBox({
@@ -109,9 +109,9 @@ export function ComposerBox({
       )}
       <div className="grid min-w-0 px-1 pt-1">{children}</div>
       {attachments && <div className="px-2 pt-1">{attachments}</div>}
-      <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1 p-1">
-        <div className="flex min-w-0 items-center gap-1">{start}</div>
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">{end}</div>
+      <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1.5 p-1">
+        <div className="flex min-w-0 items-center gap-1.5">{start}</div>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">{end}</div>
       </div>
     </div>
   )
@@ -505,18 +505,18 @@ export function Composer({
       : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
-  // Before the cast is read, "Write for …" rather than a "Reply" that flashes first.
+  // Keep the action named while the cast is loading; the full name includes its speaker.
   const generateText =
-    editing !== null ? "New version" : name ? `Write for ${name}` : cast === null ? "Write for …" : "Reply"
+    editing !== null ? "New version" : name ? `Generate ${name}` : cast === null ? "Generate …" : "Generate"
   const generateHint =
     editing !== null
-      ? `A new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
+      ? `Generate a new version of ${editedName ? `${editedName}'s` : "this"} reply, following this guidance (${submitHint}). The guidance stays here.`
       : `${
           name === null
-            ? "The model writes the next turn"
+            ? "Generate the next turn with the model"
             : speakerPlayed
-              ? `The model writes ${name}'s turn for you`
-              : `The model writes ${name}'s turn`
+              ? `Generate ${name}'s next turn with the model for you`
+              : `Generate ${name}'s next turn with the model`
         }${guidance && hasText ? ", following the guidance" : ""}${guidance ? ` (${submitHint})` : ""}`
   const shownError = error ?? saveError ?? viewPrefs.error
 
@@ -577,7 +577,7 @@ export function Composer({
     replier,
     round: replyPlan.round,
     generateText,
-    generateWord: editing !== null ? "New version" : "Write",
+    generateWord: editing !== null ? "New version" : "Generate",
     generateHint,
     sendLabel,
     sendHint,

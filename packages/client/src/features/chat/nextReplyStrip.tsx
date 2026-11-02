@@ -19,7 +19,7 @@ const chipTones: Record<ChipTone, string> = {
  * whole text; wider, a very long name is cut with an ellipsis, its whole text in the tooltip.
  */
 export const chipClass = (tone: ChipTone = "neutral") =>
-  `inline-flex h-7 min-w-0 shrink-0 sm:max-w-80 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
+  `inline-flex h-9 min-w-0 shrink-0 sm:max-w-80 items-center gap-1 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent ${chipTones[tone]}`
 
 /**
  * The strip's row: it wraps where there's room; on a phone (`scroll`) it's one row that scrolls
@@ -57,7 +57,7 @@ export function StripRow({ scroll, children }: { scroll: boolean; children: Reac
       aria-label="Next reply"
       data-more-before={(scroll && more.before) || undefined}
       data-more-after={(scroll && more.after) || undefined}
-      className={`flex min-w-0 items-center gap-1.5 ${scroll ? "overflow-x-auto [scrollbar-width:none]" : "flex-wrap"}`}
+      className={`flex min-w-0 items-center gap-1.5 border border-transparent px-1 ${scroll ? "overflow-x-auto [scrollbar-width:none]" : "flex-wrap"}`}
       style={scroll && (more.before || more.after) ? { maskImage: fade } : undefined}
     >
       {children}

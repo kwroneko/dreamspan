@@ -248,7 +248,7 @@ test("a pending guidance action fits a long speaker name on a phone and desktop"
   await page.getByRole("button", { name: /^Speaking as / }).click()
   await page.getByRole("dialog", { name: "Speak as", exact: true }).getByRole("option", { name, exact: true }).click()
   await toggle(page, true)
-  const generate = page.getByRole("button", { name: `Write for ${name}`, exact: true })
+  const generate = page.getByRole("button", { name: `Generate ${name}`, exact: true })
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
     for (const theme of ["light", "dark"] as const) {

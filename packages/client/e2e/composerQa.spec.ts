@@ -213,10 +213,10 @@ for (const width of [1440, 390])
       await expect(toggle(page)).toBeChecked()
       const direction = "Let Aria lower her voice.\nLet the music fade away.\nEnd on the invitation."
       await box(page).fill(direction)
-      await page.getByRole("button", { name: "Write for Sam", exact: true }).click()
+      await page.getByRole("button", { name: "Generate Sam", exact: true }).click()
       await expect.poll(async () => (await path(chatId)).entries.at(-1)?.version.status).toBe("complete")
       await expect(cacheChip(page)).toHaveAccessibleName(/^Cache warm/)
-      await expect(page.getByRole("button", { name: "Write for Sam", exact: true })).toBeEnabled()
+      await expect(page.getByRole("button", { name: "Generate Sam", exact: true })).toBeEnabled()
       const height = await page.getByTestId("messages").evaluate((element) => element.clientHeight)
       await testInfo.attach("conversation-height", {
         body: JSON.stringify({ width, theme, height }),

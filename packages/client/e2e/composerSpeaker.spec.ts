@@ -215,7 +215,7 @@ test("Next: Auto's pick, a name in the box, a pick for one reply, and an empty S
   await page.keyboard.press("Escape")
 
   // Generate says whose turn it writes: the persona's, for the user.
-  const write = page.getByRole("button", { name: "Write for Ana" })
+  const write = page.getByRole("button", { name: "Generate Ana" })
   await expect(write).toBeVisible()
   await write.click()
   await expect(lastHeader(page)).toContainText("Ana")
@@ -347,7 +347,7 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone, pi
   await expect(page.getByRole("button", { name: /^Playing as Visitor 239/ })).toBeVisible()
 })
 
-test("a phone names the Write for action in full on its icon and keeps an empty input compact", async ({ page }) => {
+test("a phone names the Generate action in full on its icon and keeps an empty input compact", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   const chatId = await chatWith(["Mira", "Captain Rhee"])
   await page.goto(`${server().url}/chats/${chatId}`)
@@ -355,8 +355,8 @@ test("a phone names the Write for action in full on its icon and keeps an empty 
   await page.getByRole("combobox", { name: "Find someone to speak as, or a persona", exact: true }).fill("rhee")
   await page.keyboard.press("Enter")
   await expect(speakerChip(page)).toHaveAccessibleName(/^Speaking as Captain Rhee/)
-  // An icon on a phone, its full name its label (and tooltip), never a cut-off "Write for Capt…".
-  const write = page.getByRole("button", { name: "Write for Captain Rhee", exact: true })
+  // An icon on a phone, its full name its label (and tooltip), never a cut-off "Generate Capt…".
+  const write = page.getByRole("button", { name: "Generate Captain Rhee", exact: true })
   await expect(write).toBeEnabled()
   await expect(write).toBeInViewport({ ratio: 1 })
   expect((await write.boundingBox())!.width).toBeLessThan(45)

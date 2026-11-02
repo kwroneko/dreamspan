@@ -111,7 +111,7 @@ const open = async (page: Page, width: number, height: number, theme: "light" | 
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/chats/${chatId}`)
   await expect(box(page)).toBeEditable()
-  await expect(page.getByRole("button", { name: "Write for Avani", exact: true })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Generate Avani", exact: true })).toBeEnabled()
 }
 
 const shoot = async (page: Page, name: string) => {
