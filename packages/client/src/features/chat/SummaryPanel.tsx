@@ -344,7 +344,7 @@ function SummaryRow({
       }`}
     >
       <div className="flex items-start gap-1">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm">
+        <div className="my-1 flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <LevelBadge level={summary.level} />
           <Tooltip label="Shows its first message in the chat.">
             <button
@@ -500,7 +500,7 @@ function JobRow({ session, job, onJump }: { session: ChatSession; job: LcmJob; o
       className={`flex flex-col gap-1 rounded-md border bg-surface px-3 py-2 ${job.status === "failed" ? "border-danger/40" : "border-border"}`}
     >
       <div className="flex items-start gap-1">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 py-1 text-sm">
+        <div className="my-1 flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <LevelBadge level={job.level} />
           <Tooltip label="Shows its first message in the chat.">
             <button

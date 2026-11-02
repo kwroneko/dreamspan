@@ -50,6 +50,8 @@ const chatFor = (title: string) =>
         { _tag: "Persona", entityId: ids.get("Bo")! }
       ] as const)
         yield* api.ChangeCast({ chatId: chat.id, slotId: null, change })
+      // A line written with Mira there: only then has she been in the chat (castpresence).
+      yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Evening.", reply: false })
       return chat.id
     })
   )

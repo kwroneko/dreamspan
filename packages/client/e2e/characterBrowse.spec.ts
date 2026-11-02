@@ -45,6 +45,9 @@ test.beforeAll(async () => {
       const pair = yield* api.CreateChat({ title: "The pair" })
       for (const entityId of [ava.entityId, cleo.entityId])
         yield* api.ChangeCast({ chatId: pair.id, slotId: null, change: { _tag: "Join", entityId } })
+      // A line in each: a join alone doesn't put a character in a chat (castpresence).
+      for (const chat of [solo, pair])
+        yield* api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "Hello.", reply: false })
     })
   )
 })

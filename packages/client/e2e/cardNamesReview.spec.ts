@@ -201,7 +201,11 @@ test("Save rechecks names and disables the action after an unannounced collision
   )
   // Save asks nothing, so the recheck happens on the click itself.
   await save.click()
-  await expect(page.getByRole("alert")).toContainText("Another card is already called Late target · 1")
+  // The clash shows in the editor's status line (and in Save's explanation), not as an alert;
+  // a hidden tooltip's copy of it isn't a status.
+  await expect(
+    page.getByRole("status").filter({ hasText: "Another card is already called Late target · 1" })
+  ).toBeVisible()
   await expect(save).toBeDisabled()
   const refs = await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.ListLibrary({ kind: "card" }))
   expect(refs.find((ref) => ref.id === original.id)?.label).toBe("Late save")

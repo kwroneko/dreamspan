@@ -342,7 +342,7 @@ export function BranchControl(props: BranchControlProps) {
       triggerLabel={`Branch: ${label}, ${place}: switch branch`}
       hint="Switch to another of this chat's branches, or rename or delete them."
       hintSide="bottom"
-      triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
+      triggerClassName="inline-flex h-8 max-w-72 min-w-0 shrink! items-center gap-1.5 rounded-md border border-border px-2 text-sm text-text outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus data-popup-open:bg-surface-raised"
       title={title}
       side="bottom"
       align="end"

@@ -183,7 +183,9 @@ for (const width of [1440, 390])
       await tiles.first().scrollIntoViewIfNeeded()
       results.library = await measure(tiles)
       await shoot(page, `${width}-${theme}-library`)
-      for (const path of [`/groups/${chatId}`, `/groups/${chatId}/new`]) {
+      // Only the group's page has the collage: a group's new chat is the chat page, as any chat
+      // (DESIGN §2.1 [D] "A pending chat looks and works like any other chat", pendingchat).
+      for (const path of [`/groups/${chatId}`]) {
         await page.goto(`${server().url}${path}`)
         const portraits = page.getByRole("main").locator("[aria-hidden='true'].grid [data-portrait]")
         await expect(portraits).toHaveCount(4)

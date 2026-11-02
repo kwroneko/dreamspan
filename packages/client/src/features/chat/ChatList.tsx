@@ -148,7 +148,7 @@ function Row({
         </span>
       </Link>
       {fork && (
-        <span data-layout-overlay="Pin action sits over the chat row" className="absolute right-2.5 bottom-1">
+        <span data-layout-overlay="Pin action sits over the chat row" className="absolute right-2.5 bottom-2">
           <PinButton fork={fork} className="tile-toggle" />
         </span>
       )}

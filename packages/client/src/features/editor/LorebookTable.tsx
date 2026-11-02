@@ -371,18 +371,18 @@ const EntryRow = memo(function EntryRow({
   return (
     <div
       {...(open ? { role: "group", "aria-label": `Lorebook entry ${uid}` } : {})}
-      className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
+      className={`border-b border-border py-2 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
       {!compact ? (
         <div
           data-entry-header
-          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
           style={{ gridTemplateColumns: template }}
         >
-          <div className="flex items-center gap-1 pt-0.5">
+          <div className="mt-0.5 flex items-center gap-1">
             {select}
             {chevron}
-            <span className="pt-1">{enabled}</span>
+            <span className="mt-1">{enabled}</span>
           </div>
           {titleCell}
           {columns.map((column) => (
@@ -398,11 +398,11 @@ const EntryRow = memo(function EntryRow({
       ) : (
         <div
           data-entry-header
-          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
         >
           {select}
           {chevron}
-          <span className="pt-1.5">{enabled}</span>
+          <span className="mt-1.5">{enabled}</span>
           <div className="min-w-0 flex-1">{titleCell}</div>
           <div className="flex shrink-0 gap-0.5">
             {settingsToggle}
@@ -827,7 +827,7 @@ export function LorebookTable({
           >
             Collapse all
           </Button>
-          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
+          {!panel && <span aria-hidden="true" className="h-5 w-px bg-border" />}
           <Button
             variant="ghost"
             className={small}
@@ -846,7 +846,7 @@ export function LorebookTable({
           >
             Disable all
           </Button>
-          {!panel && <span aria-hidden="true" className="mx-0.5 h-5 w-px bg-border" />}
+          {!panel && <span aria-hidden="true" className="h-5 w-px bg-border" />}
           <Button
             variant="ghost"
             className={small}

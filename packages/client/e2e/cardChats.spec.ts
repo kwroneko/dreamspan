@@ -77,9 +77,49 @@ test.beforeAll(async () => {
           WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<${MANY - 1})
           SELECT printf('scale-join-%03d',i),printf('scale-%03d',i),0,'participant.join',json_object('entity',?),'import',? FROM n`,
         params: [scale, now]
-      }
+      },
+      // One message each, written when its chat was made: a character is in a chat only if a
+      // version records them (castpresence, DESIGN §3.5 [P], ARCHITECTURE §3.8); a join alone
+      // doesn't count.
+      {
+        sql: `INSERT INTO lanes (id, chat_id, name, created_at)
+          SELECT 'lane-' || id, id, 'main', ? FROM chats WHERE id LIKE 'scale-%'`,
+        params: [now]
+      },
+      {
+        sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
+          SELECT 'version-' || id, 'slot-' || id, 0, 'complete', 'human', 'verbatim', 'imported', json_array(?), created_at, created_at
+          FROM chats WHERE id LIKE 'scale-%'`,
+        params: [scale]
+      },
+      {
+        sql: `INSERT INTO slots (id, chat_id, lane_id, depth, selected_version_id, created_at)
+          SELECT 'slot-' || id, id, 'lane-' || id, 0, 'version-' || id, created_at FROM chats WHERE id LIKE 'scale-%'`
+      },
+      { sql: "UPDATE chats SET active_leaf_slot_id = 'slot-' || id WHERE id LIKE 'scale-%'" },
+      { sql: "UPDATE forks SET tip_slot_id = 'slot-' || chat_id WHERE chat_id LIKE 'scale-%'" }
     ])
   )
+  // A group chat imported from ST: a long name, three characters, and a line written with them
+  // there (a join alone doesn't put a character in a chat: castpresence). Older than Aria's own.
+  const groupChat = await admin((api) =>
+    api.CreateChat({ title: "The Lantern Inn at the End of the Long Road: 2024-4-6@21h03m12s345ms" })
+  )
+  group = groupChat.id
+  groupCreatedAt = groupChat.createdAt
+  for (const entityId of [aria, bren, cass]) {
+    await admin((api) => api.ChangeCast({ chatId: group, slotId: null, change: { _tag: "Join", entityId } }))
+  }
+  await admin((api) =>
+    api.SendMessage({
+      chatId: group,
+      parentSlotId: null,
+      branch: false,
+      content: "A round for the table.",
+      reply: false
+    })
+  )
+  await new Promise((done) => setTimeout(done, 20))
   // Aria: a conversation, then a newer chat she joined that has no message yet.
   used = await admin((api) =>
     api.StartChat({
@@ -92,15 +132,6 @@ test.beforeAll(async () => {
   await new Promise((done) => setTimeout(done, 20))
   const empty = await admin((api) => api.CreateChat({ title: "Opened, never written in" }))
   await admin((api) => api.ChangeCast({ chatId: empty.id, slotId: null, change: { _tag: "Join", entityId: aria } }))
-  // A group chat imported from ST: a long name, three characters.
-  const groupChat = await admin((api) =>
-    api.CreateChat({ title: "The Lantern Inn at the End of the Long Road: 2024-4-6@21h03m12s345ms" })
-  )
-  group = groupChat.id
-  groupCreatedAt = groupChat.createdAt
-  for (const entityId of [aria, bren, cass]) {
-    await admin((api) => api.ChangeCast({ chatId: group, slotId: null, change: { _tag: "Join", entityId } }))
-  }
 })
 
 const phone = async (browser: import("@playwright/test").Browser) => {
@@ -183,7 +214,8 @@ test("Continue and the tile open the chat with the last message, not a newer emp
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
   await page.goto(`${server().url}/cards/${aria}`)
   const main = page.getByRole("main")
-  await expect(main.getByRole("button", { name: /^Open chat / })).toHaveCount(3)
+  // Her conversation and the group; the chat she only joined isn't one of hers (castpresence).
+  await expect(main.getByRole("button", { name: /^Open chat / })).toHaveCount(2)
   await main.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/chats/${used}`))
 })
@@ -193,7 +225,7 @@ test("on a phone, a group chat's row shows when it started and its length in ful
   await page.goto(`${server().url}/cards/${aria}`)
   const row = chatLinks(page).filter({ hasText: "The Lantern Inn" })
   const meta = row.locator("[data-chat-meta]")
-  await expect(meta).toHaveText(`started ${startedDay(groupCreatedAt)} · 0 messages`)
+  await expect(meta).toHaveText(`started ${startedDay(groupCreatedAt)} · 1 message`)
   const fits = await meta.evaluate((element) => {
     const box = element.getBoundingClientRect()
     const link = element.closest("a,button")!.getBoundingClientRect()

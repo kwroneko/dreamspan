@@ -31,6 +31,14 @@ const baseOf = (draft: Draft | null): Base => ({
   expectedRowVersion: draft?.rowVersion ?? null,
   expectedSession: draft?.session ?? null
 })
+/**
+ * Which text a page opens with when the server's draft and a copy kept in this browser differ:
+ * the one written last. A reload right after typing can read the server before the last
+ * keystrokes' saves reach it; the browser's copy has them. Equal times keep the server's.
+ */
+export const newerText = (serverAt: number | null, localAt: number | null): "server" | "local" =>
+  localAt !== null && (serverAt === null || localAt > serverAt) ? "local" : "server"
+
 export class UserDraftStore {
   private draft: Draft | null = null
   // The base of the displayed text, independent of reads/restores the user hasn't seen.
@@ -47,7 +55,9 @@ export class UserDraftStore {
     history: null as ReadonlyArray<DraftState> | null,
     displaced: null as DraftDisplacement | null,
     recovered: 0,
-    remote: null as Draft | null
+    remote: null as Draft | null,
+    /** When the server's draft, as opened, was last written: its text against a newer browser copy. */
+    savedAt: null as number | null
   }
   private userId: UserId
   private targetId: string
@@ -129,8 +139,15 @@ export class UserDraftStore {
         .sort((a, b) => a.at - b.at)) {
         const save = pendingOf(copy)
         if (save?.kind === "setting" || save?.kind === "pendingChat") {
-          // The old pending composer also retains a carry copy: an existing server draft takes precedence.
-          if (save.kind === "pendingChat" && this.draft !== null) continue
+          // The pending composer keeps its own copy of each keystroke too. An existing server
+          // draft takes precedence unless that copy is newer: the server can lag the last
+          // keystrokes when the page reloads right after them (newerText above).
+          if (
+            save.kind === "pendingChat" &&
+            this.draft !== null &&
+            newerText(this.draft.status === "active" ? this.draft.updatedAt : null, copy.at) === "server"
+          )
+            continue
           const replay = await this.run((client) =>
             client("SaveUserDraft", {
               ...this.address(),
@@ -193,6 +210,7 @@ export class UserDraftStore {
       }
       this.update({
         ready: true,
+        savedAt: this.draft?.status === "active" ? this.draft.updatedAt : null,
         text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
       })
     })

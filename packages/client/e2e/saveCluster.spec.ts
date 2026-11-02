@@ -219,8 +219,11 @@ for (const width of [1440, 390])
     )
     // A note: Save in its header, beside its menu.
     const notes = await openPanel(page, "Notes")
-    await notes.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
-    await page.getByRole("menuitem", { name: "New note" }).click()
+    // New note is a button of its own since addbuttons, not an Add note menu's item.
+    await notes
+      .getByRole("region", { name: "This chat's notes" })
+      .getByRole("button", { name: "New note", exact: true })
+      .click()
     const note = notes.getByRole("region", { name: "Note Note" })
     await note.getByRole("textbox", { name: /^Text of/ }).fill("A first line.")
     await saveCluster(note).getByRole("button", { name: "Save", exact: true }).click()

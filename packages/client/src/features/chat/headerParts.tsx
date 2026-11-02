@@ -24,9 +24,10 @@ export function HeaderPin({ view }: ChatHeaderActionProps) {
     .section("all")
     // By id: a branch made at another's last message ends where that one does.
     .rows.find((f) => f.chat.id === view.chat?.id && f.forkId === (view.forkId ?? view.chat?.currentForkId))
-  // A phone's header keeps its room for the name; the chat lists' rows have the pin too.
+  // A narrow header (a phone, or a narrow chat column) keeps its room for the name; the chat
+  // lists' rows have the pin too.
   return fork ? (
-    <span className="contents max-sm:hidden">
+    <span className="flex @max-[40rem]/header:hidden">
       <PinButton fork={fork} />
     </span>
   ) : null

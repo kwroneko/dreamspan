@@ -70,7 +70,10 @@ for (const theme of ["light", "dark"] as const)
       geometry[`${size}-${scene}`] = boxes
       const first = boxes[0]!
       for (const box of boxes) {
-        expect(Math.abs(box.x - first.x), `${scene}: row alignment`).toBeLessThanOrEqual(1)
+        expect(
+          Math.abs(box.x - first.x),
+          `${scene}: row alignment of ${box.label} with ${first.label}`
+        ).toBeLessThanOrEqual(1)
         if (!before) {
           expect(box.width, `${scene}: ${box.label}`).toBeLessThanOrEqual(640)
           expect(Math.abs(box.width - first.width), `${scene}: shared width`).toBeLessThanOrEqual(1)
