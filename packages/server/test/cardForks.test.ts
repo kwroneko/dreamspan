@@ -78,6 +78,36 @@ const fork = (api: Api, refId: RefId, characterVersion: string, name?: string) =
   })
 
 layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" })("card forks", (it) => {
+  it.effect("a copied card note keeps the draft's original base and detects concurrent edits", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const writer = yield* Writer
+      const userId = yield* me(api)
+      const parent = yield* card(api, "Note conflict")
+      const note = yield* api.CreateCardNote({ cardRefId: parent.ref.id, title: "Weather" })
+      const start = note.headRevisionId
+      yield* draft(api, note.id, textField(["content"]), "Unsaved fog.")
+      const opened = yield* api.OpenEditor({ refId: note.id })
+      yield* writer.EditRef({
+        userId,
+        refId: note.id,
+        expectedRowVersion: opened.ref.rowVersion,
+        doc: { ...opened.doc, content: "Saved rain." },
+        message: null,
+        commitDraft: null
+      })
+      const forked = yield* fork(api, parent.ref.id, "fork")
+      const [copy] = yield* api.ListCardNotes({ cardRefId: forked.id })
+      assert.strictEqual(yield* outcome(commit(api, copy!.ref.id), () => "allowed"), "EditConflict")
+      const carried = (yield* api.OpenEditor({ refId: copy!.ref.id })).drafts.find((d) => d.status === "active")!
+      assert.strictEqual(carried.baseRevision, start)
+      assert.strictEqual((yield* api.GetRevision({ refId: copy!.ref.id, revisionId: start })).content, "")
+      const copiedAgain = yield* fork(api, forked.id, "next fork")
+      const [nextNote] = yield* api.ListCardNotes({ cardRefId: copiedAgain.id })
+      assert.strictEqual(yield* outcome(commit(api, nextNote!.ref.id), () => "allowed"), "EditConflict")
+    })
+  )
+
   it.effect("a fork of a fork carries an older draft base and keeps its conflict", () =>
     Effect.gen(function* () {
       const api = yield* client()
