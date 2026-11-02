@@ -96,7 +96,9 @@ for (const width of [1440, 390])
       await expect(page.getByRole("tablist", { name: "Chat panel" })).toBeVisible()
       await closePanel(page)
       const mine = page.getByRole("article", { name: "Your message" })
-      await mine.locator(".markdown").dblclick()
+      // Aim inside "gull": the center of this wide block is blank and can
+      // select a paragraph, which deliberately keeps the message out of Edit.
+      await mine.locator(".markdown").dblclick({ position: { x: 24, y: 12 } })
       const messageText = mine.getByRole("textbox", { name: "Message text" })
       await expect(messageText).toBeFocused()
       await messageText.press("Control+a")

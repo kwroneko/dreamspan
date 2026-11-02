@@ -18,6 +18,10 @@ export const saveRevision = async (scope: Page | Locator, message?: string) => {
     await scope.getByRole("textbox", { name: "Revision message", exact: true }).press("Enter")
     await expect(scope.getByRole("textbox", { name: "Revision message", exact: true })).toHaveCount(0)
   }
+  // Pending also disables Save. Wait for the saved state and the end of the
+  // request; a valid no-op save clears drafts without advancing the revision.
+  await expect(saveCluster(scope)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
+  await expect(saveButton(scope)).not.toHaveAttribute("aria-busy", "true")
   await expect(saveButton(scope)).toBeDisabled()
 }
 

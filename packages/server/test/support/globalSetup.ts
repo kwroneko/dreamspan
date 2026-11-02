@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { TestProject } from "vitest/node"
+import { build } from "rolldown"
 import { buildWorkers } from "../../scripts/build-workers.ts"
 
 declare module "vitest" {
@@ -65,6 +66,16 @@ export const makeSetup =
 
 const buildBundles = async (bundleDir: string) => {
   await buildWorkers(bundleDir)
+  // LCM fixtures issue many small batches. Strip this worker once too, instead of
+  // starting Node's TypeScript/Wasm loader for every batch under the test's deadline.
+  await build({
+    input: fileURLToPath(new URL("./lcmFixtureWorker.ts", import.meta.url)),
+    platform: "node",
+    output: { file: join(bundleDir, "lcmFixture.mjs"), format: "esm" },
+    logLevel: "warn"
+  })
+  // This helper is also used by Playwright, where Vitest's inject() is unavailable.
+  process.env.RP_TEST_LCM_FIXTURE_WORKER = join(bundleDir, "lcmFixture.mjs")
   // Bundled native dependencies stay external. These throwaway bundles are outside the
   // repository's node_modules ancestry; production bundles live inside it.
   mkdirSync(join(bundleDir, "node_modules"))

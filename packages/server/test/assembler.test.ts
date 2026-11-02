@@ -16,6 +16,7 @@ import type { PositionedEvent } from "../src/assembler/pipeline.ts"
 import type { ContextSnapshot, ModelInput, NoteInput } from "../src/assembler/types.ts"
 import { matchLorebooks } from "../src/assembler/lorebook.ts"
 import { makeAssembler } from "../src/assembler/assembler.ts"
+import { makeScriptRunner, makeRegexDeadline, REGEX_MS, REGEX_OUTPUT } from "../src/assembler/regex.ts"
 import { chatCompletionsFields, providerRequest } from "../src/assembler/wire.ts"
 import { importCard } from "../src/formats/cardImport.ts"
 import { forbidCardOverrides, importStPreset } from "../src/formats/preset.ts"
@@ -131,6 +132,54 @@ const chat = (fields: Partial<AssemblyFixture> = {}): AssemblyFixture => ({
 
 const assembled = (fixture: AssemblyFixture, options?: Parameters<typeof assembleFixture>[1]) =>
   Effect.runPromise(assembleFixture(fixture, options))
+
+// Functional and output-budget assertions must not depend on how much CPU this
+// process receives. The registered scripts stage still compiles the real scripts.
+const unlimitedRegex = (): ReturnType<typeof makeRegexDeadline> => ({
+  expired: false,
+  run: (job) => {
+    job()
+    return true
+  }
+})
+const withRegexDeadline = (fixture: AssemblyFixture, deadline = unlimitedRegex()) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const assembler = yield* makeAssembler
+      const scripts = assembler.stages.get("scripts")!
+      yield* assembler.stages.register({
+        id: "scripts",
+        run: (assembly) =>
+          scripts.run(assembly).pipe(
+            Effect.map((compiled) => {
+              compiled.scripts = makeScriptRunner(
+                compiled.scripts!.list,
+                { ms: REGEX_MS, output: REGEX_OUTPUT },
+                deadline
+              )
+              return compiled
+            })
+          )
+      })
+      return yield* assembleFixture(fixture, { assembler })
+    }).pipe(Effect.scoped)
+  )
+const scripted = (
+  messages: ReadonlyArray<FixtureMessage>,
+  scripts: ReadonlyArray<object>,
+  context = 20_000,
+  deadline = unlimitedRegex()
+) =>
+  withRegexDeadline(
+    chat({
+      messages,
+      preset: {
+        ...preset({ openai_max_context: context, extensions: { regex_scripts: scripts } }),
+        regex_approved: true
+      }
+    }),
+    deadline
+  )
 
 const contents = (snapshot: ContextSnapshot) => snapshot.request.messages.map((m) => `${m.role}: ${m.content}`)
 /** The end-of-request message for Mira with the default turn text (DESIGN §2.2). */
@@ -1040,41 +1089,47 @@ describe("the context assembler", () => {
       ],
       preset: doc
     })
-    const off = await assembled(fixture)
+    const off = await withRegexDeadline(fixture)
     expect(contents(off)).toContain("assistant: <thinking>new</thinking>Write it down.")
-    const on = await assembled({ ...fixture, preset: { ...doc, regex_approved: true } })
+    const on = await withRegexDeadline({ ...fixture, preset: { ...doc, regex_approved: true } })
     // Within its depths only: the oldest reply keeps its thinking.
     expect(contents(on)).toContain("assistant: Write it down.")
     expect(contents(on)).toContain("assistant: <thinking>old</thinking>You're [lae|lae|Mira].")
     expect(on.issues).toEqual([expect.objectContaining({ kind: "regex_skipped" })])
     expect(on.issues[0]!.message).toContain("backreference")
+  })
 
-    // Time is bounded per context: V8 stops a pattern that would take seconds, which would
-    // have emptied the newest reply; it's sent as written.
-    const scripted = (messages: ReadonlyArray<FixtureMessage>, scripts: ReadonlyArray<object>, context = 20_000) =>
-      assembled({
-        ...fixture,
-        messages,
-        preset: {
-          ...preset({ openai_max_context: context, extensions: { regex_scripts: scripts } }),
-          regex_approved: true
-        }
-      })
-    const nested = `${"(".repeat(300)}a*${")*".repeat(300)}`
+  it("keeps skipped prompt text out of stable history when the regex budget expires", async () => {
+    // Exhaust the injected budget at its first batch. VM interruption of a single
+    // expensive engine call is checked separately in regex.test.ts.
+    let expired = false
+    const deadline = {
+      get expired() {
+        return expired
+      },
+      run: () => {
+        expired = true
+        return false
+      }
+    }
     const slow = await scripted(
-      [...fixture.messages, { side: "assistant", content: "a".repeat(43_000) }],
-      [regexScript("heavy", { findRegex: `/${nested}/g` })]
+      [{ side: "assistant", content: "a".repeat(43_000) }],
+      [regexScript("heavy", { findRegex: "/a/g" })],
+      20_000,
+      deadline
     )
     expect(slow.issues.map((i) => i.message)).toContain(
       "The regex scripts ran out of time (200 ms for one context): the rest of the messages are sent without them."
     )
     expect(contents(slow).at(-2)).toBe(`assistant: ${"a".repeat(43_000)}`)
-    // Another turn could leave them the time they lacked: what it didn't cover isn't cached as stable.
+    // A later turn may have budget left: skipped text cannot be cached as stable.
     expect(slow.request.breakpoints.map((b) => b.reason)).not.toContain("history")
+  })
 
-    // And so is the text they make, replaced or copied: the script stops, the context doesn't.
+  it("bounds text made by prompt regex scripts, including unchanged copies", async () => {
+    // The injected deadline leaves the output budget as the only possible limit.
     const growing = await scripted(
-      [{ side: "assistant", content: "q".repeat(3_000) }, ...fixture.messages],
+      [{ side: "assistant", content: "q".repeat(3_000) }, ...chat().messages],
       [regexScript("heavy", { findRegex: "/q/g", replaceString: "b".repeat(200_000) })]
     )
     const tooMuch = 'The regex script "copy 16" was skipped where it failed: it made more text than one context allows.'
@@ -1094,10 +1149,8 @@ describe("the context assembler", () => {
       copies,
       200_000
     )
-    // Under a loaded machine the 200 ms budget can run out before the seventeenth copy: either way the scripts stop.
-    expect(copied.issues.map((i) => i.message)).toSatisfy((messages: Array<string>) =>
-      messages.some((m) => m === tooMuch || m.startsWith("The regex scripts ran out of time"))
-    )
+    expect(copied.issues.map((i) => i.message)).toContain(tooMuch)
+    expect(copied.issues.some((i) => i.message.startsWith("The regex scripts ran out of time"))).toBe(false)
     // What ran out depends on the messages after: the ones it skipped aren't cached as stable.
     expect(copied.request.breakpoints.map((b) => b.reason)).not.toContain("history")
   })

@@ -182,8 +182,7 @@ for (const width of [1440, 390])
 
       const notes = await subTab(tab, "Notes")
       await expect(notes.getByText("No notes", { exact: true })).toBeVisible()
-      await notes.getByRole("button", { name: /^Add a note/ }).click()
-      await page.getByRole("menuitem", { name: "New note" }).click()
+      await notes.getByRole("button", { name: "New note", exact: true }).click()
       await expect(notes.getByRole("list", { name: "The card's notes" })).toBeVisible()
       await shoot(page, `panel-notes-${width}-${theme}`)
 

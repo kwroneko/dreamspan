@@ -167,6 +167,7 @@ export const registerPresentation = () => [
     order: 20,
     component: ({ children, session, view, wide, onOpenPanel }) => (
       <PresetWorkspace
+        compact={!wide}
         context={view.history?.presetContext ?? null}
         chat={{ chatId: session.id, forkId: view.forkId }}
         onOpen={() => {

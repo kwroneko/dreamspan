@@ -218,8 +218,8 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
     <section className="flex min-w-0 flex-col gap-3" aria-label="Snippets">
       <p className="text-sm text-muted">
         Text you keep beside your chats: lines to reuse, passages from a swipe, ideas. A snippet is never sent to the
-        model by itself; a note can show one (Add note, then Pick a shared note). Copy one to paste it anywhere, and add
-        to the one open last from any editor with Send text to snippet.
+        model by itself; a note can show one (Pick a shared note). Copy one to paste it anywhere, and add to the one
+        open last from any editor with Send text to snippet.
       </p>
       <div className="flex max-w-controls items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">

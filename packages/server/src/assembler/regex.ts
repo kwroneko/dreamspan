@@ -163,9 +163,13 @@ export const makeRegexDeadline = (limit: number) => {
 /**
  * A preset's scripts for one context, with the time (`ms`) and the text (`output`) they may
  * still spend; each batch runs as a vm script whose timeout V8 enforces.
+ * A supplied deadline lets tests exhaust time independently of the output budget.
  */
-export const makeScriptRunner = (list: ReadonlyArray<PromptScript>, limits: { ms: number; output: number }) => {
-  const deadline = makeRegexDeadline(limits.ms)
+export const makeScriptRunner = (
+  list: ReadonlyArray<PromptScript>,
+  limits: { ms: number; output: number },
+  deadline = makeRegexDeadline(limits.ms)
+) => {
   const output = { left: limits.output }
   return {
     list,

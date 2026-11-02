@@ -248,13 +248,6 @@ function CardPanel({
           {info.binding === "revision" && info.definition && (
             <ChatDefinition name={card.name} info={{ ...info, definition: info.definition }} />
           )}
-          {/* Save stays in sight while a field further down is edited; what's typed is used as it's typed. */}
-          <div
-            data-layout-overlay="Sticky save bar covers scrolled editor content"
-            className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2"
-          >
-            <SaveRevision store={store} />
-          </div>
           {state.saveError && (
             <ErrorAlert
               error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
