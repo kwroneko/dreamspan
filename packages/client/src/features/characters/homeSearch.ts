@@ -1,7 +1,10 @@
 import type { CardBrowse } from "./cardBrowse.tsx"
 
+/** The characters' filters, in their order (`cardBrowse.tsx`), here so the URL's parsing needs no UI. */
+export const CARD_FILTERS = ["all", "used", "unused", "favourites", "personas", "groups"] as const
+
 /** Home's own params; retained only on home, independently of the sidebar's scope. */
-export const homeSearch = ["show", "sort", "reverse", "q", "pinsSort"] as const
+export const homeSearch = ["show", "sort", "reverse", "personas", "q", "pinsSort"] as const
 
 export interface HomeBrowse extends CardBrowse {
   readonly search: string
@@ -9,9 +12,10 @@ export interface HomeBrowse extends CardBrowse {
 }
 
 export const readHomeSearch = (search: Record<string, unknown>): HomeBrowse => ({
-  filter: (["all", "used", "unused", "favourites", "groups"] as const).find((v) => v === search.show) ?? "all",
+  filter: CARD_FILTERS.find((v) => v === search.show) ?? "all",
   sort: (["recent", "created", "added", "name"] as const).find((v) => v === search.sort) ?? "recent",
   reversed: search.reverse === true,
+  withPersonas: search.personas === true,
   search: typeof search.q === "string" ? search.q : "",
   pinsSort: (["recent", "created", "name"] as const).find((v) => v === search.pinsSort) ?? "recent"
 })
@@ -21,6 +25,7 @@ export const writeHomeSearch = (state: HomeBrowse) => ({
   show: state.filter === "all" ? undefined : state.filter,
   sort: state.sort === "recent" ? undefined : state.sort,
   reverse: state.reversed || undefined,
+  personas: state.withPersonas || undefined,
   q: state.search || undefined,
   pinsSort: state.pinsSort === "recent" ? undefined : state.pinsSort
 })

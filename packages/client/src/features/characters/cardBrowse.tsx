@@ -1,5 +1,5 @@
 // What lists characters, in one set of parts: the filter (All, With chats, Never used,
-// Favourites, Groups, each with its count), the sort with its direction, the date a date sort
+// Favourites, Personas, Groups, each with its count), Include personas, the sort with its direction, the date a date sort
 // orders by, the favourite star and the grid of tiles. The home grid, the left panel's grid and
 // Start a chat use them; each place keeps its own sort and direction (`useCardBrowse(place)`),
 // remembered per account in this browser, since a narrow panel and the home page are used
@@ -9,24 +9,31 @@ import { useState } from "react"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
+import { Checkbox } from "../../ui/Choice.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuCheckboxItem } from "../../ui/Menu.tsx"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { type CardSort, shortAgo, sortCards, sortDate } from "./cardRecency.ts"
+import { CARD_FILTERS } from "./homeSearch.ts"
 import type { ShellLibrary } from "./shellData.tsx"
 
 type ShellCard = ShellLibrary["cards"][number]
-type CardFilter = "all" | "used" | "unused" | "favourites" | "groups"
+type CardFilter = "all" | "used" | "unused" | "favourites" | "personas" | "groups"
 export interface CardBrowse {
   readonly filter: CardFilter
   readonly sort: CardSort
   /** The sort the other way round from its own (dates newest first, names A to Z). */
   readonly reversed: boolean
+  /**
+   * The persona folder's cards among the other filters' characters, marked (owner, 2026-11-02:
+   * off by default). Personas alone are the `personas` filter, whatever this says.
+   */
+  readonly withPersonas: boolean
 }
-const DEFAULT: CardBrowse = { filter: "all", sort: "recent", reversed: false }
-const FILTERS = ["all", "used", "unused", "favourites", "groups"] as const
+const DEFAULT: CardBrowse = { filter: "all", sort: "recent", reversed: false, withPersonas: false }
+const FILTERS = CARD_FILTERS
 const SORTS = ["recent", "created", "added", "name"] as const
 
 const read = (key: string): CardBrowse => {
@@ -35,14 +42,18 @@ const read = (key: string): CardBrowse => {
     return {
       filter: DEFAULT.filter,
       sort: SORTS.find((s) => s === stored.sort) ?? DEFAULT.sort,
-      reversed: stored.reversed === true
+      reversed: stored.reversed === true,
+      withPersonas: stored.withPersonas === true
     }
   } catch {
     return DEFAULT
   }
 }
 
-/** A place's filter, and its sort remembered per account in this browser. A new sort starts its own way round. */
+/**
+ * A place's filter, and its sort and Include personas remembered per account in this browser.
+ * A new sort starts its own way round.
+ */
 export function useCardBrowse(place: string) {
   const key = `rp.cards.${place}.${useSession().user.id}`
   const [state, setState] = useState<CardBrowse>(() => read(key))
@@ -54,7 +65,10 @@ export function useCardBrowse(place: string) {
     }
     setState(next)
     try {
-      localStorage.setItem(key, JSON.stringify({ sort: next.sort, reversed: next.reversed }))
+      localStorage.setItem(
+        key,
+        JSON.stringify({ sort: next.sort, reversed: next.reversed, withPersonas: next.withPersonas })
+      )
     } catch {
       /* Not remembered, still applied. */
     }
@@ -67,37 +81,50 @@ const matchesName = (c: ShellCard, needle: string) =>
   [c.card.label, c.card.name, c.card.subtitle].some((n) => n.toLowerCase().includes(needle))
 
 const inFilter = (c: ShellCard, filter: CardFilter) =>
-  filter === "used"
-    ? c.card.chats > 0
-    : filter === "unused"
-      ? c.card.chats === 0
-      : filter === "favourites"
-        ? c.favourite
-        : true
+  filter === "personas"
+    ? c.persona
+    : filter === "used"
+      ? c.card.chats > 0
+      : filter === "unused"
+        ? c.card.chats === 0
+        : filter === "favourites"
+          ? c.favourite
+          : true
+
+/** Whether a filter's list mixes the persona folder's cards in with the characters (and so marks them). */
+export const mixesPersonas = (browse: CardBrowse) => browse.withPersonas && browse.filter !== "personas"
+/** The cards a filter considers: personas only under Personas or with Include personas. */
+const considered = (cards: ReadonlyArray<ShellCard>, browse: Pick<CardBrowse, "filter" | "withPersonas">) =>
+  browse.filter === "personas" || browse.withPersonas ? cards : cards.filter((c) => !c.persona)
 
 /** The characters a place shows: its filter and the search, in its order. */
 export const browseCards = (cards: ReadonlyArray<ShellCard>, browse: CardBrowse, search: string) => {
   const needle = search.trim().toLowerCase()
   return sortCards(
-    cards.filter((c) => inFilter(c, browse.filter) && matchesName(c, needle)),
+    considered(cards, browse).filter((c) => inFilter(c, browse.filter) && matchesName(c, needle)),
     browse.sort,
     browse.reversed
   )
 }
 
 /** Each filter's count over all the characters, whatever the search: what choosing it would show without one. */
-const filterCounts = (cards: ReadonlyArray<ShellCard>) => ({
-  all: cards.length,
-  used: cards.filter((c) => c.card.chats > 0).length,
-  unused: cards.filter((c) => c.card.chats === 0).length,
-  favourites: cards.filter((c) => c.favourite).length
-})
+const filterCounts = (all: ReadonlyArray<ShellCard>, withPersonas: boolean) => {
+  const cards = withPersonas ? all : all.filter((c) => !c.persona)
+  return {
+    all: cards.length,
+    used: cards.filter((c) => c.card.chats > 0).length,
+    unused: cards.filter((c) => c.card.chats === 0).length,
+    favourites: cards.filter((c) => c.favourite).length,
+    personas: all.filter((c) => c.persona).length
+  }
+}
 
 const FILTER_LABELS: Record<CardFilter, string> = {
   all: "All",
   used: "With chats",
   unused: "Never used",
   favourites: "Favourites",
+  personas: "Personas",
   groups: "Groups"
 }
 
@@ -110,15 +137,18 @@ export function CardFilterControl({
   onChange,
   cards,
   groups,
+  withPersonas = false,
   compact = false
 }: {
   value: CardFilter
   onChange: (filter: CardFilter) => void
   cards: ReadonlyArray<ShellCard>
   groups?: number | null
+  /** Include personas is ticked: the characters' counts count them too. */
+  withPersonas?: boolean
   compact?: boolean
 }) {
-  const counts = filterCounts(cards)
+  const counts = filterCounts(cards, withPersonas)
   const options = FILTERS.filter((f) => f !== "groups" || groups !== undefined)
   const count = (f: CardFilter) => (f === "groups" ? (groups ?? null) : counts[f])
   const shown = options.includes(value) ? value : "all"
@@ -154,6 +184,29 @@ export function CardFilterControl({
         )
       }))}
     />
+  )
+}
+
+/**
+ * Include personas: the persona folder's cards among the characters, marked. Only where a
+ * filter lists characters (not Personas, not Groups).
+ */
+export function IncludePersonas({
+  browse,
+  onChange
+}: {
+  browse: CardBrowse
+  onChange: (change: Partial<CardBrowse>) => void
+}) {
+  if (browse.filter === "personas" || browse.filter === "groups") return null
+  return (
+    <Checkbox
+      checked={browse.withPersonas}
+      onCheckedChange={(withPersonas) => onChange({ withPersonas })}
+      hint="Shows the cards you play as among these characters"
+    >
+      Include personas
+    </Checkbox>
   )
 }
 

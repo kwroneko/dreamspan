@@ -5,12 +5,11 @@
 // branch (`ChangeCast` `Join`, as the cast's other changes); the grid stays open, so several
 // can be added in a row. Who's already in the chat is marked, and a click on them does nothing.
 // It's the `cast.add-characters` entry of `castSections`, so a plugin can replace or remove it.
-import type { CastCard, EntityId } from "@rp/shared/chat.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
-import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
@@ -18,7 +17,14 @@ import { Spinner } from "../../ui/Spinner.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { browseCards, useCardBrowse } from "../characters/cardBrowse.tsx"
 import { CardBrowseBar } from "../characters/CardBrowseBar.tsx"
-import { CharacterGrid, type ShellLibrary, shellAtom, type TilePick, type TileState } from "../characters/shellData.tsx"
+import {
+  browsable,
+  CharacterGrid,
+  type ShellLibrary,
+  shellAtom,
+  type TilePick,
+  type TileState
+} from "../characters/shellData.tsx"
 import { readCastAddOpen, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
 import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession, Outcome } from "./session.ts"
@@ -31,7 +37,6 @@ interface CastAddTarget {
   readonly subscribe: (listener: () => void) => () => void
   readonly cast: () => Cast | null
   readonly join: (id: EntityId) => Promise<Outcome<unknown>>
-  readonly listCards: () => Promise<Outcome<ReadonlyArray<CastCard>>>
   /** What a tile's tooltip says it does, and what's said once it's done. */
   readonly addHint: (name: string) => string
   readonly joined: (name: string) => string
@@ -41,7 +46,6 @@ const sessionTarget = (session: ChatSession): CastAddTarget => ({
   subscribe: session.subscribe,
   cast: () => session.snapshot().cast,
   join: (id) => session.changeCast({ _tag: "Join", entityId: id }),
-  listCards: () => session.listCards(),
   addHint: (name) => `Add ${name} to the chat`,
   joined: (name) => `${name} joined the chat.`
 })
@@ -50,7 +54,6 @@ const pendingTarget = (pending: PendingChat): CastAddTarget => ({
   subscribe: pending.subscribe,
   cast: () => pending.view().cast,
   join: (id) => pending.join(id),
-  listCards: pending.listCards,
   addHint: (name) => `Add ${name}: they greet after the others, and the chat starts with them`,
   joined: (name) => `${name} joined the chat.`
 })
@@ -165,18 +168,6 @@ function AddGrid({
       )
     })
   }
-  // The persona folder's cards aren't in the grid (the shell's characters), but any card can
-  // join as a character (DESIGN §2.2): they're offered apart, under it.
-  const [personas, setPersonas] = useState<ReadonlyArray<CastCard> | null>(null)
-  useEffect(() => {
-    let live = true
-    void target.listCards().then((result) => {
-      if (live && result.ok) setPersonas(result.value.filter((card) => card.persona && !card.inBin))
-    })
-    return () => {
-      live = false
-    }
-  }, [target])
   const status = new Map<string, Status>([
     ...participants.map((id) => [id, "in"] as const),
     ...playedByMe.map((id) => [id, "you"] as const),
@@ -192,15 +183,8 @@ function AddGrid({
   const pageKey = `${search}/${browse.filter}`
   const [shown, setShown] = useState({ key: pageKey, count: PAGE })
   const count = shown.key === pageKey ? shown.count : PAGE
-  const found = browseCards(data.cards, browse, search)
+  const found = browseCards(browsable(data), browse, search)
   const cards = found.slice(0, count)
-  const needle = search.trim().toLowerCase()
-  const personasShown =
-    browse.filter === "all"
-      ? (personas ?? []).filter((card) =>
-          [card.name, card.subtitle ?? ""].some((name) => name.toLowerCase().includes(needle))
-        )
-      : []
   return (
     <div className="flex flex-col gap-2">
       {/* Kept in view while the grid scrolls under it, with what the last add did. */}
@@ -229,9 +213,13 @@ function AddGrid({
         // Three small tiles a row on a phone, more as the panel widens.
         className="grid grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-2 @3xl:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
       >
-        {cards.length === 0 && personasShown.length === 0 && (
+        {cards.length === 0 && (
           <p className="col-span-full py-2 text-sm text-muted">
-            {data.cards.length === 0 ? "You have no characters yet." : "No character matches."}
+            {browsable(data).length === 0
+              ? "You have no characters yet."
+              : browse.filter === "personas" && !search.trim()
+                ? "You have no personas yet."
+                : "No character matches."}
           </p>
         )}
       </CharacterGrid>
@@ -244,45 +232,6 @@ function AddGrid({
         >
           Show {Math.min(PAGE, found.length - count)} more of {(found.length - count).toLocaleString()}
         </Button>
-      )}
-      {personasShown.length > 0 && (
-        <section aria-label="Personas" className="flex flex-col gap-1 pt-2">
-          <h3 className="text-xs font-medium text-muted">Personas</h3>
-          <ul className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-1">
-            {personasShown.map((card) => {
-              const name = `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`
-              const s = status.get(card.entityId)
-              const state = stateOf(s)
-              return (
-                <li key={card.entityId}>
-                  <Tooltip label={hintOf(target, card.name, s)}>
-                    <button
-                      type="button"
-                      aria-label={labelOf(name, s)}
-                      {...(state.done || state.pending ? { "aria-disabled": true } : {})}
-                      onClick={() => {
-                        if (!state.done && !state.pending) add(card.entityId, card.name)
-                      }}
-                      className={`flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus ${state.done || state.pending ? "cursor-default" : "hover:bg-surface-raised"}`}
-                    >
-                      <span className={state.done ? "opacity-50" : ""}>
-                        <Avatar
-                          id={card.entityId}
-                          name={card.name}
-                          mediaId={card.avatarMediaId}
-                          crop={card.avatarCrop}
-                          size="md"
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{name}</span>
-                      {state.mark}
-                    </button>
-                  </Tooltip>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
       )}
     </div>
   )

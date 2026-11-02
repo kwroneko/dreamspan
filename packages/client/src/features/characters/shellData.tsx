@@ -29,6 +29,9 @@ const SHELL_KEYS = ["chats", "library", "pins", "favourites"]
 /** Kept while the app runs: every screen reads it, and a remount mustn't cancel and send it again. */
 export const shellAtom = Atom.keepAlive(AppClient.query("GetShellCards", undefined, { reactivityKeys: SHELL_KEYS }))
 
+/** Every card the lists browse: the characters, then the persona folder's (each `persona`), for `browseCards`. */
+export const browsable = (data: ShellLibrary) => [...data.cards, ...data.personas]
+
 /** A section's rows, with their cast's cards, and how many it has. */
 export interface ShellRows {
   readonly rows: ReadonlyArray<ShellFork>
@@ -216,7 +219,8 @@ export interface TileState {
 /**
  * Characters as tiles, in the order given (`browseCards`), each with the date `sort` orders
  * by. `pick`: what a tile does, else open the character's chat, and `status` each tile's
- * status for it, by entity id. `children` follow the tiles
+ * status for it, by entity id. `markPersonas`: the list mixes the persona folder's cards in,
+ * so each is marked "You" (`mixesPersonas`). `children` follow the tiles
  * (an empty state). `className` sets the columns for where it's shown.
  */
 export function CharacterGrid({
@@ -224,6 +228,7 @@ export function CharacterGrid({
   sort,
   pick,
   status,
+  markPersonas = false,
   className,
   children
 }: {
@@ -231,6 +236,7 @@ export function CharacterGrid({
   sort: CardSort
   pick?: TilePick
   status?: ReadonlyMap<string, string>
+  markPersonas?: boolean
   className: string
   children?: ReactNode
 }) {
@@ -243,10 +249,25 @@ export function CharacterGrid({
           sort={sort}
           {...(pick ? { pick } : {})}
           status={status?.get(c.card.entityId)}
+          marked={markPersonas && c.persona}
         />
       ))}
       {children}
     </div>
+  )
+}
+
+/** The "You" badge (the card header's, PortraitControls.tsx) on a persona's picture in a mixed list. */
+function PersonaBadge() {
+  return (
+    <Tooltip label="A persona: a card you play as">
+      <span
+        data-persona-badge
+        className="absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm"
+      >
+        You
+      </span>
+    </Tooltip>
   )
 }
 
@@ -258,12 +279,15 @@ function CharacterTile({
   card,
   sort = "name",
   pick,
-  status
+  status,
+  marked
 }: {
   card: ShellCard
   sort?: CardSort
   pick?: TilePick
   status: string | undefined
+  /** A persona in a mixed list: the "You" badge on its picture. */
+  marked: boolean
 }) {
   const open = useOpenCharacter()
   const c = card.card
@@ -276,13 +300,18 @@ function CharacterTile({
         if (!pick) return open(c.entityId)
         if (!state.done && !state.pending) pick.onPick(card)
       }}
-      aria-label={pick ? pick.label(card, status) : `Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}`}
+      aria-label={
+        pick
+          ? pick.label(card, status)
+          : `Open ${c.label}${c.subtitle ? ` · ${c.subtitle}` : ""}${marked ? " (persona)" : ""}`
+      }
       {...(state.done || state.pending ? { "aria-disabled": true } : {})}
       {...(state.pending ? { "aria-busy": true } : {})}
       className={`group flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface text-left outline-none focus-visible:ring-2 focus-visible:ring-focus ${state.done || state.pending ? "cursor-default" : "hover:border-focus"}`}
     >
-      <span className={`aspect-[2/3] w-full overflow-hidden ${state.done ? "opacity-50" : ""}`}>
+      <span className={`relative aspect-[2/3] w-full overflow-hidden ${state.done ? "opacity-50" : ""}`}>
         <Avatar id={c.entityId} name={c.name} mediaId={c.avatarMediaId} crop={c.avatarCrop} size="fill" />
+        {marked && <PersonaBadge />}
       </span>
       <span className="flex w-full min-w-0 flex-1 flex-col gap-0.5 p-2">
         {/* A pick's tooltip names it already. */}

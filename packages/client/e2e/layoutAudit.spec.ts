@@ -471,13 +471,20 @@ test.describe("synthetic library and every app surface", () => {
           return
         }
         await go("home-all", "/")
-        for (const name of ["With chats", "Never used", "Favourites", "Groups", "All"]) {
+        for (const name of ["With chats", "Never used", "Favourites", "Personas", "Groups", "All"]) {
           await page
             .getByRole("main")
             .getByRole("group", { name: "Show", exact: true })
             .getByRole("button", { name, exact: true })
             .click()
           await audit(`home-${name}`)
+        }
+        // Personas mixed in, each marked "You" (personalists).
+        if (selected.test("home-include-personas")) {
+          const include = page.getByRole("main").getByRole("checkbox", { name: "Include personas" })
+          await include.check()
+          await audit("home-include-personas")
+          await include.uncheck()
         }
         await showAppNavigation(page)
         for (const name of ["Characters", "Chats"]) {

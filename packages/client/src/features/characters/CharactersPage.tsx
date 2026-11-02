@@ -6,10 +6,10 @@ import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
-import { browseCards, CardFilterControl, CardSortControl } from "./cardBrowse.tsx"
+import { browseCards, CardFilterControl, CardSortControl, IncludePersonas, mixesPersonas } from "./cardBrowse.tsx"
 import { useHomeBrowse } from "./useHomeBrowse.ts"
 import { GroupGrid } from "./GroupGrid.tsx"
-import { CharacterGrid, shellAtom, useGroupCount, type ShellLibrary } from "./shellData.tsx"
+import { browsable, CharacterGrid, shellAtom, useGroupCount, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
 
 const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
@@ -34,7 +34,7 @@ function Home({ data }: { data: ShellLibrary }) {
       </div>
     )
   const needle = search.trim().toLowerCase()
-  const cards = browseCards(data.cards, browse, search)
+  const cards = browseCards(browsable(data), browse, search)
   return (
     <div className="flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
@@ -48,8 +48,9 @@ function Home({ data }: { data: ShellLibrary }) {
         <CardFilterControl
           value={browse.filter}
           onChange={(filter) => setBrowse({ filter })}
-          cards={data.cards}
+          cards={browsable(data)}
           groups={groups}
+          withPersonas={browse.withPersonas}
         />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -61,16 +62,31 @@ function Home({ data }: { data: ShellLibrary }) {
           onChange={(e) => setBrowse({ search: e.currentTarget.value })}
           className="sm:max-w-xs"
         />
-        <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <IncludePersonas browse={browse} onChange={setBrowse} />
+          <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />
+        </div>
       </div>
       {browse.filter === "groups" ? (
         <GroupGrid needle={needle} sort={browse.sort} reversed={browse.reversed} className={COLUMNS} />
       ) : (
-        <CharacterGrid cards={cards} sort={browse.sort} className={COLUMNS}>
+        <CharacterGrid cards={cards} sort={browse.sort} markPersonas={mixesPersonas(browse)} className={COLUMNS}>
           {!cards.length && (
-            <EmptyState title={browse.filter === "favourites" && !needle ? "No favourites yet" : "No characters here"}>
+            <EmptyState
+              title={
+                needle
+                  ? "No characters here"
+                  : browse.filter === "favourites"
+                    ? "No favourites yet"
+                    : browse.filter === "personas"
+                      ? "No personas yet"
+                      : "No characters here"
+              }
+            >
               {browse.filter === "favourites" && !needle ? (
                 <p>Star a character to keep it here.</p>
+              ) : browse.filter === "personas" && !needle ? (
+                <p>Cards you play as are kept here. In the library, a card’s menu adds it.</p>
               ) : (
                 <Link to="/import/st" className="text-accent">
                   Import from SillyTavern

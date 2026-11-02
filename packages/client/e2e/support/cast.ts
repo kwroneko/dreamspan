@@ -14,12 +14,21 @@ export const openCastAdd = async (page: Page) => {
 }
 
 /** Adds the character (or persona-folder card) whose name starts with `name`, found by searching for it. */
-export const addToCast = async (page: Page, name: string) => {
+/** Adds `name` from Add characters; a `persona` (in the persona folder) is under its Personas filter. */
+export const addToCast = async (page: Page, name: string, { persona = false }: { persona?: boolean } = {}) => {
   const section = await openCastAdd(page)
+  if (persona) {
+    await section.getByRole("combobox", { name: "Show" }).click()
+    await page.getByRole("option", { name: /^Personas/ }).click()
+  }
   await section.getByRole("searchbox", { name: "Find a character to add" }).fill(name)
   await section.getByRole("button", { name: new RegExp(`^Add ${escape(name)}.* to this chat$`) }).click()
   await expect(section.getByRole("button", { name: new RegExp(`^${escape(name)}.*: in this chat$`) })).toBeVisible()
   await section.getByRole("searchbox", { name: "Find a character to add" }).fill("")
+  if (persona) {
+    await section.getByRole("combobox", { name: "Show" }).click()
+    await page.getByRole("option", { name: /^All/ }).click()
+  }
 }
 
 /**
