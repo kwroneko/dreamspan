@@ -198,7 +198,7 @@ function Chats({ card }: { card: CardUsage }) {
   )
 }
 
-function Page({ card }: { card: CardUsage }) {
+function Page({ card, persona = false }: { card: CardUsage; persona?: boolean }) {
   useTitle(card.label)
   const openCharacter = useOpenCharacter()
   const docAtom = useMemo(
@@ -246,18 +246,22 @@ function Page({ card }: { card: CardUsage }) {
                 Continue
               </Button>
             )}
-            <Tooltip label="Opens a new chat at their greeting. Nothing is saved until you send.">
-              <Link
-                to="/cards/$entityId/chat"
-                params={{ entityId: card.entityId }}
-                className={buttonClass(used ? "secondary" : "primary")}
-              >
-                New chat
+            {!persona && (
+              <Tooltip label="Opens a new chat at their greeting. Nothing is saved until you send.">
+                <Link
+                  to="/cards/$entityId/chat"
+                  params={{ entityId: card.entityId }}
+                  className={buttonClass(used ? "secondary" : "primary")}
+                >
+                  New chat
+                </Link>
+              </Tooltip>
+            )}
+            <Tooltip label="Edit this card's definition.">
+              <Link to="/library/$refId" params={{ refId: card.refId }} className={buttonClass("ghost")}>
+                Edit card
               </Link>
             </Tooltip>
-            <Link to="/library/$refId" params={{ refId: card.refId }} className={buttonClass("ghost")}>
-              Edit card
-            </Link>
           </div>
         </div>
       </header>
@@ -282,13 +286,13 @@ export function CardPage() {
   const { entityId } = useParams({ strict: false })
   return (
     <AsyncView atom={shellAtom} loading="Loading the card…">
-      {({ cards }) => {
-        const card = cards.map((c) => c.card).find((it) => it.entityId === entityId)
+      {({ cards, personas }) => {
+        const card = [...cards, ...personas].map((c) => c.card).find((it) => it.entityId === entityId)
         return card ? (
-          <Page key={card.entityId} card={card} />
+          <Page key={card.entityId} card={card} persona={personas.some((p) => p.card.entityId === card.entityId)} />
         ) : (
-          <EmptyState title="This card isn't one of your characters">
-            <p>It may be a persona, or in the bin. The library lists every card.</p>
+          <EmptyState title="This card isn't available">
+            <p>The library lists your cards, including personas.</p>
             <Link to="/library" className={buttonClass()}>
               Open the library
             </Link>

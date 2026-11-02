@@ -49,7 +49,9 @@ function FamilyTree({ family, entityId }: { family: CardFamily; entityId: Entity
   const usage = useAtomValue(shellAtom)
   // The shell counts visible fork views as chats and dates each card by its Recent, as its
   // tile does. Family metadata alone counts containers, so it disagrees as soon as a chat branches.
-  const cards = AsyncResult.isSuccess(usage) ? new Map(usage.value.cards.map((c) => [c.card.entityId, c])) : null
+  const cards = AsyncResult.isSuccess(usage)
+    ? new Map([...usage.value.cards, ...usage.value.personas].map((c) => [c.card.entityId, c]))
+    : null
   const walk = (parent: EntityId | null, depth = 0): Array<{ member: FamilyMember; depth: number }> =>
     family.members
       .filter((m) => m.parentEntityId === parent)

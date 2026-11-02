@@ -469,7 +469,7 @@ function Browser({ data }: { data: ShellLibrary }) {
   const setSearch = (search: string) => setBrowse({ search })
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
-  const card = data.cards.find((c) => c.card.entityId === scope.entity)
+  const card = [...data.cards, ...data.personas].find((c) => c.card.entityId === scope.entity)
   const cardLabel = card
     ? `${card.card.label}${card.card.subtitle ? ` · ${card.card.subtitle}` : ""}`
     : "Character not found"

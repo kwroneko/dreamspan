@@ -256,7 +256,7 @@ describe("shell fork summaries", () => {
       yield* walks("nothing written", [])
       yield* t.append(harbor.id, ownA.slotId, "atA goes on.", mira.entityId, atA)
       yield* walks("append in one fork", ["atA"])
-      // A swipe on the shared prefix, chosen in main: main's own selection.
+      // A retained authored swipe contributes activity on every fork displaying its slot.
       const swipe = yield* writer.AddVersion({
         userId,
         slotId: a.slotId,
@@ -265,7 +265,7 @@ describe("shell fork summaries", () => {
         select: true,
         commitDraft: null
       })
-      yield* walks("swipe on a shared slot", ["main"])
+      yield* walks("swipe on a shared slot", ["main", "atA", "atB"])
       yield* writer.SelectVersion({
         userId,
         slotId: a.slotId,
@@ -285,7 +285,8 @@ describe("shell fork summaries", () => {
         content: "b, amended.",
         expectedRowVersion: written.entry.version.rowVersion
       })
-      yield* walks("edit on a shared slot", ["atB"])
+      // The edit's human-authored copy is retained activity wherever this slot is displayed.
+      yield* walks("edit on a shared slot", ["atB", "main"])
       yield* writer.AddStateEvent({
         userId,
         chatId: harbor.id,

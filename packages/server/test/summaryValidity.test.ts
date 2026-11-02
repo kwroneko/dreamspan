@@ -97,12 +97,12 @@ describe("per-fork summary validity", () => {
         yield* sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin, created_at, updated_at)
           VALUES ('v-a2', 'a', 1, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`
         assert.deepStrictEqual(yield* reached(sql`DELETE FROM versions WHERE id = 'v-a2'`), all)
-        // A new swipe is shown nowhere until something selects it; a new slot is on no path
-        // until a fork's tip moves to it, which reaches that fork.
+        // A retained swipe contributes participation/activity on every path through its slot.
+        // A new slot is on no path until a fork's tip moves to it, which reaches that fork.
         assert.deepStrictEqual(
           yield* reached(sql`INSERT INTO versions (id, slot_id, ordinal, status, writer, content, macro_mode, origin,
             created_at, updated_at) VALUES ('v-a3', 'a', 2, 'complete', 'human', 'swipe', 'verbatim', 'user_written', 1, 1)`),
-          []
+          all
         )
         assert.deepStrictEqual(yield* reached(slot("d", "c", 4)), [])
         assert.deepStrictEqual(

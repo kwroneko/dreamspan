@@ -61,6 +61,10 @@ const statements: ReadonlyArray<string> = [
     purged_at ON main.slots BEGIN ${touch(SLOT, "NEW.chat_id", "NEW.id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_slot_delete AFTER DELETE ON main.slots
     BEGIN ${touch(CHAT, "OLD.chat_id")} END`,
+  // An unselected human-written alternative contributes persona activity too.
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_insert AFTER INSERT ON main.versions
+    WHEN EXISTS (SELECT 1 FROM slots WHERE id = NEW.slot_id)
+    BEGIN ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version AFTER UPDATE OF slot_id, speaker_entity_id, content, origin,
     source_version_id, created_at, deleted_at, purged_at, fork_id ON main.versions
     BEGIN ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")} ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,

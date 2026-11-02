@@ -63,7 +63,9 @@ export class CardUsage extends Schema.Class<CardUsage>("CardUsage")({
   chats: Schema.Int,
   /**
    * In the shell read (`ShellCard.card`, what the home grid and the library show): the last
-   * message the card itself spoke, so a card the user played has none. `ListCardUsage` gives the
+   * message the card itself spoke, including human-written persona turns and their retained
+   * alternatives. A selected imported persona without its own turn uses the chat's activity.
+   * `ListCardUsage` (the legacy character-only read) gives the
    * last message in any of its chats instead. (A card's Recent is
    * `ShellCard.recentAt`.)
    */
@@ -181,6 +183,8 @@ export class ShellLibrary extends Schema.Class<ShellLibrary>("ShellLibrary")({
 /** The shell's cards without their forks: what home, the grids and Start a chat read (GetShellCards). */
 export class ShellCards extends Schema.Class<ShellCards>("ShellCards")({
   cards: Schema.Array(ShellCard),
+  /** Persona usage for library and card details; kept apart from the character grids. */
+  personas: Schema.Array(ShellCard),
   pinsCollapsed: Schema.Boolean
 }) {}
 

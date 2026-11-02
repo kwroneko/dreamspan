@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { Generator } from "../src/chat/Generator.ts"
 import { client, posted, serverLayer, testConfig } from "./support/config.ts"
 
-it.live("card swaps keep user-played speaking turns out of shell activity", () =>
+it.live("card swaps preserve user-played speaking activity under its historical authors", () =>
   Effect.gen(function* () {
     const api = yield* client()
     const card = yield* api.CreateCard({ label: "User-played pilot", name: "Pilot" })
@@ -64,10 +64,27 @@ it.live("card swaps keep user-played speaking turns out of shell activity", () =
       characterVersion: "2"
     })
     const rows = (yield* api.GetShellLibrary()).forks
-    assert.isEmpty(rows.find((f) => f.forkId === original.id)!.activity)
-    assert.isEmpty(rows.find((f) => f.forkId === peer.id)!.activity)
-    for (const entityId of [card.entityId, copy.entityId, secondCopy.entityId])
-      assert.isNull((yield* api.GetShellLibrary()).cards.find((c) => c.card.entityId === entityId)!.card.lastMessageAt)
+    assert.deepEqual(
+      rows.find((f) => f.forkId === original.id)!.activity.map((a) => [a.entityId, a.slot]),
+      [
+        [card.entityId, turn.entry.slotId],
+        [copy.entityId, secondTurn.entry.slotId]
+      ]
+    )
+    assert.deepEqual(
+      rows.find((f) => f.forkId === peer.id)!.activity.map((a) => [a.entityId, a.slot]),
+      [[card.entityId, turn.entry.slotId]]
+    )
+    const cards = (yield* api.GetShellLibrary()).cards
+    assert.strictEqual(
+      cards.find((c) => c.card.entityId === card.entityId)!.card.lastMessageAt,
+      turn.entry.version.createdAt
+    )
+    assert.strictEqual(
+      cards.find((c) => c.card.entityId === copy.entityId)!.card.lastMessageAt,
+      secondTurn.entry.version.createdAt
+    )
+    assert.isNull(cards.find((c) => c.card.entityId === secondCopy.entityId)!.card.lastMessageAt)
     const modelTurn = yield* posted(
       api.SendMessage({
         chatId: start.chat.id,
@@ -88,7 +105,11 @@ it.live("card swaps keep user-played speaking turns out of shell activity", () =
       (yield* api.GetShellLibrary()).forks
         .find((f) => f.forkId === original.id)!
         .activity.map((a) => [a.entityId, a.slot]),
-      [[secondCopy.entityId, modelTurn.entry.slotId]]
+      [
+        [card.entityId, turn.entry.slotId],
+        [copy.entityId, secondTurn.entry.slotId],
+        [secondCopy.entityId, modelTurn.entry.slotId]
+      ]
     )
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig({ dbWorkers: "bundle" }), Generator.none)))
 )

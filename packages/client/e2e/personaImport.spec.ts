@@ -8,6 +8,7 @@ import { png } from "../../server/test/formats/support.ts"
 import { asUser, loginCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openPanel, closePanel } from "./support/panel.ts"
+import { expectLayout } from "./support/layoutAudit.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -50,6 +51,7 @@ for (const width of [1440, 390]) {
         expect(response.status).toBe(200)
         expect((await response.json()).outcome).not.toBe("failed")
       }
+      await admin((api) => api.FinishStImport({ importId: run.importId, notSent: [] }))
       const { chat, cast } = await admin((api) =>
         Effect.gen(function* () {
           const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === tag)!
@@ -86,6 +88,21 @@ for (const width of [1440, 390]) {
       await closePanel(page)
       await expect(ada.locator("header")).toContainText("Ada")
       await expect(bo.locator("header")).toContainText("Bo")
+      // The same imported persona is used in the library, its own page, and its editor.
+      await page.goto(`${server().url}/library?show=personas&q=Ada`)
+      const row = page.getByRole("listitem").filter({ has: page.getByRole("link", { name: "Ada", exact: true }) })
+      await expect(row).toContainText(/\d+ chats? ·/)
+      await expect(row).not.toContainText("Never used")
+      await row.getByRole("link", { name: "Ada", exact: true }).click()
+      await expect(page.getByRole("heading", { level: 1, name: "Ada", exact: true })).toBeVisible()
+      await expect(page.getByRole("list", { name: "Chats", exact: true })).toContainText(tag)
+      if (process.env.LAYOUT_AUDIT) await expectLayout(page, test.info(), "persona-chats")
+      if (process.env.SCREENSHOT_DIR)
+        await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `persona-usage-${width}-${scheme}.png`) })
+      await page.getByRole("link", { name: "Edit card", exact: true }).click()
+      await expect(page.getByRole("link", { name: /^Used by \d+ chats?\./ })).toBeVisible()
+      await page.getByRole("link", { name: /^Used by \d+ chats?\./ }).click()
+      await expect(page.getByRole("list", { name: "Chats", exact: true })).toContainText(tag)
     })
   }
 }

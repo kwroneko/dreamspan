@@ -375,7 +375,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   GetShellCards: {
     probe: (actor, owner) =>
       Effect.map(actor.api.GetShellCards(), (data) =>
-        assert.isFalse(data.cards.some((c) => c.card.refId === owner.refId))
+        assert.isFalse([...data.cards, ...data.personas].some((c) => c.card.refId === owner.refId))
       )
   },
   GetShellForks: {

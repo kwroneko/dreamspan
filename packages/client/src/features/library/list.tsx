@@ -173,8 +173,7 @@ const matches = (needle: string, ...texts: ReadonlyArray<string | undefined>) =>
 
 /** What an item says under its name: its version, then how it's used. */
 function Meta({ item }: { item: Item }) {
-  // A persona's badge says what it is; the shell doesn't count the chats it plays in.
-  const usage = !persona(item) && item.usage ? usageLine(item.usage) : (item.detail ?? null)
+  const usage = item.usage ? usageLine(item.usage) : (item.detail ?? null)
   return (
     <>
       {item.entry.subtitle && <span>{item.entry.subtitle}</span>}
@@ -211,7 +210,7 @@ function OpenLink({
 }) {
   const { entry } = item
   const props = picture ? { tabIndex: -1, "aria-hidden": true, className } : { title: itemName(entry), className }
-  return entry.kind === "card" && !persona(item) ? (
+  return entry.kind === "card" ? (
     <Link to="/cards/$entityId" params={{ entityId: entry.entityId }} {...props}>
       {children}
     </Link>
@@ -462,7 +461,7 @@ function Section({
                   {
                     value: "used",
                     label: "Last used",
-                    description: "By the last message the character itself wrote, in any chat; never used come last"
+                    description: "By the last message the card wrote, in any chat; unused cards come last"
                   },
                   { value: "name", label: "Name", description: "By name" },
                   { value: "chats", label: "Most chats", description: "By how many chats it's in" },
@@ -522,7 +521,9 @@ export function LibraryPage() {
   useTitle("Library")
   const [prefs, setPrefs] = usePrefs()
   const shell = useAtomValue(shellAtom)
-  const usage = new Map(AsyncResult.isSuccess(shell) ? shell.value.cards.map((c) => [c.card.entityId, c]) : [])
+  const usage = new Map(
+    AsyncResult.isSuccess(shell) ? [...shell.value.cards, ...shell.value.personas].map((c) => [c.card.entityId, c]) : []
+  )
   return (
     <div className="flex flex-col gap-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -553,7 +554,7 @@ export function LibraryPage() {
                       entry,
                       card: cards.get(entry.entityId),
                       usage: usage.get(entry.entityId)?.card,
-                      shell: usage.get(entry.entityId)
+                      shell: cards.get(entry.entityId)?.persona ? undefined : usage.get(entry.entityId)
                     }))}
                     {...(kind === "preset" ? { archived: lists.archivedPresets } : {})}
                     prefs={prefs}

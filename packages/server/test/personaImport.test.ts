@@ -10,6 +10,40 @@ import { importStFolder } from "./support/stUpload.ts"
 layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seconds" })(
   "imported persona selection",
   (it) => {
+    it.effect("uses the default persona for a fresh user message without an avatar or matching name", () =>
+      Effect.gen(function* () {
+        const files = new Map<string, Uint8Array>([
+          [
+            "settings.json",
+            encode({
+              power_user: {
+                personas: { "pilot.png": "Default pilot" },
+                default_persona: "pilot.png"
+              }
+            })
+          ],
+          ["User Avatars/pilot.png", png()],
+          ["characters/Navigator.png", card("Navigator", "Hello.")],
+          [
+            "chats/Navigator/default-user.jsonl",
+            jsonl([
+              header({}),
+              message({ name: "Unmatched speaker", user: true, mes: "A synthetic user turn.", minute: 4 }),
+              message({ name: "Navigator", mes: "A later answer.", minute: 5 })
+            ])
+          ]
+        ])
+        const { api } = yield* importStFolder(files)
+        const chat = (yield* api.ListChats({ limit: 100, before: null })).find((c) => c.title === "default-user")!
+        const read = () => api.ReadPath({ chatId: chat.id, leafSlotId: null, range: { _tag: "Bottom" }, limit: 100 })
+        const path = yield* read()
+        const version = path.entries[0]!.version
+        const persona = (yield* api.GetShellCards()).personas.find((c) => c.card.name === "Default pilot")!
+        assert.strictEqual(version.speakerEntityId, persona.card.entityId)
+        assert.strictEqual(persona.card.lastMessageAt, Date.UTC(2025, 0, 1, 10, 4))
+      })
+    )
+
     it.effect("uses the locked or default persona when no user-side message exists", () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -49,6 +83,13 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           assert.deepStrictEqual(cast.playedByMe, [persona.entityId])
           assert.include(cast.participants, persona.entityId)
           assert.strictEqual(cast.macroNames.user, name)
+          const used = (yield* api.GetShellCards()).personas.find((c) => c.card.entityId === persona.entityId)!
+          assert.isAbove(used.card.chats, 0)
+          assert.strictEqual(used.card.lastMessageAt, chat.lastMessageAt)
+          assert.include(
+            (yield* api.ListChats({ entityId: persona.entityId, limit: 100, before: null })).map((c) => c.id),
+            chat.id
+          )
         }
       })
     )
@@ -102,6 +143,22 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
           )
         }
         assert.lengthOf(records, 2)
+        const shell = yield* api.GetShellCards()
+        for (const [name, minute] of [
+          ["Ada", 1],
+          ["Bo", 2]
+        ] as const) {
+          const used = shell.personas.find((c) => c.card.name === name)!
+          assert.isAtLeast(used.card.chats, 2)
+          assert.strictEqual(used.card.lastMessageAt, Date.UTC(2025, 0, 1, 10, minute))
+          const chats = yield* api.ListChats({ entityId: used.card.entityId, limit: 100, before: null })
+          for (const record of records)
+            assert.include(
+              chats.map((c) => c.id),
+              record.chatId
+            )
+          assert.isAtLeast((yield* api.OpenEditor({ refId: used.card.refId })).usedByChats, 2)
+        }
       })
     )
   }

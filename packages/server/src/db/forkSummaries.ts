@@ -18,7 +18,7 @@ import type { ForkRow } from "./rows.ts"
 import { shellEventsQuery, shellPlainForksQuery, shellSlotsQuery, shellTreeQuery } from "./shellQueries.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { settleSummaries } from "./summaryValidity.ts"
-import { slotParticipantsSql } from "./participation.ts"
+import { slotHumanAuthorsSql, slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
 export const FORK_SUMMARY_FORMAT = 3
@@ -63,6 +63,7 @@ type Slot = {
   depth: number
   preview: string
   participants: string
+  human_authors: string
 }
 type Event = FoldableEvent & { fork_id: string; chat_id: string; slot_id: string | null }
 
@@ -176,6 +177,7 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
                 CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
                 v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
                 ${sql.literal(slotParticipantsSql("s"))} AS participants,
+                ${sql.literal(slotHumanAuthorsSql("s"))} AS human_authors,
                 CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
               FROM slots s JOIN versions v ON v.id = ${shownIn(sql, record.id, "s")}
               WHERE ${sql.in("s.id", ids)}`
@@ -210,10 +212,6 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
       let endpoint: Slot | undefined
       let messages = 0
-      // What the fork's own events make of the state at a message, kept while the state is
-      // the same one: it changes only at messages with events, so a long path folds them once.
-      let foldedFrom: typeof state | undefined
-      let played = new Set<string>()
       // What it shares: its parent's path while that's live, else the history up to its base.
       const parent = record.parent_fork_id === null ? undefined : parentPaths.get(record.parent_fork_id)
       const baseDepth = base?.depth
@@ -235,20 +233,13 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
         messages++
         endpoint = s
         state = foldState(positional.get(s.id) ?? [], state)
-        if (state !== foldedFrom) {
-          foldedFrom = state
-          let here = state
-          // Existing turns retain their authors across card swaps. Keep the played
-          // identities at each step, including intermediate cards in a swap chain.
-          played = new Set(here.playedByMe)
-          for (const event of branch) {
-            here = foldState([event], here)
-            for (const id of here.playedByMe) played.add(id)
-          }
+        const record = (entity: string, at: number) => {
+          if (at >= (activity.get(entity)?.at ?? -Infinity))
+            activity.set(entity, { entityId: entity as EntityId, at, slot: s.id })
         }
-        const playedByMe = s.speaker !== null && played.has(s.speaker)
-        if (s.speaker !== null && !playedByMe)
-          activity.set(s.speaker, { entityId: s.speaker as EntityId, at: s.at, slot: s.id })
+        if (s.speaker !== null) record(s.speaker, s.at)
+        for (const author of JSON.parse(s.human_authors) as Array<{ entity: string; at: number }>)
+          record(author.entity, author.at)
       }
       state = foldState(branch, state)
       const present = state.participants.filter((id) => !state.playedByMe.includes(id) && !state.absent.includes(id))

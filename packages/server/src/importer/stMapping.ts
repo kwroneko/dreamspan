@@ -235,8 +235,7 @@ export const speakerMap = (
       entity =
         (speaker.avatar !== null ? folder.personas.get(speaker.avatar) : undefined) ??
         (byName.length === 1 ? folder.personas.get(byName[0]!)! : undefined) ??
-        (header?.persona ? folder.personas.get(header.persona) : undefined) ??
-        null
+        defaultPersona(folder, header)
       if (entity !== null) spoke.add(entity)
     } else {
       // A message names its card's avatar in group chats (and from ST's /sendas).
