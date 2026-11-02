@@ -9,6 +9,7 @@ import {
   chatComposerNotes,
   chatCardActions,
   castSections,
+  pendingCastSections,
   chatBranchControls,
   messagePreviews,
   summaryPreviews,
@@ -54,6 +55,12 @@ const ChooseChatCard = deferred<Parameters<typeof import("./CardForkDialogs.tsx"
 )
 const CastAddSection = deferred<Parameters<typeof import("./CastAdd.tsx").CastAddSection>[0]>(() =>
   import("./CastAdd.tsx").then((m) => ({ default: m.CastAddSection }))
+)
+const PendingCastAddSection = deferred<Parameters<typeof import("./CastAdd.tsx").PendingCastAddSection>[0]>(() =>
+  import("./CastAdd.tsx").then((m) => ({ default: m.PendingCastAddSection }))
+)
+const PendingReplyFrom = deferred<Parameters<typeof import("./ReplyOrder.tsx").PendingReplyFrom>[0]>(() =>
+  import("./ReplyOrder.tsx").then((m) => ({ default: m.PendingReplyFrom }))
 )
 const ReplyOrderSection = deferred<Parameters<typeof import("./ReplyOrder.tsx").ReplyOrderSection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.ReplyOrderSection }))
@@ -123,6 +130,9 @@ export const registerPresentation = () => [
   castSections.register({ id: "cast.reply-order", order: 5, component: ReplyOrderSection }),
   castSections.register({ id: "cast.one-reply", order: 6, component: OneReplySection }),
   castSections.register({ id: "cast.add-characters", order: 10, component: CastAddSection }),
+  // The same sections in a chat not made yet: who answers the first message, Add characters.
+  pendingCastSections.register({ id: "cast.reply-order", order: 5, component: PendingReplyFrom }),
+  pendingCastSections.register({ id: "cast.add-characters", order: 10, component: PendingCastAddSection }),
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),

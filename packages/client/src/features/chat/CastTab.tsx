@@ -22,9 +22,13 @@ import { IconButton, iconButtonClass } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { castView } from "./cast.ts"
 import { useShowPanel } from "./panels.tsx"
-import { PersonaSwitch } from "./PersonaSwitch.tsx"
+import { PendingPersonaSwitch, PersonaSwitch } from "./PersonaSwitch.tsx"
 import type { ChatSession } from "./session.ts"
-import { castSections, ChatCardActions } from "./presentation.tsx"
+import type { ChatCardInfo } from "./CardForkDialogs.tsx"
+import type { PendingChat } from "./pendingChat.ts"
+import { usePendingCardInfo } from "./pendingCardInfo.ts"
+import { castSections, ChatCardActions, pendingCastSections } from "./presentation.tsx"
+import { type ReactNode } from "react"
 import { writeAs } from "./speaker.ts"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
@@ -168,7 +172,7 @@ function Member({
 }
 
 /** Who you play: one row, apart from the characters, with no count of the chats it's in. */
-function You({ session, card }: { session: ChatSession; card: CastCard | undefined }) {
+function You({ card, children }: { card: CastCard | undefined; children: ReactNode }) {
   const showPanel = useShowPanel()
   return (
     <div role="group" aria-label="Your persona" className="flex max-w-controls items-center gap-3">
@@ -198,7 +202,7 @@ function You({ session, card }: { session: ChatSession; card: CastCard | undefin
           <span className="font-medium">No persona</span>
         )}
       </div>
-      <PersonaSwitch session={session} trigger="Switch" />
+      {children}
     </div>
   )
 }
@@ -266,7 +270,9 @@ export function CastTab({ session }: { session: ChatSession }) {
   if (cast === null) return <p className="text-sm text-muted">Loading who's here…</p>
   return (
     <div className="flex flex-col gap-4">
-      <You session={session} card={persona === null ? undefined : view.cards.get(persona)} />
+      <You card={persona === null ? undefined : view.cards.get(persona)}>
+        <PersonaSwitch session={session} trigger="Switch" />
+      </You>
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
           <h2 className="text-sm font-semibold">
@@ -312,6 +318,126 @@ export function CastTab({ session }: { session: ChatSession }) {
           {error.message}
         </p>
       )}
+    </div>
+  )
+}
+
+/** A pending chat's character row: the same row, with what applies before the first send. */
+function PendingMember({
+  card,
+  info,
+  version,
+  removable,
+  onRemove
+}: {
+  card: CastCard
+  info: ChatCardInfo | undefined
+  version: string
+  /** Whether they can be left out: the chat keeps one character at least. */
+  removable: boolean
+  onRemove: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const showPanel = useShowPanel()
+  const name = card.name
+  return (
+    <li aria-label={name} className="flex items-center gap-3 py-2">
+      <Avatar id={card.entityId} name={name} mediaId={card.avatarMediaId} crop={card.avatarCrop} size="lg" preview />
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+        <button
+          type="button"
+          title={name}
+          aria-label={`${name}: open their card`}
+          onClick={() => showPanel(`card:${card.entityId}`)}
+          className="line-clamp-2 max-w-full rounded-sm text-left font-medium [overflow-wrap:anywhere] outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
+        >
+          {name}
+        </button>
+        {version && <span className="max-w-full truncate text-xs text-muted">{version}</span>}
+      </div>
+      <Popover
+        open={open}
+        onOpenChange={setOpen}
+        trigger={<Icon name="more" />}
+        triggerLabel={`More for ${name}`}
+        hint={`More for ${name}`}
+        triggerClassName={iconButtonClass()}
+        title={name}
+        side="bottom"
+        align="end"
+        keepMounted
+      >
+        <div
+          className="flex flex-col items-stretch gap-0.5 [&_button]:h-auto! [&_button]:min-h-8 [&_button]:w-full [&_button]:justify-start [&_button]:px-2! [&_button]:py-1.5 [&_button]:text-left [&_button]:whitespace-normal"
+          onClickCapture={() => setOpen(false)}
+        >
+          <Button
+            variant="ghost"
+            hint="Opens their card's fields in this panel."
+            onClick={() => showPanel(`card:${card.entityId}`)}
+          >
+            Edit the card here
+          </Button>
+          <ChatCardActions session={null} card={card} info={info} />
+          {removable && (
+            <Button
+              variant="ghost"
+              className="text-danger!"
+              hint="Leaves them out of the new chat, with their greeting."
+              onClick={onRemove}
+            >
+              Remove from chat
+            </Button>
+          )}
+        </div>
+      </Popover>
+    </li>
+  )
+}
+
+/**
+ * The Cast tab of a chat not made yet: the same tab, changing the pending chat (pendingChat.ts)
+ * rather than writing anything. Who you play, the characters (each can be left out but the
+ * last), then its sections (`pendingCastSections`: who answers first, Add characters).
+ */
+export function PendingCastTab({ pending }: { pending: PendingChat }) {
+  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
+  const infoOf = usePendingCardInfo()
+  const playing = pending.playing(state)
+  const characters = state.greeters.map((item) => item.card).filter((card) => card.entityId !== state.persona)
+  const sameName = (card: CastCard) =>
+    characters.some((other) => other.entityId !== card.entityId && other.name === card.name)
+  return (
+    <div className="flex flex-col gap-4">
+      <You card={playing ?? undefined}>
+        <PendingPersonaSwitch pending={pending} trigger="Switch" />
+      </You>
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+          <h2 className="text-sm font-semibold">{plural(characters.length, "character", "characters")}</h2>
+        </div>
+        {characters.length === 0 ? (
+          <p className="py-2 text-sm text-muted">No one is in this chat. Add a character below to start.</p>
+        ) : (
+          <ul
+            aria-label="Characters in this chat"
+            className="grid gap-x-6 @3xl:grid-cols-[repeat(auto-fill,minmax(22rem,1fr))]"
+          >
+            {characters.map((card) => (
+              <PendingMember
+                key={card.entityId}
+                card={card}
+                info={infoOf(card.entityId)}
+                version={sameName(card) ? (card.subtitle ?? "") : ""}
+                removable={characters.length > 1}
+                onRemove={() => pending.remove(card.entityId)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+      <SlotOutlet slot={pendingCastSections} props={{ pending }} />
+      <p className="text-xs text-muted">The chat starts with this cast when you send the first message.</p>
     </div>
   )
 }

@@ -120,7 +120,9 @@ test("a first message typed before the chat exists survives leaving it, and goes
   const text = "Unsent: the first message, which must survive navigation"
   await page.goto(`${server().url}/cards/${fen}/chat`)
   await box.fill(text)
-  await page.getByRole("navigation", { name: "Screens" }).getByRole("link", { name: "Characters" }).click()
+  // A pending chat has the chat's header on a phone, as any chat: its ← opens the menu.
+  await page.getByRole("button", { name: "Chats and menu" }).click()
+  await page.locator(".fixed.inset-0").getByRole("link", { name: "Characters", exact: true }).last().click()
   await page.getByRole("main").getByRole("button", { name: "Open Fen", exact: true }).click()
   await page.getByRole("button", { name: "Close", exact: true }).click()
   await expect(box).toHaveValue(text)

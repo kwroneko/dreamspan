@@ -36,7 +36,7 @@ function Loading({ label }: { label: string }) {
 const linkClass =
   "rounded-sm text-accent underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-focus"
 
-export function PresetTabPicker({ session }: { session: ChatSession }) {
+export function PresetTabPicker({ session }: { session: ChatSession | null }) {
   const selection = usePresetSelection(session)
   const created = useNewPreset(selection)
   const label = selection.label
@@ -67,7 +67,7 @@ export function PresetTabPicker({ session }: { session: ChatSession }) {
   )
 }
 
-export function ModelTabPicker({ session }: { session: ChatSession }) {
+export function ModelTabPicker({ session }: { session: ChatSession | null }) {
   const selection = useModelSelection(session)
   const { current, value, loaded, models } = selection
   const text = current ? current.label : value !== null ? "Model not found" : "Choose a model"

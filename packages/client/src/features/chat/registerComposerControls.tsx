@@ -102,7 +102,7 @@ export const registerComposerControls = () => [
     component: (context) =>
       context.compact ? (
         <SquareIconButton
-          label={`Generate ${context.speakerName}`}
+          label={`Write for ${context.speakerName}`}
           hint={`The model writes ${context.speakerName}'s turn`}
           variant={context.guidance ? "primary" : "ghost"}
           pending={context.guidance && context.busy}
@@ -112,17 +112,20 @@ export const registerComposerControls = () => [
           {!(context.guidance && context.busy) && <GenerateIcon />}
         </SquareIconButton>
       ) : (
-        <Button
-          variant={context.guidance ? "primary" : "secondary"}
-          aria-label={`Generate ${context.speakerName}`}
-          pending={context.busy}
-          disabled={context.busy || !context.prefsReady}
-          onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
-        >
-          {/* Its word only: the speaker's name is on the chip at the row's start, and in its name. */}
-          {context.guidance && <GenerateIcon />}
-          Generate
-        </Button>
+        // The saved composer's Write: its word only, the speaker's name on the chip and in its name.
+        <Tooltip label={`The model writes ${context.speakerName}'s turn`}>
+          <Button
+            variant={context.guidance ? "primary" : "ghost"}
+            aria-label={`Write for ${context.speakerName}`}
+            pending={context.guidance && context.busy}
+            disabled={context.busy || !context.prefsReady}
+            onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
+            className="px-2.5"
+          >
+            {!(context.guidance && context.busy) && <GenerateIcon />}
+            Write
+          </Button>
+        </Tooltip>
       )
   }),
   pendingComposerControls.register({
@@ -143,6 +146,19 @@ export const registerComposerControls = () => [
           <SendIcon />
         </SquareIconButton>
       )
+  }),
+  // The next-reply strip of a chat not made yet: the account's model and preset, as at the saved composer.
+  pendingComposerControls.register({
+    id: "pending.model",
+    order: 30,
+    placement: "strip",
+    component: ({ view, onSettings }) => <ModelChip session={null} view={view} onSettings={onSettings} />
+  }),
+  pendingComposerControls.register({
+    id: "pending.preset",
+    order: 40,
+    placement: "strip",
+    component: ({ view, onSettings }) => <PresetChip session={null} view={view} onSettings={onSettings} />
   }),
   composerControls.register({
     id: "composer.model",

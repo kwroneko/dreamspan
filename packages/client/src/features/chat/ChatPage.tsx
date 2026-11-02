@@ -13,7 +13,7 @@ import {
   messageStream
 } from "./presentation.tsx"
 import { useChatCommandKeys } from "./commands.tsx"
-import { useIsPanelTab, usePanelHere } from "./panels.tsx"
+import { useIsPanelTab } from "./panels.tsx"
 // A chat (DESIGN §10.1): a URL per chat and per message, the path in a virtualized list
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
@@ -37,7 +37,7 @@ import { TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
-import { ChatSidePanel, isPanelTab, type PanelTab, rememberedPanel, rememberPanel, useWide } from "./ChatPanels.tsx"
+import { ChatSidePanel, type PanelTab, rememberPanel, usePanel } from "./ChatPanels.tsx"
 import { ChatHeader } from "./ChatHeader.tsx"
 import { chatDisplayName } from "./chatTitle.ts"
 import { EnableLcmDialog } from "./EnableLcmDialog.tsx"
@@ -431,54 +431,6 @@ function OpenChat({
     return () => session.dispose()
   }, [session, initialSlot])
   return <ChatSurface session={session} fork={fork} slot={slot} panel={panel} />
-}
-
-/**
- * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
- * (a link to a message drops the URL's). A phone opens it only when asked: it covers the chat.
- */
-function usePanel(urlPanel: PanelTab | null, view: ChatView) {
-  const navigate = useNavigate()
-  const wide = useWide()
-  const userId = useSession().user.id
-  // Each user's own, read again when another signs in.
-  const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
-  const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
-  const candidate = urlPanel ?? (wide ? rememberedTab : null)
-  const panel = usePanelHere(candidate, view)
-  // The URL names the tab shown, so a refresh or a copied link keeps it.
-  useEffect(() => {
-    if (panel !== null && panel !== urlPanel)
-      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
-  }, [navigate, urlPanel, panel])
-  // What a call reads when it's made, so `show` stays the same function from tab to tab and as
-  // the chat updates: the message rows, the composer and the header take it, and a new one
-  // re-rendered every row on each tab switch (night/tabperf).
-  const latest = useRef({ view, urlPanel, panel })
-  useLayoutEffect(() => {
-    latest.current = { view, urlPanel, panel }
-  })
-  const show = useCallback(
-    (next: PanelTab | null) => {
-      if (next !== null && !isPanelTab(next, latest.current.view)) return
-      rememberPanel(userId, next)
-      setRemembered({ userId, tab: next })
-      void navigate({
-        to: ".",
-        search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
-          next === null ? prev : { ...prev, panel: next },
-        // On a phone, opening the sheet is a step in the history, so Back closes it.
-        replace: wide || next === null || latest.current.urlPanel !== null
-      })
-    },
-    [navigate, wide, userId]
-  )
-  /** Search params that keep the panel's tab: the one shown when the call is made. */
-  const withPanel = useCallback((search: Record<string, string>) => {
-    const shown = latest.current.panel
-    return shown === null ? search : { ...search, panel: shown }
-  }, [])
-  return { panel, show, withPanel, wide, userId }
 }
 
 function ChatSurface({

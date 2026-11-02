@@ -170,7 +170,10 @@ function PhoneBar() {
   })
   const { selection } = useShellNavigation()
   // On a phone, an open chat's header takes this bar's place; its ← opens this menu (ChatHeader.tsx).
-  const inChat = useLocation({ select: (location) => /^\/chats\/[^/]+$/.test(location.pathname) })
+  // A chat not made yet (a card's or a group's new chat) has the same header.
+  const inChat = useLocation({
+    select: (location) => /^\/(chats\/[^/]+|cards\/[^/]+\/chat|groups\/[^/]+\/new)$/.test(location.pathname)
+  })
   // On the desktop with the sidebar hidden, this bar brings it back (but not over a chat,
   // whose own header has that button).
   const [hidden] = useSidebarHidden()

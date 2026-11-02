@@ -1,8 +1,30 @@
 import { join } from "node:path"
-import { expect, test } from "@playwright/test"
+import { expect, test, type Locator, type Page } from "@playwright/test"
 import { Effect } from "effect"
+import { openCastAdd } from "./support/cast.ts"
+import { closePanel, openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+
+/** Does something in the pending chat's Cast tab (who's in it, who you play, who replies), then closes the panel. */
+const inCast = async (page: Page, act: (tab: Locator) => Promise<void>) => {
+  const tab = await openPanel(page, "Cast")
+  await act(tab)
+  await closePanel(page)
+}
+/** Starts adding a character from the Cast tab's Add characters, as in a saved chat. */
+const startAdding = async (page: Page, name: string) => {
+  await openPanel(page, "Cast")
+  const section = await openCastAdd(page)
+  await section.getByRole("searchbox", { name: "Find a character to add" }).fill(name)
+  await section.getByRole("button", { name: `Add ${name} to this chat`, exact: true }).click()
+}
+/** Leaves a character out of the pending chat, from their row's ⋯ in the Cast tab. */
+const remove = (page: Page, name: string) =>
+  inCast(page, async (tab) => {
+    await tab.getByRole("button", { name: `More for ${name}`, exact: true }).click()
+    await page.getByRole("button", { name: "Remove from chat", exact: true }).click()
+  })
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "10000", FAKE_GENERATOR_TOKENS: "10" })
 for (const width of [1440, 390]) {
@@ -51,14 +73,16 @@ for (const width of [1440, 390]) {
       const add = async (whileLoading?: () => Promise<void>) => {
         holdAdd = whileLoading !== undefined
         releaseAdd = undefined
-        await page.getByLabel("Add character", { exact: true }).click()
-        await page.getByRole("option", { name: second, exact: true }).click()
+        await startAdding(page, second)
         if (whileLoading) {
           await expect.poll(() => releaseAdd !== undefined).toBe(true)
+          // The greeting is beside the panel, or under the phone's sheet.
+          if (width === 390) await closePanel(page)
           await whileLoading()
           holdAdd = false
           releaseAdd!()
         }
+        if (width !== 390 || !whileLoading) await closePanel(page)
         await expect(page.getByRole("article", { name: `Greeting from ${second}`, exact: true })).toBeVisible()
       }
       await add(async () => {
@@ -67,7 +91,9 @@ for (const width of [1440, 390]) {
       })
       // Loading the second card must keep the latest greeting choice.
       await expect(greeting).toContainText("Mira opens the door.")
-      await expect(page.getByLabel("Reply from", { exact: true })).toBeVisible()
+      await inCast(page, async (tab) => {
+        await expect(tab.getByLabel("Reply from", { exact: true })).toBeVisible()
+      })
       await next.click()
       // Ordinary greetings remain selectable alongside the group greetings.
       await expect(greeting).toContainText("Mira waves.")
@@ -80,24 +106,30 @@ for (const width of [1440, 390]) {
       if (process.env.SCREENSHOT_DIR)
         await page.screenshot({ path: join(process.env.SCREENSHOT_DIR, `group-${width}-${theme}.png`) })
       // Playing an added card excludes it from the character count and automatic replies.
-      await page.getByLabel("Reply from", { exact: true }).click()
-      await page.getByRole("option", { name: second, exact: true }).click()
-      await page.getByLabel(/^Playing as /).click()
-      await page.getByRole("tab", { name: "All cards", exact: true }).click()
-      await page.getByRole("combobox", { name: "Find a card to play as" }).fill(second)
-      await page.getByRole("option", { name: second, exact: true }).click()
+      await inCast(page, async (tab) => {
+        await tab.getByLabel("Reply from", { exact: true }).click()
+        await page.getByRole("option", { name: second, exact: true }).click()
+        await tab.getByRole("button", { name: /^Playing as / }).click()
+        await page.getByRole("tab", { name: "All cards", exact: true }).click()
+        await page.getByRole("combobox", { name: "Find a card to play as" }).fill(second)
+        await page.getByRole("option", { name: second, exact: true }).click()
+        await expect(tab.getByLabel("Reply from", { exact: true })).toHaveCount(0)
+      })
       await expect(greeting).toContainText("Mira opens the door.")
       await expect(
         page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
       ).toBeVisible()
       await expect(page.getByText("group greeting", { exact: true })).toHaveCount(0)
-      await expect(page.getByLabel("Reply from", { exact: true })).toContainText(name)
-      await page.getByLabel(/^Playing as /).click()
-      await page.getByRole("button", { name: "No persona", exact: true }).click()
+      await inCast(page, async (tab) => {
+        await tab.getByRole("button", { name: /^Playing as / }).click()
+        await page.getByRole("button", { name: "No persona", exact: true }).click()
+        // With no persona both are characters again; who replies kept its pick.
+        await expect(tab.getByLabel("Reply from", { exact: true })).toContainText(second)
+      })
       await next.click()
       await next.click()
       await expect(greeting).toContainText("Mira welcomes the crew.")
-      await page.getByRole("button", { name: `Remove ${second} from pending cast` }).click()
+      await remove(page, second)
       await expect(greeting).toContainText("Mira opens the door.")
       await expect(
         page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
@@ -110,8 +142,10 @@ for (const width of [1440, 390]) {
       await add()
       await next.click()
       await expect(greeting).toContainText("Mira welcomes the crew.")
-      await page.getByLabel("Reply from", { exact: true }).click()
-      await page.getByRole("option", { name: second, exact: true }).click()
+      await inCast(page, async (tab) => {
+        await tab.getByLabel("Reply from", { exact: true }).click()
+        await page.getByRole("option", { name: second, exact: true }).click()
+      })
       await page.getByLabel("Message", { exact: true }).fill("Hello crew.")
       await page.getByRole("button", { name: "Send", exact: true }).click()
       await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
@@ -158,13 +192,13 @@ test("a pending group can restore a removed original member", async ({ page }) =
   const next = greeting.getByRole("button", { name: "Next greeting from Group Mira" })
   if (await next.isEnabled()) await next.click()
   await expect(greeting).toContainText("group greeting")
-  await page.getByRole("button", { name: "Remove Group Tobin from pending cast" }).click()
+  await remove(page, "Group Tobin")
   await expect(greeting).toContainText("Group Mira waves.")
   await expect(
     page.getByRole("status").filter({ hasText: "selected group greeting is no longer available" })
   ).toBeVisible()
-  await page.getByLabel("Add character", { exact: true }).click()
-  await page.getByRole("option", { name: "Group Tobin", exact: true }).click()
+  await startAdding(page, "Group Tobin")
+  await closePanel(page)
   await expect(page.getByRole("article", { name: "Greeting from Group Tobin", exact: true })).toBeVisible()
   await next.click()
   await expect(greeting).toContainText("Group Mira welcomes everyone.")

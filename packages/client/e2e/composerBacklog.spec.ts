@@ -2,6 +2,7 @@ import { join } from "node:path"
 import { expect, type Page, test } from "@playwright/test"
 import type { ChatId, EntityId } from "@rp/shared/chat.ts"
 import { Effect } from "effect"
+import { pickPendingPersona } from "./support/cast.ts"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
@@ -65,8 +66,7 @@ for (const [width, theme, model, asCard] of [
     const personaId = await importCard(page, personaName)
     await rpc((api) => api.SetPersona({ entityId: personaId, persona: true }))
     await page.goto(`${server().url}/cards/${cardId}/chat`)
-    await page.getByRole("button", { name: /^Playing as / }).click()
-    await page.getByRole("option", { name: personaName, exact: true }).click()
+    await pickPendingPersona(page, personaName)
     await page.getByRole("button", { name: /^Speaking as / }).click()
     const picker = page.getByRole("dialog", { name: "Speak as", exact: true })
     await expect(picker.getByRole("option", { name, exact: true })).toBeVisible()
@@ -248,7 +248,7 @@ test("a pending guidance action fits a long speaker name on a phone and desktop"
   await page.getByRole("button", { name: /^Speaking as / }).click()
   await page.getByRole("dialog", { name: "Speak as", exact: true }).getByRole("option", { name, exact: true }).click()
   await toggle(page, true)
-  const generate = page.getByRole("button", { name: `Generate ${name}`, exact: true })
+  const generate = page.getByRole("button", { name: `Write for ${name}`, exact: true })
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 1000 })
     for (const theme of ["light", "dark"] as const) {

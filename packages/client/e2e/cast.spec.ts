@@ -8,7 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { markPersona } from "./support/library.ts"
 import { openPanel } from "./support/panel.ts"
-import { addToCast } from "./support/cast.ts"
+import { addToCast, pickPendingPersona } from "./support/cast.ts"
 
 // About four seconds a reply.
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "40", FAKE_GENERATOR_TOKENS: "160" })
@@ -66,8 +66,7 @@ const chatWithMira = async (page: Page) => {
   await setUp(page)
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).click()
-  await page.getByLabel("Playing as").click()
-  await page.getByRole("option", { name: "Bo" }).click()
+  await pickPendingPersona(page, "Bo")
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
   await expect(page).toHaveURL(/\/chats\/[^/?]+$/)

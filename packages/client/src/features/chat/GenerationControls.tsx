@@ -37,7 +37,8 @@ export function ModelChip({
   view,
   onSettings
 }: {
-  session: ChatSession
+  /** Null in a chat not made yet: the model is the account's either way. */
+  session: ChatSession | null
   view: ChatView
   onSettings: (tab: "model") => void
 }) {
@@ -91,7 +92,7 @@ export function PresetChip({
   view,
   onSettings
 }: {
-  session: ChatSession
+  session: ChatSession | null
   view: ChatView
   onSettings: (tab: "preset") => void
 }) {

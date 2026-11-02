@@ -8,6 +8,8 @@ import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { oneReplyAtATime, replyPolicies, replyPolicyOf } from "./replyPolicy.ts"
+import type { EntityId } from "@rp/shared/chat.ts"
+import type { PendingChat } from "./pendingChat.ts"
 import type { ChatSession } from "./session.ts"
 
 export function ReplyOrderSection({ session }: { session: ChatSession }) {
@@ -76,6 +78,31 @@ export function OneReplySection({ session }: { session: ChatSession }) {
           {error}
         </p>
       )}
+    </section>
+  )
+}
+
+/**
+ * In a chat not made yet with two or more characters: who answers the first message you send
+ * (the first character unless picked), in the same place (`pendingCastSections`).
+ */
+export function PendingReplyFrom({ pending }: { pending: PendingChat }) {
+  const state = useSyncExternalStore(pending.subscribe, pending.snapshot)
+  const repliers = state.greeters.filter((item) => item.card.entityId !== state.persona)
+  if (repliers.length < 2) return null
+  const value = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0]!).card.entityId
+  return (
+    <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
+      <Field label="Reply from" description="Who answers the first message you send." className="w-full sm:w-72">
+        <Select
+          items={repliers.map(({ card }) => ({
+            value: card.entityId as string,
+            label: `${card.name}${card.subtitle ? ` · ${card.subtitle}` : ""}`
+          }))}
+          value={value}
+          onValueChange={(id) => pending.setReplier(id as EntityId)}
+        />
+      </Field>
     </section>
   )
 }

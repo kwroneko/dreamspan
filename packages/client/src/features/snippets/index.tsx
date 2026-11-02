@@ -284,7 +284,9 @@ export const register = () => [
     description: "Text kept beside your chats, never sent by itself: copy it, or send text here from any editor.",
     icon: "snippet",
     order: 75,
-    component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets")
+    component: lazyPanel(() => Promise.resolve({ default: SnippetsPanel }), "snippets"),
+    // Snippets are kept beside every chat, a pending one too.
+    pending: SnippetsPanel
   }),
   // Every editor's bar: its whole text, and its selection while there is one. A snippet's
   // own editor doesn't offer them: they would append it to itself.

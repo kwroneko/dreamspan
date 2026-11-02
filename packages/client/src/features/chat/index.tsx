@@ -15,7 +15,8 @@ import { registerModelMarks } from "./modelMarks.tsx"
 import { registerReplyCommands } from "./replyCommands.ts"
 import { registerHistoryCommands } from "./historyContributions.ts"
 import { registerPanels } from "./registerPanels.tsx"
-import { lazy, Suspense } from "react"
+import { createElement, lazy, Suspense } from "react"
+import { loadChatPage, loadedChatPage } from "./chatPageLoader.ts"
 import { routes } from "../../routes.tsx"
 import { Loading, reloadPage } from "../../ui/Spinner.tsx"
 import { ChatDefaultsPage } from "./ChatDefaults.tsx"
@@ -24,7 +25,7 @@ import { ChatSkeleton } from "./SkeletonMessages.tsx"
 import { sidebarSearch } from "../characters/sidebarSearch.ts"
 
 // The chat view carries the Markdown renderer, most of the bundle: it loads with the first chat opened.
-const ChatPage = lazy(() => import("./ChatPage.tsx").then((module) => ({ default: module.ChatPage })))
+const ChatPage = lazy(loadChatPage)
 const StartChatPage = lazy(() => import("./StartChatPage.tsx").then((module) => ({ default: module.StartChatPage })))
 const StartGroupChatPage = lazy(() =>
   import("./StartChatPage.tsx").then((module) => ({ default: module.StartGroupChatPage }))
@@ -32,6 +33,9 @@ const StartGroupChatPage = lazy(() =>
 const ContextPage = lazy(() => import("./ContextPage.tsx").then((module) => ({ default: module.ContextPage })))
 
 function LazyChatPage() {
+  // Loaded ahead (a pending chat does, chatPageLoader.ts): no fallback to show.
+  const Loaded = loadedChatPage()
+  if (Loaded) return createElement(Loaded)
   return (
     <Suspense fallback={<ChatSkeleton onRetry={reloadPage} />}>
       <ChatPage />

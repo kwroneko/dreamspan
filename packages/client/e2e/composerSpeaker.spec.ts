@@ -8,6 +8,7 @@ import { Effect } from "effect"
 import { loginCookie, withCookie } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { choices, nextChip, nextName, nextReply, pickReply } from "./support/strip.ts"
+import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
 // One session for the file's setup calls: the server allows 50 logins per address in 15 minutes.
@@ -324,6 +325,8 @@ test("hundreds of cards stay searchable and reachable by keyboard on a phone, pi
   // The persona is picked from the library; the speaker only from the chat's cast.
   await page.goto(`${server().url}/library`)
   await page.getByRole("link", { name: "Start a chat with Mira" }).first().click()
+  // Who you play is the Cast tab's, as in a saved chat.
+  await openPanel(page, "Cast")
   await page.getByRole("button", { name: /^Playing as / }).click()
   await page.getByRole("tab", { name: "All cards" }).click()
   const search = page.getByRole("combobox", { name: "Find a card to play as" })

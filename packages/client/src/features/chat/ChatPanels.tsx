@@ -1,6 +1,7 @@
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -9,8 +10,16 @@ import { Sheet } from "../../ui/Sheet.tsx"
 import { SubjectTabs, ToolTabs } from "../../ui/PanelTabs.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
-import { chatPanels, isPanelTab, PanelContent, preloadPanel, usePanelTabs } from "./panels.tsx"
-export { isPanelTab } from "./panels.tsx"
+import {
+  chatPanels,
+  isPanelTab,
+  PanelContent,
+  PendingPanelContent,
+  preloadPanel,
+  usePanelHere,
+  usePanelTabs
+} from "./panels.tsx"
+import type { PendingChat } from "./pendingChat.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
 
@@ -133,6 +142,18 @@ export function PanelToggles({
   )
 }
 
+/** What the panel's tabs show: a saved chat's session, or a chat not made yet (pendingChat.ts). */
+export type SidePanelContent =
+  | {
+      session: ChatSession
+      view: ChatView
+      focus: string | null
+      onJump: (slot: SlotId) => void
+      onEnable: () => void
+      onSummaries: (summary: string) => void
+    }
+  | { pending: PendingChat; view: ChatView }
+
 /** The panel: beside the chat on a wide screen, a sheet over it on a phone. */
 export function ChatSidePanel({
   tab,
@@ -148,13 +169,7 @@ export function ChatSidePanel({
   title: string
   onTab: (tab: PanelTab) => void
   onClose: () => void
-  session: ChatSession
-  view: ChatView
-  focus: string | null
-  onJump: (slot: SlotId) => void
-  onEnable: () => void
-  onSummaries: (summary: string) => void
-}) {
+} & SidePanelContent) {
   // A tab mounts when first shown and stays mounted, hidden, while the panel is open, so
   // switching tabs never ends what's in one: a summary's edit with its unsaved text, say.
   const userId = useSession().user.id
@@ -200,7 +215,11 @@ export function ChatSidePanel({
           value: t.value,
           label: t.label,
           icon: t.descriptor.icon,
-          description: t.descriptor.description
+          // A tab with nothing to show before the first send says so where it's described.
+          description:
+            "pending" in content && !t.descriptor.pending
+              ? `${t.descriptor.description ?? t.label} Available once the chat is saved.`
+              : t.descriptor.description
         }))}
         value={tab}
         onValueChange={onTab}
@@ -236,15 +255,26 @@ export function ChatSidePanel({
         >
           {/* The panel's whole width, its text at a readable measure (styles.css), unless the tab asks for less. */}
           <div data-measure className={t.descriptor.width === "readable" ? "max-w-[52rem]" : ""}>
-            <PanelContent
-              key={t.descriptor.id}
-              descriptor={t.descriptor}
-              tab={t.value}
-              active={t.value === tab}
-              notesFocus={notesFocus}
-              onNotes={notes}
-              {...content}
-            />
+            {"pending" in content ? (
+              <PendingPanelContent
+                key={t.descriptor.id}
+                descriptor={t.descriptor}
+                tab={t.value}
+                active={t.value === tab}
+                pending={content.pending}
+                view={content.view}
+              />
+            ) : (
+              <PanelContent
+                key={t.descriptor.id}
+                descriptor={t.descriptor}
+                tab={t.value}
+                active={t.value === tab}
+                notesFocus={notesFocus}
+                onNotes={notes}
+                {...content}
+              />
+            )}
           </div>
         </div>
       )
@@ -277,4 +307,51 @@ export function ChatSidePanel({
       {panels}
     </aside>
   )
+}
+/**
+ * The side panel's tab: the URL's, else on a wide screen the one this browser last had open
+ * (a link to a message drops the URL's). A phone opens it only when asked: it covers the chat.
+ */
+export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
+  const navigate = useNavigate()
+  const wide = useWide()
+  const userId = useSession().user.id
+  // Each user's own, read again when another signs in.
+  const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
+  const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
+  const candidate = urlPanel ?? (wide ? rememberedTab : null)
+  const panel = usePanelHere(candidate, view)
+  // The URL names the tab shown, so a refresh or a copied link keeps it.
+  useEffect(() => {
+    if (panel !== null && panel !== urlPanel)
+      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
+  }, [navigate, urlPanel, panel])
+  // What a call reads when it's made, so `show` stays the same function from tab to tab and as
+  // the chat updates: the message rows, the composer and the header take it, and a new one
+  // re-rendered every row on each tab switch (night/tabperf).
+  const latest = useRef({ view, urlPanel, panel })
+  useLayoutEffect(() => {
+    latest.current = { view, urlPanel, panel }
+  })
+  const show = useCallback(
+    (next: PanelTab | null) => {
+      if (next !== null && !isPanelTab(next, latest.current.view)) return
+      rememberPanel(userId, next)
+      setRemembered({ userId, tab: next })
+      void navigate({
+        to: ".",
+        search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
+          next === null ? prev : { ...prev, panel: next },
+        // On a phone, opening the sheet is a step in the history, so Back closes it.
+        replace: wide || next === null || latest.current.urlPanel !== null
+      })
+    },
+    [navigate, wide, userId]
+  )
+  /** Search params that keep the panel's tab: the one shown when the call is made. */
+  const withPanel = useCallback((search: Record<string, string>) => {
+    const shown = latest.current.panel
+    return shown === null ? search : { ...search, panel: shown }
+  }, [])
+  return { panel, show, withPanel, wide, userId }
 }

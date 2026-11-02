@@ -4,6 +4,7 @@ import type { ComponentProps, ComponentType } from "react"
 import { useSyncExternalStore } from "react"
 import { makeRegistry } from "../../registry.ts"
 import type { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
+import type { ChatView } from "./session.ts"
 
 export interface PendingComposerContext {
   /** A phone: the speaker chip is its portrait, Generate an icon, as at the chat's composer. */
@@ -17,12 +18,19 @@ export interface PendingComposerContext {
   readonly busy: boolean
   readonly hasText: boolean
   readonly start: (first: "send" | "generate") => Promise<void>
+  /** The pending chat as the saved chat's parts read it (pendingChat.ts). */
+  readonly view: ChatView
+  /** Opens the side panel at a tab, as the saved composer's chips do. */
+  readonly onSettings: (tab: string) => void
 }
 interface PendingControl {
   readonly id: string
   readonly order: number
-  /** `notes`: a row of its own above the composer, for what the user should know before sending. */
-  readonly placement: "notes" | "speaker" | "actions" | "guidance"
+  /**
+   * `notes`: a row of its own above the composer, for what the user should know before sending;
+   * `strip`: the next-reply strip under the box, as at the saved chat's composer.
+   */
+  readonly placement: "notes" | "speaker" | "actions" | "guidance" | "strip"
   readonly component: ComponentType<PendingComposerContext>
   readonly run?: (context: PendingComposerContext) => Promise<void>
 }

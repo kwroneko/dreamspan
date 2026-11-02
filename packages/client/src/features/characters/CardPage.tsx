@@ -80,7 +80,7 @@ function Folded({ title, children }: { title: string; children: string }) {
   )
 }
 
-export function Definition({ doc }: { doc: Doc }) {
+function Definition({ doc }: { doc: Doc }) {
   const alternates = texts(doc.alternate_greetings)
   const fields: ReadonlyArray<readonly [string, string]> = [
     ["Description", text(doc.description)],

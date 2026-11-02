@@ -6,7 +6,8 @@
 // can be added in a row. Who's already in the chat is marked, and a click on them does nothing.
 // It's the `cast.add-characters` entry of `castSections`, so a plugin can replace or remove it.
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
-import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
+import type { Cast } from "@rp/shared/chatSetupApi.ts"
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AsyncView } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
@@ -19,7 +20,40 @@ import { browseCards, useCardBrowse } from "../characters/cardBrowse.tsx"
 import { CardBrowseBar } from "../characters/CardBrowseBar.tsx"
 import { CharacterGrid, type ShellLibrary, shellAtom, type TilePick, type TileState } from "../characters/shellData.tsx"
 import { readCastAddOpen, subscribeCastAdd, takeCastAddRequest, writeCastAddOpen } from "./castAddState.ts"
-import type { ChatSession } from "./session.ts"
+import type { PendingChat } from "./pendingChat.ts"
+import type { ChatSession, Outcome } from "./session.ts"
+
+/**
+ * Who the grid adds to: a saved chat (a `Join` at the leaf shown), or a chat not made yet
+ * (pendingChat.ts), where the character joins before the first send and greets after the others.
+ */
+interface CastAddTarget {
+  readonly subscribe: (listener: () => void) => () => void
+  readonly cast: () => Cast | null
+  readonly join: (id: EntityId) => Promise<Outcome<unknown>>
+  readonly listCards: () => Promise<Outcome<ReadonlyArray<CastCard>>>
+  /** What a tile's tooltip says it does, and what's said once it's done. */
+  readonly addHint: (name: string) => string
+  readonly joined: (name: string) => string
+}
+
+const sessionTarget = (session: ChatSession): CastAddTarget => ({
+  subscribe: session.subscribe,
+  cast: () => session.snapshot().cast,
+  join: (id) => session.changeCast({ _tag: "Join", entityId: id }),
+  listCards: () => session.listCards(),
+  addHint: (name) => `Add ${name} to the chat`,
+  joined: (name) => `${name} joined the chat.`
+})
+
+const pendingTarget = (pending: PendingChat): CastAddTarget => ({
+  subscribe: pending.subscribe,
+  cast: () => pending.view().cast,
+  join: (id) => pending.join(id),
+  listCards: pending.listCards,
+  addHint: (name) => `Add ${name}: they greet after the others, and the chat starts with them`,
+  joined: (name) => `${name} joined the chat.`
+})
 
 type ShellCard = ShellLibrary["cards"][number]
 
@@ -67,14 +101,14 @@ const stateOf = (status: string | undefined): TileState =>
             )
           }
         : {}
-const hintOf = (name: string, status: string | undefined) =>
+const hintOf = (target: CastAddTarget, name: string, status: string | undefined) =>
   status === "you"
     ? `You play ${name} in this chat: they're your persona`
     : status === "in"
       ? `${name} is already in this chat`
       : status === "adding"
         ? `Adding ${name}…`
-        : `Add ${name} to the chat`
+        : target.addHint(name)
 /** `name` with its version, when it has one. */
 const labelOf = (name: string, status: string | undefined) =>
   status === "you"
@@ -87,16 +121,16 @@ const fullName = (c: ShellCard) => `${c.card.label}${c.card.subtitle ? ` · ${c.
 const PAGE = 60
 
 function AddGrid({
-  session,
+  target,
   data,
   focusSearch
 }: {
-  session: ChatSession
+  target: CastAddTarget
   data: ShellLibrary
   /** Moves the focus to the search when it changes (an outside request to add). */
   focusSearch: number
 }) {
-  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const cast = useSyncExternalStore(target.subscribe, target.cast)
   const [search, setSearch] = useState("")
   // Its own filter and sort, apart from the left panel's (cardBrowse.tsx).
   const [browse, setBrowse] = useCardBrowse("cast")
@@ -122,11 +156,11 @@ function AddGrid({
   const add = (id: EntityId, name: string) => {
     setAdding((now) => [...now, id])
     queue.current = queue.current.then(async () => {
-      const outcome = await session.changeCast({ _tag: "Join", entityId: id })
+      const outcome = await target.join(id)
       setAdding((now) => now.filter((e) => e !== id))
       setSaid(
         outcome.ok
-          ? { tone: "done", text: `${name} joined the chat.` }
+          ? { tone: "done", text: target.joined(name) }
           : { tone: "failed", text: `${name} couldn't be added: ${outcome.error.message}` }
       )
     })
@@ -136,13 +170,13 @@ function AddGrid({
   const [personas, setPersonas] = useState<ReadonlyArray<CastCard> | null>(null)
   useEffect(() => {
     let live = true
-    void session.listCards().then((result) => {
+    void target.listCards().then((result) => {
       if (live && result.ok) setPersonas(result.value.filter((card) => card.persona && !card.inBin))
     })
     return () => {
       live = false
     }
-  }, [session])
+  }, [target])
   const status = new Map<string, Status>([
     ...participants.map((id) => [id, "in"] as const),
     ...playedByMe.map((id) => [id, "you"] as const),
@@ -151,7 +185,7 @@ function AddGrid({
   const pick: TilePick = {
     onPick: (c) => add(c.card.entityId, c.card.label),
     label: (c, s) => labelOf(fullName(c), s),
-    hint: (c, s) => hintOf(c.card.label, s),
+    hint: (c, s) => hintOf(target, c.card.label, s),
     state: stateOf
   }
   // How many tiles are shown, for this search and filter: another starts from the first page.
@@ -221,7 +255,7 @@ function AddGrid({
               const state = stateOf(s)
               return (
                 <li key={card.entityId}>
-                  <Tooltip label={hintOf(card.name, s)}>
+                  <Tooltip label={hintOf(target, card.name, s)}>
                     <button
                       type="button"
                       aria-label={labelOf(name, s)}
@@ -255,6 +289,17 @@ function AddGrid({
 }
 
 export function CastAddSection({ session }: { session: ChatSession }) {
+  const target = useMemo(() => sessionTarget(session), [session])
+  return <CastAdd target={target} />
+}
+
+/** The same Add characters in a chat not made yet (`pendingCastSections`). */
+export function PendingCastAddSection({ pending }: { pending: PendingChat }) {
+  const target = useMemo(() => pendingTarget(pending), [pending])
+  return <CastAdd target={target} />
+}
+
+function CastAdd({ target }: { target: CastAddTarget }) {
   const userId = useSession().user.id
   const [open, setOpen] = useState(() => readCastAddOpen(userId))
   // Counts outside requests to add (the speaker switcher's "Add to chat"); 0 after a click here.
@@ -311,7 +356,7 @@ export function CastAddSection({ session }: { session: ChatSession }) {
         {/* The grid is made only once opened: hundreds of tiles most visits never look at. */}
         {open && (
           <AsyncView atom={shellAtom} loading="Loading your characters…" still="Still loading your characters…">
-            {(data) => <AddGrid session={session} data={data} focusSearch={focusSearch} />}
+            {(data) => <AddGrid target={target} data={data} focusSearch={focusSearch} />}
           </AsyncView>
         )}
       </div>
