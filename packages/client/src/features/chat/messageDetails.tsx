@@ -62,10 +62,7 @@ export function MessageDetailSettings() {
   const sorted = [...entries].sort((a, b) => (a.place === b.place ? a.order - b.order : a.place === "header" ? -1 : 1))
   if (sorted.length === 0) return null
   return (
-    <Fieldset
-      legend="Message details"
-      description="What each message shows beside its text: in its header, and under its portrait. Hover over a detail in a chat for more."
-    >
+    <Fieldset legend="Message details">
       {sorted.map((detail) => {
         const on = choices[detail.id] !== false
         return (

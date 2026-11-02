@@ -195,9 +195,8 @@ export function GenerationSettingsPanel({
         </p>
         <p className="text-xs text-muted">
           {used?.scope === "chat"
-            ? "The model this chat is bound to. "
-            : "The model this chat's next reply uses: your current model, shared by every chat. "}
-          Its settings apply everywhere it is used.
+            ? "The model this chat is bound to."
+            : "Your current model: every chat's next reply uses it."}
         </p>
       </div>
       <ModelSettingsEditor key={model.id} model={model} onSaved={() => setSaves((n) => n + 1)} />

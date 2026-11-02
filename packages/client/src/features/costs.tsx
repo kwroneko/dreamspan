@@ -258,8 +258,8 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
       <ErrorAlert error={action.error} title="Pricing wasn't saved" />
       {message && <Alert>{message}</Alert>}
       <p className="text-sm text-muted">
-        Summary spending caps count each request at the most it could cost. An unknown price or mixed currencies pause
-        capped work.
+        Summaries never spend past their cap: each request counts at the most it could cost, and an unknown price or
+        mixed currencies pause capped work.
       </p>
     </form>
   )
@@ -268,10 +268,7 @@ function CostPage() {
   useTitle("Costs")
   return (
     <Card>
-      <CardHeader
-        title="Costs"
-        description="Your prices for model requests, including replies, summaries and retries."
-      />
+      <CardHeader title="Costs" />
       <AsyncView atom={settingsAtom}>
         {(settings) => (
           <AsyncView atom={connectionsAtom}>

@@ -608,10 +608,7 @@ export function DocumentRegexScripts({
 export function CardRegexScripts({ store, call }: { store: EditorStore; call: Caller }) {
   return (
     <Card>
-      <CardHeader
-        title="Regex scripts"
-        description="Run on this card's messages, after your global scripts and the preset's. Changes are used as you make them."
-      />
+      <CardHeader title="Regex scripts" />
       <DocumentRegexScripts store={store} call={call} holder="card" />
     </Card>
   )

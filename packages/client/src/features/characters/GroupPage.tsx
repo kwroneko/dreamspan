@@ -70,7 +70,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
       </header>
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:items-start">
         <Card>
-          <CardHeader title={`Chats (${chats.length.toLocaleString()})`} description="Latest message first." />
+          <CardHeader title={`Chats (${chats.length.toLocaleString()})`} />
           <ChatList
             chats={chats}
             onDeleted={(chat) => {

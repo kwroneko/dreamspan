@@ -66,10 +66,7 @@ export function ChatsPage() {
       </div>
       <ChatList />
       <Card>
-        <CardHeader
-          title="A chat without characters"
-          description="For notes or trying a model. Characters can join from the composer later."
-        />
+        <CardHeader title="A chat without characters" about="Characters can join later, from the composer." />
         <EmptyChat />
       </Card>
     </div>

@@ -14,10 +14,7 @@ export function EmbeddedLorebook({ store }: { store: EditorStore }) {
   return (
     <div data-card-lorebook className="scroll-mt-[var(--preset-toolbar-height,1rem)]">
       <Card>
-        <CardHeader
-          title="Embedded lorebook"
-          description="Travels with this card on export and is used automatically in new chats. Changes are drafts until you save the card."
-        />
+        <CardHeader title="Embedded lorebook" />
         <div className="flex min-w-0 flex-col gap-4">
           <LorebookForm store={store} root={BOOK} absent="This card has no embedded lorebook." />
           <FieldTools store={store} field={valueField(BOOK)} label="Embedded lorebook" />

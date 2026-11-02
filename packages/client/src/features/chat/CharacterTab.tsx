@@ -35,8 +35,6 @@ import { PersonaSwitch } from "./PersonaSwitch.tsx"
 import { ChatCardActions } from "./presentation.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
 
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
-
 export function CharacterTab({ session, view, tab }: PanelProps) {
   const entityId = tab.slice(5) as EntityId
   return <ChatCharacterPanel session={session} view={view} entityId={entityId} />
@@ -139,7 +137,6 @@ function CardPanel({
   }, [store])
   useLeaveGuard(store)
   const portrait = { id: card.entityId, name: card.name, mediaId: card.avatarMediaId }
-  const others = info.usedByChats - 1
   return (
     <div className="flex flex-col gap-4">
       <header className="flex items-start gap-3">
@@ -172,16 +169,12 @@ function CardPanel({
       {!state.snapshot && !state.loadError && <p className="text-sm text-muted">Loading the card…</p>}
       {state.snapshot && (
         <>
-          {/* The consequence, once, where it matters (DESIGN §6.2). */}
-          <p className="text-sm">
-            {info.binding === "revision"
-              ? `This chat uses an earlier version of ${card.name}: editing changes the card, not what this chat uses.`
-              : persona
-                ? `What you change is used for ${card.name} as you type, in every chat where you play them.`
-                : others === 0
-                  ? `What you change is used for ${card.name} as you type; no other chat uses it.`
-                  : `What you change is used for ${card.name} as you type, in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
-          </p>
+          {/* Only where editing wouldn't reach this chat (DESIGN §6.2, §10.1). */}
+          {info.binding === "revision" && (
+            <p className="text-sm">
+              This chat uses an earlier version of {card.name}: editing changes the card, not what this chat uses.
+            </p>
+          )}
           {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
           {/* Save stays in sight while a field further down is edited; what's typed is used as it's typed. */}
           <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">

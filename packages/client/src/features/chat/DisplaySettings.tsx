@@ -156,10 +156,7 @@ export function DisplaySettings() {
   return (
     <div className="flex flex-col gap-6">
       <ChatWidthSetting />
-      <Fieldset
-        legend="Enter sends"
-        description="Your account preference for both chat and new-chat composers. Ctrl/Cmd+Enter always submits; Shift+Enter adds a line."
-      >
+      <Fieldset legend="Enter sends" about="Ctrl/Cmd+Enter always sends; Shift+Enter adds a line.">
         <RadioGroup
           value={viewer.prefs.enterSends}
           disabled={!viewer.ready}
@@ -179,7 +176,7 @@ export function DisplaySettings() {
       <MessageDetailSettings />
       <Fieldset
         legend="Display transformations"
-        description="These account choices change what you see in chats. Stored text, editing, copying, and future requests keep the original text. Streaming replies stay as written until they finish."
+        about="Change only what you see: the text you edit, copy and send stays as written."
       >
         <Switch
           checked={viewer.prefs.outputMacros}
@@ -197,10 +194,6 @@ export function DisplaySettings() {
         >
           Use display regex scripts
         </Switch>
-        <p className="text-sm text-muted">
-          Slow or oversized rules are skipped with an explanation beside the message. Turn these switches off to see
-          messages as saved. A message that scripts rewrote as it was saved offers “Show the original text” in its menu.
-        </p>
         {viewer.error && (
           <p role="alert" className="text-sm text-danger">
             {viewer.error.message}

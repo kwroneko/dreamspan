@@ -136,7 +136,7 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
   {
     value: "tool_schema" as const,
     label: "Yes, the OpenAI way",
-    description: "For OpenAI’s APIs, which take no prefill: the model is made to start its reply with it."
+    description: "Lets OpenAI’s models start the reply with the prefill, though their APIs take none."
   }
 ]
 
@@ -493,7 +493,7 @@ export function ModelSettingsEditor({
             </Field>
             <Field
               label="Reasoning"
-              description="Whether it thinks before replying. Yes sends it the thinking settings its provider takes, such as the reasoning effort."
+              description="Whether it thinks before replying. Yes turns its thinking on, with its provider's settings such as the reasoning effort."
             >
               <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
             </Field>
@@ -844,7 +844,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Models"
-        description="What the provider lists, with your edits on top. * marks your values, ? values nobody reports; a context size nobody reports is assumed."
+        about="* marks your own values, ? values nobody reports; a context size nobody reports is assumed."
         actions={
           <>
             <Button

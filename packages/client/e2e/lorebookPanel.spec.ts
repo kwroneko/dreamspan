@@ -245,7 +245,7 @@ for (const [width, scheme] of [
       .getByRole("button", { name: new RegExp(`^Wren's notes ${tag}`) })
       .click()
     const own = again.getByRole("region", { name: `Lorebook Wren's notes ${tag}` })
-    await expect(own.getByText(`Part of Wren ${tag}'s card: saving it saves the card.`)).toBeVisible()
+    await expect(own.getByText(/saving it saves the card/)).toHaveCount(0)
     await expect(own.getByRole("button", { name: /^Keys of .*: lens/ })).toBeVisible()
     await noOverflow(page)
     await page.screenshot({ path: join(shots, `panel-card-${width}-${scheme}.png`), fullPage: false })

@@ -58,24 +58,16 @@ type Open = "history" | "search" | "fork" | "update" | null
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-/** What saving reaches, in one line: the chats using it, and how to change it for some only. */
-const usedBy = (chats: number, some: string | null) =>
-  chats === 0
-    ? "No chat uses it yet."
-    : chats === 1
-      ? `Used by 1 chat: what you change here is used there as you type.`
-      : `Used by ${chats} chats: what you change here is used in all of them as you type.${some ? ` To change it in some only, ${some}.` : ""}`
+/** How many chats use it. */
+const usedBy = (chats: number) =>
+  chats === 0 ? "No chat uses it yet." : chats === 1 ? "Used by 1 chat." : `Used by ${chats} chats.`
 
 /**
  * A lorebook's line: the chats it was added to. The presets that send it are listed just below
  * it (`LorebookUse`).
  */
 const addedTo = (chats: number) =>
-  chats === 0
-    ? "Not added to any chat yet."
-    : chats === 1
-      ? "Added to 1 chat: what you change here is used there as you type."
-      : `Added to ${chats} chats: what you change here is used in all of them as you type. To change it in some only, make a variant.`
+  chats === 0 ? "Not added to any chat yet." : chats === 1 ? "Added to 1 chat." : `Added to ${chats} chats.`
 
 /** What saving did to the refs that follow this one. */
 const savedNotice = (saved: SavedRef) => {
@@ -286,7 +278,7 @@ export function Editor({
             {bookOnly ? (
               // The book is part of the card's document: saved, versioned and exported with it.
               <>
-                {ref.label}'s own lorebook. It's part of the card: saving it saves the card.{" "}
+                {ref.label}'s own lorebook.{" "}
                 <button
                   type="button"
                   className="text-accent underline-offset-4 hover:underline"
@@ -298,9 +290,7 @@ export function Editor({
                   Show the whole card
                 </button>
               </>
-            ) : ref.kind === "preset" ? (
-              "What you change here is used by every chat with this prompt preset, as you type."
-            ) : ref.chatId !== null ? (
+            ) : ref.kind === "preset" ? null : ref.chatId !== null ? (
               // A chat override (DESIGN §4): this chat's own version of the entry.
               <>
                 Only <OverrideChat chatId={ref.chatId} /> uses this version; the original's later changes still reach it
@@ -309,7 +299,7 @@ export function Editor({
             ) : ref.kind === "lorebook" ? (
               addedTo(usedByChats)
             ) : (
-              usedBy(usedByChats, ref.kind === "card" ? "fork it" : ref.kind === "note" ? null : "make a variant")
+              usedBy(usedByChats)
             )}
           </p>
           {ref.kind !== "card" && variants.length > 1 && (

@@ -95,7 +95,7 @@ test("a note made in the chat goes into the request once on, and out once off", 
   // Mira's note is hers: her group says so, and it isn't deleted from here. With two notes, both are open.
   const hers = dialog.getByRole("region", { name: "Mira's notes" })
   await expect(hers.getByRole("button", { name: "Collapse Outfit" })).toBeVisible()
-  await expect(hers.getByText("what you change here changes them in every chat with Mira")).toBeVisible()
+  await expect(hers.getByText("what you change here changes them in every chat with Mira")).toHaveCount(0)
   await hers.getByRole("button", { name: "Actions for Outfit" }).click()
   await expect(page.getByRole("menuitem", { name: "Delete the note" })).toHaveCount(0)
   await page.keyboard.press("Escape")

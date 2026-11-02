@@ -78,17 +78,13 @@ function MemberMore({
           Edit the card here
         </Button>
         <ChatCardActions session={session} card={card} info={info} />
-        <Button
-          variant="ghost"
-          hint={`You play ${name} from the latest message on, on this branch: {{user}} is them.`}
-          onClick={onPersona}
-        >
+        <Button variant="ghost" hint={`You play ${name} in this chat: {{user}} is them.`} onClick={onPersona}>
           Use as my persona
         </Button>
         <Button
           variant="ghost"
           className="text-danger!"
-          hint="They leave from the latest message on, on this branch. Earlier messages stay."
+          hint="They leave the chat. Earlier messages stay."
           onClick={() => onChange({ _tag: "Leave", entityId: card.entityId })}
         >
           Remove from chat
@@ -320,7 +316,6 @@ export function CastTab({ session }: { session: ChatSession }) {
           {error.message}
         </p>
       )}
-      <p className="text-xs text-muted">Changes here apply from the latest message on, on this branch.</p>
     </div>
   )
 }

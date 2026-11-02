@@ -146,12 +146,12 @@ test("a new chat from a card: the greeting follows the persona until the first s
   // The card layout is the preset's, never a chat's: no selector here.
   await expect(settings.getByText("Card layout")).toHaveCount(0)
   // Who each message is sent as is advanced, collapsed.
-  await settings.getByText("Advanced: who each message is sent as", { exact: true }).click()
+  await settings.getByText("Advanced: message roles", { exact: true }).click()
   await settings.getByText("By perspective").click()
   await shoot(page, "chat-settings")
   // Settings are state from the leaf on: read back after a reload.
   await page.reload()
-  await page.getByText("Advanced: who each message is sent as", { exact: true }).click()
+  await page.getByText("Advanced: message roles", { exact: true }).click()
   await expect(page.getByRole("radio", { name: /By perspective/ })).toBeChecked()
   // Closed, it stays closed.
   await page.getByRole("button", { name: "Close the panel" }).click()

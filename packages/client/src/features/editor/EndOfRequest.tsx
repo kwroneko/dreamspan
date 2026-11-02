@@ -11,7 +11,7 @@ export function EndOfRequest({ store }: { store: EditorStore }) {
     <Card>
       <CardHeader
         title="End of request"
-        description="Always the last message, after everything above: who writes next, then your guidance."
+        about="Tell the model who writes next, and pass your guidance: always the last message sent."
       />
       <div className="flex flex-col gap-4">
         {END_OF_REQUEST.map((text) => (

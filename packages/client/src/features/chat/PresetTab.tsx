@@ -43,9 +43,6 @@ function PresetColumn({ store }: { store: EditorStore }) {
           <span className="font-medium">
             <RefName store={store} />
           </span>
-          <p className="text-xs text-muted">
-            Used by every chat with this preset, as you type. Moving or deleting a prompt waits for Save.
-          </p>
         </div>
         <Tooltip label="The preset editor over the chat, with room to work and search">
           <Button

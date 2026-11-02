@@ -433,7 +433,7 @@ export function BinPage() {
   const [tab, setTab] = useState<"deleted" | "recovered">(search.section === "recovered" ? "recovered" : "deleted")
   return (
     <Card>
-      <CardHeader title="Bin" description="Deleted things wait here, newest first: restore them where they were." />
+      <CardHeader title="Bin" />
       <Tabs
         label="Bin sections"
         value={tab}

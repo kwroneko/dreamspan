@@ -748,20 +748,21 @@ const resolveStage: AssemblerStage = {
 const builtinProjections: ReadonlyArray<RoleProjection> = [
   {
     id: "by_writer",
-    label: "By writer",
-    description: "Yours as user, the model's as assistant.",
+    label: "By author",
+    description: "Your messages are user, the characters' are assistant.",
     role: ({ side }) => side
   },
   {
     id: "alternate",
     label: "Alternating",
-    description: "Strictly alternating by position, for models that require it.",
+    description:
+      "User and assistant alternate message by message, whoever wrote each, for a model that rejects two of the same role in a row. Nothing is merged.",
     role: ({ entry }) => (entry.depth % 2 === 0 ? "assistant" : "user")
   },
   {
     id: "perspective",
     label: "By perspective",
-    description: "The replying character's own turns as assistant, everyone else's as user.",
+    description: "The replying character's messages are assistant; yours and the other characters' are user.",
     role: ({ speaker, cast }) => (speaker !== undefined && speaker === cast.speaker ? "assistant" : "user")
   }
 ]
@@ -777,7 +778,7 @@ const rolesStage = sync("roles", (assembly) => {
   if (!found) {
     assembly.issues.push({
       kind: "role_projection_missing",
-      message: `This chat's role projection "${chosen}" isn't installed (a plugin may be off); roles are by writer instead.`
+      message: `This chat's role projection "${chosen}" isn't installed (a plugin may be off); roles are by author instead.`
     })
   }
   const projection = found ?? assembly.request.projections.get("by_writer")

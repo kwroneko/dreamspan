@@ -3,6 +3,7 @@ import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
 import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
+import { AboutHint } from "./AboutHint.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -187,20 +188,35 @@ export function Textarea({
 }
 
 /** A group of related controls with a legend, such as a set of radio buttons. */
+/**
+ * A group of fields under its legend. `description` is a standing line of state, never an
+ * explanation; `about` is an explanation the user needs to choose correctly, in a "?" beside
+ * the legend (DESIGN §10.1), named after a string legend.
+ */
 export function Fieldset({
   legend,
   description,
+  about,
   children,
   className = ""
 }: {
   legend: ReactNode
   description?: ReactNode
+  about?: ReactNode
   children: ReactNode
   className?: string
 }) {
+  const head = <BaseFieldset.Legend className="text-sm font-medium text-text">{legend}</BaseFieldset.Legend>
   return (
     <BaseFieldset.Root className={`flex min-w-0 flex-col gap-2 ${className}`}>
-      <BaseFieldset.Legend className="text-sm font-medium text-text">{legend}</BaseFieldset.Legend>
+      {about ? (
+        <div className="flex items-center gap-1">
+          {head}
+          <AboutHint heading={typeof legend === "string" ? legend : "this group"}>{about}</AboutHint>
+        </div>
+      ) : (
+        head
+      )}
       {description && <p className="text-sm text-muted">{description}</p>}
       {children}
     </BaseFieldset.Root>

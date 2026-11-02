@@ -57,10 +57,7 @@ function ColorControl({
 export function MessageColorSettings() {
   const viewer = useViewPrefs()
   return (
-    <Fieldset
-      legend="Message colours"
-      description="Colours follow your account. Reset follows the current light or dark theme."
-    >
+    <Fieldset legend="Message colours" about="Reset goes back to the current theme's colours.">
       {/* One a row in a narrow panel, side by side as it widens. */}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-3">
         {messageColors.map((color) => (

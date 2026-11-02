@@ -84,7 +84,7 @@ for (const width of [1440, 390]) {
     await expect(overlay).toHaveCount(0)
     await expect(page).toHaveURL(new RegExp(`/chats/${chat.id}`))
     await page.goto(`${server().url}/library/${ref.id}`)
-    await expect(page.getByText("Added to 1 chat: what you change here is used there as you type.")).toBeVisible()
+    await expect(page.getByText("Added to 1 chat.", { exact: true })).toBeVisible()
     await expect(page.getByRole("region", { name: "Where it's used" })).toContainText("3 entries")
     // One row per entry, highest order first, as ST's Priority sort; rows open to the whole entry.
     const titles = () =>

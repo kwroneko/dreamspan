@@ -132,7 +132,7 @@ for (const width of [1440, 390]) {
     await expect(members(page)).toContainText(two)
     await expect(section(page).getByRole("button", { name: `${one}: in this chat`, exact: true })).toBeVisible()
     await expect(section(page).getByRole("button", { name: `${two}: in this chat`, exact: true })).toBeVisible()
-    await expect(section(page).getByRole("status")).toHaveText(`${two} joined the chat, from the latest message on.`)
+    await expect(section(page).getByRole("status")).toHaveText(`${two} joined the chat.`)
     await expect(toggle(page)).toHaveAttribute("aria-expanded", "true")
     await shoot(page, `castadd-added-${width}`)
 

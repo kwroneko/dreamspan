@@ -787,8 +787,8 @@ export function LorebookTable({
             disabled={book.entries.length === 0}
             hint={
               selecting
-                ? "Ends selecting: the checkboxes go."
-                : "A checkbox on each entry, to change one setting on the selected ones at once."
+                ? "Stop selecting entries."
+                : "Select several entries to change a setting on all of them at once."
             }
             onClick={() => {
               setSelecting(!selecting)
@@ -840,7 +840,7 @@ export function LorebookTable({
               variant="primary"
               className={small}
               disabled={live.length === 0}
-              hint="Pick one setting and its value for the selected entries; their other settings stay as they are."
+              hint="Give every selected entry the same value for one setting; their other settings stay as they are."
               onClick={() => setMassEdit(true)}
             >
               Change for selected…

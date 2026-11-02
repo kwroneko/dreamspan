@@ -91,9 +91,6 @@ const SummarySettings = deferred<Parameters<typeof import("./ThisChatTab.tsx").S
 const RolesSetting = deferred<Parameters<typeof import("./ThisChatTab.tsx").RolesSetting>[0]>(() =>
   import("./ThisChatTab.tsx").then((m) => ({ default: m.RolesSetting }))
 )
-const AccountSettingsNote = deferred<{ session: import("./session.ts").ChatSession }>(() =>
-  import("./ThisChatTab.tsx").then((m) => ({ default: m.AccountSettingsNote }))
-)
 
 export const registerPresentation = () => [
   ...registerTimelineTransforms(),
@@ -131,7 +128,6 @@ export const registerPresentation = () => [
   chatSettingSections.register({ id: "settings.summaries", order: 10, component: SummariesSwitch }),
   chatSettingSections.register({ id: "settings.macro-bindings", order: 80, component: MacroBindings }),
   chatSettingSections.register({ id: "settings.roles", order: 90, component: RolesSetting }),
-  chatSettingSections.register({ id: "settings.account", order: 100, component: AccountSettingsNote }),
   summaryPanelSections.register({ id: "summaries.settings", order: 100, component: SummarySettings }),
   summarySettingFields.register({ id: "settings.summary-fields", order: 10, component: LcmFields }),
   timelineBoundaries.register({ id: "timeline.lcm-boundary", order: 10, component: LcmBoundary }),
