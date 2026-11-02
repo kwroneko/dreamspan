@@ -102,6 +102,45 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  for (const stopped of [false, true]) {
+    it.live(`swiping the ${stopped ? "stopped" : "running"} reply preserves the round's hold state`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const { chat, sent, mira, tobin, describe } = yield* setup(api)
+        const first = yield* posted(
+          api.Generate({
+            chatId: chat.id,
+            parentSlotId: sent.slotId,
+            branch: false,
+            speakerEntityId: mira,
+            round: [tobin]
+          })
+        )
+        yield* gate(first.entry.version.id)
+        if (stopped) yield* api.StopGeneration({ versionId: first.entry.version.id })
+        const entries = yield* pathBecomes(api, chat.id, describe, [
+          "you: m0",
+          `Mira (${stopped ? "stopped" : "generating"})`
+        ])
+        const swipe = yield* api.Regenerate({ slotId: first.entry.slotId, expectedRowVersion: entries[1]!.rowVersion })
+        if (!stopped) {
+          yield* release(first.entry.version.id)
+          // Drain only after the selected swipe finishes, even when the old version ends first.
+          yield* Effect.sleep(100)
+          assert.deepStrictEqual(yield* roundOf(api, chat.id), [{ speaker: tobin, held: false }])
+          yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (generating)"])
+        }
+        yield* release(swipe.version.id)
+        if (stopped) {
+          yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (complete)"])
+          assert.deepStrictEqual(yield* roundOf(api, chat.id), [{ speaker: tobin, held: true }])
+          yield* api.Round({ chatId: chat.id, forkId: null, action: "continue" })
+        }
+        yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (complete)", "Tobin (generating)"])
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+    )
+  }
+
   for (const ending of ["stopped", "failed"] as const) {
     it.live(`a ${ending} old reply does not pause the replacement send's round`, () =>
       Effect.gen(function* () {
