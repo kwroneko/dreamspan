@@ -1,3 +1,4 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The card editor: every card field and the card's notes (DESIGN §4.1, §4.1a), in tabs (owner,
 // 2026-11-01), the same component in the chat's character tab (`layout: "panel"`, a narrow
 // column) and in the full editor (`layout: "page"`). Definition holds what goes into the prompt
@@ -535,12 +536,19 @@ export function CardEditor({
 }) {
   const snapshot = useSyncExternalStore(cardEditorTabs.subscribe, cardEditorTabs.snapshot, cardEditorTabs.snapshot)
   const tabs = [...snapshot.entries].sort((a, b) => a.order - b.order)
-  const [tab, setTab] = useState(initial)
+  const [urlTab, setUrlTab] = usePlaceParam(`cardTab:${layout}:${store.refId}`, "")
+  const tab = urlTab || initial
+  const setTab = (next: string | undefined) => setUrlTab(next ?? "")
+  usePlaceNotice(urlTab && !tabs.some((entry) => entry.id === urlTab) ? "This card tab is no longer available." : null)
+  useEffect(() => {
+    if (reveal && initial !== undefined) setUrlTab(initial, true)
+    // An explicit external reveal chooses once; subsequent user tab choices must win.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial, reveal])
   // Opened again on another tab (the panel's Lorebooks list opening this card's book): it decides.
   const [lastInitial, setLastInitial] = useState(initial)
   if (initial !== lastInitial) {
     setLastInitial(initial)
-    setTab(initial)
   }
   // Opened again on a tab from elsewhere (Show the whole card): the tabs come into view.
   const root = useRef<HTMLDivElement>(null)
@@ -568,12 +576,14 @@ export function CardEditor({
   }, [lastInitial, reveal])
   // Search's Go to opens the tab that holds the field it goes to.
   const match = useContext(SearchNavigation)
-  const [lastMatch, setLastMatch] = useState(match)
-  if (match !== lastMatch) {
-    setLastMatch(match)
+  useEffect(() => {
     const holder = match && tabs.find((entry) => entry.holds?.(match.path))
-    if (holder) setTab(holder.id)
-  }
+    if (!holder) return
+    const frame = requestAnimationFrame(() => setTab(holder.id))
+    return () => cancelAnimationFrame(frame)
+    // Only a new search visit changes tabs; selecting a tab must not replay the visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match])
   const shown = tabs.some((entry) => entry.id === tab) ? tab : (tabs[0]?.id ?? "")
   if (tabs.length === 0) return null
   return (

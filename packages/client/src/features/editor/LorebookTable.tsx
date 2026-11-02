@@ -1,3 +1,4 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // A lorebook's entries as a table, as SillyTavern's World Info editor shows them: one row per
 // entry with its switch, title and keys, and the registered columns (strategy, position,
 // depth, order, trigger %) edited in place; a row opens to its text and keys, with the rest
@@ -584,9 +585,23 @@ export function LorebookTable({
   const sorts = useRegistry(lorebookSorts)
   const actions = useRegistry(lorebookEntryActions)
   const card = useEditorKind(store) === "card"
-  const [query, setQuery] = useState("")
-  const [enabled, setEnabled] = useState<EnabledFilter>("all")
-  const [sortId, setSortId] = useState("order")
+  const scope = `entries:${store.refId}:${root.join("/")}`
+  const [query, changeQuery] = usePlaceParam(`${scope}:q`, "")
+  const setQuery = (next: string) => changeQuery(next, true)
+  const [enabled, changeEnabled] = usePlaceParam<EnabledFilter>(`${scope}:show`, "all", ["all", "on", "off"])
+  const setEnabled = (next: EnabledFilter) => changeEnabled(next, true)
+  const [sortId, changeSort] = usePlaceParam(
+    `${scope}:sort`,
+    "order",
+    sorts.map((s) => s.id)
+  )
+  const setSortId = (next: string) => changeSort(next, true)
+  const [entryKey, setEntryKey] = usePlaceParam(`${scope}:entry`, "")
+  const entry = entryKey === "" ? null : Number(entryKey)
+  const enteredHere = useRef<number | null>(null)
+  usePlaceNotice(
+    entry !== null && !book.entries.some((e) => e.uid === entry) ? "This entry is no longer in the lorebook." : null
+  )
   const [opened, setOpened] = useOpenEntries(store.refId, root, added)
   // Opened entries whose settings are open too: closed again with the page.
   const [settings, setSettings] = useState<ReadonlySet<number>>(EMPTY)
@@ -640,20 +655,37 @@ export function LorebookTable({
 
   // A search visit to an entry: everything shown again, the entry open and scrolled to.
   const match = useContext(SearchNavigation)
-  const [visited, setVisited] = useState(match)
-  if (match !== visited) {
-    setVisited(match)
-    const at = match && JSON.stringify(match.path.slice(0, root.length + 1)) === JSON.stringify([...root, "entries"])
-    const uid = at ? uidOf(match.path[root.length + 1]) : null
-    if (uid !== null) {
-      setQuery("")
-      setEnabled("all")
-      setOpened((set) => new Set(set).add(uid))
-      // A match in anything but the title, keys and text is in the entry's settings.
-      if (!SHOWN.has(String(match!.path[root.length + 2]))) showSettings(uid, true)
-      setFocus({ uid, at: "title" })
-    }
-  }
+  useEffect(() => {
+    if (!match) return
+    const frame = requestAnimationFrame(() => {
+      const at = JSON.stringify(match.path.slice(0, root.length + 1)) === JSON.stringify([...root, "entries"])
+      const uid = at ? uidOf(match.path[root.length + 1]) : null
+      if (uid !== null) {
+        enteredHere.current = uid
+        setEntryKey(String(uid), true)
+        setQuery("")
+        setEnabled("all")
+        setOpened((set) => new Set(set).add(uid))
+        if (!SHOWN.has(String(match.path[root.length + 2]))) showSettings(uid, true)
+        setFocus({ uid, at: "title" })
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+    // Only a new search visit restores the match; edits and folds must not replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [match])
+  useEffect(() => {
+    const local = enteredHere.current
+    enteredHere.current = null
+    if (entry === local || entry === null || !book.entries.some((e) => e.uid === entry)) return
+    const frame = requestAnimationFrame(() => {
+      setOpened((set) => new Set(set).add(entry))
+      setFocus({ uid: entry, at: "title" })
+    })
+    return () => cancelAnimationFrame(frame)
+    // Restore only a new URL target, not each edit or fold of that entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry])
 
   // Measured, so the chat's narrow editor overlay gets the narrow layout too.
   const list = useRef<HTMLDivElement>(null)
@@ -680,6 +712,8 @@ export function LorebookTable({
   const template = `${selecting ? "6.25rem" : "4.5rem"} minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.25rem`
 
   const toggle = (uid: number, open: boolean, at?: "keys") => {
+    enteredHere.current = open ? uid : null
+    setEntryKey(open ? String(uid) : "", true)
     setOpened((set) => {
       const next = new Set(set)
       if (open) next.add(uid)
@@ -689,6 +723,8 @@ export function LorebookTable({
     if (at) setFocus({ uid, at })
   }
   const reveal = (uid: number) => {
+    enteredHere.current = uid
+    setEntryKey(String(uid), true)
     setQuery("")
     setEnabled("all")
     setPinned((list) => [uid, ...list.filter((other) => other !== uid)])

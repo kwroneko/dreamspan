@@ -93,7 +93,7 @@ test("Branch from here makes an unnamed branch, shows it at once, keeps the URL,
   await expect(branches).toHaveAccessibleName(/Branch: Split .+ at #1, 3 of 3/)
   await expect.poll(() => new URL(page.url()).searchParams.get("slot")).toBe(slot)
   expect(new URL(page.url()).searchParams.get("panel")).toBe("history")
-  expect(new URL(page.url()).searchParams.get("fork")).toBeNull()
+  expect(new URL(page.url()).searchParams.get("fork")).not.toBeNull()
   await expect(at).toHaveCount(0)
   // The chat is on top of All chats now, listed once, with its branches counted.
   await expect(rows.first()).toHaveAttribute("data-chat-id", chatId)

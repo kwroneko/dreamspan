@@ -1,3 +1,4 @@
+import { usePlaceParam } from "../../usePlaceParam.ts"
 import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
@@ -127,7 +128,15 @@ export function Editor({
   const userId = useSession().user.id
   const [store] = useState(() => suppliedStore ?? new EditorStore(refId, userId, call))
   const [searchMatch, setSearchMatch] = useState<SearchMatch | null>(null)
-  const [open, setOpen] = useState<Open>(null)
+  const [dialog, setDialog] = usePlaceParam("editorDialog", "", ["", "history", "search"])
+  const [transient, setTransient] = useState<Open>(null)
+  const open = transient ?? (dialog || null)
+  const setOpen = (next: Open) => {
+    if (next === "history" || next === "search" || next === null) {
+      setTransient(null)
+      setDialog(next ?? "")
+    } else setTransient(next)
+  }
   // A preset's search sits in the sticky bar, so its matches stay beside the document; it's
   // folded away until asked for.
   const [searching, setSearching] = useState(false)
@@ -135,12 +144,13 @@ export function Editor({
   const [more, setMore] = useState(false)
   // A card opened on its own lorebook shows the book alone, in the large editor, until "Show
   // the whole card", which opens the card on its Lorebook tab.
-  const [bookView, setBookView] = useState(focus === CARD_LOREBOOK_FOCUS)
+  const [bookMode, setBookMode] = usePlaceParam(`cardBook:${refId}`, "", ["", "book", "card"])
+  const bookView = bookMode === "book" || (bookMode !== "card" && focus === CARD_LOREBOOK_FOCUS)
+  const setBookView = (on: boolean) => setBookMode(on ? "book" : "card")
   // Opened again from the panel while open: the new focus decides.
   const [lastFocus, setLastFocus] = useState(focus)
   if (focus !== lastFocus) {
     setLastFocus(focus)
-    setBookView(focus === CARD_LOREBOOK_FOCUS)
   }
   // Back from the book's own view: the card opens on its Lorebook tab.
   const [cardTab, setCardTab] = useState<string | undefined>(undefined)

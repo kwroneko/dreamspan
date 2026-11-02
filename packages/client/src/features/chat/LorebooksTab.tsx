@@ -1,3 +1,4 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The side panel's Lorebooks tab (DESIGN §1.3, §5.0): every book this chat reads in one list
 // (lorebookRows.ts: each member card's own, those added to this chat, the preset's), each with
 // its switch; picking a row opens that book below the list to read and edit (owner,
@@ -212,7 +213,9 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
   const { books: presetBooks, label: presetName } = usePresetBooks(presetStore)
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selectedKey, setSelectedKey] = usePlaceParam("book", "")
+  const selected = selectedKey || null
+  const setSelected = (next: string | null) => setSelectedKey(next ?? "")
   // Switches not confirmed yet, by row; each with the latest request's number, so an earlier
   // answer doesn't put a later switch back.
   const [pending, setPending] = useState<ReadonlyMap<string, boolean>>(new Map())
@@ -243,6 +246,16 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
     preset: presetBooks,
     pending
   })
+  usePlaceNotice(
+    active &&
+      selected &&
+      library !== null &&
+      cardRefs !== null &&
+      cast !== null &&
+      !rows.some((row) => row.key === selected)
+      ? "This lorebook is no longer in the chat."
+      : null
+  )
   const byId = new Map((library ?? []).map((ref) => [ref.id as string, ref]))
   const nameOf = (id: string) => byId.get(id)?.label ?? (library === null ? "…" : "A lorebook no longer in the library")
   const openPreset = () => preset.ref && workspace?.open(preset.ref, PRESET_LOREBOOKS_FOCUS)

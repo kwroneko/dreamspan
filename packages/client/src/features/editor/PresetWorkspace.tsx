@@ -1,6 +1,17 @@
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
-import { createContext, lazy, type ReactNode, Suspense, useContext, useEffect, useEffectEvent, useState } from "react"
+import {
+  createContext,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState
+} from "react"
 import { useSession } from "../../session.ts"
 import { ColumnOverlay } from "../../ui/ColumnOverlay.tsx"
 import { Loading } from "../../ui/Spinner.tsx"
@@ -46,7 +57,29 @@ export function PresetWorkspace({
   const call = useCaller()
   const userId = useSession().user.id
   const [stores] = useState(() => new Map<RefId, EditorStore>())
-  const [selection, setSelection] = useState<Workspace["selection"]>(null)
+  const search = useSearch({ strict: false }) as Record<string, unknown>
+  const navigate = useNavigate()
+  const selection = useMemo<Workspace["selection"]>(
+    () =>
+      typeof search.editor === "string" && search.editor
+        ? { ref: search.editor as RefId, ...(typeof search.focus === "string" ? { focus: search.focus } : {}) }
+        : null,
+    [search.editor, search.focus]
+  )
+  const setSelection = (next: Workspace["selection"]) =>
+    void navigate({
+      to: ".",
+      search: (prev: Record<string, unknown>) => ({
+        ...prev,
+        editor: next?.ref,
+        focus: next?.focus,
+        editorDialog: undefined,
+        ...(next ? { [`cardBook:${next.ref}`]: undefined } : {}),
+        ...(compact && next ? { panel: undefined } : {})
+      }),
+      state: (prev) => ({ ...prev, ...(compact && next ? { chatPanel: true } : {}) }),
+      resetScroll: false
+    })
   const notifyOpen = useEffectEvent(() => onOpen?.())
   // Also reconcile when an already open editor crosses into the phone layout: otherwise
   // the side panel becomes a modal sheet over it and makes the editor inert.

@@ -18,7 +18,8 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import { browseCards, useCardBrowse } from "./cardBrowse.tsx"
+import { browseCards } from "./cardBrowse.tsx"
+import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { GroupFaces } from "./GroupFaces.tsx"
@@ -95,7 +96,6 @@ function useOpenFork(fork: ShellFork, scopeChat: boolean) {
         ...scopeSearch(scopeChat ? { entity: null, chat: fork.chat.id } : navigation.scope),
         ...(navigation.grid && !scopeChat ? { side: "characters" } : {}),
         fork: fork.forkId,
-        ...(fork.leaf ? { leaf: fork.leaf } : {}),
         ...(panel ? { panel } : {})
       }
     })
@@ -464,9 +464,9 @@ const SECTIONS = {
 
 function Browser({ data }: { data: ShellLibrary }) {
   const { scope, setScope, grid, setGrid } = useShellNavigation()
-  const [search, setSearch] = useState("")
-  // The characters grid's own filter and sort, apart from the home page's (cardBrowse.tsx).
-  const [browse, setBrowse] = useCardBrowse("sidebar")
+  const [browse, setBrowse] = useSidebarBrowse()
+  const search = browse.search
+  const setSearch = (search: string) => setBrowse({ search })
   const params = useParams({ strict: false }) as { chatId?: string }
   const shown = useSearch({ strict: false, select: (s: { fork?: string }) => s.fork })
   const card = data.cards.find((c) => c.card.entityId === scope.entity)
@@ -609,7 +609,14 @@ function Browser({ data }: { data: ShellLibrary }) {
           // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
           <div className="max-w-controls">
             {/* A chat's own pins are among its named and pinned branches. */}
-            {kind !== "chat" && <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} />}
+            {kind !== "chat" && (
+              <PinnedChats
+                pinsCollapsed={data.pinsCollapsed}
+                entity={scope.entity}
+                sortBy={browse.pinsSort}
+                onSortChange={(pinsSort) => setBrowse({ pinsSort })}
+              />
+            )}
             {sections.map(([id, title]) =>
               section(id, id === "just" ? `Just ${card?.card.label ?? "this character"}` : title)
             )}

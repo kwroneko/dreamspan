@@ -192,6 +192,8 @@ for (const width of [1440, 390])
       await mkdir(screens, { recursive: true })
       await page.screenshot({ animations: "disabled", path: `${screens}/message-editor-${width}-${theme}.png` })
       await page.reload()
+      await expect(messageDiff).toBeVisible()
+      await messageDiff.getByRole("button", { name: "Close", exact: true }).click()
       await editHistory(mine, "Earlier draft text…")
       const history = page.getByRole("dialog", { name: "Earlier draft text", exact: true })
       // The earliest state is the text the edit was typed on (owner, 2026-11-02), after the typed ones.

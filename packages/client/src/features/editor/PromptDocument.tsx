@@ -1,3 +1,4 @@
+import { usePlaceExpansion, usePlaceNotice, usePlaceParam } from "../../usePlaceParam.ts"
 // The preset's prompt order as one document (DESIGN §6.2a). Each prompt is a bounded block: a
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
 // above its text in the code-editor box. Options fold away per prompt, or all at once.
@@ -620,7 +621,18 @@ export function PromptDocument({
   const savedOrder = useValue<ReadonlyArray<PromptOrderEntry>>(store, ["order"]) ?? []
   const order = presetOrder(prompts, savedOrder)
   // The document opens every block; the column opens none, so its editors mount only when asked for.
-  const [opened, setOpened] = useState<Opened>(() => ({ all: !column, except: new Set() }))
+  const scope = `prompts:${layout}:${store.refId}`
+  const [promptFocus, setPromptFocus] = usePlaceParam(`${scope}:focus`, "")
+  const focusedPrompt = promptFocus || focus
+  const focusedHere = useRef<string | undefined>(undefined)
+  const [opened, changeOpened] = usePlaceExpansion(scope, !column)
+  const setOpened = (next: Opened | ((current: Opened) => Opened)) =>
+    changeOpened(typeof next === "function" ? next(opened) : next)
+  usePlaceNotice(
+    focusedPrompt && focusedPrompt !== PRESET_LOREBOOKS_FOCUS && !prompts.some((p) => p.identifier === focusedPrompt)
+      ? "This prompt is no longer in the preset."
+      : null
+  )
   // Options fold away by default; "Show all options" is this browser's choice.
   const [options, setOptions] = useState<Opened>(() => ({ all: readOptionsOpen(), except: new Set() }))
   // The prompt just added, whose text takes the focus as its editor mounts.
@@ -638,6 +650,8 @@ export function PromptDocument({
       })
       return () => cancelAnimationFrame(frame)
     }
+    // A new search target reveals once; folding a prompt must not replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchMatch])
   const root = useRef<HTMLDivElement>(null)
   const names = new Map(
@@ -664,10 +678,12 @@ export function PromptDocument({
     })
   }
   useEffect(() => {
-    if (!focus) return
-    const frame = requestAnimationFrame(() => jump(focus))
+    if (!focusedPrompt || focusedHere.current === focusedPrompt) return
+    const frame = requestAnimationFrame(() => jump(focusedPrompt))
     return () => cancelAnimationFrame(frame)
-  }, [focus])
+    // Only a new target scrolls; editing that prompt must not keep scrolling it back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedPrompt])
   useEffect(() => {
     if (!goTo) return
     // A warning's link is about the prompt's condition and generation types: its options open too.
@@ -676,6 +692,8 @@ export function PromptDocument({
       jump(goTo.identifier)
     })
     return () => cancelAnimationFrame(frame)
+    // Only a new warning navigation scrolls; expansion changes must not replay it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [goTo])
   const setOrder = (next: ReadonlyArray<PromptOrderEntry>) => writePresetOrder(store, next)
   const move = (from: number, to: number) => {
@@ -924,6 +942,16 @@ export function PromptDocument({
       // The user moved on before the new prompt's editor mounted (renaming it, say): its text
       // doesn't take the focus back. A menu handing focus back to its trigger isn't moving on.
       onFocusCapture={(event) => {
+        const id = (event.target as HTMLElement).closest<HTMLElement>("[data-prompt]")?.dataset.prompt
+        const target = event.target as HTMLElement
+        if (
+          id &&
+          id !== promptFocus &&
+          (target.matches("input, textarea, [contenteditable=true]") || target.shadowRoot !== null)
+        ) {
+          focusedHere.current = id
+          setPromptFocus(id, true)
+        }
         if (added === null || !(event.target instanceof HTMLElement)) return
         if (event.target.hasAttribute("aria-haspopup")) return
         const own = `[data-prompt="${CSS.escape(added)}"]`

@@ -140,7 +140,12 @@ export const useShowPanel = () => {
   const navigate = useNavigate()
   return useCallback(
     (panel: string) =>
-      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true }),
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({ ...prev, panel }),
+        state: (prev) => ({ ...prev, chatPanel: true }),
+        resetScroll: false
+      }),
     [navigate]
   )
 }

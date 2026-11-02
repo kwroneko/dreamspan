@@ -96,6 +96,10 @@ export class SummaryDraft {
     this.summary = summary
   }
 
+  get historyKey() {
+    return this.backupId
+  }
+
   readonly subscribe = (listener: () => void) => {
     this.listeners.add(listener)
     return () => {

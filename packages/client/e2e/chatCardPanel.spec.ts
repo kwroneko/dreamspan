@@ -266,7 +266,10 @@ for (const width of [1440, 390])
     await overlay.getByRole("button", { name: "Back to the chat", exact: true }).click()
     await expect(overlay).toHaveCount(0)
     // The same chat and fork; on a phone the sheet closed as the editor opened, as for a preset.
-    expect(page.url()).toBe(width === 390 ? url.replace(/\?panel=.*$/, "") : url)
+    expect(new URL(page.url()).pathname).toBe(new URL(url).pathname)
+    expect(new URL(page.url()).searchParams.has("fork")).toBe(true)
+    expect(new URL(page.url()).searchParams.get("panel")).toBe(width === 390 ? null : `card:${ref(name).entityId}`)
+    expect(new URL(page.url()).searchParams.has("editor")).toBe(false)
     await expect(page.getByLabel("Message", { exact: true })).toBeVisible()
   })
 

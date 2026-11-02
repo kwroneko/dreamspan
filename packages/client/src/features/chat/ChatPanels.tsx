@@ -1,7 +1,8 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 // The chat panel host: descriptors own its tabs and bodies; the host owns layout and retention.
 import type { EntityId, SlotId } from "@rp/shared/chat.ts"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
-import { useNavigate } from "@tanstack/react-router"
+import { useLocation, useNavigate, useRouter } from "@tanstack/react-router"
 import { Button } from "../../ui/Button.tsx"
 import { useSession } from "../../session.ts"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
@@ -22,6 +23,11 @@ import {
 import type { PendingChat } from "./pendingChat.ts"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    chatPanel?: boolean
+  }
+}
 
 // --- Whether the panel is open and at which tab: each user's choice in this browser, kept in
 // its storage under keys naming the user, so another account signing in here has its own.
@@ -175,7 +181,9 @@ export function ChatSidePanel({
   const userId = useSession().user.id
   const { width, min, max, change, reset } = usePanelWidth(userId, "chat", 416, 260, wide)
   const [visited, setVisited] = useState<ReadonlySet<PanelTab>>(() => new Set([tab]))
-  const [notesFocus, setNotesFocus] = useState<EntityId | null>(null)
+  const [notesCard, setNotesCard] = usePlaceParam("notesCard", "")
+  const notesFocus = (notesCard || null) as EntityId | null
+  const setNotesFocus = (next: EntityId) => setNotesCard(next, true)
   const notes = (card: EntityId) => {
     setNotesFocus(card)
     onTab("notes")
@@ -314,18 +322,42 @@ export function ChatSidePanel({
  */
 export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   const navigate = useNavigate()
+  const router = useRouter()
+  const [pathname] = useState(() => router.state.location.pathname)
   const wide = useWide()
   const userId = useSession().user.id
   // Each user's own, read again when another signs in.
   const [remembered, setRemembered] = useState(() => ({ userId, tab: rememberedPanel(userId) }))
   const rememberedTab = remembered.userId === userId ? remembered.tab : rememberedPanel(userId)
-  const candidate = urlPanel ?? (wide ? rememberedTab : null)
+  const explicit = useLocation({ select: (l) => l.state.chatPanel === true })
+  const candidate = urlPanel ?? (!explicit && wide ? rememberedTab : null)
   const panel = usePanelHere(candidate, view)
+  usePlaceNotice(
+    urlPanel !== null && view.cast !== null && panel !== urlPanel
+      ? "This panel is no longer available in this chat."
+      : null
+  )
   // The URL names the tab shown, so a refresh or a copied link keeps it.
   useEffect(() => {
-    if (panel !== null && panel !== urlPanel)
-      void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
-  }, [navigate, urlPanel, panel])
+    // Location state can update before the route's search props, and this component can
+    // still be mounted while another route opens. Never normalize either newer place
+    // from this render's old panel, or resolve a character tab before its cast loads.
+    const latestPanel = router.latestLocation.search.panel
+    if (
+      view.loading ||
+      router.latestLocation.pathname !== pathname ||
+      (isPanelTab(latestPanel) ? latestPanel : null) !== urlPanel
+    )
+      return
+    if (!explicit || panel !== urlPanel)
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({ ...prev, panel: panel ?? undefined }),
+        state: (prev) => ({ ...prev, chatPanel: true }),
+        replace: true,
+        resetScroll: false
+      })
+  }, [navigate, router, pathname, urlPanel, panel, explicit, view.loading])
   // What a call reads when it's made, so `show` stays the same function from tab to tab and as
   // the chat updates: the message rows, the composer and the header take it, and a new one
   // re-rendered every row on each tab switch (night/tabperf).
@@ -335,7 +367,7 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
   })
   const show = useCallback(
     (next: PanelTab | null) => {
-      if (next !== null && !isPanelTab(next, latest.current.view)) return
+      if (next === latest.current.panel || (next !== null && !isPanelTab(next, latest.current.view))) return
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
       void navigate({
@@ -343,15 +375,20 @@ export function usePanel(urlPanel: PanelTab | null, view: ChatView) {
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
           next === null ? prev : { ...prev, panel: next },
         // On a phone, opening the sheet is a step in the history, so Back closes it.
-        replace: wide || next === null || latest.current.urlPanel !== null
+        state: (prev) => ({ ...prev, chatPanel: true }),
+        replace: next === null,
+        resetScroll: false
       })
     },
-    [navigate, wide, userId]
+    [navigate, userId]
   )
   /** Search params that keep the panel's tab: the one shown when the call is made. */
-  const withPanel = useCallback((search: Record<string, string>) => {
-    const shown = latest.current.panel
-    return shown === null ? search : { ...search, panel: shown }
-  }, [])
+  const withPanel = useCallback(
+    (search: Record<string, string>) => {
+      const shown = latest.current.panel
+      return { ...router.state.location.search, ...search, panel: shown ?? undefined }
+    },
+    [router]
+  )
   return { panel, show, withPanel, wide, userId }
 }

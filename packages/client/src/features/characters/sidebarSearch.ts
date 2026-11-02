@@ -4,4 +4,13 @@
  * The panel reads them from the URL and nowhere else. Screens the panel's picks open register
  * them as `retainSearch`, so moving around inside such a screen keeps the panel where it is.
  */
-export const sidebarSearch = ["character", "forks", "side"] as const
+export const sidebarSearch = [
+  "character",
+  "forks",
+  "side",
+  "sideShow",
+  "sideSort",
+  "sideReverse",
+  "sideQ",
+  "sidePinsSort"
+] as const

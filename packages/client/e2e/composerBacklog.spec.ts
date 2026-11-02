@@ -81,8 +81,8 @@ for (const [width, theme, model, asCard] of [
     const shots = process.env.SCREENSHOT_DIR
     if (shots) await page.screenshot({ animations: "disabled", path: join(shots, `pending-${width}-${theme}.png`) })
     await box.press("Enter")
-    await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
-    const chatId = page.url().split("/chats/")[1]! as ChatId
+    await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
+    const chatId = new URL(page.url()).pathname.split("/chats/")[1]! as ChatId
     await expect(page.getByRole("button", { name: new RegExp(`^Speaking as ${selected}`) })).toBeVisible()
     await expect(page.getByRole("button", { name: "Stop the reply", exact: true })).toHaveCount(0)
     const entries = await rpc((api) => api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 }))

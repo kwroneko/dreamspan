@@ -120,9 +120,8 @@ for (const width of [1440, 390]) {
       .first()
       .click()
     await expect(page).toHaveURL(new RegExp(`/chats/${group.chat.id}`))
-    // Current-fork URLs are canonicalized after the path loads. Wait before
-    // opening phone sheets; neither the fork nor its temporary leaf stays in the URL.
-    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
+    // The resolved fork remains explicit; wait before opening phone sheets.
+    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBe(group.forkId)
     await expect.poll(() => new URL(page.url()).searchParams.get("leaf")).toBeNull()
     await expect(page.getByLabel("Message", { exact: true })).toBeEditable()
     if (width === 390 && (await page.getByRole("button", { name: "Close", exact: true }).isVisible()))
@@ -176,8 +175,8 @@ for (const width of [1440, 390]) {
     await page.goto(`${server().url}/chats/${group.chat.id}?fork=${await forkEndingAt(appended.entry.slotId)}`)
     await page.getByRole("button", { name: /not the one the chat opens on/ }).click()
     await page.getByRole("button", { name: "Back to the branch the chat opens on", exact: true }).click()
-    // The link names no fork: the chat's current one, which is where the newest branch went.
-    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBeNull()
+    // The current branch resolves to an explicit fork, so the link stays stable.
+    await expect.poll(() => new URL(page.url()).searchParams.get("fork")).toBe(newFork)
     await expect(page.getByRole("button", { name: /not the one the chat opens on/ })).toHaveCount(0)
     data = await admin((api) => api.GetShellLibrary())
   })

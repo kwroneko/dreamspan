@@ -69,7 +69,7 @@ const chatWithMira = async (page: Page) => {
   await pickPendingPersona(page, "Bo")
   await composer(page).fill("Hello there.")
   await page.getByRole("button", { name: "Send as Bo" }).click()
-  await expect(page).toHaveURL(/\/chats\/[^/?]+$/)
+  await expect(page).toHaveURL(/\/chats\/[^/?]+(?:\?.*)?$/)
   await expect(replies(page)).toHaveCount(2)
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   return page.url()
@@ -108,6 +108,13 @@ test("the Cast tab: mute, speak now, write as, the card, add and remove", async 
 
   // The name opens Mira's tab, where the card is edited.
   await member(page, "Mira").getByRole("button", { name: "Mira: open their card" }).click()
+  await expectTextBox(
+    page.getByRole("textbox", { name: "Description", exact: true }),
+    "A harbor pilot who reads the tides."
+  )
+  await page.goBack()
+  await expect(members(page)).toBeVisible()
+  await page.goForward()
   await expectTextBox(
     page.getByRole("textbox", { name: "Description", exact: true }),
     "A harbor pilot who reads the tides."
@@ -155,7 +162,8 @@ test("the full editor opens the card used everywhere over the chat, and goes bac
   const editor = page.getByRole("dialog", { name: "Card editor", exact: true })
   await expect(editor.getByText(/Used by \d+ chats?/)).toBeVisible()
   await expectTextBox(editor.getByRole("textbox", { name: "Description" }), "A harbor pilot who reads the tides.")
-  expect(page.url()).toBe(chat)
+  expect(new URL(page.url()).pathname).toBe(new URL(chat).pathname)
+  expect(new URL(page.url()).searchParams.has("editor")).toBe(true)
   await editor.getByRole("button", { name: "Back to the chat", exact: true }).click()
   await expect(editor).toHaveCount(0)
   expect(page.url()).toBe(chat)

@@ -1,3 +1,4 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
 import { messageRows, useTimelineTransforms } from "./timelineContributions.tsx"
 import { lcmCursor, positionOf } from "./position.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -18,7 +19,7 @@ import { useIsPanelTab } from "./panels.tsx"
 // anchored at the bottom, and the composer. Nothing here locks while replies generate.
 import { RegistryContext } from "@effect/atom-react"
 import type { ChatId, ForkId, PathEntry, SlotId } from "@rp/shared/chat.ts"
-import { useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { useLocation, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   useCallback,
@@ -34,6 +35,7 @@ import { Button } from "../../ui/Button.tsx"
 import { SkeletonMessages } from "./SkeletonMessages.tsx"
 import { Alert } from "../../ui/Surface.tsx"
 import { TooltipProvider } from "../../ui/Tooltip.tsx"
+import { showToast } from "../../ui/Toast.tsx"
 import { useLookingAt } from "../notices.tsx"
 import { useSession } from "../../session.ts"
 import { CastContext, castView } from "./cast.ts"
@@ -48,6 +50,17 @@ import { type ContextMark, Message } from "./Message.tsx"
 import { useRenderCount } from "./perf.ts"
 import { ChatSession, type ChatView } from "./session.ts"
 import { boundaryIndex, placeOf } from "./summaryBoundary.ts"
+
+interface ReadingPosition {
+  key: string
+  slot: SlotId | null
+  offset: number
+}
+declare module "@tanstack/react-router" {
+  interface HistoryState {
+    chatReading?: ReadingPosition
+  }
+}
 
 /** Load more history when the first or last rendered message is this close to the loaded edge. */
 const EDGE = 5
@@ -65,11 +78,13 @@ function MessageList({
   anchor,
   rail,
   onBranch,
-  onOpenSummaries
+  onOpenSummaries,
+  restore
 }: {
   session: ChatSession
   view: ChatView
   anchor: SlotId | null
+  restore: ReadingPosition | null
   rail: boolean
   onBranch: (entry: PathEntry, index: number) => void
   onOpenSummaries: (focus: string | null) => void
@@ -77,6 +92,9 @@ function MessageList({
   // TanStack Virtual's instance is mutable, which React Compiler's memoization can't see.
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const userId = useSession().user.id
+  const restored = useRef(false)
   const positioned = useRef(0)
   /** Paging waits until a new window is positioned: before that, the list renders from its top. */
   const settled = useRef(false)
@@ -225,7 +243,7 @@ function MessageList({
     let frame = 0
     let shown: Element | null = null
     const reveal = () => {
-      const article = list.querySelector(`article[data-slot="${anchor}"]`)
+      const article = list.querySelector(`article[data-slot="${CSS.escape(anchor)}"]`)
       if (!article || article === shown) return
       shown = article
       cancelAnimationFrame(frame)
@@ -323,6 +341,77 @@ function MessageList({
     if (follow.stuck && fromEnd > 1) virtualizer.scrollToEnd()
   })
 
+  useEffect(() => {
+    const list = parent.current
+    if (!list || !restore || restore.slot === null || restored.current || view.opened === 0) return
+    let frame = 0
+    const place = () => {
+      const article = list.querySelector<HTMLElement>(`article[data-slot="${CSS.escape(restore.slot!)}"]`)
+      if (!article) return
+      restored.current = true
+      hold(false)
+      virtualizer.scrollToOffset(
+        Math.max(
+          0,
+          list.scrollTop + article.getBoundingClientRect().top - list.getBoundingClientRect().top - restore.offset
+        )
+      )
+    }
+    frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(place)
+    })
+    const observer = new MutationObserver(() => {
+      if (!restored.current) place()
+    })
+    observer.observe(list, { childList: true, subtree: true })
+    const timer = setTimeout(() => {
+      place()
+      observer.disconnect()
+    }, 150)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+      observer.disconnect()
+    }
+  }, [restore, view.opened, hold, virtualizer])
+  useEffect(() => {
+    const list = parent.current
+    if (!list) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const save = () => {
+      if (!settled.current || !view.forkId) return
+      const bounds = list.getBoundingClientRect()
+      const bottom = view.newer === null && list.scrollHeight - list.scrollTop - list.clientHeight <= END_PX
+      const article = [...list.querySelectorAll<HTMLElement>("article[data-slot]")].find(
+        (el) => el.getBoundingClientRect().bottom > bounds.top
+      )
+      if (!bottom && !article) return
+      const reading: ReadingPosition = {
+        key: `${userId}/${session.id}/${view.forkId}`,
+        slot: bottom ? null : (article!.dataset.slot as SlotId),
+        offset: bottom ? 0 : article!.getBoundingClientRect().top - bounds.top
+      }
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => prev,
+        state: (prev) => ({ ...prev, chatReading: reading }),
+        replace: true,
+        resetScroll: false
+      })
+    }
+    const scroll = () => {
+      clearTimeout(timer)
+      timer = setTimeout(save, 200)
+    }
+    list.addEventListener("scroll", scroll, { passive: true })
+    window.addEventListener("pagehide", save)
+    return () => {
+      clearTimeout(timer)
+      list.removeEventListener("scroll", scroll)
+      window.removeEventListener("pagehide", save)
+    }
+  }, [navigate, session, userId, view.forkId, view.newer])
+
   const items = virtualizer.getVirtualItems()
   const first = items[0]?.index
   const last = items.at(-1)?.index
@@ -363,7 +452,7 @@ function MessageList({
         entry={entry}
         session={session}
         highlighted={entry.slotId === anchor || entry.slotId === view.highlight}
-        branchFork={view.forkId === view.chat?.currentForkId ? null : view.forkId}
+        branchFork={view.forkId}
         onBranch={onBranch}
       />
       <SlotOutlet slot={messageStream} props={{ entry, session, place: "below" }} />
@@ -422,32 +511,38 @@ function OpenChat({
 }) {
   const registry = useContext(RegistryContext)
   const userId = useSession().user.id
-  const [session] = useState(() => new ChatSession(chatId, fork, registry, userId))
+  const [session] = useState(() => new ChatSession(chatId, fork, registry, userId, (title) => showToast({ title })))
   useLookingAt(chatId)
   // The slot the chat opened at; a deep link within the open chat moves the window instead.
-  const [initialSlot] = useState(slot)
+  const reading = useLocation({ select: (l) => l.state.chatReading })
+  const [restore] = useState(() => (reading?.key === `${userId}/${chatId}/${fork}` ? reading : null))
+  const [initialSlot] = useState(restore ? restore.slot : slot)
   useEffect(() => {
     session.start(initialSlot)
     return () => session.dispose()
   }, [session, initialSlot])
-  return <ChatSurface session={session} fork={fork} slot={slot} panel={panel} />
+  return <ChatSurface session={session} fork={fork} slot={slot} panel={panel} restore={restore} />
 }
 
 function ChatSurface({
   session,
   fork,
   slot,
-  panel: urlPanel
+  panel: urlPanel,
+  restore
 }: {
   session: ChatSession
   fork: ForkId | null
   slot: SlotId | null
   panel: PanelTab | null
+  restore: ReadingPosition | null
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
   const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
   const shown = useRef({ fork, slot })
+  const [originalTarget] = useState({ fork, slot })
+  const reading = originalTarget.fork === fork && originalTarget.slot === slot ? restore : null
   // Another message or fork of the open chat moves the window; a URL catching up with
   // where the window already is doesn't.
   useEffect(() => {
@@ -462,19 +557,29 @@ function ChatSurface({
   useEffect(() => {
     if (view.deleted) void navigate({ to: "/chats", replace: true })
   }, [navigate, view.deleted])
-  // The URL names a fork only while it isn't the chat's current one: once sending there
-  // made it current, the URL drops it.
+  // Pin the viewed branch even when it is currently the chat's default.
   useEffect(() => {
-    if (fork !== null && view.forkId === fork && view.chat?.currentForkId === fork) {
-      void navigate({ to: ".", search: withPanel(slot === null ? {} : { slot }), replace: true })
-    }
-  }, [navigate, withPanel, fork, slot, view.forkId, view.chat])
+    if (
+      !session.snapshot().loading &&
+      view.forkId === session.snapshot().forkId &&
+      view.forkId !== null &&
+      fork !== view.forkId
+    )
+      void navigate({
+        to: ".",
+        search: (prev: Record<string, unknown>) => ({ ...prev, fork: view.forkId }),
+        replace: true,
+        resetScroll: false
+      })
+  }, [navigate, session, fork, view.forkId])
   // Rows read the cast from context: it's the same object until the cast changes.
   const cast = useMemo(() => castView(view.cast), [view.cast])
   /** Turning summaries on, which asks first what it costs. */
   const [enabling, setEnabling] = useState(false)
   /** The summary the panel opens at: one clicked on the rail, or none. */
-  const [focus, setFocus] = useState<string | null>(null)
+  const [summaryFocus, setSummaryFocus] = usePlaceParam("summary", "")
+  const focus = summaryFocus || null
+  const setFocus = useCallback((next: string | null) => setSummaryFocus(next ?? "", true), [setSummaryFocus])
   const { prefs } = useViewPrefs()
   const rail = prefs.coverageRail
   const openSummaries = useCallback(
@@ -482,7 +587,7 @@ function ChatSurface({
       setFocus(summaryId)
       show("summaries")
     },
-    [show]
+    [show, setFocus]
   )
   // Another branch (DESIGN §3.2): the window opens the fork through it, at the message
   // switched to, which the URL then names, with the fork unless it's the current one.
@@ -498,16 +603,14 @@ function ChatSurface({
       else
         void navigate({
           to: ".",
-          search: withPanel(
-            target === result.value.chat.currentForkId ? { slot: sibling } : { fork: target, slot: sibling }
-          )
+          search: withPanel({ fork: target, slot: sibling })
         })
     },
     [session, navigate, withPanel, slot]
   )
   const switchBranch = useCallback((entry: PathEntry, index: number) => void onBranch(entry, index), [onBranch])
   // A summary's range opens the window at its first message, as a link to that message does.
-  const branchFork = view.forkId === view.chat?.currentForkId ? null : view.forkId
+  const branchFork = view.forkId
   // Beside the chat the panel stays open; a phone's sheet closes to show the message.
   const jump = useCallback(
     (target: SlotId) => {
@@ -516,7 +619,14 @@ function ChatSurface({
       if (target === slot) {
         if (!wide) show(null)
         void session.open(target)
-      } else void navigate({ to: ".", search: wide ? withPanel(at) : at })
+      } else
+        void navigate({
+          to: ".",
+          search: wide ? withPanel(at) : at,
+          // A message link starts a fresh reading position and explicitly closes a phone's sheet.
+          state: ({ chatReading: _old, ...prev }) => ({ ...prev, chatPanel: true }),
+          resetScroll: false
+        })
     },
     [session, navigate, show, withPanel, wide, slot, branchFork, userId]
   )
@@ -584,7 +694,8 @@ function ChatSurface({
                 key={prefs.timeline}
                 session={session}
                 view={view}
-                anchor={slot}
+                anchor={reading ? reading.slot : slot}
+                restore={reading}
                 rail={rail}
                 onBranch={switchBranch}
                 onOpenSummaries={openSummaries}
@@ -623,7 +734,9 @@ export function ChatPage() {
   const search = useSearch({ strict: false }) as { fork?: unknown; slot?: unknown; panel?: unknown }
   const fork = typeof search.fork === "string" && search.fork !== "" ? (search.fork as ForkId) : null
   const slot = typeof search.slot === "string" ? (search.slot as SlotId) : null
-  const panel = useIsPanelTab(search.panel) ? (search.panel as string) : null
+  const validPanel = useIsPanelTab(search.panel)
+  usePlaceNotice(search.panel !== undefined && !validPanel ? "This panel is no longer available." : null)
+  const panel = validPanel ? (search.panel as string) : null
   return (
     <div data-fill className="flex min-h-0 flex-1 flex-col">
       <OpenChat key={chatId} chatId={chatId} fork={fork} slot={slot} panel={panel} />

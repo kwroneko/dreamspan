@@ -28,9 +28,8 @@ import {
 import { LcmBoundary } from "./LcmBoundary.tsx"
 import { CoverageRail } from "./CoverageRail.tsx"
 import { HistoryMessagePreview, HistorySummaryPreview, HistoryPreviewProvider } from "./historyPreview.tsx"
-import { PortraitProvider } from "../../ui/Portrait.tsx"
+import { ChatPortraitProvider } from "./ChatPortraitProvider.tsx"
 import { PortraitColumn } from "./PortraitColumn.tsx"
-import { castPortrait } from "./cast.ts"
 import { AssemblyRefusal } from "./AssemblyRefusal.tsx"
 import { LearnContextLimit } from "./LearnContextLimit.tsx"
 function deferred<P extends object>(load: () => Promise<{ default: ComponentType<P> }>) {
@@ -181,10 +180,10 @@ export const registerPresentation = () => [
   chatSurfaceProviders.register({
     id: "chat.portraits",
     order: 30,
-    component: ({ wide, cast, children }) => (
-      <PortraitProvider inline={wide} current={(portrait) => castPortrait(cast, portrait.id)}>
+    component: ({ wide, cast, view, children }) => (
+      <ChatPortraitProvider wide={wide} cast={cast} ready={view.cast !== null}>
         {children}
-      </PortraitProvider>
+      </ChatPortraitProvider>
     )
   }),
   chatColumns.register({ id: "chat.portrait-column", order: 10, component: PortraitColumn }),

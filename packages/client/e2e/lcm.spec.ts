@@ -193,6 +193,16 @@ for (const [name, viewport] of [
       else await expect(dialog).toBeVisible()
       await expect(page).toHaveURL(new RegExp(`slot=${fixture.entries[4]!.slotId}`))
       await expect(article(page, fixture, 5)).toHaveClass(/border-accent/)
+      if (name === "phone") {
+        await page.goBack()
+        await expect(children).toBeVisible()
+        await page.goForward()
+        await expect(dialog).toHaveCount(0)
+      } else {
+        await expect(children).toBeVisible()
+        await page.reload()
+        await expect(children).toBeVisible()
+      }
     })
 
     test("an edit goes through a draft and becomes a revision; any revision can be used again", async ({ page }) => {
@@ -209,7 +219,7 @@ for (const [name, viewport] of [
       // The draft is on the server: a reload offers it again, with the panel still open at it.
       await page.reload()
       await expect(dialog).toBeVisible()
-      await row.getByRole("button", { name: /Edit the summary of messages 1–8/ }).click()
+      // The summary editor is part of the URL, so its draft is open already.
       await expectTextBox(box, "The road flooded. Mira saved the ledger.")
       await dialog.getByRole("button", { name: "Save", exact: true }).click()
       await expect(row).toContainText("The road flooded. Mira saved the ledger.")

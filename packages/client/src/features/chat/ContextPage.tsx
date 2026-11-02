@@ -1,3 +1,4 @@
+import { usePlaceExpansion, usePlaceParam } from "../../usePlaceParam.ts"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import { tokenizerText } from "../editor/tokenCounts.ts"
 // The request inspector (DESIGN §7.4): the context one reply was generated from, as it was
@@ -341,7 +342,9 @@ function Message({
   /** The reuse line after it, and whether it's the only one. */
   reuse: { kind: Reuse; alone: boolean } | undefined
 }) {
-  const [raw, setRaw] = useState(false)
+  const [rawMode, changeRaw] = usePlaceParam(`requestText:${index}`, "parts", ["parts", "raw"])
+  const raw = rawMode === "raw"
+  const setRaw = (next: boolean) => changeRaw(next ? "raw" : "parts", true)
   const preview = message.content.length > PREVIEW ? `${message.content.slice(0, PREVIEW)}…` : message.content
   const sources = message.sources.filter((source) => !unsent(source))
   return (
@@ -559,12 +562,27 @@ function Messages({ run }: { run: RunContext }) {
   "use no memo"
   const parent = useRef<HTMLDivElement>(null)
   const all = () => new Set(run.messages.keys())
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(() =>
+  const defaultAll =
     run.messages.length <= OPEN_ALL.messages &&
     run.messages.reduce((sum, m) => sum + m.content.length, 0) <= OPEN_ALL.characters
-      ? all()
-      : new Set()
+  const [opened, setOpened] = usePlaceExpansion("turns", defaultAll)
+  const expanded: ReadonlySet<number> = new Set(
+    [...run.messages.keys()].filter((i) => opened.all !== opened.except.has(String(i)))
   )
+  const setExpanded = (change: ReadonlySet<number> | ((previous: ReadonlySet<number>) => ReadonlySet<number>)) => {
+    const next = typeof change === "function" ? change(expanded) : change
+    if (next.size === expanded.size && [...next].every((i) => expanded.has(i))) return
+    const allOpen = next.size === run.messages.length
+    const allClosed = next.size === 0
+    setOpened(
+      allOpen || allClosed
+        ? { all: allOpen, except: new Set() }
+        : {
+            all: opened.all,
+            except: new Set([...run.messages.keys()].filter((i) => opened.all !== next.has(i)).map(String))
+          }
+    )
+  }
   const [focused, setFocused] = useState<number | null>(null)
   // eslint-disable-next-line react-hooks/incompatible-library -- mutable instance; memoization is disabled above
   const virtualizer = useVirtualizer({

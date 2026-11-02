@@ -1,3 +1,6 @@
+import { usePlaceParam, usePlaceNotice } from "../../usePlaceParam.ts"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
 import { useUserDraft, UserDraftStatus } from "../editor/userDraft.tsx"
 import { DEFAULT_RESPONSE, DEFAULT_SAMPLERS, ModelSettings } from "@rp/shared/modelSettings.ts"
 import { Schema } from "effect"
@@ -750,7 +753,9 @@ function AddModelDialog({
 
 function ModelRow({ model, compat }: { model: Model; compat: ConnectionSectionProps["connection"]["compat"] }) {
   const hide = useAction()
-  const [editing, setEditing] = useState(false)
+  const [selectedModel, setSelectedModel] = usePlaceParam("model", "")
+  const editing = selectedModel === model.id
+  const setEditing = (on: boolean) => setSelectedModel(on ? model.id : "")
   const resolved = resolveModel(model.key, model.upstream, model.overrides, compat)
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
@@ -822,7 +827,17 @@ const refreshSummary = (refresh: ModelRefresh) =>
 
 export function ModelsSection({ connection }: ConnectionSectionProps) {
   const refresh = useAction()
-  const [includeHidden, setIncludeHidden] = useState(false)
+  const [hidden, setHidden] = usePlaceParam("models", "visible", ["visible", "all"])
+  const includeHidden = hidden === "all"
+  const setIncludeHidden = (on: boolean) => setHidden(on ? "all" : "visible", true)
+  const [selectedModel] = usePlaceParam("model", "")
+  const modelAtom = modelsAtom(connection.id, includeHidden || selectedModel !== "")
+  const modelList = useAtomValue(modelAtom)
+  usePlaceNotice(
+    selectedModel && AsyncResult.isSuccess(modelList) && !modelList.value.some((m) => m.id === selectedModel)
+      ? "This model is no longer available on this connection."
+      : null
+  )
   const [adding, setAdding] = useState(false)
   const [refreshed, setRefreshed] = useState<ModelRefresh | null>(null)
   return (
@@ -867,7 +882,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
         <Switch checked={includeHidden} onCheckedChange={setIncludeHidden}>
           Show hidden models
         </Switch>
-        <AsyncView atom={modelsAtom(connection.id, includeHidden)} loading="Loading models…">
+        <AsyncView atom={modelAtom} loading="Loading models…">
           {(models) =>
             models.length === 0 ? (
               <EmptyState title="No models">
@@ -875,9 +890,11 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
               </EmptyState>
             ) : (
               <ul className="flex flex-col divide-y divide-border" aria-label="Models">
-                {models.map((model) => (
-                  <ModelRow key={model.id} model={model} compat={connection.compat} />
-                ))}
+                {models
+                  .filter((model) => includeHidden || !model.hidden || model.id === selectedModel)
+                  .map((model) => (
+                    <ModelRow key={model.id} model={model} compat={connection.compat} />
+                  ))}
               </ul>
             )
           }
