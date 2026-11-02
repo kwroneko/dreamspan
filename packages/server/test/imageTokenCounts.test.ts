@@ -21,13 +21,25 @@ const pending = (connectionId: string, sha256 = hash): UncountedImages => ({
 })
 const user = "owner" as UserId
 
-const fixture = (count: Providers["Service"]["countImageTokens"]) => {
+const fixture = (
+  count: Providers["Service"]["countImageTokens"],
+  // Every connection counts through its own provider unless a test says otherwise.
+  choices: (connectionId: string) => string | null = (connectionId) => connectionId
+) => {
   const config = testConfig()
   const stored = new Map<string, number>()
+  const known = ["connection-a", "connection-b", "connection-c", "connection-d"]
   const layers = [
     Layer.succeed(AppConfig)(config),
     Layer.succeed(Providers)({ countImageTokens: count } as Providers["Service"]),
     Layer.succeed(Reader)({
+      GetTokenCounting: () =>
+        Effect.succeed(
+          known.flatMap((connectionId) => {
+            const via = choices(connectionId)
+            return via ? [{ connectionId, via }] : []
+          })
+        ),
       GetImageTokenCount: ({ sha256 }: { sha256: string }) => Effect.sync(() => stored.get(sha256) ?? null),
       GetMediaFile: ({ mediaId }: { mediaId: string }) =>
         Effect.succeed({ path: mediaPath(mediaId), mime: "image/png" })
@@ -106,3 +118,25 @@ it.effect("times out a stalled count and backs off instead of stranding the queu
     }).pipe(Effect.provide(h.layer))
   }).pipe(Effect.scoped)
 )
+
+it.live("passes no counting connection when the user chose none, and the one they chose otherwise", () => {
+  const asked: Array<string | null> = []
+  const h = fixture(
+    ({ via }) =>
+      Effect.sync(() => {
+        asked.push(via)
+        return null
+      }),
+    (connectionId) => (connectionId === "connection-b" ? "connection-c" : null)
+  )
+  return Effect.gen(function* () {
+    yield* storeMedia(h.config.dataDir, hash, Buffer.from("synthetic"))
+    const counts = yield* ImageTokenCounts
+    yield* counts.request(user, pending("connection-a"), () => {})
+    yield* eventually(() => asked.length === 1)
+    // A choice made later isn't held up by the rest the default's answer earned.
+    yield* counts.request(user, pending("connection-b"), () => {})
+    yield* eventually(() => asked.length === 2)
+    assert.deepStrictEqual(asked, [null, "connection-c"])
+  }).pipe(Effect.provide(h.layer), Effect.scoped)
+})

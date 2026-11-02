@@ -910,16 +910,27 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   GetTokenCounting: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* owner.api.SetTokenCounting({ connectionId: owner.connectionId, enabled: true })
-        assert.include(yield* owner.api.GetTokenCounting(), owner.connectionId)
-        assert.notInclude(yield* actor.api.GetTokenCounting(), owner.connectionId)
+        yield* owner.api.SetTokenCounting({ connectionId: owner.connectionId, via: owner.connectionId })
+        const mine = (yield* owner.api.GetTokenCounting()).map((choice) => choice.connectionId)
+        assert.include(mine, owner.connectionId)
+        const theirs = (yield* actor.api.GetTokenCounting()).flatMap((choice) => [choice.connectionId, choice.via])
+        assert.notInclude(theirs, owner.connectionId)
       })
   },
   SetTokenCounting: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        yield* refused(actor.api.SetTokenCounting({ connectionId: owner.connectionId, enabled: true }), "NotFound")
-        assert.notInclude(yield* actor.api.GetTokenCounting(), owner.connectionId)
+        yield* refused(
+          actor.api.SetTokenCounting({ connectionId: owner.connectionId, via: owner.connectionId }),
+          "NotFound"
+        )
+        // Nor can another user's connection count for one's own: it would send to their provider.
+        yield* refused(
+          actor.api.SetTokenCounting({ connectionId: actor.connectionId, via: owner.connectionId }),
+          "NotFound"
+        )
+        const theirs = (yield* actor.api.GetTokenCounting()).flatMap((choice) => [choice.connectionId, choice.via])
+        assert.notInclude(theirs, owner.connectionId)
       })
   },
   GetGenerationDefaults: {

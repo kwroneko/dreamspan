@@ -57,6 +57,8 @@ export const generateReply = (
     readonly approveRegex?: boolean
     /** More of Mira's card: her regex scripts, say. */
     readonly mira?: Partial<CardDoc>
+    /** The connection's Token counts set to its own provider (off by default, DESIGN §11). */
+    readonly countWithProvider?: boolean
   }
 ) =>
   Effect.gen(function* () {
@@ -75,6 +77,7 @@ export const generateReply = (
       },
       ...(options.connection.apiKey ? { apiKey: options.connection.apiKey } : {})
     })
+    if (options.countWithProvider) yield* api.SetTokenCounting({ connectionId: connection.id, via: connection.id })
     const model = yield* api.AddUserModel({
       connectionId: connection.id,
       key: options.modelKey ?? "mock-model",

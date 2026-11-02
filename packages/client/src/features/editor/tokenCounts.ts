@@ -85,16 +85,19 @@ const subscribe = (listener: () => void) => {
 }
 
 /** The chat model, as the cache's key: counts follow it when it changes. */
-/** The connections whose provider may count (`GetTokenCounting`): their counts are cached apart. */
+/** How each connection counts (`GetTokenCounting`): counts by each way are cached apart. */
 const countingAtom = AppClient.query("GetTokenCounting", undefined, { reactivityKeys: ["settings"] })
 
-/** The chat model, and whether its provider counts, as the cache's key: counts follow both. */
+/** The chat model, and which connection counts for it, as the cache's key: counts follow both. */
 const useModelKey = () => {
   const defaults = useAtomValue(defaultsAtom)
   const counting = useAtomValue(countingAtom)
   const model = AsyncResult.isSuccess(defaults) ? defaults.value.model : null
-  const provider = AsyncResult.isSuccess(counting) && model !== null && counting.value.includes(model.connection)
-  return model ? `${model.connection}/${model.model}/${provider ? "provider" : "local"}` : "none"
+  const via =
+    AsyncResult.isSuccess(counting) && model !== null
+      ? counting.value.find((choice) => choice.connectionId === model.connection)?.via
+      : undefined
+  return model ? `${model.connection}/${model.model}/${via ?? "local"}` : "none"
 }
 
 export interface TokenCounts {

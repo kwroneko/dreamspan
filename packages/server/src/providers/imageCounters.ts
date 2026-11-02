@@ -26,6 +26,11 @@ interface ImageCountRequest extends ListRequest {
  */
 export interface ImageTokenCounter {
   readonly id: string
+  /**
+   * Sends the image to a provider. Such a counter runs only through a connection the user chose
+   * to count with (DESIGN §11); a local one (a plugin's formula, say) counts without asking.
+   */
+  readonly remote: boolean
   readonly appliesTo: (target: RequestTarget & { readonly model: string; readonly baseUrl: string }) => boolean
   readonly count: (request: ImageCountRequest) => Effect.Effect<number, TokenCountError>
 }
@@ -71,6 +76,7 @@ const TEXT = "."
 
 const anthropic: ImageTokenCounter = {
   id: "anthropic-count-tokens",
+  remote: true,
   appliesTo: (target) => target.api === "anthropic-messages",
   count: (request) => {
     const auth = { "x-api-key": request.apiKey ?? "", "anthropic-version": "2023-06-01" }
@@ -92,6 +98,7 @@ const anthropic: ImageTokenCounter = {
 
 const google: ImageTokenCounter = {
   id: "google-count-tokens",
+  remote: true,
   appliesTo: (target) => target.api === "google-generative-ai",
   count: (request) => {
     const auth: Record<string, string> = request.apiKey ? { "x-goog-api-key": request.apiKey } : {}
@@ -111,6 +118,7 @@ const google: ImageTokenCounter = {
 /** Only OpenAI's own API has the endpoint; Chat Completions connections to it share the count. */
 const openai: ImageTokenCounter = {
   id: "openai-input-tokens",
+  remote: true,
   appliesTo: (target) =>
     (target.api === "openai-responses" || target.kind === "openai-chat") &&
     URL.canParse(target.baseUrl) &&

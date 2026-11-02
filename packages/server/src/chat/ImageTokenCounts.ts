@@ -2,11 +2,16 @@
 // of an open chat holds images its model hasn't counted (an image was sent, or the model
 // changed), the cache-warmth estimate hands them here; each is counted once per content hash,
 // model and detail, stored, and the chat's estimate is made again. Sends never wait for it.
+// A provider's counting endpoint gets an image only where the user chose one in the chat
+// connection's Token counts setting (owner, 2026-11-02: "NEVER send anything to providers users
+// didn't actually choose to"; DESIGN §11). Otherwise only a local counter can count, and the
+// estimate keeps its formula, calibration or unknown basis.
 import type { UserId } from "@rp/shared/domain.ts"
 import type { ConnectionId } from "@rp/shared/providers.ts"
 import { Context, Effect, FiberSet, Layer, Semaphore } from "effect"
 import { AppConfig } from "../config.ts"
 import { Reader, Writer } from "../db/Database.ts"
+import { countingVia } from "../db/tokenCounting.ts"
 import { readMedia } from "../importer/mediaFiles.ts"
 import { Providers } from "../providers/Providers.ts"
 
@@ -41,7 +46,12 @@ export class ImageTokenCounts extends Context.Service<
       const resting = new Map<string, number>()
       const rests = (key: string) => (resting.get(key) ?? 0) > Date.now()
 
-      const countOne = (userId: UserId, pending: UncountedImages, image: UncountedImages["images"][number]) =>
+      const countOne = (
+        userId: UserId,
+        pending: UncountedImages,
+        via: ConnectionId | null,
+        image: UncountedImages["images"][number]
+      ) =>
         Effect.gen(function* () {
           const cached = yield* reader.GetImageTokenCount({
             userId,
@@ -59,7 +69,8 @@ export class ImageTokenCounts extends Context.Service<
             connectionId: pending.connectionId as ConnectionId,
             modelKey: pending.modelKey,
             image: { data: bytes.toString("base64"), mimeType: file.mime },
-            detail: pending.detail
+            detail: pending.detail,
+            via
           })
           if (tokens === null) return "no-counter" as const
           if (!Number.isSafeInteger(tokens) || tokens <= 0) return "failed" as const
@@ -76,14 +87,21 @@ export class ImageTokenCounts extends Context.Service<
 
       return ImageTokenCounts.of({
         request: (userId, pending, counted) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
+            const via = countingVia(
+              yield* reader.GetTokenCounting({ userId }).pipe(Effect.orElseSucceed(() => [])),
+              pending.connectionId
+            )
             for (const [key, until] of resting) if (until <= Date.now()) resting.delete(key)
             if (resting.size > 4096) return
             const model = `${userId}\n${pending.kind}\n${pending.modelKey}`
-            if (rests(model)) return
+            // What failed, or had nothing to count it, rests apart for each way of counting: a
+            // choice made in the connection's settings is tried at once.
+            const way = `${model}\n${via ?? "local"}`
+            if (rests(way)) return
             const todo = pending.images.filter((image) => {
               const key = `${model}\n${pending.detail}\n${image.sha256}`
-              if (busy.size >= 128 || busy.has(key) || rests(key)) return false
+              if (busy.size >= 128 || busy.has(key) || rests(`${way}\n${pending.detail}\n${image.sha256}`)) return false
               busy.add(key)
               return true
             })
@@ -95,7 +113,7 @@ export class ImageTokenCounts extends Context.Service<
                 for (const image of todo) {
                   const key = `${model}\n${pending.detail}\n${image.sha256}`
                   const outcome = yield* Effect.suspend(() =>
-                    rests(model) ? Effect.succeed("no-counter" as const) : countOne(userId, pending, image)
+                    rests(way) ? Effect.succeed("no-counter" as const) : countOne(userId, pending, via, image)
                   ).pipe(
                     Effect.timeout("30 seconds"),
                     gate.withPermits(1),
@@ -108,9 +126,10 @@ export class ImageTokenCounts extends Context.Service<
                     Effect.ensuring(Effect.sync(() => busy.delete(key)))
                   )
                   if (outcome === "counted") stored = true
-                  else if (outcome === "failed") resting.set(key, Date.now() + RETRY_MS)
+                  else if (outcome === "failed")
+                    resting.set(`${way}\n${pending.detail}\n${image.sha256}`, Date.now() + RETRY_MS)
                   else {
-                    resting.set(model, Date.now() + RETRY_MS)
+                    resting.set(way, Date.now() + RETRY_MS)
                     break
                   }
                 }

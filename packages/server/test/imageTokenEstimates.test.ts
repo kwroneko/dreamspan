@@ -212,6 +212,8 @@ describe("image token estimates", () => {
         },
         apiKey: "sk-synthetic"
       })
+      // The user chose to count with this connection's provider (off by default, DESIGN §11).
+      yield* api.SetTokenCounting({ connectionId: connection.id, via: connection.id })
       const model = yield* api.AddUserModel({
         connectionId: connection.id,
         key: "claude-opus-4-7",
@@ -312,7 +314,8 @@ describe("image token estimates", () => {
         modelKey: "claude-opus-4-7",
         model: { vision: true },
         content: "Describe it.",
-        images: [image]
+        images: [image],
+        countWithProvider: true
       })
       assert.strictEqual(generated.version.status, "complete", JSON.stringify(generated.version.error))
       // The send itself used the formula: counting never ran before it.

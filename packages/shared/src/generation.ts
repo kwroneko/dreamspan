@@ -3,6 +3,7 @@ import { LcmDefaults, LcmSettingsChange, ModelChoice } from "./lcmSettings.ts"
 // model and a default preset, both the user's own.
 import { Schema } from "effect"
 import { RefId } from "./library.ts"
+import { ConnectionId } from "./providers.ts"
 
 /** How the built-in prompt preset is named, apart from an imported preset that ST also calls Default. */
 export const BUILTIN_PRESET_LABEL = "Default (built-in)"
@@ -48,6 +49,15 @@ export class TokenizerInfo extends Schema.Class<TokenizerInfo>("TokenizerInfo")(
   exact: Schema.Boolean,
   note: Schema.optionalKey(Schema.String)
 }) {}
+
+/**
+ * How one of the user's connections counts tokens (owner, 2026-11-02: "NEVER send anything to
+ * providers users didn't actually choose to"; DESIGN §11). A connection with no entry counts on
+ * this server (the default). `via` is the connection whose provider receives the text and images
+ * being counted: the connection itself, or another of the user's, used only for counting.
+ */
+export const TokenCountingChoice = Schema.Struct({ connectionId: ConnectionId, via: ConnectionId })
+export type TokenCountingChoice = typeof TokenCountingChoice.Type
 
 /** How many texts one `CountTokens` takes, and how long each may be. */
 export const COUNT_TOKENS_TEXTS = 64

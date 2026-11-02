@@ -46,6 +46,7 @@ import {
   COUNT_TOKENS_TEXTS,
   GenerationDefaults,
   GenerationDefaultsChange,
+  TokenCountingChoice,
   TokenizerInfo
 } from "./generation.ts"
 import { LlmRequest } from "./usage.ts"
@@ -335,14 +336,19 @@ export class AppApi extends RpcGroup.make(
     error: ServerError
   }),
   /**
-   * The user's connections whose provider may count the editors' text (owner, 2026-11-02: off
-   * by default, since it sends the text to that provider).
+   * The user's connections whose token counts (editors' text, the next request's images) go
+   * to a provider, and to which connection's (owner, 2026-11-02: off by default, since it sends
+   * the text and images to that provider). A connection not listed counts on this server.
    */
-  Rpc.make("GetTokenCounting", { success: Schema.Array(ConnectionId), error: ServerError }),
-  /** Turns a connection's provider counting on or off; NotFound when it isn't the user's. */
+  Rpc.make("GetTokenCounting", { success: Schema.Array(TokenCountingChoice), error: ServerError }),
+  /**
+   * Sets how a connection counts: `via` null counts on this server, else through that
+   * connection's provider (the connection itself or another of the user's). NotFound when
+   * either isn't the user's.
+   */
   Rpc.make("SetTokenCounting", {
-    payload: { connectionId: ConnectionId, enabled: Schema.Boolean },
-    success: Schema.Array(ConnectionId),
+    payload: { connectionId: ConnectionId, via: Schema.NullOr(ConnectionId) },
+    success: Schema.Array(TokenCountingChoice),
     error: Schema.Union([NotFound, ServerError])
   }),
   /** Both defaults at once; NotFound when either isn't one of the user's own. */
