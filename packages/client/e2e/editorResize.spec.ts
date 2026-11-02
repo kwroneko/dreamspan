@@ -112,6 +112,11 @@ for (const kind of ["lorebook", "preset", "card"] as const) {
     await expect(editor).toBeVisible()
     // This is the coexistence that fails at the breakpoint: both surfaces mounted at 1024.
     await expect(panel).toBeVisible()
+    if (kind === "lorebook") {
+      // Each view keeps its own expansion; exercise resize with both sets open.
+      await expect(editor.getByRole("textbox", { name: "Entry content", exact: true })).toHaveCount(0)
+      await editor.getByRole("button", { name: "Expand all", exact: true }).click()
+    }
     const field = editor
       .getByRole("textbox", {
         name: kind === "lorebook" ? "Entry content" : kind === "preset" ? "Prompt: Main Prompt" : "Description",
