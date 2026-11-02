@@ -220,8 +220,8 @@ export function ChatSidePanel({
           hidden={t.value !== tab}
           className="@container min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
         >
-          {/* A readable width for forms and prose, unless the tab lays itself out in columns. */}
-          <div className={t.descriptor.width === "full" ? "" : "max-w-[52rem]"}>
+          {/* The panel's whole width, its text at a readable measure (styles.css), unless the tab asks for less. */}
+          <div data-measure className={t.descriptor.width === "readable" ? "max-w-[52rem]" : ""}>
             <PanelContent
               key={t.descriptor.id}
               descriptor={t.descriptor}

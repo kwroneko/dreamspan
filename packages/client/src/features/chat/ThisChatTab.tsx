@@ -175,7 +175,11 @@ export function ChatIdentity({ session }: { session: ChatSession }) {
       >
         {chatDisplayName(view)}
       </h2>
-      <div role="group" aria-label="Your persona" className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div
+        role="group"
+        aria-label="Your persona"
+        className="flex max-w-controls flex-wrap items-center gap-x-3 gap-y-2"
+      >
         {persona && (
           <Avatar
             id={persona.entityId}

@@ -4,7 +4,7 @@
 // window shows narrower and comes back on a bigger one; a short window narrows the columns
 // before the middle; the sidebar hides and comes back from the header. What lives in the
 // columns uses a wide column sensibly: no control stretched across it. Every card is made up.
-import { mkdirSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import type { EntityId } from "@rp/shared/chat.ts"
@@ -98,6 +98,19 @@ test.beforeAll(async ({ browser }) => {
     })
   )
   chatId = started.chat.id
+  // A preset to show in the Prompt preset tab: the ST default's prompts.
+  const presetPage = await browser.newPage()
+  await apiLogin(presetPage.request, server(), ADMIN.handle, ADMIN.password)
+  const preset = readFileSync(new URL("../../server/test/fixtures/presets/default.json", import.meta.url))
+  const uploaded = await presetPage.request.post(`${server().url}/library/import?name=Harbor%20preset.json`, {
+    data: preset,
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(uploaded.status()).toBe(200)
+  await presetPage.close()
+  const presets = await admin((api) => api.ListLibrary({ kind: "preset" }))
+  const harbor = presets.find((r) => r.label === "Harbor preset")!
+  await admin((api) => api.ChangeGenerationDefaults({ change: { preset: harbor.id } }))
 })
 test.afterAll(async () => {
   await provider?.stop()
@@ -309,8 +322,8 @@ for (const theme of ["light", "dark"] as const)
     await expect(page.getByRole("button", { name: "Show the sidebar", exact: true })).toHaveCount(0)
   })
 
-/** The controls in `scope` wider than `max` px: buttons, inputs, selects and switches. */
-const wideControls = (scope: Locator, max: number, selector = CONTROLS) =>
+/** The controls in `scope` wider than `max` px: buttons, dropdowns and switches by default. */
+const wideControls = (scope: Locator, max: number, selector = GROUPED) =>
   scope.locator(selector).evaluateAll(
     (nodes, limit) =>
       nodes
@@ -322,11 +335,60 @@ const wideControls = (scope: Locator, max: number, selector = CONTROLS) =>
         .filter((n) => n.width > limit),
     max
   )
-const CONTROLS = "button, input:not([type=checkbox]):not([type=radio]), select, [role=combobox], [role=switch]"
+/**
+ * What stays a control's width however wide the panel: buttons (but a disclosure's heading,
+ * which spans its section, and the preset's dashed Add a prompt bar under its list), dropdowns
+ * and switches. Text fields and editors take the whole width.
+ */
+const GROUPED =
+  'button:not([aria-expanded]):not([aria-label="Add a prompt at the end"]), select, [role=combobox]:not(input), [role=switch]'
 
-/** A tab body's readable width (ChatPanels.tsx): 52rem. */
-const READABLE = 832
+/** A row of controls that belong together (`max-w-controls`, styles.css): 40rem. */
+const GROUP = 640
 const TABS = ["This chat", "Cast", "Model", "Lorebooks", "Notes", "Summaries", "Display", "Snippets", "Mira"]
+
+/** The paragraphs in `scope` with a line longer than 80 characters of their own type. */
+const longLines = (scope: Locator) =>
+  scope.locator("p").evaluateAll((nodes) =>
+    nodes
+      .filter((n) => (n as HTMLElement).offsetParent !== null)
+      .flatMap((n) => {
+        const probe = document.createElement("span")
+        probe.style.cssText = "position:absolute;visibility:hidden;width:80ch"
+        n.append(probe)
+        const measure = probe.getBoundingClientRect().width
+        probe.remove()
+        const width = n.getBoundingClientRect().width
+        return width > measure + 1
+          ? [`${Math.round(width)} > ${Math.round(measure)}: ${n.textContent?.slice(0, 40)}`]
+          : []
+      })
+  )
+
+/** How many of a grid's items share its first row. */
+const firstRow = (grid: Locator) =>
+  grid.locator(":scope > *").evaluateAll((nodes) => {
+    const tops = nodes.map((n) => Math.round(n.getBoundingClientRect().top))
+    return tops.filter((top) => top === tops[0]).length
+  })
+
+const openTab = async (page: Page, tab: string) => {
+  await panelTab(page, tab)
+  const body = page.getByRole("tabpanel", { name: tab })
+  await expect(body).toBeVisible()
+  // Loaded: its lazy code and its reads.
+  await expect(body.getByText(/^(Loading|Still loading)/)).toHaveCount(0, { timeout: 30_000 })
+  return body
+}
+
+/** Cast's Add characters, opened, and its grid of tiles. */
+const addGrid = async (body: Locator) => {
+  const add = body.getByRole("button", { name: "Add characters", exact: true })
+  if ((await add.getAttribute("aria-expanded")) === "false") await add.click()
+  const grid = body.getByLabel("Characters", { exact: true })
+  await expect(grid.getByRole("button", { name: /Lantern keeper 1\b/ }).first()).toBeVisible({ timeout: 30_000 })
+  return grid
+}
 
 for (const theme of ["light", "dark"] as const)
   test(`the panel's tabs at 1000 px and the sidebar at 700 px use the width sensibly (${theme})`, async ({ page }) => {
@@ -335,12 +397,9 @@ for (const theme of ["light", "dark"] as const)
     expect(await resizeTo(page, "Resize chat panel", 1000)).toBe(1000)
     expect(await resizeTo(page, "Resize sidebar", 700)).toBe(700)
     for (const tab of TABS) {
-      await panelTab(page, tab)
-      const body = page.getByRole("tabpanel", { name: tab })
-      await expect(body).toBeVisible()
-      // Loaded: its lazy code and its reads.
-      await expect(body.getByText(/^(Loading|Still loading)/)).toHaveCount(0, { timeout: 30_000 })
-      expect.soft(await wideControls(body, READABLE), tab).toEqual([])
+      const body = await openTab(page, tab)
+      expect.soft(await wideControls(body, GROUP), tab).toEqual([])
+      expect.soft(await longLines(body), tab).toEqual([])
       await shoot(page, `panel-${tab.toLowerCase().replace(/ /g, "-")}-1000-${theme}`)
     }
     // Model: its numbers four a row, each a number's width, not half the panel.
@@ -360,7 +419,7 @@ for (const theme of ["light", "dark"] as const)
 
     // The sidebar's chats: one column, the rows using the width for their text.
     const sidebar = page.getByRole("complementary", { name: "Sidebar" })
-    expect(await wideControls(sidebar, 640, "button")).toEqual([])
+    expect(await wideControls(sidebar, GROUP, "button")).toEqual([])
     await shoot(page, `sidebar-700-chats-${theme}`)
     // Its characters: more tiles a row as it widens.
     await sidebar.getByRole("group", { name: "Left panel" }).getByRole("button", { name: "Characters" }).click()
@@ -377,17 +436,112 @@ for (const theme of ["light", "dark"] as const)
     await sidebar.getByRole("group", { name: "Left panel" }).getByRole("button", { name: "Chats" }).click()
   })
 
-test("a panel dragged to 1400 px keeps its controls at their widths (3840px)", async ({ page }) => {
+// The owner's report (2026-11-02): the right panel's tabs stopped at a fixed width with the
+// rest empty. Dragged to 1700 px, fields and grids use it all, what belongs together stays
+// together, and text keeps a readable line.
+test("a panel dragged to 1700 px uses its width: fields and grids widen, groups stay together (3840px)", async ({
+  page
+}) => {
+  // Every tab, then the grid at two widths, on the window's 4K: a loaded host needs the time.
+  test.setTimeout(360_000)
   await open(page, 3840, 2160)
   await openPanel(page, "This chat")
-  expect(await resizeTo(page, "Resize chat panel", 1400)).toBe(1400)
+  expect(await resizeTo(page, "Resize chat panel", 1700)).toBe(1700)
   for (const tab of TABS) {
-    await panelTab(page, tab)
-    const body = page.getByRole("tabpanel", { name: tab })
-    await expect(body).toBeVisible()
-    expect.soft(await wideControls(body, READABLE), tab).toEqual([])
+    const body = await openTab(page, tab)
+    expect.soft(await wideControls(body, GROUP), tab).toEqual([])
+    expect.soft(await longLines(body), tab).toEqual([])
   }
+  // The card's fields: the whole width, no empty band beside them.
+  const mira = await openTab(page, "Mira")
+  const description = mira.getByRole("textbox", { name: "Description", exact: true })
+  await expect(description).toBeVisible()
+  expect(await width(description)).toBeGreaterThan(1600)
+  // Cast: who you play and its Switch together; Add characters' tiles as many a row as fit.
+  const cast = await openTab(page, "Cast")
+  expect(await width(cast.getByRole("group", { name: "Your persona" }))).toBeLessThanOrEqual(GROUP)
+  const grid = await addGrid(cast)
+  const wide = await firstRow(grid)
+  expect(wide).toBeGreaterThanOrEqual(10)
+  // The search and the filter bar stay a bar's width above it.
+  expect(await width(cast.getByRole("searchbox", { name: "Find a character to add" }))).toBeLessThanOrEqual(GROUP)
+  // Model: a limit's pencil beside its figure, not at the far edge.
+  const model = await openTab(page, "Model")
+  const pencil = (await model.getByRole("button", { name: "Set the context window yourself" }).boundingBox())!
+  const panel = (await page.getByRole("complementary", { name: "Chat panel" }).boundingBox())!
+  expect(pencil.x - panel.x).toBeLessThanOrEqual(GROUP + 40)
   await noSideScroll(page)
-  await panelTab(page, "Notes")
-  await shoot(page, "panel-notes-1400-3840")
+  // Narrower, fewer tiles a row: the grid follows the panel.
+  await resizeTo(page, "Resize chat panel", 800)
+  await panelTab(page, "Cast")
+  await expect.poll(() => firstRow(grid)).toBeLessThan(wide)
+  expect(await firstRow(grid)).toBeGreaterThanOrEqual(4)
 })
+
+const SWEEP = [...TABS.slice(0, 3), "Prompt preset", ...TABS.slice(3), "History edits", "Juniper"]
+const CARD_TABS = ["Greetings", "Metadata", "Lorebook", "Notes", "Extra"]
+
+// Screens for review (RP_SCREENS): every tab at 400, 800, 1200, 1700 and 2400 px with its
+// card's tabs, the sidebar from 320 to 1700 px, and each tab on a phone, in both themes.
+for (const theme of ["light", "dark"] as const)
+  test(`screens of every tab at each width (${theme})`, async ({ page }) => {
+    test.skip(!shots, "Screenshot capture requested through RP_SCREENS")
+    test.setTimeout(1_800_000)
+    const slug = (s: string) => s.toLowerCase().replace(/ /g, "-")
+    await open(page, 3840, 1400, theme)
+    // A lorebook in this chat, open below the list.
+    const lore = await openPanel(page, "Lorebooks")
+    const inChat = lore.getByRole("list", { name: "Lorebooks in this chat" })
+    // The other theme's run added it already: wait for the list before deciding.
+    const none = lore.getByText("No lorebook is in this chat.")
+    await expect(inChat.or(none).first()).toBeVisible()
+    if (await none.isVisible()) {
+      await lore.getByRole("button", { name: "Add a lorebook" }).click()
+      await lore.getByRole("searchbox").fill("harbor")
+      await lore
+        .getByRole("list", { name: "Lorebooks to add" })
+        .getByRole("button", { name: /Harbor lore/ })
+        .click()
+    }
+    await inChat
+      .getByRole("button", { name: /Harbor lore/ })
+      .first()
+      .click()
+    for (const w of [400, 800, 1200, 1700, 2400]) {
+      expect(await resizeTo(page, "Resize chat panel", w)).toBe(w)
+      for (const tab of SWEEP) {
+        const body = await openTab(page, tab)
+        if (tab === "Cast") await addGrid(body)
+        await shoot(page, `panel-${slug(tab)}-${w}-${theme}`)
+        if (tab === "Mira" || tab === "Juniper") {
+          for (const sub of CARD_TABS) {
+            await body.getByRole("tab", { name: sub, exact: true }).first().click()
+            await shoot(page, `panel-${slug(tab)}-${slug(sub)}-${w}-${theme}`)
+          }
+          await body.getByRole("tab", { name: "Definition", exact: true }).first().click()
+        }
+      }
+      await noSideScroll(page)
+    }
+    await handle(page, "Resize chat panel").dblclick()
+    const sidebar = page.getByRole("complementary", { name: "Sidebar" })
+    const left = sidebar.getByRole("group", { name: "Left panel" })
+    for (const w of [320, 800, 1200, 1700]) {
+      expect(await resizeTo(page, "Resize sidebar", w)).toBe(w)
+      await left.getByRole("button", { name: "Chats" }).click()
+      await shoot(page, `sidebar-chats-${w}-${theme}`)
+      await left.getByRole("button", { name: "Characters" }).click()
+      await expect(sidebar.getByRole("button", { name: /^Open Mira/ })).toBeVisible()
+      await shoot(page, `sidebar-characters-${w}-${theme}`)
+    }
+    await left.getByRole("button", { name: "Chats" }).click()
+    // A phone: the panel is a sheet over the chat.
+    await page.setViewportSize({ width: 390, height: 844 })
+    for (const tab of SWEEP) {
+      const body = await openPanel(page, tab)
+      await expect(body.getByText(/^(Loading|Still loading)/)).toHaveCount(0, { timeout: 30_000 })
+      if (tab === "Cast") await addGrid(body)
+      await shoot(page, `phone-${slug(tab)}-390-${theme}`)
+      await noSideScroll(page)
+    }
+  })
