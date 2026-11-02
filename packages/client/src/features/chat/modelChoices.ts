@@ -2,7 +2,8 @@
 import type { Connection, Model } from "@rp/shared/providers.ts"
 import { Cause, Effect, Exit } from "effect"
 import { useEffect, useState } from "react"
-import { useAction } from "../../actions.tsx"
+import { type ActionResult, useAction } from "../../actions.tsx"
+import { useSession } from "../../session.ts"
 import { describeCause } from "../../errors.ts"
 import type { AppClient } from "../../rpc.ts"
 
@@ -97,9 +98,21 @@ export const readModelChoices = (client: AppClient["Service"]) =>
  * on `retry`. Each connection is read on its own, so one that fails (or times out) leaves
  * the others' models listed and is named in `failed`.
  */
+/**
+ * The last read, each user's, and the one under way: the composer's chip and the Model tab
+ * mount together, and every chat opened mounts them again. Each shows the last read at once
+ * and has it read again behind it, one read for all of them (night/tabperf: each mount read
+ * every connection's models anew, the provider's list for each).
+ */
+const lastReads = new Map<string, Read>()
+let reading: { readonly userId: string; readonly done: Promise<ActionResult<Read>> } | null = null
+
 export function useModelChoiceList(enabled: boolean, current: string | null = null): ModelChoiceList {
   const action = useAction()
-  const [read, setRead] = useState<Read | null>(null)
+  const userId = useSession().user.id
+  const [ownRead, setRead] = useState<Read | null>(null)
+  // Until this one's read lands, the last read, if there is one.
+  const read = ownRead ?? (enabled ? (lastReads.get(userId) ?? null) : null)
   const missing = read !== null && current !== null && !read.models.some((model) => model.value === current)
   // A model missing from the list is looked for once more, not on every render.
   const [lookedFor, setLookedFor] = useState<string | null>(null)
@@ -108,12 +121,18 @@ export function useModelChoiceList(enabled: boolean, current: string | null = nu
   useEffect(() => {
     if (!enabled) return
     let live = true
-    void action
-      .run((client) => readModelChoices(client))
-      .then((result) => {
-        if (!live) return
-        setRead(result.ok ? result.value : { models: [], connections: 0, failed: [], error: result.error.message })
+    if (reading === null || reading.userId !== userId) {
+      const done = action.run((client) => readModelChoices(client))
+      reading = { userId, done }
+      void done.then((result) => {
+        if (reading?.done === done) reading = null
+        if (result.ok) lastReads.set(userId, result.value)
       })
+    }
+    void reading.done.then((result) => {
+      if (!live) return
+      setRead(result.ok ? result.value : { models: [], connections: 0, failed: [], error: result.error.message })
+    })
     return () => {
       live = false
     }

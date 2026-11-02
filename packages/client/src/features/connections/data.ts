@@ -2,6 +2,7 @@
 import { type Connection, type ConnectionId, originOf, type ProviderKindInfo } from "@rp/shared/providers.ts"
 import { allOf } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
+import { defaultsAtom } from "../pickers/defaults.ts"
 
 export const connectionsAtom = AppClient.query("ListConnections", undefined, { reactivityKeys: ["connections"] })
 const credentialsAtom = AppClient.query("ListCredentials", undefined, { reactivityKeys: ["credentials"] })
@@ -9,10 +10,8 @@ const kindsAtom = AppClient.query("ListProviderKinds", undefined, { timeToLive: 
 /** What the connection and key screens need, requested together. */
 export const providerSetupAtom = allOf({ kinds: kindsAtom, connections: connectionsAtom, credentials: credentialsAtom })
 
-/** The account's defaults; the writes that change them name "settings". */
-export const generationDefaultsAtom = AppClient.query("GetGenerationDefaults", undefined, {
-  reactivityKeys: ["settings"]
-})
+/** The account's defaults; the writes that change them name "settings". The pickers' atom: one read for both. */
+export const generationDefaultsAtom = defaultsAtom
 
 /** Connections just created here, whose page fetches their model list once as it opens. */
 export const freshConnections = new Set<ConnectionId>()

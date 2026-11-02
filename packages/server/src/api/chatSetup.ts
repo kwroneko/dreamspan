@@ -6,7 +6,7 @@ import type { RevisionId } from "@rp/shared/library.ts"
 // Every handler acts as the authenticated user; storage enforces ownership, so another
 // user's ids are NotFound. Changes are published to the chat's subscribers.
 import { type AppApi, CurrentUser } from "@rp/shared/api.ts"
-import type { ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
+import type { CastCard, ChatId, EntityId, ForkId, SlotId } from "@rp/shared/chat.ts"
 import { GenerationUnavailable } from "@rp/shared/chatApi.ts"
 import { Cast, type CastChange, ChatNote, ShellCards, ShellForks, ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -100,68 +100,111 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
    * avatar of the version the chat uses there (its own version's, say).
    */
   const castAt = (user: UserId, chatId: ChatId, slotId: SlotId | null, forkId?: ForkId | null) =>
+    Effect.map(castsAt(user, chatId, [slotId], forkId), ([cast]) => cast!)
+
+  /**
+   * The casts at several positions of one fork, as `castAt` reads each: the state at each, then
+   * the cards once for every position that binds them alike, and the role projections once.
+   * A chat's messages display at their own positions, one cast each (GetCasts).
+   */
+  const castsAt = (user: UserId, chatId: ChatId, slotIds: ReadonlyArray<SlotId | null>, forkId?: ForkId | null) =>
     Effect.gen(function* () {
-      const events = yield* reader.StateEventsAt({
-        userId: user,
-        chatId,
-        slotId,
-        forkId: forkId ?? null,
-        displayEnd: true
-      })
-      const state = foldState(events)
-      // Departed cards still name the messages they wrote, including old personas and
-      // impersonated turns. Retain their faces without adding them to the active cast.
-      const previous = events.flatMap(({ data }) => {
-        switch (data.key) {
-          case "card.swap":
-            return [data.value.replaces, data.value.entity]
-          case "participant.join":
-          case "participant.leave":
-            return [data.value.entity]
-          case "played_by_me.set":
-            return data.value.entities
-          default:
-            return []
-        }
-      })
-      const ids = [...new Set([...state.participants, ...state.playedByMe, ...previous])]
-      const cards = yield* reader.CastCards({
-        userId: user,
-        entityIds: ids as Array<Cast["participants"][number]>,
-        chat: { chatId, bindings: bindingsOf(state) }
-      })
-      const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
-      return new Cast({
-        slotId,
-        participants: state.participants as Cast["participants"],
-        absent: state.absent as Cast["absent"],
-        playedByMe: state.playedByMe as Cast["playedByMe"],
-        model: null,
-        preset: null,
-        lorebooks: state.lorebooks as Cast["lorebooks"],
-        cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
-          on ? [] : [entity as Cast["cardLorebooksOff"][number]]
-        ),
-        listedLorebooks: state.listedLorebooks as Cast["listedLorebooks"],
-        loreBelowHistory: state.loreBelowHistory ?? true,
-        macroBindings: state.macroBindings,
-        macroNames: {
-          user: state.macroBindings.user ?? ((persona?.modelName ?? persona?.name) || "User"),
-          char:
-            state.macroBindings.char ??
-            state.participants
-              .filter((id) => !state.playedByMe.includes(id))
-              .flatMap((id) => {
-                const card = cards.find((c) => c.entityId === id)
-                return card ? [card.modelName ?? card.name] : []
-              })
-              .join(", ")
-        },
-        rolesProjection: state.rolesProjection,
-        roleProjections: yield* reader.RoleProjections(),
-        cards
+      const positions = yield* Effect.forEach(
+        slotIds,
+        (slotId) =>
+          Effect.map(
+            reader.StateEventsAt({ userId: user, chatId, slotId, forkId: forkId ?? null, displayEnd: true }),
+            (events) => ({ slotId, events, state: foldState(events) })
+          ),
+        { concurrency: 2 }
+      )
+      const idsOf = ({ events, state }: (typeof positions)[number]) => castIds(events, state)
+      // One read of the cards for each set of version bindings among the positions.
+      const groups = new Map<string, { bindings: ReturnType<typeof bindingsOf>; ids: Set<string> }>()
+      for (const position of positions) {
+        const bindings = bindingsOf(position.state)
+        const key = JSON.stringify(bindings)
+        const group = groups.get(key) ?? { bindings, ids: new Set<string>() }
+        for (const id of idsOf(position)) group.ids.add(id)
+        groups.set(key, group)
+      }
+      const read = new Map<string, ReadonlyArray<CastCard>>()
+      for (const [key, group] of groups)
+        read.set(
+          key,
+          yield* reader.CastCards({
+            userId: user,
+            entityIds: [...group.ids] as Array<Cast["participants"][number]>,
+            chat: { chatId, bindings: group.bindings }
+          })
+        )
+      const roleProjections = yield* reader.RoleProjections()
+      return positions.map((position) => {
+        const ids = idsOf(position)
+        const all = read.get(JSON.stringify(bindingsOf(position.state)))!
+        const cards = all.filter((card) => ids.includes(card.entityId))
+        return castOf(position.slotId, position.state, cards, roleProjections)
       })
     })
+
+  /** Every card the state names: the cast, and those departed that still name messages they wrote. */
+  const castIds = (events: Effect.Success<ReturnType<typeof reader.StateEventsAt>>, state: ChatState) => {
+    // Departed cards still name the messages they wrote, including old personas and
+    // impersonated turns. Retain their faces without adding them to the active cast.
+    const previous = events.flatMap(({ data }) => {
+      switch (data.key) {
+        case "card.swap":
+          return [data.value.replaces, data.value.entity]
+        case "participant.join":
+        case "participant.leave":
+          return [data.value.entity]
+        case "played_by_me.set":
+          return data.value.entities
+        default:
+          return []
+      }
+    })
+    return [...new Set([...state.participants, ...state.playedByMe, ...previous])]
+  }
+
+  const castOf = (
+    slotId: SlotId | null,
+    state: ChatState,
+    cards: ReadonlyArray<CastCard>,
+    roleProjections: Cast["roleProjections"]
+  ) => {
+    const persona = cards.find((card) => card.entityId === state.playedByMe.at(-1))
+    return new Cast({
+      slotId,
+      participants: state.participants as Cast["participants"],
+      absent: state.absent as Cast["absent"],
+      playedByMe: state.playedByMe as Cast["playedByMe"],
+      model: null,
+      preset: null,
+      lorebooks: state.lorebooks as Cast["lorebooks"],
+      cardLorebooksOff: Object.entries(state.embeddedLorebooks).flatMap(([entity, on]) =>
+        on ? [] : [entity as Cast["cardLorebooksOff"][number]]
+      ),
+      listedLorebooks: state.listedLorebooks as Cast["listedLorebooks"],
+      loreBelowHistory: state.loreBelowHistory ?? true,
+      macroBindings: state.macroBindings,
+      macroNames: {
+        user: state.macroBindings.user ?? ((persona?.modelName ?? persona?.name) || "User"),
+        char:
+          state.macroBindings.char ??
+          state.participants
+            .filter((id) => !state.playedByMe.includes(id))
+            .flatMap((id) => {
+              const card = cards.find((c) => c.entityId === id)
+              return card ? [card.modelName ?? card.name] : []
+            })
+            .join(", ")
+      },
+      rolesProjection: state.rolesProjection,
+      roleProjections,
+      cards
+    })
+  }
 
   const handlers = {
     // The summaries the read computed are stored after the answer, never before it
@@ -310,6 +353,9 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
 
     GetCast: ({ chatId, slotId, forkId }) =>
       Effect.flatMap(userId, (id) => castAt(id, chatId, slotId, forkId)).pipe(internal("GetCast")),
+
+    GetCasts: ({ chatId, slotIds, forkId }) =>
+      Effect.flatMap(userId, (id) => castsAt(id, chatId, slotIds, forkId)).pipe(internal("GetCasts")),
 
     // The cards as the next request reads them after `slotId`: the bindings there decide.
     ListChatCards: ({ chatId, slotId, entityIds, forkId }) =>

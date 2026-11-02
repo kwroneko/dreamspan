@@ -10,7 +10,7 @@ import type { EntityId } from "@rp/shared/chat.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { MAX_IMPORT_BYTES } from "@rp/shared/libraryImport.ts"
 import { Effect } from "effect"
-import { useCallback, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
@@ -299,11 +299,15 @@ export function NewVersionDialog({ refId, label, onClose }: { refId: RefId; labe
 const familyQuery = (entityId: EntityId) => AppClient.query("CardFamily", { entityId }, { reactivityKeys: ["library"] })
 
 /** The card's library ref when the place showing it doesn't know it (the card page). */
-function useCardRef(entityId: EntityId, refId: RefId | undefined) {
+function useCardRef(entityId: EntityId) {
   const result = useAtomValue(useMemo(() => familyQuery(entityId), [entityId]))
-  if (refId) return refId
   const family = AsyncResult.isSuccess(result) ? result.value : null
   return family?.members.find((member) => member.entityId === entityId)?.refId ?? undefined
+}
+
+/** Reads the card's family for its ref, only where the place doesn't know it. */
+function WithCardRef({ entityId, children }: { entityId: EntityId; children: (ref: RefId | undefined) => ReactNode }) {
+  return children(useCardRef(entityId))
 }
 
 /**
@@ -323,8 +327,8 @@ export function ImportNewVersion({
   compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useCardRef(entityId, refId)
-  return (
+  // The Cast tab knows every card's ref: a family read per card there was an N+1 (night/tabperf).
+  const action = (ref: RefId | undefined) => (
     <>
       <Button
         variant={compact ? "ghost" : "secondary"}
@@ -338,6 +342,7 @@ export function ImportNewVersion({
       {open && ref && <NewVersionDialog refId={ref} label={label} onClose={() => setOpen(false)} />}
     </>
   )
+  return refId ? action(refId) : <WithCardRef entityId={entityId}>{action}</WithCardRef>
 }
 
 /** The library item menu's entry; the host mounts the dialog outside the menu. */

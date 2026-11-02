@@ -511,6 +511,19 @@ export class ChatSetupApi extends RpcGroup.make(
     error: Schema.Union([...Errors])
   }),
   /**
+   * GetCast at several positions of one fork, in their order: the casts the messages on screen
+   * display with (their macros and display scripts), one request for a page of them.
+   */
+  Rpc.make("GetCasts", {
+    payload: {
+      chatId: ChatId,
+      forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
+      slotIds: Schema.Array(Schema.NullOr(SlotId)).check(Schema.isMaxLength(200))
+    },
+    success: Schema.Array(Cast),
+    error: Schema.Union([...Errors])
+  }),
+  /**
    * These cards as the chat uses them after `slotId` (the Cast tab, at the leaf shown).
    * Another user's chat or slot, or a card that isn't the user's live card, is NotFound.
    */

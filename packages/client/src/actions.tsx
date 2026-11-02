@@ -13,7 +13,8 @@ import { Button } from "./ui/Button.tsx"
 import { Loading } from "./ui/Spinner.tsx"
 import { Alert } from "./ui/Surface.tsx"
 
-type ActionResult<A> = { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
+export type ActionResult<A> =
+  { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: AppError }
 
 /**
  * Runs RPCs as the user. Calls don't cancel each other, unlike a shared mutation atom.
@@ -187,6 +188,21 @@ export const allOf = <const Atoms extends Record<string, Atom.Atom<AsyncResult.A
   )
 
 /** A query's result: loading, an error with a retry, or the value. */
+/**
+ * A query kept a while after its last reader left (`timeToLive`), read again behind what it
+ * kept: what was read shows at once when a screen comes back (a tab, after another chat),
+ * and the fresh read replaces it (night/tabperf).
+ */
+export function useAtomRevalidated<A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>) {
+  const registry = useContext(RegistryContext)
+  const result = useAtomValue(atom)
+  const [kept] = useState(() => AsyncResult.isSuccess(registry.get(atom)))
+  useEffect(() => {
+    if (kept) registry.refresh(atom)
+  }, [kept, registry, atom])
+  return result
+}
+
 export function AsyncView<A, E>({
   atom,
   loading,
