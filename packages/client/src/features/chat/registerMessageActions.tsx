@@ -1,123 +1,9 @@
 import { ForkNotesDialog } from "./ForkNotesDialog.tsx"
 import { Link } from "@tanstack/react-router"
-import { useSyncExternalStore } from "react"
-import { Button } from "../../ui/Button.tsx"
-import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Select } from "../../ui/Select.tsx"
-import { Spinner } from "../../ui/Spinner.tsx"
 import { canContinue, ContinueView, runContinue } from "./ContinueAction.tsx"
 import { copy } from "./copy.ts"
-import { parseModelValue, useModelChoiceList } from "./modelChoices.ts"
-import { invokeMessageAction, messageActions, viewOf, type MessageActionProps } from "./messageActions.tsx"
+import { invokeMessageAction, messageActions, viewOf } from "./messageActions.tsx"
 import type { ChatSession } from "./session.ts"
-
-/**
- * "Regenerate with…": one new version of the message from a model the user picks, the chat
- * keeping its own model (a model refuses a scene, say), from the same list as "Retry with…".
- * Loading, no models anywhere, and a failed read each say so; a connection that couldn't be
- * read is named, with Retry, and the others' models are still offered. Mounted only while
- * open, so rows don't follow the session.
- */
-function RegenerateWith({
-  session,
-  title,
-  onClose,
-  onPick
-}: {
-  session: ChatSession
-  title: string
-  onClose: () => void
-  onPick: (model: ReturnType<typeof parseModelValue>) => void
-}) {
-  const list = useModelChoiceList(true)
-  // The model the chat goes on using, named, so the choice here reads as a one-off.
-  const effective = useSyncExternalStore(session.subscribe, session.snapshot).history?.model
-  const chatModel =
-    effective?.connectionName && effective.modelKey
-      ? `${effective.connectionName} · ${effective.modelKey} (${effective.scope === "chat" ? "this chat's" : "your default"})`
-      : null
-  const retry = (
-    <Button variant="secondary" onClick={list.retry}>
-      Retry
-    </Button>
-  )
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => !open && onClose()}
-      title={title}
-      description={`One new version of this message, written by the model you pick; the versions it has stay. Use it when the chat's model won't write this one (it refuses a scene, say). The chat goes on with its own model${
-        chatModel ? `: ${chatModel}` : ""
-      }.`}
-    >
-      {!list.loaded ? (
-        <p role="status" className="flex items-center gap-2 text-sm text-muted">
-          <Spinner /> Loading your models…
-        </p>
-      ) : list.error !== null ? (
-        <div role="alert" className="flex flex-col items-start gap-2 text-sm">
-          <p className="text-danger">Couldn't read your connections: {list.error}</p>
-          {retry}
-        </div>
-      ) : (
-        <>
-          {list.choices.length > 0 ? (
-            <Select
-              items={list.choices}
-              value={null}
-              placeholder="Pick a model…"
-              onValueChange={(value) => {
-                onClose()
-                onPick(parseModelValue(value))
-              }}
-            />
-          ) : (
-            list.failed.length === 0 && (
-              <p className="text-sm text-muted">
-                {list.connections === 0
-                  ? "You have no connections yet, so there are no models to pick. "
-                  : "None of your connections lists a model you can use. "}
-                <Link
-                  to="/settings/connections"
-                  className="text-accent underline-offset-4 hover:underline"
-                  onClick={onClose}
-                >
-                  {list.connections === 0 ? "Add a connection" : "Add a model to a connection"}
-                </Link>
-              </p>
-            )
-          )}
-          {list.failed.length > 0 && (
-            <div role="alert" className="flex flex-col items-start gap-2 text-sm">
-              <ul className="flex flex-col gap-1 text-danger">
-                {list.failed.map((failure) => (
-                  <li key={failure.connection}>
-                    Couldn't read the models of {failure.connection}: {failure.message}
-                  </li>
-                ))}
-              </ul>
-              {retry}
-            </div>
-          )}
-        </>
-      )}
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-      </DialogActions>
-    </Dialog>
-  )
-}
-
-function PickModel({ session, entry, generated, report, closeDialog }: MessageActionProps) {
-  return (
-    <RegenerateWith
-      session={session}
-      title={generated ? "Regenerate with another model" : "Generate a version with a model"}
-      onClose={closeDialog}
-      onPick={async (choice) => report(await session.regenerate(entry, choice))}
-    />
-  )
-}
 
 /**
  * The fork the message is viewed in, for the inspector's links back into the chat. It isn't
@@ -191,20 +77,6 @@ export const registerMessageActions = () => [
       hint: "Have the model write a new version of this turn, as its speaker. Your version stays.",
       onSelect: async () => report(await session.regenerate(entry))
     }))
-  }),
-  messageActions.register({
-    id: "message.regenerate-with",
-    order: 55,
-    group: "change",
-    describe: viewOf(({ generated, openDialog }) => ({
-      label: generated ? "Regenerate with…" : "Generate a version with…",
-      icon: "model",
-      hint: generated
-        ? "One new version of this reply from another model you pick, the chat keeping its own: for a reply its model won't write."
-        : "A version of this turn written by a model you pick, once; the chat keeps its own model.",
-      onSelect: () => openDialog("message.regenerate-with")
-    })),
-    dialog: PickModel
   }),
   messageActions.register({
     id: "message.branch",

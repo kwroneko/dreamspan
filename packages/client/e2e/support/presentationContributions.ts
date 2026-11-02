@@ -10,7 +10,6 @@ import {
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
-  messageRetries,
   messageVersions,
   summarySettingFields,
   timelineBoundaries,
@@ -39,7 +38,6 @@ export const install = async (mode: "surfaces" | "fields" | "rows" | "hide" | "p
     await own(timelineBoundaries.register({ id: "timeline.lcm-boundary", order: 10, component: text("boundary") }))
     await own(timelineSummaries.register({ id: "timeline.summary", order: 10, component: text("summary") }))
     await own(timelineRails.register({ id: "timeline.coverage", order: 10, component: text("rail") }))
-    await own(messageRetries.register({ id: "message.retry-with", order: 10, component: text("retry") }))
     await own(
       messageVersions.register({
         id: "message.versions",
@@ -80,7 +78,6 @@ export const install = async (mode: "surfaces" | "fields" | "rows" | "hide" | "p
       [timelineRails, "timeline.coverage"],
       [timelineBoundaries, "timeline.lcm-boundary"],
       [messageVersions, "message.versions"],
-      [messageRetries, "message.retry-with"],
       [chatOverlays, "chat.preset-overlay"],
       [chatSurfaceProviders, "chat.preset-workspace"]
     ] as const)

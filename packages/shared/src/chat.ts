@@ -192,7 +192,7 @@ export class Version extends Schema.Class<Version>("Version")({
   createdAt: Schema.Number,
   /**
    * The model it was generated with, as "connection · model", when one is recorded: from
-   * the start for "Regenerate with…", otherwise once its context is assembled. For an
+   * the start for an explicit model override, otherwise once its context is assembled. For an
    * imported version, the API and model SillyTavern recorded, as "API · model" (such as
    * "OpenRouter · anthropic/claude-3.5-sonnet"): its models aren't the user's connections.
    * Null for text a person wrote, and where nothing was recorded.

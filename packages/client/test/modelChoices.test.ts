@@ -1,4 +1,4 @@
-// The models offered by Regenerate with… and the other pickers: one connection that can't be
+// The models offered by the pickers: one connection that can't be
 // read (an error, a defect, a server too busy to answer) no longer empties the whole list.
 import { assert, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"

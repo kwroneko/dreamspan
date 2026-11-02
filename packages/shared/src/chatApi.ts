@@ -548,7 +548,7 @@ export class ChatApi extends RpcGroup.make(
       /** The fork it's done in, whose row version `expectedRowVersion` is (absent or null: the current one). */
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       expectedRowVersion: Schema.Int,
-      /** "Retry with…" or "Regenerate with…": this swipe uses another model of the user's, recorded on it. */
+      /** Optional per-generation model override, recorded on the new version. */
       model: Schema.optionalKey(ModelChoice),
       /**
        * A one-turn direction for this version (the guidance editor's box); empty for none.

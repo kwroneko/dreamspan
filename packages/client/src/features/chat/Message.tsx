@@ -51,7 +51,6 @@ import {
 import {
   messageDirections,
   messageHeaderDetails,
-  messageRetries,
   messageVersions,
   messagePreviews,
   useVersionNavigation,
@@ -872,13 +871,6 @@ export const Message = memo(function Message({
           </details>
         )}
         <SlotOutlet slot={messageDirections} props={{ entry, session }} />
-        {generated &&
-          (version.mark === "refused" || (version.status === "failed" && version.error?.class === "refused")) && (
-            <SlotOutlet
-              slot={messageRetries}
-              props={{ onPick: async (choice) => report(await session.regenerate(entry, choice)) }}
-            />
-          )}
         {generating && (
           // The version's Stop (DESIGN §3.1: it belongs to the version), at the end of what's
           // being written and held at the bottom of the view while any of the reply shows, so a

@@ -211,6 +211,9 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 ## 3. The message graph: versions, branches, threads, state
 
 ### 3.1 Slots and versions
+
+- **[D]** Remove the message action to generate with another model and the refusal-specific "Retry with…" picker; choose the model below the composer and swipe instead (owner, 2026-11-02: "I don't get it. There's a model switch right below the composer. What's the point of having a dedicated button for something you can do by switching and then swiping? That's what everyone does. Same with refusals with another model."). Per-generation model recording stays. **Built; obsolete as an implementation plan** (nomodelretry, 2026-11-02; ARCHITECTURE §12).
+
 **[O]** **How the model is presented to users** (owner, 2026-10-14): "the UX for how we translate our immutable and version controlled data model to something that users understand and which doesn't cause surprises for them still hasn't been worked out or discussed properly." The rules below (generated text frozen, edits of it as new versions, the user's own text amended with undo history, branches as forks, layered cards, re-imports merged) are decided; how each shows up in the UI, and what the user is told when one applies, was the open question at that date. **Largely overtaken** by the later owner decisions on edit/amend, per-note fork inheritance, editor shape and independent forks (§3.4, §6.2a, §10.3), whose concrete UI is built (ARCHITECTURE §12, §14). Owner acceptance of the resulting UX remains unverified.
 
 - **[D]** **Versions belong to a message slot, and the continuation belongs to the slot**, not to a version. Swapping, regenerating or editing a version at *any* depth replaces that message in place and keeps what follows. This is a version, not a branch.
@@ -229,7 +232,7 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[P]** The version picker is built for dozens of versions: compact previews, star, hide, delete, side-by-side comparison. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Delete is on the adjacent version action surface.
 - **[D]** Pressing swipe while a generation is running starts another one. You can move freely between versions that are still generating and finished ones. **The stop button belongs to the version**, not the composer. There's no dedicated "generate ×N" action.
 - **[D]** **Failed generations are versions** with a clear failure style showing the cause: HTTP error, context length, classifier refusal (with its category), or a length cutoff. They never enter the context. **Built** (U08, 2026-10-28; ARCHITECTURE.md §12).
-- **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals offer Retry and "Retry with…" another model. **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Text Continue is distinct from agent transcript recovery (§7.5).
+- **[P]** A stream that dies midway keeps its partial text and offers Continue (§7.5). Refusals keep ordinary retry through the version arrows; to use another model, change the composer's model first (**[D]**, owner, 2026-11-02; §3.1 supersedes the earlier "Retry with…" picker proposal). **Built; obsolete as an implementation proposal** (2026-10-30; ARCHITECTURE §12). Text Continue is distinct from agent transcript recovery (§7.5).
 - **[D]** Generating with different models and upstreams at the same time is required. The model is chosen per generation and recorded on the version **[P]**. **Built** per-generation model recording (ARCHITECTURE §12, §15).
 
 ### 3.2 Branches
