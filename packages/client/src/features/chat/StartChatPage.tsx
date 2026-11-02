@@ -108,7 +108,7 @@ function Greeting({
         </header>
         <Markdown text={text} streaming={false} />
         {count > 1 && (
-          <footer className="-mb-1 flex min-h-8 items-center">
+          <footer className="flex min-h-8 items-center">
             <span className="flex-1" />
             <div className="flex shrink-0 items-center" role="group" aria-label={`${name}'s greetings`}>
               <IconButton
