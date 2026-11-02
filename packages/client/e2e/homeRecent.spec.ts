@@ -85,6 +85,7 @@ for (const width of [1440, 390]) {
       /^With chats\s*5$/,
       /^Never used\s*1$/,
       /^Favourites\s*0$/,
+      /^Personas\s*0$/,
       /^Groups\s*1$/
     ])
     if (width === 1440) {

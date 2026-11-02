@@ -129,7 +129,7 @@ test("History edits doesn't ask for a model before a search", async ({ page }) =
   await expect(tab).toContainText(/re-read about \d+ messages/)
 })
 
-test("Add characters over a long list: the search keeps its height, characters before personas", async ({ page }) => {
+test("Add characters over a long list: the search keeps its height, personas under their filter", async ({ page }) => {
   await open(page)
   await openPanel(page, "Cast")
   const section = await openCastAdd(page)
@@ -138,12 +138,12 @@ test("Add characters over a long list: the search keeps its height, characters b
   const box = await section.getByRole("searchbox", { name: "Find a character to add" }).boundingBox()
   expect(box?.height).toBeGreaterThanOrEqual(34)
   await section.getByRole("searchbox", { name: "Find a character to add" }).fill("")
-  const personas = section.getByRole("region", { name: "Personas", exact: true })
-  // Juniper and Wren: one is played here (the persona test switches them), so it's marked.
-  await expect(personas.getByRole("button")).toHaveCount(2)
-  await expect(personas.getByRole("button", { name: /: you play them here$/ })).toHaveCount(1)
-  const top = async (locator: typeof section) => (await locator.boundingBox())!.y
-  expect(
-    await top(section.getByRole("button", { name: /^Add Lantern keeper \d+ to this chat$/ }).first())
-  ).toBeLessThan(await top(personas))
+  // Juniper and Wren, in the persona folder, are under Personas only; one is played here
+  // (the persona test switches them), so it's marked.
+  const grid = section.getByLabel("Characters", { exact: true })
+  await expect(grid.getByRole("button", { name: /^Add (Juniper|Wren)/ })).toHaveCount(0)
+  await section.getByRole("combobox", { name: "Show" }).click()
+  await page.getByRole("option", { name: /^Personas/ }).click()
+  await expect(grid.getByRole("button", { name: /^Add .* to this chat$|: you play them here$/ })).toHaveCount(2)
+  await expect(grid.getByRole("button", { name: /: you play them here$/ })).toHaveCount(1)
 })
