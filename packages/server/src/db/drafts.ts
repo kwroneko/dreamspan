@@ -680,16 +680,15 @@ export const makeDraftStore = (
         const shownText = yield* startText(options.key, options.baseRevision)
         const shownImages = yield* startImages(options.key)
         if (shownText !== null && (shownText !== existing.content || existing.images_json !== shownImages)) {
-          if (existing.history_length > 0)
-            yield* record(
-              existing,
-              shownText,
-              diffPatch(existing.content, shownText),
-              "revision",
-              now(),
-              false,
-              shownImages
-            )
+          yield* record(
+            existing,
+            shownText,
+            diffPatch(existing.content, shownText),
+            "revision",
+            now(),
+            false,
+            shownImages
+          )
           yield* sql`UPDATE drafts SET content = ${shownText}, images_json = ${shownImages} WHERE id = ${existing.id}`
           existing = (yield* byId(existing.id))!
         }
