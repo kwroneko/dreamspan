@@ -1635,10 +1635,16 @@ export class WriteOps extends RpcGroup.make(
       /** The composer the text came from, committed with the post or the queued entry. */
       commitDraft: CommitDraft,
       /** What regex scripts did to `content` as it was sent, and the text typed. */
-      rewrite: Schema.optionalKey(StoredRewrite)
+      rewrite: Schema.optionalKey(StoredRewrite),
+      /**
+       * Who replies after its reply, in turn (DESIGN §2.3): queued as the round's entries behind
+       * that reply. A send at the fork's tip first drops the round already queued there.
+       */
+      round: Schema.optionalKey(Schema.Array(EntityId))
     },
     success: Schema.Union([
-      Schema.TaggedStruct("Posted", { result: AppendResult }),
+      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
+      Schema.TaggedStruct("Posted", { result: AppendResult, queue: Schema.optionalKey(Schema.Array(QueuedMessage)) }),
       Schema.TaggedStruct("Queued", {
         queued: QueuedMessage,
         queue: Schema.Array(QueuedMessage),
@@ -1689,6 +1695,21 @@ export class WriteOps extends RpcGroup.make(
    * (`next`, generating, which the caller starts), and the rest wait for that reply. A
    * slot gone to the bin withdraws its entries.
    */
+  /**
+   * The fork's stopped round goes on (DESIGN §2.3): its entries wait at the fork's tip again, and
+   * when nothing is being written there the first posts as a reply (`next`, to start).
+   */
+  Rpc.make("ContinueRound", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: QueueOutcome,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The fork's round entries, waiting or stopped, dropped. */
+  Rpc.make("EndRound", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: QueueOutcome,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Adds the card to the persona folder or takes it out, keeping its other folders. */
   Rpc.make("SetPersona", {
     payload: { userId: UserId, entityId: EntityId, persona: Schema.Boolean },

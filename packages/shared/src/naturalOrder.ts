@@ -99,9 +99,9 @@ export const naturalOrder = <Id>(
   return activated
 }
 
-// ST's other group reply strategies (`group_activation_strategy` in group-chats.js), one reply at
-// a time as here (DESIGN §2.3): ST runs the whole activated list in turn, here each send or
-// Reply now takes the next of it.
+// ST's other group reply strategies (`group_activation_strategy` in group-chats.js). ST runs the
+// whole activated list in turn, as a round does here (`replyPolicy.ts`); these picks are for one
+// reply at a time, the Cast tab's switch (DESIGN §2.3).
 
 /** ST's reply strategies by their `activation_strategy` number, as policy ids (`replyPolicy.ts`). */
 export const ST_REPLY_ORDERS: Readonly<Record<number, string>> = { 0: "natural", 1: "list", 2: "manual", 3: "pooled" }

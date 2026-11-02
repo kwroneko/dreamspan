@@ -884,14 +884,16 @@ export const Message = memo(function Message({
           // being written and held at the bottom of the view while any of the reply shows, so a
           // reply longer than the screen never takes it out of reach.
           <div className="pointer-events-none sticky bottom-2 z-10 flex justify-end">
-            <Button
-              variant="secondary"
-              className="pointer-events-auto h-8 shrink-0 px-3 shadow-sm max-sm:h-10"
-              onClick={async () => report(await session.stop(version.id))}
-            >
-              <Icon name="stop" size={12} />
-              Stop
-            </Button>
+            <Tooltip label="Stop writing this reply; what it wrote is kept. A round after it stops too: Continue round goes on with it.">
+              <Button
+                variant="secondary"
+                className="pointer-events-auto h-8 shrink-0 px-3 shadow-sm max-sm:h-10"
+                onClick={async () => report(await session.stop(version.id))}
+              >
+                <Icon name="stop" size={12} />
+                Stop
+              </Button>
+            </Tooltip>
           </div>
         )}
         {(showVersions || (revealed && !editing)) && (

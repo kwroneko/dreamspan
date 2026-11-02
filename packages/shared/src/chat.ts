@@ -398,6 +398,12 @@ export class QueuedMessage extends Schema.Class<QueuedMessage>("QueuedMessage")(
   replySpeakerEntityId: Schema.NullOr(EntityId),
   /** For `generate`: the one-turn direction the reply gets. */
   direction: Schema.NullOr(Schema.String),
+  /**
+   * A reply of a round (DESIGN §2.3): queued by the server, behind the round's reply before it,
+   * in `forkId`. `held`: the round stopped (Stop, or a reply that failed) and waits for
+   * Continue round.
+   */
+  round: Schema.optionalKey(Schema.Struct({ held: Schema.Boolean, forkId: Schema.NullOr(ForkId) })),
   rowVersion: Schema.Int,
   createdAt: Schema.Number
 }) {}

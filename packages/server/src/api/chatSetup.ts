@@ -59,6 +59,8 @@ const toEvent = (change: Exclude<CastChange, { readonly _tag: "Persona" }>): Sta
       return { key: "lorebook.below_history", value: { on: change.on } }
     case "ReplyOrder":
       return { key: "reply.order", value: change.order }
+    case "ReplySingle":
+      return { key: "reply.single", value: { on: change.on } }
   }
 }
 
@@ -204,6 +206,7 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       },
       rolesProjection: state.rolesProjection,
       ...(state.replyOrder === null ? {} : { replyOrder: state.replyOrder }),
+      ...(state.replySingle === true ? { replySingle: true } : {}),
       roleProjections,
       cards
     })

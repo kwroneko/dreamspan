@@ -986,6 +986,12 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT,
     images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)),
+    -- 1: a reply of a round (DESIGN §2.3), queued by the server behind the round's reply before it.
+    round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)),
+    -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round.
+    held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)),
+    CHECK (round = 0 OR kind = 'generate'),
+    CHECK (held = 0 OR round = 1),
     CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
     CHECK (kind = 'generate' OR direction IS NULL),
     CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)

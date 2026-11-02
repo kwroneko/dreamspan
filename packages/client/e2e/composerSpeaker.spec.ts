@@ -63,6 +63,8 @@ const chatWith = async (characters: ReadonlyArray<string>, withBo = false) => {
       for (const name of cast)
         yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: ids[name]! } })
       yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "PlayedByMe", entityIds: [ids.Ana!] } })
+      // One reply at a time: these check Auto's pick, the first of a round (rounds: replyRounds.spec.ts).
+      yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "ReplySingle", on: true } })
       return chat.id
     })
   )

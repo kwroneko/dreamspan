@@ -1254,6 +1254,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         assert.deepStrictEqual(yield* owner.api.GetDisplayPrefs({}), before)
       })
   },
+  Round: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.Round({ chatId: owner.chat.chatId, forkId: null, action: "continue" }), "NotFound"),
+        refused(actor.api.Round({ chatId: owner.chat.chatId, forkId: null, action: "end" }), "NotFound")
+      ])
+  },
   StopGeneration: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

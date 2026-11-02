@@ -273,6 +273,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   roleProjections: Schema.Array(RoleProjectionOption),
   /** Who replies when nobody is picked (`reply.order`, a reply policy's id); absent is the default, natural order. */
   replyOrder: Schema.optionalKey(Schema.String),
+  /** True: one reply per user action instead of the reply order's round (`reply.single`); absent is off, as in ST. */
+  replySingle: Schema.optionalKey(Schema.Boolean),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
@@ -319,6 +321,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
   /** Who replies when nobody is picked (`reply.order`): a reply policy's id. */
   Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
+  /** One reply per user action, or the reply order's whole round as in ST (`reply.single`). */
+  Schema.TaggedStruct("ReplySingle", { on: Schema.Boolean }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type

@@ -48,8 +48,13 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
     const cast = castOf([a, b], [card(a, "Ana", 1), card(b, "Bram", 0)])
     assert.strictEqual(AUTO_POLICY, "natural")
     assert.isDefined(replyPolicies.get("round-robin"), "round-robin stays registered")
-    assert.deepStrictEqual(nextInTurn(cast, [], null), { id: a, after: null })
-    assert.deepStrictEqual(planReply(cast, [], null, null), { next: { id: a, after: null }, replier: a, reply: true })
+    assert.deepStrictEqual(nextInTurn(cast, [], null), { id: a, after: null, then: [] })
+    assert.deepStrictEqual(planReply(cast, [], null, null), {
+      next: { id: a, after: null, then: [] },
+      replier: a,
+      round: [],
+      reply: true
+    })
     // Empty casts still permit the existing unnamed reply; null alone cannot mean disabled.
     assert.isTrue(planReply(null, [], null, null).reply)
     assert.isFalse(planReply({ ...cast, absent: [a, b] }, [], null, null).reply)
@@ -61,7 +66,12 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
           (undo) => Effect.sync(undo)
         )
         assert.deepStrictEqual(nextInTurn(cast, [], null), { id: b, after: a })
-        assert.deepStrictEqual(planReply(cast, [], null, null), { next: { id: b, after: a }, replier: b, reply: true })
+        assert.deepStrictEqual(planReply(cast, [], null, null), {
+          next: { id: b, after: a },
+          replier: b,
+          round: [],
+          reply: true
+        })
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* Effect.acquireRelease(
@@ -69,8 +79,13 @@ it.effect("a scoped reply policy changes the composer's choice, disables and res
               (undo) => Effect.sync(undo)
             )
             assert.isNull(nextInTurn(cast, [], null))
-            assert.deepStrictEqual(planReply(cast, [], null, null), { next: null, replier: null, reply: false })
-            assert.deepStrictEqual(planReply(cast, [], null, b), { next: null, replier: b, reply: true })
+            assert.deepStrictEqual(planReply(cast, [], null, null), {
+              next: null,
+              replier: null,
+              round: [],
+              reply: false
+            })
+            assert.deepStrictEqual(planReply(cast, [], null, b), { next: null, replier: b, round: [], reply: true })
             assert.isFalse(planReply(null, [], null, null).reply)
           })
         )
@@ -152,8 +167,8 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
   const order = (replyOrder: string, more: Partial<Cast> = {}) =>
     castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], replyOrder, ...more })
   const user = [turn("v1", ana, "Hello.")]
-  // List order: the first in the cast's order after your message, then the next each time.
-  const list = order("list")
+  // List order, one at a time: the first in the cast's order after your message, then the next each time.
+  const list = order("list", { replySingle: true })
   assert.strictEqual(planReply(list, user, ana, null, null).replier, mira)
   assert.strictEqual(planReply(list, [...user, turn("v2", mira)], ana, null, null).replier, tobin)
   assert.strictEqual(planReply(list, [...user, turn("v2", mira), turn("v3", tobin)], ana, null, null).replier, wren)
@@ -164,7 +179,8 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
   // Sending a message starts the list again, whoever spoke last; a muted card is skipped.
   assert.strictEqual(planReply(list, [...user, turn("v2", mira)], ana, null, "And you?").replier, mira)
   assert.strictEqual(
-    planReply(order("list", { absent: [tobin] }), [...user, turn("v2", mira)], ana, null, null).replier,
+    planReply(order("list", { absent: [tobin], replySingle: true }), [...user, turn("v2", mira)], ana, null, null)
+      .replier,
     wren
   )
   // Pooled: someone who hasn't spoken since your message; once all have, not the last.
@@ -176,7 +192,12 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
   }
   // Manual: nobody replies to what you send unless picked; Reply now picks one of them.
   const manual = order("manual")
-  assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), { next: null, replier: null, reply: false })
+  assert.deepStrictEqual(planReply(manual, user, ana, null, "Hello?"), {
+    next: null,
+    replier: null,
+    round: [],
+    reply: false
+  })
   assert.strictEqual(planReply(manual, user, ana, tobin, "Hello?").replier, tobin)
   assert.include([mira, tobin, wren], planReply(manual, user, ana, null, null).replier)
   // An order no policy has is the default, natural order.
@@ -188,4 +209,47 @@ it("follows the chat's reply order: list, pooled and manual, as ST's group strat
     assert.isString(policy.description)
     assert.isString(policy.autoDetail)
   }
+})
+
+it("plans ST's whole round per reply order, and one reply with the switch on or a pick", () => {
+  const [mira, tobin, wren, ana] = ["synthetic-mira", "synthetic-tobin", "synthetic-wren", "synthetic-ana"] as [
+    EntityId,
+    EntityId,
+    EntityId,
+    EntityId
+  ]
+  const cards = [card(mira, "Mira", 1), card(tobin, "Tobin", 0), card(wren, "Wren", 1), card(ana, "Ana", 1)]
+  const order = (replyOrder: string, more: Partial<Cast> = {}) =>
+    castOf([mira, tobin, wren, ana], cards, { playedByMe: [ana], replyOrder, ...more })
+  const user = [turn("v1", ana, "Hello.")]
+  const whole = (cast: Cast, path: ReadonlyArray<PathEntry>, input: string | null, picked: EntityId | null = null) => {
+    const plan = planReply(cast, path, ana, picked, input)
+    return plan.replier === null ? [] : [plan.replier, ...plan.round]
+  }
+  // Natural (ST's activateNaturalOrder): those named, in the order named, then everyone whose roll
+  // passes, in a shuffled order, without repeats; talkativeness 0 never passes.
+  const natural = order("natural")
+  assert.sameMembers(whole(natural, user, "Hello."), [mira, wren])
+  const named = whole(natural, user, "Tobin, and Wren?")
+  assert.deepStrictEqual(named.slice(0, 2), [tobin, wren])
+  assert.sameMembers(named, [tobin, wren, mira])
+  // An empty send reads the tip's text, and the last character to speak doesn't answer themselves.
+  assert.deepStrictEqual(whole(natural, [...user, turn("v2", mira, "Quiet.")], null), [wren])
+  // The same tip and text plan the same round every time (the preview, Send, a reload agree).
+  const again = whole(natural, user, "Hello.")
+  for (let i = 0; i < 5; i++) assert.deepStrictEqual(whole(natural, user, "Hello."), again)
+  // List (ST's activateListOrder): everyone in the cast's order, after a message or an empty send,
+  // the last speaker too; muted cards are left out.
+  assert.deepStrictEqual(whole(order("list"), user, "Hi."), [mira, tobin, wren])
+  assert.deepStrictEqual(whole(order("list"), [...user, turn("v2", wren)], null), [mira, tobin, wren])
+  assert.deepStrictEqual(whole(order("list", { absent: [tobin] }), user, "Hi."), [mira, wren])
+  // Pooled (ST's activatePooledOrder) is one reply; manual is none to a message, one to an empty send.
+  assert.lengthOf(whole(order("pooled"), user, "Hi."), 1)
+  assert.deepStrictEqual(whole(order("manual"), user, "Hi."), [])
+  assert.lengthOf(whole(order("manual"), user, null), 1)
+  // One reply at a time (the Cast tab's switch): the round's first only.
+  assert.deepStrictEqual(whole(order("natural", { replySingle: true }), user, "Tobin, and Wren?"), [tobin])
+  assert.deepStrictEqual(whole(order("list", { replySingle: true }), user, "Hi."), [mira])
+  // A pick under Next is one reply, as ST's force talk.
+  assert.deepStrictEqual(whole(natural, user, "Hello.", tobin), [tobin])
 })

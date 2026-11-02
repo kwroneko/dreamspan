@@ -485,6 +485,11 @@ export class ChatApi extends RpcGroup.make(
        * posted at once, the client asks for no reply.
        */
       reply: Schema.optionalKey(Schema.Boolean),
+      /**
+       * If it's queued: who replies after `replySpeakerEntityId`, in turn, the rest of the round
+       * the send started (DESIGN §2.3). Posted at once, the client's Generate carries it.
+       */
+      round: Schema.optionalKey(Schema.Array(EntityId)),
       composer: ComposerCommit
     },
     success: SendResult,
@@ -504,10 +509,26 @@ export class ChatApi extends RpcGroup.make(
       branch: Schema.Boolean,
       speakerEntityId: Schema.optionalKey(Schema.NullOr(EntityId)),
       direction: Schema.optionalKey(Schema.String),
+      /**
+       * Who replies after this reply, in turn: the rest of the round (DESIGN §2.3), queued on the
+       * server behind it. Any Send or Generate at the fork's tip ends the round already there.
+       */
+      round: Schema.optionalKey(Schema.Array(EntityId)),
       composer: ComposerCommit
     },
     success: SendResult,
     error: Schema.Union([NotFound, LeafMoved, GenerationUnavailable, ServerError])
+  }),
+  /**
+   * The fork's round (DESIGN §2.3). `continue`: a stopped round goes on, its next reply starting
+   * at the fork's tip (or waiting for the reply being written there), the rest queued behind it;
+   * nothing held leaves the queue as it is. `end`: what's left of it, waiting or stopped, is
+   * dropped; the reply being written goes on. Returns the chat's queue.
+   */
+  Rpc.make("Round", {
+    payload: { chatId: ChatId, forkId: Schema.NullOr(ForkId), action: Schema.Literals(["continue", "end"]) },
+    success: Schema.Array(QueuedMessage),
+    error: Schema.Union([NotFound, GenerationUnavailable, ServerError])
   }),
   /**
    * A swipe: a new model version of a slot, selected and streamed, with the speaker and

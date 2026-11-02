@@ -24,11 +24,19 @@ const replyCandidates = (cast: Cast | null, speaker: EntityId | null): Array<Ent
   return others.length > 0 ? others : present
 }
 
-/** The next reply in turn, and whose turn it follows (null: no one's spoken yet). */
+/**
+ * The next reply in turn, and whose turn it follows (null: no one's spoken yet). `then`: who
+ * replies after it in the same round, in turn, as ST's group replies do (DESIGN §2.3); none
+ * when the chat takes one reply per user action (`Cast.replySingle`).
+ */
 export interface NextInTurn {
   readonly id: EntityId
   readonly after: EntityId | null
+  readonly then?: ReadonlyArray<EntityId>
 }
+
+/** Whether the chat takes one reply per user action instead of ST's rounds (the Cast tab's switch). */
+export const oneReplyAtATime = (cast: Cast | null) => cast?.replySingle === true
 
 /** The character who spoke last on the path (null: none has). */
 const lastCharacter = (cast: Cast, entries: ReadonlyArray<PathEntry>): EntityId | null => {
@@ -62,9 +70,9 @@ const roundRobin = (
 }
 
 /**
- * ST's natural order (`@rp/shared/naturalOrder.ts`), one reply a send: the first it activates.
- * Someone named in the text being sent replies; else each candidate replies by their card's
- * talkativeness. With nothing typed, the mentions come from the tip's message and, when a
+ * ST's natural order (`@rp/shared/naturalOrder.ts`): everyone it activates, in turn (one reply
+ * a send, the first, when the chat takes one at a time). Those named in the text being sent
+ * reply first; then each candidate who passes a roll by their card's talkativeness. With nothing typed, the mentions come from the tip's message and, when a
  * character wrote it, they don't answer themselves unless no one else can. The rolls are seeded
  * by the tip's version and the candidates, so the preview, Send, a reload and a queued send agree.
  */
@@ -86,8 +94,8 @@ const natural = (
     return { id, name: card?.name ?? "", talkativeness: card?.talkativeness ?? TALKATIVENESS_DEFAULT }
   })
   const seed = hashSeed([tip?.id ?? "", ...members.flatMap((m) => [m.id, String(m.talkativeness)])])
-  const [id] = naturalOrder(members, typed ? input : (tip?.content ?? ""), banned, mulberry32(seed))
-  return id === undefined ? null : { id, after }
+  const [id, ...then] = naturalOrder(members, typed ? input : (tip?.content ?? ""), banned, mulberry32(seed))
+  return id === undefined ? null : { id, after, then }
 }
 
 /** Whether a turn is the user's: a card they play, or no one's written by a person. */
@@ -116,8 +124,10 @@ const rollsFor = (entries: ReadonlyArray<PathEntry>, candidates: ReadonlyArray<E
 const typedText = (input: string | null | undefined) => input !== null && input !== undefined && input.trim() !== ""
 
 /**
- * ST's list order, one reply a send: after your message, the first in the cast's order; asked
- * again with nothing typed, the next after the last to reply since your turn, then the first again.
+ * ST's list order (`activateListOrder`): every candidate in the cast's order, after a message or
+ * an empty send alike. One at a time, it's the first in the cast's order after your message;
+ * asked again with nothing typed, the next after the last to reply since your turn, then the
+ * first again.
  */
 const list = (
   cast: Cast | null,
@@ -127,6 +137,10 @@ const list = (
 ): NextInTurn | null => {
   const candidates = replyCandidates(cast, speaker)
   if (cast === null || candidates.length === 0) return null
+  if (!oneReplyAtATime(cast)) {
+    const [id, ...then] = candidates
+    return { id: id!, after: lastCharacter(cast, entries), then }
+  }
   const last = sinceUser(cast, entries, typedText(input)).at(-1) ?? null
   const id = listOrder(cast.participants, candidates, last)
   return id === null ? null : { id, after: lastCharacter(cast, entries) }
@@ -188,8 +202,8 @@ replyPolicies.register({
   id: "natural",
   label: "Natural order",
   description:
-    "Someone named in your message replies; else each character gets a chance by their talkativeness. ST's default.",
-  autoDetail: "Picked by talkativeness: someone you name first, else each by their chance",
+    "Anyone you name replies first, then each character who feels like it, by how talkative they are. The default.",
+  autoDetail: "Anyone you name first, then others by how talkative they are",
   next: natural,
   unnamedReply: noCharacters
 })
@@ -197,8 +211,8 @@ replyPolicies.register({
   id: "list",
   label: "List order",
   description:
-    "Characters reply in the cast's order: the first after your message, then the next each time you ask for another reply.",
-  autoDetail: "The next in the cast's order: the first after your message",
+    "Every character replies, in the cast's order. One at a time: the first after your message, then the next each time you ask for another reply.",
+  autoDetail: "In the cast's order",
   next: list,
   unnamedReply: noCharacters
 })
@@ -253,6 +267,8 @@ export const planReply = (
   return {
     next,
     replier: picked ?? next?.id ?? null,
+    /** Who replies after the replier, in turn: none for a pick (ST's force talk) or one at a time. */
+    round: picked !== null || oneReplyAtATime(cast) ? [] : [...(next?.then ?? [])],
     reply: picked !== null || next !== null || policy?.unnamedReply?.(cast) === true
   }
 }
