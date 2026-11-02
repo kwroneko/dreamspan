@@ -304,6 +304,38 @@ test("export asks about a preset's held changes even with no ordinary dirty fiel
   expect(saved.doc.prompts).not.toEqual(expect.arrayContaining([expect.objectContaining({ identifier: "extra" })]))
 })
 
+test("export asks about a linked note slot's own unsaved fields", async ({ page }) => {
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Linked note export"
+  const ref = await importCard(page, name)
+  await admin((api) =>
+    Effect.gen(function* () {
+      const shared = yield* api.CreateSharedNote({ title: "Shared", content: "Shared note text." })
+      const slot = yield* api.CreateCardNote({ cardRefId: ref.id, title: "Linked slot", link: shared.entityId })
+      const opened = yield* api.OpenEditor({ refId: slot.id })
+      yield* api.SaveEditorDraft({
+        refId: slot.id,
+        field: textField(["title"]),
+        draftId: null,
+        content: "Changed linked slot title",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+    })
+  )
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toContainText("Title")
+  const saved = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(JSON.stringify(saved)).toContain("Changed linked slot title")
+  expect(JSON.stringify(saved)).toContain("Shared note text.")
+})
+
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const)
     test(`Disable all and a prompt added wait unsaved, Revert takes them back (${width}, ${theme})`, async ({
