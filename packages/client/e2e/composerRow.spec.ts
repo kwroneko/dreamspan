@@ -31,6 +31,7 @@ const measure = (row: Locator) =>
 for (const width of [1440, 1024, 390])
   for (const theme of ["light", "dark"] as const)
     test(`equal composer gaps and aligned controls (${width}px ${theme})`, async ({ page }) => {
+      test.setTimeout(120_000)
       const chatId = await withCookie(server(), cookie, (api) =>
         Effect.gen(function* () {
           yield* api.SetDisplayPrefs({ prefs: { guidance: false } })
@@ -54,6 +55,15 @@ for (const width of [1440, 1024, 390])
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      let release: (() => void) | null = null
+      await page.routeWebSocket("**/rpc", (socket) => {
+        const upstream = socket.connectToServer()
+        socket.onMessage((message) => {
+          if (release === null && String(message).includes('"tag":"Generate"')) release = () => upstream.send(message)
+          else upstream.send(message)
+        })
+        upstream.onMessage((message) => socket.send(message))
+      })
       await page.goto(`${server().url}/chats/${chatId}`)
       const generate = page.getByRole("button", {
         name: `Generate ${longName}`,
@@ -63,23 +73,41 @@ for (const width of [1440, 1024, 390])
       const controls = page.getByTestId("composer-controls")
       const strip = page.getByRole("group", { name: "Next reply", exact: true })
       const guidance = page.getByRole("switch", { name: "Guidance", exact: true })
-      const measurements = []
-      for (const on of [false, true]) {
-        if (on) await guidance.click()
-        await expect(guidance).toHaveAttribute("aria-checked", String(on))
-        await page
-          .getByTestId("composer")
-          .fill(on ? "Let the captain discover a sheltered route." : "The pass is open.")
+      const measurements: Array<{
+        state: string
+        on: boolean
+        guidanceGenerateGap: number
+        groups: Awaited<ReturnType<typeof measure>>[]
+        frame: { x: number; y: number; width: number; height: number }
+      }> = []
+      const capture = async (state: string, primary = generate) => {
         const groups = [
           await measure(controls.locator(":scope > div").nth(0)),
           await measure(controls.locator(":scope > div").nth(1)),
           await measure(strip)
         ]
         const frame = (await page.getByTestId("composer-box").boundingBox())!
-        measurements.push({ on, groups, frame })
+        const toggleBounds = (await guidance.boundingBox())!
+        const primaryBounds = (await primary.boundingBox())!
+        const guidanceGenerateGap = primaryBounds.x - toggleBounds.x - toggleBounds.width
+        const on = (await guidance.getAttribute("aria-checked")) === "true"
+        const primaryLabel = await primary.getAttribute("aria-label")
+        measurements.push({ state, on, guidanceGenerateGap, groups, frame })
+        // Check the exact pair from the owner's screenshot in every state, including a
+        // highlighted or pending primary button and the disabled toggle during guidance edits.
+        expect(Math.abs(guidanceGenerateGap - 6), `${state}: Guidance to primary`).toBeLessThanOrEqual(1)
+        if (on) await expect(primary).toHaveClass(/bg-accent/)
+
         if (shots) {
           mkdirSync(shots, { recursive: true })
-          const name = `${width}-${theme}-guidance-${on ? "on" : "off"}`
+          const name = `${width}-${theme}-${state}`
+          await controls
+            .locator(":scope > div")
+            .nth(1)
+            .screenshot({
+              path: join(shots, `${name}-actions.png`),
+              animations: "disabled"
+            })
           await page.screenshot({ path: join(shots, `${name}.png`), animations: "disabled" })
           await page
             .locator(".chat-column")
@@ -95,9 +123,7 @@ for (const width of [1440, 1024, 390])
           }
         }
         for (const control of groups[0]!.controls.slice(1)) expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
-        for (const control of groups[1]!.controls.filter(
-          (control) => !control.label?.startsWith("Generate") || width === 390
-        ))
+        for (const control of groups[1]!.controls.filter((control) => control.label !== primaryLabel || width === 390))
           expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
         // Both groups in the box share their centre; the pickers have the same outer inset.
         expect(Math.abs(groups[0]!.controls[0]!.centre - groups[1]!.controls[0]!.centre)).toBeLessThanOrEqual(1)
@@ -110,14 +136,37 @@ for (const width of [1440, 1024, 390])
             (el) => parseFloat(getComputedStyle(el).paddingRight) + parseFloat(getComputedStyle(el).borderRightWidth)
           )
         ).toBe(5)
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+      }
+      for (const on of [false, true]) {
+        if (on) await guidance.click()
+        await expect(guidance).toHaveAttribute("aria-checked", String(on))
+        for (const text of ["", on ? "Let the captain discover a sheltered route." : "The pass is open."]) {
+          await page.getByTestId("composer").fill(text)
+          await capture(`${on ? "guidance" : "message"}-${text ? "text" : "empty"}`)
+        }
         await expect(generate).toHaveText(width === 390 ? "" : "Generate")
         await guidance.focus()
         await page.keyboard.press("Tab")
         await expect(generate).toBeFocused()
         await expect(page.getByText(new RegExp(`^Generate ${longName}'s next turn`))).toBeVisible()
         await page.getByTestId("composer").focus()
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
       }
+      await generate.click()
+      await expect.poll(() => release !== null).toBe(true)
+      await expect(generate).toHaveAttribute("aria-busy", "true")
+      await expect(generate).toBeDisabled()
+      await capture("guidance-pending")
+      release!()
+      await expect(generate).toBeEnabled()
+      await page.getByRole("button", { name: "New version with this guidance", exact: true }).click()
+      const newVersion = page.getByRole("button", { name: "New version", exact: true })
+      await expect(guidance).toBeChecked()
+      await expect(guidance).toBeDisabled()
+      await expect(newVersion).toBeEnabled()
+      await capture("guidance-editing", newVersion)
+      await page.getByRole("button", { name: "Close: back to new messages", exact: true }).click()
+      await expect(generate).toBeEnabled()
       if (shots)
         writeFileSync(join(shots, `${width}-${theme}-measurements.json`), JSON.stringify(measurements, null, 2))
       if (width === 1440 && theme === "light") {
