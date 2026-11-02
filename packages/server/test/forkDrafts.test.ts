@@ -108,10 +108,38 @@ const chatWithNote = Effect.gen(function* () {
   )
   const note = yield* api.CreateChatNote({ chatId: chat.id, forkId: main, title: "Weather" })
   const at = (forkId: ForkId, slotId: SlotId | null): ChatNotePosition => ({ chatId: chat.id, forkId, slotId })
-  return { api, chat, chatId: chat.id as ChatId, main, first: first.entry.slotId, note, at }
+  return { api, chat, chatId: chat.id as ChatId, main, first: first.entry.slotId, firstEntry: first.entry, note, at }
 })
 
 describe("unsaved note text and forks", () => {
+  it.live("now carries unsaved text based on a note binding at a trailing insertion", () =>
+    Effect.gen(function* () {
+      const { api, chatId, main, first, firstEntry, note, at } = yield* chatWithNote
+      const source = at(main, first)
+      yield* api.InsertMessage({
+        chatId,
+        forkId: main,
+        anchor: first,
+        expectedRowVersion: firstEntry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "A later insertion." }
+      })
+      yield* type(api, note.id, source, "Saved at the insertion.")
+      yield* save(api, note.id, source)
+      yield* type(api, note.id, source, "Typed on at the insertion.")
+      const preview = yield* api.PreviewForkNotes({ chatId, fromForkId: main, atSlotId: first })
+      assert.lengthOf(preview, 1)
+      const made = yield* api.CreateFork({
+        chatId,
+        fromForkId: main,
+        atSlotId: first,
+        notes: { comparison: canonicalJson(preview), choices: [{ note: note.entityId, choice: "now" }] }
+      })
+      const there = yield* shown(api, note.id, at(made.fork.id, first))
+      assert.deepStrictEqual([there.saved, there.unsaved], ["Saved at the insertion.", "Typed on at the insertion."])
+      assert.isNull((yield* shown(api, note.id, source)).unsaved)
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("a branch at the latest message takes it; the source goes back, with it in its history", () =>
     Effect.gen(function* () {
       const { api, chatId, main, first, note, at } = yield* chatWithNote
