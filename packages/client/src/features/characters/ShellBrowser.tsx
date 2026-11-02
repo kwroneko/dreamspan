@@ -16,6 +16,7 @@ import { Segmented } from "../../ui/Segmented.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { browseCards, useCardBrowse } from "./cardBrowse.tsx"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
@@ -197,7 +198,7 @@ export function ForkRow({
   const opensHere = perFork && fork.current && fork.branches > 1
   return (
     <div
-      className={`flex min-w-0 items-center gap-1 rounded-md border p-1 hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+      className={`flex min-w-0 items-center gap-1 rounded-md border py-1 ps-1 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
         label={

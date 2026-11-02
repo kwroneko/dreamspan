@@ -2,6 +2,7 @@
 // sort (no Groups: a group chat starts from its group), that opens a new chat with the one
 // picked (its greeting; nothing is saved until the first send, DESIGN §2.1). Registered in the
 // sidebar's actions slot, so a plugin can replace it.
+import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
 import { useAtomValue } from "@effect/atom-react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
@@ -59,7 +60,7 @@ function Choices({
       {matches.slice(0, SHOWN).map((c) => {
         const last = c.recentAt ?? undefined
         return (
-          <li key={c.card.entityId} className="flex min-w-0 items-center gap-0.5">
+          <li key={c.card.entityId} className={`flex min-w-0 items-center gap-0.5 ${rowActionInsetClass}`}>
             <Link
               to="/cards/$entityId/chat"
               params={{ entityId: c.card.entityId }}

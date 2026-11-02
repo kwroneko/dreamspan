@@ -20,7 +20,7 @@ export const buttonClass = (variant: Variant = "secondary") =>
 
 /** The tooltip popup's look, shared with `Tooltip`. */
 export const tooltipPopupClass =
-  "pointer-events-none max-w-72 origin-[var(--transform-origin)] rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md transition-[scale,opacity] duration-100 data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+  "pointer-events-none max-w-[min(18rem,calc(100vw-1rem))] origin-[var(--transform-origin)] rounded-md bg-text px-2 py-1 text-xs text-canvas shadow-md transition-[scale,opacity] duration-100 data-ending-style:opacity-0 data-instant:transition-none data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
 
 /**
  * `pending` disables the button and shows a spinner while its action runs. `hint` explains
@@ -60,7 +60,7 @@ export function Button({
       <BaseTooltip.Root>
         <BaseTooltip.Trigger render={button} />
         <BaseTooltip.Portal>
-          <BaseTooltip.Positioner side="top" sideOffset={6} className="pointer-events-none z-50">
+          <BaseTooltip.Positioner side="top" sideOffset={6} collisionPadding={8} className="pointer-events-none z-50">
             <BaseTooltip.Popup className={tooltipPopupClass}>{hint}</BaseTooltip.Popup>
           </BaseTooltip.Positioner>
         </BaseTooltip.Portal>

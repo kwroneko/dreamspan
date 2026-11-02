@@ -148,7 +148,7 @@ function Row({
         </span>
       </Link>
       {fork && (
-        <span className="absolute right-2 bottom-1">
+        <span className="absolute right-2.5 bottom-1">
           <PinButton fork={fork} />
         </span>
       )}
@@ -157,7 +157,7 @@ function Row({
           type="button"
           onClick={onDelete}
           aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
-          className="absolute top-2 right-2 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
+          className="absolute top-2 right-2.5 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
         >
           Delete
         </button>

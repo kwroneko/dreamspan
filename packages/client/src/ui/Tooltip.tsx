@@ -36,7 +36,7 @@ export function Tooltip({
     <BaseTooltip.Root {...(followCursor ? { trackCursorAxis: "y" as const } : {})}>
       <BaseTooltip.Trigger {...props} render={children} />
       <BaseTooltip.Portal>
-        <BaseTooltip.Positioner side={side} sideOffset={6} className="pointer-events-none z-50">
+        <BaseTooltip.Positioner side={side} sideOffset={6} collisionPadding={8} className="pointer-events-none z-50">
           <BaseTooltip.Popup className={tooltipPopupClass}>{label}</BaseTooltip.Popup>
         </BaseTooltip.Positioner>
       </BaseTooltip.Portal>
