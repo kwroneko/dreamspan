@@ -92,7 +92,10 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
         assert.strictEqual(after.doc.personality, "Local choice")
         assert.strictEqual(after.ref.followsRefId, null)
         assert.isFalse(after.ref.updateAvailable)
-        assert.deepStrictEqual(yield* api.OpenEditor({ refId: fork.id }), forkBefore)
+        const forkAfter = yield* api.OpenEditor({ refId: fork.id })
+        assert.deepStrictEqual(forkAfter.doc, forkBefore.doc)
+        assert.strictEqual(forkAfter.ref.headRevisionId, forkBefore.ref.headRevisionId)
+        assert.isFalse(forkAfter.ref.updateAvailable)
         const matched = (yield* reader.StImportSources({ userId })).library.filter((r) => r.sourcePath === cardPath)
         assert.deepStrictEqual(
           matched.map((r) => r.refId),

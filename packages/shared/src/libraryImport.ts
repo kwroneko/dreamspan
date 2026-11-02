@@ -2,7 +2,7 @@
 // the formats a library document can be exported as.
 import { Schema } from "effect"
 import { ImportReport } from "./importReport.ts"
-import { EntityKind, LibraryRef, MergeOutcome, RefId } from "./library.ts"
+import { EntityKind, LibraryRef, MergeOutcome, RefId, RevisionId } from "./library.ts"
 
 export class ImportedFollower extends Schema.Class<ImportedFollower>("ImportedFollower")({
   refId: RefId,
@@ -14,6 +14,8 @@ export class ImportedFollower extends Schema.Class<ImportedFollower>("ImportedFo
 export class LibraryImport extends Schema.Class<LibraryImport>("LibraryImport")({
   /** True for a new entity; false for a new import of an existing upstream. */
   created: Schema.Boolean,
+  /** A file staged for explicit merge; the ref head and card-owned notes are unchanged. */
+  stagedRevisionId: Schema.optionalKey(RevisionId),
   /** The upstream ref, after the import. */
   ref: LibraryRef,
   /** On a re-import: how the upstream merged the new file with its own edits. */

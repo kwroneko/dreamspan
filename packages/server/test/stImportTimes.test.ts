@@ -208,7 +208,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         assert.strictEqual(second.answers.get(path)!.outcome, "updated")
         const after = (yield* first.api.OpenEditor({ refId: ref.id })).ref
         assert.strictEqual(after.updatedAt, INNER)
-        assert.strictEqual((yield* first.api.OpenEditor({ refId: follower.id })).ref.updatedAt, INNER)
+        assert.strictEqual((yield* first.api.OpenEditor({ refId: follower.id })).ref.updatedAt, follower.updatedAt)
         assert.deepStrictEqual(
           (yield* first.api.ListRevisions({ refId: ref.id, limit: 10 })).map((r) => r.createdAt),
           [INNER, FILE]

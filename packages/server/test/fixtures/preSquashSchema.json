@@ -200,6 +200,12 @@
     },
     {
       "type": "index",
+      "name": "entity_refs_fork_revision",
+      "tbl_name": "entity_refs",
+      "sql": "CREATE INDEX entity_refs_fork_revision ON entity_refs(forked_from_revision_id) WHERE forked_from_revision_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "entity_refs_head",
       "tbl_name": "entity_refs",
       "sql": "CREATE INDEX entity_refs_head ON entity_refs(head_revision_id)"
@@ -365,6 +371,42 @@
       "name": "lcm_summary_choices_chosen",
       "tbl_name": "lcm_summary_choices",
       "sql": "CREATE INDEX lcm_summary_choices_chosen ON lcm_summary_choices(chosen_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_base",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_base ON library_merges(base_revision_id) WHERE base_revision_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_ours",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_ours ON library_merges(ours_revision_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_ref",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_ref ON library_merges(ref_id, created_at)"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_source",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_source ON library_merges(source_ref_id) WHERE source_ref_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_theirs",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_theirs ON library_merges(theirs_revision_id)"
+    },
+    {
+      "type": "index",
+      "name": "library_merges_undo",
+      "tbl_name": "library_merges",
+      "sql": "CREATE INDEX library_merges_undo ON library_merges(undone_by_revision_id) WHERE undone_by_revision_id IS NOT NULL"
     },
     {
       "type": "index",
@@ -928,7 +970,7 @@
       "type": "table",
       "name": "entity_refs",
       "tbl_name": "entity_refs",
-      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), forked_from_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1049,6 +1091,12 @@
       "name": "lcm_summary_choices",
       "tbl_name": "lcm_summary_choices",
       "sql": "CREATE TABLE lcm_summary_choices ( summary_id TEXT PRIMARY KEY REFERENCES summaries(id) ON DELETE CASCADE, chosen_id TEXT NOT NULL REFERENCES summaries(id) ON DELETE CASCADE ) STRICT"
+    },
+    {
+      "type": "table",
+      "name": "library_merges",
+      "tbl_name": "library_merges",
+      "sql": "CREATE TABLE library_merges ( revision_id TEXT PRIMARY KEY REFERENCES entity_revisions(id) ON DELETE CASCADE, ref_id TEXT NOT NULL REFERENCES entity_refs(id) ON DELETE CASCADE, ours_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, base_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL, theirs_revision_id TEXT NOT NULL REFERENCES entity_revisions(id) ON DELETE CASCADE, source_ref_id TEXT REFERENCES entity_refs(id) ON DELETE SET NULL, selection_json TEXT NOT NULL, created_at INTEGER NOT NULL, undone_by_revision_id TEXT REFERENCES entity_revisions(id) ON DELETE SET NULL ) STRICT"
     },
     {
       "type": "table",

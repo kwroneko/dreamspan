@@ -2479,6 +2479,40 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         "NotFound"
       )
   },
+  ForkMergeStatus: {
+    probe: (actor, owner) => refused(actor.api.ForkMergeStatus({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  PreviewForkMerge: {
+    probe: (actor, owner) => refused(actor.api.PreviewForkMerge({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  LibraryGenealogy: {
+    probe: (actor, owner) => refused(actor.api.LibraryGenealogy({ refId: owner.editor.cardRefId }), "NotFound")
+  },
+  CommitForkMerge: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.CommitForkMerge({
+          refId: owner.editor.cardRefId,
+          theirsRevisionId: owner.editor.revisionId,
+          baseRevisionId: null,
+          expectedRowVersion: 1,
+          selection: { excluded: [], resolutions: [] },
+          message: null
+        }),
+        "NotFound"
+      )
+  },
+  UndoForkMerge: {
+    probe: (actor, owner) =>
+      refused(
+        actor.api.UndoForkMerge({
+          refId: owner.editor.cardRefId,
+          mergeRevisionId: owner.editor.revisionId,
+          expectedRowVersion: 1
+        }),
+        "NotFound"
+      )
+  },
   PreviewUpdate: {
     probe: (actor, owner) => refused(actor.api.PreviewUpdate({ refId: owner.editor.cardRefId }), "NotFound")
   },
@@ -3282,11 +3316,12 @@ const seed = Effect.gen(function* () {
           return variant.id
         })
       // Cards merge only their own import line; notes still exercise ref following.
-      const cardSource = (yield* api.OpenEditor({ refId: editorCard.id })).doc
+      const pendingCard = yield* api.CreateCard({ label: "Pending import", name: "Pending import" })
+      const cardSource = (yield* api.OpenEditor({ refId: pendingCard.id })).doc
       const importCard = (personality: string) =>
         writer.ImportFile({
           userId: user.id,
-          intoRefId: editorCard.id,
+          intoRefId: pendingCard.id,
           kind: "card",
           label: "",
           schemaVersion: 1,
@@ -3300,7 +3335,7 @@ const seed = Effect.gen(function* () {
         })
       yield* importCard("")
       const cardDraft = yield* api.SaveEditorDraft({
-        refId: editorCard.id,
+        refId: pendingCard.id,
         field: textField(["personality"]),
         draftId: null,
         expectedSession: null,
@@ -3308,15 +3343,15 @@ const seed = Effect.gen(function* () {
         expectedRowVersion: null,
         baseRevisionId: null
       })
-      const cardRef = (yield* api.OpenEditor({ refId: editorCard.id })).ref
+      const cardRef = (yield* api.OpenEditor({ refId: pendingCard.id })).ref
       yield* api.CommitEditorDrafts({
-        refId: editorCard.id,
+        refId: pendingCard.id,
         expectedRowVersion: cardRef.rowVersion,
         fields: [{ field: cardDraft.key.field, draftId: cardDraft.id, expectedRowVersion: cardDraft.rowVersion }],
         message: null
       })
       yield* importCard("Theirs.")
-      const pendingCardRefId = editorCard.id
+      const pendingCardRefId = pendingCard.id
       const pendingNoteRefId = yield* pending(note.id, ["content"])
       const queued = yield* api.SendMessage({
         chatId: chat.id,
