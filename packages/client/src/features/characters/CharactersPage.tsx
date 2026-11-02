@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 import { Link } from "@tanstack/react-router"
 import { AsyncView } from "../../actions.tsx"
 import { Input } from "../../ui/Field.tsx"
@@ -6,7 +6,8 @@ import { EmptyState } from "../../ui/Surface.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { useTitle } from "../shell.tsx"
 import { homeIntro } from "./homeSlots.ts"
-import { browseCards, CardFilterControl, CardSortControl, useCardBrowse } from "./cardBrowse.tsx"
+import { browseCards, CardFilterControl, CardSortControl } from "./cardBrowse.tsx"
+import { useHomeBrowse } from "./useHomeBrowse.ts"
 import { GroupGrid } from "./GroupGrid.tsx"
 import { CharacterGrid, shellAtom, useGroupCount, type ShellLibrary } from "./shellData.tsx"
 import { PinnedChats } from "./ShellBrowser.tsx"
@@ -14,8 +15,8 @@ import { PinnedChats } from "./ShellBrowser.tsx"
 const COLUMNS = "grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5"
 
 function Home({ data }: { data: ShellLibrary }) {
-  const [browse, setBrowse] = useCardBrowse("home")
-  const [search, setSearch] = useState("")
+  const [browse, setBrowse] = useHomeBrowse()
+  const { search } = browse
   const groups = useGroupCount()
   // With nothing imported, what the intro offers (first-run steps) stands in for the empty grid.
   const intro = useSyncExternalStore(homeIntro.subscribe, homeIntro.snapshot).entries.length > 0
@@ -24,7 +25,12 @@ function Home({ data }: { data: ShellLibrary }) {
     return (
       <div className="flex flex-col gap-5">
         <SlotOutlet slot={homeIntro} props={{ data }} />
-        <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
+        <PinnedChats
+          pinsCollapsed={data.pinsCollapsed}
+          home
+          sortBy={browse.pinsSort}
+          onSortChange={(pinsSort) => setBrowse({ pinsSort })}
+        />
       </div>
     )
   const needle = search.trim().toLowerCase()
@@ -32,7 +38,12 @@ function Home({ data }: { data: ShellLibrary }) {
   return (
     <div className="flex flex-col gap-5">
       <SlotOutlet slot={homeIntro} props={{ data }} />
-      <PinnedChats pinsCollapsed={data.pinsCollapsed} home />
+      <PinnedChats
+        pinsCollapsed={data.pinsCollapsed}
+        home
+        sortBy={browse.pinsSort}
+        onSortChange={(pinsSort) => setBrowse({ pinsSort })}
+      />
       <div>
         <CardFilterControl
           value={browse.filter}
@@ -47,7 +58,7 @@ function Home({ data }: { data: ShellLibrary }) {
           aria-label="Search characters and groups"
           placeholder="Search by name"
           value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
+          onChange={(e) => setBrowse({ search: e.currentTarget.value })}
           className="sm:max-w-xs"
         />
         <CardSortControl sort={browse.sort} reversed={browse.reversed} onChange={setBrowse} />

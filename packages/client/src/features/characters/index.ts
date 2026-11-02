@@ -7,6 +7,7 @@ import { sidebarActions } from "../shell.tsx"
 import { StartChatPicker } from "./StartChatPicker.tsx"
 import { sidebarFoot } from "./homeSlots.ts"
 import { OpenChatBranches } from "./ShellBrowser.tsx"
+import { homeSearch } from "./homeSearch.ts"
 
 export const register = () => {
   registerCharacterPanels()
@@ -15,7 +16,7 @@ export const register = () => {
   // The open chat's branches at the left panel's foot, below whatever it lists.
   sidebarFoot.register({ id: "open-chat-branches", order: 10, component: OpenChatBranches })
   // The home screen: the character grid (DESIGN §2.1).
-  routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage })
+  routes.register({ id: "characters", parent: "app", path: "/", component: CharactersPage, retainSearch: homeSearch })
   // A card without entering a chat; its pending chat is `/cards/$entityId/chat` (chat feature).
   routes.register({ id: "characters.card", parent: "app", path: "/cards/$entityId", component: CardPage })
   // A group's chats, named by any one of them (DESIGN §2.1).

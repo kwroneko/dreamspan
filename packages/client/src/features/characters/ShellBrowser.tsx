@@ -397,14 +397,19 @@ export function PinnedChats({
   pinsCollapsed,
   entity = null,
   chat = null,
-  home = false
+  home = false,
+  sortBy,
+  onSortChange
 }: {
   pinsCollapsed: boolean
   entity?: EntityId | null
   chat?: ChatId | null
   home?: boolean
+  sortBy?: ShellSort
+  onSortChange?: (sort: ShellSort) => void
 }) {
-  const [sort, setSort] = useState<ShellSort>("recent")
+  const [localSort, setSort] = useState<ShellSort>("recent")
+  const sort = sortBy ?? localSort
   const [limit, setLimit] = useState(PAGE_ROWS)
   const action = useAction()
   const open = !home || !pinsCollapsed
@@ -423,7 +428,7 @@ export function PinnedChats({
         >
           {home ? (pinsCollapsed ? "▸ " : "▾ ") : ""}Pinned chats
         </Button>
-        {open && <SortSwitch value={sort} onChange={setSort} label="Sort pinned chats" />}
+        {open && <SortSwitch value={sort} onChange={onSortChange ?? setSort} label="Sort pinned chats" />}
       </div>
       {open && (
         <>
