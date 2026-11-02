@@ -22,7 +22,7 @@ import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
-import { defaultSpeaker, nameOf, recentSpeakers, replyFaces, useCast } from "./cast.ts"
+import { defaultSpeaker, listNames, nameOf, recentSpeakers, replyFaces, useCast } from "./cast.ts"
 import { planReply } from "./replyPolicy.ts"
 import { HistoryIcon } from "./icons.tsx"
 import { composerChoice, useComposerChoice } from "./speaker.ts"
@@ -301,6 +301,9 @@ export function Composer({
   )
   const { next, replier } = replyPlan
   const replierName = nameOf(castView, replier)
+  // Everyone the send's round has reply, in turn (DESIGN §2.3): "Mira", "Mira and Tobin", "Mira, Tobin and Wren".
+  const roundNames =
+    replier === null ? null : listNames([replier, ...replyPlan.round].map((id) => nameOf(castView, id) ?? "?"))
   // Only known when the window reaches the leaf; otherwise the server takes the message anyway.
   const leaf = view.newer === null ? view.entries.at(-1) : undefined
   const leafGenerating = leaf?.version.status === "generating"
@@ -425,7 +428,8 @@ export function Composer({
           from,
           plan.reply,
           captured?.images,
-          captured?.ids
+          captured?.ids,
+          plan.round
         )
         accepted = sent
         report(outcome)
@@ -441,7 +445,7 @@ export function Composer({
   const replyNow = async () => {
     if (busy || !ready || replier === null || choice.draftId === null) return
     setBusy(true)
-    const outcome = await session.generate(session.snapshot().leafSlotId, replier)
+    const outcome = await session.generate(session.snapshot().leafSlotId, replier, "", undefined, replyPlan.round)
     report(outcome)
     if (outcome.ok) replied(choice.draftId)
     setBusy(false)
@@ -492,11 +496,12 @@ export function Composer({
   }
 
   const hasText = text.trim() !== "" || !!attachmentInput?.count
-  const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} replies` : "Send"
+  const replies = replyPlan.round.length > 0 ? "reply" : "replies"
+  const sendLabel = hasText ? (name ? `Send as ${name}` : "Send") : replierName ? `${replierName} ${replies}` : "Send"
   const sendHint = hasText
-    ? `${sendLabel}${replierName ? `, then ${replierName} replies` : ""} (${submitHint})`
-    : replierName
-      ? `${replierName} replies now, with nothing sent from you`
+    ? `${sendLabel}${roundNames ? `, then ${roundNames} ${replies}` : ""} (${submitHint})`
+    : roundNames
+      ? `${roundNames} ${replies} now, with nothing sent from you`
       : "Type a message to send"
   // Generate writes the speaker's turn: for a card the user plays, the model writes it for them.
   const editedName = editing === null ? null : nameOf(castView, editing.speakerEntityId)
@@ -559,6 +564,7 @@ export function Composer({
       candidates: faces,
       muted: cast?.absent ?? [],
       next,
+      round: replyPlan.round,
       picked: pickedReply,
       loading: turnEntries === null,
       onPick: (id) => void choices.change({ replyFrom: id }).then(report)
@@ -569,6 +575,7 @@ export function Composer({
     ready,
     hasText,
     replier,
+    round: replyPlan.round,
     generateText,
     generateWord: editing !== null ? "New version" : "Write",
     generateHint,

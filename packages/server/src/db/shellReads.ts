@@ -7,10 +7,7 @@
 // worker keeps the last computation while the database hasn't changed (`PRAGMA data_version`
 // moves with every commit of another connection, and the writer is one), so a screen's
 // several reads cost one.
-import { avatarCropField } from "@rp/shared/media.ts"
 import { CastCard, type ChatId, type EntityId, type SlotId } from "@rp/shared/chat.ts"
-import { modelName } from "@rp/shared/cardNames.ts"
-import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
 import { chatName } from "@rp/shared/chatName.ts"
 import { CardUsage, ShellCard, ShellFork, type ShellForksView, type ShellSection } from "@rp/shared/chatSetupApi.ts"
 import type { RefId, RevisionId } from "@rp/shared/library.ts"
@@ -25,6 +22,7 @@ import {
   summaryStamps
 } from "./forkSummaries.ts"
 import { readFavourites } from "./cardFavourites.ts"
+import { type CardSummaryRow, cardSummary, cardSummaryBook } from "./cards.ts"
 import type { ReadOps } from "./ops.ts"
 import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
@@ -61,9 +59,11 @@ const sortBy = (forks: ReadonlyArray<Fork>, sort: ShellForksView["sort"], recent
         : a.name.localeCompare(b.name)
       : (sort === "created"
           ? b.createdAt - a.createdAt
-          : recent === "chat"
-            ? b.chatRecentAt - a.chatRecentAt
-            : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
+          : sort === "added"
+            ? (b.addedAt ?? b.createdAt) - (a.addedAt ?? a.createdAt)
+            : recent === "chat"
+              ? b.chatRecentAt - a.chatRecentAt
+              : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
   )
 
 /**
@@ -156,49 +156,27 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         { data_version: number }
       ]
       if (recompute !== true && memo !== null && memo.userId === userId && memo.version === version) return memo.state
-      // Each live card's names, avatar and lorebook flags, read by SQLite from its head
-      // revision: the shell never needs the rest of the document, which can be megabytes.
-      const rows = yield* sql<{
-        id: string
-        created_at: number
-        added_at: number
-        ref: string
-        revision: string
-        fields: string
-        book: number
-        book_entries: number | null
-        persona: number
-      }>`
-        SELECT e.id, e.created_at, r.created_at AS added_at, r.id AS ref, rev.id AS revision,
-          -- One parse of the document for the strings (a missing or non-string value reads as empty
-          -- below), and the lorebook's type and size without returning its entries.
-          json_extract(rev.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
-            '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness') AS fields,
-          json_type(rev.doc_json, '$.character_book') = 'object' AS book,
-          CASE WHEN json_type(rev.doc_json, '$.character_book.entries') = 'array'
-            THEN json_array_length(rev.doc_json, '$.character_book.entries') ELSE 0 END AS book_entries,
+      // Each live card's names, avatar and lorebook flags, from its head revision's summary
+      // columns (`cardSummary`): no read parses a document, which can be megabytes.
+      const rows = yield* sql<
+        CardSummaryRow & {
+          id: string
+          created_at: number
+          added_at: number
+          ref: string
+          revision: string
+          persona: number
+        }
+      >`
+        SELECT e.id, e.created_at, r.created_at AS added_at, r.id AS ref, r.head_revision_id AS revision,
+          cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries,
           EXISTS(SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
         FROM entities e JOIN entity_refs r ON r.id = (SELECT id FROM entity_refs WHERE entity_id = e.id AND ref_kind = 'upstream' LIMIT 1)
-        JOIN entity_revisions rev ON rev.id = r.head_revision_id
+        LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
         WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.deleted_at IS NULL AND e.purged_at IS NULL AND e.archived_at IS NULL
         ORDER BY r.label COLLATE NOCASE, e.id`
       // Built from what the read just made: no constructor checks (the RPC encodes it anyway).
-      const text = (value: unknown) => (typeof value === "string" ? value : "")
-      const metadata = rows.map((row) => {
-        const [name, nickname, subtitle, avatar, bookName, crop, talkativeness] = JSON.parse(
-          row.fields
-        ) as Array<unknown>
-        return {
-          ...row,
-          name: text(name),
-          nickname: text(nickname),
-          subtitle: text(subtitle),
-          avatar: typeof avatar === "string" ? avatar : null,
-          crop: avatarCropField(avatar, crop),
-          bookName: text(bookName).trim(),
-          talkativeness: talkativenessOf(talkativeness)
-        }
-      })
+      const metadata = rows.map((row) => ({ ...row, ...cardSummary(row) }))
       const byCard = new Map(
         metadata.map((m) => [
           m.id,
@@ -207,15 +185,13 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               entityId: m.id as EntityId,
               name: m.name,
               label: m.name,
-              modelName: modelName({ name: m.name, nickname: m.nickname }),
-              subtitle: m.subtitle,
+              modelName: m.modelName,
+              subtitle: m.version,
               persona: m.persona === 1,
               inBin: false,
               talkativeness: m.talkativeness,
-              lorebook: m.book === 1,
-              ...(m.book === 1 && m.bookName !== "" ? { lorebookName: m.bookName } : {}),
-              ...(m.book === 1 ? { lorebookEntries: m.book_entries ?? 0 } : {}),
-              avatarMediaId: m.avatar,
+              ...cardSummaryBook(m),
+              avatarMediaId: m.avatarMediaId,
               ...m.crop
             },
             trusted
@@ -234,6 +210,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         title: string
         current_fork_id: string | null
         chat_created_at: number
+        chat_added_at: number
         shell_stamp: number
         s_format: number | null
         s_stamp: number | null
@@ -248,7 +225,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         lists: string | null
       }>`
           SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id,
-            c.title, c.current_fork_id, c.created_at AS chat_created_at,
+            c.title, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
@@ -264,6 +241,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             title: r.title,
             current_fork_id: r.current_fork_id,
             created_at: r.chat_created_at,
+            added_at: r.chat_added_at,
             shell_stamp: r.shell_stamp
           }
         ])
@@ -364,6 +342,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           original: record.parent_fork_id === null,
           split: s.split,
           createdAt: record.created_at,
+          addedAt: row.added_at,
           endAt: s.endAt,
           recentAt,
           chatRecentAt: 0,
@@ -444,7 +423,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
                   refId: m.ref as RefId,
                   headRevisionId: m.revision as RevisionId,
                   label: c.label,
-                  subtitle: m.subtitle,
+                  subtitle: m.version,
                   name: c.name,
                   avatarMediaId: c.avatarMediaId,
                   ...(c.avatarCrop ? { avatarCrop: c.avatarCrop } : {}),

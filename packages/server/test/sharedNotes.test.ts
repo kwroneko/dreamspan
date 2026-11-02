@@ -4,6 +4,7 @@
 import { assert, it } from "@effect/vitest"
 import { type ChatId, type EntityId, NewVersion, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
+import { textField, valueField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import type { ContextSnapshot } from "../src/assembler/types.ts"
@@ -212,5 +213,43 @@ it.live("a card's note saved as a shared note links to it; in the bin it sends n
     assert.notProperty(own, "link")
     assert.strictEqual(own["content"], "A red oilskin coat.")
     assert.include(yield* assembled(userId, chat.chat.id, chat.entry.slotId), "A red oilskin coat.")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
+it.live("a card's notes list says what each sends: its live text, a linked one's shared note's", () =>
+  Effect.gen(function* () {
+    const { api, userId, mira } = yield* setup
+    const typed = (refId: RefId, field: string, content: string) =>
+      Effect.gen(function* () {
+        const opened = yield* api.OpenEditor({ refId })
+        const existing = opened.drafts.find((d) => d.key.field === field)
+        return yield* api.SaveEditorDraft({
+          draftId: null,
+          expectedSession: null,
+          refId,
+          field,
+          content,
+          expectedRowVersion: existing?.rowVersion ?? null,
+          baseRevisionId: existing?.status === "active" ? null : opened.ref.headRevisionId
+        })
+      })
+    const shared = yield* api.CreateSharedNote({ title: "Weather", content: "Rain on the roofs." })
+    const linked = yield* api.CreateCardNote({ cardRefId: mira.id, title: "", link: shared.entityId })
+    const own = yield* api.CreateCardNote({ cardRefId: mira.id, title: "Outfit" })
+    yield* edit(api, userId, own.id, { content: "A grey coat." })
+    const sent = Effect.map(api.ListCardNotes({ cardRefId: mira.id }), (notes) =>
+      Object.fromEntries(notes.map((n) => [n.ref.id, n.sent?.["content"] ?? null]))
+    )
+    assert.deepStrictEqual(yield* sent, { [linked.id]: "Rain on the roofs.", [own.id]: "A grey coat." })
+    // What's typed and not yet saved is what a reply sends (live text).
+    yield* typed(shared.id, textField(["content"]), "Snow on the roofs.")
+    yield* typed(own.id, textField(["content"]), "A red coat.")
+    yield* typed(own.id, valueField(["on_by_default"]), "true")
+    const notes = yield* api.ListCardNotes({ cardRefId: mira.id })
+    assert.deepStrictEqual(yield* sent, { [linked.id]: "Snow on the roofs.", [own.id]: "A red coat." })
+    assert.strictEqual(notes.find((n) => n.ref.id === own.id)!.sent!["on_by_default"], true)
+    // A shared note in the bin sends nothing.
+    yield* api.DeleteNote({ noteRefId: shared.id })
+    assert.deepStrictEqual(yield* sent, { [linked.id]: null, [own.id]: "A red coat." })
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )

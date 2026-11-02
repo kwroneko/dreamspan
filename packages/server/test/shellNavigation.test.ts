@@ -202,7 +202,7 @@ describe("independent shell reads", () => {
       }).pipe(Effect.scoped, Effect.provide(layer()))
   )
   it.live(
-    "takes folder card creation from ST or file ctime, keeps it on re-import, and uses now for direct uploads",
+    "inherits full-folder ST arrival from saved metadata or file dates, keeps it on re-import, and uses now for direct uploads",
     () =>
       Effect.gen(function* () {
         const api = yield* client()
@@ -230,11 +230,12 @@ describe("independent shell reads", () => {
           join(folder, "characters", "Fallback.json"),
           json({ ...source, create_date: "invalid", data: { ...source.data, name: "Fallback" } })
         )
-        const fallbackCtime = statSync(join(folder, "characters", "Fallback.json")).ctimeMs
+        const fallbackStat = statSync(join(folder, "characters", "Fallback.json"))
+        const fallbackFileTime = Math.min(...[fallbackStat.birthtimeMs, fallbackStat.mtimeMs].filter((at) => at > 0))
         yield* importFolder()
         assert.closeTo(
           (yield* api.GetShellLibrary()).cards.find((c) => c.card.name === "Fallback")!.createdAt,
-          fallbackCtime,
+          fallbackFileTime,
           1
         )
         const port = yield* serverPort

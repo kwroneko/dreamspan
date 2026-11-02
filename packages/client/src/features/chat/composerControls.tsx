@@ -42,6 +42,8 @@ export interface ComposerControlContext {
   readonly ready: boolean
   readonly hasText: boolean
   readonly replier: EntityId | null
+  /** Who replies after `replier`, in turn, in the round a send or Reply now starts (DESIGN §2.3). */
+  readonly round: ReadonlyArray<EntityId>
   /** Write for's accessible name, "Write for Sam" (or "New version" while a reply's guidance is edited). */
   readonly generateText: string
   /** What Write for's button shows, a word: "Write", or "New version". */

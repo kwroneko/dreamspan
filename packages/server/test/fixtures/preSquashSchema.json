@@ -98,6 +98,12 @@
     },
     {
       "type": "index",
+      "name": "chats_st_group",
+      "tbl_name": "chats",
+      "sql": "CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "composer_images_draft",
       "tbl_name": "composer_images",
       "sql": "CREATE INDEX composer_images_draft ON composer_images(draft_id, status)"
@@ -818,6 +824,12 @@
     },
     {
       "type": "table",
+      "name": "card_summaries",
+      "tbl_name": "card_summaries",
+      "sql": "CREATE TABLE card_summaries ( revision_id TEXT PRIMARY KEY, fields TEXT NOT NULL, book INTEGER NOT NULL, book_entries INTEGER NOT NULL ) STRICT, WITHOUT ROWID"
+    },
+    {
+      "type": "table",
       "name": "changeset_groups",
       "tbl_name": "changeset_groups",
       "sql": "CREATE TABLE changeset_groups ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, origin TEXT NOT NULL CHECK (origin IN ('user', 'agent')), created_at INTEGER NOT NULL ) STRICT"
@@ -850,7 +862,7 @@
       "type": "table",
       "name": "chats",
       "tbl_name": "chats",
-      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
+      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER, added_at INTEGER, st_group_id TEXT, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",
@@ -904,7 +916,7 @@
       "type": "table",
       "name": "entity_refs",
       "tbl_name": "entity_refs",
-      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1054,7 +1066,7 @@
       "type": "table",
       "name": "queued_messages",
       "tbl_name": "queued_messages",
-      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, -- As on versions: the typed text before regex scripts rewrote it, and what they did. raw_content TEXT, rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)), CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
+      "sql": "CREATE TABLE queued_messages ( id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, -- The reply it waits for: the slot, not a version, so it posts after whichever version -- ends up selected. reply_slot_id TEXT NOT NULL REFERENCES slots(id) ON DELETE CASCADE, -- Order among the entries waiting in a chat. seq INTEGER NOT NULL, -- A message to post, or a reply to generate. kind TEXT NOT NULL CHECK (kind IN ('message', 'generate')), content TEXT NOT NULL, -- As on versions: the typed text before regex scripts rewrote it, and what they did. raw_content TEXT, rewrite_json TEXT CHECK (rewrite_json IS NULL OR json_valid(rewrite_json)), speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'message': who replies to it once it posts, picked when it was sent, as an -- immediate send's reply is. reply_speaker_entity_id TEXT REFERENCES entities(id) ON DELETE SET NULL, -- For 'generate': the one-turn direction the reply gets. direction TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT, images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)), -- 1: a reply of a round (DESIGN §2.3), queued by the server behind the round's reply before it. round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)), -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round. held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)), CHECK (round = 0 OR kind = 'generate'), CHECK (held = 0 OR round = 1), CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0), CHECK (kind = 'generate' OR direction IS NULL), CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL) ) STRICT"
     },
     {
       "type": "table",
@@ -1289,6 +1301,18 @@
       "name": "card_ref_update",
       "tbl_name": "entity_refs",
       "sql": "CREATE TRIGGER card_ref_update BEFORE UPDATE ON entity_refs WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' AND (NEW.ref_kind <> 'upstream' OR NEW.follows_ref_id IS NOT NULL OR NEW.chat_id IS NOT NULL OR EXISTS (SELECT 1 FROM entity_refs r WHERE r.entity_id = NEW.entity_id AND r.id <> NEW.id)) BEGIN SELECT RAISE(ABORT, 'cards have one independent upstream ref'); END"
+    },
+    {
+      "type": "trigger",
+      "name": "card_summaries_delete",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END"
+    },
+    {
+      "type": "trigger",
+      "name": "card_summaries_insert",
+      "tbl_name": "entity_revisions",
+      "sql": "CREATE TRIGGER card_summaries_insert AFTER INSERT ON entity_revisions WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card' BEGIN INSERT INTO card_summaries (revision_id, fields, book, book_entries) VALUES (NEW.id, json_extract(NEW.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id', '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness'), coalesce(json_type(NEW.doc_json, '$.character_book') = 'object', 0), CASE WHEN json_type(NEW.doc_json, '$.character_book.entries') = 'array' THEN json_array_length(NEW.doc_json, '$.character_book.entries') ELSE 0 END); END"
     },
     {
       "type": "trigger",

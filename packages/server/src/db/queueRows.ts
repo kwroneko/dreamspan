@@ -1,6 +1,6 @@
 // The send queue's rows (migration 0012), read by the readers and the writer. Every query
 // reaches the owner through the chat: a queued message has no owner of its own.
-import { type ChatId, type EntityId, QueuedMessage, type SlotId } from "@rp/shared/chat.ts"
+import { type ChatId, type EntityId, type ForkId, QueuedMessage, type SlotId } from "@rp/shared/chat.ts"
 import type { UserId } from "@rp/shared/domain.ts"
 import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
@@ -23,6 +23,9 @@ export interface QueuedRow {
   readonly direction: string | null
   /** For 'message': 1 when it posts without a reply (every character muted, migration 0048). */
   readonly no_reply: number
+  /** 1: a reply of a round; `held` 1: its round stopped, waiting for Continue round. */
+  readonly round: number
+  readonly held: number
   readonly row_version: number
   readonly created_at: number
 }
@@ -38,6 +41,7 @@ export const toQueued = (row: QueuedRow) =>
     speakerEntityId: row.speaker_entity_id as EntityId | null,
     replySpeakerEntityId: row.reply_speaker_entity_id as EntityId | null,
     direction: row.direction,
+    ...(row.round === 1 ? { round: { held: row.held === 1, forkId: row.fork_id as ForkId | null } } : {}),
     rowVersion: row.row_version,
     createdAt: row.created_at
   })

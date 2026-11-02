@@ -2,6 +2,7 @@
 // chat part, settings.json, a group, or one of the folder's library files, and building a
 // persona's card. Like every parse, nothing here throws on a file's content: a file that
 // can't be read is a report with an error.
+import { sourceTime } from "../formats/sourceTime.ts"
 import { docHash, searchText } from "../db/documents.ts"
 import { CardDoc } from "@rp/shared/docs/card.ts"
 import { NOTE_SCHEMA_VERSION, noteDepth, type NoteDoc, type Placement } from "@rp/shared/docs/note.ts"
@@ -21,6 +22,7 @@ const parseChatPart = (input: {
   readonly first: boolean
   readonly firstIndex: number
   readonly carryAt: number | null
+  readonly fallbackAt?: number
 }) => {
   const issues = new ReportBuilder()
   return attempt(() => parseStChatPart(input.bytes, input, issues)).pipe(
@@ -139,6 +141,11 @@ const parseLibraryFile = (
         parsed,
         card: {
           name: card.name,
+          ...(typeof card.creation_date === "number" &&
+          card.creation_date > 0 &&
+          sourceTime(card.creation_date * 1000) !== null
+            ? { authoredAt: sourceTime(card.creation_date * 1000)! }
+            : {}),
           greetings: [card.first_mes, ...card.alternate_greetings, ...card.group_only_greetings]
             .filter((greeting) => greeting.trim() !== "")
             .map((greeting) => greeting.slice(0, stChatLimits.maxGreetingChars)),

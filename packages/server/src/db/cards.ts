@@ -4,7 +4,7 @@ import { displayEndOf } from "./displayPath.ts"
 import { forkAt } from "./forkState.ts"
 import { type FoldableEvent, foldState } from "@rp/shared/state.ts"
 import { withoutPurged } from "./stateRefs.ts"
-import { cardNames } from "@rp/shared/cardNames.ts"
+import { cardNames, modelName } from "@rp/shared/cardNames.ts"
 import { avatarCropField } from "@rp/shared/media.ts"
 import { talkativenessOf } from "@rp/shared/naturalOrder.ts"
 // Cards as chats see them: display name, model name, version and greetings from the
@@ -97,6 +97,88 @@ const parse = (row: CardRow): CardText => {
   }
 }
 
+/** A card revision's summary (baseline `card_summaries`), as a query selects it: null without one. */
+export interface CardSummaryRow {
+  readonly card_fields: string | null
+  readonly card_book: number | null
+  readonly card_book_entries: number | null
+}
+
+/**
+ * What the card lists read of a revision, from its summary columns rather than its document
+ * (decisions1: the document can be megabytes with a lorebook, and every list read parsed it).
+ * Anything malformed reads as empty, as `parse` has it.
+ */
+export const cardSummary = (row: CardSummaryRow) => {
+  let fields: Array<unknown> = []
+  try {
+    const parsed: unknown = row.card_fields === null ? [] : JSON.parse(row.card_fields)
+    if (Array.isArray(parsed)) fields = parsed
+  } catch {
+    // The column is SQLite's own JSON; anything else reads as empty.
+  }
+  const [name, nickname, version, avatar, bookName, crop, talkativeness] = fields
+  const book = row.card_book === 1
+  return {
+    name: text(name),
+    nickname: text(nickname),
+    modelName: modelName({ name: text(name), nickname: text(nickname) }),
+    version: text(version),
+    avatarMediaId: typeof avatar === "string" ? avatar : null,
+    crop: avatarCropField(avatar, crop),
+    talkativeness: talkativenessOf(talkativeness),
+    book,
+    bookName: text(bookName).trim(),
+    bookEntries: row.card_book_entries ?? 0
+  }
+}
+
+/** The summary's lorebook fields of a `CastCard`. */
+export const cardSummaryBook = (summary: ReturnType<typeof cardSummary>) => ({
+  lorebook: summary.book,
+  ...(summary.book && summary.bookName !== "" ? { lorebookName: summary.bookName } : {}),
+  ...(summary.book ? { lorebookEntries: summary.bookEntries } : {})
+})
+
+/**
+ * The user's cards as lists show them (`CastCard` alone): `ids`, binned ones included, or every
+ * live one, as `loadCards` picks them, read from the summary columns only.
+ */
+export const loadCastCards = (sql: SqlClient.SqlClient, userId: UserId, ids: ReadonlyArray<EntityId> | null) =>
+  ids !== null && ids.length === 0
+    ? Effect.succeed([] as Array<CastCard>)
+    : sql<CardSummaryRow & { entity_id: string; persona: number; in_bin: number }>`
+        SELECT e.id AS entity_id, cs.fields AS card_fields, cs.book AS card_book, cs.book_entries AS card_book_entries,
+          e.deleted_at IS NOT NULL AS in_bin,
+          EXISTS (SELECT 1 FROM entity_tags t WHERE t.entity_id = e.id AND t.tag = 'persona') AS persona
+        FROM entities e
+        JOIN entity_refs r ON r.id = (
+          SELECT r2.id FROM entity_refs r2 WHERE r2.entity_id = e.id AND r2.ref_kind = 'upstream'
+          LIMIT 1)
+        LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
+        WHERE e.owner_user_id = ${userId} AND e.kind = 'card' AND e.purged_at IS NULL
+          AND ${ids === null ? sql`e.deleted_at IS NULL AND e.archived_at IS NULL` : sql.in("e.id", ids)}
+        ORDER BY r.label COLLATE NOCASE, e.id`.pipe(
+        Effect.map((rows) =>
+          rows.map((row) => {
+            const summary = cardSummary(row)
+            return new CastCard({
+              entityId: row.entity_id as EntityId,
+              name: summary.name,
+              label: summary.name,
+              modelName: summary.modelName,
+              subtitle: summary.version,
+              persona: row.persona === 1,
+              inBin: row.in_bin === 1,
+              talkativeness: summary.talkativeness,
+              ...cardSummaryBook(summary),
+              avatarMediaId: summary.avatarMediaId,
+              ...summary.crop
+            })
+          })
+        )
+      )
+
 /**
  * The user's cards: `ids` (binned ones included, so a chat can still name them), or every
  * live one. Each is read from its single upstream ref; the
@@ -123,21 +205,21 @@ export const loadCards = (sql: SqlClient.SqlClient, userId: UserId, ids: Readonl
  * the chat reads, `cardInChat` in library.ts). Its persona mark stays the library's.
  */
 export const castCardAt = (sql: SqlClient.SqlClient, card: CastCard, revisionId: string) =>
-  sql<{ doc_json: string }>`SELECT doc_json FROM entity_revisions WHERE id = ${revisionId}`.pipe(
+  sql<CardSummaryRow>`SELECT fields AS card_fields, book AS card_book, book_entries AS card_book_entries
+    FROM card_summaries WHERE revision_id = ${revisionId}`.pipe(
     Effect.map(([row]) => {
       if (!row) return card
-      const doc = JSON.parse(row.doc_json) as Record<string, unknown>
-      const names = cardNames(doc)
+      const summary = cardSummary(row)
       return new CastCard({
         ...card,
-        name: names.displayName,
-        label: names.displayName,
-        modelName: names.modelName,
-        subtitle: names.version,
-        avatarMediaId: typeof doc.avatar_media_id === "string" ? doc.avatar_media_id : null,
-        ...avatarCropField(doc.avatar_media_id, doc.avatar_crop),
-        talkativeness: talkativenessFrom(doc),
-        lorebook: typeof doc.character_book === "object" && doc.character_book !== null
+        name: summary.name,
+        label: summary.name,
+        modelName: summary.modelName,
+        subtitle: summary.version,
+        avatarMediaId: summary.avatarMediaId,
+        ...summary.crop,
+        talkativeness: summary.talkativeness,
+        lorebook: summary.book
       })
     })
   )

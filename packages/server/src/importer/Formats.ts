@@ -83,6 +83,7 @@ export class Formats extends Context.Service<
         readonly first: boolean
         readonly firstIndex: number
         readonly carryAt: number | null
+        readonly fallbackAt?: number
       }) => Effect.Effect<StChatPart, FormatWorkerFailed>
       readonly settings: (
         bytes: Uint8Array

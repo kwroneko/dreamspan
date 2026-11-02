@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react"
 import { chatCommands } from "./commands.tsx"
 import { QueuedMessages } from "./QueuedMessages.tsx"
+import { RoundControls } from "./RoundControls.tsx"
 import { pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
@@ -111,6 +112,8 @@ export const registerComposerControls = () => [
       <QueuedMessages queue={view.queue} session={session} onRecovered={recoverQueued} />
     )
   }),
+  // The round under way after the queue: who's still to reply, Continue round once stopped.
+  composerControls.register({ id: "composer.round", order: 20, placement: "queue", component: RoundControls }),
   pendingComposerControls.register({
     id: "pending.speaker",
     order: 10,

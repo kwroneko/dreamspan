@@ -29,6 +29,10 @@ export const castView = (cast: Cast | null, extra: ReadonlyArray<CastCard> = [])
 
 export const CastContext = createContext<CastView>(castView(null))
 
+/** Names as a sentence lists them: "Mira", "Mira and Tobin", "Mira, Tobin and Wren". */
+export const listNames = (names: ReadonlyArray<string>) =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+
 export const useCast = () => useContext(CastContext)
 
 /** A cast card's portrait as the cast has it now: its name and image (ui/Portrait.tsx). */

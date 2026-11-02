@@ -1,3 +1,4 @@
+import { StArrival } from "@rp/shared/stImportApi.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
@@ -383,6 +384,8 @@ export const StImportNote = Schema.Struct({
   title: Schema.String,
   /** Its texts, oldest first, as the note's revisions; the last is current. */
   contents: Schema.NonEmptyArray(Schema.String),
+  /** Source file time; summary revisions prefer their individual source messages. */
+  modifiedAt: Schema.optionalKey(Schema.Number),
   /** For a summary, the message each text was saved on, in the same order, where it's known. */
   sources: Schema.optionalKey(Schema.Array(Schema.NullOr(SlotId))),
   placement: NoteDoc.fields.placement,
@@ -1420,6 +1423,10 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("ImportFile", {
     payload: {
+      /** Full-folder arrival evidence; ordinary single-file uploads omit it. */
+      arrival: Schema.optionalKey(StArrival),
+      /** Source modification time for an ST folder import; absent for ordinary uploads. */
+      modifiedAt: Schema.optionalKey(Schema.Number),
       createdAt: Schema.optionalKey(Schema.Number),
       userId: UserId,
       intoRefId: Schema.NullOr(RefId),
@@ -1635,10 +1642,16 @@ export class WriteOps extends RpcGroup.make(
       /** The composer the text came from, committed with the post or the queued entry. */
       commitDraft: CommitDraft,
       /** What regex scripts did to `content` as it was sent, and the text typed. */
-      rewrite: Schema.optionalKey(StoredRewrite)
+      rewrite: Schema.optionalKey(StoredRewrite),
+      /**
+       * Who replies after its reply, in turn (DESIGN §2.3): queued as the round's entries behind
+       * that reply. A send at the fork's tip first drops the round already queued there.
+       */
+      round: Schema.optionalKey(Schema.Array(EntityId))
     },
     success: Schema.Union([
-      Schema.TaggedStruct("Posted", { result: AppendResult }),
+      /** `queue`: the chat's queue, when the post queued the rest of a round behind it. */
+      Schema.TaggedStruct("Posted", { result: AppendResult, queue: Schema.optionalKey(Schema.Array(QueuedMessage)) }),
       Schema.TaggedStruct("Queued", {
         queued: QueuedMessage,
         queue: Schema.Array(QueuedMessage),
@@ -1689,6 +1702,21 @@ export class WriteOps extends RpcGroup.make(
    * (`next`, generating, which the caller starts), and the rest wait for that reply. A
    * slot gone to the bin withdraws its entries.
    */
+  /**
+   * The fork's stopped round goes on (DESIGN §2.3): its entries wait at the fork's tip again, and
+   * when nothing is being written there the first posts as a reply (`next`, to start).
+   */
+  Rpc.make("ContinueRound", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: QueueOutcome,
+    error: Schema.Union([NotFound, StorageError])
+  }),
+  /** The fork's round entries, waiting or stopped, dropped. */
+  Rpc.make("EndRound", {
+    payload: { userId: UserId, chatId: ChatId, forkId: Schema.NullOr(ForkId) },
+    success: QueueOutcome,
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** Adds the card to the persona folder or takes it out, keeping its other folders. */
   Rpc.make("SetPersona", {
     payload: { userId: UserId, entityId: EntityId, persona: Schema.Boolean },
@@ -1735,6 +1763,7 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("StImportCharacterNote", {
     payload: {
+      modifiedAt: Schema.optionalKey(Schema.Number),
       userId: UserId,
       cardEntityId: EntityId,
       prompt: Schema.String,
@@ -1838,6 +1867,8 @@ export class WriteOps extends RpcGroup.make(
   }),
   Rpc.make("StImportStartChat", {
     payload: {
+      groupId: Schema.optionalKey(Schema.String),
+      arrival: Schema.optionalKey(StArrival),
       userId: UserId,
       parentRecordId: Schema.optionalKey(Schema.String),
       source: Schema.String,
@@ -1876,7 +1907,11 @@ export class WriteOps extends RpcGroup.make(
       /** A JSON array of the format worker's messages (formats/stChat.ts), passed on unread. */
       messagesJson: Schema.String,
       /** Each speaker key of the messages, as a card of the user's, or null. */
-      speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId))
+      speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId)),
+      /** Full-folder cards/personas by speaker; a manual link alone never dates their arrival. */
+      arrivalRefs: Schema.optionalKey(Schema.Record(Schema.String, RefId)),
+      groupArrival: Schema.optionalKey(StArrival),
+      groupId: Schema.optionalKey(Schema.String)
     },
     success: Schema.Struct({
       slotIds: Schema.Array(SlotId),

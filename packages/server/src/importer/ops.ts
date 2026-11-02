@@ -1,3 +1,4 @@
+import { StArrival } from "@rp/shared/stImportApi.ts"
 import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // The format workers' operations (ARCHITECTURE.md §11.2): parsing an uploaded file and
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
@@ -38,6 +39,7 @@ export class ParsedMedia extends Schema.Class<ParsedMedia>("ParsedMedia")({
 /** A parsed file: its report, and what goes into the library, if anything. */
 export class ParsedFile extends Schema.Class<ParsedFile>("ParsedFile")({
   stCreatedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  stModifiedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** A card's ST `chat`: the chat file (without `.jsonl`) ST last opened it on. */
   stChat: Schema.optionalKey(Schema.String),
   report: ImportReport,
@@ -169,6 +171,8 @@ export class StSettings extends Schema.Class<StSettings>("StSettings")({
 }) {}
 
 export class StGroup extends Schema.Class<StGroup>("StGroup")({
+  stAddedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  arrival: Schema.optionalKey(StArrival),
   id: Schema.String,
   name: Schema.String,
   members: Schema.Array(Schema.String),
@@ -186,6 +190,7 @@ export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")(
   card: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,
+      authoredAt: Schema.optionalKey(Schema.Number),
       greetings: Schema.Array(Schema.String),
       world: Schema.NullOr(Schema.String),
       /** It carries a lorebook of its own (`character_book`). */
@@ -236,7 +241,8 @@ export class FormatOps extends RpcGroup.make(
       parser,
       first: Schema.Boolean,
       firstIndex: Schema.Int,
-      carryAt: Schema.NullOr(Schema.Number)
+      carryAt: Schema.NullOr(Schema.Number),
+      fallbackAt: Schema.optionalKey(Schema.Number)
     },
     success: StChatPart
   }),

@@ -1,5 +1,6 @@
 // Card import: a file's bytes to our card document, the images it carries, and its import
 // report. The format is detected from the bytes, never trusted from the file name.
+import { sourceTime } from "./sourceTime.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import { type ImportReport, ReportBuilder, shownText } from "@rp/shared/importReport.ts"
 import type { Effect } from "effect"
@@ -18,6 +19,8 @@ export interface CardFile {
 
 export interface CardImport {
   readonly stCreatedAt: number | null
+  /** CCv3 modification_date (seconds), else the consumed CHARX entries’ times. */
+  readonly stModifiedAt: number | null
   /** ST's `chat`: the chat file ST last opened the card on. */
   readonly stChat: string | null
   readonly card: CardDoc
@@ -122,10 +125,19 @@ const fromCharx = (bytes: Uint8Array, limits: Limits, issues: ReportBuilder) => 
   const plain = ({ uri, ext, bytes }: CardFile) => ({ uri, ext, bytes })
   return {
     ...parsed,
+    archiveModifiedAt: [...used].reduce<number | null>((latest, name) => {
+      const at = entries.get(name)?.modifiedAt ?? null
+      return at === null ? latest : Math.max(latest ?? 0, at)
+    }, null),
     avatar: icon ? plain(icon) : null,
     assets: files.filter((file) => file !== icon).map(plain)
   }
 }
+
+const cardModifiedAt = (card: CardDoc) =>
+  typeof card.modification_date === "number" && card.modification_date > 0
+    ? sourceTime(card.modification_date * 1000)
+    : null
 
 export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): Effect.Effect<CardImport, FormatError> =>
   attempt(() => {
@@ -136,16 +148,40 @@ export const importCard = (bytes: Uint8Array, limits: Limits = defaultLimits): E
     const report = (version: string, container: string) => issues.build(`card-${version}-${container}`)
     if (isPng(bytes)) {
       const { card, version, avatar, stCreatedAt, stChat } = fromPng(bytes, limits, issues)
-      return { card, stCreatedAt, stChat, avatar, assets: [], report: report(version, "png") }
+      return {
+        card,
+        stCreatedAt,
+        stModifiedAt: cardModifiedAt(card),
+        stChat,
+        avatar,
+        assets: [],
+        report: report(version, "png")
+      }
     }
     if (isZip(bytes)) {
-      const { card, version, avatar, assets, stCreatedAt, stChat } = fromCharx(bytes, limits, issues)
-      return { card, stCreatedAt, stChat, avatar, assets, report: report(version, "charx") }
+      const { card, version, avatar, assets, stCreatedAt, stChat, archiveModifiedAt } = fromCharx(bytes, limits, issues)
+      return {
+        card,
+        stCreatedAt,
+        stModifiedAt: cardModifiedAt(card) ?? archiveModifiedAt,
+        stChat,
+        avatar,
+        assets,
+        report: report(version, "charx")
+      }
     }
     const { card, version, stCreatedAt, stChat } = cardFromJson(
       parseJson(bytes, limits.maxCardJsonBytes, limits, issues),
       limits,
       issues
     )
-    return { card, stCreatedAt, stChat, avatar: null, assets: [], report: report(version, "json") }
+    return {
+      card,
+      stCreatedAt,
+      stModifiedAt: cardModifiedAt(card),
+      stChat,
+      avatar: null,
+      assets: [],
+      report: report(version, "json")
+    }
   })

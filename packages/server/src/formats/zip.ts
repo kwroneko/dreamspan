@@ -7,6 +7,7 @@ import { fail, type Limits } from "./safety.ts"
 
 interface ZipEntry {
   readonly name: string
+  readonly modifiedAt: number | null
   readonly method: number
   readonly crc: number
   readonly compressedSize: number
@@ -33,6 +34,29 @@ export const isSafePath = (name: string) =>
   !name.includes("\0") &&
   !/^[a-zA-Z]:/.test(name) &&
   !name.split("/").some((segment) => segment === "..")
+
+/** ZIP's UTC extended timestamp wins over its timezone-less DOS date (read as UTC). */
+const modificationTime = (view: DataView, offset: number, extraStart: number, extraEnd: number) => {
+  for (let at = extraStart; at + 4 <= extraEnd;) {
+    const tag = view.getUint16(at, true)
+    const length = view.getUint16(at + 2, true)
+    const end = at + 4 + length
+    if (end > extraEnd) break
+    if (tag === 0x5455 && length >= 5 && view.getUint8(at + 4) & 1) return view.getUint32(at + 5, true) * 1000
+    at = end
+  }
+  const time = view.getUint16(offset + 12, true)
+  const date = view.getUint16(offset + 14, true)
+  const year = 1980 + (date >> 9),
+    month = (date >> 5) & 15,
+    day = date & 31
+  const hour = time >> 11,
+    minute = (time >> 5) & 63,
+    second = (time & 31) * 2
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return null
+  const parsed = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  return parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day ? parsed.getTime() : null
+}
 
 /** The archive's files by name (directories left out), from its central directory. */
 export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry> => {
@@ -73,6 +97,12 @@ export const readZip = (bytes: Uint8Array, limits: Limits): Map<string, ZipEntry
     if (!name.endsWith("/")) {
       entries.set(name, {
         name,
+        modifiedAt: modificationTime(
+          view,
+          offset,
+          offset + 46 + nameLength,
+          offset + 46 + nameLength + view.getUint16(offset + 30, true)
+        ),
         method: view.getUint16(offset + 10, true),
         crc: view.getUint32(offset + 16, true),
         compressedSize: view.getUint32(offset + 20, true),

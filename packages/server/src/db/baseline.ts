@@ -212,6 +212,29 @@ export const baseline: ReadonlyArray<string> = [
     search_text TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL
   ) STRICT`,
+  // A card revision's summary, what the card lists read (`cardSummary` in cards.ts): written
+  // with the revision, in its insert's transaction, so no list parses a document, which can be
+  // megabytes with a lorebook. A table of its own, not columns of entity_revisions: a column
+  // after doc_json is reached only through its overflow pages, which is the read it saves.
+  // `fields` is name, nickname, character_version, avatar_media_id, character_book.name,
+  // avatar_crop and extensions.talkativeness as the document has them (a JSON array); `book`
+  // whether it embeds a lorebook, `book_entries` how many entries that has.
+  `CREATE TABLE card_summaries (
+    revision_id TEXT PRIMARY KEY,
+    fields TEXT NOT NULL,
+    book INTEGER NOT NULL,
+    book_entries INTEGER NOT NULL
+  ) STRICT, WITHOUT ROWID`,
+  `CREATE TRIGGER card_summaries_insert AFTER INSERT ON entity_revisions
+    WHEN (SELECT kind FROM entities WHERE id = NEW.entity_id) = 'card'
+    BEGIN INSERT INTO card_summaries (revision_id, fields, book, book_entries) VALUES (NEW.id,
+      json_extract(NEW.doc_json, '$.name', '$.nickname', '$.character_version', '$.avatar_media_id',
+        '$.character_book.name', '$.avatar_crop', '$.extensions.talkativeness'),
+      coalesce(json_type(NEW.doc_json, '$.character_book') = 'object', 0),
+      CASE WHEN json_type(NEW.doc_json, '$.character_book.entries') = 'array'
+        THEN json_array_length(NEW.doc_json, '$.character_book.entries') ELSE 0 END); END`,
+  `CREATE TRIGGER card_summaries_delete AFTER DELETE ON entity_revisions
+    BEGIN DELETE FROM card_summaries WHERE revision_id = OLD.id; END`,
   `CREATE INDEX entity_revisions_entity ON entity_revisions(entity_id, seq)`,
   `CREATE INDEX entity_revisions_hash ON entity_revisions(entity_id, doc_hash)`,
   `CREATE TABLE entity_refs (
@@ -230,6 +253,7 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_used_at INTEGER,
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3),
     CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
     CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
   ) STRICT`,
@@ -271,10 +295,14 @@ export const baseline: ReadonlyArray<string> = [
     active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
-    last_message_at INTEGER
+    last_message_at INTEGER,
+    added_at INTEGER,
+    st_group_id TEXT,
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
   , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
     -- Moved by triggers on every write the shell's fork summaries read (fork_summaries).
     shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
+  `CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL`,
   `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
   `CREATE TABLE lanes (
     id TEXT PRIMARY KEY,
@@ -986,6 +1014,12 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL, no_reply INTEGER NOT NULL DEFAULT 0 CHECK (no_reply IN (0, 1)), fork_id TEXT,
     images_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(images_json)),
+    -- 1: a reply of a round (DESIGN §2.3), queued by the server behind the round's reply before it.
+    round INTEGER NOT NULL DEFAULT 0 CHECK (round IN (0, 1)),
+    -- 1: its round stopped (Stop, a failed reply, a restart) and waits for Continue round.
+    held INTEGER NOT NULL DEFAULT 0 CHECK (held IN (0, 1)),
+    CHECK (round = 0 OR kind = 'generate'),
+    CHECK (held = 0 OR round = 1),
     CHECK (kind = 'generate' OR length(content) > 0 OR json_array_length(images_json) > 0),
     CHECK (kind = 'generate' OR direction IS NULL),
     CHECK (kind = 'message' OR reply_speaker_entity_id IS NULL)

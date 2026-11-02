@@ -14,14 +14,32 @@ interface OpenEditor {
 }
 
 const open = new Map<OpenEditor, number>()
+const listeners = new Set<() => void>()
+const changed = () => {
+  for (const listener of listeners) listener()
+}
 
-/** Counts one more place guarding `editor`; the returned function undoes it. */
+/** Told when an editor opens or closes; the returned function stops it. */
+export const subscribeOpenEditors = (listener: () => void) => {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * Counts one more place guarding `editor`; the returned function undoes it. Listeners hear of
+ * it after the effect that called this: told within it, a listener's re-render ran inside
+ * another component's commit and lost a message editor's focus (snippets.spec).
+ */
 export const trackOpenEditor = (editor: OpenEditor) => {
   open.set(editor, (open.get(editor) ?? 0) + 1)
+  queueMicrotask(changed)
   return () => {
     const count = (open.get(editor) ?? 1) - 1
     if (count > 0) open.set(editor, count)
     else open.delete(editor)
+    queueMicrotask(changed)
   }
 }
 

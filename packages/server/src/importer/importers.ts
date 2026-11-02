@@ -33,6 +33,7 @@ interface ImportedFile {
 
 export interface Imported {
   readonly stCreatedAt?: number | null
+  readonly stModifiedAt?: number | null
   /** A card's ST `chat`: the chat file ST last opened it on. */
   readonly stChat?: string | null
   readonly report: ImportReport
@@ -226,6 +227,7 @@ const cardImporter: Importer = {
             )
       return {
         stCreatedAt: imported.stCreatedAt,
+        stModifiedAt: imported.stModifiedAt,
         stChat: imported.stChat,
         report,
         library: {
@@ -318,7 +320,10 @@ export const failed = (format: string, code: string, message: string) =>
   new ImportReport({ format, issues: [new ImportIssue({ level: "error", code, message })] })
 
 /** What a parse returns for an imported file whose bytes hash to `fileSha256`. */
-export const parsedFile = ({ report, library, files, stCreatedAt, stChat }: Imported, fileSha256: string) => {
+export const parsedFile = (
+  { report, library, files, stCreatedAt, stModifiedAt, stChat }: Imported,
+  fileSha256: string
+) => {
   // The importers build documents to their schemas, the card's note too; one that came out
   // invalid is an importer bug, and is never stored. The note is checked as a card's, which
   // the writer makes it.
@@ -341,6 +346,7 @@ export const parsedFile = ({ report, library, files, stCreatedAt, stChat }: Impo
   }
   return new ParsedFile({
     ...(stCreatedAt === undefined ? {} : { stCreatedAt }),
+    ...(stModifiedAt === undefined ? {} : { stModifiedAt }),
     ...(stChat === undefined || stChat === null ? {} : { stChat }),
     report,
     sha256: fileSha256,

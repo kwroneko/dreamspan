@@ -83,6 +83,7 @@ describe("ST chat parts", () => {
     })
     const [greeting, user, narrator] = messages(part.batches)
     expect(greeting).toEqual({
+      arrivalAt: Date.UTC(2025, 0, 1, 10),
       user: false,
       hidden: false,
       speaker: "c:name:Alice",

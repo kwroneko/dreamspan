@@ -46,6 +46,8 @@ export class LibraryRef extends Schema.Class<LibraryRef>("LibraryRef")({
   rowVersion: Schema.Int,
   /** When its head last moved or it was renamed: the picker's "edited 3 days ago". */
   updatedAt: Schema.Number,
+  /** ST arrival on full-folder imports, otherwise this ref's creation time. */
+  addedAt: Schema.optionalKey(Schema.Number),
   /** When the user archived it (hidden from lists, nothing deleted); null while it isn't. */
   archivedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   /** When a reply was last generated with it (a preset), null if never since this was recorded. */

@@ -140,9 +140,10 @@ export function QueuedMessages({
 }) {
   const editors = useSyncExternalStore(session.subscribeEditors, session.queueEditors)
   const cast = useCast()
+  // A round's replies show as the round (RoundControls.tsx), not as queued items.
   const ids = [
     ...new Set([
-      ...queue.map((item) => item.id),
+      ...queue.filter((item) => item.round === undefined).map((item) => item.id),
       ...editors.flatMap((editor) => (editor.target._tag === "Queue" ? [editor.target.queuedId] : []))
     ])
   ]
