@@ -1,3 +1,4 @@
+import { insertStMessageBatch, prepareStMessageBatch } from "./stMessageBatch.ts"
 import { recordCardArrival, recordChatArrival } from "./stArrival.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
@@ -457,6 +458,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
     StImportMessages: (input) =>
       // Decoded before the transaction, which holds only database work.
       Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) => {
+        const batch = input.matching ? null : prepareStMessageBatch(messages, input.speakers)
         const arrivals = new Map<string, number>()
         for (const message of messages) {
           if (message.arrivalAt == null) continue
@@ -566,7 +568,19 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
           if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
           let firstAdded: string | null = null
           const slotIds: Array<SlotId> = []
-          for (const message of messages) {
+          if (batch !== null) {
+            yield* insertStMessageBatch(sql, batch, {
+              chatId,
+              laneId,
+              forkId: fileFork.id,
+              parentId: parent?.id ?? null,
+              depth: parent === null ? 0 : parent.depth + 1
+            })
+            firstAdded = batch.slotIds[0] ?? null
+            slotIds.push(...batch.slotIds)
+            added = batch.slotIds.length
+          }
+          for (const message of batch === null ? messages : []) {
             const writer = message.user ? "human" : "model"
             const speaker = message.speaker === null ? null : (speakers[message.speaker] ?? null)
             const chosen = message.selected < message.versions.length ? message.selected : 0

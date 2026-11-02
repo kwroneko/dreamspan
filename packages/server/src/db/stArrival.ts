@@ -12,7 +12,8 @@ export const recordCardArrival = Effect.fnUntraced(function* (
 ) {
   yield* sql`UPDATE entity_refs SET created_at = ${arrival.at}, st_added_basis = ${arrival.basis}
     WHERE id = ${refId} AND ref_kind = 'upstream'
-      AND entity_id IN (SELECT id FROM entities WHERE owner_user_id = ${userId} AND kind = 'card')
+      AND EXISTS (SELECT 1 FROM entities e WHERE e.id = entity_refs.entity_id
+        AND e.owner_user_id = ${userId} AND e.kind = 'card')
       AND (st_added_basis IS NULL OR st_added_basis > ${arrival.basis}
         OR (st_added_basis = ${arrival.basis} AND created_at > ${arrival.at}))`
   // Newly discovered author metadata can refine Created on a re-import too. Without it,
