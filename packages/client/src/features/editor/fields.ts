@@ -6,7 +6,7 @@ import { makeRegistry } from "../../registry.ts"
 
 const CARD_LABELS: Record<string, string> = {
   name: "Display name",
-  nickname: "Name the model sees",
+  nickname: "In-chat nickname",
   description: "Description",
   personality: "Personality",
   scenario: "Scenario",

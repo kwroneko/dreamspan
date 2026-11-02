@@ -1,5 +1,6 @@
 import { useUserDraft, UserDraftStatus } from "./userDraft.tsx"
 import { Effect } from "effect"
+import { DISPLAY_HINT, NICKNAME_HINT } from "./cardNameHints.ts"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import { checkCardNames } from "./checkCardNames.ts"
 // A card from scratch: the three standard names, then the editor for the rest.
@@ -51,11 +52,15 @@ export function NewCardButton() {
       >
         <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
           <UserDraftStatus draft={durable} />
-          <Field label="Display name">
+          <Field label="Display name" about={DISPLAY_HINT}>
             <Input value={name} onChange={(event) => setName(event.currentTarget.value)} required />
           </Field>
-          <Field label="Name the model sees (leave empty to use the display name)">
-            <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
+          <Field label="In-chat nickname" about={NICKNAME_HINT}>
+            <Input
+              placeholder="Add an in-chat nickname"
+              value={nickname}
+              onChange={(event) => setNickname(event.currentTarget.value)}
+            />
           </Field>
           <Field label="Version (shown as subtitle)">
             <Input value={version} onChange={(event) => setVersion(event.currentTarget.value)} />

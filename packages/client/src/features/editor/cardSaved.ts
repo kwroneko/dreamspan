@@ -1,4 +1,4 @@
-// Continuations when a card's chat name changes: where its name is confirmed (the name
+// Continuations when a card's nickname changes: where its name is confirmed (the name
 // header, `CardNameHeader.tsx`), or after a fork or swap renamed what the chat uses. Features
 // own their dialogs; callers only provide the names and wait for the answer.
 import { useEffect, useSyncExternalStore, type ComponentType } from "react"
@@ -25,7 +25,7 @@ export interface CardSaved {
 
 /**
  * How a name question was answered: `cancel` (closed: no rename), `keep` (the old name stays
- * the chat name, as the nickname), `plain` (renamed from now on), `no` (renamed, past messages
+ * the nickname, as the nickname), `plain` (renamed from now on), `no` (renamed, past messages
  * kept), `replaced` (renamed and replaced in past messages), `failed` (renamed; the replacement
  * failed and can be resumed). None: no question was registered, so the rename just goes ahead.
  */

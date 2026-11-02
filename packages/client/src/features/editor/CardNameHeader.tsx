@@ -1,8 +1,8 @@
 // A card's header at the top of its editor, the same in the chat's character tab and the full
 // editor (owner, 2026-11-01, 2026-11-02; `CardHeader`): the portrait beside the names and token
-// counts, as tall as they are. The display name is the title, the version a small badge on the
-// row under it, then the nickname as what it does ("In chat: Mio", or a faint "Add a chat
-// name"). Each is renamed in place with the pencil (`ui/InlineRename`), and none has an
+// counts, stacked from the top. The display name is the title, the version a small badge on the
+// row under it, then the nickname as what it does ("In chat: Mio", or a faint "Add an in-chat
+// nickname"). Each is renamed in place with the pencil (`ui/InlineRename`), and none has an
 // on-screen label: each one's tooltip says what it is. A change of the name chats use asks
 // about past messages right there, on confirm (`renameQuestion`, the registered `cardSaved`
 // question), never after a later Save. Under the names, the card's token counts.
@@ -18,6 +18,7 @@ import { AsyncResult } from "effect/reactivity"
 import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react"
 import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
+import { DISPLAY_HINT, NICKNAME_HINT, VERSION_HINT } from "./cardNameHints.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { Caller } from "./caller.ts"
@@ -34,12 +35,6 @@ export interface RenameChat {
   readonly chatId: string
   readonly forkId: string | null
 }
-
-const DISPLAY_HINT =
-  "The display name: what the app shows this card by, in the library and here. Chats call them by it too when there's no chat name."
-const VERSION_HINT = "The version: shown beside the display name, to tell this card from others with the same name."
-const NICKNAME_HINT =
-  "The chat name (the card's nickname): what chats and the model call them, and what {{char}} becomes. Empty: the display name."
 
 /**
  * The text of a card's notes on in every chat by default, as chats send it (what ST counts as
@@ -126,7 +121,7 @@ export function CardTokens({ store }: { store: EditorStore }) {
         data-card-tokens
         data-card-header-row
         aria-busy={pending || undefined}
-        className="col-span-full w-fit max-w-full truncate rounded text-xs leading-4 text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className="w-fit max-w-full truncate rounded text-xs leading-4 text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
         {shown(sums.total)} tokens · {shown(sums.permanent)} permanent
       </span>
@@ -217,9 +212,7 @@ export function CardNameHeader({
   }
 
   const Title = heading
-  // Grid cells of `CardHeader`: each name in the first column, its pencil in the second, so
-  // every pencil is on one line; the title takes at most two lines and the others one, so the
-  // names never outgrow the portrait beside them.
+  // Each row fits its own text; the title pencil follows its last visible line.
   return (
     <>
       <InlineRename
@@ -228,7 +221,7 @@ export function CardNameHeader({
         hint={DISPLAY_HINT}
         fieldLabel="Display name"
         goTo={nameMatch}
-        cells
+        lastLine
         className="peer/title"
         onRename={async (next) => !(await clashes(next, version)) && rename({ name: next, nickname })}
       >
@@ -236,14 +229,20 @@ export function CardNameHeader({
         <Tooltip label={DISPLAY_HINT}>
           <Title
             data-card-header-row
-            className={`col-start-1 line-clamp-2 max-w-96 min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
+            data-inline-rename-text
+            className={`line-clamp-2 min-w-0 font-semibold [overflow-wrap:anywhere] ${heading === "h1" ? "text-2xl leading-8" : "text-lg leading-7"}`}
           >
             {name || "Unnamed card"}
           </Title>
         </Tooltip>
       </InlineRename>
       {after && (
-        <span className="col-start-3 row-start-1 flex items-center peer-data-renaming/title:hidden">{after}</span>
+        <span
+          data-layout-audit-ignore="inset: Floating favourite shares the enclosing editor header's content inset"
+          className="absolute top-0 right-0 flex items-center peer-data-renaming/title:hidden"
+        >
+          {after}
+        </span>
       )}
       <InlineRename
         value={version}
@@ -252,8 +251,7 @@ export function CardNameHeader({
         fieldLabel="Version"
         goTo={versionMatch}
         allowEmpty
-        cells
-        className="text-sm"
+        className="w-fit max-w-full text-sm"
         onRename={async (next) => {
           if (await clashes(name, next)) return false
           write({ version: next })
@@ -263,12 +261,12 @@ export function CardNameHeader({
           {version ? (
             <span
               data-card-header-row
-              className="col-start-1 max-w-96 min-w-0 truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted"
+              className="min-w-0 truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted"
             >
               {version}
             </span>
           ) : (
-            <span data-card-header-row className="col-start-1 max-w-96 truncate text-xs text-muted/70">
+            <span data-card-header-row className="truncate text-xs text-muted/70">
               Add a version
             </span>
           )}
@@ -276,29 +274,28 @@ export function CardNameHeader({
       </InlineRename>
       <InlineRename
         value={nickname}
-        label="the chat name"
+        label="the nickname"
         hint={NICKNAME_HINT}
-        fieldLabel="Chat name (nickname)"
+        fieldLabel="In-chat nickname"
         goTo={nicknameMatch}
         allowEmpty
-        cells
-        className="text-sm"
+        className="w-fit max-w-full text-sm"
         onRename={(next) => rename({ name, nickname: next })}
       >
         <Tooltip label={NICKNAME_HINT}>
           {nickname ? (
-            <span data-card-header-row className="col-start-1 max-w-96 min-w-0 truncate text-muted">
+            <span data-card-header-row className="min-w-0 truncate text-muted">
               In chat: {nickname}
             </span>
           ) : (
-            <span data-card-header-row className="col-start-1 max-w-96 truncate text-muted/70">
-              Add a chat name
+            <span data-card-header-row className="truncate text-muted/70">
+              Add an in-chat nickname
             </span>
           )}
         </Tooltip>
       </InlineRename>
       {problem && (
-        <p role="alert" className="col-span-full text-sm text-danger">
+        <p role="alert" className="text-sm text-danger">
           {problem}
         </p>
       )}
@@ -309,15 +306,14 @@ export function CardNameHeader({
 /**
  * A card's header, the same in the chat's character tab and the full editor (owner,
  * 2026-11-02): the portrait (`CardHeaderPortrait`) beside its names and token counts
- * (`CardNameHeader`, `CardTokens` as `children`), the portrait exactly as tall as they are,
- * their first row at its top and the last at its bottom, the rows spread evenly between.
+ * (`CardNameHeader`, `CardTokens` as `children`), stacked from the top with consistent gaps.
  * Its width sets the portrait's size (a container query), so it holds at any panel width.
  */
 export function CardHeader({ portrait, children }: { portrait: ReactNode; children: ReactNode }) {
   return (
     <div data-card-header className="@container flex items-stretch gap-3">
       {portrait}
-      <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,max-content)_auto_1fr] content-between items-center justify-items-start gap-x-1">
+      <div className="relative flex min-w-0 flex-1 flex-col items-start gap-1 has-[>span.absolute]:pr-8 [&>[data-renaming]]:w-full [&>[data-renaming]]:flex-none">
         {children}
       </div>
     </div>

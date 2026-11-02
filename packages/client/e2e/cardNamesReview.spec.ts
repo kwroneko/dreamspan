@@ -128,7 +128,7 @@ test("three name drafts and diffs work, but history must refuse a colliding rest
     .getByRole("button", { name: /^Revision \d+ / })
     .click()
   const diff = history.getByLabel("Revision changes", { exact: true })
-  for (const label of ["Display name", "Name the model sees", "Version (shown as subtitle)", "Description"])
+  for (const label of ["Display name", "In-chat nickname", "Version (shown as subtitle)", "Description"])
     await expect(diff).toContainText(label)
   await revisions
     .last()

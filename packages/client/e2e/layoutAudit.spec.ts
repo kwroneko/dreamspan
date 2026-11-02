@@ -374,6 +374,20 @@ test.describe("synthetic library and every app surface", () => {
           await expect(page.getByRole("main").getByRole("heading").first()).toBeVisible({ timeout: 30000 })
           await audit(surface)
         }
+        if (process.env.LAYOUT_AUDIT_CARD_HEADERS_ONLY === "1") {
+          await go("card-editor-header", `/library/${cardRef}`)
+          await go("group-chat", `/chats/${chatId}`)
+          await openPanel(page, cardName)
+          await audit("panel-card-header")
+          if (width >= 1024) {
+            const handle = page.getByRole("separator", { name: "Resize chat panel", exact: true })
+            await handle.press("Home")
+            await audit("panel-card-header-narrow")
+            await handle.press("End")
+            await audit("panel-card-header-wide")
+          }
+          return
+        }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")

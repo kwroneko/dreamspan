@@ -1,4 +1,4 @@
-// The question a change of a card's chat name asks (owner, 2026-11-01): where the name is
+// The question a change of a card's nickname asks (owner, 2026-11-01): where the name is
 // confirmed (`atConfirm`, the name header), or after a fork or a swap renamed what a chat uses.
 // "Replace <old> with <new> in the history: No / this chat / all N chats"; when the display
 // name changed with no nickname (`display`), also keep the old name in chats or just change it.
@@ -234,7 +234,7 @@ export function RenameHistory({ change, onDone }: { change: CardSaved; onDone: C
               <Button
                 className={wide}
                 disabled={action.pending}
-                hint={`“${change.oldName}” stays the name chats use, as its chat name; past messages stay as they are. The display name becomes “${change.newName}”.`}
+                hint={`“${change.oldName}” stays the name chats use, as its nickname; past messages stay as they are. The display name becomes “${change.newName}”.`}
                 onClick={() => finish("keep")}
               >
                 Keep “{change.oldName}” in chats

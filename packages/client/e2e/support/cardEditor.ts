@@ -13,7 +13,7 @@ export const cardFieldsTab = async (scope: Page | Locator, name: string) => {
 const NAMES = {
   display: { which: "the display name", field: "Display name" },
   version: { which: "the version", field: "Version" },
-  nickname: { which: "the chat name", field: "Chat name (nickname)" }
+  nickname: { which: "the nickname", field: "In-chat nickname" }
 } as const
 
 /**
@@ -28,6 +28,6 @@ export const renameCard = async (scope: Page | Locator, name: keyof typeof NAMES
   await box.press("Enter")
 }
 
-/** The nickname line under the title: "In chat: <name>", or "Add a chat name". */
+/** The nickname line under the title: "In chat: <name>", or "Add an in-chat nickname". */
 export const chatNameLine = (scope: Page | Locator, nickname: string) =>
-  scope.getByText(nickname ? `In chat: ${nickname}` : "Add a chat name", { exact: true })
+  scope.getByText(nickname ? `In chat: ${nickname}` : "Add an in-chat nickname", { exact: true })
