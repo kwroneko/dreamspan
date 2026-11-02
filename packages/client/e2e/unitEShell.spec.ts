@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import type { ShellLibrary } from "@rp/shared/chatSetupApi.ts"
 import { writeRealisticStFolder } from "../../server/test/support/stRealistic.ts"
-import { panelTab } from "./support/panel.ts"
+import { openPanel, panelTab } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { closePortrait } from "./support/portrait.ts"
@@ -270,13 +270,17 @@ for (const width of [1440, 390]) {
           exact: true
         })
         .click()
-      await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+      // Its new chat, the card in the side panel's character tab, as in any chat.
+      const fullEditor = page.getByRole("button", { name: `Open ${unused.card.name} in the full editor`, exact: true })
+      await expect(fullEditor).toBeVisible()
       await shoot("new-chat-card")
       if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
       else await page.getByRole("button", { name: "Close the panel", exact: true }).click()
       await shoot("new-chat")
-      await page.getByRole("button", { name: `Show ${unused.card.name}'s card`, exact: true }).click()
-      await expect(page.getByRole("link", { name: "Edit card", exact: true })).toBeVisible()
+      // The header's faces open the card's tab; a phone's header leaves them out, as in any chat.
+      if (width === 390) await openPanel(page, unused.card.label)
+      else await page.getByRole("button", { name: `Show ${unused.card.name}'s card`, exact: true }).click()
+      await expect(fullEditor).toBeVisible()
       await page.goto(`${server().url}/cards/${card}`)
       await expect(page.getByRole("heading", { name: "Definition", exact: true })).toBeVisible()
       await shoot("card-page")
