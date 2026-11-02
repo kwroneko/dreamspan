@@ -1,7 +1,14 @@
 // Private non-secret text drafts. Explicit Save stays separate from saving the draft.
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import type { UserId } from "@rp/shared/domain.ts"
-import type { Draft, DraftDisplacement, DraftState } from "@rp/shared/drafts.ts"
+import {
+  observeDeletion,
+  type ObservedDeletion,
+  deletedSince,
+  type Draft,
+  type DraftDisplacement,
+  type DraftState
+} from "@rp/shared/drafts.ts"
 import type { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { useAction } from "../../actions.tsx"
 import { useSession } from "../../session.ts"
@@ -11,6 +18,8 @@ import { Icon } from "../../ui/Icon.tsx"
 import { Popover } from "../../ui/Popover.tsx"
 import { iconButtonClass } from "../../ui/Tooltip.tsx"
 import { copiesOf, dropCopy, keepCopy, makeCopy, pendingOf, type Copy } from "./backup.ts"
+
+import { readTypedBackup, keepTypedBackup, dropTypedBackup } from "./typedBackup.ts"
 
 const openStores = new Set<UserDraftStore>()
 export const registerUserDraftNotices = () =>
@@ -42,7 +51,9 @@ export const newerText = (serverAt: number | null, localAt: number | null): "ser
 export class UserDraftStore {
   private draft: Draft | null = null
   // The base of the displayed text, independent of reads/restores the user hasn't seen.
+  private observedDeletion: ObservedDeletion | null = null
   private base = baseOf(null)
+  private lastPersistAcknowledged = false
   private edits = 0
   private pendingTypes = new Set<{ initial: string; content: string }>()
   private copy: Copy | null = null
@@ -84,6 +95,7 @@ export class UserDraftStore {
   private payload = (content: string) => ({
     ...this.address(),
     content,
+    ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
     ...this.base
   })
   private remember(content: string, current: boolean) {
@@ -96,10 +108,14 @@ export class UserDraftStore {
       current ? Date.now() : (this.copy?.at ?? Date.now()) - 1,
       previous ? [previous] : []
     )
-    if (current) this.copy = copy
+    if (current) {
+      this.copy = copy
+      keepTypedBackup(copy)
+    }
     return { copy, kept: keepCopy(copy, previous) }
   }
   private async persist(content: string) {
+    this.lastPersistAcknowledged = false
     // Refile on our own preceding acknowledgement, never a fresh read of another tab's base.
     const { copy, kept } = this.remember(content, content === this.state.text)
     await kept
@@ -110,19 +126,29 @@ export class UserDraftStore {
       this.update({ error: result.error.message })
       return false
     }
+    this.lastPersistAcknowledged = true
     this.draft = result.value
-    this.base = baseOf(result.value)
+    // A deletion may have won while this request was in flight. Recovery acknowledges
+    // the copy into the bin, not as new field text; never rebase later typing onto it unseen.
+    const accepted = result.value.status === "active" && result.value.content === content
+    if (accepted || this.state.text === content) {
+      this.base = baseOf(result.value)
+      this.observedDeletion = null
+    }
+    if (!accepted && this.state.text === content)
+      this.update({ text: result.value.status === "active" ? result.value.content : null })
     if (this.copy === copy) this.copy = null
+    dropTypedBackup(copy)
     await dropCopy(copy)
     // Later typing is descended from this acknowledged text. Refile its browser copy
     // now, even if another queued operation delays its own save or the page closes.
-    if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+    if (accepted && this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
     this.update({
-      error: null,
+      error: accepted ? null : "This text was deleted elsewhere. Find your copy in recovered texts.",
       displaced: result.value.displaced ?? this.state.displaced,
       recovered: this.state.recovered + result.value.recovered
     })
-    return true
+    return accepted
   }
   open = () => {
     this.queue = this.queue.then(async () => {
@@ -133,11 +159,32 @@ export class UserDraftStore {
       if (result.ok) {
         this.draft = result.value
         if (this.edits === 0) this.base = baseOf(result.value)
+        else if (
+          result.value !== null &&
+          this.base.draftId === null &&
+          this.pendingTypes.size > 0 &&
+          (result.value.status !== "active" || [...this.pendingTypes][0]?.initial === result.value.content)
+        ) {
+          // Typing began in the host's empty/saved field before its draft read finished.
+          // The read confirms that starting text; this is new typing, not an offline replay.
+          this.observedDeletion = observeDeletion(result.value)
+          if (this.copy !== null && this.state.text !== null) await this.remember(this.state.text, true).kept
+        }
       } else this.update({ error: result.error.message })
-      for (const copy of copies
+      const sync = readTypedBackup(this.userId, this.targetId)
+      const allCopies = sync === null || copies.some((copy) => copy.key === sync.key) ? copies : [...copies, sync]
+      for (const copy of allCopies
+        .filter((c) => !this.copy?.ancestors.includes(c.key))
         .filter((c) => c.field === this.field || (this.field === "First message" && c.field === "first message"))
         .sort((a, b) => a.at - b.at)) {
         const save = pendingOf(copy)
+        // A deletion is a causal barrier, even if the server now holds subsequent text.
+        // Leave the asynchronous copy in Browser recovery for explicit inspection.
+        if (deletedSince(this.draft, save?.kind === "userDraft" ? save.payload : null)) {
+          await keepCopy(copy)
+          dropTypedBackup(copy)
+          continue
+        }
         if (save?.kind === "setting" || save?.kind === "pendingChat") {
           // The pending composer keeps its own copy of each keystroke too. An existing server
           // draft takes precedence unless that copy is newer: the server can lag the last
@@ -145,7 +192,7 @@ export class UserDraftStore {
           if (
             save.kind === "pendingChat" &&
             this.draft !== null &&
-            newerText(this.draft.status === "active" ? this.draft.updatedAt : null, copy.at) === "server"
+            newerText(this.draft.updatedAt, copy.at) === "server"
           )
             continue
           const replay = await this.run((client) =>
@@ -168,6 +215,7 @@ export class UserDraftStore {
               displaced: replay.value.displaced ?? this.state.displaced,
               recovered: this.state.recovered + replay.value.recovered
             })
+            dropTypedBackup(copy)
             await dropCopy(copy)
           } else {
             if (this.edits === 0) {
@@ -182,6 +230,7 @@ export class UserDraftStore {
           continue
         }
         if (save?.kind !== "userDraft") continue
+        if (copy.key.startsWith("legacy:") && newerText(this.draft?.updatedAt ?? null, copy.at) === "server") continue
         const replay = await this.run((client) => client("SaveUserDraft", save.payload))
         if (replay.ok) {
           this.draft = replay.value
@@ -194,9 +243,11 @@ export class UserDraftStore {
             displaced: replay.value.displaced ?? this.state.displaced,
             recovered: this.state.recovered + replay.value.recovered
           })
+          dropTypedBackup(copy)
           await dropCopy(copy)
         } else {
           if (this.edits === 0) {
+            this.observedDeletion = save.payload.observedDeletion ?? null
             this.base = {
               draftId: save.payload.draftId,
               expectedRowVersion: save.payload.expectedRowVersion,
@@ -210,7 +261,7 @@ export class UserDraftStore {
       }
       this.update({
         ready: true,
-        savedAt: this.draft?.status === "active" ? this.draft.updatedAt : null,
+        savedAt: this.draft?.updatedAt ?? null,
         text: this.state.text ?? (this.draft?.status === "active" ? this.draft.content : null)
       })
     })
@@ -252,8 +303,12 @@ export class UserDraftStore {
       const remote = this.state.remote
       if (!remote) return false
       const edits = this.edits
-      // Put local text in undo history before accepting another device's text.
-      if (this.state.text !== null && !(await this.persist(this.state.text))) return false
+      // Keeping text is an explicit choice after observing the remote deletion. The
+      // observation never replaces the original text base. Loading may acknowledge
+      // local text into recovered texts instead of reopening a deleted field.
+      if (!load) this.observedDeletion = observeDeletion(remote)
+      if (this.state.text !== null && !(await this.persist(this.state.text)) && !this.lastPersistAcknowledged)
+        return false
       if (this.edits !== edits) return false
       if (load) {
         if (remote.status !== "active") {

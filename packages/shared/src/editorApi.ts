@@ -8,7 +8,7 @@ import { Schema } from "effect"
 import { Rpc, RpcGroup } from "effect/rpc"
 import { ChatId, EntityId, ForkId, SlotId } from "./chat.ts"
 import { BinItem } from "./bin.ts"
-import { Draft, DraftRestore, DraftState } from "./drafts.ts"
+import { ObservedDeletion, Draft, DraftRestore, DraftState } from "./drafts.ts"
 import { NotFound, ServerError, StaleWrite } from "./errors.ts"
 import { CardFamily, Doc, LibraryRef, MergeOutcome, MergePreview, RefId, Revision, RevisionId } from "./library.ts"
 
@@ -140,6 +140,7 @@ export const UserDraftSave = Schema.Struct({
   ownerId: UserId,
   targetId: Schema.String,
   field: Schema.String,
+  observedDeletion: Schema.optionalKey(ObservedDeletion),
   draftId: Schema.NullOr(Schema.String),
   content: Schema.String,
   expectedRowVersion: Schema.NullOr(Schema.Int),

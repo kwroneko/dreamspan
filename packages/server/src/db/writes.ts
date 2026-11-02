@@ -213,7 +213,17 @@ export const makeWriteHandlers = (bin: Bin) =>
           return toChat(row!)
         }).pipe(transaction("CreateChat")),
 
-      SaveDraft: ({ userId, key, draftId, content, images, expectedRowVersion, expectedSession, baseRevision }) =>
+      SaveDraft: ({
+        userId,
+        key,
+        draftId,
+        content,
+        images,
+        expectedRowVersion,
+        expectedSession,
+        baseRevision,
+        observedDeletion
+      }) =>
         Effect.gen(function* () {
           if (images !== undefined) yield* checkImages(userId, images)
           return yield* drafts.save({
@@ -224,6 +234,7 @@ export const makeWriteHandlers = (bin: Bin) =>
             base: expectedRowVersion === null ? null : { rowVersion: expectedRowVersion, session: expectedSession },
             baseRevision,
             checkTarget: draftTarget(userId, key),
+            observedDeletion,
             images
           })
         }).pipe(transaction("SaveDraft")),

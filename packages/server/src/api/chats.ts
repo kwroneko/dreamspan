@@ -671,12 +671,13 @@ export const makeChatHandlers = Effect.gen(function* () {
         return yield* reader.ListMessageDrafts({ userId: id, chatId })
       }).pipe(internal("MessageDrafts")),
 
-    SaveMessageDraft: ({ target, draftId, content, images, expectedRowVersion, expectedSession }) =>
+    SaveMessageDraft: ({ target, draftId, content, images, expectedRowVersion, expectedSession, observedDeletion }) =>
       Effect.flatMap(userId, (id) =>
         writer.SaveDraft({
           userId: id,
           key: messageDraftKey(target),
           draftId,
+          ...(observedDeletion === undefined ? {} : { observedDeletion }),
           content,
           ...(images === undefined ? {} : { images }),
           expectedRowVersion,

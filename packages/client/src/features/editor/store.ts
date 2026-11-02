@@ -25,7 +25,7 @@ import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@rp/shared/
 import { presetOrder } from "@rp/shared/presetOrder.ts"
 import { arrange, type HeldChanges, heldText, NO_HELD, parseHeld, splitOrder, withHeld } from "@rp/shared/presetHeld.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
-import { type Draft, entityDraftTarget } from "@rp/shared/drafts.ts"
+import { type Draft, deletedSince, entityDraftTarget } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
 import type { Doc, RefId, RevisionId } from "@rp/shared/library.ts"
 import { useEffect, useMemo, useSyncExternalStore } from "react"
@@ -255,6 +255,8 @@ export class EditorStore {
       const pending = pendingOf(copy)
       if (pending?.kind !== "editor") continue
       const payload = pending.payload
+      const serverDraft = this.snapshot?.drafts.find((draft) => draft.key.field === copy.field) ?? null
+      if (deletedSince(serverDraft, payload)) continue
       const replay = copy
       const field = this.field(copy.field)
       const captured = {

@@ -68,6 +68,10 @@ export class DraftDisplacement extends Schema.Class<DraftDisplacement>("DraftDis
   images: Schema.optionalKey(MessageImages)
 }) {}
 
+/** A deletion the editor observed; this never replaces the base its text was typed on. */
+export const ObservedDeletion = Schema.Struct({ draftId: Schema.String, rowVersion: Schema.Int })
+export type ObservedDeletion = typeof ObservedDeletion.Type
+
 export class Draft extends Schema.Class<Draft>("Draft")({
   id: Schema.String,
   key: DraftKey,
@@ -78,6 +82,8 @@ export class Draft extends Schema.Class<Draft>("Draft")({
   /** What the draft was started from, for conflict detection on commit. */
   baseRevision: Schema.NullOr(Schema.String),
   rowVersion: Schema.Int,
+  /** Last deliberate emptying/discard, retained across later text. Recovery compares server versions, never clocks. */
+  clearedVersion: Schema.optionalKey(Schema.Int),
   /**
    * The drafting session, counted up each time one ends (committed or discarded). Text
    * typed in a session that has ended is never taken as the start of the next one.
@@ -203,3 +209,21 @@ export const DraftRestore = {
   content: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(DraftHistoryPolicy.maxContentChars))),
   images: Schema.optionalKey(MessageImages)
 }
+
+/** A browser copy typed before the latest deletion must never reopen the field. */
+export const deletedSince = (
+  draft: Draft | null,
+  base: {
+    readonly draftId: string | null
+    readonly expectedRowVersion: number | null
+    readonly observedDeletion?: ObservedDeletion
+  } | null
+): boolean => {
+  if (draft === null || (draft.clearedVersion ?? 0) === 0) return false
+  if (base?.observedDeletion?.draftId === draft.id && base.observedDeletion.rowVersion >= draft.clearedVersion!)
+    return false
+  return base?.draftId !== draft.id || (base.expectedRowVersion ?? 0) < draft.clearedVersion!
+}
+
+export const observeDeletion = (draft: Draft | null): ObservedDeletion | null =>
+  draft !== null && (draft.clearedVersion ?? 0) > 0 ? { draftId: draft.id, rowVersion: draft.rowVersion } : null

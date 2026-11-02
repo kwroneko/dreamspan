@@ -91,6 +91,15 @@ const expectStill = async (page: Page, box: Locator, text: string) => {
   expect(await size()).toEqual(outer)
   await page.locator("body").click({ position: { x: 1, y: 1 } })
   await page.mouse.move(0, 0)
+  await expect(frame.locator("[data-field-edited]")).toBeVisible()
+  expect(
+    await frame.locator("[data-field-edited]").evaluate((e) => {
+      let alpha = 1
+      for (let node: Element | null = e; node; node = node.parentElement)
+        alpha *= Number(getComputedStyle(node).opacity)
+      return alpha
+    })
+  ).toBe(1)
   expect(moved(before, await boxesOutside(frame))).toEqual([])
   expect(await size()).toEqual(outer)
 }
@@ -104,6 +113,13 @@ for (const width of [1440, 390])
     await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
     await page.goto(`${server().url}/library/${card.id}`)
     await expectStill(page, page.getByRole("textbox", { name: /^Description/ }), "A quiet harbour.")
+    const description = frameOf(page.getByRole("textbox", { name: /^Description/ }))
+    const beforeSave = await description.boundingBox()
+    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(description.locator("[data-field-edited]")).toHaveCount(0)
+    const afterSave = await description.boundingBox()
+    expect(afterSave?.width).toBe(beforeSave?.width)
+    expect(afterSave?.height).toBe(beforeSave?.height)
     await cardFieldsTab(page, "Metadata")
     await expectStill(page, page.getByRole("textbox", { name: "Creator", exact: true }), "Someone")
 
@@ -132,14 +148,15 @@ test("the strip shows only with the pointer or focus in the box, and its control
   const box = page.getByRole("textbox", { name: /^Description/ })
   const frame = frameOf(box)
   const strip = frame.locator("[data-field-chrome]")
+  const controls = strip.locator("[data-field-reveal]").last()
   await page.mouse.move(0, 0)
-  await expect.poll(() => opacity(strip)).toBe(0)
+  await expect.poll(() => opacity(controls)).toBe(0)
   await frame.hover({ position: { x: 20, y: 10 } })
-  await expect.poll(() => opacity(strip)).toBeCloseTo(0.6)
+  await expect.poll(() => opacity(controls)).toBeCloseTo(0.6)
   await strip.hover()
-  await expect.poll(() => opacity(strip)).toBe(1)
+  await expect.poll(() => opacity(controls)).toBe(1)
   await page.mouse.move(0, 0)
-  await expect.poll(() => opacity(strip)).toBe(0)
+  await expect.poll(() => opacity(controls)).toBe(0)
 
   // Typing gives it an edit history; Tab from the box reaches the strip's controls, which show.
   await box.click()
@@ -147,14 +164,14 @@ test("the strip shows only with the pointer or focus in the box, and its control
   const history = frame.getByRole("button", { name: "Edit history of Description", exact: true })
   await expect(history).toBeVisible()
   await page.mouse.move(0, 0)
-  await expect.poll(() => opacity(strip)).toBeCloseTo(0.6)
+  await expect.poll(() => opacity(controls)).toBeCloseTo(0.6)
   for (let i = 0; i < 4; i += 1) {
     await page.keyboard.press("Tab")
     if (await history.evaluate((e) => e === document.activeElement)) break
   }
   await expect(history).toBeFocused()
   // Every control on the way was in the strip.
-  await expect.poll(() => opacity(strip)).toBe(1)
+  await expect.poll(() => opacity(controls)).toBe(1)
   await page.keyboard.press("Enter")
   await expect(page.getByRole("dialog", { name: "Edit history: Description" })).toBeVisible()
 })

@@ -15,7 +15,8 @@ import {
   isDestructive,
   isEmptyPatch,
   parseDraftTarget,
-  type Patch
+  type Patch,
+  type ObservedDeletion
 } from "@rp/shared/drafts.ts"
 import { getAt, isHeldField, parseField } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
@@ -37,6 +38,7 @@ interface DraftRow {
   readonly status: Draft["status"]
   readonly base_revision: string | null
   readonly committed_revision: string | null
+  readonly cleared_version: number
   readonly row_version: number
   readonly session: number
   readonly text_version: number
@@ -147,6 +149,7 @@ const toDraft = (row: DraftRow, recovered = 0, displaced: DraftDisplacement | nu
     status: row.status,
     baseRevision: row.base_revision,
     rowVersion: row.row_version,
+    clearedVersion: row.cleared_version,
     session: row.session,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -504,7 +507,8 @@ export const makeDraftStore = (
     kind: "edit" | "restore" | "revision",
     baseRevision: string | null,
     displaced = false,
-    imagesJson: string | null = draft.images_json
+    imagesJson: string | null = draft.images_json,
+    deliberate = true
   ) =>
     Effect.gen(function* () {
       const at = now()
@@ -522,6 +526,7 @@ export const makeDraftStore = (
       const textChanged = reopened || !isEmptyPatch(patch) || imagesChanged
       yield* sql`UPDATE drafts SET content = ${content}, images_json = ${imagesJson}, status = 'active',
                    base_revision = ${baseRevision ?? draft.base_revision},
+                   cleared_version = CASE WHEN ${deliberate && content === "" && draft.content !== "" ? 1 : 0} THEN row_version + 1 ELSE cleared_version END,
                    row_version = row_version + 1,
                    text_version = CASE WHEN ${textChanged ? 1 : 0} THEN row_version + 1 ELSE text_version END,
                    updated_at = ${at}
@@ -563,6 +568,8 @@ export const makeDraftStore = (
    * The one rule for text saved onto a draft, every kind, in the writer's transaction.
    * `base` is the draft as the client had it when the text was typed (null: it had none).
    * - Typed on the draft as it is: saved, extending the history as typing does.
+   * - A deletion advanced `cleared_version` past the base: recover the submitted text
+   *   and leave the field alone. This wins over the following rules.
    * - Another tab changed the text since (or it's `next`, see below): saved as its own
    *   history entry, the other text before it marked displaced, so it's one step back now
    *   and goes to the recovered texts when the session ends or the entry is dropped.
@@ -580,14 +587,20 @@ export const makeDraftStore = (
     options: {
       readonly baseRevision: string | null
       readonly ended: "recover" | "reopen"
+      readonly observedDeletion?: ObservedDeletion | undefined
       readonly next?: boolean
       readonly images?: MessageImages | undefined
     }
   ) =>
     Effect.gen(function* () {
       const ended = base !== null && base.session !== null && base.session !== draft.session
-      if (ended && options.ended === "recover" && options.next !== true) {
-        const recovered = content.trim() !== "" && content !== shown(draft)
+      // Deliberate deletion wins over writes typed before it, including keepalive and
+      // Browser recovery retries. Sending a composer ends its session without deleting
+      // its separately typed `next` text; manual deletion always wins.
+      const observed = options.observedDeletion?.draftId === draft.id ? options.observedDeletion.rowVersion : 0
+      const deleted = draft.cleared_version > Math.max(base?.rowVersion ?? 0, observed)
+      if (deleted || (ended && options.ended === "recover" && options.next !== true)) {
+        const recovered = toBin(draft) && content.trim() !== "" && content !== shown(draft)
         if (recovered) yield* recover(draft.user_id, toDraft(draft).key, [content], "discard")
         return { draft: toDraft(draft, recovered ? 1 : 0), recovered }
       }
@@ -651,6 +664,7 @@ export const makeDraftStore = (
     readonly base: Base | null
     readonly baseRevision: string | null
     readonly checkTarget: Effect.Effect<void, NotFound, never>
+    readonly observedDeletion?: ObservedDeletion | undefined
   }) =>
     Effect.gen(function* () {
       yield* tooLarge(options.content)
@@ -674,6 +688,7 @@ export const makeDraftStore = (
         keeps &&
         existing !== null &&
         existing.status !== "active" &&
+        existing.cleared_version <= (options.base?.rowVersion ?? 0) &&
         (options.draftId === null || options.draftId === existing.id) &&
         (options.key.targetKind === "entity_field"
           ? options.base?.session === existing.session
@@ -700,6 +715,7 @@ export const makeDraftStore = (
         const saved = yield* saveOnto(existing, typedHere ? options.base : null, options.content, {
           baseRevision: options.baseRevision,
           ended: "reopen",
+          observedDeletion: options.observedDeletion,
           images: options.images
         })
         return saved.draft
@@ -806,7 +822,7 @@ export const makeDraftStore = (
         if (moves)
           recovered = yield* record(draft, back, diffPatch(draft.content, back), "revision", now(), false, backImages)
         const updatedAt = now()
-        yield* sql`UPDATE drafts SET status = 'discarded', content = ${moves ? back : draft.content},
+        yield* sql`UPDATE drafts SET cleared_version = row_version + 1, status = 'discarded', content = ${moves ? back : draft.content},
                      images_json = ${moves ? backImages : draft.images_json}, row_version = row_version + 1,
                      text_version = CASE WHEN ${moves ? 1 : 0} THEN row_version + 1 ELSE text_version END,
                      session = session + 1, updated_at = ${updatedAt}
@@ -824,12 +840,14 @@ export const makeDraftStore = (
         yield* recover(draft.user_id, toDraft(draft).key, lost, outcome === "discarded" ? "discard" : "commit")
       yield* sql`DELETE FROM draft_history WHERE draft_id = ${draft.id}`
       const updatedAt = now()
-      yield* sql`UPDATE drafts SET status = ${outcome}, content = '', images_json = NULL, row_version = row_version + 1,
+      const clears = outcome === "discarded"
+      yield* sql`UPDATE drafts SET cleared_version = CASE WHEN ${clears ? 1 : 0} THEN row_version + 1 ELSE cleared_version END, status = ${outcome}, content = '', images_json = NULL, row_version = row_version + 1,
                    text_version = row_version + 1, session = session + 1, updated_at = ${updatedAt}
                  WHERE id = ${draft.id}`
       const ended = toDraft(
         {
           ...draft,
+          cleared_version: clears ? draft.row_version + 1 : draft.cleared_version,
           status: outcome,
           content: "",
           images_json: null,
@@ -1095,9 +1113,9 @@ export const makeDraftStore = (
    * A library field's draft moved to `content` (a restored revision's text, appended as a
    * restore, so the live text before it stays a state) and its session ended on `revision`.
    */
-  const settleOn = (draft: DraftRow, content: string, revision: string) =>
+  const settleOn = (draft: DraftRow, content: string, revision: string, deliberate = true) =>
     Effect.gen(function* () {
-      yield* update(draft, content, "revision", revision)
+      yield* update(draft, content, "revision", revision, false, draft.images_json, deliberate)
       return yield* end((yield* byId(draft.id))!, "committed", revision)
     })
 

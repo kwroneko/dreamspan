@@ -327,12 +327,22 @@ export const makeLcmHandlers = Effect.gen(function* () {
         yield* reader.GetSummary({ userId: id, summaryId, forkId: forkId ?? null })
         return yield* reader.GetDraft({ userId: id, key: summaryDraftKey(summaryId, forkId) })
       }).pipe(internal("GetSummaryDraft")),
-    SaveSummaryDraft: ({ summaryId, forkId, draftId, content, expectedRowVersion, expectedSession, baseRevisionId }) =>
+    SaveSummaryDraft: ({
+      summaryId,
+      forkId,
+      draftId,
+      content,
+      expectedRowVersion,
+      expectedSession,
+      baseRevisionId,
+      observedDeletion
+    }) =>
       Effect.flatMap(userId, (id) =>
         writer.SaveDraft({
           userId: id,
           key: summaryDraftKey(summaryId, forkId),
           draftId,
+          ...(observedDeletion === undefined ? {} : { observedDeletion }),
           content,
           expectedRowVersion,
           expectedSession,

@@ -26,34 +26,6 @@ const savePersona = (id: string | null) => {
   }
 }
 
-/**
- * The last text typed in a chat not made yet, written synchronously with each keystroke. The
- * browser copy (IndexedDB) and the server draft are written asynchronously, so a reload right
- * after a keystroke can lose it from both; this one is already written. Per user and pending
- * chat (`copyKey`); emptied when the box is, or once the first send has made the chat.
- */
-const typedKey = (userId: string, copyKey: string) => `rp.pendingTyped:${userId}:${copyKey}`
-
-export const writeLastTyped = (userId: string, copyKey: string, content: string) => {
-  try {
-    if (content === "") localStorage.removeItem(typedKey(userId, copyKey))
-    else localStorage.setItem(typedKey(userId, copyKey), JSON.stringify({ at: Date.now(), content }))
-  } catch {
-    // The asynchronous copies still keep it.
-  }
-}
-
-export const readLastTyped = (userId: string, copyKey: string): { at: number; content: string } | null => {
-  try {
-    const value: unknown = JSON.parse(localStorage.getItem(typedKey(userId, copyKey)) ?? "null")
-    if (typeof value !== "object" || value === null) return null
-    const { at, content } = value as { at?: unknown; content?: unknown }
-    return typeof at === "number" && typeof content === "string" && content !== "" ? { at, content } : null
-  } catch {
-    return null
-  }
-}
-
 export interface PendingState {
   /** Each character's card, in the order they greet: the chat's characters. */
   readonly greeters: ReadonlyArray<CardForChat>

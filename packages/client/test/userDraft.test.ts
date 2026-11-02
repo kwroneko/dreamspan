@@ -1,5 +1,5 @@
 import type { UserId } from "@rp/shared/domain.ts"
-import { Draft, DraftKey, DraftState } from "@rp/shared/drafts.ts"
+import { Draft, DraftKey, DraftState, deletedSince } from "@rp/shared/drafts.ts"
 import type { UserDraftSave } from "@rp/shared/editorApi.ts"
 import { Effect } from "effect"
 import { beforeEach, expect, it, vi } from "vitest"
@@ -56,7 +56,7 @@ const deferred = <A>() => {
 const until = async (check: () => boolean) => {
   await vi.waitFor(() => expect(check()).toBe(true))
 }
-const harness = (initial = draft("original"), field = key.field) => {
+const harness = (initial = draft("original"), field = key.field, targetId = key.targetId) => {
   let current = initial
   const saves: Array<typeof UserDraftSave.Type> = []
   const handlers = {
@@ -88,7 +88,7 @@ const harness = (initial = draft("original"), field = key.field) => {
       return { ok: false, error: { tag: "ServerError", message: "Synthetic refusal", problems: [], reason: null } }
     }
   }
-  const store = new UserDraftStore(ownerId, key.targetId, field, run)
+  const store = new UserDraftStore(ownerId, targetId, field, run)
   return { store, handlers, saves }
 }
 beforeEach(() => memory.clear())
@@ -482,4 +482,117 @@ it.each([
   expect(store.snapshot().text).toBe(text)
   // The newer copy goes to the server; the older one isn't sent over the server's text.
   expect(saves.map((save) => save.content)).toEqual(at > 5 ? ["First line\n\n\n\nSecond line"] : [])
+})
+
+// Device A's clock may be years ahead; a deletion still wins by server version.
+it.each(["active", "discarded", "committed"] as const)(
+  "a newer %s deletion blocks an older browser copy",
+  async (status) => {
+    const pending = makeCopy(
+      ownerId,
+      key.targetId,
+      "First message",
+      { kind: "userDraft", payload: payload("deleted text", 3) },
+      9e15
+    )
+    await keepCopy(pending)
+    const tombstone = new Draft({ ...draft("", 5), status, clearedVersion: 5 })
+    const { store, saves } = harness(tombstone, "First message")
+    store.open()
+    await until(() => store.snapshot().ready)
+    expect(store.snapshot().text).toBe(status === "active" ? "" : null)
+    expect(store.snapshot().savedAt).toBe(5)
+    expect(saves).toEqual([])
+    // Explicit recovery stays possible; it never reappears in the composer automatically.
+    expect(await copiesOf(ownerId, key.targetId)).toHaveLength(1)
+  }
+)
+
+it("a keystroke based on an older tombstone survives reload, even with a slow browser clock", async () => {
+  const pending = makeCopy(
+    ownerId,
+    key.targetId,
+    "First message",
+    { kind: "userDraft", payload: payload("new keystroke", 5) },
+    -1000
+  )
+  await keepCopy(pending)
+  const { store, saves } = harness(new Draft({ ...draft("", 5), clearedVersion: 5 }), "First message")
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(store.snapshot().text).toBe("new keystroke")
+  expect(saves.map((save) => save.content)).toEqual(["new keystroke"])
+})
+
+it("a deletion barrier remains after subsequent text and rejects legacy copies without a base", () => {
+  const after = new Draft({ ...draft("replacement", 8), clearedVersion: 5 })
+  expect(deletedSince(after, payload("deleted", 3))).toBe(true)
+  expect(deletedSince(after, null)).toBe(true)
+  expect(deletedSince(after, payload("new", 5))).toBe(false)
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "draft", rowVersion: 5 } })).toBe(
+    false
+  )
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "draft", rowVersion: 4 } })).toBe(
+    true
+  )
+  expect(deletedSince(after, { ...payload("new", 3), observedDeletion: { draftId: "other", rowVersion: 100 } })).toBe(
+    true
+  )
+})
+
+it("the synchronous versioned backup alone keeps the final keystroke across an immediate reload", async () => {
+  const storage = new Map<string, string>()
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key)
+  })
+  try {
+    const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
+    const { store, handlers } = harness(tombstone, "First message", "pending-chat:synthetic")
+    store.open()
+    await until(() => store.snapshot().ready)
+    const held = deferred<Draft>()
+    handlers.SaveUserDraft = () => held.promise
+    store.type("Final keystroke", "")
+    // Simulate IndexedDB not finishing before the page is destroyed.
+    memory.clear()
+    const reopened = harness(tombstone, "First message", "pending-chat:synthetic")
+    reopened.store.open()
+    await until(() => reopened.store.snapshot().ready)
+    expect(reopened.store.snapshot().text).toBe("Final keystroke")
+    expect(storage.size).toBe(0)
+    held.resolve(draft("Final keystroke", 6))
+  } finally {
+    vi.unstubAllGlobals()
+    vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
+  }
+})
+
+it("a deletion that wins during a save does not let a stale form commit its text", async () => {
+  const { store, handlers } = harness()
+  store.open()
+  await until(() => store.snapshot().ready)
+  handlers.SaveUserDraft = async () =>
+    new Draft({ ...draft("", 5), status: "discarded", clearedVersion: 5, recovered: 1 })
+  const save = vi.fn(async () => true)
+  expect(await store.commit("stale form text", save)).toBe(false)
+  expect(save).not.toHaveBeenCalled()
+  expect(store.snapshot().recovered).toBe(1)
+})
+
+it("typing into the empty field before its tombstone read finishes starts from that deletion", async () => {
+  const tombstone = new Draft({ ...draft("", 5), clearedVersion: 5 })
+  const { store, handlers, saves } = harness(tombstone, "First message")
+  const opening = deferred<Draft>()
+  handlers.GetUserDraft = () => opening.promise
+  const save = handlers.SaveUserDraft
+  handlers.SaveUserDraft = async (payload) =>
+    Math.max(payload.expectedRowVersion ?? 0, payload.observedDeletion?.rowVersion ?? 0) < 5 ? tombstone : save(payload)
+  store.open()
+  store.type("new text typed in the empty box", "")
+  opening.resolve(tombstone)
+  await until(() => saves.some((save) => save.content === "new text typed in the empty box"))
+  expect(store.snapshot().text).toBe("new text typed in the empty box")
+  expect(store.snapshot().error).toBeNull()
 })

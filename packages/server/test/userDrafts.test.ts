@@ -57,8 +57,145 @@ describe("authored settings and pre-creation drafts", () => {
         outcome: "discarded"
       })
       assert.strictEqual(ended.status, "discarded")
+      assert.strictEqual(ended.content, "")
+      assert.strictEqual(ended.clearedVersion, ended.rowVersion)
+      const tombstone = yield* reader.GetDraft({ userId: user.id, key })
+      assert.strictEqual(tombstone?.updatedAt, ended.updatedAt)
+      assert.strictEqual(tombstone?.clearedVersion, ended.rowVersion)
       const recovered = yield* reader.ListRecoveredTexts({ userId: user.id, source: null, limit: 100, before: null })
       assert.isTrue(recovered.some((text) => text.content === first.content))
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("keeps a versioned empty tombstone through later typing", () =>
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      const reader = yield* Database.Reader
+      const user = yield* writer.EnsureUser({ handle: "empty-author", displayName: "Author" })
+      const key = { targetKind: "user_field" as const, targetId: "pending-chat:synthetic", field: "First message" }
+      let current = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "delete this",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      current = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "",
+        draftId: current.id,
+        expectedRowVersion: current.rowVersion,
+        expectedSession: current.session,
+        baseRevision: null
+      })
+      assert.strictEqual(current.clearedVersion, current.rowVersion)
+      const cleared = current.rowVersion
+      const stale = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "old device copy",
+        draftId: current.id,
+        expectedRowVersion: cleared - 1,
+        expectedSession: current.session,
+        baseRevision: null
+      })
+      assert.strictEqual(stale.content, "")
+      assert.strictEqual(stale.rowVersion, cleared)
+      assert.strictEqual(stale.recovered, 1)
+      const read = yield* reader.GetDraft({ userId: user.id, key })
+      assert.strictEqual(read?.content, "")
+      assert.strictEqual(read?.updatedAt, current.updatedAt)
+      current = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "a new thought",
+        draftId: current.id,
+        expectedRowVersion: current.rowVersion,
+        expectedSession: current.session,
+        baseRevision: null
+      })
+      assert.strictEqual(current.clearedVersion, cleared)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("only an observation of the latest deletion permits new text on an older drafting base", () =>
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      const user = yield* writer.EnsureUser({ handle: "observed-clear", displayName: "Author" })
+      const key = { targetKind: "user_field" as const, targetId: "pending-chat:observed", field: "First message" }
+      const first = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "before",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      const base = {
+        userId: user.id,
+        key,
+        draftId: first.id,
+        expectedRowVersion: first.rowVersion,
+        expectedSession: first.session,
+        baseRevision: null
+      }
+      const deleted = yield* writer.SaveDraft({ ...base, content: "" })
+      const seen = { draftId: deleted.id, rowVersion: deleted.rowVersion }
+      const fresh = yield* writer.SaveDraft({ ...base, content: "new after observing", observedDeletion: seen })
+      assert.strictEqual(fresh.content, "new after observing")
+      const later = yield* writer.SaveDraft({ ...base, content: "", expectedRowVersion: fresh.rowVersion })
+      for (const observedDeletion of [seen, { draftId: "another-draft", rowVersion: later.rowVersion + 100 }]) {
+        const stale = yield* writer.SaveDraft({ ...base, content: "stale browser copy", observedDeletion })
+        assert.strictEqual(stale.content, "")
+        assert.strictEqual(stale.recovered, 1)
+      }
+      const newest = yield* writer.SaveDraft({
+        ...base,
+        content: "new after the second deletion",
+        observedDeletion: { draftId: later.id, rowVersion: later.rowVersion }
+      })
+      assert.strictEqual(newest.content, "new after the second deletion")
+      assert.strictEqual(newest.clearedVersion, later.rowVersion)
+    }).pipe(Effect.provide(layer()))
+  )
+
+  it.effect("a normal form commit leaves later typing free to start a new session", () =>
+    Effect.gen(function* () {
+      const writer = yield* Database.Writer
+      const user = yield* writer.EnsureUser({ handle: "new-form-author", displayName: "Author" })
+      const key = { targetKind: "user_field" as const, targetId: "chat:new", field: "Title" }
+      const first = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "First chat",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      const ended = yield* writer.ClearDraft({
+        userId: user.id,
+        key,
+        draftId: first.id,
+        expectedRowVersion: first.rowVersion,
+        outcome: "committed"
+      })
+      assert.strictEqual(ended.clearedVersion, 0)
+      const later = yield* writer.SaveDraft({
+        userId: user.id,
+        key,
+        content: "New chat typed before the draft read",
+        draftId: null,
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevision: null
+      })
+      assert.strictEqual(later.content, "New chat typed before the draft read")
+      assert.strictEqual(later.recovered, 0)
     }).pipe(Effect.provide(layer()))
   )
 

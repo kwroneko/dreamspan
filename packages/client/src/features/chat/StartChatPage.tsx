@@ -1,5 +1,5 @@
 import { greetingPick } from "@rp/shared/greetings.ts"
-import { newerText, useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingComposerControls,
@@ -38,15 +38,7 @@ import { IconButton, TooltipProvider } from "../../ui/Tooltip.tsx"
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
-import {
-  copiesOf,
-  type Copy,
-  dropCopy,
-  keepCopy,
-  makeCopy,
-  pendingChatCopy,
-  pendingGroupChatCopy
-} from "../editor/backup.ts"
+import { type Copy, dropCopy, keepCopy, pendingChatCopy, pendingGroupChatCopy } from "../editor/backup.ts"
 import { useTitle } from "../shell.tsx"
 import { CastContext, castView } from "./cast.ts"
 import { PendingChatHeader } from "./ChatHeader.tsx"
@@ -56,7 +48,7 @@ import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
-import { PendingChat, pendingOptions, pendingTitle, readLastTyped, writeLastTyped } from "./pendingChat.ts"
+import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
@@ -178,80 +170,31 @@ function Pending({
   useEffect(preloadChatPage, [])
   const sending = useRef<string | null>(null)
   const destination = useRef<string | null>(null)
-  // The newest copy of the text in this browser as the page opened, once read: on opening, the
-  // newer of it and the server's draft wins, so a reload right after typing keeps the last
-  // keystrokes even when the server hasn't had them yet (newerText).
-  const [local, setLocal] = useState<{ readonly at: number; readonly content: string } | null | undefined>(undefined)
-  const settled = useRef(false)
+  // The draft store reconciles its synchronous and IndexedDB backups before opening.
   useEffect(() => {
     if (!durable.ready || sending.current !== null) return
-    if (!settled.current) {
-      if (local === undefined) return
-      settled.current = true
-      // The newer copy becomes the draft's text (and is saved); this effect then shows it.
-      if (local !== null && local.content !== durable.text && newerText(durable.savedAt, local.at) === "local") {
-        typed.current = local.content
-        durable.setText(local.content)
-        return
-      }
-    }
     typed.current = durable.text
     setTextState(durable.text)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- durable's setter is new each render
-  }, [durable.ready, durable.text, durable.savedAt, local])
+  }, [durable.ready, durable.text])
   const copy = useRef<Copy | null>(null)
   const keep = (content: string) => {
-    writeLastTyped(userId, copyKey, destination.current === null ? content : "")
-    if (destination.current === null) durable.setText(content)
+    if (destination.current === null) {
+      durable.setText(content)
+      return Promise.resolve()
+    }
     const previous = copy.current
     copy.current = null
-    if (content === "") {
-      return previous === null ? Promise.resolve() : dropCopy(previous)
-    }
-    copy.current =
-      destination.current !== null
-        ? composerCarryCopy(userId, destination.current, entityId, group?.name ?? card.card.name, content, previous)
-        : makeCopy(
-            userId,
-            copyKey,
-            "first message",
-            {
-              kind: "pendingChat",
-              payload:
-                group === null
-                  ? { entityId, name: card.card.name, content }
-                  : { entityId, name: group.name, content, groupChatId: group.chatId }
-            },
-
-            Date.now()
-          )
+    if (content === "") return previous === null ? Promise.resolve() : dropCopy(previous)
+    copy.current = composerCarryCopy(
+      userId,
+      destination.current,
+      entityId,
+      group?.name ?? card.card.name,
+      content,
+      previous
+    )
     return keepCopy(copy.current, previous)
   }
-  // The text left here before, if nothing's been typed since; the newest of them, when
-  // several tabs left one (the others stay in the sidebar's Unsaved text).
-  useEffect(() => {
-    let current = true
-    void copiesOf(userId, copyKey).then((copies) => {
-      const newest = [...copies].sort((a, b) => b.at - a.at)[0]
-      if (!current) return
-      // The keystroke-synchronous copy may be newer than the asynchronous ones.
-      const typedLast = readLastTyped(userId, copyKey)
-      const found =
-        typedLast !== null && (newest === undefined || typedLast.at > newest.at)
-          ? typedLast
-          : newest === undefined
-            ? null
-            : { at: newest.at, content: newest.content }
-      setLocal(found)
-      if (found === null || copy.current !== null || typed.current !== "") return
-      copy.current = newest ?? null
-      typed.current = found.content
-      setTextState(found.content)
-    })
-    return () => {
-      current = false
-    }
-  }, [userId, copyKey])
   const playing = pending.playing(state)
   // The guidance toggle, as in the chat's composer (DESIGN §2.2).
   const viewPrefs = useViewPrefs()

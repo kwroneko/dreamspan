@@ -66,7 +66,7 @@ import {
 } from "@rp/shared/chatApi.ts"
 import { User, UserAccount, UserId, UserRole } from "@rp/shared/domain.ts"
 import { BinBranch, BinChanged, BinForkShown, BinItem, CannotDeleteLastFork, RecoveredText } from "@rp/shared/bin.ts"
-import { Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
+import { ObservedDeletion, Draft, DraftHistoryPolicy, DraftKey, DraftRestore, DraftState } from "@rp/shared/drafts.ts"
 import {
   ComposerImage,
   ComposerImageIds,
@@ -740,6 +740,7 @@ export class WriteOps extends RpcGroup.make(
       /** The draft the text was typed into, if the client had one: another draft at the key is a conflict. */
       draftId: Schema.NullOr(Schema.String),
       content: Schema.String,
+      observedDeletion: Schema.optionalKey(ObservedDeletion),
       images: Schema.optionalKey(MessageImages),
       /** The draft as last seen: null if none was. */
       expectedRowVersion: Schema.NullOr(Schema.Int),

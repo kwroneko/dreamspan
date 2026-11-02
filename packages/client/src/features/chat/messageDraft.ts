@@ -1,3 +1,4 @@
+import { observeDeletion, type ObservedDeletion } from "@rp/shared/drafts.ts"
 import type { MessageImages } from "@rp/shared/chat.ts"
 // The text of a message editor (DESIGN §6.2): an edit of a version, or a version of a
 // message the user is writing. Typed into a server draft like a summary's (summaryDraft.ts),
@@ -96,12 +97,14 @@ export class MessageDraft {
   private readonly listeners = new Set<() => void>()
   /** The draft as the server last answered with it. */
   private draft: Draft | null
+  private readonly initialText: string
   /**
    * What the text shown was typed on, which its saves name. It changes only with the text
    * shown, or when the server answers a save with exactly the text sent: text restored from
    * a copy keeps the copy's base until the server has it, whatever the server holds now.
    */
   private base: Base
+  private observedDeletion: ObservedDeletion | null = null
   /** Typed here and not saved yet. */
   private local: string | null = null
   /** The browser copy of `local`. */
@@ -131,6 +134,7 @@ export class MessageDraft {
       error: null,
       conflict: null
     }
+    this.initialText = this.view.text
   }
 
   readonly subscribe = (listener: () => void) => {
@@ -171,7 +175,10 @@ export class MessageDraft {
         if (replayed.ok) {
           this.draft = replayed.value
           // The text it holds is shown, unless something was typed here meanwhile.
-          if (this.local === null) this.base = baseOf(replayed.value)
+          if (this.local === null) {
+            this.base = baseOf(replayed.value)
+            this.observedDeletion = null
+          }
           if (replayed.value.displaced !== null) conflict = { ...replayed.value.displaced, typedAt: copy.at }
           void dropCopy(copy)
         } else {
@@ -186,6 +193,7 @@ export class MessageDraft {
               rowVersion: save.payload.expectedRowVersion,
               session: save.payload.expectedSession
             }
+            this.observedDeletion = save.payload.observedDeletion ?? null
             this.replayedAt = copy.at
           }
           error = replayed.error
@@ -207,6 +215,7 @@ export class MessageDraft {
     const base = this.base
     return {
       target: this.target,
+      ...(this.observedDeletion === null ? {} : { observedDeletion: this.observedDeletion }),
       draftId: base.draftId,
       content,
       ...(this.view.images === undefined ? {} : { images: this.view.images }),
@@ -272,6 +281,24 @@ export class MessageDraft {
   save(): Promise<void> {
     this.cancelTimer()
     return this.serial(async () => {
+      if (this.local === null) return
+      if (this.base.draftId === null && this.replayedAt === null) {
+        // A fresh editor can reopen a cancelled insertion/write whose empty draft
+        // isn't in the active-draft list. Match the starting text it showed before
+        // taking that resting base. Offline replay always keeps its original base.
+        const opened =
+          this.draft === null
+            ? await this.session.call((client) => client("GetMessageDraft", { target: this.target }))
+            : { ok: true as const, value: this.draft }
+        if (!opened.ok && opened.error.tag !== "NotFound") return this.set({ error: opened.error })
+        const resting = opened.ok ? opened.value : null
+        this.draft = resting
+        if (resting !== null && resting.status !== "active" && resting.content === this.initialText) {
+          this.observedDeletion = observeDeletion(resting)
+          if (this.local !== null) this.keep(this.local)
+        }
+      }
+      // Take the text and its copy together after the read: typing during it is newer.
       const sent = this.local
       if (sent === null) return
       const sentImages = this.view.images
@@ -287,12 +314,17 @@ export class MessageDraft {
       }
       // The server has exactly the text sent: what's typed from it is on the draft as it is now.
       this.draft = result.value
-      this.base = baseOf(result.value)
+      const exact = result.value.status === "active" && result.value.content === sent
+      if (exact || (this.local === sent && this.view.images === sentImages)) {
+        this.base = baseOf(result.value)
+        this.observedDeletion = null
+      }
       if (copy !== null) void dropCopy(copy)
       if (this.local === sent && this.view.images === sentImages) {
         this.local = null
         if (this.pending === copy) this.pending = null
-      } else if (this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
+        if (!exact) this.set({ text: result.value.content, images: result.value.images })
+      } else if (exact && this.local !== null && this.pending !== null && !this.sending.has(this.pending)) {
         // More typed since: its copy now names the draft as the server has it.
         this.keep(this.local)
       }
@@ -302,7 +334,7 @@ export class MessageDraft {
           ? { ...result.value.displaced, typedAt: this.replayedAt }
           : this.view.conflict
       this.replayedAt = null
-      this.set({ error: null, unsaved: this.local !== null, conflict })
+      this.set({ error: exact ? null : deletedElsewhere, unsaved: this.local !== null, conflict })
     })
   }
 
@@ -419,9 +451,11 @@ export class MessageDraft {
     )
     if (result.ok) {
       this.draft = result.value
-      // Typed while the discard was out: that text wasn't discarded, so the editor stays open
-      // with it, its copy and the base it was typed on.
+      // Our own acknowledged Cancel precedes this later typing. Refile it on that
+      // acknowledged deletion, so recovery never confuses it with the cancelled text.
       if (this.local !== null) {
+        this.observedDeletion = observeDeletion(result.value)
+        this.keep(this.local)
         this.set({ error: typedDuringCancel })
         return { ok: false, error: typedDuringCancel }
       }
@@ -441,6 +475,13 @@ const typedDuringCancel: AppError = {
 const notSaved: AppError = {
   tag: "NotSaved",
   message: "The text isn't on the server yet. Wait for it to be kept, then try again.",
+  problems: [],
+  reason: null
+}
+
+const deletedElsewhere: AppError = {
+  tag: "NotSaved",
+  message: "This text was deleted elsewhere. Find your copy in recovered texts.",
   problems: [],
   reason: null
 }
