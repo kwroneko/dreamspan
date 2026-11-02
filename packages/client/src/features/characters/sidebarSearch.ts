@@ -11,6 +11,7 @@ export const sidebarSearch = [
   "sideShow",
   "sideSort",
   "sideReverse",
+  "sidePersonas",
   "sideQ",
   "sidePinsSort"
 ] as const

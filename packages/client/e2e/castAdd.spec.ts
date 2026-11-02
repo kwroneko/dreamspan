@@ -99,13 +99,15 @@ for (const width of [1440, 390]) {
     // aria-disabled: Playwright won't click it unless forced; a person can, and nothing happens.
     await mira.click({ force: true })
     await expect(members(page).getByRole("listitem")).toHaveCount(1)
-    // Ana is in the persona folder: offered apart; Bo, played here, is marked.
-    const personas = section(page).getByRole("region", { name: "Personas", exact: true })
-    await expect(personas.getByRole("button", { name: "Add Ana to this chat", exact: true })).toBeVisible()
-    await expect(personas.getByRole("button", { name: "Bo: you play them here", exact: true })).toBeVisible()
+    // Ana and Bo are in the persona folder: not among All's characters, but under Personas,
+    // where Bo, played here, is marked.
+    await expect.poll(() => tileLabels(page)).not.toContain("Add Ana to this chat")
+    const show = section(page).getByRole("combobox", { name: "Show" })
+    await show.click()
+    await page.getByRole("option", { name: /^Personas/ }).click()
+    await expect.poll(() => tileLabels(page)).toEqual(["Add Ana to this chat", "Bo: you play them here"])
 
     // The filter: Never used leaves out Mira, who has this chat; no Groups.
-    const show = section(page).getByRole("combobox", { name: "Show" })
     await show.click()
     await expect(page.getByRole("option", { name: /^Groups/ })).toHaveCount(0)
     await page.getByRole("option", { name: /^Never used/ }).click()
@@ -113,7 +115,7 @@ for (const width of [1440, 390]) {
       .poll(() => tileLabels(page))
       .toEqual(expect.arrayContaining([`Add ${one} to this chat`, `Add ${two} to this chat`]))
     await expect.poll(() => tileLabels(page)).not.toContain("Mira: in this chat")
-    await expect(personas).toHaveCount(0)
+    await expect.poll(() => tileLabels(page)).not.toContain("Add Ana to this chat")
     await show.click()
     await page.getByRole("option", { name: /^All/ }).click()
     // The search: by name.

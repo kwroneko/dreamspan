@@ -437,6 +437,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
               createdAt: m.created_at,
               addedAt: m.added_at,
               favourite: favourites.has(m.id),
+              persona: m.persona === 1,
               open:
                 open === undefined
                   ? null

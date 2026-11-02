@@ -14,14 +14,14 @@ import { Loading } from "../../ui/Spinner.tsx"
 import { useWide } from "../chat/ChatPanels.tsx"
 import { type CardBrowse, browseCards, FavouriteStar, SortDate, useCardBrowse } from "./cardBrowse.tsx"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
-import { shellAtom, sidebarCleared, useShellNavigation, type ShellLibrary } from "./shellData.tsx"
+import { browsable, shellAtom, sidebarCleared, useShellNavigation, type ShellLibrary } from "./shellData.tsx"
 
 /** Enough to pick from; a name narrows the rest. */
 const SHOWN = 40
 
 /** Groups aren't offered here: a remembered Groups reads as All. */
 const matching = (data: ShellLibrary, browse: CardBrowse, needle: string) =>
-  browseCards(data.cards, browse.filter === "groups" ? { ...browse, filter: "all" } : browse, needle)
+  browseCards(browsable(data), browse.filter === "groups" ? { ...browse, filter: "all" } : browse, needle)
 
 /** The card's tab beside the new chat where there's room; on a phone it would cover the chat. */
 const startSearch = (entityId: ShellLibrary["cards"][number]["card"]["entityId"], wide: boolean) => ({
@@ -46,13 +46,15 @@ function Choices({
   if (!matches.length)
     return (
       <p className="px-1 py-2 text-sm text-muted">
-        {!data.cards.length
+        {!browsable(data).length
           ? "No characters yet."
           : needle.trim()
             ? "No character by that name."
             : browse.filter === "favourites"
               ? "No favourites yet: star a character to keep it here."
-              : "No characters here."}
+              : browse.filter === "personas"
+                ? "No personas yet."
+                : "No characters here."}
       </p>
     )
   return (

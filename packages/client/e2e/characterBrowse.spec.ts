@@ -87,7 +87,14 @@ for (const width of [1440, 390]) {
     await page.goto(server().url)
     const main = page.getByRole("main")
     const show = main.getByRole("group", { name: "Show", exact: true })
-    const counts = [/^All\s*4$/, /^With chats\s*2$/, /^Never used\s*2$/, /^Favourites\s*1$/, /^Groups\s*1$/]
+    const counts = [
+      /^All\s*4$/,
+      /^With chats\s*2$/,
+      /^Never used\s*2$/,
+      /^Favourites\s*1$/,
+      /^Personas\s*0$/,
+      /^Groups\s*1$/
+    ]
     await expect(show.getByRole("button")).toHaveText(counts)
     // The counts are what each filter holds, whatever the search.
     await main.getByRole("searchbox", { name: "Search characters and groups" }).fill("zzz")
@@ -158,6 +165,7 @@ for (const width of [1440, 390]) {
       "With chats · 2",
       "Never used · 2",
       "Favourites · 2",
+      "Personas · 0",
       "Groups · 1"
     ])
     await page.getByRole("option", { name: "Favourites · 2" }).click()
@@ -178,7 +186,13 @@ for (const width of [1440, 390]) {
     await panel.getByRole("button", { name: "Start a chat", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "Start a chat with…" })
     await dialog.getByRole("combobox", { name: "Show" }).click()
-    await expect(page.getByRole("option")).toHaveText(["All · 4", "With chats · 2", "Never used · 2", "Favourites · 2"])
+    await expect(page.getByRole("option")).toHaveText([
+      "All · 4",
+      "With chats · 2",
+      "Never used · 2",
+      "Favourites · 2",
+      "Personas · 0"
+    ])
     await page.getByRole("option", { name: "Never used · 2" }).click()
     await expect(dialog).toBeVisible()
     const rows = dialog.getByRole("list", { name: "Characters" }).getByRole("link")

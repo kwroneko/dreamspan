@@ -18,7 +18,7 @@ import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { forkLabel, formatMoment, OPENS_HERE_HINT } from "../chat/forks.ts"
 import { Badge } from "../../ui/Surface.tsx"
 import { rowActionInsetClass } from "../../ui/rowSpacing.ts"
-import { browseCards } from "./cardBrowse.tsx"
+import { browseCards, mixesPersonas } from "./cardBrowse.tsx"
 import { useSidebarBrowse } from "./useSidebarBrowse.ts"
 import { CardBrowseBar } from "./CardBrowseBar.tsx"
 import { GroupGrid } from "./GroupGrid.tsx"
@@ -30,6 +30,7 @@ import {
   CharacterGrid,
   PAGE_ROWS,
   scopeSearch,
+  browsable,
   shellAtom,
   sidebarCleared,
   useShellForks,
@@ -586,7 +587,7 @@ function Browser({ data }: { data: ShellLibrary }) {
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
-      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups />}
+      {grid && <CardBrowseBar data={data} browse={browse} onChange={setBrowse} groups includePersonas />}
       {/* The gutter is kept whether or not it scrolls, so the list never shifts, with a gap before the bar. */}
       <div className="@container min-h-0 flex-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
         {grid ? (
@@ -600,8 +601,9 @@ function Browser({ data }: { data: ShellLibrary }) {
             />
           ) : (
             <CharacterGrid
-              cards={browseCards(data.cards, browse, needle)}
+              cards={browseCards(browsable(data), browse, needle)}
               sort={browse.sort}
+              markPersonas={mixesPersonas(browse)}
               className="grid grid-cols-2 gap-2 @sm:grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]"
             />
           )

@@ -18,9 +18,9 @@ export function useHomeBrowse() {
   const state = useMemo(() => {
     const parsed = readHomeSearch(search)
     return !initialized && !homeSearch.some((key) => search[key] !== undefined)
-      ? { ...parsed, sort: remembered.sort, reversed: remembered.reversed }
+      ? { ...parsed, sort: remembered.sort, reversed: remembered.reversed, withPersonas: remembered.withPersonas }
       : parsed
-  }, [initialized, search, remembered.sort, remembered.reversed])
+  }, [initialized, search, remembered.sort, remembered.reversed, remembered.withPersonas])
   // Mark even a default-only entry, so Back restores its defaults after a later choice
   // changed the device memory. The marker survives reloads in this history entry.
   useEffect(() => {
@@ -36,7 +36,7 @@ export function useHomeBrowse() {
 
   const update = (change: Partial<HomeBrowse>) => {
     const next = changeHomeBrowse(state, change)
-    if (change.sort !== undefined || change.reversed !== undefined) remember(next)
+    if (change.sort !== undefined || change.reversed !== undefined || change.withPersonas !== undefined) remember(next)
     void navigate({
       to: ".",
       search: (prev: Record<string, unknown>) => ({

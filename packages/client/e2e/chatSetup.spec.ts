@@ -129,8 +129,8 @@ test("a new chat from a card: the greeting follows the persona until the first s
   // Later, playing Ana from here on doesn't rewrite what was said before.
   await openPanel(page, "Cast")
   const cast = page.getByRole("tabpanel", { name: "Cast" })
-  // Ana is in the persona folder: offered apart, under the characters.
-  await addToCast(page, "Ana")
+  // Ana is in the persona folder: under Add characters' Personas.
+  await addToCast(page, "Ana", { persona: true })
   await expect(cast.getByRole("list", { name: "Characters in this chat" })).toContainText("Ana")
   await expect(first).toContainText("Mira waves at Bo from the pier.")
   // The panel's tab is in the URL: a reload keeps it open there.
