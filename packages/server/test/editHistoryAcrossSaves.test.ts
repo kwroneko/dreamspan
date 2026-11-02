@@ -112,6 +112,52 @@ it.live("a message edit keeps its states across Save and Cancel, and nothing goe
   }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
 )
 
+it.live("a no-op saved edit keeps its initial state when the version changes elsewhere", () =>
+  Effect.gen(function* () {
+    const api = yield* client()
+    const chat = yield* api.CreateChat({ title: "Synthetic unchanged save" })
+    const sent = yield* posted(
+      api.SendMessage({ chatId: chat.id, parentSlotId: null, branch: false, content: "original" })
+    )
+    const versionId = sent.entry.version.id
+    const target = { _tag: "Edit", versionId } as const
+    // Typing and removing a character before autosave leaves an unchanged first draft.
+    const typed = yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      content: "original",
+      expectedRowVersion: null,
+      expectedSession: null
+    })
+    yield* api.AmendVersion({
+      versionId,
+      content: "original",
+      expectedRowVersion: 1,
+      draft: { draftId: typed.id, session: typed.session }
+    })
+    yield* api.AmendVersion({ versionId, content: "changed elsewhere", expectedRowVersion: 1 })
+    const reopened = yield* api.SaveMessageDraft({
+      target,
+      draftId: null,
+      content: "typed after the external change",
+      expectedRowVersion: null,
+      expectedSession: null
+    })
+    const states = yield* api.MessageDraftHistory({ target, limit: 100 })
+    assert.deepStrictEqual(
+      states.map((s) => s.length),
+      ["typed after the external change".length, "changed elsewhere".length, "original".length]
+    )
+    const restored = yield* api.RestoreMessageDraft({
+      target,
+      draftId: reopened.id,
+      seq: states.at(-1)!.seq,
+      expectedRowVersion: reopened.rowVersion
+    })
+    assert.strictEqual(restored.content, "original")
+  }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
+)
+
 it.live("a resting edit typed on a version changed elsewhere first takes the version's text", () =>
   Effect.gen(function* () {
     const api = yield* client()
