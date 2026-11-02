@@ -70,7 +70,7 @@ const headerInView = (title: Locator) =>
  * also leads the table, out of view above: the view moves up until the copy's whole header
  * shows under the sticky toolbar.
  */
-const check = async (page: Page, scope: Locator) => {
+const check = async (page: Page, scope: Locator, shot: string) => {
   const add = scope.getByRole("button", { name: "Add entry", exact: true })
   const before = await onScroller(add, 0.3)
   await add.click()
@@ -79,6 +79,7 @@ const check = async (page: Page, scope: Locator) => {
   await page.waitForTimeout(300)
   expect(await onScroller(add, "read")).toBe(before)
   expect(await headerInView(title)).toBe(true)
+  if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${shot}-added.png` })
   await page.keyboard.type("Gulls")
 
   await onScroller(add, "bottom")
@@ -91,45 +92,56 @@ const check = async (page: Page, scope: Locator) => {
   await expect(copy).toBeFocused()
   await expect.poll(() => onScroller(add, "read")).toBeLessThan(low)
   await expect.poll(() => headerInView(copy)).toBe(true)
+  if (process.env.SCREENSHOT_DIR)
+    await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/${shot}-duplicated.png` })
 }
 
-for (const width of [1440, 390]) {
-  test(`the large editor's Add entry scrolls only when the new entry is hidden (${width}px)`, async ({ page }) => {
-    test.setTimeout(120_000)
-    await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    const ref = await upload(page, `Coast ${width}`)
-    await page.goto(`${server().url}/library/${ref.id}`)
-    const list = page.getByRole("list", { name: "Entries" })
-    await expect(list.getByRole("textbox", { name: "Title of Place 39", exact: true })).toBeVisible()
-    await check(page, page.locator("main"))
-  })
+for (const theme of ["light", "dark"] as const)
+  for (const width of [1440, 390]) {
+    test(`the large editor's Add entry scrolls only when the new entry is hidden (${width}px, ${theme})`, async ({
+      page
+    }) => {
+      test.setTimeout(120_000)
+      await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const ref = await upload(page, `Coast ${width}`)
+      await page.goto(`${server().url}/library/${ref.id}`)
+      const list = page.getByRole("list", { name: "Entries" })
+      await expect(list.getByRole("textbox", { name: "Title of Place 39", exact: true })).toBeVisible()
+      await check(page, page.locator("main"), `lorebook-large-${width}-${theme}`)
+    })
 
-  test(`the side panel's Add entry scrolls only when the new entry is hidden (${width}px)`, async ({ page }) => {
-    test.setTimeout(120_000)
-    await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
-    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-    await upload(page, `Tides ${width}`)
-    const chatId = await admin((api) =>
-      Effect.gen(function* () {
-        const ref = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === `Tides ${width}`)!
-        const chat = yield* api.CreateChat({ title: `Lore ${width}` })
-        yield* api.ChangeCast({
-          chatId: chat.id,
-          slotId: null,
-          change: { _tag: "Lorebook", ref: ref.id, active: true }
+    test(`the side panel's Add entry scrolls only when the new entry is hidden (${width}px, ${theme})`, async ({
+      page
+    }) => {
+      test.setTimeout(120_000)
+      await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      await upload(page, `Tides ${width}`)
+      const chatId = await admin((api) =>
+        Effect.gen(function* () {
+          const ref = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === `Tides ${width}`)!
+          const chat = yield* api.CreateChat({ title: `Lore ${width}` })
+          yield* api.ChangeCast({
+            chatId: chat.id,
+            slotId: null,
+            change: { _tag: "Lorebook", ref: ref.id, active: true }
+          })
+          return chat.id
         })
-        return chat.id
-      })
-    )
-    await page.goto(`${server().url}/chats/${chatId}`)
-    const panel = await openPanel(page, "Lorebooks")
-    await panel
-      .getByRole("list", { name: "Lorebooks in this chat" })
-      .getByRole("button", { name: new RegExp(`^Tides ${width}`) })
-      .click()
-    const editor = panel.getByRole("region", { name: `Lorebook Tides ${width}` })
-    await expect(editor.getByRole("list", { name: "Entries" })).toBeVisible()
-    await check(page, editor)
-  })
-}
+      )
+      await page.goto(`${server().url}/chats/${chatId}`)
+      const panel = await openPanel(page, "Lorebooks")
+      await panel
+        .getByRole("list", { name: "Lorebooks in this chat" })
+        .getByRole("button", { name: new RegExp(`^Tides ${width}`) })
+        .click()
+      const editor = panel.getByRole("region", { name: `Lorebook Tides ${width}` })
+      await expect(editor.getByRole("list", { name: "Entries" })).toBeVisible()
+      await check(page, editor, `lorebook-panel-${width}-${theme}`)
+    })
+  }
