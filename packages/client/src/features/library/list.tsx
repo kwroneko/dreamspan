@@ -422,8 +422,7 @@ function Section({
                   {
                     value: "added",
                     label: "Added",
-                    description:
-                      "By when it was added: inherited from SillyTavern during a folder import, otherwise when added here"
+                    description: "By when it was added; a folder import keeps the date it was added there"
                   }
                 ]}
                 value={prefs.sort}

@@ -383,7 +383,7 @@ function ReportActions({
         <Card>
           <CardHeader
             title="Hidden from the start"
-            description="These chats have messages hidden from their first message on, as ST's manual summarizing leaves them. They stay hidden unless you un-hide them."
+            about="These chats have messages hidden from their first message on, as ST's manual summarizing leaves them. They stay hidden unless you un-hide them."
           />
           <ul aria-label="Hidden runs" className="flex flex-col divide-y divide-border">
             {report.hiddenRuns.map((run) => (
@@ -986,10 +986,7 @@ function JobsSection({ opened }: StImportSectionProps) {
     <AsyncView atom={stImportsAtom} loading="Loading your imports…">
       {(jobs) => (
         <Card>
-          <CardHeader
-            title="Imports"
-            description="Running and past imports, newest first. Removing one from the list changes nothing it imported."
-          />
+          <CardHeader title="Imports" about="Removing an import from the list changes nothing it imported." />
           {jobs.length === 0 ? (
             <p className="text-sm text-muted">No imports yet.</p>
           ) : (

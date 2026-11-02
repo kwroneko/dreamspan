@@ -187,7 +187,7 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   await portrait(reply)
     .getByRole("button", { name: /^Generation: 8\.0 s · 214 tokens/ })
     .hover()
-  await expect(tip(page, "SillyTavern's count")).toBeVisible()
+  await expect(tip(page, "as imported: the text and its reasoning")).toBeVisible()
   await shoot(page, "01-imported-1440")
 
   // The other swipe: another lab, its own figures.

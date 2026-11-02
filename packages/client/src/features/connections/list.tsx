@@ -23,7 +23,6 @@ export function ConnectionsPage() {
     <Card>
       <CardHeader
         title="Connections"
-        description="Each connection is one provider API at one address, with the key it sends."
         actions={
           <>
             <Button

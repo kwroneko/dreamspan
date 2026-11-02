@@ -1,12 +1,9 @@
-import { useState, useSyncExternalStore } from "react"
-import { chatCommands } from "./commands.tsx"
 import { QueuedMessages } from "./QueuedMessages.tsx"
 import { RoundControls } from "./RoundControls.tsx"
 import { pendingComposerControls } from "./pendingComposerControls.tsx"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Icon } from "../../ui/Icon.tsx"
-import { Popover } from "../../ui/Popover.tsx"
 import { SquareIconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CacheChip } from "./CacheIndicator.tsx"
 import { nameOf, useCast } from "./cast.ts"
@@ -16,43 +13,6 @@ import { chipClass } from "./nextReplyStrip.tsx"
 import { hasReplyChoice, NextReplyChip } from "./ReplyFrom.tsx"
 import { SpeakerSwitcher } from "./SpeakerSwitcher.tsx"
 import { composerControls, type ComposerControlContext } from "./composerControls.tsx"
-
-function ShortcutList() {
-  const commands = useSyncExternalStore(chatCommands.subscribe, chatCommands.snapshot)
-  return (
-    <ul className="list-inside list-disc space-y-1 pt-1">
-      {commands.entries
-        .filter((command) => command.shortcut)
-        .map((command) => (
-          <li key={command.id}>{command.label}</li>
-        ))}
-    </ul>
-  )
-}
-
-/** The strip's "?": the keyboard shortcuts, beside the controls they stand for. */
-function Help({ hint }: ComposerControlContext) {
-  const [open, setOpen] = useState(false)
-  return (
-    <span className="ml-auto">
-      <Popover
-        open={open}
-        onOpenChange={setOpen}
-        trigger={<Icon name="help" size={14} />}
-        triggerLabel="Keyboard shortcuts"
-        hint="Keyboard shortcuts"
-        title="Keyboard shortcuts"
-        triggerClassName={`${chipClass()} w-7 justify-center px-0! text-muted`}
-        align="end"
-      >
-        <div className="flex min-h-0 flex-col gap-2 overflow-y-auto text-sm">
-          <ShortcutList />
-          <p className="text-xs text-muted">{hint}</p>
-        </div>
-      </Popover>
-    </span>
-  )
-}
 
 /** Guidance as an icon toggle in the box (DESIGN §2.2: a visible control), its name and use in the tooltip. */
 function GuidanceToggle({
@@ -223,12 +183,6 @@ export const registerComposerControls = () => [
     // In the box's control row, after the speaker, at every width: the text has a row of its own.
     placement: "tools",
     component: ({ history }) => history
-  }),
-  composerControls.register({
-    id: "composer.help",
-    order: 100,
-    placement: "strip",
-    component: Help
   }),
   composerControls.register({
     id: "composer.speaker",

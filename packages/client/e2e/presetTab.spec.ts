@@ -211,6 +211,8 @@ for (const width of [1440, 390])
 
       // Pointer: drag a handle down past two rows.
       const handle = panel.getByRole("button", { name: "Move Formatting", exact: true })
+      // Both ends in sight, clear of the unsaved bar at the panel's foot.
+      await panel.locator('[data-prompt="synthetic-7"]').evaluate((row) => row.scrollIntoView({ block: "center" }))
       await handle.scrollIntoViewIfNeeded()
       const from = (await handle.boundingBox())!
       const target = (await panel.locator('[data-prompt="synthetic-7"]').boundingBox())!

@@ -43,7 +43,7 @@ test("phone sheets close immediately and after changing image privacy", async ({
     await openPanel(page, "This chat")
     const sheet = page.getByRole("dialog").first()
     await sheet.getByRole("button", { name: "Image settings", exact: true }).click()
-    await page.getByRole("dialog", { name: "Images in this browser" }).getByLabel("Every image").click()
+    await page.getByRole("dialog", { name: "Images" }).getByLabel("Every image").click()
     await page.getByRole("option", { name: mode, exact: true }).click()
     await page.keyboard.press("Escape")
     const tooltip = page.getByText("Image settings", { exact: true })

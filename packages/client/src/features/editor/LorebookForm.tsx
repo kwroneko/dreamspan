@@ -58,8 +58,7 @@ function BookSettings({ store, root, entries }: { store: EditorStore; root: Fiel
           />
         </div>
         <p className="text-sm text-muted">
-          {entries.toLocaleString()} {entries === 1 ? "entry" : "entries"}. Chats place lore below the history by
-          default; a chat's Lorebooks tab can let entries go where their positions say.
+          {entries.toLocaleString()} {entries === 1 ? "entry" : "entries"}.
         </p>
       </div>
     </details>

@@ -661,7 +661,7 @@ export const Message = memo(function Message({
   // Who hid it: the user here (SetMessageHidden), else it came hidden from an ST import.
   const hiddenReason = entry.hiddenByUser
     ? "Hidden: you hid it from the model, so it isn't sent. To send it again: More actions → Show to the model again."
-    : `Hidden: not sent to the model.${version.origin === "imported" ? " It was hidden in SillyTavern." : ""}`
+    : `Hidden: not sent to the model.${version.origin === "imported" ? " It came hidden with the import." : ""}`
   const empty = !hidden && !entry.inContext && !generating && version.status !== "failed" && context === null
   const reason = hidden
     ? hiddenReason

@@ -226,7 +226,7 @@ for (const theme of ["light", "dark"] as const) {
     // The owner's example: a book's ⋯ item and its switch say what they do.
     await lore.getByRole("button", { name: "More for Saltmarsh" }).click()
     await page.getByRole("menuitem", { name: "Remove from this chat" }).hover()
-    await expect(explanation(page)).toHaveText(/^Takes it off this chat's list, from the latest message on/)
+    await expect(explanation(page)).toHaveText(/^Takes it off this chat's list\. Add a lorebook brings it back/)
     await page.screenshot({ path: join(shots, `lorebook-menu-1440-${theme}.png`) })
     await page.keyboard.press("Escape")
     // The row's switch: its explanation as its description, and in a tooltip on hover.

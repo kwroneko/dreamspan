@@ -282,7 +282,7 @@ for (const width of [1440, 390]) {
     const prefill = page.getByRole("combobox", { name: "Prefill", exact: true })
     await prefill.click()
     await expect(page.getByRole("option", { name: "Not known: the provider doesn't say", exact: true })).toBeVisible()
-    await expect(page.getByRole("option", { name: "Through a tool schema", exact: true })).toBeVisible()
+    await expect(page.getByRole("option", { name: "Yes, the OpenAI way", exact: true })).toBeVisible()
     await shoot(page, "10-model-capabilities")
   })
 }

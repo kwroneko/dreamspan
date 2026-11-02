@@ -49,7 +49,7 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await createConnection(page, "Local fake", provider.baseUrl, "sk-fake-key-123456")
   await expect(page.getByText("Key ending in 3456")).toBeVisible()
 
-  await page.getByRole("button", { name: "Check" }).click()
+  await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It works")).toBeVisible()
   await expect(page.getByText(/Route: direct/)).toBeVisible()
   expect(provider.keys).toContain("sk-fake-key-123456")
@@ -161,7 +161,7 @@ test("a key or header typed for one address isn't sent to the one another sessio
   await expect(dialog.getByLabel("Key")).toHaveValue("")
   await expect(dialog.getByRole("button", { name: "Save key" })).toBeDisabled()
   await dialog.getByRole("button", { name: "Cancel" }).click()
-  await page.getByRole("button", { name: "Check" }).click()
+  await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It doesn't work")).toBeVisible()
   expect(other.keys).not.toContain("sk-repointed-victim-0002")
 
@@ -188,7 +188,7 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
 
   const origin = new URL(other.baseUrl).origin
   await expect(page.getByText(`This key isn't allowed for ${origin}`)).toBeVisible()
-  await page.getByRole("button", { name: "Check" }).click()
+  await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It doesn't work")).toBeVisible()
   expect(other.keys).not.toContain("sk-bound-key-abcdef")
 
@@ -201,7 +201,7 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
   await dialog.getByRole("button", { name: "Allow" }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByText(`This key isn't allowed for ${origin}`)).toBeHidden()
-  await page.getByRole("button", { name: "Check" }).click()
+  await page.getByRole("button", { name: "Check", exact: true }).click()
   await expect(page.getByText("It works")).toBeVisible()
   expect(other.keys).toContain("sk-bound-key-abcdef")
 })

@@ -211,7 +211,7 @@ export const POSITIONS: ReadonlyArray<{
     position: "outlet",
     short: "Outlet",
     label: "Outlet",
-    description: "In ST, sent only where a prompt has {{outlet::its outlet name}}. Chats here don't fill outlets yet."
+    description: "Sent only where a prompt has {{outlet::its outlet name}}. Not yet: chats don't fill outlets."
   }
 ]
 

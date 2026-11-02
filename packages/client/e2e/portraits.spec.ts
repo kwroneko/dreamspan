@@ -54,7 +54,7 @@ const select = async (page: Page, field: string, option: string) => {
   // In a phone's chat the image settings are in the menu its header's ← opens.
   await showAppNavigation(page)
   await page.getByRole("button", { name: "Image settings", exact: true }).filter({ visible: true }).first().click()
-  const popover = page.getByRole("dialog", { name: "Images in this browser" })
+  const popover = page.getByRole("dialog", { name: "Images" })
   await popover.getByLabel(field).click()
   await page.getByRole("option", { name: option, exact: true }).click()
   await page.keyboard.press("Escape")
@@ -129,12 +129,12 @@ for (const width of [1440, 390]) {
     if (width === 390) await page.getByRole("button", { name: "Close", exact: true }).click()
     else await page.getByRole("button", { name: "Close the panel" }).click()
     for (const [label, pixels] of [
-      ["Small (48 × 72)", 48],
-      ["Large (72 × 108)", 72],
-      ["Largest (84 × 126)", 84],
-      ["SillyTavern default (60 × 90)", 60]
+      ["Smallest (48 × 72)", 48],
+      ["Medium (72 × 108)", 72],
+      ["Large (84 × 126)", 84],
+      ["Small (60 × 90)", 60]
     ] as const) {
-      await select(page, "Message portrait size (account)", label)
+      await select(page, "Message portrait size", label)
       await expect(portrait).toHaveCSS("width", `${pixels}px`)
       await expect(portrait).toHaveCSS("height", `${pixels * 1.5}px`)
       await expect(portrait).toHaveCSS("border-radius", "10px")

@@ -306,7 +306,7 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
         <p className="px-2 py-4 text-sm text-muted">
           {query.search
             ? `No chat's title or characters have “${query.search}”.`
-            : "No chats yet. Pick a character to start one, or import your SillyTavern folder."}
+            : "No chats yet. Pick a character to start one."}
         </p>
       ) : (
         <ul aria-label="Chats" className="flex flex-col gap-0.5">

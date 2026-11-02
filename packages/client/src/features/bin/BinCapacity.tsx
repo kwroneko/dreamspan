@@ -51,7 +51,7 @@ export function BinCapacity() {
       <summary className="cursor-pointer font-medium">Bin capacity</summary>
       <p className="my-3 text-sm text-muted">
         Each section has its own limits. Older eligible entries are permanently removed when new entries need room.
-        Saving a limit removes nothing now. These limits apply to your account on every device.
+        Saving a limit removes nothing now.
       </p>
       <AsyncView atom={limitsAtom} loading="Reading capacities…">
         {(limits) => (

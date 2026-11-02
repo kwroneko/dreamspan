@@ -38,7 +38,7 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
       description={
         stored === undefined
           ? `Not set: ${JSON.stringify(fallback)} is used. {{char}} is the character, <FIELDNAME> the field.`
-          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing, as SillyTavern sends one character."
+          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing."
       }
     />
   )
@@ -75,7 +75,7 @@ export function PresetEditor({
       <Card>
         <CardHeader
           title="Prompts"
-          description="Sent in this order. Drag a handle or an outline name; arrow keys move a focused handle."
+          about="Reorder what's sent by dragging a handle or an outline name, or with the arrow keys on a focused handle."
         />
         <PromptDocument
           store={store}
@@ -100,7 +100,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
     <>
       <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>
-        <CardHeader title="Text and context" description="SillyTavern's prompt text switches." />
+        <CardHeader title="Text and context" />
         <div className="flex flex-col gap-3">
           <SwitchField store={store} path={["pin_examples"]} label="Pin example dialogues" />
           <p className="text-sm text-muted">
@@ -119,7 +119,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
         </div>
       </Card>
       <Card>
-        <CardHeader title="Prefill" description="Dropped where the provider can't take it." />
+        <CardHeader title="Prefill" about="Left out where the provider can't take it." />
         <div className="flex flex-col gap-3">
           <TextField store={store} path={["prefill", "assistant"]} label="Start of the reply" rows={3} />
           <TextField
@@ -140,7 +140,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
         </div>
       </Card>
       <Card>
-        <CardHeader title="Utility prompts" description="Text used in particular situations." />
+        <CardHeader title="Utility prompts" />
         <details>
           <summary className="cursor-pointer text-sm text-muted">Show the {UTILITY.length} utility prompts</summary>
           <div className="mt-3 flex flex-col gap-3">

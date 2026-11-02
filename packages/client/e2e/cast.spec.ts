@@ -85,7 +85,8 @@ const openCast = async (page: Page) => {
 test("the Cast tab: mute, speak now, write as, the card, add and remove", async ({ page }) => {
   await chatWithMira(page)
   await openCast(page)
-  await expect(page.getByText("Changes here apply from the latest message on, on this branch.")).toBeVisible()
+  // No standing line about when changes apply (owner, 2026-11-02).
+  await expect(page.getByText("Changes here apply", { exact: false })).toHaveCount(0)
   // The card you play is apart, with no count of the chats it's in; Mira is the one character.
   const you = page.getByRole("group", { name: "Your persona", exact: true })
   await expect(you).toContainText("Bo")

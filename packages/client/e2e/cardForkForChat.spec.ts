@@ -78,7 +78,7 @@ for (const width of [1440, 390])
       // The card's own tab is also a chat surface, with the same editing scope and actions.
       const details = await openPanel(page, name)
       await shot("card-details")
-      await expect(details).toContainText("no other chat uses it")
+      await expect(details).not.toContainText("as you type")
       await expect(details.getByRole("button", { name: `Open ${name} in the full editor`, exact: true })).toBeVisible()
       await expect(details.getByRole("button", { name: `Use another version: ${name}`, exact: true })).toBeVisible()
       await page.getByRole("button", { name: `Fork for this chat: ${name}`, exact: true }).click()

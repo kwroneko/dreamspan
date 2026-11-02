@@ -101,7 +101,7 @@ export function FamilySection({ entityId, whenForked }: CardSurfaceContext) {
   if (whenForked && AsyncResult.isSuccess(result) && result.value.members.length < 2) return null
   return (
     <Card>
-      <CardHeader title="Forks" description="Independent cards in the same family." />
+      <CardHeader title="Forks" about="Separate copies of this card, each edited on its own." />
       <AsyncView atom={atom} loading="Loading the family…">
         {(family) => <FamilyTree family={family} entityId={entityId} />}
       </AsyncView>

@@ -346,7 +346,7 @@ export function KeySection(props: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="API key"
-        description="Keys go in and never come back out: only their last four characters show."
+        about="Once saved, a key is never shown again: only its last four characters."
         actions={
           <>
             <Button hint="Gives it a key you type, sent only to its address." onClick={() => setDialog("set")}>
@@ -559,7 +559,7 @@ export function HeadersSection({ connection, kinds }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Custom headers"
-        description="Sent with every request, for gateways and proxies that need them."
+        about="For gateways and proxies that need them: sent with every request."
         actions={
           <Button onClick={() => setOpen(true)}>
             {connection.headerNames.length > 0 ? "Replace headers" : "Add headers"}
@@ -617,7 +617,7 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
 
   return (
     <Card>
-      <CardHeader title="Network route" description="How this connection's requests leave the server." />
+      <CardHeader title="Network route" />
       <form onSubmit={submit} className="flex flex-col gap-4">
         <Fieldset
           legend={
@@ -672,7 +672,7 @@ export function TestSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Check the connection"
-        description="Fetches the model list, and reports the route the request took."
+        about="Check the connection works: it fetches the model list and reports the route taken."
         actions={
           <Button
             pending={action.pending}
@@ -706,7 +706,7 @@ export function DeleteSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Delete the connection"
-        description="It goes to the recycle bin. Messages and usage records keep naming its models."
+        about="It goes to the bin. Messages and usage records keep naming its models."
         actions={
           <Button variant="danger" onClick={() => setOpen(true)}>
             Delete

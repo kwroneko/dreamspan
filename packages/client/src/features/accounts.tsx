@@ -265,7 +265,7 @@ function UsersPage() {
     <Card>
       <CardHeader
         title="Users"
-        description="There's no sign-up: an admin creates each account."
+        about="There's no sign-up: an admin creates each account."
         actions={
           session.via === "proxy" ? undefined : (
             <Button variant="primary" onClick={() => setCreating(true)}>

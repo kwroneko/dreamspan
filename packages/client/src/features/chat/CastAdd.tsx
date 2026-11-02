@@ -74,7 +74,7 @@ const hintOf = (name: string, status: string | undefined) =>
       ? `${name} is already in this chat`
       : status === "adding"
         ? `Adding ${name}…`
-        : `Add ${name}: they join from the latest message on, on this branch`
+        : `Add ${name} to the chat`
 /** `name` with its version, when it has one. */
 const labelOf = (name: string, status: string | undefined) =>
   status === "you"
@@ -126,7 +126,7 @@ function AddGrid({
       setAdding((now) => now.filter((e) => e !== id))
       setSaid(
         outcome.ok
-          ? { tone: "done", text: `${name} joined the chat, from the latest message on.` }
+          ? { tone: "done", text: `${name} joined the chat.` }
           : { tone: "failed", text: `${name} couldn't be added: ${outcome.error.message}` }
       )
     })

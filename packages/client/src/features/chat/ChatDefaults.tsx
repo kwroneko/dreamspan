@@ -110,10 +110,7 @@ export function ChatDefaultsPage() {
   return (
     <div className="flex flex-col gap-6">
       <Card>
-        <CardHeader
-          title="Replies"
-          description="What every chat's replies use. You can also switch the model and preset in the composer."
-        />
+        <CardHeader title="Replies" />
         <div className="flex flex-col gap-4">
           <Field
             label="Default model"
@@ -221,10 +218,7 @@ export function SummaryDefaults({
     picked ? modelValue(picked.connection, picked.model) : NONE
   return (
     <Card>
-      <CardHeader
-        title="Summaries"
-        description="For all your chats with summaries on. A chat turns summaries on or off in its side panel."
-      />
+      <CardHeader title="Summaries" />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
         <Field label="Fallback summarizer" description="Tried once when a summary keeps failing on its own model.">
           <Select
@@ -238,7 +232,7 @@ export function SummaryDefaults({
           checked={account.enabled}
           disabled={!defaults}
           onCheckedChange={(enabled) => void writeLcm({ enabled })}
-          description="Chats imported from SillyTavern start with summaries off whatever this says."
+          description="Imported chats start with summaries off, whatever this says."
         >
           New chats summarize older messages
         </Switch>
@@ -275,10 +269,6 @@ export function SummaryDefaults({
       </section>
       <section aria-label="Summary defaults for new chats" className="mt-6 flex flex-col gap-3">
         <h3 className="text-sm font-medium text-text">For new chats</h3>
-        <p className="text-sm text-muted">
-          A new chat copies these when it's made and keeps them; change a chat's own in its side panel's This chat tab.
-          Chats from before these settings follow them until they set their own.
-        </p>
         <SlotOutlet
           slot={summarySettingFields}
           props={{

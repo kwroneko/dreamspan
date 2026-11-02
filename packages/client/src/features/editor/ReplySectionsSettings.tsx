@@ -91,7 +91,7 @@ function PairRow({
             Match case
           </Checkbox>
           <Checkbox
-            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included, as in SillyTavern."
+            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included."
             checked={regex}
             onCheckedChange={(checked) => {
               const { regex: _, ...rest } = pair
@@ -126,7 +126,7 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
     <Card>
       <CardHeader
         title="Thinking at the start of a reply"
-        description="Some presets ask the model to think in tags before it replies. That part shows in a folded panel, “Thinking in the reply”, above the reply text."
+        about="Fold a reply's thinking away when a preset asks the model to think in tags: it shows in a folded panel above the reply."
       />
       <div className="flex flex-col gap-4" data-preset-section="reply-sections">
         <Switch

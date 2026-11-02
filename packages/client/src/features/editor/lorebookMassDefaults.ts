@@ -45,7 +45,11 @@ const inherited = (
   input: {
     kind: "choice",
     options: [
-      { value: "inherit", label: `Default (${fallback})`, description: "Not set on the entry: ST's default." },
+      {
+        value: "inherit",
+        label: `Default (${fallback})`,
+        description: "Not set on the entry, so the default applies."
+      },
       { value: "true", label: "On" },
       { value: "false", label: "Off" }
     ]

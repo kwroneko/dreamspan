@@ -115,7 +115,7 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
         : upstream === "assistant"
           ? "As the provider says: yes"
           : upstream === "tool_schema"
-            ? "As the provider says: through a tool schema"
+            ? "As the provider says: yes, the OpenAI way"
             : "As the provider says: no",
     description:
       upstream === undefined
@@ -135,9 +135,8 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
   },
   {
     value: "tool_schema" as const,
-    label: "Through a tool schema",
-    description:
-      "For OpenAI’s APIs: the reply comes back through a forced tool call whose schema makes it start with the prefill."
+    label: "Yes, the OpenAI way",
+    description: "Lets OpenAI’s models start the reply with the prefill, though their APIs take none."
   }
 ]
 
@@ -494,13 +493,13 @@ export function ModelSettingsEditor({
             </Field>
             <Field
               label="Reasoning"
-              description="Whether it thinks before replying. Yes sends thinking settings in the form its provider takes, such as the reasoning effort, and on OpenAI's APIs sends the instructions as developer messages."
+              description="Whether it thinks before replying. Yes turns its thinking on, with its provider's settings such as the reasoning effort."
             >
               <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
             </Field>
             <Field
               label="Tools"
-              description="Whether it can call tools. Nothing here asks a model to call one yet, so this changes no request; Continue through a tool schema follows Prefill instead."
+              description="Whether it can call tools. Nothing here asks a model to call one yet, so this changes nothing."
             >
               <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
             </Field>
@@ -845,7 +844,7 @@ export function ModelsSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Models"
-        description="What the provider lists, with your edits on top. * marks your values, ? values nobody reports; a context size nobody reports is assumed."
+        about="* marks your own values, ? values nobody reports; a context size nobody reports is assumed."
         actions={
           <>
             <Button

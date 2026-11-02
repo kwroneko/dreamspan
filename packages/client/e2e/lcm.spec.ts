@@ -348,8 +348,8 @@ for (const [name, viewport] of [
         })
       )
       await open(page, fixture)
-      // For all chats, so not in the chat's panel: it links there.
-      await (await openPanel(page, "This chat")).getByRole("link", { name: "Settings → Chats" }).last().click()
+      // For all chats, so in Settings → Chats, not the chat's panel.
+      await page.goto(`${server().url}/settings/chats`)
       await expect(page).toHaveURL(/\/settings\/chats$/)
       const dialog = page.getByRole("region", { name: "Models for summaries" })
       const pick = async (select: Locator, option: string | RegExp) => {

@@ -184,10 +184,7 @@ function SummaryRequestPage() {
           <Provenance details={details} raw />
           {details.request ? (
             <>
-              <p className="text-sm text-muted">
-                The captured request, in sent order. Labels and sources describe the request; the text boxes contain its
-                verbatim text.
-              </p>
+              <p className="text-sm text-muted">The request, in the order it was sent.</p>
               {details.request.messages.map((message, index) => (
                 <Card key={index}>
                   <CardHeader

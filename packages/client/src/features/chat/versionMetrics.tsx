@@ -112,10 +112,10 @@ export const recordedFigures = (r: RecordedGeneration): Figures => {
   if (r.firstTokenMs !== undefined) rows.push(["Time to first token", seconds(r.firstTokenMs)])
   if (r.reasoningMs !== undefined) rows.push(["Reasoning time", seconds(r.reasoningMs)])
   if (r.tokens !== undefined) {
-    rows.push(["Tokens", `${count(r.tokens)} (SillyTavern's count of the text and its reasoning)`])
+    rows.push(["Tokens", `${count(r.tokens)} (as imported: the text and its reasoning)`])
     if (span !== null && span > 0) rows.push(["Speed", `${(r.tokens / (span / 1000)).toFixed(1)} tokens/s`])
   }
-  rows.push(["Recorded by", "SillyTavern"])
+  rows.push(["Recorded by", "The imported chat"])
   return {
     time: span === null ? null : shortTime(span),
     tokens: r.tokens === undefined ? null : shortTokens(r.tokens),
@@ -195,7 +195,7 @@ export const registerVersionMetrics = () => [
     order: 30,
     label: "Token count",
     description:
-      "How many tokens a message came to: the provider's count for replies written here, SillyTavern's count for imported messages.",
+      "How many tokens a message came to: the provider's count for replies written here, the imported count for imported messages.",
     component: TokenCount
   })
 ]

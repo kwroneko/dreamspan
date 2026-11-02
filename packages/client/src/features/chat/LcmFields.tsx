@@ -196,7 +196,7 @@ function PairOrigin({
 /** A target and a maximum, with the figure the next context has now. */
 function Pair({
   legend,
-  description,
+  about,
   scope,
   resolved,
   fallback,
@@ -209,7 +209,7 @@ function Pair({
   disabled
 }: {
   legend: string
-  description: string
+  about: string
   scope: "chat" | "account"
   resolved: Resolved
   fallback: Partial<Record<LcmField, unknown>>
@@ -231,7 +231,7 @@ function Pair({
     return problem
   }
   return (
-    <Fieldset legend={legend} description={description}>
+    <Fieldset legend={legend} about={about}>
       <div className="flex flex-wrap items-end gap-3">
         {([target, maximum] as const).map((field) => (
           <TokensInput
@@ -311,7 +311,7 @@ export function LcmFields({
     fitted?.chunk ?? chunkSize(resolved.leafInput, { target: resolved.recentTarget, maximum: resolved.recentMax })
   return (
     <div className="flex flex-col gap-5">
-      <Fieldset legend="Send with" description="What each summary request sends the model.">
+      <Fieldset legend="Send with">
         <Segmented
           label="Send with"
           wrap
@@ -326,7 +326,7 @@ export function LcmFields({
             {
               value: "raw",
               label: "Instruction and messages only",
-              description: "Only the instruction, the earlier summaries and the messages, like ST's Raw."
+              description: "Only the instruction, the earlier summaries and the messages."
             }
           ]}
         />
@@ -362,7 +362,7 @@ export function LcmFields({
       {instruction}
       <Pair
         legend="Recent messages kept as written"
-        description="Above the maximum, the oldest are summarized until the recent part is back at the target. Summarizing starts halfway between them, so summaries are usually ready before the maximum."
+        about="Keep recent messages as written up to the maximum: past it, the oldest are summarized until the recent part is back at the target."
         scope={scope}
         resolved={resolved}
         fallback={fallback}
@@ -376,7 +376,7 @@ export function LcmFields({
       />
       <Pair
         legend="Summary block"
-        description="Above the maximum, the oldest summaries are condensed into higher levels until the block is back at the target."
+        about="Keep the summaries within the maximum: past it, the oldest are condensed until the block is back at the target."
         scope={scope}
         resolved={resolved}
         fallback={fallback}
@@ -388,7 +388,7 @@ export function LcmFields({
         write={write}
         disabled={disabled}
       />
-      <Fieldset legend="When it runs" description="The total context limit stays with the model's settings.">
+      <Fieldset legend="When it runs">
         <RadioGroup<LcmWhen>
           value={resolved.when}
           onValueChange={(when) => void choose({ when })}

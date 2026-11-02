@@ -62,10 +62,7 @@ export function MessageDetailSettings() {
   const sorted = [...entries].sort((a, b) => (a.place === b.place ? a.order - b.order : a.place === "header" ? -1 : 1))
   if (sorted.length === 0) return null
   return (
-    <Fieldset
-      legend="Message details"
-      description="What each message shows beside its text: in its header, and under its portrait. Hover over a detail in a chat for more."
-    >
+    <Fieldset legend="Message details">
       {sorted.map((detail) => {
         const on = choices[detail.id] !== false
         return (
@@ -178,9 +175,7 @@ function ModelName({ entry }: MessageDetailProps) {
   const imported = version.origin === "imported" || version.recorded !== undefined
   return (
     <Tooltip
-      label={
-        imported ? `Generated with ${version.model}, as SillyTavern recorded it` : `Generated with ${version.model}`
-      }
+      label={imported ? `Generated with ${version.model}, as recorded at import` : `Generated with ${version.model}`}
     >
       <ModelLabel model={version.model} />
     </Tooltip>
@@ -220,7 +215,7 @@ export const registerMessageDetails = () => [
     place: "header",
     order: 21,
     label: "Model name",
-    description: "The model that wrote a reply, and the connection (or SillyTavern's API) it was used through.",
+    description: "The model that wrote a reply, and the connection or API it was used through.",
     component: ModelName
   }),
   messageDetails.register({

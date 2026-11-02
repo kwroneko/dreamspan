@@ -7,7 +7,6 @@ import { chatSettingSections, summarySettingFields } from "./presentation.tsx"
 // A change is a state event at the leaf shown, so from there on, on this branch.
 // The context assembler reads them; this only writes them.
 import type { CastChange } from "@rp/shared/chatSetupApi.ts"
-import { Link } from "@tanstack/react-router"
 import { BUILTIN_SUMMARY_INSTRUCTION, type LcmSettingsChange, resolveLcm } from "@rp/shared/lcmSettings.ts"
 import type { LcmSettingsView } from "@rp/shared/lcm.ts"
 import { type ReactNode, useEffect, useState, useSyncExternalStore } from "react"
@@ -65,10 +64,7 @@ function Instruction({
     return message === null
   }
   return (
-    <Fieldset
-      legend="Instruction"
-      description="What the summary request asks for. {{words}} is the summary length (under Advanced)."
-    >
+    <Fieldset legend="Instruction" about="{{words}} is the summary length, set under Advanced.">
       <CodeEditor label="This chat's summarization instruction" value={text} base={base} rows={5} onChange={setText} />
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -293,13 +289,10 @@ export function RolesSetting({ session }: { session: ChatSession }) {
     setError(outcome.ok ? null : outcome.error)
   }
   return (
-    <Disclosure title="Advanced: who each message is sent as">
+    <Disclosure title="Advanced: message roles">
       <section aria-label="Roles" className="flex flex-col gap-2">
-        <p id="roles-label" className="text-sm text-muted">
-          Which messages the model is sent as yours (the user's) and which as its own.
-        </p>
         <RadioGroup
-          aria-labelledby="roles-label"
+          aria-label="Message roles"
           value={rolesProjection}
           onValueChange={(projection) => void change({ _tag: "Roles", projection })}
           options={[
@@ -308,7 +301,7 @@ export function RolesSetting({ session }: { session: ChatSession }) {
                   {
                     value: unknownRoles,
                     label: `${unknownRoles} (not installed)`,
-                    description: "Sent by writer until it is back."
+                    description: "Sent by author until it's back."
                   }
                 ]
               : []),
@@ -318,19 +311,6 @@ export function RolesSetting({ session }: { session: ChatSession }) {
       </section>
       <Problem error={error ?? action.error} />
     </Disclosure>
-  )
-}
-
-/** Where the settings for every chat are. */
-export function AccountSettingsNote() {
-  return (
-    <p className="text-sm text-muted">
-      The refusal judge, the fallback summarizer and the summary defaults for new chats apply to all your chats:{" "}
-      <Link to="/settings/chats" className={link}>
-        Settings → Chats
-      </Link>
-      .
-    </p>
   )
 }
 

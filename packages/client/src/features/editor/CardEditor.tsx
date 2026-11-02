@@ -38,11 +38,10 @@ import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** What each field is for, on hover over its label. */
 const HINTS = {
-  description: "Who they are: sent with every request. ST's description field; {{char}} and {{user}} become the names.",
+  description: "Who they are: sent with every request. {{char}} and {{user}} become the names.",
   personality: "A short summary of their personality, sent with every request after the description.",
   scenario: "The situation the chat starts in, sent with every request.",
-  mes_example:
-    "Example dialogue showing how they talk, each example starting with <START>. Sent as the preset says (ST's example messages).",
+  mes_example: "Example dialogue showing how they talk, each example starting with <START>. Sent as the preset says.",
   system_prompt:
     "The card's own system prompt: used in place of the preset's Main Prompt where the preset allows it ({{original}} is the preset's).",
   post_history_instructions:
@@ -111,7 +110,7 @@ function Greetings({
   path,
   title,
   one,
-  hint,
+  about,
   add
 }: {
   store: EditorStore
@@ -119,13 +118,13 @@ function Greetings({
   title: string
   /** "Alternate greeting": each one's label, numbered. */
   one: string
-  hint: string
+  /** Only where the heading doesn't say it all (DESIGN §10.1). */
+  about?: string
   add: { label: string; hint: string }
 }) {
   const greetings = useValue<ReadonlyArray<string> | undefined>(store, path) ?? []
   return (
-    <Fieldset legend={title}>
-      <p className="text-sm text-muted">{hint}</p>
+    <Fieldset legend={title} {...(about ? { about } : {})}>
       {greetings.map((greeting, index) => (
         <div key={index} className="flex flex-col gap-1">
           <Field label={`${one} ${index + 1}`}>
@@ -294,9 +293,6 @@ function CardNotes({ store, call }: { store: EditorStore; call: Caller }) {
   const cards = entity ? [{ entity, name }] : []
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-sm text-muted">
-        Each note is saved on its own, and goes where it says in the chats it's on in.
-      </p>
       <ErrorAlert error={error} />
       {notes === null && !error && <p role="status">Loading the notes…</p>}
       {notes?.length === 0 && (
@@ -387,9 +383,6 @@ function DefinitionTab({ store, call, layout }: CardTabProps) {
           <PromptUseNote store={store} call={call} field="post_history_instructions" />
         </div>
       </div>
-      <p className="text-sm text-muted">
-        The card's Character's Note is one of its notes, in the Notes tab, as are its other notes.
-      </p>
     </div>
   )
 }
@@ -410,7 +403,6 @@ function GreetingsTab({ store, layout }: CardTabProps) {
         path={["alternate_greetings"]}
         title="Alternate greetings"
         one="Alternate greeting"
-        hint="Other first messages a new chat can start from, as swipes of the first message."
         add={{ label: "Add a greeting", hint: "A new, empty alternate greeting at the end of the list." }}
       />
       <Greetings
@@ -418,7 +410,7 @@ function GreetingsTab({ store, layout }: CardTabProps) {
         path={["group_only_greetings"]}
         title="Group greetings"
         one="Group greeting"
-        hint="First messages offered only when a new chat has more than one character."
+        about="Offered only when a new chat has more than one character."
         add={{ label: "Add a group greeting", hint: "A new, empty greeting used only in group chats." }}
       />
     </div>
@@ -467,10 +459,6 @@ function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
   if (layout === "page")
     return (
       <div data-card-lorebook className="flex min-w-0 flex-col gap-4">
-        <p className="text-sm text-muted">
-          Travels with this card on export and is used automatically in new chats. What's typed is used as it's typed;
-          saving the card saves it.
-        </p>
         <LorebookForm store={store} root={BOOK} absent={`${name} has no lorebook of its own.`} />
         <FieldTools store={store} field={valueField(BOOK)} label="Lorebook" />
       </div>
@@ -478,9 +466,7 @@ function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
   if (!book)
     return (
       <div className="flex min-w-0 flex-col items-start gap-3">
-        <p className="text-sm text-muted">
-          {name} has no lorebook of its own. A card's book travels with it on export and is used in its chats.
-        </p>
+        <p className="text-sm text-muted">{name} has no lorebook of its own.</p>
         <Button
           hint="Starts the card's own lorebook with one empty entry."
           onClick={() => {
@@ -497,7 +483,6 @@ function LorebookTab({ store, layout, onOpenBook }: CardTabProps) {
         store={store}
         root={BOOK}
         fallbackName={`${name}'s lorebook`}
-        note={`Part of ${name}'s card: saving the card saves it.`}
         saveControls={false}
         {...(onOpenBook ? { onOpenLarge: onOpenBook } : {})}
       />

@@ -57,7 +57,6 @@ function ChooseModel() {
         </ul>
       )}
       <ErrorAlert error={action.error} />
-      <p className="text-xs text-muted">It becomes the default for all chats; change it in Settings → Chats.</p>
     </Popover>
   )
 }

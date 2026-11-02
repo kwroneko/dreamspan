@@ -220,7 +220,7 @@ for (const width of [1440, 390])
           })
         )
         await page.reload()
-        await expect(reply.getByRole("note")).toContainText("time limit", { timeout: 15_000 })
+        await expect(reply.getByRole("note")).toContainText("took too long", { timeout: 15_000 })
         await expect(reply.locator(".markdown")).toHaveText(hostileText)
         await page.getByLabel("Message", { exact: true }).fill("The browser remains responsive.")
       }

@@ -177,7 +177,7 @@ function NotificationSettings() {
     <Card>
       <CardHeader
         title="Notifications"
-        description="A reply that finishes in a chat you aren't looking at gets a badge in the chat list, and the tab's title and icon count them."
+        about="See when a reply finishes in a chat you aren't looking at: a badge in the chat list, and a count in the tab's title and icon."
       />
       <div className="flex flex-col gap-3">
         <NoticeChannelSettings />

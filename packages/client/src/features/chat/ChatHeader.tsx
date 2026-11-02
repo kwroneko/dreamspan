@@ -166,7 +166,7 @@ function ChatTitle({
         description={
           <>
             Leave it empty to name it after its characters.
-            {name?.started ? ` It keeps the day SillyTavern started it (${formatDay(name.started)}).` : ""}
+            {name?.started ? ` It keeps the day it started (${formatDay(name.started)}).` : ""}
           </>
         }
         maxLength={200}

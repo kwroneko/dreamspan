@@ -166,7 +166,7 @@ export function EnableLcmDialog({
         <>
           {offer.imported && (
             <fieldset className="flex flex-col gap-2">
-              <legend className="mb-1 text-sm font-medium">This chat came with a summary from SillyTavern</legend>
+              <legend className="mb-1 text-sm font-medium">This chat came with a summary</legend>
               <blockquote className="line-clamp-3 border-l-2 border-border pl-3 text-sm text-muted">
                 {offer.imported.preview}
               </blockquote>

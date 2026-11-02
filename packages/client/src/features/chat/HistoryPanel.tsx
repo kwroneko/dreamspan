@@ -250,7 +250,7 @@ export function HistoryPanel({
   return (
     <div className="flex flex-col gap-4 p-3 text-sm">
       <h2 className="font-semibold">Search and replace</h2>
-      <p className="text-muted">Only this branch: other branches and chats keep their history.</p>
+
       {search.pairs.map((pair, i) => (
         <fieldset key={i} className="flex flex-col gap-2">
           <label>

@@ -48,10 +48,6 @@ export function PresetLorebooks({
       <h3 id="preset-lorebooks" className="text-xs font-medium tracking-wide text-muted uppercase">
         Lorebooks sent with this preset
       </h3>
-      <p className="text-xs text-muted">
-        Every chat using this preset scans them, as it does its own books: for style and rules entries that come in when
-        their words appear.
-      </p>
       {books.length > 0 && (
         <ul aria-label="Lorebooks sent with this preset" className="flex flex-col gap-1">
           {books.map((book) => {

@@ -1,23 +1,29 @@
 // Layout and status pieces with no behavior of their own: cards, badges, callouts and
 // empty states, and sections opened on demand.
 import { type ReactNode, useState } from "react"
+import { AboutHint } from "./AboutHint.tsx"
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`rounded-lg border border-border bg-surface p-4 sm:p-5 ${className}`}>{children}</section>
 }
 
 /**
- * A card's heading row: title and description, with actions to the right (below on phones,
- * unless `inline`: for one small icon button that fits beside the title anywhere).
+ * A card's heading row: title, with actions to the right (below on phones, unless `inline`:
+ * for one small icon button that fits beside the title anywhere). `description` is a standing
+ * line of state (a count, a progress line), never an explanation; `about` is an explanation
+ * the user needs to choose correctly, in a "?" beside the title (DESIGN §10.1). It needs a
+ * string title, for its name.
  */
 export function CardHeader({
   title,
   description,
+  about,
   actions,
   inline = false
 }: {
   title: ReactNode
   description?: ReactNode
+  about?: ReactNode
   actions?: ReactNode
   inline?: boolean
 }) {
@@ -26,7 +32,14 @@ export function CardHeader({
       className={`mb-4 flex gap-3 ${inline ? "flex-row items-start justify-between" : "flex-col sm:flex-row sm:items-start sm:justify-between"}`}
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h2 className="text-base font-semibold">{title}</h2>
+        {about ? (
+          <div className="flex items-center gap-1">
+            <h2 className="text-base font-semibold">{title}</h2>
+            <AboutHint heading={typeof title === "string" ? title : "this section"}>{about}</AboutHint>
+          </div>
+        ) : (
+          <h2 className="text-base font-semibold">{title}</h2>
+        )}
         {description && <p className="text-sm text-muted">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>}

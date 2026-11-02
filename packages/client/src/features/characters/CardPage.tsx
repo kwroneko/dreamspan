@@ -264,10 +264,7 @@ function Page({ card }: { card: CardUsage }) {
       <CardSurface placement="family" entityId={card.entityId} />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:items-start">
         <Card className="lg:order-2">
-          <CardHeader
-            title={used ? `Chats (${card.chats.toLocaleString()})` : "Chats"}
-            description={used ? "When this character last spoke, most recent first." : undefined}
-          />
+          <CardHeader title={used ? `Chats (${card.chats.toLocaleString()})` : "Chats"} />
           <Chats card={card} />
         </Card>
         <Card className="lg:order-1">

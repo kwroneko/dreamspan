@@ -147,7 +147,7 @@ test("viewer preferences belong to the account and patches preserve independent 
     await expect(panel.getByRole("switch", { name: "Summaries in chat" })).not.toBeChecked()
     await expect(panel.getByRole("switch", { name: "Coverage rail" })).not.toBeChecked()
     await page.getByRole("button", { name: "Image settings", exact: true }).first().click()
-    await expect(page.getByLabel("Message portrait size (account)")).toHaveText("SillyTavern default (60 × 90)")
+    await expect(page.getByLabel("Message portrait size")).toHaveText("Small (60 × 90)")
   } finally {
     await context.close()
   }

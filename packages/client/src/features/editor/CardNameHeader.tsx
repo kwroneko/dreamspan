@@ -36,8 +36,7 @@ export interface RenameChat {
 
 const DISPLAY_HINT =
   "The display name: what the app shows this card by, in the library and here. Chats call them by it too when there's no chat name."
-const VERSION_HINT =
-  "The version (the card's character_version): shown beside the display name, to tell this card from others with the same name."
+const VERSION_HINT = "The version: shown beside the display name, to tell this card from others with the same name."
 const NICKNAME_HINT =
   "The chat name (the card's nickname): what chats and the model call them, and what {{char}} becomes. Empty: the display name."
 
@@ -116,8 +115,8 @@ export function CardTokens({ store }: { store: EditorStore }) {
         <>
           Total: every card field a chat can send: its name, description, personality, scenario, first message, example
           messages, its own system prompt and post-history instructions, and its notes on by default. Permanent: what
-          every request carries, as SillyTavern counts it: the name, description, personality, scenario and those notes.{" "}
-          {MACROS_COUNTED} {tokenizerText(tokenizer)}
+          every request carries: the name, description, personality, scenario and those notes. {MACROS_COUNTED}{" "}
+          {tokenizerText(tokenizer)}
         </>
       }
     >

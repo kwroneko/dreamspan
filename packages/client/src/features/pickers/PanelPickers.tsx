@@ -62,7 +62,6 @@ export function PresetTabPicker({ session }: { session: ChatSession }) {
           </Button>
         </Tooltip>
       </div>
-      <p className="text-xs text-muted">Every chat's next reply uses it, as in the composer.</p>
       {created.dialog}
     </section>
   )
@@ -94,9 +93,7 @@ export function ModelTabPicker({ session }: { session: ChatSession }) {
         <p className="text-sm text-muted">
           No model is chosen: choose the one that writes replies. Its settings show below.
         </p>
-      ) : (
-        <p className="text-xs text-muted">Every chat's next reply uses it, as in the composer.</p>
-      )}
+      ) : null}
     </section>
   )
 }

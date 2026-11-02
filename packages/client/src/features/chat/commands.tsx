@@ -1,8 +1,9 @@
 import { chatPanels, isPanelTab, useChatPanels } from "./panels.tsx"
 // Commands in the chat's ⋯ menu and on keys. The host supplies the viewed fork and navigation;
 // contributions own the behavior, label, ordering and availability. A command with a
-// shortcut is listed under Keyboard shortcuts rather than in the menu, unless it asks to be
-// in both (`menu: true`); one with a `dialog` opens it from the menu.
+// shortcut is listed under the ⋯ menu's Keyboard shortcuts rather than in the menu itself, unless
+// it asks to be in both (`menu: true`), and its keys are in its control's explanation (DESIGN
+// §10.1); one with a `dialog` opens it from the menu.
 import { type ComponentType, Fragment, useEffect, useState, useSyncExternalStore } from "react"
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { SlotId } from "@rp/shared/chat.ts"

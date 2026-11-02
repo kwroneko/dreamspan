@@ -55,7 +55,7 @@ export const originText = (origin: LcmSummary["origin"]) =>
   origin === "user"
     ? "edited by you"
     : origin === "imported"
-      ? "imported from SillyTavern"
+      ? "imported with the chat"
       : origin === "changeset"
         ? "changed by an agent"
         : "written by the model"

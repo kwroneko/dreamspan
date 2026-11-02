@@ -177,8 +177,8 @@ export function NotesTab({
                 <Tooltip
                   label={
                     note.active
-                      ? "On: sent with the chat from the latest message on, on this branch. Switch it off to stop."
-                      : "Off: not sent. Switch it on to send it from the latest message on, on this branch."
+                      ? "On: sent with the chat. Switch it off to stop."
+                      : "Off: not sent. Switch it on to send it."
                   }
                 >
                   <span className="inline-flex">
@@ -200,10 +200,7 @@ export function NotesTab({
           return (
             <>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 basis-60 text-sm text-muted">
-                  Notes are sent with the chat where each says, as you type. A switch turns one on or off from the
-                  latest message on, on this branch.
-                </p>
+                <span className="min-w-0 flex-1 basis-60" />
                 <NoteListControls ids={notes.map((n) => n.ref.id)} blocks={blocks} />
               </div>
               {/* The chat's and each card's notes side by side as the panel widens (26rem each at least). */}
@@ -211,7 +208,9 @@ export function NotesTab({
                 <section aria-label="This chat's notes" className="flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold">This chat</h3>
                   {own.length === 0 ? (
-                    <p className="text-sm text-muted">No notes yet. A note here is like ST's author's note.</p>
+                    <p className="text-sm text-muted">
+                      No notes yet. A note here is text the model is sent with this chat.
+                    </p>
                   ) : (
                     <NoteList
                       label="Notes"
@@ -245,9 +244,6 @@ export function NotesTab({
                         <p className="text-sm text-muted">No notes yet.</p>
                       ) : (
                         <>
-                          <p className="text-xs text-muted">
-                            The card's own: what you change here changes them in every chat with {name}.
-                          </p>
                           <NoteList
                             label="Notes"
                             entries={entries(theirs, false)}

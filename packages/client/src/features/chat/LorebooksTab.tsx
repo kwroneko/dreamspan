@@ -69,8 +69,7 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
           </p>
           <p className="text-sm">
             Below the history, every entry that matches goes in one block just after the history, and is looked at again
-            every turn. Where each entry says, as in SillyTavern, entries above the history stay until the history's
-            start next moves.
+            every turn. Where each entry says, entries above the history stay until the history's start next moves.
           </p>
         </Popover>
       </div>
@@ -89,7 +88,7 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
             value: "positions",
             label: "Where each entry says",
             description:
-              "Each entry goes where its own position says, as in SillyTavern. One above the history can make the provider read the whole history again."
+              "Each entry goes where its own position says. One above the history can make the provider read the whole history again."
           }
         ]}
       />
@@ -260,10 +259,8 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           row.on ? `${card.name}'s own lorebook` : `${card.name}'s own lorebook, off in this chat`,
           ...(card.lorebookEntries === undefined ? [] : [entries(card.lorebookEntries)])
         ].join(" · "),
-        switchHint: `Off stops ${card.name}'s own book in this chat only, from the latest message on. The card keeps it, and its other chats still read it.`,
-        edit: ref
-          ? { ref: ref.id, root: ["character_book"], note: `Part of ${card.name}'s card: saving it saves the card.` }
-          : null,
+        switchHint: `Off stops ${card.name}'s own book in this chat only. The card keeps it.`,
+        edit: ref ? { ref: ref.id, root: ["character_book"] } : null,
         focus: CARD_LOREBOOK_FOCUS,
         menu: []
       }
@@ -289,14 +286,13 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
             : "Off in this chat",
         ...(ref?.subtitle ? [ref.subtitle] : [])
       ].join(" · "),
-      switchHint:
-        "Off stops the book in this chat, from the latest message on; it stays listed here, off, until you remove it.",
+      switchHint: "Off stops the book in this chat; it stays listed here, off, until you remove it.",
       ...(row.presetSends ? { presetLink: { label: `Also ${presetLabel.toLowerCase()}`, open: openPreset } } : {}),
       edit: ref ? { ref: ref.id, root: [] } : null,
       menu: [
         {
           label: "Remove from this chat",
-          description: "Takes it off this chat's list, from the latest message on. Add a lorebook brings it back.",
+          description: "Takes it off this chat's list. Add a lorebook brings it back.",
           tone: "danger",
           onSelect: () => {
             if (selected === row.key) setSelected(null)
@@ -387,7 +383,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
             <Button
               onClick={() => setAdding(true)}
               disabled={library === null}
-              hint="Picks a book from your library for this chat to read, from the latest message on."
+              hint="Picks a book from your library for this chat to read."
             >
               Add a lorebook
             </Button>
@@ -406,9 +402,6 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
           void send("placement", { _tag: "LoreBelowHistory", on }, null, "Couldn't change where entries go")
         }
       />
-      <p className="text-sm text-muted">
-        A chat's switches apply from the latest message on, on this branch; a preset's, in every chat using it.
-      </p>
 
       {chosen && chosenShown?.edit && workspace && (
         <div ref={opened} className="scroll-mt-2 border-t border-border pt-4">

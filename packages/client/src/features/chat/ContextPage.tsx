@@ -639,8 +639,7 @@ function Inspector({ run }: { run: RunContext }) {
           </dd>
           <dt className="text-muted">Generation</dt>
           <dd>
-            {run.type}, {run.mode === "st" ? "SillyTavern-compatible (earlier assembler)" : "the preset's layout"};{" "}
-            {run.status}
+            {run.type}, {run.mode === "st" ? "the earlier fixed layout" : "the preset's layout"}; {run.status}
           </dd>
           <dt className="text-muted">Breakpoints</dt>
           <dd>
@@ -668,7 +667,7 @@ function Inspector({ run }: { run: RunContext }) {
       <section aria-label="Messages" className="flex flex-col gap-2">
         <h2 className="text-base font-semibold">Messages</h2>
         {run.capture === "unavailable" ? (
-          <p className="text-sm text-muted">Not sent / unavailable: no sanitized final request capture is stored.</p>
+          <p className="text-sm text-muted">Not sent, or the exact request wasn't kept.</p>
         ) : (
           <Messages key={run.versionId} run={run} />
         )}
@@ -677,7 +676,7 @@ function Inspector({ run }: { run: RunContext }) {
       <Card>
         <CardHeader
           title="Usage"
-          description="What the provider reported, per attempt, and how long each took (first token: from sending to the first text or reasoning). Reasoning time is not recorded."
+          about="First token: the time from sending to the first text or reasoning. Reasoning time isn't recorded."
         />
         <Usage requests={run.requests} />
       </Card>
