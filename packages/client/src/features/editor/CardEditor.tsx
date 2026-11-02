@@ -38,11 +38,10 @@ import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** What each field is for, on hover over its label. */
 const HINTS = {
-  description: "Who they are: sent with every request. ST's description field; {{char}} and {{user}} become the names.",
+  description: "Who they are: sent with every request. {{char}} and {{user}} become the names.",
   personality: "A short summary of their personality, sent with every request after the description.",
   scenario: "The situation the chat starts in, sent with every request.",
-  mes_example:
-    "Example dialogue showing how they talk, each example starting with <START>. Sent as the preset says (ST's example messages).",
+  mes_example: "Example dialogue showing how they talk, each example starting with <START>. Sent as the preset says.",
   system_prompt:
     "The card's own system prompt: used in place of the preset's Main Prompt where the preset allows it ({{original}} is the preset's).",
   post_history_instructions:

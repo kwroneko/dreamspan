@@ -211,7 +211,9 @@ export function NotesTab({
                 <section aria-label="This chat's notes" className="flex flex-col gap-1.5">
                   <h3 className="text-sm font-semibold">This chat</h3>
                   {own.length === 0 ? (
-                    <p className="text-sm text-muted">No notes yet. A note here is like ST's author's note.</p>
+                    <p className="text-sm text-muted">
+                      No notes yet. A note here is text the model is sent with this chat.
+                    </p>
                   ) : (
                     <NoteList
                       label="Notes"

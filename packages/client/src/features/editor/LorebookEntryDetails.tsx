@@ -96,7 +96,7 @@ export function InheritedSwitch({
         <Select
           value={value === null ? "inherit" : String(value)}
           items={[
-            { value: "inherit", label: "Default", description: `Not set here: ${fallback}, as in a fresh ST install.` },
+            { value: "inherit", label: "Default", description: `Not set here: ${fallback}.` },
             { value: "true", label: "On" },
             { value: "false", label: "Off" }
           ]}
@@ -412,7 +412,7 @@ export function EntryDetails({
                   store={store}
                   path={[...path, "ignore_budget"]}
                   label="Ignore the token budget"
-                  description="Still included once the lorebook budget (a quarter of the context, less the reply's room) or this book's own is used up; its text still counts toward them. With entries below the history it still has to fit the room kept for them."
+                  description="Still included once the lorebook budget, or this book's own, is used up. Its text still counts toward them."
                 />
                 <SwitchField
                   store={store}
@@ -424,8 +424,8 @@ export function EntryDetails({
               <details className={group}>
                 <summary className={`cursor-pointer ${groupTitle}`}>Timing, filters and automation</summary>
                 <p className="text-sm text-muted">
-                  Kept as SillyTavern has them. Chats here don't use sticky, cooldown, character filters or automation
-                  yet; the context inspector lists an entry that has them.
+                  Kept for export. Chats here don't use sticky, cooldown, character filters or automation yet; the
+                  context inspector lists an entry that has them.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-3">
                   <NumberField
@@ -461,34 +461,34 @@ export function EntryDetails({
                   store={store}
                   path={[...path, "automation_id"]}
                   label="Automation ID"
-                  description="ST's Automation ID: a Quick Reply that runs when the entry is sent. Kept for ST; nothing runs it here."
+                  description="An automation to run when the entry is sent. Kept for export; nothing here runs it."
                 />
                 <SwitchField
                   store={store}
                   path={[...path, "add_memo"]}
                   label="Add the title as a memo"
-                  description="SillyTavern's flag, which its imports set when an entry has a title. Nothing here reads it and it changes nothing sent to the model; it's kept for exports."
+                  description="Kept for export. It changes nothing sent to the model."
                 />
                 {card && (
                   <>
                     <TextField
                       store={store}
                       path={[...path, "name"]}
-                      label="Name (card books)"
-                      description="The card book format's own name for the entry, kept for export."
+                      label="Name in exports"
+                      description="The entry's name in an exported card."
                     />
                     <NumberField
                       store={store}
                       path={[...path, "priority"]}
-                      label="Priority (card books)"
-                      description="The card book format's priority, kept for export; Order decides here."
+                      label="Priority in exports"
+                      description="The entry's priority in an exported card. Order decides here."
                       optional
                     />
                     <SwitchField
                       store={store}
                       path={[...path, "use_regex"]}
                       label="Keys are regular expressions"
-                      description="The card book format's flag, kept for export."
+                      description="Kept for export. Keys here are regular expressions when written as /pattern/flags."
                     />
                   </>
                 )}

@@ -88,7 +88,7 @@ export function PresetTab({ session, view }: { session: ChatSession; view: ChatV
     <PresetColumn key={ref} store={workspace.store(ref)} />
   ) : (
     <p className="text-sm text-muted">
-      {builtin ? "SillyTavern's built-in default. Import a preset to edit its prompts." : "Loading the current preset…"}
+      {builtin ? "The built-in default. Import a preset to edit its prompts." : "Loading the current preset…"}
     </p>
   )
 }

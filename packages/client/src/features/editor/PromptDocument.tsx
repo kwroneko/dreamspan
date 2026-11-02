@@ -948,7 +948,7 @@ export function PresetWarnings({ store, onGoTo }: { store: EditorStore; onGoTo: 
           {TRIGGERS.filter((t) => prompt.injection_trigger.includes(t.value))
             .map((t) => t.label)
             .join(", ")}
-          , and the two never meet. Exported to SillyTavern, it&apos;s switched off.{" "}
+          , and the two never meet. In an export, it&apos;s switched off.{" "}
           <button type="button" className={link} onClick={() => onGoTo(prompt.identifier)}>
             Go to the prompt
           </button>

@@ -356,7 +356,7 @@ export const matchLorebooks = (
       buffer.regexMatches.set(pattern, matched)
       return matched
     }
-    if (pattern === "invalid") issue(source, "invalid_regex", "Invalid ST slash regex; matched as literal text.", key)
+    if (pattern === "invalid") issue(source, "invalid_regex", "Invalid /regex/ key; matched as literal text.", key)
     if (pattern === "unsafe" || pattern === "limit") {
       issue(
         source,

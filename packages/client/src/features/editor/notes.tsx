@@ -87,7 +87,7 @@ const PLACES = [
   {
     value: "tail",
     label: "After the newest message",
-    description: "An older place: in the history at depth 0, as ST puts it. Pick another to move it."
+    description: "An older place: in the history at depth 0. Pick another to move it."
   },
   {
     value: "section:card",
@@ -457,7 +457,7 @@ export function NoteSettings({ store, cards = [] }: { store: EditorStore; cards?
           store={store}
           path={["scan_lore"]}
           label="Lorebook entries can trigger on it"
-          hint="Its text is scanned with the chat for lorebook keys, as ST's “Include in World Info Scanning”."
+          hint="Its text is scanned with the chat for lorebook keys."
         />
         {card && (
           <>

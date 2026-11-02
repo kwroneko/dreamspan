@@ -117,10 +117,8 @@ for (const width of [1440, 390]) {
       // The tooltip, and the option's description (a hidden copy of the same text).
       const created = sort.getByRole("button", { name: "Created", exact: true })
       await created.hover()
-      await expect(
-        page.getByText(/^By when the card was made: for a SillyTavern import/).filter({ visible: true })
-      ).toBeVisible()
-      await expect(created).toHaveAccessibleDescription(/^By when the card was made: for a SillyTavern import/)
+      await expect(page.getByText(/^By when the card was created$/).filter({ visible: true })).toBeVisible()
+      await expect(created).toHaveAccessibleDescription(/^By when the card was created$/)
     }
     await shoot(page, `characters-added-${width}`)
     await main.getByRole("button", { name: "Order: Newest first", exact: true }).click()

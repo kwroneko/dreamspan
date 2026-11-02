@@ -37,7 +37,7 @@ export function ImageControls() {
         triggerLabel="Image settings"
         hint="Image settings"
         hintSide="bottom"
-        title="Images in this browser"
+        title="Images"
         side="bottom"
         align="end"
         triggerClassName="h-8 rounded-md px-2 text-muted outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus"
@@ -53,15 +53,15 @@ export function ImageControls() {
             ]}
           />
         </Field>
-        <Field label="Message portrait size (account)">
+        <Field label="Message portrait size">
           <Select<typeof viewer.prefs.portraitSize>
             value={viewer.prefs.portraitSize}
             onValueChange={(portraitSize) => void viewer.change({ portraitSize })}
             items={[
-              { value: "small", label: "Small (48 × 72)" },
-              { value: "default", label: "SillyTavern default (60 × 90)" },
-              { value: "large", label: "Large (72 × 108)" },
-              { value: "largest", label: "Largest (84 × 126)" }
+              { value: "small", label: "Smallest (48 × 72)" },
+              { value: "default", label: "Small (60 × 90)" },
+              { value: "large", label: "Medium (72 × 108)" },
+              { value: "largest", label: "Large (84 × 126)" }
             ]}
           />
         </Field>
@@ -71,8 +71,8 @@ export function ImageControls() {
           </p>
         )}
         <p className="text-xs text-muted">
-          Image concealment stays on this device. Portrait size follows your account. {IMAGES_SHORTCUT} toggles images
-          anywhere. Blurred images stay blurred on hover and tap.
+          Show, blur or hide applies on this device; portrait size on all your devices. {IMAGES_SHORTCUT} switches
+          images anywhere. Blurred images stay blurred on hover and tap.
         </p>
       </Popover>
     </div>

@@ -161,7 +161,7 @@ const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {
   recent: { label: "Recent", hint: "By the latest message in any of its chats; characters never used come last" },
   created: {
     label: "Created",
-    hint: "By when the card was made: for a SillyTavern import, the date ST gives it (its create_date); otherwise when it was added here"
+    hint: "By when the card was created"
   },
   added: { label: "Added", hint: "By when it came into this app, imported or written here" },
   name: { label: "Name", hint: "By name" }

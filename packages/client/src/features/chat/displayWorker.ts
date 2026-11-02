@@ -69,7 +69,7 @@ export const runRegexJob = (job: RegexJob): Promise<DisplayResult> | DisplayResu
   pending++
   const fallback = {
     text: job.text,
-    issues: ["Display regex stopped: time limit or worker unavailable. Original text shown."]
+    issues: ["Display regex stopped: it took too long or couldn't run. Original text shown."]
   }
   const result = queue.then(async () => {
     const ready = idle ?? (await startWorker())

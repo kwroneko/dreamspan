@@ -27,7 +27,7 @@ import { type EditorStore, useEditorState, useText, useValue } from "./store.ts"
 const PLACEMENTS: ReadonlyArray<readonly [number, string, string?]> = [
   [1, "Your messages", "Messages on your side of the chat."],
   [2, "Replies", "Messages on the characters' side: the model's replies."],
-  [3, "Slash commands", "ST's slash commands. Nothing here runs them, so this changes nothing."],
+  [3, "Slash commands", "Slash commands. Nothing here runs them, so this changes nothing."],
   [5, "Lorebook entries", "Entries' text as it goes into the prompt, for a script that changes the prompt."],
   [6, "Reasoning", "A reply's reasoning, and the text of its reply sections."]
 ]

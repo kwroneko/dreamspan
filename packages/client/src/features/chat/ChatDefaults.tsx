@@ -238,7 +238,7 @@ export function SummaryDefaults({
           checked={account.enabled}
           disabled={!defaults}
           onCheckedChange={(enabled) => void writeLcm({ enabled })}
-          description="Chats imported from SillyTavern start with summaries off whatever this says."
+          description="Imported chats start with summaries off, whatever this says."
         >
           New chats summarize older messages
         </Switch>

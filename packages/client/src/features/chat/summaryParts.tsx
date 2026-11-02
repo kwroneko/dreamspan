@@ -80,8 +80,8 @@ export function SummaryBadges({ summary }: { summary: Row }) {
         <HintBadge hint="Edited by you. It stays as you wrote it, even when its messages change.">Edited</HintBadge>
       )}
       {summary.origin === "imported" && (
-        <HintBadge hint="SillyTavern's summary, kept when summaries were turned on. It stays as it is.">
-          From SillyTavern
+        <HintBadge hint="It came with the imported chat and was kept when summaries were turned on. It stays as it is.">
+          Imported
         </HintBadge>
       )}
       {summary.origin === "changeset" && <HintBadge hint="Changed by an agent.">Changed by agent</HintBadge>}

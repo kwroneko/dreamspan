@@ -67,7 +67,7 @@ export const branchLastAt = (fork: Pick<Fork, "createdAt" | "endAt">) => fork.en
 
 /** What the chat opening on a branch means, wherever it's marked. */
 export const OPENS_HERE_HINT =
-  "The chat opens on this branch: the one you last wrote in or made. An imported chat opens where SillyTavern last had it open."
+  "The chat opens on this branch: the one you last wrote in or made. An imported chat opens where it was last open."
 
 // Writes made here bump a chat's count, so every list of its branches reads again at once. A
 // branch made here is listed from the write's answer until a read made after it has it.

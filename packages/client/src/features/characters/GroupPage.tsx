@@ -115,7 +115,7 @@ function Page({ group, chats }: { group: ChatGroup; chats: ReadonlyArray<Chat> }
         title="Rename group"
         label="Name"
         initial={group.name}
-        description={`All ${chats.length.toLocaleString()} of its chats take the name, and so do the chats you start from here. A chat imported from SillyTavern keeps the day it started. Leave it empty to name them after their characters.`}
+        description={`All ${chats.length.toLocaleString()} of its chats take the name, and so do the chats you start from here. An imported chat keeps the day it started. Leave it empty to name them after their characters.`}
         maxLength={200}
         saveLabel="Rename"
         pending={rename.pending}

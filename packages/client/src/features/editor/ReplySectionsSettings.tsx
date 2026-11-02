@@ -91,7 +91,7 @@ function PairRow({
             Match case
           </Checkbox>
           <Checkbox
-            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included, as in SillyTavern."
+            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included."
             checked={regex}
             onCheckedChange={(checked) => {
               const { regex: _, ...rest } = pair

@@ -38,7 +38,7 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
       description={
         stored === undefined
           ? `Not set: ${JSON.stringify(fallback)} is used. {{char}} is the character, <FIELDNAME> the field.`
-          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing, as SillyTavern sends one character."
+          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing."
       }
     />
   )
@@ -100,7 +100,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
     <>
       <SlotOutlet slot={presetEditorSections} props={{ store }} />
       <Card>
-        <CardHeader title="Text and context" description="SillyTavern's prompt text switches." />
+        <CardHeader title="Text and context" description="How example dialogues and character fields are sent." />
         <div className="flex flex-col gap-3">
           <SwitchField store={store} path={["pin_examples"]} label="Pin example dialogues" />
           <p className="text-sm text-muted">

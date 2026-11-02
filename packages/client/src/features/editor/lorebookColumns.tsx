@@ -87,7 +87,7 @@ const STRATEGIES: ReadonlyArray<{ readonly value: Strategy; readonly label: stri
   {
     value: "vectorized",
     label: "Vectorized",
-    description: "ST matches it by similarity to the chat. Chats here don't yet, and match its keys."
+    description: "Meant to match by similarity to the chat. Not yet: for now it matches its keys."
   }
 ]
 
@@ -269,7 +269,7 @@ export const registerLorebookTable = () => {
     id: "order",
     order: 10,
     label: "Order",
-    description: "Highest order first, as ST's Priority sorts.",
+    description: "Highest order first.",
     compare: (a, b) => number(b.order, a.order)
   })
   lorebookSorts.register({

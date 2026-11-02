@@ -136,7 +136,7 @@ for (const [name, viewport, chat] of [
 
       const summaries = await openPanel(page, "Summaries")
       await expect(summaries.getByTestId("summary-panel-heading")).toContainText("Older messages: 1 summary")
-      await expect(summaries.getByText("From SillyTavern", { exact: true })).toBeVisible()
+      await expect(summaries.getByText("Imported", { exact: true })).toBeVisible()
       await expect(summaries.getByText(IMPORTED_SUMMARY)).toBeVisible()
       const backfill = summaries.getByTestId("backfill")
       await expect(backfill).toHaveAttribute("data-state", "waiting")

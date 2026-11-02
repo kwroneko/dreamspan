@@ -178,9 +178,7 @@ function ModelName({ entry }: MessageDetailProps) {
   const imported = version.origin === "imported" || version.recorded !== undefined
   return (
     <Tooltip
-      label={
-        imported ? `Generated with ${version.model}, as SillyTavern recorded it` : `Generated with ${version.model}`
-      }
+      label={imported ? `Generated with ${version.model}, as recorded at import` : `Generated with ${version.model}`}
     >
       <ModelLabel model={version.model} />
     </Tooltip>
@@ -220,7 +218,7 @@ export const registerMessageDetails = () => [
     place: "header",
     order: 21,
     label: "Model name",
-    description: "The model that wrote a reply, and the connection (or SillyTavern's API) it was used through.",
+    description: "The model that wrote a reply, and the connection or API it was used through.",
     component: ModelName
   }),
   messageDetails.register({

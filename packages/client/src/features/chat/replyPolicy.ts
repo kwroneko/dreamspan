@@ -192,8 +192,7 @@ replyPolicies.register({ id: "round-robin", next: roundRobin, unnamedReply: noCh
 replyPolicies.register({
   id: "natural",
   label: "Natural order",
-  description:
-    "Someone named in your message replies; else each character gets a chance by their talkativeness. ST's default.",
+  description: "Someone named in your message replies; else each character gets a chance by their talkativeness.",
   autoDetail: "Picked by talkativeness: someone you name first, else each by their chance",
   next: natural,
   unnamedReply: noCharacters

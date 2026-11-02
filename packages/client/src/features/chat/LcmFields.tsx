@@ -326,7 +326,7 @@ export function LcmFields({
             {
               value: "raw",
               label: "Instruction and messages only",
-              description: "Only the instruction, the earlier summaries and the messages, like ST's Raw."
+              description: "Only the instruction, the earlier summaries and the messages."
             }
           ]}
         />

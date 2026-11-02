@@ -258,8 +258,8 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
       <ErrorAlert error={action.error} title="Pricing wasn't saved" />
       {message && <Alert>{message}</Alert>}
       <p className="text-sm text-muted">
-        Summary spending caps use a conservative bound across possible routes and cache rates. An unknown price or mixed
-        currency pauses capped work.
+        Summary spending caps count each request at the most it could cost. An unknown price or mixed currencies pause
+        capped work.
       </p>
     </form>
   )

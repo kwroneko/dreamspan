@@ -187,7 +187,7 @@ it("the worker deadline keeps the original and releases the queue for the next m
     const first = regexDisplay(opt)
     const second = regexDisplay(opt)
     await vi.runAllTimersAsync()
-    expect(await first).toMatchObject({ text: input.text, issues: [expect.stringContaining("time limit")] })
+    expect(await first).toMatchObject({ text: input.text, issues: [expect.stringContaining("took too long")] })
     expect(await second).toEqual({ text: "second", issues: [] })
     // Only the worker that ran out of time goes; the one that answered takes the next jobs.
     expect(terminate).toHaveBeenCalledTimes(1)

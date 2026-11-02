@@ -68,8 +68,7 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
           </p>
           <p className="text-sm">
             Below the history, every entry that matches goes in one block just after the history, and is looked at again
-            every turn. Where each entry says, as in SillyTavern, entries above the history stay until the history's
-            start next moves.
+            every turn. Where each entry says, entries above the history stay until the history's start next moves.
           </p>
         </Popover>
       </div>
@@ -88,7 +87,7 @@ function Placement({ on, onChange }: { on: boolean; onChange: (on: boolean) => v
             value: "positions",
             label: "Where each entry says",
             description:
-              "Each entry goes where its own position says, as in SillyTavern. One above the history can make the provider read the whole history again."
+              "Each entry goes where its own position says. One above the history can make the provider read the whole history again."
           }
         ]}
       />
