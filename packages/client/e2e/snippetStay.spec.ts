@@ -48,7 +48,7 @@ for (const width of [1440, 390])
           first: { _tag: "Send", content: "A synthetic harbour.", speakerEntityId: null }
         })
       )
-      // A named last-open snippet, plus another to prove the notice targets its own snippet.
+      // A named snippet, plus another to prove the notice targets its own snippet.
       const target = await admin((api) =>
         api.CreateSnippet({ chatId: chat.id, title: "Harbour notebook", content: "Earlier passage." })
       )
@@ -61,7 +61,9 @@ for (const width of [1440, 390])
       const text = "The keeper watches the harbour. Pending words stay here."
       const before = await admin((api) => api.ListRevisions({ refId: card.id, limit: 100 }))
       await field.fill(text)
+      // Snippets isn't shown, so a menu chooses where it goes.
       await panel.getByRole("button", { name: "Send text to snippet", exact: true }).first().click()
+      await page.getByRole("menuitem", { name: /^Harbour notebook/ }).click()
       await expect(page.getByText("Added to snippet “Harbour notebook”", { exact: true })).toBeVisible()
       await expect(panel).toBeVisible()
       await expect(field).toBeFocused()
@@ -106,6 +108,7 @@ for (const width of [1440, 390])
       await field.press("Control+Home")
       await field.press("Control+Shift+End")
       await page.getByRole("button", { name: "Send selection to snippet", exact: true }).click()
+      await page.getByRole("menuitem", { name: /^New snippet/ }).click()
       await expect(page.getByText(`Added to snippet “${text}”`, { exact: true })).toBeVisible()
       await expect(field).toBeFocused()
       await expectTextBox(field, text)

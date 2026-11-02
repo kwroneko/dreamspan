@@ -46,6 +46,9 @@ export function FieldFrame({
       {strip && (
         <div
           data-field-chrome
+          // Its controls are compact by design, along the box's own border (DESIGN §10.1): the box's
+          // edge isn't a container edge they need clearance from. Left and right still have px-2.
+          data-layout-audit-ignore="inset: The box's own controls sit in a slim strip along its border"
           className={
             side === "bottom"
               ? "flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-2 max-sm:h-9"

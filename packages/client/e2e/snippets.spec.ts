@@ -38,13 +38,14 @@ for (const width of [1440, 390])
       await admin((api) => api.CreateChatNote({ chatId, title: "Destination" }))
       await page.goto(`${server().url}/chats/${chat.id}`)
 
-      // Sending keeps the note open; the notice offers the snippet.
+      // With Snippets not shown, a menu chooses; sending keeps the note open; the notice offers the snippet.
       const notes = await openPanel(page, "Notes")
       const content = await noteText(notes, "Destination")
       await content.fill("Lanterns by the harbour")
       await content.press("Control+Home")
       await content.press("Control+Shift+ArrowRight")
       await notes.getByRole("button", { name: "Send selection to snippet" }).click()
+      await page.getByRole("menuitem", { name: /^New snippet/ }).click()
       await expect(notes).toBeVisible()
       await expect(content).toBeFocused()
       await page.getByRole("button", { name: "Open", exact: true }).click()
@@ -91,7 +92,7 @@ for (const width of [1440, 390])
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
 
-      // A message opened for editing by a double-click adds its selection to the snippet open last.
+      // A message opened for editing by a double-click adds its selection to a snippet chosen from the menu.
       await admin((api) =>
         api.SendMessage({ chatId, forkId: null, parentSlotId: null, branch: false, content: "A gull crosses the bay." })
       )
@@ -106,20 +107,21 @@ for (const width of [1440, 390])
       await expect(messageText).toBeFocused()
       await messageText.press("Control+a")
       await mine.getByRole("button", { name: "Send selection to snippet" }).click()
-      // After a reload nothing is open last: it's a new snippet.
+      await page.getByRole("menuitem", { name: /^New snippet/ }).click()
       await expect
         .poll(async () => (await admin((api) => api.ListSnippets({ chatId }))).map((s) => s.content))
         .toContain("A gull crosses the bay.")
       await expect(messageText).toBeFocused()
       await mine.getByRole("button", { name: "Cancel" }).click()
 
-      // The note's selection, by the shortcut, then its whole text: both to the snippet open last.
+      // The note's selection, by the shortcut, then its whole text: both chosen from the menu, with Snippets not shown.
       await openPanel(page, "Notes")
       const again = await noteText(notes, "Destination")
       await again.fill("A foghorn sounds.")
       await again.press("Control+Home")
       await again.press("Control+Shift+End")
       await again.press("Control+Shift+S")
+      await page.getByRole("menuitem", { name: /^Untitled snippet/ }).click()
       await expect(notes).toBeVisible()
       await expect(again).toBeFocused()
       await page.getByRole("button", { name: "Open", exact: true }).last().click()
@@ -129,6 +131,7 @@ for (const width of [1440, 390])
       await openPanel(page, "Notes")
       await again.fill("A bell rings.")
       await notes.getByRole("button", { name: "Send text to snippet" }).click()
+      await page.getByRole("menuitem", { name: /^Untitled snippet/ }).click()
       await expect(notes).toBeVisible()
       await expect(again).toBeFocused()
       await page.getByRole("button", { name: "Open", exact: true }).last().click()
@@ -150,6 +153,8 @@ test("a library field creates a snippet for all chats outside a chat", async ({ 
   await description.press("Control+Home")
   await description.press("Control+Shift+End")
   await description.press("Control+Shift+S")
+  // Outside a chat no snippet is open: the shortcut opens the menu at its button.
+  await page.getByRole("menuitem", { name: /^New snippet/ }).click()
   await expect(description).toBeFocused()
   await expect(page.getByRole("dialog", { name: "Snippets" })).toHaveCount(0)
   await expectTextBox(description, "A keeper watches the harbour.")

@@ -48,6 +48,10 @@ export const proseTheme = EditorView.theme({
     color: "var(--danger)",
     backgroundColor: "color-mix(in oklch, var(--danger) 15%, transparent)"
   },
+  ".rp-flash": {
+    backgroundColor: "color-mix(in oklch, var(--accent) 30%, transparent)",
+    borderRadius: "2px"
+  },
   ".rp-line-unchanged": { color: "var(--text-muted)" },
   // Quiet markers keep the gutter's width, so the text never shifts when the first change shows it.
   "&.rp-unchanged .cm-gutters": { visibility: "hidden" },

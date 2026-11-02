@@ -1,7 +1,8 @@
 // The Snippets workspace (owner, 2026-11-01): the snippets of the chat shown (every branch of it)
 // and those for all chats, each edited through an editor store as every library entry is: what's
 // typed saves as it's typed, with its edit history, and a revision is cut by Save. It outlives its
-// panel, so text sent here with the panel closed goes to the snippet open last.
+// panel. Text sent from an editor goes, in one click, only to a snippet open on screen (`target`);
+// otherwise the sender chooses one from a menu (owner, 2026-11-02).
 import type { BinItem } from "@rp/shared/bin.ts"
 import type { ChatId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
@@ -14,8 +15,10 @@ import { EditorStore } from "../editor/store.ts"
 
 interface State {
   readonly items: ReadonlyArray<Snippet>
-  /** Where Send text to snippet adds: the snippet opened or created last. */
+  /** The snippet last opened, clicked or typed into. */
   readonly selected: RefId | null
+  /** Those opened, clicked or typed into, the last one first: the target is the first still expanded. */
+  readonly used: ReadonlyArray<RefId>
   /** Bumped by `select`, so the panel opens and shows the snippet again. */
   readonly reveal: number
   readonly error: string | null
@@ -23,12 +26,19 @@ interface State {
   readonly floating: boolean
   /** The chat shown, whose own snippets are listed with those for all chats; null outside one. */
   readonly chatId: ChatId | null
+  /** Bumped as snippet editors mount and unmount, so what shows the target reads it again. */
+  readonly editors: number
+  /** Text just added to a snippet: its editor marks it briefly and scrolls to it. */
+  readonly added: { readonly refId: RefId; readonly at: number; readonly length: number } | null
+  /** The snippets picked from the send menu, the last one first. */
+  readonly recent: ReadonlyArray<RefId>
 }
 
 const CONTENT = ["content"]
 
 export class SnippetWorkspace {
-  private state: State = { items: [], selected: null, reveal: 0, error: null, floating: false, chatId: null }
+  private state: State
+  private editors = new Map<HTMLElement, RefId>()
   private listeners = new Set<() => void>()
   private stores = new Map<RefId, EditorStore>()
   private openPanel: (() => void) | null = null
@@ -39,6 +49,75 @@ export class SnippetWorkspace {
   constructor(call: Caller, user: string) {
     this.call = call
     this.user = user
+    this.state = {
+      items: [],
+      selected: null,
+      used: [],
+      reveal: 0,
+      error: null,
+      floating: false,
+      chatId: null,
+      editors: 0,
+      added: null,
+      recent: this.readRecent()
+    }
+  }
+  private get recentKey() {
+    return `rp.snippetRecent.${this.user}`
+  }
+  private readRecent(): ReadonlyArray<RefId> {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(this.recentKey) ?? "[]")
+      return Array.isArray(value) ? value.filter((id): id is RefId => typeof id === "string") : []
+    } catch {
+      return []
+    }
+  }
+  private picked(refId: RefId) {
+    const recent = [refId, ...this.state.recent.filter((id) => id !== refId)].slice(0, 50)
+    this.update({ recent })
+    try {
+      localStorage.setItem(this.recentKey, JSON.stringify(recent))
+    } catch {
+      // Only the menu's order is lost.
+    }
+  }
+
+  /** A snippet's editor on screen while mounted (it's visible only while its panel or sheet shows). */
+  registerEditor = (element: HTMLElement, refId: RefId) => {
+    this.editors.set(element, refId)
+    this.update({ editors: this.state.editors + 1 })
+    return () => {
+      this.editors.delete(element)
+      this.update({ editors: this.state.editors + 1 })
+    }
+  }
+  /**
+   * Where one click sends text (owner, 2026-11-02): of the snippets expanded in a shown panel or
+   * sheet (scrolled away within it counts), the one opened, clicked or typed into last; one never
+   * used, when none of those is expanded. None when no snippet is expanded, or Snippets isn't shown.
+   */
+  target = (state: State = this.state): RefId | null => {
+    const visible = new Set<RefId>()
+    for (const [element, refId] of this.editors)
+      if (element.isConnected && element.checkVisibility({ visibilityProperty: true })) visible.add(refId)
+    const used = state.used.find((id) => visible.has(id))
+    if (used !== undefined) return used
+    return state.items.find((item) => visible.has(item.ref.id))?.ref.id ?? null
+  }
+  /** The snippets to choose from, those picked last first, then as listed. */
+  choices = (state: State = this.state) => {
+    const rank = (item: Snippet) => {
+      const at = state.recent.indexOf(item.ref.id)
+      return at === -1 ? Infinity : at
+    }
+    return [...state.items].sort((a, b) => rank(a) - rank(b))
+  }
+  /** A snippet's title as shown. */
+  titleOf = (refId: RefId) => {
+    const store = this.stores.get(refId)
+    const typed = store?.snapshot ? store.text(["title"]) : undefined
+    return (typed ?? this.state.items.find((item) => item.ref.id === refId)?.title) || "Untitled snippet"
   }
   snapshot = () => this.state
   subscribe = (listener: () => void) => {
@@ -65,7 +144,17 @@ export class SnippetWorkspace {
   }
   close = () => this.update({ floating: false })
   /** Makes it where Send adds, and has the panel open and show it. */
-  select = (selected: RefId) => this.update({ selected, reveal: this.state.reveal + 1 })
+  select = (selected: RefId) =>
+    this.update({
+      selected,
+      used: [selected, ...this.state.used.filter((id) => id !== selected)],
+      reveal: this.state.reveal + 1
+    })
+  /** Clicked or typed into: it becomes the target, without the panel revealing it again. */
+  use = (refId: RefId) => {
+    if (this.state.used[0] !== refId)
+      this.update({ selected: refId, used: [refId, ...this.state.used.filter((id) => id !== refId)] })
+  }
 
   /** A snippet's editor store, made once and kept while the workspace lives. */
   store(refId: RefId) {
@@ -96,17 +185,18 @@ export class SnippetWorkspace {
     if (!result.ok) return this.update({ error: result.error.message })
     const items = result.value
     const selected = items.some((item) => item.ref.id === this.state.selected) ? this.state.selected : null
-    this.update({ items, selected, error: null })
+    const used = this.state.used.filter((id) => items.some((item) => item.ref.id === id))
+    this.update({ items, selected, used, error: null })
   }
 
-  create = async (content = "") => {
+  create = async (content = "", select = true) => {
     const result = await this.call(
       (api) => api("CreateSnippet", { chatId: this.state.chatId, title: "Untitled snippet", content }),
       ["library"]
     )
     if (!result.ok) return this.update({ error: result.error.message })
     this.update({ items: [...this.state.items, result.value], error: null })
-    this.select(result.value.ref.id)
+    if (select) this.select(result.value.ref.id)
     void this.refresh()
     return result.value
   }
@@ -128,22 +218,32 @@ export class SnippetWorkspace {
     })
   }
 
-  /** Adds text to the end of the snippet open last, or to a new one. */
-  send = async (text: string) => {
-    const target = this.state.selected
-    const store = target === null ? null : this.store(target)
-    if (store !== null && store.snapshot === null) await store.load()
-    if (store === null || store.snapshot === null) {
-      const made = await this.create(text)
-      if (made) this.added(made.ref.id, made.title, made.content)
-      return
-    }
-    const current = store.text(CONTENT) ?? ""
-    store.setText(CONTENT, current === "" ? text : `${current.replace(/\n*$/, "")}\n\n${text}`)
+  /**
+   * Adds text to the end of a snippet. To the target on screen, it shows there; chosen from the
+   * menu, the panel stays as it is and a notice says where it went.
+   */
+  append = async (refId: RefId, text: string, how: "target" | "chosen") => {
+    if (how === "chosen") this.picked(refId)
+    const store = this.store(refId)
+    if (store.snapshot === null) await store.load()
+    if (store.snapshot === null) return this.update({ error: "That snippet couldn't be opened." })
+    const current = (store.text(CONTENT) ?? "").replace(/\n*$/, "")
+    const next = current === "" ? text : `${current}\n\n${text}`
+    store.setText(CONTENT, next)
+    const added = { refId, at: next.length - text.length, length: text.length }
+    this.update({ added })
+    setTimeout(() => this.state.added === added && this.update({ added: null }), 2000)
     await store.save(textField(CONTENT))
-    this.select(store.refId)
     if (store.saveError) return this.update({ error: store.saveError.message })
-    this.added(store.refId, store.text(["title"]) ?? "", store.text(CONTENT) ?? text)
+    if (how === "chosen") this.added(refId, store.text(["title"]) ?? "", store.text(CONTENT) ?? text)
+  }
+
+  /** A new snippet holding the text, from the menu: the panel stays as it is. */
+  appendNew = async (text: string) => {
+    const made = await this.create(text, false)
+    if (!made) return
+    this.picked(made.ref.id)
+    this.added(made.ref.id, made.title, made.content)
   }
 
   /** For all chats, or only the chat shown (every branch of it). */

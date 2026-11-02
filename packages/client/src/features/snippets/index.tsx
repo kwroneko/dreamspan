@@ -5,23 +5,24 @@
 import type { RefId } from "@rp/shared/library.ts"
 import { textField } from "@rp/shared/editing.ts"
 import type { Snippet } from "@rp/shared/snippetsApi.ts"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { appTools } from "../shell.tsx"
 import { useSession } from "../../session.ts"
 import { useCaller } from "../editor/caller.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { chatPanels, lazyPanel } from "../chat/panels.tsx"
 import { chatSurfaceProviders, type ChatSurfaceProps } from "../chat/presentation.tsx"
-import { textActions } from "../../textActions.tsx"
+import { type TextActionContext, textActions } from "../../textActions.tsx"
 import { copy } from "../chat/copy.ts"
 import { Block, BlockBody, BlockHeader, BlockToggle, ExpandCollapseAll } from "../../ui/Block.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { InlineRename } from "../../ui/InlineRename.tsx"
+import { MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { useOpenBlocks } from "../../ui/openBlocks.ts"
 import { Sheet } from "../../ui/Sheet.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { TextField } from "../editor/controls.tsx"
 import { SaveRevision } from "../editor/SaveRevision.tsx"
@@ -75,6 +76,21 @@ function SnippetsPanel() {
   return workspace ? <Workspace store={workspace} /> : <p>Opening snippets…</p>
 }
 
+/**
+ * A snippet's editor, wherever it shows (the Snippets panel or sheet, or any other surface): while
+ * `shown`, it's expanded and so can be where Send text to snippet goes, and a click or typing in it
+ * makes it the target (`SnippetWorkspace.target`). Spread the result on the element around the editor.
+ */
+export function useSnippetEditorSurface(refId: RefId, shown: boolean) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!shown || !ref.current || !workspace) return
+    return workspace.registerEditor(ref.current, refId)
+  }, [shown, refId])
+  const use = () => workspace?.use(refId)
+  return { ref, onFocus: use, onPointerDown: use }
+}
+
 const firstLine = (text: string) =>
   text
     .split("\n")
@@ -102,6 +118,11 @@ function SnippetBlock({
   const title = (loaded ? typedTitle : item.title) || "Untitled snippet"
   const content = loaded ? typedContent : item.content
   const scope = item.global ? "All chats" : "This chat"
+  const shown = open && loaded
+  const surface = useSnippetEditorSurface(item.ref.id, shown)
+  // Read from the state, so it's read again as editors come and go and the target moves.
+  const target = shown && workspace.target(state) === item.ref.id
+  const flash = state.added?.refId === item.ref.id ? state.added : undefined
   const detail = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted">
       <span>{scope}</span>
@@ -142,6 +163,23 @@ function SnippetBlock({
           ) : (
             <span className="flex min-w-0 flex-1">{toggle}</span>
           )}
+          {/* Where one click of Send text to snippet goes; its room is kept, so the header never moves. */}
+          <span
+            className="flex size-6 shrink-0 items-center justify-center max-sm:invisible"
+            data-snippet-target={target || undefined}
+          >
+            {target && (
+              <Tooltip label="Text sent to a snippet goes here.">
+                <span
+                  role="img"
+                  aria-label="Text sent to a snippet goes here"
+                  className="flex size-6 items-center justify-center"
+                >
+                  <span className="size-1.5 rounded-full bg-accent" />
+                </span>
+              </Tooltip>
+            )}
+          </span>
           <IconButton
             label={`Copy ${title}`}
             hint="Copies its text, to paste anywhere"
@@ -154,11 +192,7 @@ function SnippetBlock({
           <>
             <BlockBody>
               {loaded ? (
-                <div
-                  onFocus={() => {
-                    if (state.selected !== item.ref.id) workspace.select(item.ref.id)
-                  }}
-                >
+                <div {...surface}>
                   <TextField
                     store={store}
                     path={["content"]}
@@ -166,6 +200,7 @@ function SnippetBlock({
                     labelHidden
                     rows={Math.min(10, Math.max(3, content.split("\n").length))}
                     source="snippet"
+                    flash={flash}
                   />
                 </div>
               ) : (
@@ -218,8 +253,8 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
     <section className="flex min-w-0 flex-col gap-3" aria-label="Snippets">
       <p className="text-sm text-muted">
         Text you keep beside your chats: lines to reuse, passages from a swipe, ideas. A snippet is never sent to the
-        model by itself; a note can show one (Pick a shared note). Copy one to paste it anywhere, and add to the one
-        open last from any editor with Send text to snippet.
+        model by itself; a note can show one (Pick a shared note). Copy one to paste it anywhere, and add text to one
+        from any editor with Send text to snippet: it goes to the open snippet marked with a dot.
       </p>
       <div className="flex max-w-controls items-end gap-2">
         <Field label="Search snippets" className="min-w-0 flex-1">
@@ -273,6 +308,66 @@ function Workspace({ store }: { store: SnippetWorkspace }) {
   )
 }
 const canSend = () => chatPanels.get("snippets") !== undefined
+/** A phone, or a touch screen: there, the menu always opens, to choose where the text goes. */
+const choosesAlways = () =>
+  typeof matchMedia !== "undefined" && matchMedia("(max-width: 639.98px), (pointer: coarse)").matches
+/** One click adds to the snippet open on screen; with none, or on a phone, the menu opens. */
+const sendOrChoose = ({ text }: TextActionContext) => {
+  const target = workspace?.target() ?? null
+  if (workspace === null || target === null || choosesAlways()) return "choose" as const
+  void workspace.append(target, text, "target")
+}
+const sendHint =
+  (whole: boolean) =>
+  (_context: TextActionContext): string => {
+    const target = workspace?.target() ?? null
+    const what = whole ? "this text" : "the selected text"
+    return target === null || choosesAlways()
+      ? `Choose a snippet to add ${what} to.`
+      : `Adds ${what} to “${workspace?.titleOf(target) ?? ""}”. Right-click to choose a different snippet.`
+  }
+/** The send menu: the snippets, the one picked last first, then a new one. */
+function SnippetChoices({ context, done }: { context: TextActionContext; done: () => void }) {
+  const store = workspace
+  const state = useSyncExternalStore(
+    store?.subscribe ?? (() => () => {}),
+    store?.snapshot ?? (() => null),
+    store?.snapshot ?? (() => null)
+  )
+  if (store === null || state === null) return null
+  return (
+    <>
+      {store.choices(state).map((item) => (
+        <MenuItem
+          key={item.ref.id}
+          icon="snippet"
+          description={`Adds the text to the end of “${store.titleOf(item.ref.id)}”.`}
+          onClick={() => {
+            done()
+            void store.append(item.ref.id, context.text, "chosen")
+          }}
+        >
+          {store.titleOf(item.ref.id)}
+        </MenuItem>
+      ))}
+      {state.items.length > 0 && <MenuSeparator />}
+      <MenuItem
+        icon="plus"
+        description={
+          state.chatId === null
+            ? "Makes a snippet for all chats with this text."
+            : "Makes a snippet for this chat with this text."
+        }
+        onClick={() => {
+          done()
+          void store.appendNew(context.text)
+        }}
+      >
+        New snippet
+      </MenuItem>
+    </>
+  )
+}
 export const register = () => [
   snippetTools.register({ id: "snippets.history", order: 10, component: SnippetHistory }),
   snippetTools.register({ id: "snippets.delete", order: 90, component: DeleteSnippet }),
@@ -294,22 +389,24 @@ export const register = () => [
     id: "snippets.send-text",
     label: "Send text to snippet",
     shortLabel: "Text to snippet",
-    description: "Adds this editor's whole text to the end of the snippet open last in Snippets, or to a new one.",
+    description: sendHint(true),
     icon: "snippet",
     editor: "text",
     available: ({ text, source }) => source !== "snippet" && text.trim().length > 0 && canSend(),
-    run: ({ text }) => void workspace?.send(text)
+    run: sendOrChoose,
+    choices: SnippetChoices
   }),
   textActions.register({
     id: "snippets.send",
     label: "Send selection to snippet",
     shortLabel: "Selection to snippet",
-    description: "Adds the selected text to the end of the snippet open last in Snippets, or to a new one.",
+    description: sendHint(false),
     icon: "snippetSelection",
     editor: "selection",
     shortcut: "s",
     available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),
-    run: ({ text }) => void workspace?.send(text)
+    run: sendOrChoose,
+    choices: SnippetChoices
   }),
   textActions.register({
     id: "snippets.open",
