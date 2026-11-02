@@ -713,7 +713,7 @@ export function DeleteSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Delete the connection"
-        about="Moves this connection to the bin. You can undo this, or restore it from the bin later. Messages and usage records keep naming this connection’s models."
+        about="Moves this connection to the bin, from which it can be restored later."
         actions={
           <Button variant="danger" onClick={() => setOpen(true)}>
             Delete
@@ -724,7 +724,7 @@ export function DeleteSection({ connection }: ConnectionSectionProps) {
         open={open}
         onOpenChange={setOpen}
         title={`Delete “${connection.name}”?`}
-        description="Moves this connection to the bin. You can undo this, or restore it from the bin later."
+        description="Moves this connection to the bin, from which it can be restored later."
         confirmLabel="Delete"
         pending={action.pending}
         onConfirm={async () => {

@@ -114,7 +114,7 @@ for (const kind of ["composer", "editor"] as const) {
         if (kind === "composer" && variant === "committed elsewhere") {
           await expectTextBox(box(back), "")
           await expect(back.getByRole("article", { name: "Your message" })).toContainText(elsewhere)
-          const notice = back.getByRole("status").filter({ hasText: "typed in this browser while offline" })
+          const notice = back.getByRole("status").filter({ hasText: "Earlier composer text" })
           await expect(notice).toContainText("Recovered text")
           await notice.getByRole("link").click()
           await expect(back.getByText(offline, { exact: true })).toBeVisible()

@@ -93,7 +93,7 @@ function QueueEditor({
         )}
         <Button
           onClick={() => void cancel()}
-          hint="Closes this without updating the queued message. What you typed is kept in the bin, under Recovered text."
+          hint="Closes this without updating the queue. What you typed is kept in the bin, under Recovered text."
         >
           Cancel
         </Button>

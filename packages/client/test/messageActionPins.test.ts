@@ -171,7 +171,9 @@ describe("pinned message actions", () => {
     const reply = views(contextOf(entryOf("model", 12)))
     expect(reply.get("message.add-guidance")).toMatchObject({ label: "New version with guidance…", icon: "guidance" })
     expect(reply.get("message.delete-all")).toMatchObject({ label: "Delete message", icon: "trash-all" })
-    expect(reply.get("message.delete-all")!.hint).toContain("all 12 of its versions")
+    expect(reply.get("message.delete-all")!.hint).toBe(
+      "Moves this message and all its versions to the bin, from which it can be restored later."
+    )
     expect(reply.get("message.delete")).toMatchObject({ label: "Delete version", icon: "trash" })
     // Every action the old menu and toolbar had is listed, the toolbar's included.
     expect([...reply.keys()]).toEqual([

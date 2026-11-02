@@ -575,8 +575,8 @@ export function UserDraftNotices({ draft }: { draft: UserDraft }) {
             </>
           ) : (
             <span>
-              Another device finished this draft. Your text is still here. Reload to read the saved value; your current
-              text will be kept in the bin, under Recovered text.
+              Another device finished this draft. Reload to read the saved value. Your text will be kept in the bin,
+              under Recovered text.
             </span>
           )}
           <div className="flex flex-wrap gap-2">

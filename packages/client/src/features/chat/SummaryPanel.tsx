@@ -158,7 +158,7 @@ function Editor({ session, summary, onDone }: { session: ChatSession; summary: L
             Undo
           </Button>
         </Tooltip>
-        <Tooltip label="Closes this without saving the summary edit. What you typed is kept in the bin, under Recovered text.">
+        <Tooltip label="Closes this without saving. What you typed is kept in the bin, under Recovered text.">
           <Button
             onClick={() => void finish(() => store.discard())}
             pending={pending}

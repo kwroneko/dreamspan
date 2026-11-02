@@ -613,12 +613,11 @@ export function Composer({
             )}
             {recovered && (
               <p role="status" className="text-sm text-muted">
-                Some text from this composer is in the{" "}
+                Earlier composer text is kept in the{" "}
                 <Link to="/bin" search={{ section: "recovered" }}>
                   bin, under Recovered text
                 </Link>
-                . This includes text typed in this browser while offline after the draft was finished on another device,
-                or earlier text replaced by another tab's typing.
+                .
               </p>
             )}
           </>

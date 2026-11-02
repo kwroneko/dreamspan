@@ -227,7 +227,7 @@ export function InsertEditor({
         <Button
           type="button"
           disabled={busy}
-          hint="Closes this without inserting a message. What you typed is kept in the bin, under Recovered text."
+          hint="Closes this without inserting. What you typed is kept in the bin, under Recovered text."
           onClick={() => void cancel()}
         >
           <Icon name="close" />

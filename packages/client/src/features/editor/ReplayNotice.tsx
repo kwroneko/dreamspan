@@ -25,7 +25,7 @@ export function ReplayNotice({
         {when(conflict.at)}.{" "}
         {switchText
           ? "Both texts are kept; switching is undoable in History."
-          : "Both texts are kept. Text saved elsewhere is kept in the bin, under Recovered text, once you save or cancel this browser's text."}
+          : "Text saved elsewhere is kept in the bin, under Recovered text, when you save or cancel this browser's text."}
       </p>
       <details>
         <summary className="cursor-pointer">View the other text</summary>
