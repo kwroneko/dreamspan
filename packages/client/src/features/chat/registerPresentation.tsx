@@ -59,6 +59,9 @@ const CastAddSection = deferred<Parameters<typeof import("./CastAdd.tsx").CastAd
 const ReplyOrderSection = deferred<Parameters<typeof import("./ReplyOrder.tsx").ReplyOrderSection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.ReplyOrderSection }))
 )
+const OneReplySection = deferred<Parameters<typeof import("./ReplyOrder.tsx").OneReplySection>[0]>(() =>
+  import("./ReplyOrder.tsx").then((m) => ({ default: m.OneReplySection }))
+)
 const RetryWith = deferred<Parameters<typeof import("./VersionControls.tsx").RetryWith>[0]>(() =>
   import("./VersionControls.tsx").then((m) => ({ default: m.RetryWith }))
 )
@@ -125,6 +128,7 @@ export const registerPresentation = () => [
   chatCardActions.register({ id: "card.fork-for-chat", order: 20, component: ForkChatCard }),
   chatCardActions.register({ id: "card.choose-version", order: 30, component: ChooseChatCard }),
   castSections.register({ id: "cast.reply-order", order: 5, component: ReplyOrderSection }),
+  castSections.register({ id: "cast.one-reply", order: 6, component: OneReplySection }),
   castSections.register({ id: "cast.add-characters", order: 10, component: CastAddSection }),
   // This chat leads with what a person touches; what few need comes after, collapsed.
   chatSettingSections.register({ id: "settings.chat", order: 1, component: ChatIdentity }),

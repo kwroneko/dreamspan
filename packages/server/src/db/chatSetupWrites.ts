@@ -103,8 +103,13 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
      */
     const afterReply = (replySlotId: string, mode: "reply" | "restart") =>
       Effect.gen(function* () {
+        // A restart pauses a round rather than dropping it: Continue round picks it up.
+        if (mode === "restart")
+          yield* sql`UPDATE queued_messages SET held = 1, updated_at = ${Date.now()}
+            WHERE reply_slot_id = ${replySlotId} AND round = 1 AND held = 0`
+        // A stopped round's entries wait for Continue round, not for this reply.
         const entries = yield* sql<QueuedRow>`
-          SELECT * FROM queued_messages WHERE reply_slot_id = ${replySlotId} ORDER BY seq`
+          SELECT * FROM queued_messages WHERE reply_slot_id = ${replySlotId} AND held = 0 ORDER BY seq`
         if (entries.length === 0) return nothing
         const [slot] = yield* sql<{
           chat_id: string
@@ -273,6 +278,39 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         return { posted, next: { slotId: next.slotId, versionId: next.version.id as VersionId, forkId: next.forkId } }
       })
 
+    /** A round's later replies (DESIGN §2.3), each a `generate` entry waiting behind `replySlotId` in order. */
+    const queueRound = (
+      chatId: string,
+      replySlotId: string,
+      forkId: string,
+      members: ReadonlyArray<EntityId>,
+      seq: number,
+      at: number
+    ) =>
+      Effect.forEach(
+        members,
+        (speaker, i) =>
+          sql`INSERT INTO queued_messages ${sql.insert({
+            id: uuidv7(),
+            chat_id: chatId,
+            reply_slot_id: replySlotId,
+            fork_id: forkId,
+            seq: seq + i,
+            kind: "generate",
+            content: "",
+            images_json: "[]",
+            speaker_entity_id: speaker,
+            reply_speaker_entity_id: null,
+            no_reply: 0,
+            direction: null,
+            round: 1,
+            held: 0,
+            created_at: at,
+            updated_at: at
+          })}`,
+        { discard: true }
+      )
+
     const handlers = {
       ...(yield* makeShellWriteHandlers),
       StartChat: ({ userId, cards, persona, greeters, first, title }) =>
@@ -383,12 +421,20 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
         imageDraftIds,
         direction,
         commitDraft,
-        rewrite
+        rewrite,
+        round
       }) =>
         Effect.gen(function* () {
           yield* graph.ownedChat(userId, chatId)
           let fork = yield* graph.ownedFork(userId, chatId, forkId ?? null)
           const draftForkId = fork.id
+          // A turn added at the fork's tip is a new user action: the round already there, waiting
+          // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
+          const endedRound =
+            parentSlotId === fork.tip_slot_id
+              ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
+              : []
+          for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
           yield* graph.checkImages(userId, images ?? [])
           yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
           yield* graph.checkSpeaker(userId, speakerEntityId)
@@ -445,6 +491,9 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 created_at: at,
                 updated_at: at
               })} RETURNING *`
+              // The rest of the round waits behind it: postQueued moves each on to the reply before.
+              if (kind === "generate" || noReply !== true)
+                yield* queueRound(chatId, parentSlotId, fork.id, round ?? [], next!.n + 1, at)
               // The text waits in the queue now, and comes back to the composer if withdrawn.
               const { draft, recovered } = yield* bin.drafts.commit(userId, commitDraft, {
                 // The composer's, or the insertion editor's below the tip, whose insertion is an append
@@ -476,7 +525,18 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 : reply(speakerEntityId, direction),
             commitDraft
           })
-          return { _tag: "Posted" as const, result }
+          // A reply posted now: the rest of its round waits for it.
+          if (kind === "generate" && (round ?? []).length > 0) {
+            const [next] = yield* sql<{ n: number }>`
+              SELECT coalesce(max(seq), -1) + 1 AS n FROM queued_messages WHERE chat_id = ${chatId}`
+            yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now())
+            return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
+          }
+          return {
+            _tag: "Posted" as const,
+            result,
+            ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
+          }
         }).pipe(transaction("SendOrQueue")),
 
       EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft, rewrite }) =>
@@ -521,6 +581,18 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             })
           }
           yield* bin.recoverQueued(userId, [row])
+          // A queued action owns the round entries immediately following it in this fork's
+          // queue. Withdrawing it cancels those replies, but keeps a later action's round.
+          if (row.round === 0) {
+            const [next] = yield* sql<{ seq: number | null }>`
+              SELECT min(seq) AS seq FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 0 AND seq > ${row.seq}`
+            yield* sql`DELETE FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 1 AND seq > ${row.seq}
+                AND seq < ${next?.seq ?? Number.MAX_SAFE_INTEGER}`
+          }
           yield* sql`DELETE FROM queued_messages WHERE id = ${queuedId}`
           return { queued: toQueued(row), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("WithdrawQueued")),
@@ -557,10 +629,68 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             WHERE id = ${versionId}`
           const version = toVersion(yield* graph.ownedVersion(userId, versionId, false))
           const [slot] = yield* sql<{ chat_id: string }>`SELECT chat_id FROM slots WHERE id = ${row.slot_id}`
+          // A round stops with a reply that's stopped or fails (as ST's does), where the fork
+          // waiting on it shows this version: the rest waits for Continue round (DESIGN §2.3).
+          const held =
+            status === "stopped" || status === "failed"
+              ? yield* sql`UPDATE queued_messages SET held = 1, updated_at = ${Date.now()}
+              WHERE reply_slot_id = ${row.slot_id} AND round = 1 AND held = 0 AND id IN (
+                SELECT q.id FROM queued_messages q JOIN slots s ON s.id = q.reply_slot_id
+                  JOIN chats c ON c.id = s.chat_id
+                WHERE q.reply_slot_id = ${row.slot_id}
+                  AND ${selectedIn(sql, sql.literal("coalesce(q.fork_id, c.current_fork_id)"), "s")} = ${versionId}
+                  -- A replacement send's round hasn't begun yet: its queued action must
+                  -- post first. Stopping the old reply doesn't stop that new round.
+                  AND NOT EXISTS (SELECT 1 FROM queued_messages action
+                    WHERE action.reply_slot_id = q.reply_slot_id AND action.fork_id IS q.fork_id
+                      AND action.round = 0 AND action.seq < q.seq))
+                RETURNING id`
+              : []
           // A reply interrupted by the server going down leaves its queue to the next start.
           const queue = status === "interrupted" ? nothing : yield* afterReply(row.slot_id, "reply")
+          // A round held here changed the queue too, though nothing posted.
+          if (held.length > 0 && !queue.queueChanged)
+            return {
+              version,
+              chatId: slot!.chat_id as ChatId,
+              ...queue,
+              queueChanged: true,
+              queue: yield* chatQueue(sql, slot!.chat_id)
+            }
           return { version, chatId: slot!.chat_id as ChatId, ...queue }
         }).pipe(transaction("FinishGeneration")),
+
+      ContinueRound: ({ userId, chatId, forkId }) =>
+        Effect.gen(function* () {
+          yield* graph.ownedChat(userId, chatId)
+          const fork = yield* graph.ownedFork(userId, chatId, forkId)
+          const held = yield* sql<{ id: string }>`
+            SELECT id FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 AND held = 1`
+          if (held.length === 0 || fork.tip_slot_id === null)
+            return { chatId, ...nothing, queue: yield* chatQueue(sql, chatId) }
+          // They wait at the tip as it is now (after an edit, a deletion or a new version there),
+          // and post at once unless a reply is still being written there.
+          yield* sql`UPDATE queued_messages SET held = 0, reply_slot_id = ${fork.tip_slot_id}, updated_at = ${Date.now()}
+            WHERE ${sql.in(
+              "id",
+              held.map((row) => row.id)
+            )}`
+          const outcome = yield* afterReply(fork.tip_slot_id, "reply")
+          return {
+            chatId,
+            ...outcome,
+            queueChanged: true,
+            queue: outcome.queueChanged ? outcome.queue : yield* chatQueue(sql, chatId)
+          }
+        }).pipe(transaction("ContinueRound")),
+
+      EndRound: ({ userId, chatId, forkId }) =>
+        Effect.gen(function* () {
+          yield* graph.ownedChat(userId, chatId)
+          const fork = yield* graph.ownedFork(userId, chatId, forkId)
+          yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1`
+          return { chatId, ...nothing, queueChanged: true, queue: yield* chatQueue(sql, chatId) }
+        }).pipe(transaction("EndRound")),
 
       SelectAndDrain: ({ userId, slotId, versionId, forkId, expectedVersionId }) =>
         Effect.gen(function* () {

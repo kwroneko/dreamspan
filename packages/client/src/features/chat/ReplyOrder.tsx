@@ -4,9 +4,10 @@
 // (`replyPolicy.ts`), each explained beside it; a plugin's policy with a label is offered too.
 // The choice is a `reply.order` state event at the leaf shown, imported from ST's group.
 import { useState, useSyncExternalStore } from "react"
+import { Switch } from "../../ui/Choice.tsx"
 import { Field } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
-import { replyPolicies, replyPolicyOf } from "./replyPolicy.ts"
+import { oneReplyAtATime, replyPolicies, replyPolicyOf } from "./replyPolicy.ts"
 import type { ChatSession } from "./session.ts"
 
 export function ReplyOrderSection({ session }: { session: ChatSession }) {
@@ -30,11 +31,46 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
     <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
       <Field
         label="Who replies"
-        description="When you haven't picked anyone under Next, with two or more characters here."
+        description="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
         className="w-full sm:w-72"
       >
         <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
       </Field>
+      {error && (
+        <p role="alert" className="text-sm text-danger">
+          {error}
+        </p>
+      )}
+    </section>
+  )
+}
+
+// One reply per user action (owner, 2026-11-02), the Cast tab's `cast.one-reply` section, beside
+// Who replies and apart from it: off (the default, and ST's), everyone the reply order picks
+// replies in turn after a send or Reply now (a round); on, only the first does. A `reply.single`
+// state event at the leaf shown.
+export function OneReplySection({ session }: { session: ChatSession }) {
+  const cast = useSyncExternalStore(session.subscribe, () => session.snapshot().cast)
+  const [pending, setPending] = useState<boolean | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  if (cast === null) return null
+  const on = pending ?? oneReplyAtATime(cast)
+  const change = async (next: boolean) => {
+    setPending(next)
+    const outcome = await session.changeCast({ _tag: "ReplySingle", on: next })
+    setPending(null)
+    setError(outcome.ok ? null : `Couldn't change how many reply: ${outcome.error.message}`)
+  }
+  return (
+    <section aria-label="One reply at a time" className="flex flex-col gap-2">
+      <Switch
+        checked={on}
+        disabled={pending !== null}
+        onCheckedChange={(next) => void change(next)}
+        description="Each message you send, or Reply now, gets one reply, so you can read or edit it before the next. Off: everyone Who replies picks answers, one after another."
+      >
+        One reply at a time
+      </Switch>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}

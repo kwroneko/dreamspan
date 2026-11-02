@@ -195,6 +195,9 @@ layer(serverLayer(testConfig()), { excludeTestServices: true, timeout: "180 seco
       // ST's default, natural order, isn't written down.
       const both = chats.find((chat) => chat.title.startsWith("Both"))!
       assert.isUndefined((yield* castOf(both.id)).replyOrder)
+      // ST groups reply in rounds: they import with "One reply at a time" off (DESIGN §2.3).
+      assert.isUndefined((yield* castOf(pooled.id)).replySingle)
+      assert.isUndefined((yield* castOf(both.id)).replySingle)
       // The latest chat, as the report's Continue names it: its start and its characters.
       const latest = yield* (yield* Reader).StImportLatestChat({ userId: user.id })
       assert.isNotNull(latest)
