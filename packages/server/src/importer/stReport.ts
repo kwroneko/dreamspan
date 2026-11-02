@@ -4,7 +4,7 @@
 // Every issue is kept, up to a bound no real folder reaches (a few per file); the client shows
 // the same issue on many files as one entry listing them all.
 import type { ChatId } from "@rp/shared/chat.ts"
-import { type ImportReport, shownText } from "@rp/shared/importReport.ts"
+import { type ImportReport } from "@rp/shared/importReport.ts"
 import { StCount, type StHiddenRun, StImportReport, StIssue, type StLinkChoice } from "@rp/shared/stImportApi.ts"
 
 /** Issues a report keeps: one or two per file for a folder of ten thousand. */
@@ -37,15 +37,12 @@ export class Report {
   issue(path: string, level: StIssue["level"], code: string, message: string, detail?: string) {
     if (level === "info") return
     if (this.issues.length >= MAX_ISSUES) this.dropped++
-    else
-      this.issues.push(
-        new StIssue({ path: shownText(path), level, code, message, ...(detail === undefined ? {} : { detail }) })
-      )
+    else this.issues.push(new StIssue({ path, level, code, message, ...(detail === undefined ? {} : { detail }) }))
   }
 
   /** The chat a chat file went into: its issues link there. */
   chat(path: string, chatId: ChatId) {
-    this.chats.set(shownText(path), chatId)
+    this.chats.set(path, chatId)
   }
 
   /** A file's own report, its errors only: its warnings say what the import chose, and the entry shows it. */
