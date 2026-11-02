@@ -1,6 +1,6 @@
 // Tagged reply sections (spec/REPLY-SECTIONS.md) in the browser: the fake generator streams
-// reasoning, then a reply that opens a `<thinking>` section (its tag split across chunks) and
-// closes it `</think>`. The reply shows two folded panels, the provider's Reasoning first, a
+// reasoning, then a reply that opens a `<thinking>` section and closes it `</thinking>` (both
+// tags split across chunks). The reply shows two folded panels, the provider's Reasoning first, a
 // body without the section, and Show as reply text puts the section back as a new version.
 import { mkdirSync } from "node:fs"
 import { resolve } from "node:path"
@@ -21,6 +21,7 @@ const shots = process.env.SCREENSHOT_DIR
 for (const width of [1440, 390])
   for (const theme of ["light", "dark"] as const) {
     test(`reply sections show in their own panel at ${width} ${theme}`, async ({ page }) => {
+      test.setTimeout(120_000)
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
@@ -54,17 +55,17 @@ for (const width of [1440, 390])
         .click()
       const reply = page.getByRole("article").last()
       const reasoning = reply.getByRole("button", { name: /^Reasoning/ })
-      const notes = reply.getByRole("button", { name: /^Thinking in the reply/ })
+      const notes = reply.locator('[data-reasoning-panel="sections"] button[aria-expanded]').first()
       const region = reply.getByRole("region", { name: "Thinking in the reply" })
       // Streaming, both open as the preference says, the thinking growing in its panel while
       // the reply is still being written; then both fold when the reply is done.
-      await expect(notes).toHaveText(/^Thinking in the reply…/)
+      await expect(notes).toHaveText(/^Thinking(…| in the reply)·/)
       await expect(region).toBeVisible()
       await expect(region).toHaveText(/\S/)
       await expect(region).not.toContainText("<think")
       await shot("reply-sections-streaming")
-      await expect(notes).toHaveText(/^Thinking in the reply…/)
-      await expect(notes).toHaveText(/^Thinking in the reply·/, { timeout: 20_000 })
+      await expect(reply.getByRole("button", { name: "Show as reply text" })).toBeVisible({ timeout: 20_000 })
+      await expect(notes).toHaveText(/^Thinking in the reply·/)
       await expect(reasoning).toHaveAttribute("aria-expanded", "false")
       await expect(notes).toHaveAttribute("aria-expanded", "false")
       // The provider's panel comes first.
@@ -93,12 +94,13 @@ for (const width of [1440, 390])
       // A wrong parse undone: the section back in the text, a new version, the reasoning kept.
       await reply.getByRole("button", { name: "Show as reply text" }).click()
       await expect(reply).toContainText("<thinking>")
-      await expect(reply).toContainText("</think>")
+      await expect(reply).toContainText("</thinking>")
       await expect(notes).toBeHidden()
       await expect(reasoning).toBeVisible()
       await shot("reply-sections-as-text")
 
-      // The preset's setting, beside End of request, on by default with the default pair.
+      // The preset's setting, beside End of request, on by default with the default pairs,
+      // literal tags unless a pair is treated as a regex.
       const label = `Sections preset ${width} ${theme}`
       await asUser(server(), ADMIN.handle, ADMIN.password, (api) => api.CreatePreset({ label }))
       // From the library a preset opens at its own address (the Presets tab, Edit as a link).
@@ -110,10 +112,29 @@ for (const width of [1440, 390])
       await heading.scrollIntoViewIfNeeded()
       const section = editor.locator('[data-preset-section="reply-sections"]')
       await expect(section.getByRole("switch", { name: "Move tagged thinking into its own panel" })).toBeChecked()
-      await expect(section.getByRole("textbox", { name: "Opening tag" })).toHaveValue("<think(?:ing)?>")
-      await expect(section.getByRole("textbox", { name: "Closing tag" })).toHaveValue("</think(?:ing)?>")
+      const opening = section.getByRole("textbox", { name: "Opening tag" })
+      const closing = section.getByRole("textbox", { name: "Closing tag" })
+      await expect(opening).toHaveCount(2)
+      await expect(opening.first()).toHaveValue("<think>")
+      await expect(closing.first()).toHaveValue("</think>")
+      await expect(opening.nth(1)).toHaveValue("<thinking>")
+      await expect(closing.nth(1)).toHaveValue("</thinking>")
+      const asRegex = section.getByRole("checkbox", { name: "Treat as a regex" })
+      await expect(asRegex).toHaveCount(2)
+      await expect(asRegex.first()).not.toBeChecked()
+      await expect(opening.first()).toHaveAccessibleDescription("Where a section starts, exactly as written.")
+      await expect(section).not.toContainText("Each tag is a regular expression")
       await shot("reply-sections-editor")
-      await expect(section.getByRole("button", { name: "Add the default pair" })).toHaveCount(0)
+      await expect(section.getByRole("button", { name: /^Add the default pair/ })).toHaveCount(0)
+      // Opting a pair into regex: its tags are patterns, checked as such.
+      await asRegex.first().click()
+      await expect(asRegex.first()).toBeChecked()
+      await expect(opening.first()).toHaveAccessibleDescription("Where a section starts: a regular expression.")
+      await opening.first().fill("<think(")
+      await expect(section).toContainText(/Invalid regular expression|Unterminated group/)
+      await asRegex.first().click()
+      await expect(section).not.toContainText(/Invalid regular expression|Unterminated group/)
+      await expect(section.getByRole("button", { name: "Add the default pair" })).toBeVisible()
       const sendBack = section.getByRole("spinbutton", { name: "Send thinking back for the last replies" })
       await sendBack.fill("")
       await sendBack.fill("2")

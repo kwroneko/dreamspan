@@ -210,15 +210,26 @@ export function InsertEditor({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="primary" disabled={busy} onClick={() => void submit("Generate")}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={busy}
+          hint={`The model writes ${name}'s message here; text you typed is its direction.`}
+          onClick={() => void submit("Generate")}
+        >
           <Icon name="regenerate" />
           Generate as {name}
         </Button>
-        <Button type="submit" disabled={busy || text.trim() === ""}>
+        <Button type="submit" disabled={busy || text.trim() === ""} hint={`Adds your text here as ${name}'s message.`}>
           <Icon name="check" />
           Insert
         </Button>
-        <Button type="button" disabled={busy} onClick={() => void cancel()}>
+        <Button
+          type="button"
+          disabled={busy}
+          hint="Closes this without inserting; text you typed goes to the bin's recovered texts."
+          onClick={() => void cancel()}
+        >
           <Icon name="close" />
           Cancel
         </Button>

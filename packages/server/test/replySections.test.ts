@@ -3,7 +3,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   DEFAULT_REPLY_SECTIONS,
-  literalPattern,
   originalReply,
   type ReplySections,
   type ReplySectionSettings,
@@ -74,16 +73,22 @@ const splits = (text: string) => [
 ]
 
 describe("reply sections", () => {
-  it("takes a leading section in either spelling, closed by either", () => {
-    for (const [open, close] of [
-      ["<think>", "</think>"],
-      ["<thinking>", "</thinking>"],
-      ["<thinking>", "</think>"],
-      ["<think>", "</thinking>"],
-      ["<THINKING>", "</Think>"]
-    ]) {
+  it("takes a leading section in either spelling, each closed by its own, in any case", () => {
+    const either: ReplySectionSettings = {
+      enabled: true,
+      pairs: [{ open: "<think(?:ing)?>", close: "</think(?:ing)?>", regex: true }],
+      send_back: 0
+    }
+    for (const [open, close, settings] of [
+      ["<think>", "</think>", undefined],
+      ["<thinking>", "</thinking>", undefined],
+      ["<THINKING>", "</Thinking>", undefined],
+      // A regex pair, opted into, lets either close either.
+      ["<thinking>", "</think>", either],
+      ["<think>", "</thinking>", either]
+    ] as const) {
       const text = `\n ${open}\nPlan: keep it short.\n${close}\n\nMira looks up.`
-      const result = run([text])
+      const result = run([text], settings ? { settings } : {})
       expect(result.body).toBe("Mira looks up.")
       expect(result.sections).toEqual({
         sections: [{ lead: "\n ", open, text: "\nPlan: keep it short.\n", close }],
@@ -95,7 +100,7 @@ describe("reply sections", () => {
   })
 
   it("parses a tag split across deltas anywhere, and never shows the section in the body first", () => {
-    const text = "<thinking>Plan.</think>\n\nThe ledger says otherwise."
+    const text = "<thinking>Plan.</thinking>\n\nThe ledger says otherwise."
     for (const chunks of splits(text)) {
       const result = run(chunks)
       expect(result.body).toBe("The ledger says otherwise.")
@@ -105,11 +110,12 @@ describe("reply sections", () => {
   })
 
   it("shows a section's text in the panel as it streams, holding back only what may start its closing tag", () => {
-    const result = run(["<thinking>Plan", " the scene: the tide", " is late, a < b; </th", "ink>\n\nBody."])
+    // A literal closing tag holds back exactly a tail that begins it: `</th`, not `< b`.
+    const result = run(["<thinking>Plan", " the scene: the tide", " is late, a < b; </th", "inking>\n\nBody."])
     expect(result.panels).toEqual([
       "Plan",
       "Plan the scene: the tide",
-      "Plan the scene: the tide is late, a ",
+      "Plan the scene: the tide is late, a < b; ",
       "Plan the scene: the tide is late, a < b; ",
       "Plan the scene: the tide is late, a < b; "
     ])
@@ -122,8 +128,8 @@ describe("reply sections", () => {
       expect(split.panel).toBe("a < b, <i>so</i> </thin.")
       for (const shown of split.panels) expect(split.panel.startsWith(shown)).toBe(true)
     }
-    // A closing pattern with no plain first character: the last 64 characters wait.
-    const settings = { enabled: true, pairs: [{ open: "<plan>", close: "(?:END|STOP)" }], send_back: 0 }
+    // A closing regex with no plain first character: the last 64 characters wait.
+    const settings = { enabled: true, pairs: [{ open: "<plan>", close: "(?:END|STOP)", regex: true }], send_back: 0 }
     const long = run(["<plan>" + "x".repeat(100), "STOP Body."], { settings })
     expect(long.panels[0]).toBe("x".repeat(36))
     expect(long.panel).toBe("x".repeat(100))
@@ -199,10 +205,10 @@ describe("reply sections", () => {
   })
 
   it("starts inside a section the preset's prefill opens", () => {
-    const result = run(["Plan.</think>\nMira looks up."], { prefill: "<thinking>\n" })
+    const result = run(["Plan.</thinking>\nMira looks up."], { prefill: "<thinking>\n" })
     expect(result.body).toBe("Mira looks up.")
     expect(result.sections!.sections).toEqual([
-      { lead: "", open: "<thinking>", text: "\nPlan.", close: "</think>", prefilled: 11 }
+      { lead: "", open: "<thinking>", text: "\nPlan.", close: "</thinking>", prefilled: 11 }
     ])
     expect(result.panel).toBe("\nPlan.")
   })
@@ -214,18 +220,153 @@ describe("reply sections", () => {
     expect(result.panel).toBe("Plan.")
   })
 
-  it("uses the pairs it's given: literal, case-sensitive, and none that match nothing", () => {
+  it("uses the pairs it's given: literal, case-sensitive, and no regex that matches nothing", () => {
     const settings: ReplySectionSettings = {
       enabled: true,
       pairs: [
-        { open: literalPattern("[plan]"), close: literalPattern("[/plan]"), case_sensitive: true },
-        { open: "x*", close: "y" },
-        { open: "(", close: ")" }
+        { open: "[plan]", close: "[/plan]", case_sensitive: true },
+        { open: "x*", close: "y", regex: true },
+        { open: "(", close: ")", regex: true },
+        { open: "", close: "end" }
       ],
       send_back: 0
     }
     expect(compilePairs(settings)).toHaveLength(1)
     expect(run(["[plan]A[/plan]B"], { settings }).body).toBe("B")
     expect(run(["[PLAN]A[/PLAN]B"], { settings }).body).toBe("[PLAN]A[/PLAN]B")
+    // As literal text, `x*` and `(` are tags like any other.
+    const literal: ReplySectionSettings = {
+      enabled: true,
+      pairs: [
+        { open: "x*", close: "y" },
+        { open: "(", close: ")" }
+      ],
+      send_back: 0
+    }
+    expect(compilePairs(literal)).toHaveLength(2)
+    expect(run(["(aside) Body"], { settings: literal }).body).toBe("Body")
+    expect(run(["xxx Body"], { settings: literal }).body).toBe("xxx Body")
+  })
+
+  it("matches literal tags with regex metacharacters exactly as written, split anywhere", () => {
+    for (const [open, close, decoy] of [
+      ["<think|plan>", "</think|plan>", "<think>"],
+      ["[plan.*]", "[/plan.*]", "plan"],
+      ["{{think}}", "{{/think}}", "{think}"],
+      ["\\think/", "\\/think/", "\think/"],
+      ["^$(?:a)", "(?:a)$^", "a"],
+      ["(+)?", "(-)?", "+"]
+    ] as const) {
+      const settings: ReplySectionSettings = { enabled: true, pairs: [{ open, close }], send_back: 0 }
+      const text = `${open}Plan: a + b? [c] (d)|e.${close}\n\nBody.`
+      for (const chunks of splits(text)) {
+        const result = run(chunks, { settings })
+        expect(result.body).toBe("Body.")
+        expect(result.panel).toBe("Plan: a + b? [c] (d)|e.")
+        expect(originalReply(result.body, result.sections)).toBe(text)
+        for (const shown of result.bodies) expect("Body.".startsWith(shown)).toBe(true)
+      }
+      // What the tag would mean as a regex doesn't open a section.
+      const plain = `${decoy}Body.`
+      expect(run([...plain], { settings }).body).toBe(plain)
+    }
+  })
+
+  it("parses SillyTavern's literal tags with line breaks in them, split anywhere", () => {
+    // ST's default prefix and suffix carry a line break; one with two, or starting with one,
+    // is held just as well.
+    for (const [open, close] of [
+      ["<think>\n", "\n</think>"],
+      ["<think>\n\n", "\n\n</think>"],
+      ["\n<think>", "</think>\n"]
+    ] as const) {
+      const settings: ReplySectionSettings = {
+        enabled: true,
+        pairs: [{ open, close, case_sensitive: true }],
+        send_back: 0
+      }
+      const text = `${open}Plan.\nStill plan.${close}\nBody.`
+      for (const chunks of splits(text)) {
+        const result = run(chunks, { settings })
+        expect(result.body).toBe("Body.")
+        expect(result.panel).toBe("Plan.\nStill plan.")
+      }
+    }
+  })
+
+  it("parses regex tags split across deltas anywhere", () => {
+    const settings: ReplySectionSettings = {
+      enabled: true,
+      pairs: [{ open: "<(?:plan|scheme)>", close: "</(?:plan|scheme)>", regex: true }],
+      send_back: 0
+    }
+    for (const [open, close] of [
+      ["<plan>", "</scheme>"],
+      ["<SCHEME>", "</plan>"]
+    ] as const) {
+      const text = `${open}Go < there.${close}\n\nBody.`
+      for (const chunks of splits(text)) {
+        const result = run(chunks, { settings })
+        expect(result.body).toBe("Body.")
+        expect(result.panel).toBe("Go < there.")
+        for (const shown of result.panels) expect("Go < there.".startsWith(shown)).toBe(true)
+        for (const shown of result.bodies) expect("Body.".startsWith(shown)).toBe(true)
+      }
+    }
+  })
+
+  it("lets a partial tag that stops matching through at once", () => {
+    const result = run(["<b", ">Mira</b>"])
+    expect(result.bodies).toEqual(["<b", "<b>Mira</b>", "<b>Mira</b>"])
+    // While it still may be the opening tag, it waits; once complete, what follows is thinking.
+    const thinking = run(["<thi", "nking>Pl", "an"])
+    expect(thinking.bodies).toEqual(["", "", "", ""])
+    expect(thinking.panels).toEqual(["", "Pl", "Plan", "Plan"])
+  })
+
+  it("streamed in any chunks, saves what the whole reply parsed at once does", () => {
+    // A small deterministic generator of replies and chunkings (no randomness between runs).
+    let seed = 7
+    const next = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648
+      return seed % n
+    }
+    const pieces = [
+      "<think>",
+      "</think>",
+      "<thinking>",
+      "</thinking>",
+      "<",
+      "</",
+      "thi",
+      "nk>",
+      " ",
+      "\n",
+      "Plan.",
+      "Mira",
+      "a < b"
+    ]
+    const regexPairs: ReplySectionSettings = {
+      enabled: true,
+      pairs: [{ open: "<think(?:ing)?>", close: "</think(?:ing)?>", regex: true }],
+      send_back: 0
+    }
+    for (let i = 0; i < 400; i++) {
+      const text = Array.from({ length: 1 + next(12) }, () => pieces[next(pieces.length)]).join("")
+      const chunks: Array<string> = []
+      for (let at = 0; at < text.length;) {
+        const size = 1 + next(6)
+        chunks.push(text.slice(at, at + size))
+        at += size
+      }
+      for (const settings of [DEFAULT_REPLY_SECTIONS, regexPairs]) {
+        const whole = run([text], { settings })
+        const streamed = run(chunks, { settings })
+        expect(streamed.body).toBe(whole.body)
+        expect(streamed.sections).toEqual(whole.sections)
+        expect(streamed.panel).toBe(sectionsDisplay(whole.sections))
+        expect(originalReply(streamed.body, streamed.sections)).toBe(text)
+      }
+    }
   })
 })

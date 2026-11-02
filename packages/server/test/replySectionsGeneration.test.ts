@@ -28,7 +28,7 @@ type Message = { readonly role: string; readonly content: string }
 const messagesOf = (request: Recorded) => (request.body as { messages: ReadonlyArray<Message> }).messages
 const completions = (requests: ReadonlyArray<Recorded>) => requests.filter((r) => r.path === "/v1/chat/completions")
 
-const REPLY = "<thinking>\nPlan: Mira is wary.</think>\n\nThe ledger says otherwise."
+const REPLY = "<thinking>\nPlan: Mira is wary.</thinking>\n\nThe ledger says otherwise."
 
 /** Reasoning, then the reply with its section, the closing tag split in two. */
 const replyWithSection = (res: Parameters<typeof sse>[0]) =>
@@ -36,7 +36,7 @@ const replyWithSection = (res: Parameters<typeof sse>[0]) =>
     chunk({ role: "assistant", reasoning_content: "Provider reasoning." }),
     chunk({ content: "<thin" }),
     chunk({ content: "king>\nPlan: Mira is wary.</thi" }),
-    chunk({ content: "nk>\n\nThe ledger" }),
+    chunk({ content: "nking>\n\nThe ledger" }),
     chunk({ content: " says otherwise." }),
     chunk({}, "stop"),
     usage
@@ -70,7 +70,7 @@ describe("reply sections in generation", () => {
                 presetFields: {
                   reply_sections: {
                     enabled: true,
-                    pairs: [{ open: "<think(?:ing)?>", close: "</think(?:ing)?>" }],
+                    pairs: [{ open: "<think(?:ing)?>", close: "</think(?:ing)?>", regex: true }],
                     send_back: 1
                   }
                 }
@@ -81,7 +81,7 @@ describe("reply sections in generation", () => {
         assert.strictEqual(version.content, "The ledger says otherwise.")
         assert.strictEqual(version.reasoning, "Provider reasoning.")
         assert.deepStrictEqual(version.replySections, {
-          sections: [{ lead: "", open: "<thinking>", text: "\nPlan: Mira is wary.", close: "</think>" }],
+          sections: [{ lead: "", open: "<thinking>", text: "\nPlan: Mira is wary.", close: "</thinking>" }],
           gap: "\n\n"
         })
         assert.strictEqual(originalReply(version.content, version.replySections), REPLY)

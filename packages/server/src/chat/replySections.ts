@@ -6,6 +6,7 @@ import {
   type ReplySection,
   type ReplySections,
   type ReplySectionSettings,
+  literalPattern,
   sectionUnclosed
 } from "@rp/shared/replySections.ts"
 import { Stream } from "effect"
@@ -13,7 +14,10 @@ import type { Generation } from "../assembler/types.ts"
 import { compileLinear } from "../assembler/regex.ts"
 import type { GenerationChunk, GenerationFailed, GenerationRequest } from "./Generator.ts"
 
-/** The longest tag a stream can split: the text held back while one may be starting. */
+/**
+ * The longest regex tag a stream can split: the text held back while one may be starting.
+ * A literal tag is held exactly, at any length.
+ */
 const TAG_HOLD = 64
 
 export interface ReplyParse {
@@ -42,6 +46,8 @@ interface Pair {
   /** The closing pattern's, so a section's text shows up to where its closing tag may start. */
   readonly closeFirst: string | null
   readonly caseless: boolean
+  /** A literal pair's tags as written (the default; null: a regex pair), so a hold is exact. */
+  readonly literal: { readonly open: string; readonly close: string } | null
 }
 
 /** A pattern's first character when it's a literal one every match starts with. */
@@ -68,18 +74,43 @@ const firstLiteral = (pattern: string) => {
   return "?*{".includes(pattern[next] ?? "") ? null : char
 }
 
-/** The usable pairs: both patterns compile, safely, and neither matches empty text. */
+/**
+ * The usable pairs: both patterns compile, safely, and neither matches empty text. A pair's
+ * tags are literal text unless it opts into regular expressions (`regex`, owner 2026-11-02),
+ * so `<think|plan>` or `[plan.*]` match only as written.
+ */
 export const compilePairs = (settings: ReplySectionSettings): ReadonlyArray<Pair> =>
   settings.pairs.flatMap((pair) => {
+    if (pair.open === "" || pair.close === "") return []
+    const regex = pair.regex === true
+    const openPattern = regex ? pair.open : literalPattern(pair.open)
+    const closePattern = regex ? pair.close : literalPattern(pair.close)
     const caseless = pair.case_sensitive !== true
     const flags = caseless ? "i" : ""
-    const open = compileLinear(`^(?:${pair.open})`, flags)
-    const close = compileLinear(pair.close, `g${flags}`)
-    if (!(open instanceof RegExp) || !(close instanceof RegExp) || pair.open === "" || pair.close === "") return []
+    const open = compileLinear(`^(?:${openPattern})`, flags)
+    const close = compileLinear(closePattern, `g${flags}`)
+    if (!(open instanceof RegExp) || !(close instanceof RegExp)) return []
     close.lastIndex = 0
     if (open.test("") || close.test("")) return []
-    return [{ open, close, first: firstLiteral(pair.open), closeFirst: firstLiteral(pair.close), caseless }]
+    return [
+      {
+        open,
+        close,
+        first: firstLiteral(openPattern),
+        closeFirst: firstLiteral(closePattern),
+        caseless,
+        literal: regex ? null : { open: pair.open, close: pair.close }
+      }
+    ]
   })
+
+/** Whether `text` is how `tag` begins, in the pair's case rule. */
+const beginsTag = (tag: string, text: string, caseless: boolean) => {
+  if (text.length > tag.length) return false
+  for (let i = 0; i < text.length; i++)
+    if (caseless ? text[i]!.toLowerCase() !== tag[i]!.toLowerCase() : text[i] !== tag[i]) return false
+  return true
+}
 
 /** Where held text went when a reply ended without the parser's end: a stop, a crash, a failure. */
 export const settleHeld = (
@@ -136,11 +167,19 @@ export const parseReply = (
   const startsWith = (pair: Pair, first: string, c: string) =>
     pair.caseless ? c.toLowerCase() === first.toLowerCase() : c === first
 
-  /** Whether the start of `rest` may still become an opening tag. */
+  /**
+   * Whether the start of `rest` may still become an opening tag: exactly, for a literal tag
+   * (`<b>` goes through at once); for a pattern, while it's short, on one line and allowed
+   * by the pattern's plain first character.
+   */
   const mayOpen = (rest: string) =>
-    rest.length < TAG_HOLD &&
-    !rest.includes("\n") &&
-    pairs.some((pair) => pair.first === null || startsWith(pair, pair.first, rest[0]!))
+    pairs.some((pair) =>
+      pair.literal
+        ? beginsTag(pair.literal.open, rest, pair.caseless)
+        : rest.length < TAG_HOLD &&
+          !rest.includes("\n") &&
+          (pair.first === null || startsWith(pair, pair.first, rest[0]!))
+    )
 
   const opening = (rest: string) => {
     for (const pair of pairs) {
@@ -151,18 +190,24 @@ export const parseReply = (
   }
 
   /**
-   * Where a closing tag may be starting in the text not shown yet: the first character in
-   * its last `TAG_HOLD` that a closing pattern's plain first character allows, so the panel
-   * keeps up with the stream (only `<…` waits, with the default tags).
+   * Where a closing tag may be starting in the text not shown yet, so the panel keeps up with
+   * the stream: for a literal tag, the earliest tail that begins it (`</thi` waits, `a < b`
+   * doesn't); for a pattern, the first character in the last `TAG_HOLD` that its plain first
+   * character allows, or all of them when it has none.
    */
-  const mayCloseAt = (text: string) => {
+  const closeMayStartAt = (pair: Pair, text: string) => {
+    if (pair.literal) {
+      for (let i = Math.max(0, text.length - pair.literal.close.length + 1); i < text.length; i++)
+        if (beginsTag(pair.literal.close, text.slice(i), pair.caseless)) return i
+      return text.length
+    }
     const from = Math.max(0, text.length - TAG_HOLD)
-    const candidates = closing ? [closing] : pairs
-    if (candidates.some((pair) => pair.closeFirst === null)) return from
-    for (let i = from; i < text.length; i++)
-      if (candidates.some((pair) => startsWith(pair, pair.closeFirst!, text[i]!))) return i
+    if (pair.closeFirst === null) return from
+    for (let i = from; i < text.length; i++) if (startsWith(pair, pair.closeFirst, text[i]!)) return i
     return text.length
   }
+  const mayCloseAt = (text: string) =>
+    Math.min(text.length, ...(closing ? [closing] : pairs).map((pair) => closeMayStartAt(pair, text)))
 
   const findClose = (text: string) => {
     let best: { index: number; tag: string } | null = null
@@ -179,18 +224,19 @@ export const parseReply = (
   const beforeSection = (final: boolean) => {
     const lead = /^\s*/.exec(buffer)![0]
     const rest = buffer.slice(lead.length)
-    if (rest !== "") {
-      const open = opening(rest)
-      if (open) {
-        sections = [...sections, { lead, open: open.tag, text: "", close: null }]
-        closing = open.pair
-        state = "inside"
-        buffer = rest.slice(open.tag.length)
-        emitSections(sections.length > 1 ? "\n\n" : "")
-        return inside(final)
-      }
+    // A tag that itself starts with blank space (a literal `\n<think>`) matches from the start.
+    const whole = lead !== "" ? opening(buffer) : null
+    const open = whole ?? (rest !== "" ? opening(rest) : null)
+    if (open) {
+      const before = whole ? "" : lead
+      sections = [...sections, { lead: before, open: open.tag, text: "", close: null }]
+      closing = open.pair
+      state = "inside"
+      buffer = buffer.slice(before.length + open.tag.length)
+      emitSections(sections.length > 1 ? "\n\n" : "")
+      return inside(final)
     }
-    if (!final && (rest === "" || mayOpen(rest))) return hold("body")
+    if (!final && (rest === "" || mayOpen(rest) || (lead !== "" && mayOpen(buffer)))) return hold("body")
     // No section here: the body starts. After a section, the whitespace before it is the gap.
     if (state === "after") {
       gap = lead

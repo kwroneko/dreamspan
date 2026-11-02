@@ -1,10 +1,12 @@
 // Tagged sections at the start of a reply (spec/REPLY-SECTIONS.md): which opening and closing
-// patterns take a leading section out of the reply into its own panel, whether that's on, and
-// how many recent replies send theirs back. The whole setting is one field of the preset;
-// absent, the defaults show and the first change writes them out.
+// tags take a leading section out of the reply into its own panel, whether that's on, and
+// how many recent replies send theirs back. Tags are text matched as written, as SillyTavern's
+// prefix and suffix are; a pair is a regular expression only when "Treat as a regex" is on
+// (owner, 2026-11-02). The whole setting is one field of the preset; absent, the defaults show
+// and the first change writes them out.
 import {
   DEFAULT_REPLY_SECTIONS,
-  DEFAULT_SECTION_PAIR,
+  DEFAULT_SECTION_PAIRS,
   type ReplySectionSettings,
   type SectionPair
 } from "@rp/shared/replySections.ts"
@@ -17,11 +19,15 @@ import { type EditorStore, useValue } from "./store.ts"
 
 const PATH = ["reply_sections"]
 
-/** Why the browser can't read a pattern; the server also skips what its linear-time engine can't run. */
-const patternError = (pattern: string) => {
-  if (pattern === "") return "Empty: this pair is skipped."
+/**
+ * Why a tag can't be used: empty, or (a regex pair) a pattern the browser can't read; the
+ * server also skips what its linear-time engine can't run.
+ */
+const tagError = (tag: string, regex: boolean) => {
+  if (tag === "") return "Empty: this pair is skipped."
+  if (!regex) return null
   try {
-    new RegExp(pattern)
+    new RegExp(tag)
     return null
   } catch (error) {
     return error instanceof Error ? error.message : "Not a regular expression."
@@ -39,13 +45,16 @@ function PairRow({
   onChange: (pair: SectionPair) => void
   onRemove: () => void
 }) {
+  const regex = pair.regex === true
   return (
     <li className="flex flex-col gap-2 rounded-md border border-border p-3" data-section-pair={index}>
       <div className="grid gap-2 sm:grid-cols-2">
         <Field
           label="Opening tag"
-          description="Where a section starts: a regular expression."
-          error={patternError(pair.open)}
+          description={
+            regex ? "Where a section starts: a regular expression." : "Where a section starts, exactly as written."
+          }
+          error={tagError(pair.open, regex)}
         >
           <Input
             value={pair.open}
@@ -54,7 +63,11 @@ function PairRow({
             onChange={(event) => onChange({ ...pair, open: event.currentTarget.value })}
           />
         </Field>
-        <Field label="Closing tag" description="Where it ends." error={patternError(pair.close)}>
+        <Field
+          label="Closing tag"
+          description={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
+          error={tagError(pair.close, regex)}
+        >
           <Input
             value={pair.close}
             spellCheck={false}
@@ -64,16 +77,28 @@ function PairRow({
         </Field>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Checkbox
-          hint="On: the tags match only as written. Off: any case, so <THINK> too."
-          checked={pair.case_sensitive === true}
-          onCheckedChange={(checked) => {
-            const { case_sensitive: _, ...rest } = pair
-            onChange(checked ? { ...rest, case_sensitive: true } : rest)
-          }}
-        >
-          Match case
-        </Checkbox>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Checkbox
+            hint="On: the tags match only in the case written. Off: any case, so <THINK> too."
+            checked={pair.case_sensitive === true}
+            onCheckedChange={(checked) => {
+              const { case_sensitive: _, ...rest } = pair
+              onChange(checked ? { ...rest, case_sensitive: true } : rest)
+            }}
+          >
+            Match case
+          </Checkbox>
+          <Checkbox
+            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included, as in SillyTavern."
+            checked={regex}
+            onCheckedChange={(checked) => {
+              const { regex: _, ...rest } = pair
+              onChange(checked ? { ...rest, regex: true } : rest)
+            }}
+          >
+            Treat as a regex
+          </Checkbox>
+        </div>
         <Button variant="ghost" hint="These tags no longer mark thinking." onClick={onRemove}>
           Remove pair
         </Button>
@@ -87,8 +112,10 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
   const settings = stored ?? DEFAULT_REPLY_SECTIONS
   // What's typed in the number field while it isn't a valid count yet (empty, say).
   const [typed, setTyped] = useState<string | null>(null)
-  const hasDefault = settings.pairs.some(
-    (pair) => pair.open === DEFAULT_SECTION_PAIR.open && pair.close === DEFAULT_SECTION_PAIR.close
+  // The default pairs this preset doesn't have, as literal tags.
+  const missingDefaults = DEFAULT_SECTION_PAIRS.filter(
+    (initial) =>
+      !settings.pairs.some((pair) => pair.regex !== true && pair.open === initial.open && pair.close === initial.close)
   )
   const change = (next: Partial<ReplySectionSettings>) => store.setValue(PATH, { ...settings, ...next })
   const setPair = (index: number, pair: SectionPair) =>
@@ -109,9 +136,11 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
         </Switch>
         <p className="text-sm text-muted">
           Only at the very start of the reply, after any blank space; several in a row are all moved. Tags later in the
-          reply stay where they are. Each tag is a regular expression (no lookaheads or backreferences); the default
-          pair accepts both <code className="font-mono">&lt;think&gt;</code> and{" "}
-          <code className="font-mono">&lt;thinking&gt;</code>, so either closes either.
+          reply stay where they are. Each tag is matched exactly as written, unless its pair is set to be treated as a
+          regex. The default pairs are <code className="font-mono">&lt;think&gt;</code> and{" "}
+          <code className="font-mono">&lt;thinking&gt;</code>, each closed by its own closing tag. While a reply is
+          being written, everything after a complete opening tag shows in the thinking panel until the closing tag
+          arrives.
         </p>
         <ul className="flex flex-col gap-2">
           {settings.pairs.map((pair, index) => (
@@ -131,13 +160,13 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
           >
             Add a pair
           </Button>
-          {!hasDefault && (
+          {missingDefaults.length > 0 && (
             <Button
               variant="ghost"
-              hint="Adds the <think> and <thinking> pair back."
-              onClick={() => change({ pairs: [...settings.pairs, DEFAULT_SECTION_PAIR] })}
+              hint={`Adds back ${missingDefaults.map((pair) => `${pair.open} … ${pair.close}`).join(" and ")}, matched as written.`}
+              onClick={() => change({ pairs: [...settings.pairs, ...missingDefaults] })}
             >
-              Add the default pair
+              {missingDefaults.length > 1 ? "Add the default pairs" : "Add the default pair"}
             </Button>
           )}
         </div>

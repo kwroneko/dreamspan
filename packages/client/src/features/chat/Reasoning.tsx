@@ -6,7 +6,9 @@
 // all (every reasoning block shown closes; the streaming preference stays as it is).
 // The reply's own leading tagged sections (spec/REPLY-SECTIONS.md) show in a second panel of
 // the same kind, "Thinking in the reply", below the provider's. Both are entries of the
-// `reasoningPanels` slot.
+// `reasoningPanels` slot. While a reply is being written, everything after a complete opening
+// tag streams into that panel, and its header reads "Thinking…" (pulsing) until the closing
+// tag has come and the body starts (owner, 2026-11-02); open or folded as the user prefers.
 import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { SlotId, Version } from "@rp/shared/chat.ts"
@@ -19,7 +21,8 @@ import { MessageBody } from "../../ui/messageCopy.tsx"
 import { SlotOutlet } from "../../slots.tsx"
 import { reasoningActions, reasoningPanels } from "./presentation.tsx"
 import { collapseCount, subscribeCollapses } from "./reasoningActions.tsx"
-import { liveReasoning, liveSections, type ChatSession } from "./session.ts"
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { liveReasoning, liveSections, liveText, type ChatSession } from "./session.ts"
 import { useDisplayed } from "./useDisplayed.ts"
 
 const words = (text: string) => {
@@ -38,6 +41,7 @@ interface PanelProps {
 /** The provider's reasoning field. */
 function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveReasoning(version.id))
+  const body = useAtomValue(liveText(version.id)) ?? version.content
   const text = live ?? version.reasoning ?? ""
   if (text === "") return null
   return (
@@ -52,6 +56,7 @@ function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
       kind="reasoning"
       first
       label="Reasoning"
+      thinking={body === ""}
     />
   )
 }
@@ -60,8 +65,12 @@ function Reasoning({ version, session, parentSlotId, depth }: PanelProps) {
 function ReplySections({ version, session, parentSlotId, depth }: PanelProps) {
   const live = useAtomValue(liveSections(version.id))
   const reasoning = useAtomValue(liveReasoning(version.id)) ?? version.reasoning ?? ""
+  const body = useAtomValue(liveText(version.id)) ?? version.content
   const text = live ?? sectionsDisplay(version.replySections)
   const streaming = version.status === "generating"
+  // The body starts only once the last section has closed (chat/replySections.ts), so a reply
+  // still being written with no body yet is thinking: everything after the opening tag is here.
+  const thinking = streaming && body === ""
   if (text === "" && !version.replySections) return null
   return (
     <ReasoningBlock
@@ -75,6 +84,8 @@ function ReplySections({ version, session, parentSlotId, depth }: PanelProps) {
       kind="sections"
       first={reasoning === ""}
       label="Thinking in the reply"
+      streamingLabel={thinking ? "Thinking…" : "Thinking in the reply"}
+      thinking={thinking}
       notice={
         !streaming && sectionUnclosed(version.replySections)
           ? "Never closed: the reply ended inside its thinking."
@@ -104,6 +115,8 @@ function ReasoningBlock({
   kind,
   first,
   label,
+  streamingLabel = `${label}…`,
+  thinking = streaming,
   notice = null
 }: PanelProps & {
   text: string
@@ -111,9 +124,14 @@ function ReasoningBlock({
   kind: "reasoning" | "sections"
   first: boolean
   label: string
+  /** The header while the reply is being written; default: the label, still going ("…"). */
+  streamingLabel?: string
+  /** Text is still arriving in this panel: its header pulses. */
+  thinking?: boolean
   notice?: string | null
 }) {
   const id = useId()
+  const hintId = useId()
   const viewer = useViewPrefs()
   // Both panels display through the reasoning placement's display scripts, as ST's do.
   const shown = useDisplayed({ version, session, parentSlotId, depth }, text, 6, streaming)
@@ -131,6 +149,15 @@ function ReasoningBlock({
   const open =
     chosen !== null && chosen.streaming === streaming ? chosen.open : streaming ? preferred === "expanded" : false
 
+  // What a click does, on hover and focus (DESIGN: every action explains itself).
+  const hint = open
+    ? streaming
+      ? "Folds this thinking away. Replies after this one stream with it folded too."
+      : "Folds this thinking away."
+    : streaming
+      ? "Shows this thinking, live as it's written. Replies after this one stream with it open too."
+      : "Shows this thinking."
+
   const toggle = () => {
     setChosen({ open: !open, streaming })
     // During a run the choice sticks: later replies stream that way too (DESIGN §7.4).
@@ -144,26 +171,43 @@ function ReasoningBlock({
     <div className="flex flex-col gap-1" data-reasoning-panel={kind}>
       {/* The actions: beside the toggle, or a row of their own under it on a phone. */}
       <div className="flex flex-wrap items-center gap-x-2">
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={toggle}
-          className="-ml-1 flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-        >
-          <Icon name={open ? "down" : "right"} size={14} />
-          <Icon name={kind === "reasoning" ? "reasoning" : "note"} size={14} />
-          <span className="font-medium">{streaming ? `${label}…` : label}</span>
-          <span aria-hidden="true">·</span>
-          <span>{words(text)}</span>
-        </button>
+        <Tooltip label={hint}>
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={id}
+            aria-describedby={hintId}
+            onClick={toggle}
+            className="-ml-1 flex w-fit max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <Icon name={open ? "down" : "right"} size={14} />
+            <Icon name={kind === "reasoning" ? "reasoning" : "note"} size={14} />
+            <span
+              className={`font-medium ${streaming && thinking ? "animate-pulse motion-reduce:animate-none" : ""}`}
+              data-thinking={streaming && thinking ? "" : undefined}
+            >
+              {streaming ? streamingLabel : label}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>{words(text)}</span>
+          </button>
+        </Tooltip>
+        <span id={hintId} hidden>
+          {hint}
+        </span>
         <div className="flex w-full flex-wrap items-center gap-x-1 pl-4 empty:hidden sm:w-auto sm:pl-0">
           <SlotOutlet slot={reasoningActions} props={{ version, text, streaming, kind, first, session }} />
         </div>
       </div>
       {notice && <p className="pl-4 text-xs text-muted">{notice}</p>}
       {open && (
-        <div id={id} role="region" aria-label={label} className="border-l-2 border-border pl-3 text-sm text-muted">
+        <div
+          id={id}
+          role="region"
+          aria-label={label}
+          aria-busy={streaming && thinking ? true : undefined}
+          className="border-l-2 border-border pl-3 text-sm text-muted"
+        >
           <MessageBody text={text}>
             {shown.pending ? (
               // Its place kept, not shown, until the display scripts answer.

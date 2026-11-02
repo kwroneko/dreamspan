@@ -16,8 +16,8 @@ export interface FakeGeneratorOptions {
   /** About how many tokens of reasoning come before the text, as a reasoning model's would; none when unset. */
   readonly reasoningTokens?: number | undefined
   /**
-   * About how many tokens of a tagged section the text starts with, opened `<thinking>` and
-   * closed `</think>`, the opening tag split across two chunks; none when unset.
+   * About how many tokens of a tagged section the text starts with, in `<thinking>` /
+   * `</thinking>`, both tags split across two chunks; none when unset.
    */
   readonly sectionTokens?: number | undefined
   /**
@@ -43,7 +43,13 @@ export const layer = (options: FakeGeneratorOptions) =>
             ? tokenize(syntheticReasoning(seed, options.reasoningTokens)).map((token) => ({ reasoning: token }))
             : []
           const section: ReadonlyArray<GenerationChunk> = options.sectionTokens
-            ? ["<thin", "king>\n", ...tokenize(syntheticReasoning(seed + 1, options.sectionTokens)), "\n</think>\n\n"]
+            ? [
+                "<thin",
+                "king>\n",
+                ...tokenize(syntheticReasoning(seed + 1, options.sectionTokens)),
+                "\n</thin",
+                "king>\n\n"
+              ]
             : []
           const cot: ReadonlyArray<GenerationChunk> = options.cotTokens
             ? ["<c", "ot>", ...tokenize(syntheticReasoning(seed + 2, options.cotTokens)), "</c", "ot>\n"]
