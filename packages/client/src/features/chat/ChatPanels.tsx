@@ -20,7 +20,6 @@ import {
   usePanelTabs
 } from "./panels.tsx"
 import type { PendingChat } from "./pendingChat.ts"
-export { isPanelTab } from "./panels.tsx"
 /** Panel URL values are open strings, validated against the descriptors at use. */
 export type PanelTab = string
 
