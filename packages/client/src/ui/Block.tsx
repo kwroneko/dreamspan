@@ -189,8 +189,11 @@ export function ExpandCollapseAll({
   anyOpen,
   allOpen,
   compact = false,
+  start,
   children
 }: {
+  /** What leads the row on its left, the list's save cluster say: one row, no empty space (DESIGN §10.1). */
+  start?: ReactNode
   onExpand: () => void
   onCollapse: () => void
   expandHint: string
@@ -206,6 +209,7 @@ export function ExpandCollapseAll({
   const small = compact ? "h-7 px-2" : ""
   return (
     <div className={`flex flex-wrap items-center gap-1 ${compact ? "justify-end" : "sm:gap-2"}`}>
+      {start !== undefined && <div className="mr-auto flex items-center">{start}</div>}
       <Button variant={variant} className={small} disabled={compact && allOpen} hint={expandHint} onClick={onExpand}>
         Expand all
       </Button>

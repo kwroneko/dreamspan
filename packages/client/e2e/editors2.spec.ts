@@ -11,7 +11,7 @@ import { HELD_FIELD, textField } from "@rp/shared/editing.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
-import { revisionStatus } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 
@@ -85,7 +85,7 @@ for (const width of [1440, 390])
       const before = await field.textContent()
       await description.fill(`${name} keeps the lighthouse log, and writes the storms down hour by hour.`)
       await expect(field).not.toHaveText(before!, { timeout: 30_000 })
-      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+      await expectSaveState(page, UNSAVED)
 
       // Export with that unsaved: the dialog names it; the last revision leaves it out.
       await page.getByRole("button", { name: "Export…", exact: true }).click()
@@ -98,7 +98,7 @@ for (const width of [1440, 390])
       )
       expect(last.data.description).toBe(`${name} keeps the lighthouse log.`)
       await expect(dialog).toHaveCount(0)
-      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+      await expectSaveState(page, UNSAVED)
 
       // Cancel writes nothing; Save and export cuts revision 2 and exports it.
       await page.getByRole("button", { name: "Export…", exact: true }).click()
@@ -111,7 +111,7 @@ for (const width of [1440, 390])
         dialog.getByRole("button", { name: "Save and export", exact: true }).click()
       )
       expect(saved.data.description).toContain("hour by hour")
-      await expect(revisionStatus(page)).toHaveText(/^Saved as revision 2$/)
+      await expectSaveState(page, NOTHING_TO_SAVE)
 
       // Nothing unsaved: Export downloads at once, with no dialog.
       await page.getByRole("button", { name: "Export…", exact: true }).click()
@@ -128,7 +128,7 @@ test("the library's item menu asks too, from the server's unsaved drafts", async
   await page.goto(`${server().url}/library/${ref.id}`)
   const description = page.getByRole("textbox", { name: "Description", exact: true })
   await description.fill("Corin mends nets on the slipway.")
-  await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+  await expectSaveState(page, UNSAVED)
   // The typing is on the server as a draft, then the editor is left.
   await expect
     .poll(() =>
@@ -150,7 +150,7 @@ test("the library's item menu asks too, from the server's unsaved drafts", async
   expect(saved.data.description).toBe("Corin mends nets on the slipway.")
   await page.goto(`${server().url}/library/${ref.id}`)
   await expectTextBox(description, "Corin mends nets on the slipway.")
-  await expect(revisionStatus(page)).toHaveText(/^Saved as revision 2$/)
+  await expectSaveState(page, NOTHING_TO_SAVE)
 })
 
 test("a card's note with unsaved typing is asked about too, and saved with the card", async ({ page }) => {
@@ -244,7 +244,7 @@ test("the character tab's Export asks with the tab's own unsaved typing", async 
   const dialog = page.getByRole("dialog", { name: "Petra Tab has unsaved changes" })
   await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
-  await expect(revisionStatus(tab)).toHaveText(/^Changed since revision 1$/)
+  await expectSaveState(tab, UNSAVED)
 })
 
 const upload = async (page: Page, name: string, data: unknown) => {
@@ -359,10 +359,10 @@ for (const width of [1440, 390])
       await page.getByRole("button", { name: "Disable all", exact: true }).click()
       await expect(page.getByText("Disabled all 2 entries", { exact: true })).toBeVisible({ timeout: 30_000 })
       await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
-      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+      await expectSaveState(page, UNSAVED)
       await shoot(page, `lorebook-disable-all-${width}-${theme}`)
-      await page.getByRole("button", { name: /^Revert to revision 1/ }).click()
-      await expect(revisionStatus(page)).toHaveText(/^Saved as revision 1$/, { timeout: 30_000 })
+      await page.getByRole("button", { name: "Revert to the last save", exact: true }).click()
+      await expectSaveState(page, NOTHING_TO_SAVE, { timeout: 30_000 })
 
       // A preset's added prompt waits behind the bar, shown in place.
       const preset = await upload(page, `Tidewater ${width} ${theme}.json`, {

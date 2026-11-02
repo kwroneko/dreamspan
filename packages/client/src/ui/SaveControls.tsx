@@ -1,66 +1,132 @@
-// Saving a revision, the same in every editor (owner, 2026-11-01): what's typed is used as it's
-// typed, so a revision is only a checkpoint. The state says honestly whether the text changed
-// since the last one ("Changed since revision N", never "not sent"); a plain Save asks nothing;
-// beside it, "Save with a message…" opens a one-line field for a label (Enter saves, Escape
-// cancels), which History can add or change later too. Editors bind it to their store.
-import { useState } from "react"
+// The save cluster, the same everywhere something is saved as a version (owner, 2026-11-01 and
+// 2026-11-02, DESIGN §10.1): two icon buttons, Save and Save with a message, and Revert beside
+// them while something changed. What's typed is already in use as it's typed, so saving keeps
+// a version to come back to; the cluster says only what the user needs: whether there's
+// anything to save, that it's saving, that it saved, or why it couldn't. It keeps one size in
+// every state: Revert's place is kept while it's hidden, and each state swaps an icon or a
+// colour, never text. Its explanations, on hover and focus, carry the words. Save with a
+// message opens a one-line field in its place (Enter saves, Escape cancels). Editors bind it
+// to their store (`SaveRevision`, `HeldChangesBar`).
+import { useEffect, useRef, useState } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
 import { OneLineField } from "./OneLineField.tsx"
+import { Spinner } from "./Spinner.tsx"
 
-/** The state line: whether the live text has changed since the head revision. */
-export const revisionState = (revision: number, changed: boolean) =>
-  changed ? `Changed since revision ${revision}` : `Saved as revision ${revision}`
+/** Where the cluster is; `data-save-state` on its group says it to tests and styles. */
+export type SaveState = "clean" | "unsaved" | "blocked" | "saving" | "saved" | "failed"
+
+/** How long the saved tick shows before the cluster settles back to quiet. */
+export const SAVED_FOR_MS = 1800
+
+/** The explanations, kept together so they read as one voice. */
+export const saveHints = {
+  save: "Keeps this version in History so you can return to it. Your edits are already in use; you don't need to save them.",
+  clean: "Nothing to save: no edits since the last save.",
+  saving: "Saving…",
+  saved: "Saved. You can return to this version from History.",
+  failed: (reason: string) => `Couldn't save: ${reason} Your edits are still here. Save again to retry.`,
+  message: "Keeps this version in History with a note saying what changed.",
+  revert: "Undoes every edit since the last save. What you undo stays in each field's edit history."
+}
+
+/** A reason as a sentence, ending in a full stop. */
+const sentence = (text: string) => (/[.!?…]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`)
+
+/** One size for the three, a toolbar icon button's. */
+const square = "h-8! w-8! px-0!"
+/** Not actionable but still focusable and hoverable, so its explanation can say why. */
+const inert =
+  "cursor-default bg-transparent! text-muted! opacity-50 data-disabled:pointer-events-auto! data-disabled:opacity-50! hover:bg-transparent!"
 
 export function SaveControls({
-  revision,
   changed,
   pending = false,
   blocked = null,
+  failed = null,
   onSave,
   onRevert,
-  showState = true,
-  compact = false
+  saveHint = saveHints.save,
+  revertLabel = "Revert to the last save",
+  revertHint = saveHints.revert
 }: {
-  /** A crowded toolbar: on a phone, "Save with a message…" shows as its pen icon only. */
-  compact?: boolean
-  /** The head revision's number. */
-  revision: number
-  /** The live text differs from it. */
+  /** Something differs from the last save. */
   changed: boolean
   pending?: boolean
   /** Why saving can't happen now (a name another card has, say); null when it can. */
   blocked?: string | null
-  /** Saves a revision with this message (null: none); false keeps the message field open. */
+  /** Why the last save failed; null when it didn't. */
+  failed?: string | null
+  /** Saves with this message (null: none); false keeps the message field open. */
   onSave: (message: string | null) => Promise<boolean>
   /**
-   * Puts every changed field back to the head revision; shown while something changed. The
-   * text there now stays in each field's edit history, so it asks nothing.
+   * Puts every change back as the last save had it; shown while something changed. The text
+   * there now stays in each field's edit history, so it asks nothing.
    */
   onRevert?: (() => Promise<unknown>) | undefined
-  /** The state line beside the buttons; off where the editor shows it elsewhere. */
-  showState?: boolean
+  /** What Save does, where it does more than keep a version (applying held changes, say). */
+  saveHint?: string
+  /** Revert's accessible name, where it undoes less than every edit (a held order: "Revert"). */
+  revertLabel?: string
+  revertHint?: string
 }) {
   const [writing, setWriting] = useState(false)
   const [reverting, setReverting] = useState(false)
-  const next = revision + 1
-  const disabled = !changed || blocked !== null
-  const why = blocked ?? (changed ? null : `Nothing changed since revision ${revision}.`)
+  const [justSaved, setJustSaved] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const state: SaveState = pending
+    ? "saving"
+    : blocked !== null && changed
+      ? "blocked"
+      : failed !== null
+        ? "failed"
+        : changed
+          ? "unsaved"
+          : justSaved
+            ? "saved"
+            : "clean"
+
+  const save = async (message: string | null) => {
+    clearTimeout(timer.current)
+    setJustSaved(false)
+    const saved = await onSave(message)
+    if (saved) {
+      setJustSaved(true)
+      timer.current = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
+    }
+    return saved
+  }
+
+  const actionable = state === "unsaved" || state === "failed"
+  const hint =
+    state === "saving"
+      ? saveHints.saving
+      : state === "failed"
+        ? saveHints.failed(sentence(failed!))
+        : state === "blocked"
+          ? blocked!
+          : state === "saved"
+            ? saveHints.saved
+            : state === "clean"
+              ? saveHints.clean
+              : saveHint
+  const announcement = state === "saved" ? "Saved" : state === "failed" ? `Couldn't save: ${sentence(failed!)}` : ""
+
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-2">
-      {showState && (
-        <span role="status" className="text-sm text-muted">
-          {revisionState(revision, changed)}
-        </span>
-      )}
+    <span role="group" aria-label="Save" data-save-state={state} className="inline-flex shrink-0 items-center gap-1">
+      <span role="status" className="sr-only">
+        {announcement}
+      </span>
       {writing ? (
         <OneLineField
           label="Revision message"
           placeholder="What changed"
           saveLabel="Save with this message"
-          saveHint={`Saves revision ${next} with this message`}
+          saveHint="Saves this version with your note"
           onSave={async (message) => {
-            const saved = await onSave(message === "" ? null : message)
+            const saved = await save(message === "" ? null : message)
             if (saved) setWriting(false)
             return saved
           }}
@@ -69,52 +135,57 @@ export function SaveControls({
       ) : (
         <>
           <Button
-            variant="primary"
-            pending={pending}
-            disabled={disabled}
-            hint={
-              why ??
-              `Saves revision ${next}: a checkpoint in History to come back to. Replies already use what you type as you type it.`
-            }
-            onClick={() => void onSave(null)}
+            variant={state === "failed" ? "danger" : actionable || state === "saving" ? "primary" : "ghost"}
+            aria-label="Save"
+            disabled={!actionable}
+            focusableWhenDisabled
+            aria-busy={state === "saving" || undefined}
+            className={`${square} ${state === "clean" || state === "blocked" ? inert : ""} ${
+              state === "saved"
+                ? "cursor-default bg-transparent! text-success! opacity-100! data-disabled:pointer-events-auto!"
+                : ""
+            } ${state === "saving" ? "data-disabled:pointer-events-auto! data-disabled:opacity-100!" : ""}`}
+            hint={hint}
+            onClick={() => actionable && void save(null)}
           >
-            Save
+            {state === "saving" ? (
+              <Spinner />
+            ) : state === "saved" ? (
+              <Icon name="check" />
+            ) : state === "failed" ? (
+              <Icon name="alert" />
+            ) : (
+              <Icon name="save" />
+            )}
           </Button>
           <Button
             variant="ghost"
-            disabled={disabled || pending}
             aria-label="Save with a message…"
-            className={compact ? "max-sm:px-2!" : ""}
-            hint={
-              why ??
-              "Saves a revision with a one-line message saying what changed. History can add or change a message later."
-            }
-            onClick={() => setWriting(true)}
+            disabled={!actionable}
+            focusableWhenDisabled
+            className={`${square} ${actionable ? "" : inert}`}
+            hint={actionable ? saveHints.message : state === "saving" ? saveHints.saving : hint}
+            onClick={() => actionable && setWriting(true)}
           >
-            {compact ? (
-              <>
-                <Icon name="edit" />
-                <span className="max-sm:hidden">Save with a message…</span>
-              </>
-            ) : (
-              "Save with a message…"
-            )}
+            <Icon name="save-message" />
           </Button>
-          {onRevert && changed && (
-            <Button
-              variant="ghost"
-              pending={reverting}
-              aria-label={`Revert to revision ${revision}`}
-              className={compact ? "max-sm:px-2!" : ""}
-              hint={`Puts every field back to revision ${revision}. What's there now stays in each field's edit history.`}
-              onClick={() => {
-                setReverting(true)
-                void onRevert().finally(() => setReverting(false))
-              }}
-            >
-              <Icon name="undo" />
-              <span className={compact ? "max-sm:hidden" : ""}>Revert to revision {revision}</span>
-            </Button>
+          {onRevert && (
+            // Its place is kept while nothing changed, so the cluster never changes size.
+            <span className={changed && state !== "saving" ? "contents" : "invisible inline-flex"}>
+              <Button
+                variant="ghost"
+                aria-label={revertLabel}
+                pending={reverting}
+                className={square}
+                hint={revertHint}
+                onClick={() => {
+                  setReverting(true)
+                  void onRevert().finally(() => setReverting(false))
+                }}
+              >
+                {!reverting && <Icon name="undo" />}
+              </Button>
+            </span>
           )}
         </>
       )}

@@ -2,7 +2,7 @@ import { CardSurface } from "../cardForks/surfaces.tsx"
 import { useCardNameCheck } from "./cardNameCheck.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 // A library entry's editor (ARCHITECTURE.md §14): which entry and scope you're editing, how
-// many chats the change reaches, and the state you're in: "Saved as revision N", or "Changed since revision N": what's typed is used as it's typed.
+// many chats the change reaches, and the save cluster (DESIGN §10.1).
 import { useAtomValue } from "@effect/atom-react"
 import type { ChatId } from "@rp/shared/chat.ts"
 import type { SavedRef } from "@rp/shared/editorApi.ts"
@@ -42,7 +42,6 @@ import { ForkDialog, RefName } from "./RefDialogs.tsx"
 import { RevisionsDialog } from "./RevisionsDialog.tsx"
 import { HeldChangesBar } from "./SaveRevert.tsx"
 import { SaveRevision } from "./SaveRevision.tsx"
-import { revisionState } from "../../ui/SaveControls.tsx"
 import { SearchNavigation, type SearchMatch } from "./searchNavigation.ts"
 import { SearchDialog } from "./SearchDialog.tsx"
 import { lorebookScopes, presetScopes } from "./searchScopes.ts"
@@ -77,13 +76,15 @@ const addedTo = (chats: number) =>
       ? "Added to 1 chat: what you change here is used there as you type."
       : `Added to ${chats} chats: what you change here is used in all of them as you type. To change it in some only, make a variant.`
 
-/** What saving did to the refs that follow this one. */
+/**
+ * What saving did to the refs that follow this one, or null when it did nothing more than save:
+ * Save's own tick says that (DESIGN §10.1).
+ */
 const savedNotice = (saved: SavedRef) => {
   const setAside = saved.setAside.length
   const merged = saved.followers.filter((f) => f.outcome === "fast_forward" || f.outcome === "merged").length
   const conflicts = saved.followers.filter((f) => f.outcome === "conflicts").length
-  return [
-    "Saved a revision.",
+  const parts = [
     merged > 0
       ? `${plural(merged, "entry that follows this one", "entries that follow this one")} took the change.`
       : "",
@@ -91,9 +92,8 @@ const savedNotice = (saved: SavedRef) => {
     setAside > 0
       ? `${plural(setAside, "change was", "changes were")} in something deleted since, so ${setAside === 1 ? "it's" : "they're"} in the bin's recovered texts instead.`
       : ""
-  ]
-    .filter((part) => part !== "")
-    .join(" ")
+  ].filter((part) => part !== "")
+  return parts.length === 0 ? null : ["Saved.", ...parts].join(" ")
 }
 
 /** The chat a chat override belongs to, by name, as a link back to it. */
@@ -206,7 +206,6 @@ export function Editor({
   }
   if (state.snapshot === null) return <Loading label="Opening the editor…" onRetry={() => void store.load()} />
   const { ref, usedByChats, variants } = state.snapshot
-  const { dirty } = state
 
   /**
    * A preset's and a lorebook's search sits in the sticky bar, with what it looks in (owner,
@@ -339,6 +338,8 @@ export function Editor({
 
         <div
           ref={toolbar}
+          // Whether typing is still on its way to the server: for tests, never shown.
+          data-keeping={state.saving ? "true" : "false"}
           className="sticky top-[calc(var(--scroll-pad,0px)*-1)] z-10 flex flex-col gap-2 border-b border-border bg-canvas/95 py-2 backdrop-blur"
         >
           {onClose &&
@@ -361,7 +362,7 @@ export function Editor({
               </div>
             ))}
           <div className="flex flex-wrap items-center gap-1 sm:gap-2 max-sm:[&_button]:px-2.5">
-            <SaveRevision store={store} showState={false} compact onSaved={(saved) => setNotice(savedNotice(saved))} />
+            <SaveRevision store={store} onSaved={(saved) => setNotice(savedNotice(saved))} />
             {!scopes && (
               <Button hint="Find and replace text in every field." onClick={() => setOpen("search")}>
                 Search
@@ -409,12 +410,8 @@ export function Editor({
                 </div>
               </Popover>
             )}
-            {/* A preset's search toggle ends the state line: on a phone the buttons fill a row, and
-                the line under them holds both (unitGPreset keeps the sticky bar under 400 px). */}
-            <div className="flex min-w-0 items-center justify-between gap-2 max-sm:w-full sm:ml-auto">
-              <p role="status" className="text-sm text-muted">
-                {state.saving ? "Keeping your changes…" : revisionState(store.revisionNumber, dirty > 0)}
-              </p>
+            {/* A preset's search toggle ends the row (unitGPreset keeps the sticky bar under 400 px). */}
+            <div className="flex min-w-0 items-center justify-end gap-2 sm:ml-auto">
               {scopes && (
                 <Button
                   variant="ghost"

@@ -12,7 +12,8 @@ export function Tabs<Value extends string>({
   fill = false,
   keepMounted = false,
   wrap = false,
-  end
+  end,
+  rowClassName = ""
 }: {
   tabs: ReadonlyArray<{
     readonly value: Value
@@ -34,6 +35,8 @@ export function Tabs<Value extends string>({
   wrap?: boolean | undefined
   /** Beside the tabs, at the end of their row: a close button, say. */
   end?: ReactNode
+  /** The row of tabs and `end`, placed by its user: kept in sight while scrolling, say. */
+  rowClassName?: string
 }) {
   const list = (
     <BaseTabs.List
@@ -77,7 +80,7 @@ export function Tabs<Value extends string>({
       className={`flex min-h-0 flex-col ${fill ? "flex-1" : "gap-2"}`}
     >
       {fill || end ? (
-        <div className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""}`}>
+        <div className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""} ${rowClassName}`}>
           {list}
           {end}
         </div>

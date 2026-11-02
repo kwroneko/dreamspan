@@ -583,9 +583,12 @@ export function PromptDocument({
   goTo,
   layout = "document",
   onOpenLarge,
-  onOpenLorebook
+  onOpenLorebook,
+  saveControls
 }: {
   store: EditorStore
+  /** The save cluster, at the start of the list's own toolbar row (DESIGN §10.1). */
+  saveControls?: ReactNode
   context?: PresetContext | null | undefined
   focus?: string | undefined
   /** A prompt to open and scroll to, asked for again by a new object (a warning's link). */
@@ -760,6 +763,7 @@ export function PromptDocument({
   const controls = (
     <ExpandCollapseAll
       compact={column}
+      start={saveControls}
       anyOpen={anyOpen}
       allOpen={false}
       expandHint="Show every prompt's text"

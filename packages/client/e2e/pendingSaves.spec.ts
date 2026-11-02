@@ -4,7 +4,14 @@ import { textField } from "@rp/shared/editing.ts"
 import { Effect } from "effect"
 import { readFile } from "node:fs/promises"
 import { type Client, loginCookie, withCookie } from "./support/rpc.ts"
-import { editHistoryTexts, saveButton } from "./support/saveRevision.ts"
+import {
+  NOTHING_TO_SAVE,
+  UNSAVED,
+  editHistoryTexts,
+  expectSaveState,
+  saveButton,
+  saveCluster
+} from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile(withAdmin)
@@ -218,7 +225,8 @@ test("a stale active editor meets the conflict picker after another tab commits"
   // error from the stale editor's first try.
   const conflict = page.getByRole("dialog", { name: "Changed meanwhile" })
   await saveButton(page).click()
-  await expect(page.getByRole("alert").or(conflict).first()).toBeVisible()
+  const failed = saveCluster(page).and(page.locator('[data-save-state="failed"]'))
+  await expect(failed.or(conflict).first()).toBeVisible()
   if (!(await conflict.isVisible())) await saveButton(page).click()
   await expect(conflict).toBeVisible()
 })
@@ -518,9 +526,9 @@ test("another tab's text a revision's save went over stays in the field's edit h
     })
   )
   await box.fill("hello from this tab")
-  await expect(page.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+  await expectSaveState(page, UNSAVED)
   await saveButton(page).click()
-  await expect(page.getByText("Saved a revision.", { exact: true })).toBeVisible()
+  await expectSaveState(page, NOTHING_TO_SAVE)
   // Nothing goes to the bin: the other tab's text is the state before this one's.
   await expect(page.getByText(/in the bin/)).toHaveCount(0)
   await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()

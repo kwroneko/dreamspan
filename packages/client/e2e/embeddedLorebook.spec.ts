@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
-import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, editHistoryTexts, expectSaveState, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { openEntry, openSettings } from "./support/lorebook.ts"
 import { expectTextBox } from "./support/textbox.ts"
@@ -14,7 +14,7 @@ const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
 const save = async (page: Page) => {
   await saveRevision(page)
-  await expect(page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+  await expectSaveState(page, NOTHING_TO_SAVE)
 }
 
 for (const width of [1440, 390]) {

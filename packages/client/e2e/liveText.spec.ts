@@ -1,6 +1,6 @@
 // Live text is what's sent (owner, 2026-11-01): a chat's note, a card's field and a preset's
 // prompt typed in the chat's panel and never saved reach the next request; the reply cuts a
-// revision labelled with it, which the editors' state lines then name; Save asks nothing, and
+// revision labelled with it, after which the editors have nothing to save; Save asks nothing, and
 // "Save with a message…" takes a one-line message; a field's edit history puts an earlier
 // state back as the newest. The provider is a fake on loopback, and the cards are made up.
 import { mkdirSync } from "node:fs"
@@ -12,6 +12,7 @@ import { type FakeProvider, startProvider } from "./support/provider.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { textBoxValue } from "./support/textbox.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState } from "./support/saveRevision.ts"
 
 const server = serverPerFile(withAdmin)
 const shots = process.env.SCREENSHOT_DIR
@@ -104,7 +105,7 @@ for (const width of [1440, 390])
     const note = notes.getByRole("region", { name: "Note Note" })
     const noteText = `NOTE-LIVE-${width} lanterns along the levee.`
     await note.getByRole("textbox", { name: /^Text of/ }).fill(noteText)
-    await expect(note.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Changed since revision \d+$/)
+    await expectSaveState(note, UNSAVED)
     await shoot(page, `note-changed-${width}`)
 
     // A card's field, in its tab.
@@ -114,7 +115,7 @@ for (const width of [1440, 390])
     await expect(description).toBeVisible({ timeout: 30_000 })
     const cardText = `CARD-LIVE-${width} keeps the ledger.`
     await typeAtEnd(page, description, cardText)
-    await expect(card.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Changed since revision \d+$/)
+    await expectSaveState(card, UNSAVED)
 
     // A preset's prompt, in the Prompt preset tab: text is live, no unsaved bar for it.
     await panelTab(page, "Prompt preset")
@@ -133,28 +134,26 @@ for (const width of [1440, 390])
     expect(sent).toContain(cardText)
     expect(sent).toContain(presetText.trim())
 
-    // The reply cut a revision of each, which the editors now name.
+    // The reply cut a revision of each: the editors have nothing to save.
     const revisions = await admin((api) => api.ListRevisions({ refId: miraRef as RefId, limit: 10 }))
     expect(revisions[0]!.origin).toBe("generation")
     expect(revisions[0]!.usedBy?.chatId).toBe(chatId)
     await openPanel(page, "Mira")
-    await expect(card.getByRole("status").filter({ hasText: /revision/ })).toHaveText(
-      `Saved as revision ${revisions[0]!.number}`
-    )
+    await expectSaveState(card, NOTHING_TO_SAVE)
     await panelTab(page, "Prompt preset")
-    await expect(presetTab.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Saved as revision \d+$/)
+    await expectSaveState(presetTab, NOTHING_TO_SAVE)
     // The phone's sheet was closed for the reply: its blocks start closed again.
     if (!(await main.isVisible()))
       await presetTab.getByRole("button", { name: "Expand Main Prompt", exact: true }).click()
 
     // Save asks nothing; "Save with a message…" takes one line, Enter saving it.
     await typeAtEnd(page, main, " Typed after the reply.")
-    await expect(presetTab.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Changed since/)
+    await expectSaveState(presetTab, UNSAVED)
     await presetTab.getByRole("button", { name: "Save with a message…", exact: true }).click()
     await presetTab.getByRole("textbox", { name: "Revision message", exact: true }).fill(`Tidied at ${width}`)
     await shoot(page, `save-with-message-${width}`)
     await page.keyboard.press("Enter")
-    await expect(presetTab.getByRole("status").filter({ hasText: /revision/ })).toHaveText(/^Saved as revision \d+$/)
+    await expectSaveState(presetTab, NOTHING_TO_SAVE)
     await expect(page.getByRole("dialog", { name: "Changed meanwhile" })).toHaveCount(0)
     const saved = await admin((api) => api.ListRevisions({ refId: presetRef as RefId, limit: 1 }))
     expect(saved[0]!.message).toBe(`Tidied at ${width}`)
@@ -180,12 +179,11 @@ for (const width of [1440, 390])
 
     // Revert, beside Save while something changed: one click, no question, the field back to the
     // revision, and what was there kept in its edit history.
-    const status = card.getByRole("status").filter({ hasText: /revision/ })
-    await expect(status).toHaveText(/^Changed since revision \d+$/)
-    const revert = card.getByRole("button", { name: /^Revert to revision \d+$/ })
+    await expectSaveState(card, UNSAVED)
+    const revert = card.getByRole("button", { name: "Revert to the last save", exact: true })
     await shoot(page, `revert-${width}`)
     await revert.click()
-    await expect(status).toHaveText(/^Saved as revision \d+$/)
+    await expectSaveState(card, NOTHING_TO_SAVE)
     await expect(revert).toHaveCount(0)
     await expect(page.getByRole("alertdialog")).toHaveCount(0)
     await expect.poll(() => textBoxValue(description)).toContain(`A second thought at ${width}.`)

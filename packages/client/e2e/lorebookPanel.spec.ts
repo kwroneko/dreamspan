@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState } from "./support/saveRevision.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -189,13 +190,13 @@ for (const [width, scheme] of [
     await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).not.toBeChecked()
-    await expect(editor.getByRole("status").filter({ hasText: /^Changed since revision 1$/ })).toBeVisible({
+    await expectSaveState(editor, UNSAVED, {
       timeout: 30_000
     })
-    await editor.getByRole("button", { name: /^Revert to revision 1/ }).click()
+    await editor.getByRole("button", { name: "Revert to the last save", exact: true }).click()
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).toBeChecked({ timeout: 30_000 })
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 1$/ })).toBeVisible({
+    await expectSaveState(editor, NOTHING_TO_SAVE, {
       timeout: 30_000
     })
 
@@ -222,9 +223,9 @@ for (const [width, scheme] of [
     await expect(fog.getByText("Constant", { exact: true })).toBeVisible()
     await editor.getByRole("button", { name: "Done selecting", exact: true }).click()
     // Unsaved too, until Save keeps it as the next revision.
-    await expect(editor.getByRole("status").filter({ hasText: /^Changed since revision 1$/ })).toBeVisible()
+    await expectSaveState(editor, UNSAVED)
     await editor.getByRole("button", { name: "Save", exact: true }).first().click()
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 2$/ })).toBeVisible({
+    await expectSaveState(editor, NOTHING_TO_SAVE, {
       timeout: 30_000
     })
 
@@ -312,7 +313,7 @@ test("the large editor: Look in, the pencil rename, text and keys first, Revert"
   await expect(page.getByRole("textbox", { name: "Primary keys" })).toHaveValue("harbour\nquay")
   await expect(page.getByRole("combobox", { name: "Logic" })).toHaveCount(0)
   await page.getByRole("textbox", { name: "Entry content" }).fill("Boats knock at the quay.")
-  await page.getByRole("button", { name: /^Revert to revision/ }).click()
+  await page.getByRole("button", { name: "Revert to the last save", exact: true }).click()
   await expect(page.getByRole("textbox", { name: "Entry content" })).toHaveValue("Boats rock at the quay.")
   await page.screenshot({ path: join(shots, "large-1440-dark.png"), fullPage: false })
 })

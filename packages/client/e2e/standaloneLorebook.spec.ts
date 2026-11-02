@@ -4,7 +4,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { Effect } from "effect"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { asUser } from "./support/rpc.ts"
-import { saveRevision } from "./support/saveRevision.ts"
+import { saveCluster, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { expectTextBox } from "./support/textbox.ts"
 import { openEntry, openSettings } from "./support/lorebook.ts"
@@ -12,7 +12,8 @@ import { openPanel } from "./support/panel.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
-const saved = (page: Page) => page.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })
+const saved = (page: Page) =>
+  saveCluster(page).and(page.locator('[data-save-state="clean"], [data-save-state="saved"]'))
 const save = async (page: Page) => {
   await saveRevision(page)
   await expect(saved(page)).toBeVisible()

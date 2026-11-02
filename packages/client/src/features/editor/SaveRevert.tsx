@@ -1,13 +1,11 @@
 // Save and Revert for a preset's held changes (owner, 2026-11-01 and 2026-11-02): prompts
 // moved, deleted or added and lorebooks attached or taken off wait in the Prompt preset tab's
-// floating bar and the large editor's toolbar; text, options and switches are live. Save
-// applies them and saves a revision of the whole preset; Revert puts the prompts and books
-// back as the live preset has them (presetHeld.ts), and asks nothing.
+// floating bar and the large editor's toolbar; text, options and switches are live. Its save
+// cluster is the shared one (`ui/SaveControls`, DESIGN §10.1): Save applies them and saves a
+// revision of the whole preset; Revert puts the prompts and books back as the live preset has
+// them (presetHeld.ts), and asks nothing.
 import { useState } from "react"
-import { ErrorAlert } from "../../actions.tsx"
-import type { AppError } from "../../errors.ts"
-import { Button } from "../../ui/Button.tsx"
-import { Icon } from "../../ui/Icon.tsx"
+import { SaveControls } from "../../ui/SaveControls.tsx"
 import { describePresetChanges } from "./presetChanges.ts"
 import { type EditorStore, useHeld, useWorkingDoc } from "./store.ts"
 
@@ -36,44 +34,39 @@ export function HeldChangesBar({ store, floating = false }: { store: EditorStore
         <span className="font-medium">Unsaved:</span>{" "}
         <span className="text-muted">{parts.length > 0 ? parts.join(" · ") : "prompts moved"}</span>
       </p>
-      <div className="ml-auto flex shrink-0 flex-wrap gap-2">
+      <div className="ml-auto flex shrink-0">
         <HeldSaveRevert store={store} />
       </div>
     </div>
   )
 }
 
+/** The save cluster for what's held: Save applies it, Revert drops it. */
 function HeldSaveRevert({ store }: { store: EditorStore }) {
   const held = useHeld(store)
   const [pending, setPending] = useState(false)
-  const [error, setError] = useState<AppError | null>(null)
-  const save = async () => {
+  const [failure, setFailure] = useState<string | null>(null)
+  const save = async (message: string | null) => {
     setPending(true)
-    setError(null)
-    const result = await store.commit(null)
+    setFailure(null)
+    const result = await store.commit(message)
     setPending(false)
-    if (!result.ok) setError(result.error)
+    if (!result.ok) setFailure(result.error.message)
+    return result.ok
   }
   return (
-    <>
-      <Button
-        disabled={held === "" || pending}
-        hint="Undoes what waits here: prompts back where they were, deleted ones back, added ones and attached books gone, books taken off back on."
-        onClick={() => store.revertHeld()}
-      >
-        <Icon name="undo" />
-        Revert
-      </Button>
-      <Button
-        variant="primary"
-        pending={pending}
-        disabled={held === ""}
-        hint={`Applies what waits here and saves revision ${store.revisionNumber + 1} of the preset; replies send it from then on.`}
-        onClick={() => void save()}
-      >
-        Save
-      </Button>
-      {error && <ErrorAlert error={error} />}
-    </>
+    <SaveControls
+      changed={held !== ""}
+      pending={pending}
+      failed={failure}
+      onSave={save}
+      onRevert={async () => {
+        setFailure(null)
+        store.revertHeld()
+      }}
+      revertLabel="Revert"
+      saveHint="Applies these changes and keeps this version in History. Until you save, replies use the prompts as they were."
+      revertHint="Undoes what waits here: prompts back where they were, deleted ones back, added ones and attached books gone, books taken off back on."
+    />
   )
 }

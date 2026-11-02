@@ -8,7 +8,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { openPanel } from "./support/panel.ts"
 import { asUser } from "./support/rpc.ts"
-import { saveButton } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, expectSaveState, saveButton } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({ ...withAdmin, FAKE_GENERATOR_TPS: "400", FAKE_GENERATOR_TOKENS: "40" })
@@ -228,7 +228,7 @@ for (const width of [1440, 390])
           )
         )
         .toBe("narrate")
-      await expect(overlay.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+      await expectSaveState(overlay, NOTHING_TO_SAVE)
     })
 
 for (const width of [1440, 390])
@@ -247,7 +247,7 @@ for (const width of [1440, 390])
       const close = overlay.getByRole("button", { name: "Close preset editor", exact: true })
       const bar = close.locator("xpath=ancestor::div[contains(@class,'sticky')][1]")
       await expect(bar.getByText(name, { exact: true })).toBeVisible()
-      await expect(bar.getByRole("status").filter({ hasText: /^Saved as revision \d+$/ })).toBeVisible()
+      await expectSaveState(bar, NOTHING_TO_SAVE)
       const box = (await close.boundingBox())!
       expect(box.y).toBeGreaterThanOrEqual(0)
       expect(box.y + box.height).toBeLessThan(900)
@@ -255,7 +255,7 @@ for (const width of [1440, 390])
       await page.screenshot({ path: join(shots, `sticky-close-${width}-${theme}.png`) })
       const main = overlay.getByRole("textbox", { name: "Prompt: Main Prompt", exact: true })
       await main.fill("A draft kept while closing the preset.")
-      await expect(bar.getByRole("status").filter({ hasText: /^Changed since revision \d+$/ })).toBeVisible()
+      await expectSaveState(bar, UNSAVED)
       await close.click()
       await expect(overlay).toHaveCount(0)
       await expect(page.getByLabel("Message", { exact: true })).toBeEditable()

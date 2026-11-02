@@ -11,7 +11,7 @@ import type { RefId } from "@rp/shared/library.ts"
 import { expect, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
-import { editHistoryTexts, saveRevision } from "./support/saveRevision.ts"
+import { NOTHING_TO_SAVE, UNSAVED, editHistoryTexts, saveCluster, saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
 
@@ -68,13 +68,8 @@ const savedCard = (name: string, fields: Record<string, string>) =>
 const open = async (page: Page, refId: string) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/library/${refId}`)
-  // The card's state line, first: an open note has its own.
-  await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: /^Saved as revision \d+$/ })
-      .first()
-  ).toBeVisible()
+  // The card's save cluster, first: an open note has its own.
+  await expect(saveCluster(page).first()).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
 }
 
 const field = (page: Page, name: string) => page.getByRole("textbox", { name: new RegExp(`^${name}`) })
@@ -84,13 +79,15 @@ const openNote = async (page: Page, title: string) => {
   await cardFieldsTab(page, "Notes")
   return noteText(page.getByRole("list", { name: "The card's notes" }), title)
 }
-const state = (page: Page) =>
-  page.getByRole("status").filter({ hasText: /^(Saved as revision|Changed since revision|Keeping your changes)/ })
+/** The card's save cluster (an open note has its own). */
+const state = (page: Page) => saveCluster(page).first()
 
-/** Waits until what was typed is kept on the server. */
+/** Waits until what was typed is kept on the server (the toolbar's `data-keeping`). */
 const kept = async (page: Page) => {
-  await expect(state(page)).toHaveText("Keeping your changes…")
-  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
+  const toolbar = page.locator("[data-keeping]")
+  await expect(toolbar).toHaveAttribute("data-keeping", "true")
+  await expect(toolbar).toHaveAttribute("data-keeping", "false")
+  await expect(state(page)).toHaveAttribute("data-save-state", UNSAVED)
 }
 
 /** At phone and desktop width: nothing scrolls sideways; with SCREENSHOT_DIR set, saved there. */
@@ -119,12 +116,11 @@ test("a new card's fields save as a revision with a message, and survive a reloa
   await kept(page)
   await field(page, "Scenario").fill("A storm is coming.")
   await kept(page)
-  await expect(state(page)).toHaveText("Changed since revision 1")
+  await expect(state(page)).toHaveAttribute("data-save-state", UNSAVED)
   await shoot(page, "card-editor")
 
   await saveRevision(page, "First pass")
-  await expect(page.getByText("Saved a revision.")).toBeVisible()
-  await expect(state(page)).toHaveText("Saved as revision 2")
+  await expect(state(page)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
 
   await page.reload()
   await expectTextBox(field(page, "Description"), "A lighthouse keeper who talks to gulls.")
@@ -199,7 +195,7 @@ test("a field another tab typed on meanwhile keeps that tab's text in its edit h
   await greeting.fill("hello from this tab")
   await kept(page)
   await saveRevision(page)
-  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
+  await expect(state(page)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
   const texts = await admin((api) => editHistoryTexts(api, refId, textField(["first_mes"])))
   expect(texts[0]).toBe("hello from this tab")
   expect(texts).toContain("hello from the other tab")
@@ -266,7 +262,7 @@ test("forking a card is one action, and takes the unsaved changes along", async 
   await page.goto(`${server().url}/library/${refId}`)
   await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
   await expectTextBox(field(page, "Description"), "A keeper.")
-  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
+  await expect(state(page)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
   // The original's edit history keeps the moved text: one pick puts it back.
   await page.getByRole("button", { name: "Edit history of Description" }).click()
   const history = page.getByRole("dialog", { name: "Edit history: Description" })
@@ -309,12 +305,12 @@ test("a preset's prompts reorder by dragging and by keyboard, and toggle", async
   await expect(held).toContainText("new order")
   await page.getByRole("switch", { name: "Send Chat Examples" }).click()
   await expect(page.getByRole("switch", { name: "Send Chat Examples" })).not.toBeChecked()
-  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
+  await expect(state(page)).toHaveAttribute("data-save-state", UNSAVED)
   await shoot(page, "preset-editor")
   await held.getByRole("button", { name: "Save", exact: true }).click()
   await expect(held).toHaveCount(0)
   await page.reload()
-  await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
+  await expect(state(page)).toHaveAttribute("data-save-state", NOTHING_TO_SAVE)
   expect((await names()).slice(0, 3)).toEqual(["Persona Description", "World Info (before)", "Main Prompt"])
   await expect(page.getByRole("switch", { name: "Send Chat Examples" })).not.toBeChecked()
 })
@@ -690,7 +686,7 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
   await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
   // The switch is live; the move waits behind the unsaved bar, kept on the server like typing.
   await expect(page.getByRole("region", { name: "Unsaved changes" })).toContainText("new order")
-  await expect(state(page)).toHaveText(/^Changed since revision \d+$/)
+  await expect(state(page)).toHaveAttribute("data-save-state", UNSAVED)
   await page.reload()
   await expect(page.getByRole("region", { name: "Unsaved changes" })).toContainText("new order")
   await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")

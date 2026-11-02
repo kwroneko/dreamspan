@@ -183,10 +183,6 @@ function CardPanel({
                   : `What you change is used for ${card.name} as you type, in ${plural(others + 1, "chat", "chats")}, this one included. To change it here only, fork it for this chat.`}
           </p>
           {info.binding === "revision" && <ChatDefinition name={card.name} info={info} />}
-          {/* Save stays in sight while a field further down is edited; what's typed is used as it's typed. */}
-          <div className="sticky -top-4 z-10 -mx-4 -my-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-surface px-4 py-2">
-            <SaveRevision store={store} />
-          </div>
           {state.saveError && (
             <ErrorAlert
               error={{ ...state.saveError, message: `A change couldn't be kept: ${state.saveError.message}` }}
@@ -197,6 +193,7 @@ function CardPanel({
             store={store}
             call={call}
             layout="panel"
+            saveControls={<SaveRevision store={store} />}
             onOpenBook={workspace ? () => workspace.open(info.refId, CARD_LOREBOOK_FOCUS) : undefined}
           />
         </>
