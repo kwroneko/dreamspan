@@ -893,6 +893,35 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
       })
   },
   // --- Generation
+  CountTokens: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        // The owner's chat model never counts another user's text: the caller's own default does.
+        yield* owner.api.SetGenerationDefaults({
+          defaults: { model: { connection: owner.connectionId, model: owner.modelId }, preset: null }
+        })
+        const theirs = yield* actor.api.GetGenerationDefaults()
+        yield* actor.api.SetGenerationDefaults({ defaults: { ...theirs, model: null } })
+        const counted = yield* actor.api.CountTokens({ texts: ["A lamp by the window."] })
+        assert.strictEqual(counted.tokenizer.exact, false)
+        assert.include(counted.tokenizer.note ?? "", "No model is chosen")
+      })
+  },
+  GetTokenCounting: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* owner.api.SetTokenCounting({ connectionId: owner.connectionId, enabled: true })
+        assert.include(yield* owner.api.GetTokenCounting(), owner.connectionId)
+        assert.notInclude(yield* actor.api.GetTokenCounting(), owner.connectionId)
+      })
+  },
+  SetTokenCounting: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.SetTokenCounting({ connectionId: owner.connectionId, enabled: true }), "NotFound")
+        assert.notInclude(yield* actor.api.GetTokenCounting(), owner.connectionId)
+      })
+  },
   GetGenerationDefaults: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

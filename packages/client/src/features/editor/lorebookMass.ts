@@ -3,13 +3,11 @@
 // other setting as it was. The settings it offers are a registry a plugin can add to, replace
 // or disable (spec/PLUGINS.md §8); the defaults are registered in lorebookColumns.tsx.
 //
-// Undo: a change to many entries is a revision of its own. What was changed before it, since
-// the last revision, is saved first as "Before: …"; then the change is applied and saved as
-// "<what it did>". The toast's Undo restores the revision before it (RestoreRevision), and
-// History lists both, so it can be undone later too, from any device.
+// A change to many entries is an ordinary unsaved change, as any edit is (owner, 2026-11-02:
+// "Isn't that how you would undo it if they didn't save themselves?"): Revert beside Save
+// undoes it and Save keeps it. No revision is cut for it, and its toast has no Undo of its own.
 import type { LorebookDoc, LorebookEntry } from "@rp/shared/docs/lorebook.ts"
-import { type FieldPath, getAt } from "@rp/shared/editing.ts"
-import type { RevisionId } from "@rp/shared/library.ts"
+import type { FieldPath } from "@rp/shared/editing.ts"
 import { makeRegistry } from "../../registry.ts"
 import { showToast } from "../../ui/Toast.tsx"
 import { entryPath } from "./lorebookTable.ts"
@@ -76,63 +74,15 @@ const entriesOf = (store: EditorStore, root: FieldPath) =>
 export const enableAllEdits = (store: EditorStore, root: FieldPath, enabled: boolean) =>
   patchEdits(root, entriesOf(store, root), { enabled })
 
-const failed = (title: string, message: string) => showToast({ title, description: message, timeout: 12000 })
-
 /**
- * Applies `edits` as a revision of their own, with the way back: see the top of this file.
- * `label` names the change: "Enabled all 40 entries".
+ * Applies `edits` as unsaved changes, as typing is: see the top of this file. `label` names the
+ * change: "Disabled all 40 entries".
  */
-export async function applyMassChange(store: EditorStore, label: string, edits: ReadonlyArray<EntryEdit>) {
+export function applyMassChange(store: EditorStore, label: string, edits: ReadonlyArray<EntryEdit>) {
   if (edits.length === 0) {
     showToast({ title: "Nothing to change", description: "Every entry already has that." })
     return
   }
-  // What was changed before it is a revision of its own, so Undo brings it back as it was.
-  await store.flush()
-  if (store.dirtyFields().length > 0) {
-    const before = await store.commit(`Before: ${label}`)
-    if (!before.ok) {
-      failed(
-        "Nothing was changed",
-        `Your earlier changes couldn't be saved first (${before.error.message}). Save them, then try again.`
-      )
-      return
-    }
-  }
-  const undoTo = store.snapshot?.ref.headRevisionId as RevisionId | undefined
-  const previous = edits.map((edit) => ({ path: edit.path, value: getAt(store.working().doc, edit.path) }))
   for (const edit of edits) store.setValue(edit.path, edit.value)
-  const saved = await store.commit(label)
-  if (!saved.ok || !undoTo) {
-    // Still applied, as changes since the last revision: Undo puts the old values back.
-    showToast({
-      title: label,
-      description: `Not saved as a revision (${saved.ok ? "no revision to go back to" : saved.error.message}); Revert beside Save also undoes it.`,
-      timeout: 12000,
-      actions: [
-        {
-          label: "Undo",
-          onClick: () => {
-            for (const edit of previous) store.setValue(edit.path, edit.value)
-          }
-        }
-      ]
-    })
-    return
-  }
-  showToast({
-    title: label,
-    description: `Saved as revision ${store.revisionNumber}. Undo restores revision ${store.revisionNumber - 1}; History has both.`,
-    timeout: 12000,
-    actions: [
-      {
-        label: "Undo",
-        onClick: () =>
-          void store.restoreRevision(undoTo).then((result) => {
-            if (!result.ok)
-              failed("Couldn't undo", `${result.error.message} History can restore the revision before it.`)
-          })
-      }
-    ]
-  })
+  showToast({ title: label, description: "Unsaved: Save keeps it, Revert undoes it." })
 }

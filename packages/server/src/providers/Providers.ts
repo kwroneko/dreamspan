@@ -56,6 +56,7 @@ import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
+import type { TextCountRequest } from "./textCounters.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 
 export { ProviderError } from "./errors.ts"
@@ -357,6 +358,29 @@ export interface ProvidersShape {
     readonly image: { readonly data: string; readonly mimeType: string }
     readonly detail: string
   }) => Effect.Effect<number | null, ProviderError | ServerError>
+  /**
+   * Each text's tokens with the model's own tokenizer, from the newest registered text counter
+   * that applies (ARCHITECTURE §6 "Text tokens"), and what counted; null when none applies.
+   * Never part of a send.
+   */
+  readonly countTextTokens: (input: {
+    readonly userId: UserId
+    readonly connectionId: ConnectionId
+    readonly modelKey: string
+    readonly texts: ReadonlyArray<string>
+    readonly encode: TextCountRequest["encode"]
+    /**
+     * The user opted this connection in to its provider's counting (owner, 2026-11-02: off by
+     * default, since the text goes to the provider); without it, remote counters are skipped.
+     */
+    readonly remote: boolean
+  }) => Effect.Effect<
+    | { readonly counts: ReadonlyArray<number>; readonly id: string; readonly label: string }
+    /** A provider's counter would apply, but the connection isn't opted in: its label. */
+    | { readonly optIn: string }
+    | null,
+    ProviderError | ServerError
+  >
 }
 
 export class Providers extends Context.Service<Providers, ProvidersShape>()("rp/Providers") {}
@@ -1460,9 +1484,42 @@ export const layer = (options: ProvidersOptions = {}) =>
             .pipe(Effect.mapError((error) => providerError("unknown", prepared.scrub(error.message))))
         })
 
+      const countTextTokens: ProvidersShape["countTextTokens"] = ({
+        userId,
+        connectionId,
+        modelKey,
+        texts,
+        encode,
+        remote
+      }) =>
+        Effect.gen(function* () {
+          const prepared = yield* prepare(userId, connectionId)
+          const target = { kind: prepared.kind.id, api: prepared.api, model: modelKey, baseUrl: prepared.baseUrl }
+          const applying = registry.textCounters
+            .list()
+            .toReversed()
+            .filter((c) => c.appliesTo(target))
+          const counter = applying.find((c) => remote || !c.remote)
+          if (!counter) return applying[0] ? { optIn: applying[0].label(modelKey) } : null
+          const counts = yield* counter
+            .count({
+              baseUrl: prepared.baseUrl,
+              apiKey: prepared.apiKey,
+              headers: prepared.headers,
+              fetch: fetchFor(prepared, () => {}),
+              scrub: prepared.scrub,
+              model: modelKey,
+              texts,
+              encode
+            })
+            .pipe(Effect.mapError((error) => providerError("unknown", prepared.scrub(error.message))))
+          return { counts, id: counter.id, label: counter.label(modelKey) }
+        })
+
       return Providers.of({
         estimateCost,
         countImageTokens,
+        countTextTokens,
         kinds: () =>
           registry.kinds.list().map(
             (entry) =>

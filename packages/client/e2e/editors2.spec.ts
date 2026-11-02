@@ -1,0 +1,350 @@
+// The owner's decisions of 2026-11-02 for the editors: Export with unsaved changes asks first
+// (the full editor, the character tab and the library's item menu), the card's token counts
+// say which tokenizer counted, and bulk lorebook changes and preset structure wait behind
+// Save/Revert (their own steps are in lorebookPanel, presetTab and editor). At 1440 and 390, in
+// both themes. Made-up cards only.
+import { mkdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
+import { expect, type Page, test } from "@playwright/test"
+import type { EntityId } from "@rp/shared/chat.ts"
+import { textField } from "@rp/shared/editing.ts"
+import type { RefId } from "@rp/shared/library.ts"
+import { Effect } from "effect"
+import { asUser } from "./support/rpc.ts"
+import { revisionStatus } from "./support/saveRevision.ts"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { expectTextBox } from "./support/textbox.ts"
+
+const server = serverPerFile(withAdmin)
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+const shots = process.env.SCREENSHOT_DIR
+
+const shoot = async (page: Page, name: string) => {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+  if (!shots) return
+  mkdirSync(shots, { recursive: true })
+  await page.screenshot({ path: join(shots, `${name}.png`), animations: "disabled" })
+}
+
+const importCard = async (page: Page, name: string) => {
+  const data = {
+    name,
+    description: `${name} keeps the lighthouse log.`,
+    personality: "Patient.",
+    scenario: "A storm at dusk.",
+    first_mes: `${name} lights the lamp.`,
+    mes_example: "",
+    creator_notes: "",
+    system_prompt: "",
+    post_history_instructions: "",
+    alternate_greetings: [],
+    tags: [],
+    creator: "Synthetic",
+    character_version: "1.0",
+    extensions: {}
+  }
+  const body = Buffer.from(JSON.stringify({ spec: "chara_card_v3", spec_version: "3.0", data }))
+  const response = await page.request.post(`${server().url}/library/import?name=card.json`, {
+    data: body,
+    headers: { origin: server().url, "content-type": "application/octet-stream" }
+  })
+  expect(response.status()).toBe(200)
+  return (await response.json()).library.ref as { id: RefId; entityId: EntityId }
+}
+
+const downloaded = async (page: Page, click: () => Promise<void>) => {
+  const download = page.waitForEvent("download")
+  await click()
+  return JSON.parse(readFileSync(await (await download).path(), "utf8")) as { data: { description: string } }
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`export asks about unsaved changes; counts name their tokenizer (${width}, ${theme})`, async ({ page }) => {
+      test.setTimeout(150_000)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const name = `Ione ${width} ${theme}`
+      const ref = await importCard(page, name)
+      await page.goto(`${server().url}/library/${ref.id}`)
+      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible({ timeout: 30_000 })
+
+      // Counts come from the server's tokenizer; with no chat model here, o200k_base, said so.
+      const tokens = page.locator("[data-card-tokens]")
+      await expect(tokens).toHaveText(/^~[\d,]+ tokens · ~[\d,]+ permanent$/, { timeout: 30_000 })
+      await tokens.hover()
+      const explained = page.getByText(/^Total: every card field/).last()
+      await expect(explained).toContainText("Approximate: counted with o200k_base")
+      await expect(explained).toContainText("No model is chosen")
+      await shoot(page, `tokens-${width}-${theme}`)
+      const description = page.getByRole("textbox", { name: "Description", exact: true })
+      const field = page.locator("[data-field-tokens]").first()
+      await expect(field).toHaveText(/^~[\d,]+ tokens$/)
+      const before = await field.textContent()
+      await description.fill(`${name} keeps the lighthouse log, and writes the storms down hour by hour.`)
+      await expect(field).not.toHaveText(before!, { timeout: 30_000 })
+      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+
+      // Export with that unsaved: the dialog names it; the last revision leaves it out.
+      await page.getByRole("button", { name: "Export…", exact: true }).click()
+      await page.getByRole("menuitem", { name: "V3 JSON" }).click()
+      const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+      await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
+      await shoot(page, `export-unsaved-${width}-${theme}`)
+      const last = await downloaded(page, () =>
+        dialog.getByRole("button", { name: "Export the last revision", exact: true }).click()
+      )
+      expect(last.data.description).toBe(`${name} keeps the lighthouse log.`)
+      await expect(dialog).toHaveCount(0)
+      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+
+      // Cancel writes nothing; Save and export cuts revision 2 and exports it.
+      await page.getByRole("button", { name: "Export…", exact: true }).click()
+      await page.getByRole("menuitem", { name: "V3 JSON" }).click()
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+      await expect(dialog).toHaveCount(0)
+      await page.getByRole("button", { name: "Export…", exact: true }).click()
+      await page.getByRole("menuitem", { name: "V3 JSON" }).click()
+      const saved = await downloaded(page, () =>
+        dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+      )
+      expect(saved.data.description).toContain("hour by hour")
+      await expect(revisionStatus(page)).toHaveText(/^Saved as revision 2$/)
+
+      // Nothing unsaved: Export downloads at once, with no dialog.
+      await page.getByRole("button", { name: "Export…", exact: true }).click()
+      const plain = await downloaded(page, () => page.getByRole("menuitem", { name: "V3 JSON" }).click())
+      expect(plain.data.description).toContain("hour by hour")
+      await expect(dialog).toHaveCount(0)
+    })
+
+test("the library's item menu asks too, from the server's unsaved drafts", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Corin Library"
+  const ref = await importCard(page, name)
+  await page.goto(`${server().url}/library/${ref.id}`)
+  const description = page.getByRole("textbox", { name: "Description", exact: true })
+  await description.fill("Corin mends nets on the slipway.")
+  await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+  // The typing is on the server as a draft, then the editor is left.
+  await expect
+    .poll(() =>
+      admin((api) =>
+        Effect.map(api.OpenEditor({ refId: ref.id }), (editor) =>
+          editor.drafts.some((d) => d.status === "active" && d.content === "Corin mends nets on the slipway.")
+        )
+      )
+    )
+    .toBe(true)
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
+  const saved = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(saved.data.description).toBe("Corin mends nets on the slipway.")
+  await page.goto(`${server().url}/library/${ref.id}`)
+  await expectTextBox(description, "Corin mends nets on the slipway.")
+  await expect(revisionStatus(page)).toHaveText(/^Saved as revision 2$/)
+})
+
+test("a card's note with unsaved typing is asked about too, and saved with the card", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const name = "Maren Notes"
+  const ref = await importCard(page, name)
+  // A note on the card, exported with it, typed into and not saved.
+  await admin((api) =>
+    Effect.gen(function* () {
+      const note = yield* api.CreateCardNote({ cardRefId: ref.id, title: "Lamp oil" })
+      const opened = yield* api.OpenEditor({ refId: note.id })
+      yield* api.SaveEditorDraft({
+        refId: note.id,
+        field: textField(["content"]),
+        draftId: null,
+        content: "Maren smells of lamp oil.",
+        expectedRowVersion: null,
+        expectedSession: null,
+        baseRevisionId: opened.ref.headRevisionId
+      })
+    })
+  )
+  await page.goto(`${server().url}/library`)
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: `${name} has unsaved changes` })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Note “Lamp oil”: Content")
+  // The last revisions: the note's text isn't in the file.
+  const last = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Export the last revision", exact: true }).click()
+  )
+  expect(JSON.stringify(last)).not.toContain("lamp oil.")
+  // Save and export saves the note too, and the file has it (ST's depth prompt).
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click()
+  const saved = await downloaded(page, () =>
+    dialog.getByRole("button", { name: "Save and export", exact: true }).click()
+  )
+  expect(JSON.stringify(saved)).toContain("Maren smells of lamp oil.")
+  // Nothing unsaved now: the next export asks nothing.
+  await page.getByRole("button", { name: `More actions for ${name}` }).click()
+  await downloaded(page, () => page.getByRole("menuitem", { name: "V2 JSON", exact: true }).click())
+  await expect(dialog).toHaveCount(0)
+})
+
+test("token counts expand {{char}} and {{user}} first, as ST does", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const ref = await importCard(page, "Bartholomew Longname")
+  await page.goto(`${server().url}/library/${ref.id}`)
+  const scenario = page.getByRole("textbox", { name: "Scenario", exact: true })
+  const counts = page.locator("[data-field-tokens]")
+  // Scenario is the third counted field: {{char}} counts as the name it becomes, typed out.
+  // {{user}} outside a chat is "User", as in ST.
+  const settled = async () => {
+    await expect(counts.nth(2)).toHaveAttribute("aria-busy", "true")
+    await expect.poll(() => counts.nth(2).getAttribute("aria-busy"), { timeout: 30_000 }).toBeNull()
+  }
+  await scenario.fill("Bartholomew Longname waits by User's pier, then by the long harbour wall.")
+  await settled()
+  const plain = await counts.nth(2).textContent()
+  expect(plain).toMatch(/^~\d+ tokens$/)
+  // The macros expand to that same text: nothing new to count, so the count never even waits.
+  await scenario.fill("{{char}} waits by {{user}}'s pier, then by the long harbour wall.")
+  await expectTextBox(scenario, "{{char}} waits by {{user}}'s pier, then by the long harbour wall.")
+  await page.waitForTimeout(150)
+  expect(await counts.nth(2).getAttribute("aria-busy")).toBeNull()
+  await expect(counts.nth(2)).toHaveText(plain!)
+  await counts.nth(2).hover()
+  await expect(page.getByText(/^Counted with macros as they become/).last()).toBeVisible()
+})
+
+test("the character tab's Export asks with the tab's own unsaved typing", async ({ page }) => {
+  test.setTimeout(120_000)
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const ref = await importCard(page, "Petra Tab")
+  const started = await admin((api) =>
+    api.StartChat({
+      cards: [ref.entityId],
+      persona: null,
+      greeting: null,
+      first: { _tag: "Send", content: "Petra waves.", speakerEntityId: null }
+    })
+  )
+  await page.goto(`${server().url}/chats/${started.chat.id}?panel=card:${ref.entityId}`)
+  const tab = page.getByRole("tabpanel").filter({ has: page.locator('[data-card-tabs="panel"]') })
+  await tab.getByRole("textbox", { name: "Description", exact: true }).fill("Petra carries the post up the hill.")
+  await tab.getByRole("button", { name: "Export…", exact: true }).click()
+  await page.getByRole("menuitem", { name: "V2 JSON" }).click()
+  const dialog = page.getByRole("dialog", { name: "Petra Tab has unsaved changes" })
+  await expect(dialog.getByRole("list", { name: "Unsaved changes" })).toHaveText("Description")
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(revisionStatus(tab)).toHaveText(/^Changed since revision 1$/)
+})
+
+const upload = async (page: Page, name: string, data: unknown) => {
+  const response = await page.request.post(`${server().url}/library/import?name=${encodeURIComponent(name)}`, {
+    headers: { "content-type": "application/octet-stream", origin: server().url },
+    data: Buffer.from(JSON.stringify(data))
+  })
+  expect(response.status()).toBe(200)
+  return ((await response.json()) as { library: { ref: { id: RefId } } }).library.ref.id
+}
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`Disable all and a prompt added wait unsaved, Revert takes them back (${width}, ${theme})`, async ({
+      page
+    }) => {
+      test.setTimeout(150_000)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+
+      // A book's Disable all: unsaved, no Undo of its own; Revert takes it back.
+      const book = await upload(page, `Shoals ${width} ${theme}.json`, {
+        name: `Shoals ${width} ${theme}`,
+        entries: {
+          0: { uid: 0, key: ["reef"], comment: "Reef", content: "The reef shows at low tide.", order: 10 },
+          1: { uid: 1, key: ["buoy"], comment: "Buoy", content: "The bell buoy rings in a swell.", order: 20 }
+        }
+      })
+      await page.goto(`${server().url}/library/${book}`)
+      await page.getByRole("button", { name: "Disable all", exact: true }).click()
+      await expect(page.getByText("Disabled all 2 entries", { exact: true })).toBeVisible({ timeout: 30_000 })
+      await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
+      await expect(revisionStatus(page)).toHaveText(/^Changed since revision 1$/)
+      await shoot(page, `lorebook-disable-all-${width}-${theme}`)
+      await page.getByRole("button", { name: /^Revert to revision 1/ }).click()
+      await expect(revisionStatus(page)).toHaveText(/^Saved as revision 1$/, { timeout: 30_000 })
+
+      // A preset's added prompt waits behind the bar, shown in place.
+      const preset = await upload(page, `Tidewater ${width} ${theme}.json`, {
+        prompts: [
+          { identifier: "main", name: "Main Prompt", system_prompt: true, role: "system", content: "Write the scene." },
+          { identifier: "chatHistory", name: "Chat History", system_prompt: true, marker: true }
+        ],
+        prompt_order: [
+          {
+            character_id: 100001,
+            order: [
+              { identifier: "main", enabled: true },
+              { identifier: "chatHistory", enabled: true }
+            ]
+          }
+        ]
+      })
+      await page.goto(`${server().url}/library/${preset}`)
+      await page.getByRole("button", { name: "Actions for Main Prompt" }).click()
+      await page.getByRole("menuitem", { name: "Insert a prompt below" }).click()
+      const bar = page.getByRole("region", { name: "Unsaved changes" })
+      await expect(bar).toContainText("1 prompt added")
+      await page.getByRole("textbox", { name: "Prompt: New prompt", exact: true }).fill("Keep it brief.")
+      await shoot(page, `preset-added-${width}-${theme}`)
+      await bar.getByRole("button", { name: "Revert", exact: true }).click()
+      await expect(bar).toHaveCount(0)
+      await expect(page.getByRole("textbox", { name: "Prompt: New prompt", exact: true })).toHaveCount(0)
+    })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a connection's provider counting is off until opted in, and says it sends the text (${width}, ${theme})`, async ({
+      page
+    }) => {
+      test.setTimeout(90_000)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const connection = await admin((api) =>
+        api.CreateConnection({
+          kind: "anthropic",
+          settings: {
+            name: `Counting ${width} ${theme}`,
+            baseUrl: "http://127.0.0.1:9",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+      )
+      await page.goto(`${server().url}/settings/connections/${connection.id}`)
+      const counting = page.getByRole("switch", { name: /^Count with the provider/ })
+      await expect(counting).not.toBeChecked({ timeout: 30_000 })
+      await expect(counting).toHaveAccessibleDescription(/is sent to this provider's token-counting endpoint/)
+      await counting.scrollIntoViewIfNeeded()
+      await shoot(page, `connection-counting-${width}-${theme}`)
+      await counting.click()
+      await expect(counting).toBeChecked()
+      expect(await admin((api) => api.GetTokenCounting())).toContain(connection.id)
+      await counting.click()
+      await expect(counting).not.toBeChecked()
+      expect(await admin((api) => api.GetTokenCounting())).not.toContain(connection.id)
+    })

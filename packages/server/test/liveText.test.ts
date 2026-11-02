@@ -183,6 +183,56 @@ describe("live text", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
   })
 
+  it.live("a prompt added behind the bar waits for Save, definition and all (owner, 2026-11-02)", () => {
+    const config = testConfig()
+    return Effect.gen(function* () {
+      const mock = yield* Effect.acquireRelease(
+        Effect.promise(() => startMockProvider(completion)),
+        (m) => Effect.promise(() => m.close())
+      )
+      const api = yield* client()
+      const { chat, events, version, preset } = yield* generateReply(api, {
+        connection: { kind: "openai-chat", baseUrl: `${mock.url}/v1` },
+        model: {}
+      })
+      const refId = preset.ref.id
+      const added = valueField(["prompts", "identifier=added-here"])
+      const definition = yield* type(
+        api,
+        refId,
+        added,
+        JSON.stringify({ identifier: "added-here", name: "New prompt", role: "system", content: "" })
+      )
+      const text = textField(["prompts", "identifier=added-here", "content"])
+      yield* type(api, refId, text, "HELD-NEW-PROMPT text")
+      yield* type(api, refId, HELD_FIELD, JSON.stringify({ added: [{ identifier: "added-here", enabled: true }] }))
+      // Typed elsewhere in the preset: the reply checkpoints that, and leaves the new prompt.
+      yield* type(api, refId, MAIN, "LIVE-MAIN beside a held prompt.")
+      const before = (yield* api.ListRevisions({ refId, limit: 50 })).length
+      const { entry } = yield* posted(api.Generate({ chatId: chat.id, parentSlotId: version.slotId, branch: false }))
+      yield* eventually(() => finished(events, entry.version.id) !== undefined)
+      const sent = JSON.stringify(
+        mock
+          .requests()
+          .filter((r) => r.path === "/v1/chat/completions")
+          .at(-1)!.body!.messages
+      )
+      assert.include(sent, "LIVE-MAIN beside a held prompt.")
+      assert.notInclude(sent, "HELD-NEW-PROMPT")
+      assert.lengthOf(yield* api.ListRevisions({ refId, limit: 50 }), before + 1)
+      const opened = yield* api.OpenEditor({ refId })
+      const prompts = opened.doc.prompts as ReadonlyArray<{ identifier: string }>
+      assert.isFalse(prompts.some((p) => p.identifier === "added-here"))
+      for (const field of [added, text])
+        assert.strictEqual(opened.drafts.find((d) => d.key.field === field)!.status, "active")
+      assert.strictEqual(opened.drafts.find((d) => d.id === definition.id)!.status, "active")
+      // Revert takes it away: the saved preset never had it.
+      yield* api.RevertEditorDrafts({ refId })
+      const reverted = yield* api.OpenEditor({ refId })
+      assert.strictEqual(reverted.drafts.find((d) => d.key.field === added)!.content, "undefined")
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
+  })
+
   it.live("a field's edit history is append-only, and settings never go to the bin", () =>
     Effect.gen(function* () {
       const api = yield* client()

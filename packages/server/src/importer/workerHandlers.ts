@@ -5,6 +5,7 @@ import * as Exporters from "./exporters.ts"
 import { FormatOps, ownBuffer, type StParserSource } from "./ops.ts"
 import * as StParse from "./stParse.ts"
 import { prepareThumbnails, thumbnail } from "./thumbnail.ts"
+import { countTokens } from "./tokenizer.ts"
 
 /** Resolve trusted code references inside the worker, including the bundled built-in module. */
 const parser = <K extends keyof StParse.StParsers>(
@@ -31,6 +32,7 @@ export const handlers = FormatOps.toLayer(
     return FormatOps.of({
       Thumbnail: thumbnail,
       PrepareThumbnails: prepareThumbnails,
+      CountTokens: ({ encoding, texts }) => Effect.promise(() => countTokens(encoding, texts)),
       PreviewStSettings: ({ text, surface }) => Effect.sync(() => importStSettings(text, surface)),
       Parse: ({ bytes, fileName }) =>
         Importers.parseFile(bytes, fileName).pipe(Effect.provideService(Importers.Importers, registry)),

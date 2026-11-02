@@ -133,19 +133,16 @@ export function MassEditDialog({
   const [id, setId] = useState(settings[0]?.id ?? "")
   const setting = settings.find((s) => s.id === id) ?? settings[0]
   const [values, setValues] = useState<Readonly<Record<string, MassValue>>>({})
-  const [pending, setPending] = useState(false)
   if (!setting || entries.length === 0) return null
   const value = id in values ? values[id]! : setting.current(entries[0]!)
   const edits = patchEdits(root, entries, setting.patch(value))
   const count = touched(edits)
-  const apply = async () => {
-    setPending(true)
-    await applyMassChange(
+  const apply = () => {
+    applyMassChange(
       store,
       `Set ${setting.label} to ${valueLabel(setting, value)} on ${count} ${count === 1 ? "entry" : "entries"}`,
       edits
     )
-    setPending(false)
     onClose()
   }
   return (
@@ -153,7 +150,7 @@ export function MassEditDialog({
       open
       onOpenChange={(open) => !open && onClose()}
       title={`Change for ${entries.length} selected ${entries.length === 1 ? "entry" : "entries"}`}
-      description="Sets one setting on every selected entry; their other settings stay as they are. It's saved as a revision of its own, which Undo or History takes back."
+      description="Sets one setting on every selected entry; their other settings stay as they are. It's an unsaved change like any edit: Save keeps it, Revert undoes it."
     >
       <Field label="Setting" description={setting.description}>
         <NativeSelect
@@ -177,15 +174,14 @@ export function MassEditDialog({
             : `Changes ${count} of the ${entries.length} selected; the others already have it.`}
       </p>
       <DialogActions>
-        <Button variant="ghost" onClick={onClose}>
+        <Button variant="ghost" hint="Closes this without changing any entry." onClick={onClose}>
           Cancel
         </Button>
         <Button
           variant="primary"
           disabled={count === 0}
-          pending={pending}
-          hint="Saves what was changed before as a revision, then this change as the next one."
-          onClick={() => void apply()}
+          hint="Sets it on these entries as an unsaved change: Save keeps it, Revert undoes it."
+          onClick={apply}
         >
           Apply to {count} {count === 1 ? "entry" : "entries"}
         </Button>

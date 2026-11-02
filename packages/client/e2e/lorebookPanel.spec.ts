@@ -1,7 +1,7 @@
 // The chat's Lorebooks tab and the lorebook editors (owner, 2026-11-01): one stable list with
 // the card's own book, the chat's and the preset's, switches that show at once and keep their
 // rows, a book opened below the list with compact entry headers, Expand all, Enable all /
-// Disable all and Change for selected undone through revisions, search and replace by Content /
+// Disable all and Change for selected as unsaved changes Revert takes back, search and replace by Content /
 // Keys / Both, and a preset sending a book. Made-up books, card and preset only.
 import { mkdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -181,19 +181,21 @@ for (const [width, scheme] of [
     await editor.getByRole("button", { name: "Collapse all", exact: true }).click()
     await expect(editor.getByRole("textbox", { name: "Entry content" })).toHaveCount(0)
 
-    // Disable all switches every entry off as a revision; Undo restores the one before.
+    // Disable all is an ordinary unsaved change (owner, 2026-11-02): no revision, no Undo of its
+    // own; Revert beside Save takes it back.
     await editor.getByRole("button", { name: "Disable all", exact: true }).click()
     const toast = page.getByText("Disabled all 3 entries", { exact: true })
     await expect(toast).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0)
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).not.toBeChecked()
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 2$/ })).toBeVisible({
+    await expect(editor.getByRole("status").filter({ hasText: /^Changed since revision 1$/ })).toBeVisible({
       timeout: 30_000
     })
-    await page.getByRole("button", { name: "Undo", exact: true }).click()
+    await editor.getByRole("button", { name: /^Revert to revision 1/ }).click()
     for (const title of ["Harbour", "Lamp", "Fog"])
       await expect(editor.getByRole("switch", { name: `${title} enabled` })).toBeChecked({ timeout: 30_000 })
-    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 3$/ })).toBeVisible({
+    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 1$/ })).toBeVisible({
       timeout: 30_000
     })
 
@@ -219,6 +221,12 @@ for (const [width, scheme] of [
       ).toBeVisible()
     await expect(fog.getByText("Constant", { exact: true })).toBeVisible()
     await editor.getByRole("button", { name: "Done selecting", exact: true }).click()
+    // Unsaved too, until Save keeps it as the next revision.
+    await expect(editor.getByRole("status").filter({ hasText: /^Changed since revision 1$/ })).toBeVisible()
+    await editor.getByRole("button", { name: "Save", exact: true }).first().click()
+    await expect(editor.getByRole("status").filter({ hasText: /^Saved as revision 2$/ })).toBeVisible({
+      timeout: 30_000
+    })
 
     // Search and replace in the keys only.
     await editor.getByRole("button", { name: "Search and replace", exact: true }).click()
@@ -256,7 +264,22 @@ test("a preset sends a book: attached in the Prompt preset tab, listed from the 
   await presetTab.getByRole("button", { name: "Attach a lorebook", exact: true }).click({ timeout: 60_000 })
   await presetTab.getByRole("list", { name: "Lorebooks to add" }).getByText("Style preset", { exact: true }).click()
   await expect(attached.getByRole("switch", { name: "Style preset" })).toBeChecked()
+  // Attaching waits behind the unsaved bar (owner, 2026-11-02): Revert takes it off again.
+  const bar = presetTab.getByRole("region", { name: "Unsaved changes" })
+  await expect(bar).toContainText("1 lorebook attached")
   await page.screenshot({ path: join(shots, "preset-block-1440.png"), fullPage: false })
+  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await expect(attached).toHaveCount(0)
+  await presetTab.getByRole("button", { name: "Attach a lorebook", exact: true }).click()
+  await presetTab.getByRole("list", { name: "Lorebooks to add" }).getByText("Style preset", { exact: true }).click()
+  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+  await expect(attached.getByRole("switch", { name: "Style preset" })).toBeChecked()
+  // Taking it off waits too: it's still sent until Save, and Revert puts it back.
+  await attached.getByRole("button", { name: "Take Style preset off the preset", exact: true }).click()
+  await expect(bar).toContainText("1 lorebook taken off")
+  await bar.getByRole("button", { name: "Revert", exact: true }).click()
+  await expect(attached.getByRole("switch", { name: "Style preset" })).toBeChecked()
 
   const panel = await openPanel(page, "Lorebooks")
   await expect(books(panel).getByText("From the preset Preset preset", { exact: true })).toBeVisible()

@@ -5,11 +5,10 @@
 // card's own book, Notes the card's notes, Extra its regex scripts and the sections plugins
 // add (`cardEditorSections`). Each tab is registered (`cardTabs.ts`). Card modules are card
 // notes (§5.0).
-import { estimateTextTokens } from "@rp/shared/cardTokens.ts"
 import type { LorebookDoc } from "@rp/shared/docs/lorebook.ts"
 import { valueField, type FieldPath } from "@rp/shared/editing.ts"
 import type { NoteEntry, SharedNote } from "@rp/shared/editorApi.ts"
-import { type ReactNode, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { type ReactNode, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { SlotOutlet } from "../../slots.tsx"
@@ -18,7 +17,7 @@ import { Field, Fieldset, Input } from "../../ui/Field.tsx"
 import { Slider } from "../../ui/Slider.tsx"
 import { EmptyState } from "../../ui/Surface.tsx"
 import { Tabs } from "../../ui/Tabs.tsx"
-import { IconButton } from "../../ui/Tooltip.tsx"
+import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { CardSources } from "../cardSources/index.tsx"
 import type { Caller } from "./caller.ts"
 import { CardTextEditor } from "./CardTextEditor.tsx"
@@ -34,6 +33,8 @@ import { EditorPortrait } from "./PortraitControls.tsx"
 import { PromptUseNote } from "./PromptUseNote.tsx"
 import { SearchNavigation } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useValue, useWorkingDoc } from "./store.ts"
+import { MACROS_COUNTED, useCountMacros } from "./countMacros.ts"
+import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** What each field is for, on hover over its label. */
 const HINTS = {
@@ -52,10 +53,27 @@ const HINTS = {
   tags: "Words to find and sort cards by in the library; never sent to the model."
 } as const
 
-/** A field's estimated tokens, at the end of its label, live as you type. */
+/**
+ * A field's tokens with the chat model's tokenizer, its macros expanded first as ST does
+ * (`useCountMacros`), at the end of its label, counted as you type.
+ */
 function FieldTokens({ store, path }: { store: EditorStore; path: FieldPath }) {
-  const tokens = estimateTextTokens(useText(store, path) ?? "")
-  return <span className="text-xs font-normal text-muted tabular-nums">~{tokens.toLocaleString()} tokens</span>
+  const text = useText(store, path) ?? ""
+  const expand = useCountMacros(store)
+  const texts = useMemo(() => [expand(text)], [expand, text])
+  const { counts, tokenizer, pending } = useTokenCounts(texts)
+  return (
+    <Tooltip label={`${MACROS_COUNTED} ${tokenizerText(tokenizer)}`}>
+      <span
+        tabIndex={0}
+        data-field-tokens
+        aria-busy={pending || undefined}
+        className="rounded text-xs font-normal text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {tokensText(counts[0] ?? null, tokenizer, pending)}
+      </span>
+    </Tooltip>
+  )
 }
 
 /** A text field of the card with its hint, and its token count where it's prompt text. */

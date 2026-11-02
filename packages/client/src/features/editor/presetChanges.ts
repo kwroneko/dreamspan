@@ -1,6 +1,6 @@
 // What a preset's unsaved drafts change, in words, for the Prompt preset tab's bar: the order,
 // switches, prompts added or deleted, whose text or options changed, and anything else.
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { parseField } from "@rp/shared/editing.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
 import { promptLabel } from "./promptLabel.ts"
@@ -8,6 +8,7 @@ import { promptLabel } from "./promptLabel.ts"
 interface PresetLike {
   readonly prompts?: ReadonlyArray<PresetPrompt>
   readonly order?: ReadonlyArray<PromptOrderEntry>
+  readonly lorebooks?: ReadonlyArray<PresetLorebook>
 }
 
 const orderOf = (doc: PresetLike) => presetOrder(doc.prompts ?? [], doc.order ?? [])
@@ -63,11 +64,17 @@ export function describePresetChanges(
       else options.add(identifier)
     } else other += 1
   }
+  const booksBefore = new Set(((head as PresetLike).lorebooks ?? []).map((b) => b.id))
+  const booksNow = new Set(((current as PresetLike).lorebooks ?? []).map((b) => b.id))
+  const attached = [...booksNow].filter((id) => !booksBefore.has(id)).length
+  const detached = [...booksBefore].filter((id) => !booksNow.has(id)).length
   return [
     ...(moved ? ["new order"] : []),
     ...count(switches, "switch", "switches"),
     ...count(added.length, "prompt added", "prompts added"),
     ...count(removed.length, "prompt deleted", "prompts deleted"),
+    ...count(attached, "lorebook attached", "lorebooks attached"),
+    ...count(detached, "lorebook taken off", "lorebooks taken off"),
     ...named("text", [...texts].map(name)),
     ...(renamed.size === 0
       ? []

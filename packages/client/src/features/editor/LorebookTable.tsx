@@ -545,7 +545,6 @@ export function LorebookTable({
   const [selecting, setSelecting] = useState(false)
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set())
   const [massEdit, setMassEdit] = useState(false)
-  const [busy, setBusy] = useState(false)
   const sort = sorts.find((s) => s.id === sortId) ?? sorts[0]
 
   // The order is worked out when what decides it changes, not on every edit.
@@ -647,16 +646,14 @@ export function LorebookTable({
       return copy
     })
   /** Every entry's own switch at once: the book itself stays on (owner, 2026-11-01). */
-  const switchAll = async (on: boolean) => {
-    setBusy(true)
+  const switchAll = (on: boolean) => {
     const edits = enableAllEdits(store, root, on)
     const count = new Set(edits.map((edit) => String(edit.path.at(-2)))).size
-    await applyMassChange(
+    applyMassChange(
       store,
       `${on ? "Enabled" : "Disabled"} ${count === book.entries.length ? "all " : ""}${entriesLabel(count)}`,
       edits
     )
-    setBusy(false)
   }
 
   const savedUids = ((getAt(store.head, [...root, "entries"]) ?? []) as ReadonlyArray<LorebookEntry>).map(
@@ -767,20 +764,18 @@ export function LorebookTable({
           <Button
             variant="ghost"
             className={small}
-            pending={busy}
             disabled={book.entries.length === 0 || book.entries.every((entry) => entry.enabled)}
-            hint="Switches every entry on, the hidden ones too. Saved as a revision of its own (what was changed before it first), so Undo or History takes it back."
-            onClick={() => void switchAll(true)}
+            hint="Switches every entry on, the hidden ones too. An unsaved change like any edit: Save keeps it, Revert undoes it."
+            onClick={() => switchAll(true)}
           >
             Enable all
           </Button>
           <Button
             variant="ghost"
             className={small}
-            pending={busy}
             disabled={book.entries.length === 0 || book.entries.every((entry) => !entry.enabled)}
-            hint="Switches every entry off, to turn a few back on. The book stays in the chat. Saved as a revision of its own, so Undo or History takes it back."
-            onClick={() => void switchAll(false)}
+            hint="Switches every entry off, to turn a few back on. The book stays in the chat. An unsaved change like any edit: Save keeps it, Revert undoes it."
+            onClick={() => switchAll(false)}
           >
             Disable all
           </Button>

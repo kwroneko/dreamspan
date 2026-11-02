@@ -1,0 +1,154 @@
+// Token counts as the editors show them (owner, 2026-11-02: "ideally you'd always use the
+// tokenizer of the selected model"): the server counts with the tokenizer of the model chats
+// generate with (`CountTokens`, ARCHITECTURE §6 "Text tokens"), off its main thread, and says
+// which tokenizer counted. Typing stays responsive: a field is counted once it has rested for
+// DELAY_MS, the counts every field on the page wants then go in one request, and each text is
+// counted once per model (cached here and on the server). Until a count comes, the last one
+// stays shown.
+import { useAtomValue } from "@effect/atom-react"
+import { COUNT_TOKENS_CHARS, COUNT_TOKENS_TEXTS, type TokenizerInfo } from "@rp/shared/generation.ts"
+import { AsyncResult } from "effect/reactivity"
+import { useEffect, useId, useState, useSyncExternalStore } from "react"
+import { AppClient } from "../../rpc.ts"
+import { defaultsAtom } from "../pickers/defaults.ts"
+import { type Caller, useCaller } from "./caller.ts"
+
+/** How long a field rests before it's counted again. */
+const DELAY_MS = 400
+/** Gathers the requests of every field that rested together into one. */
+const GATHER_MS = 20
+const CACHE_ENTRIES = 2_000
+
+const cache = new Map<string, number>()
+const tokenizers = new Map<string, TokenizerInfo>()
+const inFlight = new Set<string>()
+let wanted: Array<{ readonly model: string; readonly text: string }> = []
+let timer: ReturnType<typeof setTimeout> | null = null
+let version = 0
+const listeners = new Set<() => void>()
+/** Each counter's last complete counts, by its `useId`, shown while newer ones are counted. */
+const lastShown = new Map<string, ReadonlyArray<number | null>>()
+
+const key = (model: string, text: string) => `${model}\n${text}`
+
+const remember = (k: string, count: number) => {
+  cache.delete(k)
+  cache.set(k, count)
+  if (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!)
+}
+
+const changed = () => {
+  version++
+  for (const listener of listeners) listener()
+}
+
+/** A text too long for one request is counted as its estimate: it's past any context anyway. */
+const estimate = (text: string) => Math.ceil(text.length / 4)
+
+async function send(call: Caller) {
+  timer = null
+  const batch = wanted
+  wanted = []
+  for (let at = 0; at < batch.length; at += COUNT_TOKENS_TEXTS) {
+    const part = batch.slice(at, at + COUNT_TOKENS_TEXTS)
+    const result = await call((client) => client("CountTokens", { texts: part.map((w) => w.text) }))
+    for (const [i, w] of part.entries()) {
+      inFlight.delete(key(w.model, w.text))
+      if (result.ok) remember(key(w.model, w.text), result.value.counts[i] ?? 0)
+    }
+    if (result.ok && part[0]) tokenizers.set(part[0].model, result.value.tokenizer)
+  }
+  changed()
+}
+
+/** Asks for the texts not counted for `model` yet. */
+export function requestCounts(call: Caller, model: string, texts: ReadonlyArray<string>) {
+  let added = false
+  for (const text of texts) {
+    const k = key(model, text)
+    if (text === "" || cache.has(k) || inFlight.has(k)) continue
+    if (text.length > COUNT_TOKENS_CHARS) {
+      remember(k, estimate(text))
+      continue
+    }
+    inFlight.add(k)
+    wanted.push({ model, text })
+    added = true
+  }
+  if (added && timer === null) timer = setTimeout(() => void send(call), GATHER_MS)
+  else if (!added && texts.some((text) => text.length > COUNT_TOKENS_CHARS)) changed()
+}
+
+const subscribe = (listener: () => void) => {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+/** The chat model, as the cache's key: counts follow it when it changes. */
+/** The connections whose provider may count (`GetTokenCounting`): their counts are cached apart. */
+const countingAtom = AppClient.query("GetTokenCounting", undefined, { reactivityKeys: ["settings"] })
+
+/** The chat model, and whether its provider counts, as the cache's key: counts follow both. */
+const useModelKey = () => {
+  const defaults = useAtomValue(defaultsAtom)
+  const counting = useAtomValue(countingAtom)
+  const model = AsyncResult.isSuccess(defaults) ? defaults.value.model : null
+  const provider = AsyncResult.isSuccess(counting) && model !== null && counting.value.includes(model.connection)
+  return model ? `${model.connection}/${model.model}/${provider ? "provider" : "local"}` : "none"
+}
+
+export interface TokenCounts {
+  /** Each text's tokens; null until its first count comes. */
+  readonly counts: ReadonlyArray<number | null>
+  /** What counted the texts last, for the explanation; null before the first count. */
+  readonly tokenizer: TokenizerInfo | null
+  /** Shown counts are of an earlier text, or not in yet. */
+  readonly pending: boolean
+}
+
+/** `texts`' token counts, counted once they rest (see the top of this file). */
+export function useTokenCounts(texts: ReadonlyArray<string>): TokenCounts {
+  const call = useCaller()
+  const model = useModelKey()
+  const joined = texts.join("\u0000")
+  const id = useId()
+  const [rested, setRested] = useState(texts)
+  useSyncExternalStore(subscribe, () => version)
+  useEffect(() => {
+    const wait = setTimeout(() => setRested(texts), DELAY_MS)
+    return () => clearTimeout(wait)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the texts, by value
+  }, [joined])
+  const restedJoined = rested.join("\u0000")
+  useEffect(() => {
+    requestCounts(call, model, rested)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the rested texts, by value
+  }, [call, model, restedJoined])
+  const counted = rested.map((text) => (text === "" ? 0 : (cache.get(key(model, text)) ?? null)))
+  // Keep the last counts on screen while new ones are on their way.
+  const counts = counted.map((count, i) => count ?? lastShown.get(id)?.[i] ?? null)
+  const settled = counted.every((count) => count !== null)
+  const countedJoined = counted.join()
+  useEffect(() => {
+    if (settled) lastShown.set(id, counted)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the counts, by value
+  }, [id, settled, countedJoined])
+  useEffect(() => () => void lastShown.delete(id), [id])
+  return {
+    counts: rested.length === texts.length ? counts : texts.map(() => null),
+    tokenizer: tokenizers.get(model) ?? null,
+    pending: !settled || restedJoined !== joined
+  }
+}
+
+/** "~1,234 tokens" while it's approximate or on its way, "1,234 tokens" once exact. */
+export const tokensText = (count: number | null, tokenizer: TokenizerInfo | null, pending = false) =>
+  count === null ? "… tokens" : `${tokenizer?.exact && !pending ? "" : "~"}${count.toLocaleString()} tokens`
+
+/** What the count's explanation says counted it. */
+export const tokenizerText = (tokenizer: TokenizerInfo | null) =>
+  tokenizer === null
+    ? "Counting with the chat model's tokenizer…"
+    : tokenizer.exact
+      ? `Counted with ${tokenizer.label}, the model chats use.`
+      : `Approximate: counted with ${tokenizer.label}.${tokenizer.note ? ` ${tokenizer.note}` : ""}`

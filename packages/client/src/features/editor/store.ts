@@ -21,9 +21,9 @@ import {
   textField,
   valueField
 } from "@rp/shared/editing.ts"
-import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
+import type { PresetLorebook, PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import { presetOrder } from "@rp/shared/presetOrder.ts"
-import { arrange, type HeldChanges, heldText, parseHeld, splitOrder } from "./heldOrder.ts"
+import { arrange, type HeldChanges, heldText, NO_HELD, parseHeld, splitOrder, withHeld } from "@rp/shared/presetHeld.ts"
 import { stateChanges, trackOpenEditor } from "./openEditors.ts"
 import { type Draft, entityDraftTarget } from "@rp/shared/drafts.ts"
 import type { ChatNotePosition, EditorSnapshot } from "@rp/shared/editorApi.ts"
@@ -90,8 +90,8 @@ export class EditorStore {
   private readonly versions = new Map<string, number>()
   private readonly subscribers = new Map<string, (listener: () => void) => () => void>()
   /**
-   * The head with the value drafts applied, and a preset's held moves and deletions shown
-   * (heldOrder.ts): what fields read when they have no draft of their own.
+   * The head with the value drafts applied, and a preset's held changes shown
+   * (@rp/shared/presetHeld.ts): what fields read when they have no draft of their own.
    */
   private valueDoc: Doc = {}
   /** The same without the held changes: what the next reply uses. */
@@ -334,20 +334,18 @@ export class EditorStore {
         return content === null ? [] : [{ field: key, content }]
       })
     this.liveDoc = applyDrafts(kind, this.head, values).doc
-    const held = this.held()
-    this.valueDoc =
-      held === null
-        ? this.liveDoc
-        : {
-            ...this.liveDoc,
-            prompts: this.livePrompts().filter((p) => !held.deleted.includes(p.identifier)),
-            order: arrange(this.liveOrder(), held)
-          }
+    this.valueDoc = withHeld(this.liveDoc, this.held())
   }
 
-  /** A preset's moves and deletions waiting for the unsaved bar's Save; null when there are none. */
+  /** A preset's structural changes waiting for the unsaved bar's Save; null when there are none. */
   held(): HeldChanges | null {
     return this.snapshot?.ref.kind === "preset" ? parseHeld(this.current(HELD_FIELD)) : null
+  }
+
+  private setHeld(next: HeldChanges) {
+    this.change(HELD_FIELD, heldText(next))
+    this.rebuild()
+    this.bump(STRUCTURE)
   }
 
   private livePrompts() {
@@ -360,38 +358,95 @@ export class EditorStore {
 
   /** The working document with the held changes shown, for the unsaved bar to describe. */
   arranged(): Doc {
+    return withHeld(this.working().doc, this.held())
+  }
+
+  /** The working document as the live one is, without the definitions of prompts added behind the bar. */
+  beforeHeld(): Doc {
     const held = this.held()
     const working = this.working().doc
-    if (held === null) return working
+    if (held === null || held.added.length === 0) return working
     const prompts = (getAt(working, ["prompts"]) as ReadonlyArray<PresetPrompt> | undefined) ?? []
-    const order = presetOrder(prompts, (getAt(working, ["order"]) as PromptOrderEntry[] | undefined) ?? [])
-    return {
-      ...working,
-      prompts: prompts.filter((p) => !held.deleted.includes(p.identifier)),
-      order: arrange(order, held)
-    }
+    return { ...working, prompts: prompts.filter((p) => !held.added.some((a) => a.identifier === p.identifier)) }
   }
 
-  /** Deletes a preset's prompt behind the unsaved bar: it's gone from view, and sent until Save. */
+  /**
+   * Deletes a preset's prompt behind the unsaved bar: it's gone from view, and sent until Save.
+   * One added behind the bar has never been sent or saved: its definition goes at once.
+   */
   deletePrompt(identifier: string) {
-    const held = this.held()
-    this.change(
-      HELD_FIELD,
-      heldText({
-        order: held?.order ?? [],
-        deleted: [...new Set([...(held?.deleted ?? []), identifier])]
+    const held = this.held() ?? NO_HELD
+    if (held.added.some((entry) => entry.identifier === identifier)) {
+      this.setHeld({
+        ...held,
+        added: held.added.filter((entry) => entry.identifier !== identifier),
+        order: held.order.filter((id) => id !== identifier)
       })
-    )
-    this.rebuild()
-    this.bump(STRUCTURE)
+      this.dropAdded(identifier)
+      return
+    }
+    this.setHeld({ ...held, deleted: [...new Set([...held.deleted, identifier])] })
   }
 
-  /** Throws the held moves and deletions away: the order and prompts are the live ones again. */
+  /**
+   * Adds a prompt behind the unsaved bar (owner, 2026-11-02): its definition (`prompt`, or none
+   * for one the preset already defines) is live so its text can be typed, and `order`, the
+   * shown order with its entry in place, holds the entry until Save.
+   */
+  addPrompt(prompt: PresetPrompt, order: ReadonlyArray<PromptOrderEntry>) {
+    const entry = order.find((e) => e.identifier === prompt.identifier)
+    if (!entry) return
+    const at = ["prompts", `identifier=${prompt.identifier}`]
+    if (getAt(this.liveDoc, at) === undefined) this.setValue(at, prompt)
+    const held = this.held() ?? NO_HELD
+    this.setHeld({
+      ...held,
+      deleted: held.deleted.filter((id) => id !== entry.identifier),
+      added: [...held.added.filter((e) => e.identifier !== entry.identifier), entry]
+    })
+    this.setValue(["order"], order)
+  }
+
+  /** An added prompt's definition goes with it, unless the saved preset had it already. */
+  private dropAdded(identifier: string) {
+    const at = ["prompts", `identifier=${identifier}`]
+    if (getAt(this.head, at) === undefined) void this.removeItem(at)
+  }
+
+  /** Attaches a lorebook to the preset behind the unsaved bar: sent once saved. */
+  attachLorebook(entry: PresetLorebook) {
+    const held = this.held() ?? NO_HELD
+    const live = (getAt(this.liveDoc, ["lorebooks"]) as ReadonlyArray<PresetLorebook> | undefined) ?? []
+    if (live.some((book) => book.id === entry.id))
+      this.setHeld({ ...held, detached: held.detached.filter((id) => id !== entry.id) })
+    else this.setHeld({ ...held, attached: [...held.attached.filter((b) => b.id !== entry.id), entry] })
+  }
+
+  /** Takes a lorebook off the preset behind the unsaved bar: still sent until Save. */
+  detachLorebook(id: string) {
+    const held = this.held() ?? NO_HELD
+    if (held.attached.some((book) => book.id === id))
+      this.setHeld({ ...held, attached: held.attached.filter((book) => book.id !== id) })
+    else this.setHeld({ ...held, detached: [...new Set([...held.detached, id])] })
+  }
+
+  /** A preset lorebook's switch: live, as a prompt's is; one attached behind the bar switches there. */
+  switchLorebook(id: string, enabled: boolean) {
+    const held = this.held() ?? NO_HELD
+    if (held.attached.some((book) => book.id === id))
+      this.setHeld({ ...held, attached: held.attached.map((book) => (book.id === id ? { ...book, enabled } : book)) })
+    else this.setValue(["lorebooks", `id=${id}`, "enabled"], enabled)
+  }
+
+  /** Throws the held changes away: the order, prompts and lorebooks are the live ones again. */
   revertHeld() {
-    if (this.held() === null) return
+    const held = this.held()
+    if (held === null) return
     this.change(HELD_FIELD, "")
     this.rebuild()
     this.bump(STRUCTURE)
+    // A prompt added behind the bar was never saved: its definition goes too.
+    for (const entry of held.added) this.dropAdded(entry.identifier)
   }
 
   /**
@@ -411,10 +466,7 @@ export class EditorStore {
     return result
   }
 
-  /**
-   * An earlier revision as a new one (`RestoreRevision`): the fields changed since take it too.
-   * A change to many lorebook entries undoes itself this way (lorebookMass.ts).
-   */
+  /** An earlier revision as a new one (`RestoreRevision`): the fields changed since take it too. */
   async restoreRevision(revisionId: RevisionId) {
     const result = await this.call((client) =>
       client("RestoreRevision", {
@@ -427,16 +479,26 @@ export class EditorStore {
     return result
   }
 
-  /** Applies the held changes to the live document, for a save: the order as arranged, the prompts deleted. */
+  /**
+   * Applies the held changes to the live document, for a save: the order as arranged (the added
+   * prompts in it), the prompts deleted, the lorebooks attached and taken off.
+   */
   private async applyHeld() {
     const held = this.held()
     if (held === null) return
     const order = arrange(this.liveOrder(), held)
     this.change(valueField(["order"]), JSON.stringify(order))
     this.change(HELD_FIELD, "")
+    for (const book of held.attached) {
+      if (getAt(this.liveDoc, ["lorebooks"]) === undefined)
+        this.change(valueField(["lorebooks"]), JSON.stringify([book]))
+      else this.change(valueField(["lorebooks", `id=${book.id}`]), JSON.stringify(book))
+      this.rebuild()
+    }
     this.rebuild()
     this.bump(STRUCTURE)
     for (const identifier of held.deleted) await this.removeItem(["prompts", `identifier=${identifier}`])
+    for (const id of held.detached) await this.removeItem(["lorebooks", `id=${id}`])
   }
 
   text(path: FieldPath): string {
@@ -508,21 +570,22 @@ export class EditorStore {
   }
 
   setValue(path: FieldPath, value: unknown) {
-    // A preset's order as the user made it: switches and additions live, moves held (heldOrder.ts).
+    // A preset's order as the user made it: switches live; moves and additions held (presetHeld.ts).
     if (this.snapshot?.ref.kind === "preset" && path.length === 1 && path[0] === "order" && Array.isArray(value)) {
       const held = this.held()
-      // The order as stored: a prompt just added, which the shown order lists at the end until
-      // it has a place, is new to it, and goes live where it was put.
+      // The order as stored: a prompt outside it, which the shown order lists at the end, off,
+      // goes live where it's put when it's switched on; one added behind the bar waits there.
       const stored = new Set(
         ((getAt(this.liveDoc, ["order"]) as PromptOrderEntry[] | undefined) ?? []).map((e) => e.identifier)
       )
       const split = splitOrder(
         this.liveOrder().filter((e) => stored.has(e.identifier) || e.identifier === "main"),
         value as ReadonlyArray<PromptOrderEntry>,
-        held?.deleted ?? []
+        held ?? NO_HELD
       )
       const live = JSON.stringify(split.live)
-      if (live !== JSON.stringify(this.liveOrder())) this.change(valueField(path), live)
+      if (JSON.stringify(presetOrder(this.livePrompts(), split.live)) !== JSON.stringify(this.liveOrder()))
+        this.change(valueField(path), live)
       const text = heldText(split.held)
       if (text !== heldText(held)) this.change(HELD_FIELD, text)
       this.rebuild()
@@ -1030,7 +1093,7 @@ export const useWorkingDoc = (store: EditorStore) => {
 export const useDirty = (store: EditorStore, field: string) =>
   useSyncExternalStore(store.subscribe(field), () => store.isDirty(field))
 
-/** A preset's held moves and deletions as JSON, "" when there are none (heldOrder.ts). */
+/** A preset's held changes as JSON, "" when there are none (@rp/shared/presetHeld.ts). */
 export const useHeld = (store: EditorStore) =>
   useSyncExternalStore(store.subscribe(STRUCTURE, HELD_FIELD), () => heldText(store.held()))
 
@@ -1049,6 +1112,9 @@ export const useLeaveGuard = (store: EditorStore) =>
   useEffect(() => {
     // Flushed before a reply and read again after one (openEditors.ts).
     const untrack = trackOpenEditor({
+      refId: store.refId,
+      // A chat's own note is edited at a position of its own: only the plain stores are shared.
+      ...(store.chatNote ? {} : { store }),
       flush: () => store.flush(),
       refresh: () => (store.snapshot === null ? Promise.resolve() : store.refresh())
     })

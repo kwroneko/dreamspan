@@ -13,8 +13,9 @@ export const buildWorkers = async (outDir = fileURLToPath(new URL("../dist/worke
     const { output } = await build({
       input: fileURLToPath(new URL(`../src/${source}`, import.meta.url)),
       platform: "node",
-      // Native binaries and libvips remain in production node_modules, resolved by sharp.
-      external: ["sharp"],
+      // Native binaries and libvips remain in production node_modules, resolved by sharp. The
+      // tokenizer's ranks (several MB each) load from node_modules on a worker's first count.
+      external: ["sharp", /^js-tiktoken(\/|$)/],
       output: { file: `${outDir}/${name}.mjs`, format: "esm", minify: true, sourcemap: true },
       logLevel: "warn"
     })

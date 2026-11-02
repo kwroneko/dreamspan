@@ -2,7 +2,7 @@
 // header (handle, switch, name renamed in place, how it's sent, tokens, its options and actions)
 // above its text in the code-editor box. Options fold away per prompt, or all at once.
 import type { RefId } from "@rp/shared/library.ts"
-import { writePresetOrder } from "./presetDraft.ts"
+import { addPresetPrompt, writePresetOrder } from "./presetDraft.ts"
 import type { PresetPrompt, PromptOrderEntry } from "@rp/shared/docs/preset.ts"
 import type { PresetContext } from "@rp/shared/inspectorApi.ts"
 import { charDefinitions, newestMessage, perFieldMarkers, presetOrder } from "@rp/shared/presetOrder.ts"
@@ -11,7 +11,7 @@ import { DIRECTION_PROMPT } from "@rp/shared/endOfRequest.ts"
 import { type FieldPath, textField } from "@rp/shared/editing.ts"
 import { Link } from "@tanstack/react-router"
 import { uuidv7 } from "@rp/shared/id.ts"
-import { type ReactNode, useContext, useEffect, useRef, useState } from "react"
+import { type ReactNode, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { useSession } from "../../session.ts"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
@@ -40,6 +40,7 @@ import { PRESET_LOREBOOKS_FOCUS, PresetLorebooks } from "./PresetLorebooks.tsx"
 import { type EditorStore, useText, useValue } from "./store.ts"
 import { presetEditorWarnings } from "./presetSections.ts"
 import { promptLabel } from "./promptLabel.ts"
+import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /**
  * Where the document is shown: "document", the large editor (blocks open, the outline beside
@@ -105,18 +106,31 @@ function TokenCount({
   context: PresetContext | null | undefined
 }) {
   const filled = context?.blocks.find((b) => b.identifier === prompt.identifier)
+  // A prompt's own text: the chat model's tokenizer. A marker's: what the open chat fills it
+  // with, as the context budget counts it (ARCHITECTURE §15 "Token counts").
+  const texts = useMemo(() => [prompt.marker ? "" : content], [prompt.marker, content])
+  const own = useTokenCounts(texts)
+  const label = prompt.marker
+    ? "What the open chat puts here, as its context budget estimates it: four characters a token, three more a message."
+    : tokenizerText(own.tokenizer)
   return (
-    <span className="text-xs whitespace-nowrap text-muted tabular-nums">
-      {prompt.marker
-        ? filled
-          ? `~${filled.tokens.toLocaleString()} tokens`
-          : context === undefined
-            ? "no chat open"
-            : context === null
-              ? "context unavailable"
-              : "0 tokens"
-        : `~${Math.ceil(content.length / 4).toLocaleString()} tokens`}
-    </span>
+    <Tooltip label={label}>
+      <span
+        tabIndex={0}
+        data-prompt-tokens
+        className="rounded text-xs whitespace-nowrap text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      >
+        {prompt.marker
+          ? filled
+            ? `~${filled.tokens.toLocaleString()} tokens`
+            : context === undefined
+              ? "no chat open"
+              : context === null
+                ? "context unavailable"
+                : "0 tokens"
+          : tokensText(own.counts[0] ?? null, own.tokenizer, own.pending)}
+      </span>
+    </Tooltip>
   )
 }
 
@@ -649,9 +663,17 @@ export function PromptDocument({
     next.splice(to, 0, ...next.splice(from, 1))
     setOrder(next)
   }
+  // A prompt added waits behind the unsaved bar with its place (owner, 2026-11-02); its text can
+  // be typed at once, and it's sent once saved.
+  const addAt = (index: number, prompt: PresetPrompt) => {
+    const next = [...order]
+    next.splice(index, 0, { identifier: prompt.identifier, enabled: true })
+    addPresetPrompt(store, prompt, next)
+    jump(prompt.identifier, true)
+  }
   const add = (index: number) => {
     const identifier = uuidv7()
-    store.setValue(at(identifier), {
+    addAt(index, {
       ...newestMessage,
       identifier,
       name: "New prompt",
@@ -661,21 +683,11 @@ export function PromptDocument({
       // A card can't replace a prompt made here unless the user allows it (DESIGN §5.0).
       forbid_overrides: true
     })
-    const next = [...order]
-    next.splice(index, 0, { identifier, enabled: true })
-    setOrder(next)
-    jump(identifier, true)
   }
   const hasDefinitions = order.some((e) => e.identifier === charDefinitions.identifier)
   const definitionsOn = order.some((e) => e.identifier === charDefinitions.identifier && e.enabled)
-  const addDefinitions = (index: number) => {
-    if (!prompts.some((p) => p.identifier === charDefinitions.identifier))
-      store.setValue(at(charDefinitions.identifier), charDefinitions)
-    const next = [...order]
-    next.splice(index, 0, { identifier: charDefinitions.identifier, enabled: true })
-    setOrder(next)
-    jump(charDefinitions.identifier, true)
-  }
+  const addDefinitions = (index: number) =>
+    addAt(index, prompts.find((p) => p.identifier === charDefinitions.identifier) ?? charDefinitions)
   const insert = (index: number, label: string, className?: string, content: ReactNode = "＋") =>
     hasDefinitions ? (
       <Tooltip label={NEW_PROMPT_HINT}>

@@ -2272,6 +2272,12 @@ export class WriteOps extends RpcGroup.make(
     success: GenerationDefaults,
     error: Schema.Union([NotFound, StorageError, LcmSettingsInvalid])
   }),
+  /** Opts a connection of the user's in to provider token counting, or out; NotFound when it isn't theirs. */
+  Rpc.make("SetTokenCounting", {
+    payload: { userId: UserId, connectionId: ConnectionId, enabled: Schema.Boolean },
+    success: Schema.Array(ConnectionId),
+    error: Schema.Union([NotFound, StorageError])
+  }),
   /** The user's display choices, merged in one writer transaction. */
   Rpc.make("SetDisplayPrefs", {
     payload: { userId: UserId, prefs: DisplayPrefsChange },
@@ -3121,6 +3127,12 @@ export class ReadOps extends RpcGroup.make(
   Rpc.make("GetGenerationDefaults", {
     payload: { userId: UserId },
     success: GenerationDefaults,
+    error: StorageError
+  }),
+  /** The user's live connections opted in to provider token counting (`tokenCounting.ts`). */
+  Rpc.make("GetTokenCounting", {
+    payload: { userId: UserId },
+    success: Schema.Array(ConnectionId),
     error: StorageError
   }),
   /** The user's live presets whose HEAD document lists the lorebook `ref` (`PresetDoc.lorebooks`). */

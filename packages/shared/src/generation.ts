@@ -36,3 +36,19 @@ export const GenerationDefaultsChange = Schema.Struct({
   lcm: Schema.optionalKey(LcmSettingsChange)
 })
 export type GenerationDefaultsChange = typeof GenerationDefaultsChange.Type
+
+/**
+ * What counted a `CountTokens` answer (ARCHITECTURE §6 "Text tokens"): the chat model's own
+ * tokenizer (`exact`), or an approximation, with why (`note`), for the count's explanation.
+ */
+export class TokenizerInfo extends Schema.Class<TokenizerInfo>("TokenizerInfo")({
+  id: Schema.String,
+  /** "gpt-4o's own tokenizer (o200k_base, …)", "o200k_base, …, as an approximation". */
+  label: Schema.String,
+  exact: Schema.Boolean,
+  note: Schema.optionalKey(Schema.String)
+}) {}
+
+/** How many texts one `CountTokens` takes, and how long each may be. */
+export const COUNT_TOKENS_TEXTS = 64
+export const COUNT_TOKENS_CHARS = 500_000

@@ -313,7 +313,7 @@ test("switches are live; a reorder waits for Save, and Revert puts it back witho
 
 test("adding and deleting a prompt in the column", async ({ page }) => {
   await theme(page, 1440, "dark")
-  const { chatId } = await setUp(page, "Tab add")
+  const { chatId, refId } = await setUp(page, "Tab add")
   const panel = await open(page, chatId)
   await panel.getByRole("button", { name: "Actions for Formatting", exact: true }).click()
   await page.getByRole("menuitem", { name: "Insert a prompt below", exact: true }).click()
@@ -327,23 +327,37 @@ test("adding and deleting a prompt in the column", async ({ page }) => {
   await panel.getByRole("textbox", { name: "Prompt: 🪶 Style notes", exact: true }).fill("Short sentences.")
   const names = await rowNames(panel)
   expect(names[names.indexOf("synthetic-4") + 1]).not.toMatch(/^synthetic-/)
-  // Adding is live; deleting waits behind the bar, the prompt gone from view at once.
+  // Adding and deleting both wait behind the bar (owner, 2026-11-02), shown at once.
   const bar = panel.getByRole("region", { name: "Unsaved changes" })
-  // Adding a prompt is live where it was put: nothing is held.
-  await expect(bar).toHaveCount(0)
-  await expect(revisionStatus(panel)).toHaveText(/^Changed since revision \d+$/)
+  await expect(bar).toContainText("1 prompt added")
   await panel.getByRole("button", { name: "Actions for Banned phrases", exact: true }).click()
   await page.getByRole("menuitem", { name: "Delete the prompt", exact: true }).click()
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(0)
-  await expect(bar).toContainText("1 prompt deleted")
-  // Revert brings the deleted prompt back without asking; the added one stays.
+  await expect(bar).toContainText("1 prompt added · 1 prompt deleted")
+  // Revert brings the deleted prompt back and takes the added one away, without asking.
   await bar.getByRole("button", { name: "Revert", exact: true }).click()
   await expect(page.getByRole("alertdialog")).toHaveCount(0)
   await expect(bar).toHaveCount(0)
   await expect(panel.locator('[data-prompt="synthetic-7"]')).toHaveCount(1)
-  // The inserted prompt is live where it was put, after the Revert too.
-  expect(await rowNames(panel)).toEqual(names)
-  await expect(panel.getByRole("textbox", { name: "Prompt: 🪶 Style notes", exact: true })).toBeVisible()
+  const inserted = names[names.indexOf("synthetic-4") + 1]
+  expect(await rowNames(panel)).toEqual(names.filter((n) => n !== inserted))
+  await expect(panel.getByRole("textbox", { name: "Prompt: 🪶 Style notes", exact: true })).toHaveCount(0)
+  // Added again and saved with the bar's Save: then it's in the preset, where it was put.
+  await panel.getByRole("button", { name: "Actions for Formatting", exact: true }).click()
+  await page.getByRole("menuitem", { name: "Insert a prompt below", exact: true }).click()
+  await expect(bar).toContainText("1 prompt added")
+  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+  const added = await rowNames(panel)
+  expect(added[added.indexOf("synthetic-4") + 1]).not.toMatch(/^synthetic-/)
+  const savedOrder = await admin((api) =>
+    Effect.map(
+      api.OpenEditor({ refId: refId as never }),
+      (editor) => (editor.doc as { order: Array<{ identifier: string }> }).order
+    )
+  )
+  const ids = savedOrder.map((e) => e.identifier)
+  expect(ids[ids.indexOf("synthetic-4") + 1]).toBe(added[added.indexOf("synthetic-4") + 1])
 })
 
 test.describe("touch", () => {

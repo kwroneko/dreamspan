@@ -41,7 +41,13 @@ import {
   ProviderKindInfo,
   ProxyMode
 } from "./providers.ts"
-import { GenerationDefaults, GenerationDefaultsChange } from "./generation.ts"
+import {
+  COUNT_TOKENS_CHARS,
+  COUNT_TOKENS_TEXTS,
+  GenerationDefaults,
+  GenerationDefaultsChange,
+  TokenizerInfo
+} from "./generation.ts"
 import { LlmRequest } from "./usage.ts"
 import { EntityKind, LibraryRef } from "./library.ts"
 
@@ -315,6 +321,30 @@ export class AppApi extends RpcGroup.make(
     error: ServerError
   }),
   Rpc.make("GetGenerationDefaults", { success: GenerationDefaults, error: ServerError }),
+  /**
+   * Each text's tokens with the tokenizer of the model chats generate with, or an approximation
+   * that says so (ARCHITECTURE §6 "Text tokens"), for the counts the editors show.
+   */
+  Rpc.make("CountTokens", {
+    payload: {
+      texts: Schema.Array(Schema.String.check(Schema.isMaxLength(COUNT_TOKENS_CHARS))).check(
+        Schema.isMaxLength(COUNT_TOKENS_TEXTS)
+      )
+    },
+    success: Schema.Struct({ counts: Schema.Array(Schema.Int), tokenizer: TokenizerInfo }),
+    error: ServerError
+  }),
+  /**
+   * The user's connections whose provider may count the editors' text (owner, 2026-11-02: off
+   * by default, since it sends the text to that provider).
+   */
+  Rpc.make("GetTokenCounting", { success: Schema.Array(ConnectionId), error: ServerError }),
+  /** Turns a connection's provider counting on or off; NotFound when it isn't the user's. */
+  Rpc.make("SetTokenCounting", {
+    payload: { connectionId: ConnectionId, enabled: Schema.Boolean },
+    success: Schema.Array(ConnectionId),
+    error: Schema.Union([NotFound, ServerError])
+  }),
   /** Both defaults at once; NotFound when either isn't one of the user's own. */
   Rpc.make("SetGenerationDefaults", {
     payload: { defaults: GenerationDefaults },
