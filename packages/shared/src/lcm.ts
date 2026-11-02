@@ -416,7 +416,7 @@ export class LcmApi extends RpcGroup.make(
       chatId: ChatId,
       target: RerunTarget,
       requested: Schema.Boolean,
-      /** "Retry with…": the model that does it again; otherwise the chat's summarizer. */
+      /** Optional rerun model override; otherwise the chat's summarizer. */
       model: Schema.optionalKey(ModelChoice)
     },
     success: Schema.Void,

@@ -7,7 +7,6 @@ import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // of its own, which only its message's body reads, and deltas are applied once per
 // animation frame, so a token re-renders one row.
 import { sectionsDisplay } from "@rp/shared/replySections.ts"
-import type { Connection, Model } from "@rp/shared/providers.ts"
 import {
   type Chat,
   type ChatId,
@@ -1446,14 +1445,11 @@ export class ChatSession {
   }
 
   /**
-   * A swipe; with a `model`, "Retry with…" or "Regenerate with…" that one instead of the chat's.
+   * A swipe using the currently selected model.
    * It's written with the guidance of the version it re-rolls, unless the composer gives
    * this slot's guidance explicitly (the guidance editor's box, guidanceEdit.tsx).
    */
-  async regenerate(
-    entry: PathEntry,
-    model?: { readonly connection: Connection["id"]; readonly model: Model["id"] }
-  ): Promise<Outcome<unknown>> {
+  async regenerate(entry: PathEntry): Promise<Outcome<unknown>> {
     await beforeReply()
     const direction = this.guidance({ slotId: entry.slotId, kind: "version" })
     return this.slotWrite(entry.slotId, (client) =>
@@ -1461,7 +1457,6 @@ export class ChatSession {
         slotId: entry.slotId,
         forkId: this.view.forkId,
         expectedRowVersion: entry.rowVersion,
-        ...(model ? { model } : {}),
         ...(direction === undefined ? {} : { direction })
       })
     )

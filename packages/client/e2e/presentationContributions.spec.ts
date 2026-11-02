@@ -93,7 +93,7 @@ test("remaining presentation seams update mounted hosts and restore scoped defau
   await expect(page.getByText("Synthetic retained summary", { exact: true })).toBeVisible()
   await expect(page.getByRole("group", { name: "Versions", exact: true })).toBeVisible()
   await plugin(page, "surfaces")
-  for (const name of ["summary", "boundary", "rail", "retry", "overlay"])
+  for (const name of ["summary", "boundary", "rail", "overlay"])
     await expect(page.getByText(`Plugin ${name}`, { exact: true })).toBeVisible()
   await expect(page.getByText("Plugin branches", { exact: true })).toBeVisible()
   await expect(page.getByText("Plugin preview", { exact: true }).first()).toBeVisible()

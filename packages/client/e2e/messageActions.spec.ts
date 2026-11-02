@@ -4,7 +4,7 @@
 // action; the choice is the account's, so it holds across a reload and in another browser.
 // Edit, Continue, Branch from here and Delete show by default; an action a message doesn't
 // offer isn't on it, pinned or not; no two actions share an icon; many pins never wrap the
-// message or scroll it sideways. Regenerate with… says plainly when there are no models.
+// message or scroll it sideways. Removed actions stay absent even with old stored pins.
 import { expect, type Browser, type Locator, type Page, test } from "@playwright/test"
 import { join } from "node:path"
 import { showActions } from "./support/message.ts"
@@ -36,7 +36,6 @@ const DEFAULTS = {
   "message.insert-above": false,
   "message.write-version": false,
   "message.add-guidance": false,
-  "message.regenerate-with": false,
   "message.insert-below": false,
   "message.duplicate": false,
   "message.visibility": false,
@@ -90,7 +89,6 @@ const EVERY_REPLY_ACTION = [
   "Continue",
   "Write your own version",
   "New version with guidance…",
-  "Regenerate with…",
   "Branch from here",
   "Insert message below",
   "Duplicate",
@@ -235,19 +233,30 @@ test("many pins at a phone's width stay on one line, the rest in More actions", 
   await context.close()
 })
 
-test("Regenerate with… says what it's for, and that there's no model to pick, with a way to add one", async ({
-  page
-}) => {
-  await newChat(page, "Pier")
-  await openMenu(reply(page))
-  await menu(page).getByRole("menuitem", { name: "Regenerate with…" }).click()
-  const dialog = page.getByRole("dialog", { name: "Regenerate with another model", exact: true })
-  await expect(dialog).toContainText("One new version of this message, written by the model you pick")
-  await expect(dialog).toContainText("The chat goes on with its own model")
-  await expect(dialog).toContainText("You have no connections yet")
-  await expect(dialog).not.toContainText("Loading your models")
-  await expect(dialog.getByRole("link", { name: "Add a connection" })).toHaveAttribute("href", "/settings/connections")
-})
+for (const width of [1440, 390]) {
+  test(`removed model actions stay absent with an old account pin (${width}px)`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
+      api.SetDisplayPrefs({ prefs: { messageToolbar: { "message.regenerate-with": true, "message.copy-text": true } } })
+    )
+    await newChat(page, `Old model pin ${width}`)
+    await page.reload()
+    for (const message of [reply(page), mine(page)]) {
+      expect(await buttons(message)).toContain("Copy text")
+      await expect(
+        message.getByRole("button", { name: /Regenerate with|Generate a version with|Retry with/ })
+      ).toHaveCount(0)
+      await openMenu(message)
+      await expect(
+        menu(page).getByRole("menuitem", { name: /Regenerate with|Generate a version with|Retry with/ })
+      ).toHaveCount(0)
+      await expect(menu(page).getByRole("menuitem", { name: "Copy text", exact: true })).toBeVisible()
+      await page.keyboard.press("Escape")
+    }
+    await expect(mine(page).getByText("Retry with…")).toHaveCount(0)
+    await expect(reply(page).getByText("Retry with…")).toHaveCount(0)
+  })
+}
 
 for (const scheme of ["light", "dark"] as const)
   for (const width of [1440, 390] as const)

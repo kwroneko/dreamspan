@@ -15,6 +15,7 @@ import { ADMIN, serverPerFile, withAdmin } from "./support/server.ts"
 import { fixtureSql } from "../../server/test/support/lcmFixtures.ts"
 import { condensed, count, failedJob, level1 } from "./support/summaries.ts"
 import { closePanel, openPanel } from "./support/panel.ts"
+import { showActions } from "./support/message.ts"
 import { makeCopy } from "../src/features/editor/backup.ts"
 
 const server = serverPerFile(withAdmin)
@@ -368,28 +369,48 @@ for (const [name, viewport] of [
       expect(await admin((api) => api.GetGenerationDefaults()).then((d) => !!d.lcm?.fallback)).toBe(true)
     })
 
-    test("a reply a judge found refused is marked and can be retried with another model", async ({ page }) => {
-      const fixture = await makeChat(`retry-${name}`)
-      const reply = await admin((api) =>
-        api.Generate({ chatId: fixture.chatId, parentSlotId: fixture.entries.at(-1)!.slotId, branch: false })
-      )
-      if (reply._tag !== "Posted") throw new Error("the reply was queued")
-      await open(page, fixture)
-      await expect(page.getByRole("article", { name: "Reply" }).getByText("The bridge holds.")).toBeVisible()
-      await expect(page.getByText("Retry with…")).toHaveCount(0)
-      await Effect.runPromise(
-        fixtureSql(server().dataDir, [
-          { sql: "UPDATE versions SET mark = 'refused' WHERE id = ?", params: [reply.entry.version.id] }
-        ])
-      )
-      await page.reload()
-      const article = page.getByRole("article", { name: "Reply" })
-      await expect(article.getByText("refused", { exact: true })).toBeVisible()
-      const before = provider.completions.length
-      await article.getByText("Retry with…").click()
-      await page.getByRole("option", { name: /fake-small/ }).click()
-      await expect.poll(() => provider.completions.length).toBeGreaterThan(before)
-    })
+    for (const refusal of ["judged", "provider"] as const)
+      test(`a ${refusal} refusal keeps ordinary regeneration without model actions`, async ({ page }) => {
+        const fixture = await makeChat(`retry-${refusal}-${name}`)
+        const reply = await admin((api) =>
+          api.Generate({ chatId: fixture.chatId, parentSlotId: fixture.entries.at(-1)!.slotId, branch: false })
+        )
+        if (reply._tag !== "Posted") throw new Error("the reply was queued")
+        await open(page, fixture)
+        await expect(page.getByRole("article", { name: "Reply" }).getByText("The bridge holds.")).toBeVisible()
+        await expect(page.getByText("Retry with…")).toHaveCount(0)
+        await Effect.runPromise(
+          fixtureSql(server().dataDir, [
+            refusal === "judged"
+              ? { sql: "UPDATE versions SET mark = 'refused' WHERE id = ?", params: [reply.entry.version.id] }
+              : {
+                  sql: "UPDATE versions SET status = 'failed', error_json = ? WHERE id = ?",
+                  params: [
+                    JSON.stringify({ class: "refused", message: "Synthetic provider refusal" }),
+                    reply.entry.version.id
+                  ]
+                }
+          ])
+        )
+        await admin((api) => api.SetDisplayPrefs({ prefs: { messageToolbar: { "message.regenerate-with": true } } }))
+        await page.reload()
+        const article = page.getByRole("article", { name: "Reply" })
+        await expect(
+          article.getByText(refusal === "judged" ? "refused" : "Failed (refused): Synthetic provider refusal", {
+            exact: true
+          })
+        ).toBeVisible()
+        await expect(article.getByText("Retry with…")).toHaveCount(0)
+        await expect(article.getByRole("button", { name: /Regenerate with|Generate a version with/ })).toHaveCount(0)
+        await showActions(article)
+        await article.getByRole("button", { name: "More actions" }).click()
+        await expect(page.getByRole("menuitem", { name: /Regenerate with|Generate a version with/ })).toHaveCount(0)
+        await page.keyboard.press("Escape")
+        const before = provider.completions.length
+        await article.getByRole("button", { name: "Generate another version", exact: true }).click()
+        await expect.poll(() => provider.completions.length).toBeGreaterThan(before)
+        await expect(article.getByRole("group", { name: "Versions", exact: true })).toContainText("2/2")
+      })
 
     test("the context view names a summary source with its level, range and revision", async ({ page }) => {
       const fixture = await makeChat(`context-${name}`)

@@ -16,7 +16,6 @@ import {
   chatOverlays,
   chatSettingSections,
   chatSurfaceProviders,
-  messageRetries,
   messageVersions,
   summarySettingFields,
   summaryPanelSections,
@@ -61,9 +60,6 @@ const ReplyOrderSection = deferred<Parameters<typeof import("./ReplyOrder.tsx").
 )
 const OneReplySection = deferred<Parameters<typeof import("./ReplyOrder.tsx").OneReplySection>[0]>(() =>
   import("./ReplyOrder.tsx").then((m) => ({ default: m.OneReplySection }))
-)
-const RetryWith = deferred<Parameters<typeof import("./VersionControls.tsx").RetryWith>[0]>(() =>
-  import("./VersionControls.tsx").then((m) => ({ default: m.RetryWith }))
 )
 const Versions = deferred<Parameters<typeof import("./VersionControls.tsx").Versions>[0]>(() =>
   import("./VersionControls.tsx").then((m) => ({ default: m.Versions }))
@@ -149,7 +145,6 @@ export const registerPresentation = () => [
     )
   }),
   timelineRails.register({ id: "timeline.coverage", order: 10, component: CoverageRail }),
-  messageRetries.register({ id: "message.retry-with", order: 10, component: RetryWith }),
   messageVersions.register({
     id: "message.versions",
     order: 10,

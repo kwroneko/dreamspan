@@ -105,6 +105,15 @@ describe("pinned message actions", () => {
     expect(buttons(contextOf(entryOf("human", 1)))).toEqual(["Edit", "Continue", "Branch from here", "Delete message"])
   })
 
+  it("ignores a stored pin for the removed model action on normal, refused and human turns", () => {
+    messageActionPins.connect({ "message.regenerate-with": true, "message.copy-text": true }, null, null)
+    for (const entry of [entryOf("model", 1), entryOf("model", 1, { mark: "refused" }), entryOf("human", 1)]) {
+      const context = contextOf(entry)
+      expect(views(context).has("message.regenerate-with")).toBe(false)
+      expect(buttons(context)).toEqual(["Edit", "Continue", "Branch from here", "Copy text", "Delete message"])
+    }
+  })
+
   it("pins and unpins by action id, ignores an unknown id, and hides an unavailable pinned action", () => {
     const reply = contextOf(entryOf("model", 3))
     messageActionPins.choose("message.copy-text", true)
@@ -170,7 +179,6 @@ describe("pinned message actions", () => {
       "message.continue",
       "message.write-version",
       "message.add-guidance",
-      "message.regenerate-with",
       "message.branch",
       "message.insert-above",
       "message.insert-below",

@@ -19,7 +19,6 @@ import {
   chatSettingSections,
   chatSurfaceProviders,
   ChatSurfaceProviders,
-  messageRetries,
   messageVersions,
   summarySettingFields,
   timelineBoundaries,
@@ -105,7 +104,6 @@ acceptsAlternative(chatColumns)
 acceptsAlternative(chatSettingSections)
 acceptsAlternative(accountSettingSections)
 acceptsAlternative(summarySettingFields)
-acceptsAlternative(messageRetries)
 acceptsAlternative(messageVersions)
 acceptsAlternative(timelineBoundaries)
 acceptsAlternative(timelineSummaries)

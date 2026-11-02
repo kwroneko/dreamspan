@@ -5,7 +5,7 @@ import type { ChatNote } from "@rp/shared/chatSetupApi.ts"
 import { makeRegistry } from "../../registry.ts"
 import { defineSlot, SlotOutlet } from "../../slots.tsx"
 import type { ChatCardActionProps } from "./CardForkDialogs.tsx"
-import type { RetryWith, Versions } from "./VersionControls.tsx"
+import type { Versions } from "./VersionControls.tsx"
 import type { LcmBoundary } from "./LcmBoundary.tsx"
 import type { TimelineSummary } from "./TimelineSummary.tsx"
 import type { CoverageRail } from "./CoverageRail.tsx"
@@ -29,7 +29,6 @@ export const summarySettingFields = defineSlot<ComponentProps<typeof LcmFields>>
 export const timelineBoundaries = defineSlot<ComponentProps<typeof LcmBoundary>>("chat.timeline-boundaries")
 export const timelineSummaries = defineSlot<ComponentProps<typeof TimelineSummary>>("chat.timeline-summaries")
 export const timelineRails = defineSlot<ComponentProps<typeof CoverageRail>>("chat.timeline-rails")
-export const messageRetries = defineSlot<ComponentProps<typeof RetryWith>>("message.retry")
 /**
  * In a message's header, after its name and its message details (messageDetails.tsx: time,
  * model): badges such as the rewrite mark. A detail the user can hide is a message detail instead.

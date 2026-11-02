@@ -1,8 +1,8 @@
 // Versions on every message and the version picker (DESIGN §3.1), against a server with the
 // fake generator: a message the user wrote gets a model-written version from its menu, then
 // its › and the arrows like a reply; the picker stars and hides versions (hidden ones
-// leave the arrows), filters to the starred and compares two; "Regenerate with…" another
-// model labels the new version with it. On a phone the picker is a sheet.
+// leave the arrows), filters to the starred and compares two; switching the composer
+// model then swiping makes another version. On a phone the picker is a sheet.
 import { expect, type Locator, type Page, test } from "@playwright/test"
 import { Effect } from "effect"
 import { messageMenu, showActions } from "./support/message.ts"
@@ -58,10 +58,10 @@ test("a message the user wrote gets a version from the model, then its › and a
   await versions(mine).getByRole("button", { name: "Previous version", exact: true }).click()
   await versions(mine).getByRole("button", { name: "Previous version", exact: true }).click()
   await expect(mine.locator(".markdown")).toHaveText("The lantern swings.")
-  // Before the last version › steps; More actions still regenerates with a model of choice.
+  // Before the last version › steps to the next one.
   await expect(versions(mine).getByRole("button", { name: "Next version", exact: true })).toBeVisible()
-  await messageMenu(mine, "Regenerate with…")
-  await expect(page.getByRole("dialog", { name: "Regenerate with another model" })).toBeVisible()
+  await versions(mine).getByRole("button", { name: "Next version", exact: true }).click()
+  await expect(versions(mine)).toContainText("2/3")
 })
 
 test("the picker stars and hides versions, filters to the starred, and compares two", async ({ page }) => {
@@ -112,7 +112,7 @@ test("the picker stars and hides versions, filters to the starred, and compares 
   await expect(page.getByRole("button", { name: "Show version 2 in the arrows again", exact: true })).toBeVisible()
 })
 
-test("Regenerate with… another model labels the new version with it", async ({ page }) => {
+test("switching the composer model then swiping makes another version", async ({ page }) => {
   await asUser(server(), ADMIN.handle, ADMIN.password, (api) =>
     Effect.gen(function* () {
       const connection = yield* api.CreateConnection({
@@ -127,39 +127,23 @@ test("Regenerate with… another model labels the new version with it", async ({
         },
         apiKey: "sk-synthetic"
       })
+      const first = yield* api.AddUserModel({ connectionId: connection.id, key: "prose-small", overrides: {} })
       yield* api.AddUserModel({ connectionId: connection.id, key: "prose-large", overrides: {} })
+      yield* api.ChangeGenerationDefaults({ change: { model: { connection: connection.id, model: first.id } } })
     })
   )
   await newChat(page, "Ferry")
   const reply = page.getByRole("article", { name: "Reply", exact: true }).last()
-  await messageMenu(reply, "Regenerate with…")
-  const dialog = page.getByRole("dialog", { name: "Regenerate with another model", exact: true })
-  await dialog.getByRole("combobox").click()
-  await page.getByRole("option", { name: "Relay · prose-large", exact: true }).click()
+  await page.getByRole("button", { name: "Model: Relay · prose-small. Change the model", exact: true }).click()
+  await page.getByRole("radio", { name: "Relay · prose-large", exact: true }).click()
+  await expect(
+    page.getByRole("button", { name: "Model: Relay · prose-large. Change the model", exact: true })
+  ).toBeVisible()
+  await reply.getByRole("button", { name: "Generate another version", exact: true }).click()
   await expect(versions(reply)).toContainText("2/2")
-  const label = reply.getByText("Relay · prose-large", { exact: true })
-  await expect(label).toBeVisible()
-  // A narrow header gives way in the connection's name first, down to nothing: the model's
-  // name stays whole, with no ellipsis, while any of the connection's shows (audit §7).
-  const widths = await label.evaluate((element) => {
-    const [connection, model] = [...element.children] as Array<HTMLElement>
-    const natural = (part: HTMLElement) => {
-      const range = document.createRange()
-      range.selectNodeContents(part)
-      return range.getBoundingClientRect().width
-    }
-    element.style.maxWidth = `${natural(model!) + 12}px`
-    return {
-      connection: connection!.getBoundingClientRect().width < natural(connection!),
-      model: model!.getBoundingClientRect().width >= natural(model!) - 0.01
-    }
-  })
-  expect(widths).toEqual({ connection: true, model: true })
-  await settled(page)
-  await versions(reply)
-    .getByRole("button", { name: /choose a version/ })
-    .click()
-  await expect(page.getByRole("button", { name: /^Version 2, Relay · prose-large/ })).toBeVisible()
+  // The fake generator doesn't assemble a context, so it records no model; the swipe itself
+  // used the model chosen below the composer without a dedicated action.
+  await expect(reply.getByRole("button", { name: /Regenerate with|Retry with/ })).toHaveCount(0)
 })
 
 test("on a phone the picker is a sheet", async ({ page }) => {
