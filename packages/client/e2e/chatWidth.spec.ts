@@ -170,9 +170,11 @@ for (const [width, height] of [
       const barAt = await bounds(bar)
       const textAt = await bounds(box(page))
       expect(barAt.y).toBeGreaterThanOrEqual(frame.y)
-      expect(barAt.y - frame.y).toBeLessThanOrEqual(8)
+      // The layout audit's 8 px inset inside the box's 1 px border (layoutlint, layoutfixes).
+      expect(barAt.y - frame.y).toBeLessThanOrEqual(9)
       expect(textAt.y - (barAt.y + barAt.height)).toBeGreaterThanOrEqual(0)
-      expect(textAt.y - (barAt.y + barAt.height)).toBeLessThanOrEqual(12)
+      // The bar's 8 px, the 1 px rule under it and the text box's own 8 px (layoutfixes' insets).
+      expect(textAt.y - (barAt.y + barAt.height)).toBeLessThanOrEqual(17)
       expect(Math.abs(textAt.width - input.width)).toBeLessThanOrEqual(1)
       await noSideScroll(page)
       await shoot(page, `guidance-edit-${width}-${theme}`)

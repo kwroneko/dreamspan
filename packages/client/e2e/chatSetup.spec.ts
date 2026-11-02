@@ -424,11 +424,12 @@ test("a new chat of a group: each character greets in turn, and the first send m
   await expect(composer(page)).toHaveValue("Is the ferry running?")
   // Who answers first is picked in the Cast tab, as who replies is in a saved chat.
   const cast = await openPanel(page, "Cast")
-  await cast.getByLabel("Reply from").click()
+  // The label has its (i) beside it now, so the picker is named by role (settingscopy).
+  await cast.getByRole("combobox", { name: "Reply from" }).click()
   await page.getByRole("option", { name: "Tobin" }).click()
   await closePanel(page)
-  // Reply from is independent of the speaker that Write writes.
-  await expect(page.getByRole("button", { name: "Write for Ana" })).toBeVisible()
+  // Reply from is independent of the speaker that Generate writes (named Generate again: composerrow, DESIGN §2.2 [D]).
+  await expect(page.getByRole("button", { name: "Generate Ana" })).toBeVisible()
   await shoot(page, "new-group-chat")
 
   // Reopening draws again. Pick the alternate explicitly before sending.
