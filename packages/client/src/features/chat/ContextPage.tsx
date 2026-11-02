@@ -22,6 +22,7 @@ import { Button } from "../../ui/Button.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Alert, Badge, Card, CardHeader } from "../../ui/Surface.tsx"
 import { ImageEstimate } from "./imageTokens.tsx"
+import { requestStatusText } from "./requestWords.ts"
 import { useTitle } from "../shell.tsx"
 
 /** How much of a collapsed message shows. */
@@ -487,7 +488,10 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
             className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border py-2 text-sm tabular-nums"
           >
             {[
-              ["Attempt", `${i + 1}: ${request.status}${request.usageSource === "estimated" ? " (estimated)" : ""}`],
+              [
+                "Attempt",
+                `${i + 1}: ${requestStatusText(request.status)}${request.usageSource === "estimated" ? " (estimated)" : ""}`
+              ],
               ["Input", count(request.counts.inputUncached)],
               ["Cache read", count(request.counts.cacheRead)],
               ["Cache write", count(request.counts.cacheWrite)],
@@ -523,7 +527,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
           {requests.map((request, i) => (
             <tr key={request.id} className="border-t border-border">
               <td className="py-1 pr-3">
-                {i + 1}: {request.status}
+                {i + 1}: {requestStatusText(request.status)}
                 {request.usageSource === "estimated" && " (estimated)"}
               </td>
               <td className="py-1 pr-3">{count(request.counts.inputUncached)}</td>

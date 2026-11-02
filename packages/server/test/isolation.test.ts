@@ -1429,6 +1429,13 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         )
       ]).pipe(Effect.asVoid)
   },
+  GetMessageDraft: {
+    probe: (actor, owner) =>
+      Effect.all([
+        refused(actor.api.GetMessageDraft({ target: { _tag: "Edit", versionId: owner.chat.versionId } }), "NotFound"),
+        refused(actor.api.GetMessageDraft({ target: { _tag: "Write", slotId: owner.chat.slotId } }), "NotFound")
+      ]).pipe(Effect.asVoid)
+  },
   RestoreMessageDraft: {
     probe: (actor, owner) =>
       Effect.all([
