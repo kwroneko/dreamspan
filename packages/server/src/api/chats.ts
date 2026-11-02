@@ -155,11 +155,13 @@ export const makeChatHandlers = Effect.gen(function* () {
       /** A message that posts without a reply (every character muted, DESIGN §3.5). */
       readonly noReply?: boolean
       readonly direction: string | null
+      /** Who replies after its reply, in turn (DESIGN §2.3). */
+      readonly round?: ReadonlyArray<EntityId> | undefined
       readonly composer: { readonly draftId: string; readonly session: number } | undefined
     }
   ) =>
     Effect.gen(function* () {
-      const { composer, ...send } = params
+      const { composer, round, ...send } = params
       // What the user sends goes through the scripts first, as ST's sendMessageAsUser.
       const written =
         params.kind === "message"
@@ -177,6 +179,7 @@ export const makeChatHandlers = Effect.gen(function* () {
         ...send,
         content: written.content,
         ...(written.rewrite ? { rewrite: written.rewrite } : {}),
+        ...(round === undefined || round.length === 0 ? {} : { round }),
         // The composer draft the text was taken from (DESIGN §6.2).
         commitDraft: composer === undefined ? null : { draftId: composer.draftId, session: composer.session }
       })
@@ -204,6 +207,8 @@ export const makeChatHandlers = Effect.gen(function* () {
       }
       const entry = yield* publishSlot(user, result.slotId)
       hub.publish(params.chatId, { _tag: "Chat", chat: result.chat })
+      // The rest of the round waits behind the reply just posted.
+      if (outcome.queue !== undefined) hub.publish(params.chatId, { _tag: "Queue", queue: outcome.queue })
       return { _tag: "Posted" as const, entry, chat: result.chat, draft: result.draft, recovered: result.recovered }
     })
 
@@ -289,6 +294,7 @@ export const makeChatHandlers = Effect.gen(function* () {
       images,
       imageDraftIds,
       reply,
+      round,
       composer
     }) =>
       Effect.flatMap(userId, (id) =>
@@ -305,13 +311,14 @@ export const makeChatHandlers = Effect.gen(function* () {
           replySpeakerEntityId: replySpeakerEntityId ?? null,
           ...(reply === false ? { noReply: true } : {}),
           direction: null,
+          round,
           composer
         })
       ).pipe(internal("SendMessage")),
 
     // Once the version is written, its generation starts even if the caller has gone:
     // otherwise it would stay `generating` with nothing behind it.
-    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, composer }) =>
+    Generate: ({ chatId, forkId, parentSlotId, branch, speakerEntityId, direction, round, composer }) =>
       Effect.gen(function* () {
         yield* needGenerator
         const id = yield* userId
@@ -325,9 +332,24 @@ export const makeChatHandlers = Effect.gen(function* () {
           speakerEntityId: speakerEntityId ?? null,
           replySpeakerEntityId: null,
           direction: direction ?? null,
+          round,
           composer
         })
       }).pipe(Effect.uninterruptible, internal("Generate")),
+
+    // The fork's stopped round goes on (DESIGN §2.3); its next reply starts as a queued one does.
+    Round: ({ chatId, forkId, action }) =>
+      Effect.gen(function* () {
+        if (action === "continue") yield* needGenerator
+        const id = yield* userId
+        const outcome = yield* (action === "continue" ? writer.ContinueRound : writer.EndRound)({
+          userId: id,
+          chatId,
+          forkId
+        })
+        yield* generations.continueQueue(id, outcome)
+        return outcome.queue
+      }).pipe(Effect.uninterruptible, internal("Round")),
 
     Regenerate: ({ slotId, forkId, expectedRowVersion, model, direction }) =>
       Effect.gen(function* () {

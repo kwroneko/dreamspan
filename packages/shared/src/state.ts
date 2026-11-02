@@ -45,6 +45,8 @@ export const StateEventData = Schema.Union([
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
   /** Who replies when nobody is picked: a reply policy's id (built-ins `natural`, `list`, `pooled`, `manual`; resolved at use). */
   event("reply.order", Schema.String),
+  /** On: one reply per user action, where ST replies with the reply order's whole round (DESIGN §2.3). */
+  event("reply.single", Schema.Struct({ on: Schema.Boolean })),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
@@ -136,6 +138,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "macro.unbind": { ids: {} },
   "orchestration.mode": { ids: {} },
   "reply.order": { ids: {} },
+  "reply.single": { ids: {} },
   "output.contract": { ids: {} },
   "rollout.continuity": { ids: {} },
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
@@ -343,6 +346,8 @@ export interface ChatState {
   readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
   /** The reply policy picking who replies when nobody is picked; null (no event) is the default. */
   readonly replyOrder: string | null
+  /** One reply per user action instead of a round; null (no event) is off, as in ST. */
+  readonly replySingle: boolean | null
   readonly outputContract: "final_text" | "send_message" | "both" | null
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
@@ -375,6 +380,7 @@ const emptyChatState: ChatState = {
   macroBindings: {},
   orchestration: null,
   replyOrder: null,
+  replySingle: null,
   outputContract: null,
   rolloutContinuity: null,
   lorebookBindings: {},
@@ -488,6 +494,8 @@ const applyCore = (
       return { ...state, orchestration: data.value }
     case "reply.order":
       return { ...state, replyOrder: data.value }
+    case "reply.single":
+      return { ...state, replySingle: data.value.on }
     case "output.contract":
       return { ...state, outputContract: data.value }
     case "rollout.continuity":

@@ -1275,7 +1275,9 @@ export class ChatSession {
     /** False when no one may reply (every character muted, DESIGN §3.5): the message is only posted. */
     reply = true,
     images?: import("@rp/shared/chat.ts").MessageImages,
-    imageDraftIds?: readonly string[]
+    imageDraftIds?: readonly string[],
+    /** Who replies after `replySpeaker`, in turn: the rest of the round (DESIGN §2.3). */
+    round: ReadonlyArray<EntityId> = []
   ): Promise<{
     readonly sent: boolean
     readonly outcome: Outcome<unknown>
@@ -1299,6 +1301,7 @@ export class ChatSession {
           replySpeakerEntityId: replySpeaker,
           // Queued with no one to reply, it posts alone, as it does at once.
           ...(reply ? {} : { reply: false }),
+          ...(reply && round.length > 0 ? { round } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
@@ -1312,7 +1315,12 @@ export class ChatSession {
     if (result.value._tag === "Queued") return { sent: true, outcome: result, draft, recovered }
     this.appended(result.value.entry, result.value.chat)
     if (!reply) return { sent: true, outcome: result, draft, recovered }
-    return { sent: true, outcome: await this.generate(result.value.entry.slotId, replySpeaker), draft, recovered }
+    return {
+      sent: true,
+      outcome: await this.generate(result.value.entry.slotId, replySpeaker, "", undefined, round),
+      draft,
+      recovered
+    }
   }
 
   /**
@@ -1323,7 +1331,9 @@ export class ChatSession {
     parentSlotId = this.view.leafSlotId,
     speaker: EntityId | null = null,
     direction = "",
-    composer?: ComposerSource
+    composer?: ComposerSource,
+    /** Who replies after this one, in turn: the rest of the round (DESIGN §2.3). */
+    round: ReadonlyArray<EntityId> = []
   ): Promise<Outcome<SendResult>> {
     await beforeReply()
     const result = await this.queueSnapshot(
@@ -1335,6 +1345,7 @@ export class ChatSession {
           branch: false,
           speakerEntityId: speaker,
           ...(direction.trim() === "" ? {} : { direction }),
+          ...(round.length > 0 ? { round } : {}),
           ...(composer === undefined ? {} : { composer: commitOf(composer) })
         })
       ),
@@ -1344,6 +1355,18 @@ export class ChatSession {
       if (result.value._tag === "Posted") this.appended(result.value.entry, result.value.chat)
     } else if (result.error.tag === "LeafMoved") this.reload()
     return result
+  }
+
+  /**
+   * The shown fork's round (DESIGN §2.3): `continue` goes on with a stopped one, its next reply
+   * at the tip; `end` drops what's left of it. The posted reply arrives as the queue's do.
+   */
+  async round(action: "continue" | "end"): Promise<Outcome<unknown>> {
+    if (action === "continue") await beforeReply()
+    return this.queueSnapshot(
+      this.call((client) => client("Round", { chatId: this.chatId, forkId: this.view.forkId, action })),
+      (queue) => queue
+    )
   }
 
   /** Changes who's in the chat, or a setting, from the leaf shown on (DESIGN §3.4). */
