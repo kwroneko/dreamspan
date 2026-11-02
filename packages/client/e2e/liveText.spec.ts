@@ -99,8 +99,10 @@ for (const width of [1440, 390])
 
     // A chat's own note, typed and never saved.
     const notes = await openPanel(page, "Notes")
-    await notes.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
-    await page.getByRole("menuitem", { name: "New note" }).click()
+    await notes
+      .getByRole("region", { name: "This chat's notes" })
+      .getByRole("button", { name: "New note", exact: true })
+      .click()
     const note = notes.getByRole("region", { name: "Note Note" })
     const noteText = `NOTE-LIVE-${width} lanterns along the levee.`
     await note.getByRole("textbox", { name: /^Text of/ }).fill(noteText)

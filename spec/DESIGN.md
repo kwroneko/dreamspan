@@ -2,6 +2,8 @@
 
 **Implementation audit 2026-10-30:** Built entries below are obsolete as implementation plans, retaining their [P]/[O] provenance unless a cited owner decision supersedes them. Open and later work remains unbuilt.
 
+**Built 2026-11-02 (addbuttons):** The direct-add-actions requirement in §10.1 is implemented and obsolete as a plan; see ARCHITECTURE.md §14.6.
+
 **Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. The broader refresh rule still applies to other surfaces.
 
 **Built 2026-10-30:** CCv3 `group_only_greetings` selection in §4 is implemented and obsolete as a proposal; see ARCHITECTURE.md §12. Other §4 fields retain their statuses.
@@ -746,6 +748,7 @@ Stepped history, dropped-message display and rewrite warnings without a TTL are 
 ## 10. Web app, platform and stack
 
 ### 10.1 Web app
+- **[D]** Direct add actions (owner, 2026-11-02), on the Notes “Add a note ▾” menu: "This is absurd, a huge button with text that takes up the space of 3 icon buttons just to serve as a dropdown with the main thing everyone is trying to do [and] a niche alternative feature. Just make these two icon buttons next to each other." **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.6): New note and Pick a shared note are adjacent icon buttons.
 - **[D]** Row-action spacing (owner, 2026-11-02): "The archive button for presets touches the edge of the box it's in. This is such a basic UI visual mistake." Trailing actions in scrolling lists keep at least the left content inset before the box edge and scrollbar, at every width, with or without scrolling; tooltips use shared placement and stay inside the viewport. **Built; obsolete as an implementation requirement** (ARCHITECTURE §5).
 
 **Built (fieldwidth, 2026-11-02):** the short-field width requirement below is implemented and obsolete as a plan; see ARCHITECTURE §12.
