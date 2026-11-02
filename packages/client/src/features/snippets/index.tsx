@@ -80,6 +80,7 @@ function SnippetsPanel() {
  * A snippet's editor, wherever it shows (the Snippets panel or sheet, or any other surface): while
  * `shown`, it's expanded and so can be where Send text to snippet goes, and a click or typing in it
  * makes it the target (`SnippetWorkspace.target`). Spread the result on the element around the editor.
+ * @public For other snippet editor surfaces (a large editor in the main column).
  */
 export function useSnippetEditorSurface(refId: RefId, shown: boolean) {
   const ref = useRef<HTMLDivElement>(null)
