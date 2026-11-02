@@ -1,12 +1,14 @@
 // A text box's own controls sit in a strip inside its border (ui/FieldFrame.tsx; owner,
 // 2026-11-02): focusing, typing in and leaving a box moves nothing outside it, the strip shows
 // only while the pointer or focus is in the box, and its controls come after the box in the
-// focus order. Picking states in a box's edit history swaps the text in place, with no flash.
+// focus order. Every multi-line versioned field opens large from its strip, editing the same
+// text. Picking states in a box's edit history swaps the text in place, with no flash.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 import { asUser } from "./support/rpc.ts"
 import { openEntry } from "./support/lorebook.ts"
 import { cardFieldsTab } from "./support/cardEditor.ts"
+import { textBoxValue } from "./support/textbox.ts"
 
 const server = serverPerFile(withAdmin)
 const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
@@ -196,4 +198,68 @@ test("picking states in a box's edit history swaps the text in place: nothing is
   )
   expect(seen.frames).toBeGreaterThan(0)
   expect(seen).toMatchObject({ removed: 0, blank: 0 })
+})
+
+/**
+ * Opens the box large from its strip, types there, closes it: the box in place has the same text
+ * and has focus again.
+ */
+const expectOpensLarge = async (page: Page, box: Locator, name: string, label = name) => {
+  const frame = frameOf(box)
+  await frame.getByRole("button", { name: `Open ${label} large`, exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: label, exact: true })
+  const large = dialog.getByRole("textbox", { name, exact: true })
+  await expect(large).toBeVisible()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.type(" Written large.")
+  await dialog.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect.poll(() => textBoxValue(box)).toMatch(/ Written large\.$/)
+  await expect
+    .poll(() => box.evaluate((e) => (e.getRootNode() as Document | ShadowRoot).activeElement === e))
+    .toBe(true)
+}
+
+test("every multi-line versioned field opens large from its strip, editing the same text: a card's, a note's, a preset prompt's, a lorebook entry's", async ({
+  page
+}) => {
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  const card = await admin((api) => api.CreateCard({ label: "Large", name: "Large" }))
+  await page.goto(`${server().url}/library/${card.id}`)
+  const description = page.getByRole("textbox", { name: /^Description/ })
+  await description.fill("A harbour.")
+  await expectOpensLarge(page, description, (await description.getAttribute("aria-label"))!, "Description")
+
+  await cardFieldsTab(page, "Notes")
+  await page
+    .getByRole("button", { name: /^Add a note/ })
+    .first()
+    .click()
+  await page.getByRole("menuitem", { name: /New note/ }).click()
+  const anyNote = page.getByRole("textbox", { name: /^Text of / }).first()
+  await expect(anyNote).toBeVisible()
+  const noteName = (await anyNote.getAttribute("aria-label"))!
+  const note = page.getByRole("textbox", { name: noteName, exact: true })
+  await note.fill("Remember the storm.")
+  await expectOpensLarge(page, note, noteName)
+
+  const preset = await admin((api) => api.CreatePreset({ label: "Large preset" }))
+  await page.goto(`${server().url}/library/${preset.id}`)
+  const anyPrompt = page.getByRole("textbox", { name: /^Prompt: / }).first()
+  await expect(anyPrompt).toBeVisible()
+  const promptName = (await anyPrompt.getAttribute("aria-label"))!
+  await expectOpensLarge(page, page.getByRole("textbox", { name: promptName, exact: true }), promptName)
+
+  const response = await page.request.post(`${server().url}/library/import?name=large.json`, {
+    headers: { "content-type": "application/octet-stream", origin: server().url },
+    data: Buffer.from(
+      JSON.stringify({ name: "Large book", entries: { 0: { uid: 0, key: ["k"], comment: "Pier", content: "Old." } } })
+    )
+  })
+  const book = (await response.json()).library.ref as { id: string }
+  await page.goto(`${server().url}/library/${book.id}`)
+  await openEntry(page, "Pier")
+  await expectOpensLarge(page, page.getByRole("textbox", { name: "Entry content" }), "Entry content")
 })

@@ -21,6 +21,8 @@ export function CardTextEditor({
   source,
   tools,
   status,
+  expand,
+  autoFocus,
   onChange,
   onBlur
 }: {
@@ -39,6 +41,10 @@ export function CardTextEditor({
   /** The field's own controls and status, in the strip inside its box (`ui/FieldFrame`). */
   tools?: ReactNode
   status?: ReactNode
+  /** False: no Open large (the large box itself). */
+  expand?: boolean | undefined
+  /** Focused when it opens, the caret at the end. */
+  autoFocus?: boolean | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -84,6 +90,8 @@ export function CardTextEditor({
         source={source}
         tools={tools}
         status={status}
+        expand={expand}
+        autoFocus={autoFocus}
         onChange={onChange}
         onBlur={onBlur}
       />

@@ -130,7 +130,6 @@ export function TextField({
   description,
   mono = false,
   readOnly = false,
-  expandable = false,
   labelHidden = false,
   source,
   hint,
@@ -147,8 +146,6 @@ export function TextField({
   aside?: ReactNode
   mono?: boolean
   readOnly?: boolean
-  /** A button opening the field large over the page, as ST's maximize does: a narrow panel's long field. */
-  expandable?: boolean
   /** The label is for assistive technology only (a prompt's text, named in its block's header). */
   labelHidden?: boolean
   /** A snippet's own text: its editor offers no sending to a snippet. */
@@ -188,7 +185,9 @@ export function TextField({
   const tools = (
     <>
       <FieldEditHistory store={store} field={field} label={label} />
-      {expandable && rows !== undefined && (
+      {/* Open large (owner, 2026-11-02): every multi-line prose field. The code editor's box
+          (card, preset and note text) has its own, in `ui/CodeEditorView`. */}
+      {rows !== undefined && !card && !mono && !readOnly && (
         <IconButton
           label={`Open ${label} large`}
           hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
@@ -201,7 +200,16 @@ export function TextField({
   )
   return (
     <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
-      {large && <LargeField store={store} path={path} field={field} label={label} onClose={() => setLarge(false)} />}
+      {large && (
+        <LargeField
+          store={store}
+          path={path}
+          field={field}
+          label={label}
+          onClose={() => setLarge(false)}
+          returnFocus={() => target.current?.querySelector<HTMLElement>("textarea")?.focus()}
+        />
+      )}
       <Field
         label={labelHidden ? label : <FieldLabel label={label} hint={hint} />}
         labelHidden={labelHidden}
@@ -255,17 +263,29 @@ function LargeField({
   path,
   field,
   label,
-  onClose
+  onClose,
+  returnFocus
 }: {
   store: EditorStore
   path: FieldPath
   field: string
   label: string
   onClose: () => void
+  /** Back to the box in place, where the same text is. */
+  returnFocus: () => void
 }) {
   const value = useText(store, path)
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()} title={label} wide>
+    <Dialog
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={label}
+      wide
+      finalFocus={() => {
+        requestAnimationFrame(returnFocus)
+        return false
+      }}
+    >
       <div>
         <CardTextEditor
           store={store}
@@ -275,6 +295,8 @@ function LargeField({
           label={label}
           minHeight="min(65dvh, 48rem)"
           fullHeight
+          expand={false}
+          autoFocus
           tools={<FieldEditHistory store={store} field={field} label={label} />}
           status={<FieldStatus store={store} field={field} />}
           onChange={(next) => store.setText(path, next)}

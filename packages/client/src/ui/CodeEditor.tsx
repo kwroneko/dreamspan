@@ -21,6 +21,8 @@ export interface CodeEditorProps {
   tools?: ReactNode
   /** At the strip's start: "edited", the token count. */
   status?: ReactNode
+  /** False: no Open large in the strip. Prose that can be edited has it (owner, 2026-11-02). */
+  expand?: boolean | undefined
   /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
   quietMarkers?: boolean | undefined
   rows?: number | undefined

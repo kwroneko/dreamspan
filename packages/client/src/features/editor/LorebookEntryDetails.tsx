@@ -253,7 +253,7 @@ export function EntryDetails({
         ))}
       </div>
       <div className={`grid min-w-0 gap-3 ${wide ? "grid-cols-[minmax(0,3fr)_minmax(0,2fr)]" : ""}`}>
-        <TextField store={store} path={[...path, "content"]} label="Entry content" rows={5} expandable />
+        <TextField store={store} path={[...path, "content"]} label="Entry content" rows={5} />
         <Keys
           store={store}
           path={[...path, "keys"]}

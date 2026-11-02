@@ -6,7 +6,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { proseTheme } from "./codeTheme.ts"
-import { FieldFrame } from "./FieldFrame.tsx"
+import { Button } from "./Button.tsx"
+import { Dialog, DialogActions } from "./Dialog.tsx"
+import { chromeButton, FieldFrame } from "./FieldFrame.tsx"
+import { IconButton } from "./Tooltip.tsx"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
 export default function CodeEditorView(props: CodeEditorProps) {
@@ -16,6 +19,10 @@ export default function CodeEditorView(props: CodeEditorProps) {
   const [selected, setSelected] = useState("")
   const { focused, onFocus, onBlur } = useEditorFocus()
   const selection = focused ? selected : ""
+  // Open large (owner, 2026-11-02): every prose editor's text in a box filling the middle of the
+  // screen, bound to the same value and changes, so it's the same draft with the same history.
+  const [large, setLarge] = useState(false)
+  const expand = props.expand !== false && props.textActions !== false && !props.readOnly
   useLayoutEffect(() => {
     const mounted = mountEditor(host.current!, props, setSelected)
     controller.current = mounted
@@ -57,11 +64,47 @@ export default function CodeEditorView(props: CodeEditorProps) {
               <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
             )}
             {props.tools}
+            {expand && (
+              <IconButton
+                label={`Open ${props.label} large`}
+                hint={`Opens ${props.label} large over the page, to write in a bigger box; it's the same text.`}
+                icon="expand"
+                className={chromeButton}
+                onClick={() => setLarge(true)}
+              />
+            )}
           </>
         }
       >
         <div ref={host} className="min-w-0 overflow-hidden rounded-md" />
       </FieldFrame>
+      {large && (
+        <Dialog
+          open
+          onOpenChange={(open) => !open && setLarge(false)}
+          title={props.label}
+          wide
+          // Back to the box in place, where the same text is.
+          finalFocus={() => {
+            requestAnimationFrame(() => controller.current?.focus())
+            return false
+          }}
+        >
+          <CodeEditorView
+            {...props}
+            expand={false}
+            autoFocus
+            selection={undefined}
+            minHeight="min(65dvh, 48rem)"
+            fullHeight
+          />
+          <DialogActions>
+            <Button variant="primary" onClick={() => setLarge(false)}>
+              Done
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </div>
   )
 }
@@ -187,6 +230,7 @@ function mountEditor(host: HTMLElement, initial: CodeEditorProps, onSelected: (t
     update,
     /** The selected text now, which a render may not have caught up with. */
     selection: () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to),
+    focus: () => view.focus(),
     finishComposition() {
       if (deferred !== null) {
         const value = deferred
