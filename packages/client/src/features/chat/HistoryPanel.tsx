@@ -285,6 +285,8 @@ export function HistoryPanel({
         </fieldset>
       ))}
       <Button
+        className="self-start"
+        hint="Adds another Find and Replace with pair, at most 20"
         onClick={() => setSearch({ ...search, pairs: [...search.pairs, { find: "", replace: "" }] })}
         disabled={search.pairs.length >= 20}
       >

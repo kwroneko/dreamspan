@@ -345,9 +345,14 @@ export const makeLcmHandlers = Effect.gen(function* () {
         ),
         internal("SaveSummaryDraft")
       ),
-    SummaryDraftHistory: ({ summaryId, forkId, limit }) =>
+    SummaryDraftHistory: ({ summaryId, forkId, limit, before }) =>
       Effect.flatMap(userId, (id) =>
-        reader.DraftHistory({ userId: id, key: summaryDraftKey(summaryId, forkId), limit })
+        reader.DraftHistory({
+          userId: id,
+          key: summaryDraftKey(summaryId, forkId),
+          limit,
+          ...(before === undefined ? {} : { before })
+        })
       ).pipe(internal("SummaryDraftHistory")),
     RestoreSummaryDraft: ({ summaryId, forkId, ...restore }) =>
       Effect.flatMap(userId, (id) =>

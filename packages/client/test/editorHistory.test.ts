@@ -81,7 +81,8 @@ for (const kind of ["message", "write", "queue", "summary"] as const)
             } as LcmSummary)
       if (store instanceof SummaryDraft) await store.open()
       expect(await store.history()).toEqual({ ok: true, value: [] })
-      expect(calls).toEqual(kind === "summary" ? ["GetSummaryDraft"] : [])
+      // A reopened edit reads its resting draft first: its history outlives saves (owner, 2026-11-02).
+      expect(calls).toEqual(kind === "summary" ? ["GetSummaryDraft", "GetSummaryDraft"] : ["GetMessageDraft"])
     })
 
     it("loads the complete retained history and preserves typing while restore is in flight", async () => {

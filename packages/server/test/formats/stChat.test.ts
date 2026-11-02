@@ -277,8 +277,26 @@ describe("ST settings and groups", () => {
       members: ["a.png"],
       disabledMembers: ["a.png"],
       chats: ["c1", "c2"],
-      chatId: "c2"
+      chatId: "c2",
+      // No `activation_strategy`: ST's default, natural order.
+      replyOrder: "natural"
     })
+    // ST's reply strategies by number, a numeric string too (`Number(...)`); an unknown one is natural.
+    const order = (strategy: unknown) =>
+      parseStGroup(
+        new TextEncoder().encode(JSON.stringify({ id: "g", activation_strategy: strategy })),
+        "g.json",
+        new ReportBuilder()
+      ).replyOrder
+    expect([0, 1, 2, 3, "1", 9, "x"].map(order)).toEqual([
+      "natural",
+      "list",
+      "manual",
+      "pooled",
+      "list",
+      "natural",
+      "natural"
+    ])
   })
 })
 

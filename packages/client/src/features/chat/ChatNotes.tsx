@@ -200,7 +200,7 @@ export function NotesTab({
           return (
             <>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <p className="max-w-[52rem] min-w-0 flex-1 basis-60 text-sm text-muted">
+                <p className="min-w-0 flex-1 basis-60 text-sm text-muted">
                   Notes are sent with the chat where each says, as you type. A switch turns one on or off from the
                   latest message on, on this branch.
                 </p>

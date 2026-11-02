@@ -98,3 +98,46 @@ export const naturalOrder = <Id>(
   }
   return activated
 }
+
+// ST's other group reply strategies (`group_activation_strategy` in group-chats.js), one reply at
+// a time as here (DESIGN §2.3): ST runs the whole activated list in turn, here each send or
+// Reply now takes the next of it.
+
+/** ST's reply strategies by their `activation_strategy` number, as policy ids (`replyPolicy.ts`). */
+export const ST_REPLY_ORDERS: Readonly<Record<number, string>> = { 0: "natural", 1: "list", 2: "manual", 3: "pooled" }
+
+/**
+ * ST's list order (`activateListOrder`, every member in the group's order), one reply at a time:
+ * the first member after `last` in `order`, the one to reply last since the user's turn; the first
+ * member when no one has yet, or after the last member. `members` are those who can reply, in `order`.
+ */
+export const listOrder = <Id>(order: ReadonlyArray<Id>, members: ReadonlyArray<Id>, last: Id | null): Id | null => {
+  if (members.length === 0) return null
+  const from = last === null ? -1 : order.indexOf(last)
+  if (from < 0) return members[0]!
+  return members.find((id) => order.indexOf(id) > from) ?? members[0]!
+}
+
+/**
+ * ST's pooled order (`activatePooledOrder`): one member at random among those who haven't spoken
+ * since the user's turn (`spoke`); when all have, among everyone but `last`, the last to speak,
+ * unless they're the only member.
+ */
+export const pooledOrder = <Id>(
+  members: ReadonlyArray<Id>,
+  spoke: ReadonlyArray<Id>,
+  last: Id | null,
+  random: () => number
+): Id | null => {
+  const fresh = members.filter((id) => !spoke.includes(id))
+  const pool =
+    fresh.length > 0 ? fresh : last !== null && members.length > 1 ? members.filter((id) => id !== last) : [...members]
+  return pool.length === 0 ? null : pool[Math.floor(random() * pool.length)]!
+}
+
+/**
+ * ST's manual order: nobody replies to a message you send (you pick who does); asked for a reply
+ * with nothing sent (ST's empty send, here Reply now or an empty Send), one member at random.
+ */
+export const manualOrder = <Id>(members: ReadonlyArray<Id>, typed: boolean, random: () => number): Id | null =>
+  typed || members.length === 0 ? null : members[Math.floor(random() * members.length)]!

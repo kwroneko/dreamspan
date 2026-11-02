@@ -43,6 +43,8 @@ export const StateEventData = Schema.Union([
   event("macro.binding", Schema.Struct({ name: Schema.String, value: Schema.String })),
   event("macro.unbind", Schema.Struct({ name: Schema.String })),
   event("orchestration.mode", Schema.Struct({ mode: Schema.String, config: Schema.optional(Schema.Unknown) })),
+  /** Who replies when nobody is picked: a reply policy's id (built-ins `natural`, `list`, `pooled`, `manual`; resolved at use). */
+  event("reply.order", Schema.String),
   event("output.contract", Schema.Literals(["final_text", "send_message", "both"])),
   event("rollout.continuity", Schema.Literals(["fork", "resume_previous"])),
   event("lorebook.binding", Schema.Struct({ entity: EntityId, ref: Schema.NullOr(RefId) })),
@@ -133,6 +135,7 @@ export const stateKeyIds: { readonly [K in StateEventData["key"]]: StateKeyIds<V
   "macro.binding": { ids: {} },
   "macro.unbind": { ids: {} },
   "orchestration.mode": { ids: {} },
+  "reply.order": { ids: {} },
   "output.contract": { ids: {} },
   "rollout.continuity": { ids: {} },
   "lorebook.binding": { ids: { entity: { table: "entity", kind: "card" }, ref: { table: "ref", kind: "lorebook" } } },
@@ -338,6 +341,8 @@ export interface ChatState {
   readonly rolesProjection: string | null
   readonly macroBindings: Readonly<Record<string, string>>
   readonly orchestration: { readonly mode: string; readonly config?: unknown } | null
+  /** The reply policy picking who replies when nobody is picked; null (no event) is the default. */
+  readonly replyOrder: string | null
   readonly outputContract: "final_text" | "send_message" | "both" | null
   readonly rolloutContinuity: "fork" | "resume_previous" | null
   readonly lorebookBindings: Readonly<Record<string, string | null>>
@@ -369,6 +374,7 @@ const emptyChatState: ChatState = {
   rolesProjection: null,
   macroBindings: {},
   orchestration: null,
+  replyOrder: null,
   outputContract: null,
   rolloutContinuity: null,
   lorebookBindings: {},
@@ -480,6 +486,8 @@ const applyCore = (
       return { ...state, macroBindings: { ...state.macroBindings, [data.value.name]: data.value.value } }
     case "orchestration.mode":
       return { ...state, orchestration: data.value }
+    case "reply.order":
+      return { ...state, replyOrder: data.value }
     case "output.contract":
       return { ...state, outputContract: data.value }
     case "rollout.continuity":

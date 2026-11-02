@@ -1,6 +1,14 @@
 import type { EntityId, PathEntry } from "@rp/shared/chat.ts"
 import type { Cast } from "@rp/shared/chatSetupApi.ts"
-import { hashSeed, mulberry32, naturalOrder, TALKATIVENESS_DEFAULT } from "@rp/shared/naturalOrder.ts"
+import {
+  hashSeed,
+  listOrder,
+  manualOrder,
+  mulberry32,
+  naturalOrder,
+  pooledOrder,
+  TALKATIVENESS_DEFAULT
+} from "@rp/shared/naturalOrder.ts"
 import { makeRegistry } from "../../registry.ts"
 
 /**
@@ -82,8 +90,83 @@ const natural = (
   return id === undefined ? null : { id, after }
 }
 
+/** Whether a turn is the user's: a card they play, or no one's written by a person. */
+const userTurn = (cast: Cast, entry: PathEntry) => {
+  const id = entry.version.speakerEntityId
+  return id === null ? entry.version.writer === "human" : cast.playedByMe.includes(id)
+}
+
+/** The characters who spoke since the user's last turn on the path, latest last (none when the user is sending). */
+const sinceUser = (cast: Cast, entries: ReadonlyArray<PathEntry>, typed: boolean): Array<EntityId> => {
+  if (typed) return []
+  const spoke: Array<EntityId> = []
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!
+    if (userTurn(cast, entry)) break
+    const id = entry.version.speakerEntityId
+    if (id !== null && cast.participants.includes(id)) spoke.unshift(id)
+  }
+  return spoke
+}
+
+/** The seeded rolls for a pick: by the tip's version and the candidates, as `natural`'s. */
+const rollsFor = (entries: ReadonlyArray<PathEntry>, candidates: ReadonlyArray<EntityId>) =>
+  mulberry32(hashSeed([entries.at(-1)?.version.id ?? "", ...candidates]))
+
+const typedText = (input: string | null | undefined) => input !== null && input !== undefined && input.trim() !== ""
+
+/**
+ * ST's list order, one reply a send: after your message, the first in the cast's order; asked
+ * again with nothing typed, the next after the last to reply since your turn, then the first again.
+ */
+const list = (
+  cast: Cast | null,
+  entries: ReadonlyArray<PathEntry>,
+  speaker: EntityId | null,
+  input: string | null = null
+): NextInTurn | null => {
+  const candidates = replyCandidates(cast, speaker)
+  if (cast === null || candidates.length === 0) return null
+  const last = sinceUser(cast, entries, typedText(input)).at(-1) ?? null
+  const id = listOrder(cast.participants, candidates, last)
+  return id === null ? null : { id, after: lastCharacter(cast, entries) }
+}
+
+/** ST's pooled order: someone who hasn't spoken since your turn, at random; when all have, anyone but the last. */
+const pooled = (
+  cast: Cast | null,
+  entries: ReadonlyArray<PathEntry>,
+  speaker: EntityId | null,
+  input: string | null = null
+): NextInTurn | null => {
+  const candidates = replyCandidates(cast, speaker)
+  if (cast === null || candidates.length === 0) return null
+  const spoke = sinceUser(cast, entries, typedText(input))
+  const id = pooledOrder(candidates, spoke, spoke.at(-1) ?? null, rollsFor(entries, candidates))
+  return id === null ? null : { id, after: lastCharacter(cast, entries) }
+}
+
+/** ST's manual order: no one replies to what you send unless you pick them; Reply now picks one at random. */
+const manual = (
+  cast: Cast | null,
+  entries: ReadonlyArray<PathEntry>,
+  speaker: EntityId | null,
+  input: string | null = null
+): NextInTurn | null => {
+  const candidates = replyCandidates(cast, speaker)
+  if (cast === null || candidates.length === 0) return null
+  const id = manualOrder(candidates, typedText(input), rollsFor(entries, candidates))
+  return id === null ? null : { id, after: lastCharacter(cast, entries) }
+}
+
 export interface ReplyPolicy {
   readonly id: string
+  /** Its name in the Cast tab's choice of who replies; a policy without one isn't offered there. */
+  readonly label?: string
+  /** What choosing it means, as the choice's explanation. */
+  readonly description?: string
+  /** How Auto picks under it, in the Next chooser. */
+  readonly autoDetail?: string
   /** `input`: the text being sent; null or blank when nothing is typed (Reply now, an empty box). */
   readonly next: (
     cast: Cast | null,
@@ -100,10 +183,52 @@ const noCharacters = (cast: Cast | null) => !(cast?.participants.some((id) => !c
 
 export const replyPolicies = makeRegistry<ReplyPolicy>()
 replyPolicies.register({ id: "round-robin", next: roundRobin, unnamedReply: noCharacters })
-replyPolicies.register({ id: "natural", next: natural, unnamedReply: noCharacters })
+// ST's four reply strategies (`group_activation_strategy`), in its order, chosen per chat in the Cast tab.
+replyPolicies.register({
+  id: "natural",
+  label: "Natural order",
+  description:
+    "Someone named in your message replies; else each character gets a chance by their talkativeness. ST's default.",
+  autoDetail: "Picked by talkativeness: someone you name first, else each by their chance",
+  next: natural,
+  unnamedReply: noCharacters
+})
+replyPolicies.register({
+  id: "list",
+  label: "List order",
+  description:
+    "Characters reply in the cast's order: the first after your message, then the next each time you ask for another reply.",
+  autoDetail: "The next in the cast's order: the first after your message",
+  next: list,
+  unnamedReply: noCharacters
+})
+replyPolicies.register({
+  id: "pooled",
+  label: "Pooled order",
+  description:
+    "Someone who hasn't spoken since your last message replies, at random; once all have, anyone but the last to speak.",
+  autoDetail: "At random, among those who haven't spoken since your message",
+  next: pooled,
+  unnamedReply: noCharacters
+})
+replyPolicies.register({
+  id: "manual",
+  label: "Manual",
+  description:
+    "No one replies to what you send unless you pick them under Next or use Speak now; Reply now picks someone at random.",
+  autoDetail: "No one replies to what you send; Reply now picks at random",
+  next: manual,
+  unnamedReply: noCharacters
+})
 
-/** The policy Auto follows (DESIGN §2.3); round-robin stays registered for a plugin to choose. */
+/** The default policy (DESIGN §2.3), ST's default too; a chat picks another in its Cast tab (`reply.order`). */
 export const AUTO_POLICY = "natural"
+
+/** The chat's policy: its `reply.order`, else the default (an order no policy has is the default too). */
+export const replyPolicyOf = (cast: Cast | null): ReplyPolicy | undefined => {
+  const chosen = cast?.replyOrder
+  return (chosen === undefined ? undefined : replyPolicies.get(chosen)) ?? replyPolicies.get(AUTO_POLICY)
+}
 
 /** The same dispatch drives the preview and the speaker submitted by the composer. */
 export const nextInTurn = (
@@ -111,7 +236,7 @@ export const nextInTurn = (
   entries: ReadonlyArray<PathEntry>,
   speaker: EntityId | null,
   input: string | null = null
-): NextInTurn | null => replyPolicies.get(AUTO_POLICY)?.next(cast, entries, speaker, input) ?? null
+): NextInTurn | null => replyPolicyOf(cast)?.next(cast, entries, speaker, input) ?? null
 
 /** One decision for the preview, immediate sends and queued sends (`input`: the text being
  * sent, so the preview follows the box as Send does). A null speaker
@@ -123,7 +248,7 @@ export const planReply = (
   picked: EntityId | null,
   input: string | null = null
 ) => {
-  const policy = replyPolicies.get(AUTO_POLICY)
+  const policy = replyPolicyOf(cast)
   const next = entries === null ? null : nextInTurn(cast, entries, speaker, input)
   return {
     next,

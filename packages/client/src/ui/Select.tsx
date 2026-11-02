@@ -61,7 +61,7 @@ export function Select<Value>({
     >
       <BaseSelect.Trigger
         aria-label={ariaLabel}
-        className={`flex h-9 w-full min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-base text-text shadow-xs outline-none select-none focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-disabled:opacity-50 sm:text-sm ${className}`}
+        className={`flex h-9 w-full max-w-controls min-w-0 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-base text-text shadow-xs outline-none select-none focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 data-disabled:opacity-50 sm:text-sm ${className}`}
       >
         <BaseSelect.Value className="truncate data-placeholder:text-muted" placeholder={placeholder}>
           {shown ? (current: Value | null) => (current === null ? placeholder : shown(current)) : undefined}

@@ -1,9 +1,10 @@
-// Who replies next, in a group (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (ST's natural
-// order, replyPolicy.ts) or one of the cast for one reply, after which Auto picks again. Beside it,
+// Who replies next, in a group (ST-GRIPES E4): the strip's "Next: Aria ▾" chip, Auto (the chat's
+// reply order, ST's natural order unless the Cast tab says otherwise: replyPolicy.ts) or one of the cast for one reply, after which Auto picks again. Beside it,
 // ▶ makes them reply at once, as ST's force talk does. Shown only when there's a choice to make.
 import type { EntityId } from "@rp/shared/chat.ts"
 import { nameOf, type NextInTurn, useCast } from "./cast.ts"
 import { ChipText, ChoiceChip } from "./nextReplyStrip.tsx"
+import { replyPolicyOf } from "./replyPolicy.ts"
 
 const AUTO = "auto"
 
@@ -28,6 +29,7 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
   const name = (id: EntityId) => nameOf(view, id) ?? "?"
   const replier = picked ?? next?.id ?? null
   const who = replier === null ? (loading ? "…" : "no one") : name(replier)
+  const detail = replyPolicyOf(view.cast)?.autoDetail ?? "Picked by the chat's reply order"
   return (
     <ChoiceChip<EntityId | typeof AUTO>
       label={`Next: ${who}. Choose who replies next`}
@@ -36,7 +38,7 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
           ? `${who} replies next: your pick, for one reply`
           : replier === null
             ? "No one is picked to reply"
-            : `${who} replies next: named in the message, else picked by talkativeness`
+            : `${who} replies next. ${detail}`
       }
       title="Who replies next"
       chip={<ChipText>Next: {who}</ChipText>}
@@ -44,7 +46,7 @@ export function NextReplyChip({ candidates, muted, next, picked, onPick, loading
         {
           value: AUTO,
           label: next === null ? "Auto" : `Auto: ${name(next.id)}`,
-          detail: "Picked by talkativeness: someone you name first, else each by their chance"
+          detail
         },
         ...candidates.map((id) => ({
           value: id,

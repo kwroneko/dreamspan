@@ -42,11 +42,18 @@ export class StLinkChoice extends Schema.Class<StLinkChoice>("StLinkChoice")({
   candidates: Schema.Array(Schema.Struct({ entityId: EntityId, label: Schema.String }))
 }) {}
 
+/**
+ * One thing the report asks the user to look at, for one file. The same `code` and `message` on
+ * many files is one entry in the report, listing the files; `detail` is what's particular to this
+ * file, and `chatId` the chat it went into, when it did.
+ */
 export class StIssue extends Schema.Class<StIssue>("StIssue")({
   path: Schema.String,
   level: ImportIssueLevel,
   code: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  detail: Schema.optionalKey(Schema.String),
+  chatId: Schema.optionalKey(ChatId)
 }) {}
 
 export class StImportReport extends Schema.Class<StImportReport>("StImportReport")({
@@ -145,7 +152,11 @@ export class StImportJob extends Schema.Class<StImportJob>("StImportJob")({
 /** A chat an ST import made, for the report's "Continue your latest chat". */
 export class StImportedChat extends Schema.Class<StImportedChat>("StImportedChat")({
   chatId: ChatId,
-  title: Schema.String
+  title: Schema.String,
+  /** When it started (its first message), which its name's date is, never ST's file name's. */
+  createdAt: Schema.optionalKey(Schema.Number),
+  /** Its characters' names, which name it when its title doesn't. */
+  names: Schema.optionalKey(Schema.Array(Schema.String))
 }) {}
 
 /** A job with its report (null until it has one) and the files that didn't go in. */

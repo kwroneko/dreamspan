@@ -198,7 +198,7 @@ function Tags({ store }: { store: EditorStore }) {
           ))}
         </ul>
       )}
-      <div className="flex gap-2">
+      <div className="flex max-w-controls gap-2">
         <Field label={<span className="sr-only">New tag</span>} className="flex-1">
           <Input
             value={tag}

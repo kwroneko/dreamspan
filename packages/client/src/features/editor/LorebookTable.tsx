@@ -26,6 +26,7 @@ import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Input } from "../../ui/Field.tsx"
 import { Icon } from "../../ui/Icon.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
+import { revealIfHidden } from "../../ui/reveal.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
@@ -340,7 +341,7 @@ const EntryRow = memo(function EntryRow({
       className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
       {!compact ? (
-        <div className="grid items-start gap-2 px-1" style={{ gridTemplateColumns: template }}>
+        <div data-entry-header className="grid items-start gap-2 px-1" style={{ gridTemplateColumns: template }}>
           <div className="flex items-center gap-1 pt-0.5">
             {select}
             {chevron}
@@ -355,7 +356,7 @@ const EntryRow = memo(function EntryRow({
           <div className="flex justify-end">{menu}</div>
         </div>
       ) : (
-        <div className="flex items-start gap-1 px-1">
+        <div data-entry-header className="flex items-start gap-1 px-1">
           {select}
           {chevron}
           <span className="pt-1.5">{enabled}</span>
@@ -415,16 +416,26 @@ function Rows({
     scrollMargin: margin,
     getItemKey: (index) => uids[index]!
   })
-  // Scroll to a revealed entry, then focus where it was opened at.
+  // A revealed entry (added, duplicated, a search visit), then focus where it was opened at.
+  // It scrolls only if its header or that field isn't in view (owner, 2026-11-02): an entry
+  // added at the top usually is. One the list hasn't rendered is scrolled to first.
   useEffect(() => {
     if (!focus) return
     const index = uids.indexOf(focus.uid)
-    if (index >= 0) virtualizer.scrollToIndex(index, { align: "start" })
-    const frame = requestAnimationFrame(() => {
-      if (!searching)
-        document.getElementById(focus.at === "keys" ? `lore-keys-${focus.uid}` : `lore-title-${focus.uid}`)?.focus()
+    const titleId = `lore-title-${focus.uid}`
+    if (index >= 0 && document.getElementById(titleId) === null) virtualizer.scrollToIndex(index, { align: "start" })
+    let frame = 0
+    let tries = 0
+    const settle = () => {
+      const field = document.getElementById(focus.at === "keys" ? `lore-keys-${focus.uid}` : titleId)
+      const header = document.getElementById(titleId)?.closest<HTMLElement>("[data-entry-header]")
+      // Rendered a frame or two after the virtualizer scrolled.
+      if (!header && ++tries < 4) return void (frame = requestAnimationFrame(settle))
+      if (header) revealIfHidden(header, [field])
+      if (!searching) field?.focus({ preventScroll: true })
       onFocused()
-    })
+    }
+    frame = requestAnimationFrame(settle)
     return () => cancelAnimationFrame(frame)
   }, [focus, uids, virtualizer, searching, onFocused])
   return (
@@ -671,7 +682,7 @@ export function LorebookTable({
             Add entry
           </Button>
           {/* Wide enough for its placeholder: on a phone it takes its own line. */}
-          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} flex-1`}>
+          <div className={`${panel ? "min-w-[11rem]" : "min-w-[16rem]"} max-w-controls flex-1`}>
             <Tooltip label="Shows only the entries whose title, keys or text have every word typed. Search and replace changes text.">
               <Input
                 type="search"

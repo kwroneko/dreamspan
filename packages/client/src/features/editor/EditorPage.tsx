@@ -99,7 +99,7 @@ const savedNotice = (saved: SavedRef) => {
 /** The chat a chat override belongs to, by name, as a link back to it. */
 function OverrideChat({ chatId, prefix = "" }: { chatId: ChatId; prefix?: string }) {
   const result = useAtomValue(useMemo(() => AppClient.query("GetChat", { chatId }), [chatId]))
-  const name = AsyncResult.isSuccess(result) ? chatName(result.value.title, []) : null
+  const name = AsyncResult.isSuccess(result) ? chatName(result.value.title, [], result.value.createdAt) : null
   return (
     <Link to="/chats/$chatId" params={{ chatId }} className="text-accent underline-offset-4 hover:underline">
       {prefix}

@@ -12,9 +12,9 @@ import { PresetPickerPopover, useNewPreset } from "./PresetPicker.tsx"
 import { useModelSelection } from "./modelSelection.ts"
 import { usePresetSelection } from "./presetSelection.ts"
 
-/** A dropdown's trigger: the field look, the whole width. */
+/** A dropdown's trigger: the field look, the whole width up to a row of controls' (`max-w-controls`). */
 const dropdown =
-  "flex h-9 w-full min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-base text-text shadow-xs outline-none select-none hover:bg-surface-raised focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 disabled:opacity-60 sm:text-sm"
+  "flex h-9 w-full max-w-controls min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-left text-base text-text shadow-xs outline-none select-none hover:bg-surface-raised focus-visible:border-focus focus-visible:ring-2 focus-visible:ring-focus/40 disabled:opacity-60 sm:text-sm"
 
 function Trigger({ text, muted = false }: { text: string; muted?: boolean }) {
   return (

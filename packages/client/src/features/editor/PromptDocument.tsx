@@ -29,6 +29,7 @@ import {
 } from "../../ui/Block.tsx"
 import { Menu, MenuItem, MenuSeparator } from "../../ui/Menu.tsx"
 import { ResizeHandle, useInnerPanelWidth } from "../../ui/ResizeHandle.tsx"
+import { revealIfHidden } from "../../ui/reveal.ts"
 import { SortableList } from "../../ui/SortableList.tsx"
 import { Badge } from "../../ui/Surface.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -623,13 +624,18 @@ export function PromptDocument({
     [...prompts, newestMessage].map((p) => [p.identifier, p.marker ? p.name : promptLabel(p.name, p.content).text])
   )
   if (!names.has(charDefinitions.identifier)) names.set(charDefinitions.identifier, charDefinitions.name)
-  const jump = (identifier: string) => {
+  /** Opens a prompt and scrolls to it; `added`: one just made, scrolled to only if its header is hidden. */
+  const jump = (identifier: string, added = false) => {
     reveal(identifier)
     requestAnimationFrame(() => {
       const target = root.current?.querySelector<HTMLElement>(
         identifier === PRESET_LOREBOOKS_FOCUS ? "[data-preset-lorebooks]" : `[data-prompt="${CSS.escape(identifier)}"]`
       )
       if (!target) return
+      if (added) {
+        revealIfHidden(target.firstElementChild instanceof HTMLElement ? target.firstElementChild : target)
+        return
+      }
       const scroll = root.current?.closest<HTMLElement>("[data-preset-scroll]")
       if (scroll) {
         const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0
@@ -663,7 +669,7 @@ export function PromptDocument({
     const next = [...order]
     next.splice(index, 0, { identifier: prompt.identifier, enabled: true })
     addPresetPrompt(store, prompt, next)
-    jump(prompt.identifier)
+    jump(prompt.identifier, true)
   }
   const add = (index: number) => {
     const identifier = uuidv7()

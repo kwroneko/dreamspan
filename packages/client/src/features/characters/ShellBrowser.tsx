@@ -249,7 +249,10 @@ export function ForkRow({
             {details && (
               <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
                 started{" "}
-                {formatDay(chatName(importState(fork.chat.title).title, fork.cast).started ?? new Date(fork.createdAt))}{" "}
+                {formatDay(
+                  chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
+                    new Date(fork.createdAt)
+                )}{" "}
                 · {fork.messages} messages
               </span>
             )}
@@ -571,6 +574,7 @@ function Browser({ data }: { data: ShellLibrary }) {
       <Input
         aria-label={grid ? "Find a character" : "Find a chat"}
         placeholder="Find by name"
+        className="max-w-controls"
         value={search}
         onChange={(e) => setSearch(e.currentTarget.value)}
       />
@@ -594,7 +598,8 @@ function Browser({ data }: { data: ShellLibrary }) {
             />
           )
         ) : (
-          <>
+          // One column of rows; dragged wide, a row stays a row's width, its pin beside its text.
+          <div className="max-w-controls">
             {/* A chat's own pins are among its named and pinned branches. */}
             {kind !== "chat" && <PinnedChats pinsCollapsed={data.pinsCollapsed} entity={scope.entity} />}
             {sections.map(([id, title]) =>
@@ -603,7 +608,7 @@ function Browser({ data }: { data: ShellLibrary }) {
             {forks.loading && !forks.failure && <Loading label="Still loading your chats…" />}
             <ListFailure forks={forks} />
             {none && <p className="p-2 text-sm text-muted">No chats here yet.</p>}
-          </>
+          </div>
         )}
       </div>
       <SlotOutlet slot={sidebarFoot} props={{}} />

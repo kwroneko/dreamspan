@@ -350,7 +350,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
             {cast === null || library === null ? "Loading…" : "No lorebook is in this chat. Add one below."}
           </p>
         ) : (
-          <ul aria-label="Lorebooks in this chat" className="flex flex-col gap-0.5">
+          <ul aria-label="Lorebooks in this chat" className="flex max-w-controls flex-col gap-0.5">
             {rows.map((row) => {
               const shown = shownOf(row)
               return (

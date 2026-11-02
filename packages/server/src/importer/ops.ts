@@ -123,6 +123,7 @@ export class StChatPart extends Schema.Class<StChatPart>("StChatPart")({
   speakers: Schema.Array(StSpeaker),
   greeting: Schema.NullOr(Schema.String),
   summaries: Schema.Array(Schema.Struct({ index: Schema.Int, text: Schema.String })),
+  firstAt: Schema.NullOr(Schema.Number),
   lastAt: Schema.NullOr(Schema.Number)
 }) {}
 
@@ -174,7 +175,9 @@ export class StGroup extends Schema.Class<StGroup>("StGroup")({
   disabledMembers: Schema.Array(Schema.String),
   chats: Schema.Array(Schema.String),
   /** The chat ST opens the group on (`chat_id`): the one last opened. */
-  chatId: Schema.NullOr(Schema.String)
+  chatId: Schema.NullOr(Schema.String),
+  /** ST's `activation_strategy` as a reply policy id. */
+  replyOrder: Schema.String
 }) {}
 
 /** A library file of the folder, and for a card what chats are linked to it by. */
