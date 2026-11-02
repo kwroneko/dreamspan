@@ -194,7 +194,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await setGuidance(page, true)
   const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
   await guidance.fill("Mira tells a story about the storm.")
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   const reply = replies(page).last()
   await expect(reply).toContainText("Guidance: Mira tells a story about the storm.")
   await expect(guidance).toHaveValue("")
@@ -211,7 +211,7 @@ test("Send as a card added to the chat, and Generate with guidance that a swipe 
   await expect(reply.getByRole("group", { name: "Versions" })).toContainText("3/3")
   await expect(reply).toContainText("Guidance: Mira tells a story about the storm.")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   await expect(replies(page).last()).not.toContainText("Guidance:")
   await expect(generating(page)).toHaveCount(0, { timeout: 20_000 })
   await composer(page).fill("")
@@ -222,7 +222,7 @@ test("a message sent during a reply waits, then posts after it", async ({ page }
   await chatWithMira(page)
   // Mira's turn, then back to speaking as Bo: both one tap away.
   await page.getByRole("button", { name: "Speak as Mira" }).click()
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   await expect(generating(page)).toBeVisible()
   await page.getByRole("button", { name: "Speak as Bo" }).click()
   await composer(page).fill("While you were talking.")
@@ -245,7 +245,7 @@ test("a queued message posts right after a stopped reply, and one withdrawn neve
   await chatWithMira(page)
   // Mira's turn, then back to speaking as Bo: both one tap away.
   await page.getByRole("button", { name: "Speak as Mira" }).click()
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   await expect(generating(page)).toBeVisible()
   await page.getByRole("button", { name: "Speak as Bo" }).click()
   await composer(page).fill("Never mind.")
@@ -273,7 +273,7 @@ test("a queued message posts right after a stopped reply, and one withdrawn neve
 /** Mira's turn, generating, with Bo speaking again: what's sent now is queued. */
 const miraGenerating = async (page: Page) => {
   await page.getByRole("button", { name: "Speak as Mira" }).click()
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   await expect(generating(page)).toBeVisible()
   await page.getByRole("button", { name: "Speak as Bo" }).click()
 }
@@ -315,7 +315,7 @@ test("text typed while Generate is on its way stays in the composer", async ({ p
   await setGuidance(page, true)
   const guidance = page.getByRole("textbox", { name: "Guidance", exact: true })
   await guidance.fill("A held direction.")
-  await page.getByRole("button", { name: "Write for Mira" }).click()
+  await page.getByRole("button", { name: "Generate Mira" }).click()
   await expect.poll(() => release !== null).toBe(true)
   await guidance.fill("Typed while it was on its way.")
   release!()

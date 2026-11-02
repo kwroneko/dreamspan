@@ -164,11 +164,11 @@ for (const width of [1440, 390])
       await shot("04-composer-guidance-text")
 
       // Enter generates the selected speaker's turn (the persona's here, not the reply-from
-      // character's) with the text as its direction, under the primary Write for; the text
+      // character's) with the text as its direction, under the primary Generate; the text
       // leaves the box, and the reply shows it.
       const chip = await page.getByRole("button", { name: /^Speaking as / }).getAttribute("aria-label")
       const speaker = chip!.replace(/^Speaking as /, "").replace(/\. Change the speaker$/, "")
-      await expect(page.getByRole("button", { name: `Write for ${speaker}` })).toHaveClass(/bg-accent/)
+      await expect(page.getByRole("button", { name: `Generate ${speaker}` })).toHaveClass(/bg-accent/)
       const sent = provider.completions.length
       await guidance.press("Enter")
       await expect.poll(() => provider.completions.length).toBe(sent + 1)
@@ -270,7 +270,7 @@ for (const width of [1440, 390])
         .getByRole("option", { name: personaName, exact: true })
         .click()
       const impersonated = provider.completions.length
-      await page.getByRole("button", { name: `Write for ${personaName}`, exact: true }).click()
+      await page.getByRole("button", { name: `Generate ${personaName}`, exact: true }).click()
       await expect.poll(() => provider.completions.length).toBe(impersonated + 1)
       expect(
         provider.completions
@@ -353,7 +353,7 @@ for (const width of [1440, 390])
         const label = width > 500 ? "Celia 4.2" : "Pixijb v18"
         await usePreset(label)
         await page.goto(`${server().url}/chats/${inn}`)
-        const write = page.getByRole("button", { name: `Write for ${personaName}`, exact: true })
+        const write = page.getByRole("button", { name: `Generate ${personaName}`, exact: true })
         await write.click()
         const notice = page.getByRole("status").filter({ hasText: "may need “not when writing as" })
         await expect(notice).toBeVisible()

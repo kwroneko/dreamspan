@@ -5,7 +5,7 @@
 // - (the text, on a row of its own, the box's whole width)
 // - `speaker`: the start of the box's control row, under the text;
 // - `tools`: icon buttons after the speaker;
-// - `actions`: the row's last buttons, at its right end (guidance, write, send);
+// - `actions`: the row's last buttons, at its right end (guidance, generate, send);
 // - `strip`: the next-reply strip, one row of small chips (nextReplyStrip.tsx) under the box.
 // A control may name its placement per context (`compact`: a phone), to move rather than vanish.
 import type { EntityId, PathEntry, MessageImages } from "@rp/shared/chat.ts"
@@ -44,9 +44,9 @@ export interface ComposerControlContext {
   readonly replier: EntityId | null
   /** Who replies after `replier`, in turn, in the round a send or Reply now starts (DESIGN §2.3). */
   readonly round: ReadonlyArray<EntityId>
-  /** Write for's accessible name, "Write for Sam" (or "New version" while a reply's guidance is edited). */
+  /** Generate's accessible name, "Generate Sam" (or "New version" while a reply's guidance is edited). */
   readonly generateText: string
-  /** What Write for's button shows, a word: "Write", or "New version". */
+  /** What Generate's button shows, a word: "Generate", or "New version". */
   readonly generateWord: string
   readonly generateHint: string
   readonly sendLabel: string

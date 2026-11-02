@@ -1,5 +1,7 @@
 # Design: requirements and decisions
 
+**Built 2026-11-02 (composerrow):** The Generate label and even composer-control spacing requirement in §2.2 is implemented and obsolete as an implementation requirement; see ARCHITECTURE.md §12.
+
 **Implementation audit 2026-10-30:** Built entries below are obsolete as implementation plans, retaining their [P]/[O] provenance unless a cited owner decision supersedes them. Open and later work remains unbuilt.
 
 **Built 2026-11-02 (homeurl):** Home's URL state requirement in §10.1 is implemented and obsolete as an implementation plan; see ARCHITECTURE.md §12. The broader refresh rule still applies to other surfaces.
@@ -156,6 +158,7 @@ Where the owner corrected an earlier proposal, the corrected version is recorded
 - **[D]** (owner, 2026-11-02, groupgrid) "make the gaps between portraits equal horizontally and vertically, at every panel width, with any number of members." Portrait/card grids use one CSS `gap` for both axes. **Built; obsolete as an implementation requirement** (ARCHITECTURE §14.5a).
 
 ### 2.2 Personas, speakers and writers
+- **[D]** (owner, 2026-11-02, composerrow) "Composer controls: spacing here feels uneven. Also why was 'Generate' replaced with Write? Generate was unambiguous." Restore **Generate**, including its accessible name and explanations, and even the composer controls' spacing. **Built; obsolete as an implementation requirement** (ARCHITECTURE §12).
 - **[D]** Personas aren't a special entity. **A persona is a card in the "persona folder"**, and any card can be added to that folder. Cards in it get special UI treatment.
 - **[D]** You can switch to writing as any card, on any turn.
 - **[D]** The model can write for "your" character, because you may not be playing it.

@@ -95,7 +95,7 @@ function ReplyNow({ replier, busy, ready, invoke }: ComposerControlContext & { r
         aria-label={label}
         disabled={busy || !ready || replier === null}
         onClick={invoke}
-        className={`${chipClass()} w-7 justify-center px-0! text-accent!`}
+        className={`${chipClass()} w-9 justify-center px-0! text-accent!`}
       >
         <Icon name="play" size={12} />
       </button>
@@ -143,7 +143,7 @@ export const registerComposerControls = () => [
       context.compact ? (
         <SquareIconButton
           label={`Generate ${context.speakerName}`}
-          hint={`The model writes ${context.speakerName}'s turn`}
+          hint={`Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`}
           variant={context.guidance ? "primary" : "ghost"}
           pending={context.guidance && context.busy}
           disabled={context.busy || !context.prefsReady}
@@ -155,6 +155,7 @@ export const registerComposerControls = () => [
         <Button
           variant={context.guidance ? "primary" : "secondary"}
           aria-label={`Generate ${context.speakerName}`}
+          hint={`Generate ${context.speakerName}'s first turn with the model${context.guidance ? ", following your guidance" : ""}.`}
           pending={context.busy}
           disabled={context.busy || !context.prefsReady}
           onClick={() => void pendingComposerControls.get("pending.generate")?.run?.(context)}
@@ -240,12 +241,12 @@ export const registerComposerControls = () => [
         {/* The speakers used last, one tap each, where the box can spare the width. */}
         {!compact &&
           recent.map(({ id, name, mediaId, crop }) => (
-            <Tooltip key={id} label={`Speak as ${name}`}>
+            <Tooltip key={id} label={`Switch the next turn's speaker to ${name}.`}>
               <button
                 type="button"
                 aria-label={`Speak as ${name}`}
                 onClick={() => onRecent(id)}
-                className="hidden shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus @min-[760px]:inline-flex"
+                className="hidden size-9 shrink-0 items-center justify-center rounded-md outline-none hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus @min-[760px]:inline-flex"
               >
                 <Avatar id={id} name={name} mediaId={mediaId} crop={crop} size="chip" />
               </button>
@@ -267,7 +268,7 @@ export const registerComposerControls = () => [
     order: 30,
     placement: "actions",
     run: ({ generate }) => generate(),
-    // Its word only ("Write", or "New version" while a reply's guidance is edited; an icon on a
+    // Its word only ("Generate", or "New version" while a reply's guidance is edited; an icon on a
     // phone): the speaker's name is on the chip at the row's start, and in this one's name and tooltip.
     component: ({ guidance, busy, ready, generateHint, generateText, generateWord, invoke, compact }) =>
       compact ? (
