@@ -12,6 +12,7 @@ import { Rpc, RpcGroup } from "effect/rpc"
 import { Transferable } from "effect/workers"
 import { ImportedMedia, Sha256 } from "../db/ops.ts"
 import { AvatarCrop, MEDIA_WIDTHS } from "@rp/shared/media.ts"
+import { LOCAL_ENCODINGS } from "./tokenizer.ts"
 
 export class ThumbnailFailed extends Schema.TaggedError<ThumbnailFailed>()("ThumbnailFailed", {}) {}
 
@@ -196,6 +197,11 @@ export type StParserSource = typeof StParserSource.Type
 const parser = Schema.NullOr(StParserSource)
 
 export class FormatOps extends RpcGroup.make(
+  /** Each text's tokens in a local encoding (tokenizer.ts), on the interactive lane. */
+  Rpc.make("CountTokens", {
+    payload: { encoding: Schema.Literals(LOCAL_ENCODINGS), texts: Schema.Array(Schema.String) },
+    success: Schema.Array(Schema.Int)
+  }),
   Rpc.make("PreviewStSettings", {
     payload: { text: Schema.String, surface: Schema.Literals(["model", "connection"]) },
     success: StSettingsImport

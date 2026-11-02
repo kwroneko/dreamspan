@@ -2,8 +2,9 @@
 // editable in the column. The prompt order is the large editor's own document in its "column"
 // layout, sharing the workspace's store, so an edit in either shows in the other. What's typed
 // and switched is used by the next reply as it's made (live text, owner 2026-11-01), and Save
-// with its message cuts a revision; moving or deleting a prompt is held behind the floating
-// bar's Save and Revert (heldOrder.ts), being easy to do by accident.
+// with its message cuts a revision; moving, deleting or adding a prompt and attaching or taking
+// off a lorebook wait behind the floating bar's Save and Revert (@rp/shared/presetHeld.ts;
+// owner 2026-11-02), a prompt's on/off switch excepted.
 import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import { SlotOutlet } from "../../slots.tsx"

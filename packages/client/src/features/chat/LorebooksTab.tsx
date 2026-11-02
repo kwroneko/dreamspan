@@ -308,7 +308,7 @@ export function LorebooksTab({ session, view, active }: { session: ChatSession; 
 
   const switchRow = (row: BookRow, name: string, on: boolean) => {
     if (row.source === "preset") {
-      presetStore?.setValue(["lorebooks", `id=${row.id}`, "enabled"], on)
+      presetStore?.switchLorebook(row.id, on)
       return
     }
     const change: CastChange =

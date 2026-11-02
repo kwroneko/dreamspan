@@ -1,8 +1,9 @@
 // The lorebooks a prompt preset sends (owner, 2026-11-01): style and rules entries that come in
 // when their words appear, which prompts can't do. Each is a block with its own switch, listed
 // with the prompts in the large editor and the Prompt preset tab; every chat using the preset
-// scans them, as it does its own books. A preset's `lorebooks` are field drafts like its
-// prompts': the switch is live, and Save cuts a revision.
+// scans them, as it does its own books. Attaching a book or taking one off waits behind the
+// unsaved bar's Save, as a prompt added or deleted does (owner, 2026-11-02; EditorStore's held
+// changes); a book's switch is live, as a prompt's is, and Save cuts a revision.
 import type { PresetLorebook } from "@rp/shared/docs/preset.ts"
 import type { LibraryRef, RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
@@ -36,9 +37,7 @@ export function PresetLorebooks({
   const byId = new Map((library ?? []).map((ref) => [ref.id as string, ref]))
   const attach = (ref: LibraryRef) => {
     setAdding(false)
-    const entry = { id: ref.id, enabled: true }
-    if (store.value(["lorebooks"]) === undefined) store.setValue(["lorebooks"], [entry])
-    else store.setValue(["lorebooks", `id=${ref.id}`], entry)
+    store.attachLorebook({ id: ref.id, enabled: true })
   }
   return (
     <section
@@ -68,7 +67,7 @@ export function PresetLorebooks({
                   <Switch
                     checked={book.enabled}
                     disabled={!ref}
-                    onCheckedChange={(next) => store.setValue(["lorebooks", `id=${book.id}`, "enabled"], next)}
+                    onCheckedChange={(next) => store.switchLorebook(book.id, next)}
                     hint="Off, the preset keeps the book but doesn't send it, in every chat using it. Used as you switch it; Save cuts a revision."
                     description={ref?.subtitle || undefined}
                   >
@@ -100,9 +99,9 @@ export function PresetLorebooks({
                   ))}
                 <IconButton
                   label={`Take ${name} off the preset`}
-                  hint="Takes the book off this preset (the library keeps it). Revert or History brings it back."
+                  hint="Takes the book off this preset (the library keeps it), once you Save; until then it's still sent, and Revert keeps it."
                   icon="close"
-                  onClick={() => void store.removeItem(["lorebooks", `id=${book.id}`])}
+                  onClick={() => store.detachLorebook(book.id)}
                 />
               </li>
             )
@@ -121,7 +120,7 @@ export function PresetLorebooks({
           <Button
             className={column ? "h-8 px-2.5" : ""}
             disabled={library === null}
-            hint="Picks a book from your library for this preset to send, in every chat using it."
+            hint="Picks a book from your library for this preset to send, in every chat using it, once you Save."
             onClick={() => setAdding(true)}
           >
             <Icon name="plus" />

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { cardNameClash, cardNames, renameQuestion } from "../src/cardNames.ts"
-import { cardTokenCounts, estimateTextTokens } from "../src/cardTokens.ts"
+import { cardTokenTexts, sumCardTokens } from "../src/cardTokens.ts"
 import type { RefId } from "../src/library.ts"
 
 const refs = [
@@ -82,17 +82,27 @@ describe("token counts (ST's total and permanent)", () => {
     alternate_greetings: ["g".repeat(4000)],
     creator_notes: "h".repeat(4000)
   }
+  // A stand-in tokenizer, four characters a token: the real one is the server's.
+  const count = (doc: Parameters<typeof cardTokenTexts>[0], notes?: ReadonlyArray<string>) => {
+    const texts = cardTokenTexts(doc, notes)
+    return sumCardTokens(
+      texts,
+      texts.map(({ text }) => Math.ceil(text.length / 4))
+    )
+  }
   it("counts the name, description, personality and scenario as permanent", () => {
-    expect(cardTokenCounts(doc).permanent).toBe(1 + 10 + 2 + 1)
+    expect(count(doc).permanent).toBe(1 + 10 + 2 + 1)
   })
-  it("adds the first message, examples and the card's prompts to the total, not greetings or notes", () => {
-    expect(cardTokenCounts(doc).total).toBe(14 + 100 + 20 + 1)
+  it("adds the first message, examples and the card's prompts to the total, not greetings or creator's notes", () => {
+    expect(count(doc).total).toBe(14 + 100 + 20 + 1)
+  })
+  it("counts the notes on by default as ST counts its Character's Note: permanent", () => {
+    expect(count(doc, ["n".repeat(12)])).toEqual({ permanent: 14 + 3, total: 135 + 3 })
   })
   it("counts the nickname, the name chats send", () => {
-    expect(cardTokenCounts({ ...doc, nickname: "Mio Tanaka-san" }).permanent).toBe(4 + 13)
+    expect(count({ ...doc, nickname: "Mio Tanaka-san" }).permanent).toBe(4 + 13)
   })
-  it("estimates four characters a token", () => {
-    expect(estimateTextTokens("")).toBe(0)
-    expect(estimateTextTokens("abcde")).toBe(2)
+  it("lists ST's counted fields in its panel's order, each counted on its own", () => {
+    expect(cardTokenTexts(doc).map((t) => t.text.slice(0, 1))).toEqual(["M", "a", "d", "f", "", "b", "c", "e"])
   })
 })

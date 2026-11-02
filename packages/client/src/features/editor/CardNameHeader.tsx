@@ -6,12 +6,15 @@
 // about past messages right there, on confirm (`renameQuestion`, the registered `cardSaved`
 // question), never after a later Save. Under the names, the card's token counts.
 import { renameQuestion } from "@rp/shared/cardNames.ts"
-import { cardTokenCounts } from "@rp/shared/cardTokens.ts"
+import { useAtomValue } from "@effect/atom-react"
+import { cardTokenTexts, sumCardTokens } from "@rp/shared/cardTokens.ts"
 import { ChatId, ForkId } from "@rp/shared/chat.ts"
 import { textField } from "@rp/shared/editing.ts"
 import { useSearch } from "@tanstack/react-router"
 import { Schema } from "effect"
-import { type ReactNode, useState } from "react"
+import { AsyncResult } from "effect/reactivity"
+import { type ReactNode, useMemo, useState } from "react"
+import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { InlineRename } from "../../ui/InlineRename.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
@@ -20,6 +23,7 @@ import { type CardSaved, type RenameAnswer, showCardSaved } from "./cardSaved.ts
 import { checkCardNames } from "./checkCardNames.ts"
 import { useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorState, useText, useWorkingDoc } from "./store.ts"
+import { tokenizerText, tokensText, useTokenCounts } from "./tokenCounts.ts"
 
 /** The chat the editor is opened from, for "only in this chat". */
 export interface RenameChat {
@@ -34,26 +38,56 @@ const VERSION_HINT =
 const NICKNAME_HINT =
   "The chat name (the card's nickname): what chats and the model call them, and what {{char}} becomes. Empty: the display name."
 
-/** The card's total and permanent token counts, live as you type, with what each counts. */
+/** A card's notes on in every chat by default, by their own text: what ST counts as its Character's Note. */
+function useDefaultNotes(refId: string): ReadonlyArray<string> {
+  const atom = useMemo(
+    () => AppClient.query("ListCardNotes", { cardRefId: refId as never }, { reactivityKeys: ["library"] }),
+    [refId]
+  )
+  const notes = useAtomValue(atom)
+  const texts = AsyncResult.isSuccess(notes)
+    ? notes.value.flatMap(({ doc }) =>
+        doc.on_by_default === true && doc.link === undefined && typeof doc.content === "string" ? [doc.content] : []
+      )
+    : NO_NOTES
+  const joined = texts.join("\u0000")
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the texts, by value
+  return useMemo(() => texts, [joined])
+}
+const NO_NOTES: ReadonlyArray<string> = []
+
+/**
+ * The card's total and permanent token counts, as ST's character panel has them
+ * (@rp/shared/cardTokens.ts), with the chat model's tokenizer, counted as you type.
+ */
 export function CardTokens({ store }: { store: EditorStore }) {
-  const counts = cardTokenCounts(useWorkingDoc(store))
+  const notes = useDefaultNotes(store.refId)
+  const parts = cardTokenTexts(useWorkingDoc(store), notes)
+  const { counts, tokenizer, pending } = useTokenCounts(parts.map((part) => part.text))
+  const known = counts.every((count) => count !== null)
+  const sums = sumCardTokens(
+    parts,
+    counts.map((count) => count ?? 0)
+  )
+  const shown = (n: number) => (known ? tokensText(n, tokenizer, pending).replace(/ tokens$/, "") : "…")
   return (
     <Tooltip
       label={
         <>
           Total: every card field a chat can send: its name, description, personality, scenario, first message, example
-          messages, and its own system prompt and post-history instructions. Permanent: what every request carries, as
-          ST counts it: the name, description, personality and scenario. Estimates, at four characters a token, as the
-          app counts wherever the model's tokenizer isn't used.
+          messages, its own system prompt and post-history instructions, and its notes on by default. Permanent: what
+          every request carries, as SillyTavern counts it: the name, description, personality, scenario and those notes.{" "}
+          {tokenizerText(tokenizer)}
         </>
       }
     >
       <span
         tabIndex={0}
         data-card-tokens
+        aria-busy={pending || undefined}
         className="w-fit rounded text-xs text-muted tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-focus"
       >
-        ~{counts.total.toLocaleString()} tokens · ~{counts.permanent.toLocaleString()} permanent
+        {shown(sums.total)} tokens · {shown(sums.permanent)} permanent
       </span>
     </Tooltip>
   )

@@ -27,6 +27,7 @@ import {
   type StSettings
 } from "./ops.ts"
 import type { ThumbnailFailed, ThumbnailResult } from "./ops.ts"
+import type { LocalEncoding } from "./tokenizer.ts"
 import type { AvatarCrop } from "@rp/shared/media.ts"
 import type { MEDIA_WIDTHS } from "@rp/shared/media.ts"
 
@@ -45,6 +46,11 @@ export class Formats extends Context.Service<
   Formats,
   {
     readonly listExports: Effect.Effect<ReadonlyArray<ExportFormatInfo>, FormatWorkerFailed>
+    /** Each text's tokens in a local encoding, on the interactive lane with thumbnails (tokenizer.ts). */
+    readonly countTokens: (
+      encoding: LocalEncoding,
+      texts: ReadonlyArray<string>
+    ) => Effect.Effect<ReadonlyArray<number>, FormatWorkerFailed>
     readonly previewStSettings: (
       text: string,
       surface: "model" | "connection"
@@ -143,10 +149,18 @@ const workerFailures = <A, E>(effect: Effect.Effect<A, E | RpcClientError.RpcCli
     failed
   ).pipe(Effect.catchDefect(failed))
 
-/** The thumbnail lane: the same worker code in a pool of its own (FormatsOptions.thumbnailSize). */
-class ThumbnailLane extends Context.Service<ThumbnailLane, { readonly thumbnail: Formats["Service"]["thumbnail"] }>()(
-  "rp/importer/ThumbnailLane"
-) {}
+/**
+ * The interactive lane: the same worker code in a pool of its own (FormatsOptions.thumbnailSize),
+ * for what the browser waits for: thumbnails, and token counts (one worker, so an encoding's
+ * ranks are in memory once).
+ */
+class ThumbnailLane extends Context.Service<
+  ThumbnailLane,
+  {
+    readonly thumbnail: Formats["Service"]["thumbnail"]
+    readonly countTokens: Formats["Service"]["countTokens"]
+  }
+>()("rp/importer/ThumbnailLane") {}
 
 export const layer = (options: FormatsOptions) =>
   Layer.unwrap(
@@ -184,7 +198,10 @@ export const layer = (options: FormatsOptions) =>
       const thumbnails = Layer.effect(
         ThumbnailLane,
         Effect.map(ReaderPool.client(FormatOps), (client) =>
-          ThumbnailLane.of({ thumbnail: (input) => workerFailures(client.Thumbnail(input)) })
+          ThumbnailLane.of({
+            thumbnail: (input) => workerFailures(client.Thumbnail(input)),
+            countTokens: (encoding, texts) => workerFailures(client.CountTokens({ encoding, texts }))
+          })
         )
       ).pipe(pool(options.thumbnailSize ?? 1, "thumbnail worker"))
       return Layer.effect(
@@ -196,6 +213,7 @@ export const layer = (options: FormatsOptions) =>
             listExports: workerFailures(client.ListExportFormats()),
             previewStSettings: (text, surface) => workerFailures(client.PreviewStSettings({ text, surface })),
             thumbnail: lane.thumbnail,
+            countTokens: lane.countTokens,
             prepareThumbnails: (input) => workerFailures(client.PrepareThumbnails(input)),
             parse: (bytes, fileName) => workerFailures(client.Parse({ bytes: ownBuffer(bytes), fileName })),
             export: (input) =>

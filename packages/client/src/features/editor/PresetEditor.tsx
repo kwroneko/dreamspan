@@ -128,12 +128,8 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             label="Start of a reply written as you"
             rows={3}
           />
-          <SwitchField
-            store={store}
-            path={["prefill", "continue"]}
-            label="Continue by prefilling the message"
-            description="SillyTavern's continue prefill, kept for exports. Here Continue always sends the reply so far as the start of the model's reply when the model takes a prefill, and as its last message, with the continue text after it, when it doesn't."
-          />
+          {/* No switch for ST's continue prefill (owner, 2026-11-02): nothing here reads it, and
+              `prefill.continue` is kept as imported, for exports back to ST. */}
           <SelectField
             store={store}
             path={["prefill", "continue_postfix"]}

@@ -38,6 +38,7 @@ import { makeProviderHandlers } from "./api/providers.ts"
 import { makeStImportHandlers } from "./api/stImport.ts"
 import { Accounts, AuthenticationLive, PEER_HEADER, SESSION_COOKIE, SESSION_TTL_MS } from "./auth/Accounts.ts"
 import { ImageTokenCounts } from "./chat/ImageTokenCounts.ts"
+import { TextTokens } from "./providers/TextTokens.ts"
 import { CacheWarmth } from "./chat/CacheWarmth.ts"
 import { ChatHub } from "./chat/ChatHub.ts"
 import { Generations } from "./chat/Generations.ts"
@@ -449,7 +450,11 @@ export const serverWith = <E>(
     Layer.provide(
       // The estimate waits while a reply is written (CacheWarmth.hold).
       Generations.layer
-        .pipe(Layer.provideMerge(CacheWarmth.layer.pipe(Layer.provideMerge(ImageTokenCounts.layer))))
+        .pipe(
+          Layer.provideMerge(
+            CacheWarmth.layer.pipe(Layer.provideMerge(ImageTokenCounts.layer), Layer.provideMerge(TextTokens.layer))
+          )
+        )
         .pipe(
           Layer.provideMerge(generator),
           Layer.provideMerge(summaries),

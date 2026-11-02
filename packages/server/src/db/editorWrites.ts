@@ -11,6 +11,7 @@ import {
   canonicalJson,
   droppedDrafts,
   getAt,
+  HELD_FIELD,
   isHeldField,
   keepsRegexApproval,
   newCardNote,
@@ -27,6 +28,7 @@ import type { Doc, EntityKind } from "@rp/shared/library.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { snapCrop } from "@rp/shared/media.ts"
 import { editedDoc } from "@rp/shared/presetConditions.ts"
+import { heldPromptPaths, parseHeld } from "@rp/shared/presetHeld.ts"
 import { Effect, Predicate } from "effect"
 import type { SqlClient, SqlError } from "effect/sql"
 import { fieldContent, type makeDraftStore } from "./drafts.ts"
@@ -417,7 +419,22 @@ export const makeEditorWriteHandlers = (steps: LibrarySteps) => {
           const ref = resolved?.ref ?? owned
           // A chat's own note's live text is its branch's (typed at its latest message; what's
           // typed at an earlier message is saved there by its Save).
-          const rows = yield* liveDrafts(userId, entityDraftTarget(refId, resolved?.fork))
+          const target = entityDraftTarget(refId, resolved?.fork)
+          const drafted = yield* liveDrafts(userId, target)
+          // A prompt added behind a preset's unsaved bar waits for its Save, definition and all
+          // (presetHeld.ts): it isn't sent, and Revert takes it away.
+          const heldRow =
+            owned.kind === "preset"
+              ? yield* drafts.find(
+                  userId,
+                  new DraftKey({ targetKind: "entity_field", targetId: target, field: HELD_FIELD })
+                )
+              : null
+          const held = heldPromptPaths(parseHeld(heldRow?.status === "active" ? heldRow.content : null))
+          const rows = drafted.filter((row) => {
+            const path = parseField(row.field)?.path
+            return !held.some((at) => path !== undefined && at.every((part, i) => path[i] === part))
+          })
           if (rows.length === 0) continue
           // It read the entry as it is now: one a chat pinned to an earlier revision isn't live.
           if (ref.head_revision_id !== entry.revision) continue

@@ -1,40 +1,52 @@
-// A card's token counts, as ST shows them at the top of its character panel
-// (public/scripts/RossAscends-mods.js `RA_CountCharTokens` and the counters in public/index.html):
-// "permanent" is what every request carries (the name, description, personality and scenario;
-// ST also counts its Character's Note, which is a card note here, not a card field), and
-// "total" adds the first message, the example messages, and the card's system prompt and
-// post-history instructions. Alternate greetings aren't counted, as in ST. A token is the
-// app's estimate wherever there's no tokenizer: four characters (`estimateTokens` in the
-// server's assembler/st.ts), so these are estimates, as ST's own tooltip says of its counts.
+// A card's token counts, as ST shows them at the top of its character panel (SillyTavern
+// public/scripts/RossAscends-mods.js `RA_CountCharTokens`, and the `data-token-counter` /
+// `data-token-permanent` counters in public/index.html): each counted field on its own, summed.
+// "Permanent" (`data-token-permanent`) is the name, description, personality, scenario and the
+// Character's Note (ST's depth prompt; here a card's notes on in every chat by default); "total"
+// adds the first message, the example messages, and the card's system prompt and post-history
+// instructions. Alternate greetings and creator's notes aren't counted, as in ST. The counts
+// come from the chat model's tokenizer (the client's tokenCounts.ts, ARCHITECTURE §6 "Text
+// tokens"), so any counter can sum them. ST substitutes macros in an existing card's fields
+// before it counts; these count the text as typed.
 import { modelName } from "./cardNames.ts"
 import type { Doc } from "./library.ts"
 
-export const estimateTextTokens = (text: string) => Math.ceil(text.length / 4)
-
-/** The card's text fields ST counts, and whether each is in every request. */
+/** The card's text fields ST counts, in its panel's order, and whether each is in every request. */
 const CARD_TOKEN_FIELDS: ReadonlyArray<{ readonly field: string; readonly permanent: boolean }> = [
   { field: "description", permanent: true },
+  { field: "first_mes", permanent: false },
+  { field: "system_prompt", permanent: false },
+  { field: "post_history_instructions", permanent: false },
   { field: "personality", permanent: true },
   { field: "scenario", permanent: true },
-  { field: "first_mes", permanent: false },
-  { field: "mes_example", permanent: false },
-  { field: "system_prompt", permanent: false },
-  { field: "post_history_instructions", permanent: false }
+  { field: "mes_example", permanent: false }
 ]
 
 const text = (value: unknown) => (typeof value === "string" ? value : "")
+
+export interface CardTokenText {
+  readonly text: string
+  readonly permanent: boolean
+}
+
+/** What ST counts for a card: the name chats send, its fields, and the notes on by default. */
+export const cardTokenTexts = (doc: Doc, notes: ReadonlyArray<string> = []): ReadonlyArray<CardTokenText> => [
+  { text: modelName({ name: text(doc.name), nickname: text(doc.nickname) }), permanent: true },
+  ...CARD_TOKEN_FIELDS.map(({ field, permanent }) => ({ text: text(doc[field]), permanent })),
+  ...notes.map((note) => ({ text: note, permanent: true }))
+]
 
 export interface CardTokenCounts {
   readonly total: number
   readonly permanent: number
 }
 
-export const cardTokenCounts = (doc: Doc): CardTokenCounts => {
-  const name = estimateTextTokens(modelName({ name: text(doc.name), nickname: text(doc.nickname) }))
-  let total = name
-  let permanent = name
-  for (const { field, permanent: always } of CARD_TOKEN_FIELDS) {
-    const tokens = estimateTextTokens(text(doc[field]))
+/** Sums each text's count (`counts[i]` for `texts[i]`) into ST's total and permanent. */
+export const sumCardTokens = (texts: ReadonlyArray<CardTokenText>, counts: ReadonlyArray<number>): CardTokenCounts => {
+  let total = 0
+  let permanent = 0
+  for (const [i, { permanent: always }] of texts.entries()) {
+    const tokens = counts[i] ?? 0
     total += tokens
     if (always) permanent += tokens
   }

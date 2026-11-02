@@ -11,7 +11,7 @@ import { Data, Effect } from "effect"
 import type { ListRequest } from "./modelLists.ts"
 import type { RequestTarget } from "./registry.ts"
 
-class ImageCountError extends Data.TaggedError("ImageCountError")<{ readonly message: string }> {}
+export class TokenCountError extends Data.TaggedError("TokenCountError")<{ readonly message: string }> {}
 
 interface ImageCountRequest extends ListRequest {
   readonly model: string
@@ -27,12 +27,12 @@ interface ImageCountRequest extends ListRequest {
 export interface ImageTokenCounter {
   readonly id: string
   readonly appliesTo: (target: RequestTarget & { readonly model: string; readonly baseUrl: string }) => boolean
-  readonly count: (request: ImageCountRequest) => Effect.Effect<number, ImageCountError>
+  readonly count: (request: ImageCountRequest) => Effect.Effect<number, TokenCountError>
 }
 
-const joinUrl = (base: string, path: string) => `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+export const joinUrl = (base: string, path: string) => `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
 
-const postJson = (request: ListRequest, url: string, auth: Record<string, string>, body: unknown) =>
+export const postJson = (request: ListRequest, url: string, auth: Record<string, string>, body: unknown) =>
   Effect.tryPromise({
     try: async (signal) => {
       const response = await request.fetch(url, {
@@ -48,23 +48,23 @@ const postJson = (request: ListRequest, url: string, auth: Record<string, string
       return (await response.json()) as Record<string, unknown>
     },
     catch: (error) =>
-      new ImageCountError({ message: request.scrub(error instanceof Error ? error.message : String(error)) })
+      new TokenCountError({ message: request.scrub(error instanceof Error ? error.message : String(error)) })
   })
 
-const field = (name: string) => (json: Record<string, unknown>) => {
+export const countField = (name: string) => (json: Record<string, unknown>) => {
   const value = json[name]
   return typeof value === "number" && Number.isInteger(value) && value >= 0
     ? Effect.succeed(value)
-    : Effect.fail(new ImageCountError({ message: `the count has no ${name}` }))
+    : Effect.fail(new TokenCountError({ message: `the count has no ${name}` }))
 }
 
 /** The image's tokens: the counted message with it, less the same message without it. */
 const difference = (
-  withImage: Effect.Effect<number, ImageCountError>,
-  without: Effect.Effect<number, ImageCountError>
+  withImage: Effect.Effect<number, TokenCountError>,
+  without: Effect.Effect<number, TokenCountError>
 ) =>
   Effect.flatMap(Effect.all([withImage, without], { concurrency: 1 }), ([a, b]) =>
-    a > b ? Effect.succeed(a - b) : Effect.fail(new ImageCountError({ message: "the image counted zero or negative" }))
+    a > b ? Effect.succeed(a - b) : Effect.fail(new TokenCountError({ message: "the image counted zero or negative" }))
   )
 
 const TEXT = "."
@@ -77,7 +77,7 @@ const anthropic: ImageTokenCounter = {
     const url = joinUrl(request.baseUrl, "v1/messages/count_tokens")
     const count = (content: ReadonlyArray<unknown>) =>
       postJson(request, url, auth, { model: request.model, messages: [{ role: "user", content }] }).pipe(
-        Effect.flatMap(field("input_tokens"))
+        Effect.flatMap(countField("input_tokens"))
       )
     const text = { type: "text", text: TEXT }
     return difference(
@@ -98,7 +98,9 @@ const google: ImageTokenCounter = {
     const model = request.model.replace(/^models\//, "")
     const url = joinUrl(request.baseUrl, `models/${encodeURIComponent(model)}:countTokens`)
     const count = (parts: ReadonlyArray<unknown>) =>
-      postJson(request, url, auth, { contents: [{ role: "user", parts }] }).pipe(Effect.flatMap(field("totalTokens")))
+      postJson(request, url, auth, { contents: [{ role: "user", parts }] }).pipe(
+        Effect.flatMap(countField("totalTokens"))
+      )
     return difference(
       count([{ inlineData: { mimeType: request.image.mimeType, data: request.image.data } }, { text: TEXT }]),
       count([{ text: TEXT }])
@@ -118,7 +120,7 @@ const openai: ImageTokenCounter = {
     const url = joinUrl(request.baseUrl, "responses/input_tokens")
     const count = (content: ReadonlyArray<unknown>) =>
       postJson(request, url, auth, { model: request.model, input: [{ role: "user", content }] }).pipe(
-        Effect.flatMap(field("input_tokens"))
+        Effect.flatMap(countField("input_tokens"))
       )
     const text = { type: "input_text", text: TEXT }
     return difference(

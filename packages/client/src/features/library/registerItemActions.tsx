@@ -6,7 +6,7 @@ import { buttonClass } from "../../ui/Button.tsx"
 import { MenuCheckboxItem, MenuGroup, MenuItem, MenuLinkItem } from "../../ui/Menu.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
-import { downloadExport } from "./files.ts"
+import { requestExport } from "../cardExport/exportRequests.ts"
 import { libraryItemActions, type LibraryItemProps } from "./itemActions.tsx"
 
 const compact = "h-8! px-2.5!"
@@ -102,14 +102,17 @@ function ArchiveAction({ entry }: LibraryItemProps) {
 
 function ExportItems({ entry, exportFormats }: LibraryItemProps) {
   const formats = exportFormats.filter((format) => format.kind === entry.kind)
-  const exportAs = async (format: (typeof formats)[number]["id"]) => {
-    const error = await downloadExport(entry.id, format, entry.label)
-    if (error) showToast({ title: `Couldn’t export ${entry.label}`, description: error })
-  }
+  // The last saved revision; with unsaved changes it asks first (cardExport's check).
   return (
     <MenuGroup label="Export as">
       {formats.map((format) => (
-        <MenuItem key={format.id} description={format.description} onClick={() => void exportAs(format.id)}>
+        <MenuItem
+          key={format.id}
+          description={format.description}
+          onClick={() =>
+            requestExport({ refId: entry.id, format: format.id, formatLabel: format.label, label: entry.label })
+          }
+        >
           {format.label}
         </MenuItem>
       ))}

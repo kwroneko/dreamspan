@@ -1,8 +1,8 @@
-// Save and Revert for a preset's held changes (owner, 2026-11-01): prompts moved or deleted,
-// easy to do by accident, wait in the Prompt preset tab's floating bar and the large editor's
-// toolbar; everything else is live. Save applies them and saves a revision of the whole preset;
-// Revert puts the prompts back where the live order has them, the deleted ones included, so
-// it loses no text and asks nothing.
+// Save and Revert for a preset's held changes (owner, 2026-11-01 and 2026-11-02): prompts
+// moved, deleted or added and lorebooks attached or taken off wait in the Prompt preset tab's
+// floating bar and the large editor's toolbar; text, options and switches are live. Save
+// applies them and saves a revision of the whole preset; Revert puts the prompts and books
+// back as the live preset has them (presetHeld.ts), and asks nothing.
 import { useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
@@ -18,9 +18,10 @@ import { type EditorStore, useHeld, useWorkingDoc } from "./store.ts"
  */
 export function HeldChangesBar({ store, floating = false }: { store: EditorStore; floating?: boolean }) {
   const held = useHeld(store)
-  const working = useWorkingDoc(store)
+  // Re-rendered as the document changes: the bar describes the live preset against the shown one.
+  useWorkingDoc(store)
   if (held === "") return null
-  const parts = describePresetChanges(working, store.arranged(), [])
+  const parts = describePresetChanges(store.beforeHeld(), store.arranged(), [])
   return (
     <div
       role="region"
@@ -57,7 +58,7 @@ function HeldSaveRevert({ store }: { store: EditorStore }) {
     <>
       <Button
         disabled={held === "" || pending}
-        hint="Puts the prompts back where they were, deleted ones included. Nothing typed is lost."
+        hint="Undoes what waits here: prompts back where they were, deleted ones back, added ones and attached books gone, books taken off back on."
         onClick={() => store.revertHeld()}
       >
         <Icon name="undo" />
@@ -67,7 +68,7 @@ function HeldSaveRevert({ store }: { store: EditorStore }) {
         variant="primary"
         pending={pending}
         disabled={held === ""}
-        hint={`Applies the new order and deletions and saves revision ${store.revisionNumber + 1} of the preset.`}
+        hint={`Applies what waits here and saves revision ${store.revisionNumber + 1} of the preset; replies send it from then on.`}
         onClick={() => void save()}
       >
         Save

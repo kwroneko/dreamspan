@@ -2,10 +2,15 @@
 // 2026-11-01: live text is what's sent): before a reply is asked for, what's typed and not on
 // the server yet goes there; after a reply cut revisions of what it used, each reads its state
 // again. Kept apart from store.ts so the chat can register this without loading the editors.
+// Export asks about unsaved changes with the editor that has them, when one is open (owner,
+// 2026-11-02), so it finds them here by ref.
 
 interface OpenEditor {
   readonly flush: () => Promise<unknown>
   readonly refresh: () => Promise<unknown>
+  /** The ref it edits and the editor's store, for a feature that acts on the same changes. */
+  readonly refId?: string
+  readonly store?: unknown
 }
 
 const open = new Map<OpenEditor, number>()
@@ -21,6 +26,10 @@ export const trackOpenEditor = (editor: OpenEditor) => {
 }
 
 export const flushOpenEditors = () => Promise.all([...open.keys()].map((editor) => editor.flush()))
+
+/** The store of an editor open on `refId`, if one is. */
+export const openEditorStore = (refId: string): unknown =>
+  [...open.keys()].find((editor) => editor.refId === refId && editor.store !== undefined)?.store
 
 /**
  * How many times a chat's state changed while editors were open: an editor kept while its tab

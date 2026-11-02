@@ -12,6 +12,7 @@ import type { Cost, TokenCounts } from "@rp/shared/usage.ts"
 import type { UserPricing } from "./userCosts.ts"
 import type { Capture } from "./usage.ts"
 import type { ImageTokenCounter } from "./imageCounters.ts"
+import type { TextTokenCounter } from "./textCounters.ts"
 import type { ModelCatalog } from "./contextCatalog.ts"
 import type { ContextLimitParser } from "./contextLimits.ts"
 
@@ -109,6 +110,8 @@ export interface ProviderRegistryShape {
   readonly costs: Registry<CostFormula>
   /** Exact image token counting endpoints (ARCHITECTURE §6). */
   readonly imageCounters: Registry<ImageTokenCounter>
+  /** The model's own text tokenizer, local or its provider's endpoint (ARCHITECTURE §6). */
+  readonly textCounters: Registry<TextTokenCounter>
   /** Catalogs matched by model id, for a window the list doesn't report; newest asked first. */
   readonly catalogs: Registry<ModelCatalog>
   /** Readers of the limit a context-length error states; newest asked first. */
@@ -127,6 +130,7 @@ export const empty = Layer.sync(ProviderRegistry, () =>
     observers: makeRegistry<ResponseObserver>(),
     costs: makeRegistry<CostFormula>(),
     imageCounters: makeRegistry<ImageTokenCounter>(),
+    textCounters: makeRegistry<TextTokenCounter>(),
     catalogs: makeRegistry<ModelCatalog>(),
     contextLimits: makeRegistry<ContextLimitParser>()
   })

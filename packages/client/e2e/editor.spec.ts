@@ -689,6 +689,26 @@ test("Main can be switched off and moved but a custom Main cannot be deleted", a
   await expect(page.locator("[data-prompt]").nth(1)).toHaveAttribute("data-prompt", "main")
   await expect(main.getByRole("switch", { name: "Send Main Prompt" })).not.toBeChecked()
   await expect(main.getByRole("button", { name: "Delete the prompt" })).toHaveCount(0)
+
+  // A prompt added waits behind the bar with the move (owner, 2026-11-02), across a reload,
+  // its text typed at once; Save puts both in the preset.
+  await main.getByRole("button", { name: "Actions for Main Prompt" }).click()
+  await page.getByRole("menuitem", { name: "Insert a prompt below" }).click()
+  const bar = page.getByRole("region", { name: "Unsaved changes" })
+  await expect(bar).toContainText("new order · 1 prompt added")
+  await page.getByRole("textbox", { name: "Prompt: New prompt", exact: true }).fill("Added in the large editor.")
+  await page.reload()
+  await expect(bar).toContainText("1 prompt added")
+  await expectTextBox(
+    page.getByRole("textbox", { name: "Prompt: New prompt", exact: true }),
+    "Added in the large editor."
+  )
+  await bar.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+  const saved = await page.evaluate(() => document.querySelectorAll("[data-prompt]").length)
+  await page.reload()
+  await expect(page.locator("[data-prompt]")).toHaveCount(saved)
+  await expect(page.locator("[data-prompt]").nth(2).getByText("New prompt", { exact: true })).toBeVisible()
 })
 
 test("card search opens and selects code editor and single-line matches", async ({ page }) => {

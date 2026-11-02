@@ -12,6 +12,7 @@ RpcServer.layer(FormatOps, { concurrency: 1, disableFatalDefects: true }).pipe(
     FormatOps.toLayer(
       Effect.map(Importers.Importers, (registry) =>
         FormatOps.of({
+          CountTokens: () => Effect.die("not used by this test"),
           PreviewStSettings: () => Effect.die("not used by this test"),
           Thumbnail: () => Effect.die("not used by this test"),
           PrepareThumbnails: () => Effect.die("not used by this test"),

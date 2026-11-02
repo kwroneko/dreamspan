@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { emptyEntry } from "../src/features/editor/lorebookDefaults.ts"
-import { lorebookMassSettings, patchEdits, touched } from "../src/features/editor/lorebookMass.ts"
+import { applyMassChange, lorebookMassSettings, patchEdits, touched } from "../src/features/editor/lorebookMass.ts"
+import type { EditorStore } from "../src/features/editor/store.ts"
 import { registerLorebookMassSettings } from "../src/features/editor/lorebookMassDefaults.ts"
 import { inScope, lorebookScopes, presetScopes } from "../src/features/editor/searchScopes.ts"
 
@@ -73,5 +74,26 @@ describe("what search and replace looks in", () => {
     expect(inScope(preset, presetScopes, "names")).toEqual([preset[1]])
     expect(inScope(preset, presetScopes, "both")).toHaveLength(2)
     expect(inScope(preset, presetScopes, "all")).toHaveLength(3)
+  })
+})
+
+describe("a change to many entries (owner, 2026-11-02)", () => {
+  it("is an ordinary unsaved change: set as values, never saved or restored on its own", () => {
+    const store = { setValue: vi.fn(), commit: vi.fn(), restoreRevision: vi.fn(), flush: vi.fn() }
+    const edits = patchEdits([], [entry(1), entry(2)], { enabled: false })
+    applyMassChange(store as unknown as EditorStore, "Disabled all 2 entries", edits)
+    expect(store.setValue.mock.calls).toEqual([
+      [["entries", "uid=1", "enabled"], false],
+      [["entries", "uid=2", "enabled"], false]
+    ])
+    expect(store.commit).not.toHaveBeenCalled()
+    expect(store.restoreRevision).not.toHaveBeenCalled()
+  })
+
+  it("changes nothing when every entry already has it", () => {
+    const store = { setValue: vi.fn(), commit: vi.fn() }
+    applyMassChange(store as unknown as EditorStore, "Enabled all 1 entry", [])
+    expect(store.setValue).not.toHaveBeenCalled()
+    expect(store.commit).not.toHaveBeenCalled()
   })
 })
