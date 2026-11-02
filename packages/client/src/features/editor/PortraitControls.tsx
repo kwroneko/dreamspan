@@ -4,7 +4,7 @@
 // (`POST /library/avatar?crop=`) or SetCardAvatarCrop, never through a draft.
 import { avatarCropOf, type AvatarCrop, cropKey } from "@rp/shared/media.ts"
 import { Effect } from "effect"
-import { useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { Avatar, type AvatarSize } from "../../ui/Avatar.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { FileDrop } from "../../ui/FileDrop.tsx"
@@ -153,9 +153,11 @@ function ChangeablePortrait({
   size,
   disabled,
   alt = "",
+  className = "",
   onClick
 }: {
   alt?: string
+  className?: string
   id: string
   name: string
   mediaId: string | null
@@ -172,7 +174,7 @@ function ChangeablePortrait({
         disabled={disabled}
         data-change-portrait
         onClick={onClick}
-        className="group relative inline-flex shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60"
+        className={`group relative inline-flex shrink-0 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60 ${className}`}
       >
         <Avatar id={id} name={name} mediaId={mediaId} crop={crop} size={size} alt={alt} />
         <span
@@ -256,15 +258,63 @@ export function StorePortrait({ store, call, id }: { store: EditorStore; call: C
       id={id}
       shown={{ name, mediaId, crop }}
       adjust={false}
+      size="page"
       onViewFull={viewer && mediaId !== null ? () => viewer.show({ id, name, mediaId }) : undefined}
     />
   )
 }
 
 /**
+ * The portrait's box in a card's header (`CardHeader`), 2:3, sized by the header's width so it
+ * is as tall as the names beside it: 136 px at the panel's narrowest, 144 from a 20rem header
+ * (the panel's default width), 160 from 36rem; the full editor's page 144, then 176.
+ */
+const HEADER_PORTRAIT = {
+  panel: "h-34 w-[calc(var(--spacing)*34*2/3)] @xs:h-36 @xs:w-24 @xl:h-40 @xl:w-[calc(var(--spacing)*40*2/3)]",
+  page: "h-36 w-24 @xl:h-44 @xl:w-[calc(var(--spacing)*44*2/3)]"
+} as const
+
+/**
+ * The portrait's place in a card's header: the picture (`children`), with `badge` on it ("You
+ * play" on the persona's, owner 2026-11-02, so its header has the same shape as any other) and
+ * `controls` over its top corner, faint until the picture is hovered or a control has focus,
+ * and always shown on a touch screen. Nothing takes room under it.
+ */
+export function CardHeaderPortrait({
+  size = "panel",
+  badge,
+  controls,
+  children
+}: {
+  size?: keyof typeof HEADER_PORTRAIT
+  badge?: ReactNode
+  controls?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div data-card-header-portrait className={`group/portrait relative flex shrink-0 ${HEADER_PORTRAIT[size]}`}>
+      {children}
+      {badge && (
+        <span className="pointer-events-none absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm">
+          {badge}
+        </span>
+      )}
+      {controls && (
+        <span
+          data-portrait-controls
+          className="absolute top-1 right-1 z-10 flex rounded-md border border-border bg-surface/85 text-text opacity-60 shadow-sm transition-opacity group-hover/portrait:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100"
+        >
+          {controls}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/**
  * A character tab's portrait (owner, 2026-11-01: "clicking on the thumbnail in the sidebar
  * would open the UI to replace it"): a click changes the picture; Adjust cutout and View full
- * image sit beside it.
+ * image sit over it (owner, 2026-11-02), with `badge` ("You play") on it.
  */
 export function TabPortrait({
   store,
@@ -273,7 +323,9 @@ export function TabPortrait({
   shown,
   onViewFull,
   onChanged,
-  adjust = true
+  adjust = true,
+  badge,
+  size = "panel"
 }: {
   store: EditorStore
   call: Caller
@@ -283,44 +335,49 @@ export function TabPortrait({
   onViewFull: (() => void) | undefined
   /** After a change is saved: the chat reads its cast again, so its portraits follow. */
   onChanged?: () => void
-  /** Adjust cutout beside it; off where the page shows the picture's own controls (the full editor). */
+  /** Adjust cutout over it; off where the page shows the picture's own controls (the full editor). */
   adjust?: boolean
+  badge?: ReactNode
+  size?: "panel" | "page"
 }) {
   const portrait = usePortraitChange(store, call, onChanged)
-  return (
-    <div className="flex shrink-0 flex-col items-center gap-1">
-      <ChangeablePortrait
-        id={id}
-        name={shown.name}
-        mediaId={shown.mediaId}
-        crop={shown.crop}
-        size="lg"
-        disabled={!portrait.ready}
-        onClick={portrait.openPicker}
-      />
-      {shown.mediaId !== null && (
-        <span className="flex">
-          {adjust && portrait.canAdjust && (
-            <IconButton
-              icon="crop"
-              label="Adjust cutout"
-              hint="Adjust cutout: which part of the picture small portraits show"
-              className="size-6!"
-              disabled={!portrait.ready}
-              onClick={portrait.adjust}
-            />
-          )}
-          {onViewFull && (
-            <IconButton
-              icon="expand"
-              label="View full image"
-              hint="View the full image beside the chat"
-              className="size-6!"
-              onClick={onViewFull}
-            />
-          )}
-        </span>
+  const controls = shown.mediaId !== null && ((adjust && portrait.canAdjust) || onViewFull) && (
+    <>
+      {adjust && portrait.canAdjust && (
+        <IconButton
+          icon="crop"
+          label="Adjust cutout"
+          hint="Adjust cutout: which part of the picture small portraits show"
+          className="size-7! text-text!"
+          disabled={!portrait.ready}
+          onClick={portrait.adjust}
+        />
       )}
+      {onViewFull && (
+        <IconButton
+          icon="expand"
+          label="View full image"
+          hint="View the full image beside the chat"
+          className="size-7! text-text!"
+          onClick={onViewFull}
+        />
+      )}
+    </>
+  )
+  return (
+    <div className="flex shrink-0 flex-col gap-1">
+      <CardHeaderPortrait size={size} badge={badge} controls={controls || undefined}>
+        <ChangeablePortrait
+          id={id}
+          name={shown.name}
+          mediaId={shown.mediaId}
+          crop={shown.crop}
+          size="fill"
+          className="size-full"
+          disabled={!portrait.ready}
+          onClick={portrait.openPicker}
+        />
+      </CardHeaderPortrait>
       {portrait.input}
       {portrait.chooser}
       {portrait.error && (
