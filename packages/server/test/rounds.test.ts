@@ -102,6 +102,50 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  for (const ending of ["stopped", "failed"] as const) {
+    it.live(`a ${ending} old reply does not pause the replacement send's round`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const { chat, sent, mira, tobin, wren, describe } = yield* setup(api)
+        const first = yield* posted(
+          api.Generate({
+            chatId: chat.id,
+            parentSlotId: sent.slotId,
+            branch: false,
+            speakerEntityId: mira,
+            round: [tobin]
+          })
+        )
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: first.entry.slotId,
+          branch: false,
+          content: "m1",
+          replySpeakerEntityId: wren,
+          round: [tobin]
+        })
+        yield* gate(first.entry.version.id)
+        if (ending === "stopped") yield* api.StopGeneration({ versionId: first.entry.version.id })
+        else yield* failWith(first.entry.version.id)
+        const entries = yield* pathBecomes(api, chat.id, describe, [
+          "you: m0",
+          `Mira (${ending})`,
+          "you: m1",
+          "Wren (generating)"
+        ])
+        assert.deepStrictEqual(yield* roundOf(api, chat.id), [{ speaker: tobin, held: false }])
+        yield* release(entries[3]!.version.id)
+        yield* pathBecomes(api, chat.id, describe, [
+          "you: m0",
+          `Mira (${ending})`,
+          "you: m1",
+          "Wren (complete)",
+          "Tobin (generating)"
+        ])
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+    )
+  }
+
   for (const kind of ["message", "generate"] as const) {
     it.live(`withdrawing a queued ${kind} cancels its round without touching another queued action`, () =>
       Effect.gen(function* () {

@@ -638,7 +638,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 SELECT q.id FROM queued_messages q JOIN slots s ON s.id = q.reply_slot_id
                   JOIN chats c ON c.id = s.chat_id
                 WHERE q.reply_slot_id = ${row.slot_id}
-                  AND ${selectedIn(sql, sql.literal("coalesce(q.fork_id, c.current_fork_id)"), "s")} = ${versionId})
+                  AND ${selectedIn(sql, sql.literal("coalesce(q.fork_id, c.current_fork_id)"), "s")} = ${versionId}
+                  -- A replacement send's round hasn't begun yet: its queued action must
+                  -- post first. Stopping the old reply doesn't stop that new round.
+                  AND NOT EXISTS (SELECT 1 FROM queued_messages action
+                    WHERE action.reply_slot_id = q.reply_slot_id AND action.fork_id IS q.fork_id
+                      AND action.round = 0 AND action.seq < q.seq))
                 RETURNING id`
               : []
           // A reply interrupted by the server going down leaves its queue to the next start.
