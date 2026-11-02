@@ -419,6 +419,11 @@ test.describe("synthetic library and every app surface", () => {
           await audit("dialog-start-chat-popover")
           return
         }
+        if (process.env.LAYOUT_AUDIT_HEADER_ONLY === "1") {
+          await go("pending-chat-header", `/cards/${cardId}/chat`)
+          await go("saved-chat-header", `/chats/${chatId}`)
+          return
+        }
         if (process.env.LAYOUT_AUDIT_NOTES_ONLY === "1") {
           await go("group-chat", `/chats/${chatId}`)
           await openPanel(page, "Notes")

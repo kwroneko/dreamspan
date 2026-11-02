@@ -382,7 +382,7 @@ function ChatHeaderFrame({
           </button>
         </Tooltip>
         {loading ? (
-          <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none @max-[40rem]/header:hidden" />
+          <span className="h-12 w-8 shrink-0 animate-pulse rounded-sm bg-surface-raised motion-reduce:animate-none @max-[40rem]/header:hidden" />
         ) : (
           characters.length > 0 && (
             <div
@@ -394,7 +394,7 @@ function ChatHeaderFrame({
                   <button
                     type="button"
                     aria-label={`Show ${c.label}'s card`}
-                    className="rounded-full ring-2 ring-surface outline-none focus-visible:ring-focus"
+                    className="inline-flex rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-focus"
                     onClick={() =>
                       void navigate({
                         to: ".",
