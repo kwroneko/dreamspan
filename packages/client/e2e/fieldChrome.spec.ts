@@ -1,0 +1,199 @@
+// A text box's own controls sit in a strip inside its border (ui/FieldFrame.tsx; owner,
+// 2026-11-02): focusing, typing in and leaving a box moves nothing outside it, the strip shows
+// only while the pointer or focus is in the box, and its controls come after the box in the
+// focus order. Picking states in a box's edit history swaps the text in place, with no flash.
+import { expect, test, type Locator, type Page } from "@playwright/test"
+import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
+import { asUser } from "./support/rpc.ts"
+import { openEntry } from "./support/lorebook.ts"
+import { cardFieldsTab } from "./support/cardEditor.ts"
+
+const server = serverPerFile(withAdmin)
+const admin = <A>(use: Parameters<typeof asUser<A>>[3]) => asUser(server(), ADMIN.handle, ADMIN.password, use)
+
+/** The frame (border, strip) of the box `box` is in. */
+const frameOf = (box: Locator) => box.page().locator("[data-field-frame]").filter({ has: box })
+
+/**
+ * Where every element on the page that isn't inside `frame` is, and the size of the ones around
+ * it: a text that only grows or shrinks itself (a count) moves nothing. Whatever scrolled since the
+ * first measure is scrolled back first, so the page scrolling to the box counts as nothing moving.
+ * The page's own save status ("Changed since revision 1", "Saving…") and the line holding it are
+ * left out: they report the change, at the end of their row.
+ */
+const boxesOutside = (frame: Locator) =>
+  frame.evaluate((frame) => {
+    const skip = (element: Element) =>
+      frame.contains(element) ||
+      element.matches(':has(> [role="status"])') ||
+      element.closest('[role="status"], [role="tooltip"], [data-base-ui-portal]') !== null
+    const kept = window as unknown as {
+      fieldIds?: WeakMap<Element, string>
+      fieldNext?: number
+      fieldScrolls?: ReadonlyArray<readonly [Element, number, number]>
+    }
+    const all = [document.documentElement, ...document.body.querySelectorAll("*")]
+    if (kept.fieldScrolls)
+      for (const [element, top, left] of kept.fieldScrolls) element.scrollTo({ top, left, behavior: "instant" })
+    else kept.fieldScrolls = all.map((element) => [element, element.scrollTop, element.scrollLeft] as const)
+    // Each element keeps the name it got on the first measure, so one added elsewhere shifts nothing.
+    kept.fieldIds ??= new WeakMap()
+    const out: Record<string, string> = {}
+    for (const element of document.body.querySelectorAll("*")) {
+      if (skip(element)) continue
+      const r = element.getBoundingClientRect()
+      if (r.width === 0 && r.height === 0) continue
+      let id = kept.fieldIds.get(element)
+      if (id === undefined) {
+        kept.fieldNext = (kept.fieldNext ?? 0) + 1
+        const label = element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 24) ?? ""
+        id = `${kept.fieldNext}:${element.tagName}:${label}`
+        kept.fieldIds.set(element, id)
+      }
+      out[id] = `${r.x},${r.y}${element.contains(frame) ? `,${r.width},${r.height}` : ""}`
+    }
+    return out
+  })
+
+const moved = (before: Record<string, string>, after: Record<string, string>) =>
+  Object.keys(before)
+    .filter((key) => key in after && before[key] !== after[key])
+    .map((key) => `${key} ${before[key]} -> ${after[key]}`)
+
+const opacity = (element: Locator) => element.evaluate((e) => Number(getComputedStyle(e).opacity))
+
+/** Focus, type, blur: nothing outside the box moves or changes size, the box included. */
+const expectStill = async (page: Page, box: Locator, text: string) => {
+  const frame = frameOf(box)
+  await expect(frame).toHaveCount(1)
+  await page.mouse.move(0, 0)
+  const size = async () => frame.evaluate((e) => [e.getBoundingClientRect().width, e.getBoundingClientRect().height])
+  const outer = await size()
+  await page.evaluate(() => delete (window as unknown as { fieldScrolls?: unknown }).fieldScrolls)
+  const before = await boxesOutside(frame)
+  await box.click()
+  await page.keyboard.press("End")
+  await page.keyboard.type(text)
+  await expect(frame.getByText("edited", { exact: true })).toBeVisible()
+  expect(moved(before, await boxesOutside(frame))).toEqual([])
+  expect(await size()).toEqual(outer)
+  await page.locator("body").click({ position: { x: 1, y: 1 } })
+  await page.mouse.move(0, 0)
+  expect(moved(before, await boxesOutside(frame))).toEqual([])
+  expect(await size()).toEqual(outer)
+}
+
+for (const width of [1440, 390])
+  test(`at ${width} px, focusing, typing in and leaving a card's, a lorebook entry's and a one-line box moves nothing around it`, async ({
+    page
+  }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const card = await admin((api) => api.CreateCard({ label: `Still ${width}`, name: `Still ${width}` }))
+    await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+    await page.goto(`${server().url}/library/${card.id}`)
+    await expectStill(page, page.getByRole("textbox", { name: /^Description/ }), "A quiet harbour.")
+    await cardFieldsTab(page, "Metadata")
+    await expectStill(page, page.getByRole("textbox", { name: "Creator", exact: true }), "Someone")
+
+    const response = await page.request.post(`${server().url}/library/import?name=book${width}.json`, {
+      headers: { "content-type": "application/octet-stream", origin: server().url },
+      data: Buffer.from(
+        JSON.stringify({
+          name: `Book ${width}`,
+          entries: { 0: { uid: 0, key: ["k"], comment: "Pier", content: "Old." } }
+        })
+      )
+    })
+    const book = (await response.json()).library.ref as { id: string }
+    await page.goto(`${server().url}/library/${book.id}`)
+    await openEntry(page, "Pier")
+    await expectStill(page, page.getByRole("textbox", { name: "Entry content" }), " New.")
+  })
+
+test("the strip shows only with the pointer or focus in the box, and its controls follow the box in the focus order", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const card = await admin((api) => api.CreateCard({ label: "Keys", name: "Keys" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  const box = page.getByRole("textbox", { name: /^Description/ })
+  const frame = frameOf(box)
+  const strip = frame.locator("[data-field-chrome]")
+  await page.mouse.move(0, 0)
+  await expect.poll(() => opacity(strip)).toBe(0)
+  await frame.hover({ position: { x: 20, y: 10 } })
+  await expect.poll(() => opacity(strip)).toBeCloseTo(0.6)
+  await strip.hover()
+  await expect.poll(() => opacity(strip)).toBe(1)
+  await page.mouse.move(0, 0)
+  await expect.poll(() => opacity(strip)).toBe(0)
+
+  // Typing gives it an edit history; Tab from the box reaches the strip's controls, which show.
+  await box.click()
+  await page.keyboard.type("Lanterns.")
+  const history = frame.getByRole("button", { name: "Edit history of Description", exact: true })
+  await expect(history).toBeVisible()
+  await page.mouse.move(0, 0)
+  await expect.poll(() => opacity(strip)).toBeCloseTo(0.6)
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press("Tab")
+    if (await history.evaluate((e) => e === document.activeElement)) break
+  }
+  await expect(history).toBeFocused()
+  // Every control on the way was in the strip.
+  await expect.poll(() => opacity(strip)).toBe(1)
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog", { name: "Edit history: Description" })).toBeVisible()
+})
+
+test("picking states in a box's edit history swaps the text in place: nothing is removed or blank", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const card = await admin((api) => api.CreateCard({ label: "Flash", name: "Flash" }))
+  await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+  await page.goto(`${server().url}/library/${card.id}`)
+  const box = page.getByRole("textbox", { name: /^Description/ })
+  const texts = ["First state of the text.", "Second, longer state of the text, two sentences. Here.", "Third."]
+  for (const text of texts) {
+    await box.fill(text)
+    await expect
+      .poll(() => admin((api) => api.OpenEditor({ refId: card.id })).then((x) => x.drafts[0]?.content))
+      .toBe(text)
+  }
+  await page.getByRole("button", { name: "Edit history of Description", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "Edit history: Description" })
+  const pane = dialog.getByLabel("Text of the state")
+  await expect(pane).toHaveText(texts[1]!)
+  // Every frame from here on: whether the text pane is there, and what was removed under the dialog.
+  await dialog.evaluate((dialog) => {
+    const seen = { removed: 0, blank: 0, frames: 0 }
+    ;(window as unknown as { flash: typeof seen }).flash = seen
+    new MutationObserver((records) => {
+      for (const record of records)
+        for (const node of record.removedNodes)
+          if (node instanceof Element && (node.matches("pre") || node.querySelector("pre"))) seen.removed += 1
+    }).observe(dialog, { childList: true, subtree: true })
+    const tick = () => {
+      seen.frames += 1
+      if (!dialog.querySelector('[aria-label="Text of the state"]')) seen.blank += 1
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+  const items = dialog.getByRole("list", { name: "Earlier states" }).getByRole("button")
+  const count = await items.count()
+  expect(count).toBeGreaterThanOrEqual(3)
+  for (const index of [0, 2, 1, 0, 2]) {
+    await items.nth(index).click()
+    await expect(items.nth(index)).toHaveAttribute("aria-pressed", "true")
+    await expect(pane).not.toHaveAttribute("aria-busy", "true")
+  }
+  await expect(pane).toHaveText(texts[0]!)
+  const seen = await page.evaluate(
+    () => (window as unknown as { flash: { removed: number; blank: number; frames: number } }).flash
+  )
+  expect(seen.frames).toBeGreaterThan(0)
+  expect(seen).toMatchObject({ removed: 0, blank: 0 })
+})

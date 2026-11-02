@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { CodeEditorProps } from "./CodeEditor.tsx"
 import { changeGutter, comparisonBase, lineChanges, quietMarkers } from "./codeChanges.ts"
 import { proseTheme } from "./codeTheme.ts"
+import { FieldFrame } from "./FieldFrame.tsx"
 
 /** One persistent view: controlled echoes never reset selection or undo history. */
 export default function CodeEditorView(props: CodeEditorProps) {
@@ -37,7 +38,7 @@ export default function CodeEditorView(props: CodeEditorProps) {
   }, [])
   return (
     <div
-      className="group/text flex min-w-0 flex-col gap-0.5"
+      className="group/text flex min-w-0 flex-col"
       onFocus={onFocus}
       onBlur={onBlur}
       // A key comes from inside, so the editor has focus: its selection as it is now.
@@ -45,13 +46,22 @@ export default function CodeEditorView(props: CodeEditorProps) {
         runEditorShortcut(event, props.value, controller.current?.selection() ?? selection, props.source)
       }
     >
-      <div
-        ref={host}
-        className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
-      />
-      {props.textActions !== false && (
-        <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
-      )}
+      {/* The text actions and the field's own controls in the strip inside its bottom border. */}
+      <FieldFrame
+        side="bottom"
+        strip={props.textActions !== false || props.tools !== undefined || props.status !== undefined}
+        status={props.status}
+        tools={
+          <>
+            {props.textActions !== false && (
+              <EditorTextActions text={props.value} selection={selection} shown={focused} source={props.source} />
+            )}
+            {props.tools}
+          </>
+        }
+      >
+        <div ref={host} className="min-w-0 overflow-hidden rounded-md" />
+      </FieldFrame>
     </div>
   )
 }

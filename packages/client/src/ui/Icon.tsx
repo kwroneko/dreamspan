@@ -156,6 +156,8 @@ const paths = {
   ],
   type: ["M4 7V4h16v3", "M9 20h6", "M12 4v16"],
   snippet: ["m16 18 6-6-6-6", "m8 6-6 6 6 6"],
+  /** The snippet brackets around a text cursor: the selection to a snippet. */
+  snippetSelection: ["m17 16 5-4-5-4", "m7 8-5 4 5 4", "M10 8h4", "M10 16h4", "M12 8v8"],
   /** Opens something large: a field over the page. */
   expand: ["M15 3h6v6", "M9 21H3v-6", "m21 3-7 7", "m3 21 7-7"],
   guidance: [

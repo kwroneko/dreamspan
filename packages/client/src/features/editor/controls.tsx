@@ -9,6 +9,7 @@ import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Select, type SelectItem } from "../../ui/Select.tsx"
+import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
 import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
@@ -19,23 +20,20 @@ import { draftLabel } from "./fields.ts"
 import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistory, useText, useValue } from "./store.ts"
 
 /**
- * "Edited" while the field has changes, with its undo, history and revert. `hint` says what the
- * field is for, on hover; `aside` sits at the label's end (a field's token count, say).
+ * A field's label; `hint` says what the field is for, on hover. A setting's shows "edited" while
+ * it has changes; a text field shows that in its box's strip instead (`FieldStatus`).
  */
 function FieldLabel({
   store,
   field,
   label,
-  hint,
-  aside
+  hint
 }: {
-  store: EditorStore
-  field: string
+  store?: EditorStore
+  field?: string
   label: string
   hint?: ReactNode
-  aside?: ReactNode
 }) {
-  const dirty = useDirty(store, field)
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-2">
       {hint ? (
@@ -45,9 +43,25 @@ function FieldLabel({
       ) : (
         <span>{label}</span>
       )}
-      {dirty && <Badge tone="accent">edited</Badge>}
-      {aside}
+      {store && field !== undefined && <DirtyBadge store={store} field={field} />}
     </span>
+  )
+}
+
+function DirtyBadge({ store, field }: { store: EditorStore; field: string }) {
+  return useDirty(store, field) ? <Badge tone="accent">edited</Badge> : null
+}
+
+/**
+ * At the start of a text field's strip inside its box (ui/FieldFrame.tsx; owner, 2026-11-02):
+ * "edited" while it has changes, and `aside` (its token count, say).
+ */
+function FieldStatus({ store, field, aside }: { store: EditorStore; field: string; aside?: ReactNode }) {
+  return (
+    <>
+      <DirtyBadge store={store} field={field} />
+      {aside}
+    </>
   )
 }
 
@@ -66,17 +80,28 @@ function FieldEditHistory({ store, field, label }: { store: EditorStore; field: 
   const read = useCallback(async (seq: number) => loaded(await store.stateText(field, seq)), [store, field])
   const restore = useCallback(async (seq: number) => loaded(await store.restore(field, seq)), [store, field])
   if (!has) return null
-  return <EditHistory label={label} load={load} read={read} restore={restore} />
+  return <EditHistory label={label} load={load} read={read} restore={restore} className={chromeButton} />
 }
 
 /**
  * Beside a field: a text field's edit history, and a copy from this browser that went over
  * another tab's text. Settings (values) have neither Undo nor History of their own (owner,
- * 2026-11-01): they apply as changed, and History shows them in its revisions.
+ * 2026-11-01): they apply as changed, and History shows them in its revisions. `TextField` puts
+ * the edit history in its box's strip instead (`history={false}` here).
  */
-export function FieldTools({ store, field, label }: { store: EditorStore; field: string; label: string }) {
+export function FieldTools({
+  store,
+  field,
+  label,
+  history = true
+}: {
+  store: EditorStore
+  field: string
+  label: string
+  history?: boolean
+}) {
   const conflict = useSyncExternalStore(store.subscribe(field), () => store.conflict(field))
-  const text = parseField(field)?.kind === "text"
+  const text = history && parseField(field)?.kind === "text"
   if (!text && conflict === null) return null
   return (
     <div className="flex flex-col gap-1">
@@ -118,7 +143,7 @@ export function TextField({
   description?: ReactNode
   /** What the field is for, on hover over its label. */
   hint?: ReactNode
-  /** At the end of the label's line: the field's token count, say. */
+  /** At the start of the strip inside the box, after "edited": the field's token count, say. */
   aside?: ReactNode
   mono?: boolean
   readOnly?: boolean
@@ -158,25 +183,37 @@ export function TextField({
     className: mono ? "font-mono" : "",
     onBlur: () => void store.save(field)
   }
-  return (
-    <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
+  // Its own controls, in the strip inside the box (ui/FieldFrame.tsx; owner, 2026-11-02).
+  const status = <FieldStatus store={store} field={field} aside={aside} />
+  const tools = (
+    <>
+      <FieldEditHistory store={store} field={field} label={label} />
       {expandable && rows !== undefined && (
         <IconButton
           label={`Open ${label} large`}
           hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
           icon="expand"
-          className="absolute -top-1.5 right-0 size-7!"
+          className={chromeButton}
           onClick={() => setLarge(true)}
         />
       )}
+    </>
+  )
+  return (
+    <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
       {large && <LargeField store={store} path={path} field={field} label={label} onClose={() => setLarge(false)} />}
       <Field
-        label={labelHidden ? label : <FieldLabel store={store} field={field} label={label} hint={hint} aside={aside} />}
+        label={labelHidden ? label : <FieldLabel label={label} hint={hint} />}
         labelHidden={labelHidden}
         description={description}
       >
         {rows === undefined ? (
-          <Input {...props} onChange={(event) => store.setText(path, event.currentTarget.value)} />
+          <Input
+            {...props}
+            tools={tools}
+            status={status}
+            onChange={(event) => store.setText(path, event.currentTarget.value)}
+          />
         ) : card ? (
           <CardTextEditor
             store={store}
@@ -189,6 +226,8 @@ export function TextField({
             mono={mono}
             readOnly={readOnly}
             source={source}
+            tools={tools}
+            status={status}
             onChange={(value) => store.setText(path, value)}
             onBlur={props.onBlur}
           />
@@ -197,13 +236,15 @@ export function TextField({
             {...props}
             // Prose has them; a pattern (mono) doesn't.
             textActions={!mono}
+            tools={tools}
+            status={status}
             rows={rows}
             className={`resize-y ${props.className}`}
             onChange={(event) => store.setText(path, event.currentTarget.value)}
           />
         )}
       </Field>
-      <FieldTools store={store} field={field} label={label} />
+      <FieldTools store={store} field={field} label={label} history={false} />
     </div>
   )
 }
@@ -234,11 +275,13 @@ function LargeField({
           label={label}
           minHeight="min(65dvh, 48rem)"
           fullHeight
+          tools={<FieldEditHistory store={store} field={field} label={label} />}
+          status={<FieldStatus store={store} field={field} />}
           onChange={(next) => store.setText(path, next)}
           onBlur={() => void store.save(field)}
         />
       </div>
-      <FieldTools store={store} field={field} label={label} />
+      <FieldTools store={store} field={field} label={label} history={false} />
       <DialogActions>
         <Button variant="primary" onClick={onClose}>
           Done

@@ -100,12 +100,16 @@ export function SaveControls({
               "Save with a message…"
             )}
           </Button>
-          {onRevert && changed && (
+          {/* Shown while something changed; hidden, it keeps its room, so the first key typed in a
+              field moves nothing on the page (owner, 2026-11-02). */}
+          {onRevert && (
             <Button
               variant="ghost"
               pending={reverting}
+              disabled={!changed}
+              aria-hidden={!changed || undefined}
               aria-label={`Revert to revision ${revision}`}
-              className={compact ? "max-sm:px-2!" : ""}
+              className={`${compact ? "max-sm:px-2!" : ""} ${changed ? "" : "invisible"}`}
               hint={`Puts every field back to revision ${revision}. What's there now stays in each field's edit history.`}
               onClick={() => {
                 setReverting(true)

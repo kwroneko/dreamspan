@@ -47,9 +47,10 @@ export const editorTextActions = (
   })
 
 /**
- * The editor's own text-action bar, under its box, only while the editor has focus (`shown`)
- * or a selection: hidden, it takes no room. It takes the room below the box, so what moves when
- * it comes and goes is what's under the editor, never the text in it. Only prose editors have one
+ * The editor's own text actions, in the strip inside its box (ui/FieldFrame.tsx), only while the
+ * editor has focus (`shown`) or a selection. The strip keeps its room whether they're there or
+ * not, so nothing moves when they come and go (owner, 2026-11-02). An action with an icon shows
+ * only its icon, its name in its explanation. Only prose editors have them
  * (the message editor, card text, prompts, notes, summaries; owner, 2026-11-01): a box of
  * settings, keys, tags, names, patterns, numbers or addresses doesn't. The selection's actions
  * come and go with the selection; on a phone the OS's selection menu floats at the selection,
@@ -76,7 +77,7 @@ export function EditorTextActions({
       data-text-tool
       role="toolbar"
       aria-label="Text actions"
-      className={`flex flex-wrap items-center justify-end gap-1 ${className}`}
+      className={`flex min-w-0 items-center justify-end gap-0.5 ${className}`}
     >
       {offered.map(({ action, context }) => (
         <Tooltip
@@ -95,15 +96,18 @@ export function EditorTextActions({
             // The editor keeps its focus and selection.
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => action.run(context)}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8"
+            className={`inline-flex h-6 shrink-0 items-center justify-center gap-1.5 rounded-md text-xs text-muted outline-none hover:bg-hover hover:text-text focus-visible:ring-2 focus-visible:ring-focus max-sm:h-8 ${
+              action.icon ? "w-6 max-sm:w-8" : "px-2"
+            }`}
           >
-            {action.icon && (
-              <span className="max-sm:hidden">
-                <Icon name={action.icon} size={14} />
-              </span>
+            {action.icon ? (
+              <Icon name={action.icon} size={14} />
+            ) : (
+              <>
+                <span className={action.shortLabel ? "max-sm:hidden" : ""}>{action.label}</span>
+                {action.shortLabel && <span className="sm:hidden">{action.shortLabel}</span>}
+              </>
             )}
-            <span className={action.shortLabel ? "max-sm:hidden" : ""}>{action.label}</span>
-            {action.shortLabel && <span className="sm:hidden">{action.shortLabel}</span>}
           </button>
         </Tooltip>
       ))}

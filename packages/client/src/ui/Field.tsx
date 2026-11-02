@@ -3,6 +3,7 @@ import { Fieldset as BaseFieldset } from "@base-ui/react/fieldset"
 import { Input as BaseInput } from "@base-ui/react/input"
 import { useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react"
 import { EditorTextActions, runEditorShortcut, useEditorFocus } from "../textActions.tsx"
+import { FieldFrame, framedControl } from "./FieldFrame.tsx"
 
 // 16px text on touch screens, so iOS doesn't zoom into a focused field.
 const control =
@@ -43,8 +44,21 @@ export function Field({
   )
 }
 
-export function Input({ className = "", ...props }: ComponentProps<typeof BaseInput>) {
-  return <BaseInput className={`h-9 ${control} ${className}`} {...props} />
+/** `tools` and `status` go in the box's strip at its end (`FieldFrame`); `frameClassName` sizes the box then. */
+export function Input({
+  className = "",
+  tools,
+  status,
+  frameClassName = "",
+  ...props
+}: ComponentProps<typeof BaseInput> & { tools?: ReactNode; status?: ReactNode; frameClassName?: string }) {
+  if (tools === undefined && status === undefined)
+    return <BaseInput className={`h-9 ${control} ${className}`} {...props} />
+  return (
+    <FieldFrame side="end" tools={tools} status={status} className={frameClassName}>
+      <BaseInput className={`h-9 ${framedControl} ${className}`} {...props} />
+    </FieldFrame>
+  )
 }
 
 /** Whether CSS can mask a text field. Asked at render, so a test can stand in for an old browser. */
@@ -131,17 +145,21 @@ export const formText = (form: HTMLFormElement, name: string) => {
 
 /**
  * A text box; `textActions` for prose (a message, an instruction, an entry's text) puts the
- * editor's text actions under it (Send to snippet, say) while it has focus. A box of settings,
- * keys, tags, patterns or addresses has none (owner, 2026-11-01).
+ * editor's text actions in its strip (Send to snippet, say) while it has focus. A box of settings,
+ * keys, tags, patterns or addresses has none (owner, 2026-11-01). The strip (`FieldFrame`), with
+ * `tools` and `status` too, is inside the box along its bottom border.
  */
 export function Textarea({
   className = "",
   textActions = false,
+  tools,
+  status,
   ...props
-}: ComponentProps<"textarea"> & { textActions?: boolean }) {
+}: ComponentProps<"textarea"> & { textActions?: boolean; tools?: ReactNode; status?: ReactNode }) {
   const [text, setText] = useState({ value: "", selection: "" })
   const { focused, onFocus, onBlur } = useEditorFocus()
-  if (!textActions || props.disabled)
+  const actions = textActions && !props.disabled
+  if (!actions && tools === undefined && status === undefined)
     return <BaseField.Control render={<textarea className={`min-h-24 py-2 ${control} ${className}`} {...props} />} />
   const read = (event: SyntheticEvent<HTMLTextAreaElement>) => {
     const box = event.currentTarget
@@ -152,36 +170,47 @@ export function Textarea({
   const selection = focused ? text.selection : ""
   return (
     <div
-      className="group/text flex min-w-0 flex-col gap-0.5"
+      className="group/text flex min-w-0 flex-col"
       onFocus={onFocus}
       onBlur={onBlur}
       // A key comes from inside, so the box has focus: its selection as it is now.
       onKeyDown={(event) => {
+        if (!actions) return
         const box = event.target instanceof HTMLTextAreaElement ? event.target : null
         runEditorShortcut(event, value, box ? box.value.slice(box.selectionStart, box.selectionEnd) : selection)
       }}
     >
-      <BaseField.Control
-        render={
-          <textarea
-            className={`min-h-24 py-2 ${control} ${className}`}
-            {...props}
-            onSelect={(event) => {
-              read(event)
-              props.onSelect?.(event)
-            }}
-            onInput={(event) => {
-              read(event)
-              props.onInput?.(event)
-            }}
-            onFocus={(event) => {
-              read(event)
-              props.onFocus?.(event)
-            }}
-          />
+      <FieldFrame
+        side="bottom"
+        status={status}
+        tools={
+          <>
+            {actions && <EditorTextActions text={value} selection={selection} shown={focused} />}
+            {tools}
+          </>
         }
-      />
-      <EditorTextActions text={value} selection={selection} shown={focused} />
+      >
+        <BaseField.Control
+          render={
+            <textarea
+              className={`min-h-24 py-2 ${framedControl} ${className}`}
+              {...props}
+              onSelect={(event) => {
+                read(event)
+                props.onSelect?.(event)
+              }}
+              onInput={(event) => {
+                read(event)
+                props.onInput?.(event)
+              }}
+              onFocus={(event) => {
+                read(event)
+                props.onFocus?.(event)
+              }}
+            />
+          }
+        />
+      </FieldFrame>
     </div>
   )
 }
