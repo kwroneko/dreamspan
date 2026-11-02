@@ -258,7 +258,7 @@ export function ChatHeader({
   const loading = view.chat === null
   return (
     <TooltipProvider>
-      <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-1.5 sm:gap-3 sm:px-4">
+      <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-2 sm:gap-3 sm:px-4">
         {/* The desktop's hidden sidebar comes back from here. */}
         <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <Tooltip label="All chats">
@@ -285,7 +285,10 @@ export function ChatHeader({
           <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none max-sm:hidden" />
         ) : (
           characters.length > 0 && (
-            <div className="flex shrink-0 -space-x-2 max-sm:hidden">
+            <div
+              data-layout-audit-ignore="overlap: Header portraits intentionally form a stack"
+              className="flex shrink-0 -space-x-2 max-sm:hidden"
+            >
               {characters.slice(0, 4).map((c) => (
                 <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
                   <button

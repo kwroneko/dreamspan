@@ -183,6 +183,7 @@ function Tags({ store }: { store: EditorStore }) {
             >
               {name}
               <IconButton
+                data-layout-audit-ignore="inset: Remove action is part of its compact tag chip"
                 label={`Remove the tag ${name}`}
                 hint={`Removes the tag “${name}” from this card.`}
                 icon="close"

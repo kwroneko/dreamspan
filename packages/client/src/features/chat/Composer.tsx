@@ -107,9 +107,9 @@ export function ComposerBox({
           {header}
         </div>
       )}
-      <div className="grid min-w-0 px-1 pt-1">{children}</div>
+      <div className="grid min-w-0 p-2">{children}</div>
       {attachments && <div className="px-2 pt-1">{attachments}</div>}
-      <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1 p-1">
+      <div data-testid="composer-controls" className="flex min-w-0 flex-wrap items-center gap-1 p-2">
         <div className="flex min-w-0 items-center gap-1">{start}</div>
         <div className="ml-auto flex shrink-0 items-center gap-0.5">{end}</div>
       </div>

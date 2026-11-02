@@ -6,7 +6,6 @@
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
-import { rowActionInsetClass } from "./rowSpacing.ts"
 import { IconButton, Tooltip } from "./Tooltip.tsx"
 
 /** The block: a bordered card; `dashed` for a slim row standing for something else (a marker). */
@@ -30,11 +29,7 @@ export function Block({
 
 /** The header's row: what leads (a handle, a switch), the name, then the actions at the end. */
 export function BlockHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <header className={`flex min-w-0 items-start gap-0.5 py-0.5 ps-1 ${rowActionInsetClass} ${className}`}>
-      {children}
-    </header>
-  )
+  return <header className={`flex min-w-0 items-start gap-0.5 py-2 ps-2 pe-3 ${className}`}>{children}</header>
 }
 
 /**
@@ -166,6 +161,7 @@ export function BlockSection({
       <Tooltip label={hint}>
         <button
           type="button"
+          data-layout-audit-ignore="inset: Disclosure is the full-width section header"
           aria-expanded={open}
           aria-label={`${title} of ${label}`}
           onClick={onToggle}

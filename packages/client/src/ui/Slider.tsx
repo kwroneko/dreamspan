@@ -51,6 +51,7 @@ export function Slider({
         <BaseSlider.Track className="h-1.5 w-full rounded-full bg-surface-raised ring-1 ring-border">
           <BaseSlider.Indicator className="rounded-full bg-accent" />
           <BaseSlider.Thumb
+            data-layout-overlay="Slider thumb rides over its track and fill"
             getAriaValueText={(_formatted, current) => valueText(current)}
             className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
           />

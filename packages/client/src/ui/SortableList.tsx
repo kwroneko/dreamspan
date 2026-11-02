@@ -91,6 +91,7 @@ export function SortableList<Item>({
         }}
         onClick={() => onSelect?.(item)}
         aria-label={`Move ${itemLabel(item)}`}
+        data-layout-audit-ignore={namesAsHandles ? "inset: Named drag handle is the whole outline row" : undefined}
         aria-describedby={hint}
         className={`${namesAsHandles ? "w-full gap-2 px-1 text-left text-xs" : "size-8"} flex min-h-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted outline-none hover:bg-surface-raised hover:text-text focus-visible:ring-2 focus-visible:ring-focus active:cursor-grabbing`}
         onKeyDown={(event) => {

@@ -351,6 +351,7 @@ function PromptBlock({
 
   const sendSwitch = entry.identifier !== "newestMessage" && (
     <Switch
+      labelHidden
       checked={entry.enabled}
       onCheckedChange={(enabled) =>
         writePresetOrder(

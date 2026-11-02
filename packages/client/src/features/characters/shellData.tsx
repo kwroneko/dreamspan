@@ -297,7 +297,10 @@ function CharacterTile({
   return (
     <div className="relative flex min-w-0 flex-col">
       {pick ? <Tooltip label={pick.hint(card, status)}>{button}</Tooltip> : button}
-      <span className="absolute top-1 left-1 rounded-md bg-surface/85">
+      <span
+        data-layout-overlay="Favourite action sits over the portrait"
+        className="absolute top-2 left-2 rounded-md bg-surface/85"
+      >
         <FavouriteStar card={card} />
       </span>
       {state.mark && (

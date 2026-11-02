@@ -148,7 +148,7 @@ function Row({
         </span>
       </Link>
       {fork && (
-        <span className="absolute right-2.5 bottom-1">
+        <span data-layout-overlay="Pin action sits over the chat row" className="absolute right-2.5 bottom-2">
           <PinButton fork={fork} />
         </span>
       )}
@@ -156,6 +156,7 @@ function Row({
         <button
           type="button"
           onClick={onDelete}
+          data-layout-overlay="Delete action sits over the chat row"
           aria-label={`Delete ${name.name}${name.started ? `, started ${formatDay(name.started)}` : ""}`}
           className="absolute top-2 right-2.5 hidden rounded bg-surface-raised px-1.5 py-0.5 text-xs text-muted outline-none group-focus-within:block group-hover:block hover:text-danger focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:top-auto pointer-coarse:bottom-2 pointer-coarse:block"
         >
@@ -301,7 +302,7 @@ function Loaded({ first, query }: { first: ReadonlyArray<Chat>; query: Query }) 
   }
   const pages = Array.from({ length: Math.ceil(chats.length / PAGE) }, (_, i) => chats.slice(i * PAGE, (i + 1) * PAGE))
   return (
-    <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1">
+    <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
       {chats.length === 0 ? (
         <p className="px-2 py-4 text-sm text-muted">
           {query.search
@@ -343,7 +344,7 @@ function Given({ chats, onDeleted }: { chats: ReadonlyArray<Chat>; onDeleted?: (
   }
   const pages = Array.from({ length: Math.ceil(shown.length / PAGE) }, (_, i) => shown.slice(i * PAGE, (i + 1) * PAGE))
   return (
-    <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-1">
+    <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
       {shown.length === 0 ? (
         <p className="px-2 py-4 text-sm text-muted">No chats left.</p>
       ) : (

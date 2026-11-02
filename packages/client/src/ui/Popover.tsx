@@ -58,6 +58,7 @@ export function Popover({
       )}
       <BasePopover.Portal keepMounted={keepMounted}>
         <BasePopover.Positioner
+          data-layout-overlay="Popover floats above the page"
           className="z-50 outline-none"
           side={side}
           align={align}

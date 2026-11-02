@@ -313,7 +313,11 @@ const EntryRow = memo(function EntryRow({
   const enabled = (
     <Tooltip label={EXPLAIN.enabled}>
       <span className="inline-flex">
-        <Switch checked={entry.enabled} onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}>
+        <Switch
+          labelHidden
+          checked={entry.enabled}
+          onCheckedChange={(next) => store.setValue([...path, "enabled"], next)}
+        >
           <span className="sr-only">{`${title} enabled`}</span>
         </Switch>
       </span>
@@ -339,12 +343,12 @@ const EntryRow = memo(function EntryRow({
   const menu = <RowActions context={context} actions={actions} onPick={(action) => onAction(uid, action)} />
   return (
     <div
-      className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
+      className={`border-b border-border py-2 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
       {!compact ? (
         <div
           data-entry-header
-          className={`grid items-start gap-2 ps-1 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
           style={{ gridTemplateColumns: template }}
         >
           <div className="flex items-center gap-1 pt-0.5">
@@ -363,7 +367,7 @@ const EntryRow = memo(function EntryRow({
       ) : (
         <div
           data-entry-header
-          className={`flex items-start gap-1 ps-1 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
         >
           {select}
           {chevron}

@@ -162,6 +162,8 @@ export function TextField({
     <div ref={target} className="relative flex min-w-0 scroll-mt-[var(--preset-toolbar-height,1rem)] flex-col gap-1">
       {expandable && rows !== undefined && (
         <IconButton
+          data-layout-overlay="Expand action sits above the field in its label row"
+          data-layout-audit-ignore="inset: Expand action belongs to the field label, outside the editable box"
           label={`Open ${label} large`}
           hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
           icon="expand"

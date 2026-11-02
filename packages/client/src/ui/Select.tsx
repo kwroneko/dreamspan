@@ -73,10 +73,14 @@ export function Select<Value>({
         </BaseSelect.Icon>
       </BaseSelect.Trigger>
       <BaseSelect.Portal>
-        <BaseSelect.Positioner className="z-50 outline-none select-none" sideOffset={4}>
+        <BaseSelect.Positioner
+          data-layout-overlay="Select list floats above the page"
+          className="z-50 outline-none select-none"
+          sideOffset={4}
+        >
           <BaseSelect.Popup
             ref={setPopup}
-            className="max-h-[var(--available-height)] max-w-[min(24rem,calc(100vw-1rem))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-1 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
+            className="max-h-[var(--available-height)] max-w-[min(24rem,calc(100vw-1rem))] min-w-[var(--anchor-width)] origin-[var(--transform-origin)] overflow-y-auto rounded-md border border-border bg-surface p-2 text-text shadow-lg outline-none transition-[scale,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none"
           >
             <BaseSelect.List>
               {items.map((item) => (
@@ -136,6 +140,8 @@ export function NativeSelect<Value extends string>({
         </svg>
       </span>
       <select
+        data-layout-overlay="Native select covers its visible value and icon"
+        data-layout-audit-ignore="inset: Native select is the bordered field's full hit target"
         aria-label={ariaLabel}
         value={value}
         onChange={(event) => onValueChange(event.currentTarget.value as Value)}

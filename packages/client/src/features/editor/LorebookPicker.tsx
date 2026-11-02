@@ -54,7 +54,7 @@ export function LorebookPicker({
       ) : shown.length === 0 ? (
         <p className="text-sm text-muted">No lorebook matches “{query}”.</p>
       ) : (
-        <ul aria-label="Lorebooks to add" className="flex max-h-72 flex-col overflow-y-auto">
+        <ul aria-label="Lorebooks to add" className="flex max-h-72 flex-col overflow-y-auto p-2">
           {shown.map((ref) => (
             <li key={ref.id}>
               <button

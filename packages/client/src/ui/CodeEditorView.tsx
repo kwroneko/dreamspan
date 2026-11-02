@@ -46,6 +46,7 @@ export default function CodeEditorView(props: CodeEditorProps) {
       }
     >
       <div
+        data-layout-audit-ignore="inset: Editor surface fills its own bordered field"
         ref={host}
         className="min-w-0 overflow-hidden rounded-md border border-border bg-surface shadow-xs focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/40"
       />

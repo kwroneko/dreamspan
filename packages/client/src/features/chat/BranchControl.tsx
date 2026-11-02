@@ -103,7 +103,7 @@ function BranchRow({
   return (
     <li
       data-fork={fork.id}
-      className={`flex items-start gap-1 rounded-md border ${shown ? "border-accent bg-accent/5" : "border-transparent hover:bg-surface-raised"}`}
+      className={`flex items-start gap-1 rounded-md border p-2 ${shown ? "border-accent bg-accent/5" : "border-transparent hover:bg-surface-raised"}`}
     >
       <button
         type="button"
@@ -130,7 +130,7 @@ function BranchRow({
           {fork.tipExcerpt || "No messages yet"}
         </span>
       </button>
-      <div className={`flex shrink-0 items-center py-0.5 ${rowActionInsetClass}`}>
+      <div className={`flex shrink-0 items-center ${rowActionInsetClass}`}>
         <IconButton
           label={`Rename ${label}`}
           icon="edit"
@@ -214,7 +214,7 @@ function BranchList({
   const parent = shown?.parentForkId ? forks.find((f) => f.id === shown.parentForkId) : undefined
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <ol aria-label="Branches" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
+      <ol aria-label="Branches" className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
         {ordered.map((fork) => (
           <BranchRow
             key={fork.id}

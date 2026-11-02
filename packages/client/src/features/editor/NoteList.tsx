@@ -333,7 +333,7 @@ function NoteBlock({
               </BlockSection>
             )}
             {loaded && (
-              <div className="flex flex-wrap items-center gap-2 border-t border-border px-2 py-1.5">
+              <div className="flex flex-wrap items-center gap-2 border-t border-border px-2 py-2">
                 <SaveRevision store={store} compact />
               </div>
             )}
