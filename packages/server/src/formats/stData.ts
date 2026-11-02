@@ -3,6 +3,8 @@
 // settings, and `groups/*.json` for group chats. Read from ST's public source
 // (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`, `global.d.ts`).
 // Only what the importer maps is read; the rest of `settings.json` is dropped unread.
+import { stIdTime } from "./sourceTime.ts"
+import { parseStCreatedAt } from "./stCreatedAt.ts"
 import { type ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { CARD_SCHEMA_VERSION, type CardDoc } from "@rp/shared/docs/card.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
@@ -224,6 +226,7 @@ export const parseStSettings = (bytes: Uint8Array, issues: ReportBuilder): StSet
 
 /** A group definition (`groups/<id>.json`, `Group` in global.d.ts). */
 export interface StGroup {
+  readonly stAddedAt?: number | null
   readonly id: string
   readonly name: string
   /** Card avatar file names. */
@@ -246,6 +249,9 @@ export const parseStGroup = (bytes: Uint8Array, fileName: string, issues: Report
   if (typeof group.chat_id === "string" && !chats.includes(group.chat_id)) chats.push(bounded(group.chat_id))
   return {
     id,
+    ...((stIdTime(id) ?? parseStCreatedAt(group.create_date)) === null
+      ? {}
+      : { stAddedAt: stIdTime(id) ?? parseStCreatedAt(group.create_date) }),
     name: typeof group.name === "string" && group.name !== "" ? bounded(group.name) : id,
     members: strings(group.members, stDataLimits.maxGroupMembers),
     disabledMembers: strings(group.disabled_members, stDataLimits.maxGroupMembers),

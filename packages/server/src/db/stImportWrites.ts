@@ -1,3 +1,4 @@
+import { recordCardArrival, recordChatArrival } from "./stArrival.ts"
 import { contextExcludedIn } from "./lcmVisibility.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { recordHistoryReduction } from "./historyChanges.ts"
@@ -40,6 +41,7 @@ import { DEFAULT_PRESET, newChatLcmSettings, ownedPreset } from "./generationSet
 
 /** A message as the format worker wrote it (formats/stChat.ts). */
 const Message = Schema.Struct({
+  arrivalAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   user: Schema.Boolean,
   hidden: Schema.Boolean,
   speaker: Schema.NullOr(Schema.String),
@@ -383,7 +385,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         }
       }).pipe(transaction(sql, "StImportBegin")),
 
-    StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease, parentRecordId }) =>
+    StImportStartChat: ({ userId, source, title, createdAt, chatId: into, lease, parentRecordId, arrival, groupId }) =>
       Effect.gen(function* () {
         const recordId = uuidv7()
         yield* current(userId, lease, recordId)
@@ -416,6 +418,9 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
             created_at: at
           })}`
         }
+        if (groupId !== undefined)
+          yield* sql`UPDATE chats SET st_group_id = ${groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
+        if (arrival !== undefined) yield* recordChatArrival(sql, userId, chatId, arrival)
         // An earlier record of this file whose chat was deleted for good names nothing now.
         yield* sql`DELETE FROM jobs WHERE owner_user_id = ${userId} AND kind = ${ST_CHAT_RECORD}
           AND json_extract(payload_json, '$.source') = ${source}
@@ -451,8 +456,18 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
 
     StImportMessages: (input) =>
       // Decoded before the transaction, which holds only database work.
-      Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) =>
-        Effect.gen(function* () {
+      Effect.flatMap(Schema.decodeEffect(Messages)(input.messagesJson).pipe(Effect.orDie), (messages) => {
+        const arrivals = new Map<string, number>()
+        for (const message of messages) {
+          if (message.arrivalAt == null) continue
+          const ref = message.speaker === null ? undefined : input.arrivalRefs?.[message.speaker]
+          if (ref !== undefined) arrivals.set(ref, Math.min(arrivals.get(ref) ?? Infinity, message.arrivalAt))
+        }
+        const firstAt = messages.reduce<number | null>(
+          (first, message) => (message.arrivalAt == null ? first : Math.min(first ?? Infinity, message.arrivalAt)),
+          null
+        )
+        return Effect.gen(function* () {
           const { userId, chatId, speakers } = input
           yield* ownedChat(userId, chatId)
           const payload = yield* leased(userId, input.recordId, chatId, input.lease)
@@ -544,6 +559,11 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
                 JOIN segments g ON g.chain_id = s.chain_id AND s.depth BETWEEN g.lo AND g.hi) AS changed`
             return row?.changed === 1
           })
+          if (input.groupId !== undefined)
+            yield* sql`UPDATE chats SET st_group_id = ${input.groupId} WHERE id = ${chatId} AND owner_user_id = ${userId}`
+          if (input.groupArrival !== undefined) yield* recordChatArrival(sql, userId, chatId, input.groupArrival)
+          for (const [ref, at] of arrivals) yield* recordCardArrival(sql, userId, ref, { at, basis: 1 })
+          if (firstAt !== null) yield* recordChatArrival(sql, userId, chatId, { at: firstAt, basis: 1 })
           let firstAdded: string | null = null
           const slotIds: Array<SlotId> = []
           for (const message of messages) {
@@ -775,7 +795,7 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
             WHERE id = ${input.recordId}`
           return { slotIds, matching, added, updated, differing }
         }).pipe(transaction(sql, "StImportMessages"))
-      ),
+      }),
 
     StImportFinishChat: (input) =>
       Effect.gen(function* () {

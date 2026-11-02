@@ -230,6 +230,7 @@ export const baseline: ReadonlyArray<string> = [
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     last_used_at INTEGER,
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3),
     CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)),
     CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL)
   ) STRICT`,
@@ -271,10 +272,14 @@ export const baseline: ReadonlyArray<string> = [
     active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED,
     row_version INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
-    last_message_at INTEGER
+    last_message_at INTEGER,
+    added_at INTEGER,
+    st_group_id TEXT,
+    st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3)
   , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0,
     -- Moved by triggers on every write the shell's fork summaries read (fork_summaries).
     shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT`,
+  `CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL`,
   `CREATE INDEX chats_recent ON chats(owner_user_id, last_message_at DESC) WHERE status = 'active'`,
   `CREATE TABLE lanes (
     id TEXT PRIMARY KEY,

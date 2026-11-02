@@ -33,6 +33,7 @@ import { makeLibraryQueries, type RefRow, toLibraryRef } from "./library.ts"
 import { mediaPath } from "./media.ts"
 import { sharedNote } from "./sharedNotes.ts"
 import { FollowerMerge, NotFound, RefChange, RefOperationRefused, StaleWrite, WriteOps } from "./ops.ts"
+import { recordCardArrival } from "./stArrival.ts"
 import { transaction } from "./tx.ts"
 
 /** Where an imported revision came from: the file's name and hash. */
@@ -915,6 +916,8 @@ export const makeLibraryWriteHandlers = (bin: Bin) =>
             outcome = merged.outcome
             followers = merged.change.followers
           }
+          if (kind === "card" && input.arrival !== undefined)
+            yield* recordCardArrival(sql, userId, upstream.id, input.arrival)
           // ST's favourite flag (`extensions.fav`), on a first import and each re-import, unless
           // the user set the card's favourite here since; a card without one changes nothing.
           if (kind === "card") {

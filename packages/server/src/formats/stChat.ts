@@ -230,6 +230,8 @@ const stGenerationOf = (holder: unknown, extra: unknown): StGeneration | undefin
 
 /** A message as the writer takes it: a slot with its versions. */
 export interface StMessage {
+  /** An actual recorded message date, before synthetic fallbacks; arrival evidence only. */
+  readonly arrivalAt?: number | null
   readonly user: boolean
   readonly hidden: boolean
   /** Who spoke, as a key into the speaker map the main thread resolves; null for the narrator. */
@@ -526,7 +528,7 @@ export const parseStChatPart = (
       attachments++
     }
 
-    const message: StMessage = { user, hidden, speaker, selected, versions }
+    const message: StMessage = { user, hidden, speaker, selected, versions, arrivalAt: parseStDate(value.send_date) }
     const json = JSON.stringify(message)
     if (
       batch.length >= stChatLimits.maxBatchMessages ||

@@ -1,3 +1,4 @@
+import { StArrival } from "@rp/shared/stImportApi.ts"
 import { ReplySections } from "@rp/shared/replySections.ts"
 import { BinLimits, BinLimitChange } from "@rp/shared/bin.ts"
 import { CostSettings, CostRules } from "@rp/shared/costFormulas.ts"
@@ -1422,6 +1423,8 @@ export class WriteOps extends RpcGroup.make(
    */
   Rpc.make("ImportFile", {
     payload: {
+      /** Full-folder arrival evidence; ordinary single-file uploads omit it. */
+      arrival: Schema.optionalKey(StArrival),
       /** Source modification time for an ST folder import; absent for ordinary uploads. */
       modifiedAt: Schema.optionalKey(Schema.Number),
       createdAt: Schema.optionalKey(Schema.Number),
@@ -1843,6 +1846,8 @@ export class WriteOps extends RpcGroup.make(
   }),
   Rpc.make("StImportStartChat", {
     payload: {
+      groupId: Schema.optionalKey(Schema.String),
+      arrival: Schema.optionalKey(StArrival),
       userId: UserId,
       parentRecordId: Schema.optionalKey(Schema.String),
       source: Schema.String,
@@ -1881,7 +1886,11 @@ export class WriteOps extends RpcGroup.make(
       /** A JSON array of the format worker's messages (formats/stChat.ts), passed on unread. */
       messagesJson: Schema.String,
       /** Each speaker key of the messages, as a card of the user's, or null. */
-      speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId))
+      speakers: Schema.Record(Schema.String, Schema.NullOr(EntityId)),
+      /** Full-folder cards/personas by speaker; a manual link alone never dates their arrival. */
+      arrivalRefs: Schema.optionalKey(Schema.Record(Schema.String, RefId)),
+      groupArrival: Schema.optionalKey(StArrival),
+      groupId: Schema.optionalKey(Schema.String)
     },
     success: Schema.Struct({
       slotIds: Schema.Array(SlotId),

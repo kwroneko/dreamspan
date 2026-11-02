@@ -102,7 +102,7 @@ const SORTS: Record<Exclude<Sort, "name">, (item: Item) => number | null> = {
   used: (item) => item.usage?.lastMessageAt ?? null,
   chats: (item) => item.usage?.chats ?? null,
   changed: (item) => item.entry.updatedAt,
-  added: (item) => item.shell?.addedAt ?? null
+  added: (item) => item.entry.addedAt ?? item.shell?.addedAt ?? null
 }
 const byName = (a: Item, b: Item) =>
   a.entry.label.localeCompare(b.entry.label) || a.entry.subtitle.localeCompare(b.entry.subtitle)
@@ -422,7 +422,8 @@ function Section({
                   {
                     value: "added",
                     label: "Added",
-                    description: "By when it came into this app, imported or written here"
+                    description:
+                      "By when it was added: inherited from SillyTavern during a folder import, otherwise when added here"
                   }
                 ]}
                 value={prefs.sort}

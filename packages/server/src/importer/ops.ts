@@ -1,3 +1,4 @@
+import { StArrival } from "@rp/shared/stImportApi.ts"
 import { StSettingsImport } from "@rp/shared/modelSettings.ts"
 // The format workers' operations (ARCHITECTURE.md §11.2): parsing an uploaded file and
 // writing an export, both CPU work on untrusted or large data, kept off the main thread.
@@ -170,6 +171,8 @@ export class StSettings extends Schema.Class<StSettings>("StSettings")({
 }) {}
 
 export class StGroup extends Schema.Class<StGroup>("StGroup")({
+  stAddedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  arrival: Schema.optionalKey(StArrival),
   id: Schema.String,
   name: Schema.String,
   members: Schema.Array(Schema.String),
@@ -187,6 +190,7 @@ export class StLibraryFile extends Schema.Class<StLibraryFile>("StLibraryFile")(
   card: Schema.NullOr(
     Schema.Struct({
       name: Schema.String,
+      authoredAt: Schema.optionalKey(Schema.Number),
       greetings: Schema.Array(Schema.String),
       world: Schema.NullOr(Schema.String),
       /** It carries a lorebook of its own (`character_book`). */

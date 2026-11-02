@@ -161,9 +161,12 @@ const SORT_LABELS: Record<CardSort, { label: string; hint: string }> = {
   recent: { label: "Recent", hint: "By the latest message in any of its chats; characters never used come last" },
   created: {
     label: "Created",
-    hint: "By when the card was made: for a SillyTavern import, the date ST gives it (its create_date); otherwise when it was added here"
+    hint: "By when the card was made: its author’s creation date when known, otherwise its earliest recorded arrival"
   },
-  added: { label: "Added", hint: "By when it came into this app, imported or written here" },
+  added: {
+    label: "Added",
+    hint: "By when it was added: inherited from SillyTavern during a folder import, otherwise when added here"
+  },
   name: { label: "Name", hint: "By name" }
 }
 
@@ -260,7 +263,7 @@ export function CardSortControl({
 const DATE_KINDS: Record<Exclude<CardSort, "name">, string> = {
   recent: "Last message",
   created: "Created",
-  added: "Added to this app"
+  added: "Added"
 }
 
 /**

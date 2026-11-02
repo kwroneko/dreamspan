@@ -43,6 +43,7 @@ export interface RefRow {
   readonly chat_id: string | null
   readonly row_version: number
   readonly updated_at: number
+  readonly created_at?: number
   readonly archived_at: number | null
   readonly last_used_at: number | null
   /** The head of the followed ref; for an upstream ref, its latest import. */
@@ -75,6 +76,7 @@ export const toLibraryRef = (row: RefRow) =>
     updateAvailable: row.followed_head !== null && row.followed_head !== row.merge_base_revision_id,
     rowVersion: row.row_version,
     updatedAt: row.updated_at,
+    ...(row.created_at === undefined ? {} : { addedAt: row.created_at }),
     archivedAt: row.archived_at,
     lastUsedAt: row.last_used_at
   })
@@ -84,7 +86,7 @@ export const toLibraryRef = (row: RefRow) =>
 // to the upstream the same way a variant merges with its upstream.
 const refSelect = `
   SELECT r.id, r.entity_id, e.kind, r.ref_kind, r.label, r.subtitle, r.head_revision_id, r.follows_ref_id,
-    r.merge_base_revision_id, r.chat_id, r.row_version, r.updated_at, e.archived_at, r.last_used_at,
+    r.merge_base_revision_id, r.chat_id, r.row_version, r.created_at, r.updated_at, e.archived_at, r.last_used_at,
     f.label AS followed_label,
     CASE WHEN e.kind = 'card' THEN
       (SELECT json_extract(h.doc_json, '$.nickname') FROM entity_revisions h WHERE h.id = r.head_revision_id)

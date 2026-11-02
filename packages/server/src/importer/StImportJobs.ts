@@ -324,7 +324,7 @@ export class StImportJobs extends Context.Service<
               last: read.last,
               card: extra.card,
               orphan: extra.orphan,
-              createdAt: read.ctimeMs,
+              birthAt: read.birthtimeMs,
               modifiedAt: entry.modifiedMs
             })
             start = read.next

@@ -61,9 +61,11 @@ const sortBy = (forks: ReadonlyArray<Fork>, sort: ShellForksView["sort"], recent
         : a.name.localeCompare(b.name)
       : (sort === "created"
           ? b.createdAt - a.createdAt
-          : recent === "chat"
-            ? b.chatRecentAt - a.chatRecentAt
-            : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
+          : sort === "added"
+            ? (b.addedAt ?? b.createdAt) - (a.addedAt ?? a.createdAt)
+            : recent === "chat"
+              ? b.chatRecentAt - a.chatRecentAt
+              : b.recentAt - a.recentAt) || a.name.localeCompare(b.name)
   )
 
 /**
@@ -234,6 +236,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         title: string
         current_fork_id: string | null
         chat_created_at: number
+        chat_added_at: number
         shell_stamp: number
         s_format: number | null
         s_stamp: number | null
@@ -248,7 +251,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
         lists: string | null
       }>`
           SELECT f.id, f.chat_id, f.tip_slot_id, f.last_chatted_at, f.name, f.pinned_at, f.created_at, f.parent_fork_id,
-            c.title, c.current_fork_id, c.created_at AS chat_created_at,
+            c.title, c.current_fork_id, c.created_at AS chat_created_at, coalesce(c.added_at, c.created_at) AS chat_added_at,
             c.shell_stamp, s.format AS s_format, s.stamp AS s_stamp, s.user_stamp AS s_user_stamp, s.preview,
             s.messages, s.leaf, s.end_at, s.split_at, s.split_after,
             CASE WHEN s.fork_id IS NOT NULL
@@ -264,6 +267,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
             title: r.title,
             current_fork_id: r.current_fork_id,
             created_at: r.chat_created_at,
+            added_at: r.chat_added_at,
             shell_stamp: r.shell_stamp
           }
         ])
@@ -364,6 +368,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           original: record.parent_fork_id === null,
           split: s.split,
           createdAt: record.created_at,
+          addedAt: row.added_at,
           endAt: s.endAt,
           recentAt,
           chatRecentAt: 0,

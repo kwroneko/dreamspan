@@ -98,6 +98,12 @@
     },
     {
       "type": "index",
+      "name": "chats_st_group",
+      "tbl_name": "chats",
+      "sql": "CREATE INDEX chats_st_group ON chats(owner_user_id, st_group_id) WHERE st_group_id IS NOT NULL"
+    },
+    {
+      "type": "index",
       "name": "composer_images_draft",
       "tbl_name": "composer_images",
       "sql": "CREATE INDEX composer_images_draft ON composer_images(draft_id, status)"
@@ -850,7 +856,7 @@
       "type": "table",
       "name": "chats",
       "tbl_name": "chats",
-      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
+      "sql": "CREATE TABLE chats ( id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL CHECK (kind IN ('rp', 'workshop')), status TEXT NOT NULL CHECK (status IN ('pending', 'active', 'archived')), title TEXT NOT NULL DEFAULT '', title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user')), cover_media_id TEXT REFERENCES media_assets(id), active_leaf_slot_id TEXT REFERENCES slots(id) DEFERRABLE INITIALLY DEFERRED, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, last_message_at INTEGER, added_at INTEGER, st_group_id TEXT, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3) , deleted_at INTEGER, bin_item_id TEXT, current_leaf_slot_id TEXT, current_fork_id TEXT, state_seq INTEGER NOT NULL DEFAULT 0, -- Moved by triggers on every write the shell's fork summaries read (fork_summaries). shell_stamp INTEGER NOT NULL DEFAULT 0) STRICT"
     },
     {
       "type": "table",
@@ -904,7 +910,7 @@
       "type": "table",
       "name": "entity_refs",
       "tbl_name": "entity_refs",
-      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
+      "sql": "CREATE TABLE entity_refs ( id TEXT PRIMARY KEY, entity_id TEXT NOT NULL REFERENCES entities(id), ref_kind TEXT NOT NULL CHECK (ref_kind IN ('upstream', 'variant', 'chat_override')), head_revision_id TEXT NOT NULL REFERENCES entity_revisions(id), follows_ref_id TEXT REFERENCES entity_refs(id), merge_base_revision_id TEXT REFERENCES entity_revisions(id), label TEXT NOT NULL, subtitle TEXT NOT NULL DEFAULT '', chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED, source_path TEXT, source_hash TEXT, row_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER, st_added_basis INTEGER CHECK (st_added_basis BETWEEN 0 AND 3), CHECK ((ref_kind = 'chat_override') = (chat_id IS NOT NULL)), CHECK (ref_kind = 'upstream' OR follows_ref_id IS NOT NULL) ) STRICT"
     },
     {
       "type": "table",

@@ -112,11 +112,11 @@ export class ShellCard extends Schema.Class<ShellCard>("ShellCard")({
   /** The shell uses character_version as the subtitle, independent of a legacy ref subtitle. */
   card: CardUsage,
   /**
-   * Its Created: the entity's making. An ST import dates it by ST's `create_date` (else the
-   * file's ctime); a single-file upload or a card written here, by when it came in.
+   * Its Created: CCv3 author creation time when available on a full import, else ST arrival
+   * as the earliest evidence of its making. A manual upload or a new card uses now.
    */
   createdAt: Schema.Number,
-  /** Its Added: when it came into this app (its upstream ref's making), imported or written here. */
+  /** Its Added: inherited ST arrival for full-folder imports, otherwise when added here. */
   addedAt: Schema.Number,
   /** The user's favourite (`cards.favourites`; an import's ST `fav` until the user sets it here). */
   favourite: Schema.Boolean,
@@ -147,6 +147,8 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   /** Where it parts from the fork it was made from (`ForkSplit`); null for the original. */
   split: Schema.NullOr(ForkSplit),
   createdAt: Schema.Number,
+  /** Chat/group arrival in ST for a full import; otherwise the chat's creation time. */
+  addedAt: Schema.optionalKey(Schema.Number),
   /** Its last shown message's time; null without one. */
   endAt: Schema.NullOr(Schema.Number),
   /** Its last shown message (else its chat's start), or its making when it was branched from another. */
@@ -210,7 +212,7 @@ export const ShellSection = Schema.Literals([
   "all"
 ])
 export type ShellSection = typeof ShellSection.Type
-const ShellForkSort = Schema.Literals(["recent", "created", "name"])
+const ShellForkSort = Schema.Literals(["recent", "created", "added", "name"])
 export const ShellForksView = Schema.Struct({
   entity: Schema.NullOr(EntityId),
   chat: Schema.NullOr(ChatId),
