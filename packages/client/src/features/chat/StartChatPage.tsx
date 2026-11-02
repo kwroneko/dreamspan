@@ -1,5 +1,5 @@
 import { greetingPick } from "@rp/shared/greetings.ts"
-import { useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
+import { newerText, useUserDraft, UserDraftNotices, UserDraftUndo } from "../editor/userDraft.tsx"
 import { StripRow } from "./nextReplyStrip.tsx"
 import {
   PendingComposerControls,
@@ -56,7 +56,7 @@ import { ComposerBox, useCompactComposer } from "./Composer.tsx"
 import { composerKeyDown, composerSubmitHint } from "./composerKeys.ts"
 import { expandForDisplay } from "./macros.ts"
 import { useIsPanelTab } from "./panels.tsx"
-import { PendingChat, pendingOptions, pendingTitle } from "./pendingChat.ts"
+import { PendingChat, pendingOptions, pendingTitle, readLastTyped, writeLastTyped } from "./pendingChat.ts"
 import { chatColumns } from "./presentation.tsx"
 import { seedChat } from "./session.ts"
 import { preloadChatPage } from "./chatPageLoader.ts"
@@ -178,14 +178,30 @@ function Pending({
   useEffect(preloadChatPage, [])
   const sending = useRef<string | null>(null)
   const destination = useRef<string | null>(null)
+  // The newest copy of the text in this browser as the page opened, once read: on opening, the
+  // newer of it and the server's draft wins, so a reload right after typing keeps the last
+  // keystrokes even when the server hasn't had them yet (newerText).
+  const [local, setLocal] = useState<{ readonly at: number; readonly content: string } | null | undefined>(undefined)
+  const settled = useRef(false)
   useEffect(() => {
-    if (durable.ready && sending.current === null) {
-      typed.current = durable.text
-      setTextState(durable.text)
+    if (!durable.ready || sending.current !== null) return
+    if (!settled.current) {
+      if (local === undefined) return
+      settled.current = true
+      // The newer copy becomes the draft's text (and is saved); this effect then shows it.
+      if (local !== null && local.content !== durable.text && newerText(durable.savedAt, local.at) === "local") {
+        typed.current = local.content
+        durable.setText(local.content)
+        return
+      }
     }
-  }, [durable.ready, durable.text])
+    typed.current = durable.text
+    setTextState(durable.text)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- durable's setter is new each render
+  }, [durable.ready, durable.text, durable.savedAt, local])
   const copy = useRef<Copy | null>(null)
   const keep = (content: string) => {
+    writeLastTyped(userId, copyKey, destination.current === null ? content : "")
     if (destination.current === null) durable.setText(content)
     const previous = copy.current
     copy.current = null
@@ -217,10 +233,20 @@ function Pending({
     let current = true
     void copiesOf(userId, copyKey).then((copies) => {
       const newest = [...copies].sort((a, b) => b.at - a.at)[0]
-      if (!current || newest === undefined || copy.current !== null || typed.current !== "") return
-      copy.current = newest
-      typed.current = newest.content
-      setTextState(newest.content)
+      if (!current) return
+      // The keystroke-synchronous copy may be newer than the asynchronous ones.
+      const typedLast = readLastTyped(userId, copyKey)
+      const found =
+        typedLast !== null && (newest === undefined || typedLast.at > newest.at)
+          ? typedLast
+          : newest === undefined
+            ? null
+            : { at: newest.at, content: newest.content }
+      setLocal(found)
+      if (found === null || copy.current !== null || typed.current !== "") return
+      copy.current = newest ?? null
+      typed.current = found.content
+      setTextState(found.content)
     })
     return () => {
       current = false

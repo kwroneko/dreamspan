@@ -19,7 +19,7 @@ vi.mock("../src/features/editor/backup.ts", async (original) => ({
   },
   copiesOf: async () => [...memory.values()]
 }))
-const { UserDraftStore } = await import("../src/features/editor/userDraft.tsx")
+const { UserDraftStore, newerText } = await import("../src/features/editor/userDraft.tsx")
 const ownerId = "author" as UserId
 const key = new DraftKey({ targetKind: "user_field", targetId: "test", field: "Instruction" })
 const draft = (content: string, rowVersion = 1) =>
@@ -56,7 +56,7 @@ const deferred = <A>() => {
 const until = async (check: () => boolean) => {
   await vi.waitFor(() => expect(check()).toBe(true))
 }
-const harness = (initial = draft("original")) => {
+const harness = (initial = draft("original"), field = key.field) => {
   let current = initial
   const saves: Array<typeof UserDraftSave.Type> = []
   const handlers = {
@@ -88,7 +88,7 @@ const harness = (initial = draft("original")) => {
       return { ok: false, error: { tag: "ServerError", message: "Synthetic refusal", problems: [], reason: null } }
     }
   }
-  const store = new UserDraftStore(ownerId, key.targetId, key.field, run)
+  const store = new UserDraftStore(ownerId, key.targetId, field, run)
   return { store, handlers, saves }
 }
 beforeEach(() => memory.clear())
@@ -452,4 +452,34 @@ it("closing a conflicted editor sends the refused local copy with the base it wa
     vi.unstubAllGlobals()
     vi.stubGlobal("location", { protocol: "http:", host: "localhost" })
   }
+})
+
+it("newerText takes the text written last, the server's on a tie or with no browser copy", () => {
+  expect(newerText(5, 10)).toBe("local")
+  expect(newerText(null, 10)).toBe("local")
+  expect(newerText(10, 5)).toBe("server")
+  expect(newerText(10, 10)).toBe("server")
+  expect(newerText(10, null)).toBe("server")
+})
+
+// A reload right after typing in a chat not made yet: the server's draft is read first and
+// still has the text of a few keystrokes before; the page's own browser copy has the last ones.
+it.each([
+  ["a newer", 10, "First line\n\n\n\nSecond line"],
+  ["an older", 3, "First line\n\n\n\nSecond"]
+] as const)("a pending chat's draft opens with %s browser copy against the stale server draft", async (_, at, text) => {
+  const pending = makeCopy(
+    ownerId,
+    key.targetId,
+    "first message",
+    { kind: "pendingChat", payload: { entityId: "card", name: "Group", content: "First line\n\n\n\nSecond line" } },
+    at
+  )
+  await keepCopy(pending)
+  const { store, saves } = harness(draft("First line\n\n\n\nSecond", 5), "First message")
+  store.open()
+  await until(() => store.snapshot().ready)
+  expect(store.snapshot().text).toBe(text)
+  // The newer copy goes to the server; the older one isn't sent over the server's text.
+  expect(saves.map((save) => save.content)).toEqual(at > 5 ? ["First line\n\n\n\nSecond line"] : [])
 })
