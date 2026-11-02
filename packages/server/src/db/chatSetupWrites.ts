@@ -430,8 +430,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const draftForkId = fork.id
           // A turn added at the fork's tip is a new user action: the round already there, waiting
           // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
-          if (parentSlotId === fork.tip_slot_id)
-            yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1`
+          const endedRound =
+            parentSlotId === fork.tip_slot_id
+              ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
+              : []
           for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
           yield* graph.checkImages(userId, images ?? [])
           yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
@@ -530,7 +532,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now())
             return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
           }
-          return { _tag: "Posted" as const, result }
+          return {
+            _tag: "Posted" as const,
+            result,
+            ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
+          }
         }).pipe(transaction("SendOrQueue")),
 
       EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft, rewrite }) =>
@@ -575,6 +581,18 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             })
           }
           yield* bin.recoverQueued(userId, [row])
+          // A queued action owns the round entries immediately following it in this fork's
+          // queue. Withdrawing it cancels those replies, but keeps a later action's round.
+          if (row.round === 0) {
+            const [next] = yield* sql<{ seq: number | null }>`
+              SELECT min(seq) AS seq FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 0 AND seq > ${row.seq}`
+            yield* sql`DELETE FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 1 AND seq > ${row.seq}
+                AND seq < ${next?.seq ?? Number.MAX_SAFE_INTEGER}`
+          }
           yield* sql`DELETE FROM queued_messages WHERE id = ${queuedId}`
           return { queued: toQueued(row), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("WithdrawQueued")),
@@ -620,7 +638,12 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
                 SELECT q.id FROM queued_messages q JOIN slots s ON s.id = q.reply_slot_id
                   JOIN chats c ON c.id = s.chat_id
                 WHERE q.reply_slot_id = ${row.slot_id}
-                  AND ${selectedIn(sql, sql.literal("coalesce(q.fork_id, c.current_fork_id)"), "s")} = ${versionId})
+                  AND ${selectedIn(sql, sql.literal("coalesce(q.fork_id, c.current_fork_id)"), "s")} = ${versionId}
+                  -- A replacement send's round hasn't begun yet: its queued action must
+                  -- post first. Stopping the old reply doesn't stop that new round.
+                  AND NOT EXISTS (SELECT 1 FROM queued_messages action
+                    WHERE action.reply_slot_id = q.reply_slot_id AND action.fork_id IS q.fork_id
+                      AND action.round = 0 AND action.seq < q.seq))
                 RETURNING id`
               : []
           // A reply interrupted by the server going down leaves its queue to the next start.
@@ -643,7 +666,8 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const fork = yield* graph.ownedFork(userId, chatId, forkId)
           const held = yield* sql<{ id: string }>`
             SELECT id FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 AND held = 1`
-          if (held.length === 0 || fork.tip_slot_id === null) return { chatId, ...nothing }
+          if (held.length === 0 || fork.tip_slot_id === null)
+            return { chatId, ...nothing, queue: yield* chatQueue(sql, chatId) }
           // They wait at the tip as it is now (after an edit, a deletion or a new version there),
           // and post at once unless a reply is still being written there.
           yield* sql`UPDATE queued_messages SET held = 0, reply_slot_id = ${fork.tip_slot_id}, updated_at = ${Date.now()}
