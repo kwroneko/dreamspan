@@ -192,8 +192,10 @@ for (const width of [1440, 390])
         await expect(bar()).toHaveCount(0, { timeout: 30_000 })
 
         const notes = await openPanel(page, "Notes")
-        await notes.getByRole("region", { name: "This chat's notes" }).getByRole("button", { name: "Add note" }).click()
-        await page.getByRole("menuitem", { name: "New note" }).click()
+        await notes
+          .getByRole("region", { name: "This chat's notes" })
+          .getByRole("button", { name: "New note", exact: true })
+          .click()
         const note = () => page.getByRole("tabpanel", { name: "Notes" }).getByRole("region", { name: "Note Note" })
         await expect(note().getByRole("textbox", { name: /^Text of/ })).toBeVisible()
         await note()

@@ -802,12 +802,14 @@ export function PromptDocument({
   const variant = column ? "ghost" : "secondary"
   const controls = (
     // One toolbar row: the save cluster, New prompt and the definitions block, then expand and options.
+    // In the side panel's column the row is too narrow for all of them, and the save cluster must
+    // share Expand all's row (DESIGN §10.1 [D] One row), so there the add buttons come last and wrap.
     <ExpandCollapseAll
       compact={column}
       start={
         <div className="flex flex-wrap items-center gap-1">
           {saveControls}
-          {addButtons}
+          {!column && addButtons}
         </div>
       }
       anyOpen={anyOpen}
@@ -837,6 +839,7 @@ export function PromptDocument({
           {options.all ? "Hide all options" : "Show all options"}
         </Button>
       </Tooltip>
+      {column && addButtons}
     </ExpandCollapseAll>
   )
   const list = (
