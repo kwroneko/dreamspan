@@ -1,3 +1,5 @@
+import { Tooltip } from "../../ui/Tooltip.tsx"
+import { tokenizerText } from "../editor/tokenCounts.ts"
 // The request inspector (DESIGN §7.4): the context one reply was generated from, as it was
 // sent. Each message with its role, where its text came from, its tokens and the cache
 // breakpoints between them; then the model, the samplers and what the provider reported.
@@ -29,6 +31,11 @@ import { useTitle } from "../shell.tsx"
 /** How much of a collapsed message shows. */
 const PREVIEW = 200
 
+const inputText = (request: InspectorUsage) => {
+  const c = request.counts
+  const total = c.inputUncached === null ? null : c.inputUncached + (c.cacheRead ?? 0) + (c.cacheWrite ?? 0)
+  return `${count(total)}${request.estimatedInput == null ? "" : ` (~${count(request.estimatedInput)})`}`
+}
 const count = (n: number | null) => (n === null ? "unknown" : n.toLocaleString())
 
 const activationText = (activation: SourceActivation): string => {
@@ -485,7 +492,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
                 "Attempt",
                 `${i + 1}: ${requestStatusText(request.status)}${request.usageSource === "estimated" ? " (estimated)" : ""}`
               ],
-              ["Input", count(request.counts.inputUncached)],
+              ["Input", inputText(request)],
               ["Cache read", count(request.counts.cacheRead)],
               ["Cache write", count(request.counts.cacheWrite)],
               ["Output", count(request.counts.output)],
@@ -506,7 +513,11 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
         <thead className="text-muted">
           <tr>
             <th className="py-1 pr-3 font-medium">Attempt</th>
-            <th className="py-1 pr-3 font-medium">Input</th>
+            <th className="py-1 pr-3 font-medium">
+              <Tooltip label="Total input, including cached tokens. The local estimate before sending is in parentheses.">
+                <span>Input</span>
+              </Tooltip>
+            </th>
             <th className="py-1 pr-3 font-medium">Cache read</th>
             <th className="py-1 pr-3 font-medium">Cache write</th>
             <th className="py-1 pr-3 font-medium">Output</th>
@@ -523,7 +534,7 @@ function Usage({ requests }: { requests: ReadonlyArray<InspectorUsage> }) {
                 {i + 1}: {requestStatusText(request.status)}
                 {request.usageSource === "estimated" && " (estimated)"}
               </td>
-              <td className="py-1 pr-3">{count(request.counts.inputUncached)}</td>
+              <td className="py-1 pr-3">{inputText(request)}</td>
               <td className="py-1 pr-3">{count(request.counts.cacheRead)}</td>
               <td className="py-1 pr-3">{count(request.counts.cacheWrite)}</td>
               <td className="py-1 pr-3">{count(request.counts.output)}</td>
@@ -624,7 +635,7 @@ function Inspector({ run }: { run: RunContext }) {
       <Card>
         <CardHeader
           title="Request"
-          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}.`}
+          description={`Built ${new Date(run.builtAt).toLocaleString()}: ${counted(run.messages.length, "message")}, about ${counted(tokens, "token")}. ${run.tokenizer ? tokenizerText(run.tokenizer) : ""}`}
         />
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
           <dt className="text-muted">Model</dt>

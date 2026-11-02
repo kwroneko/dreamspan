@@ -19,6 +19,13 @@ const DELAY_MS = 400
 const GATHER_MS = 20
 const CACHE_ENTRIES = 2_000
 
+let calibrationVersion = 0
+export const refreshTokenCounts = () => {
+  cache.clear()
+  tokenizers.clear()
+  calibrationVersion++
+  changed()
+}
 const cache = new Map<string, number>()
 const tokenizers = new Map<string, TokenizerInfo>()
 const inFlight = new Set<string>()
@@ -47,6 +54,7 @@ const estimate = (text: string) => Math.ceil(text.length / 4)
 
 async function send(call: Caller) {
   timer = null
+  const epoch = calibrationVersion
   const batch = wanted
   wanted = []
   for (let at = 0; at < batch.length; at += COUNT_TOKENS_TEXTS) {
@@ -54,9 +62,12 @@ async function send(call: Caller) {
     const result = await call((client) => client("CountTokens", { texts: part.map((w) => w.text) }))
     for (const [i, w] of part.entries()) {
       inFlight.delete(key(w.model, w.text))
-      if (result.ok) remember(key(w.model, w.text), result.value.counts[i] ?? 0)
+      if (result.ok && epoch === calibrationVersion) remember(key(w.model, w.text), result.value.counts[i] ?? 0)
     }
-    if (result.ok && part[0]) tokenizers.set(part[0].model, result.value.tokenizer)
+    if (result.ok && epoch === calibrationVersion && part[0]) tokenizers.set(part[0].model, result.value.tokenizer)
+  }
+  if (epoch !== calibrationVersion) {
+    for (const w of batch) requestCounts(call, w.model, [w.text])
   }
   changed()
 }
@@ -126,7 +137,7 @@ export function useTokenCounts(texts: ReadonlyArray<string>): TokenCounts {
   useEffect(() => {
     requestCounts(call, model, rested)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rested texts, by value
-  }, [call, model, restedJoined])
+  }, [call, model, restedJoined, calibrationVersion])
   const counted = rested.map((text) => (text === "" ? 0 : (cache.get(key(model, text)) ?? null)))
   // Keep the last counts on screen while new ones are on their way.
   const counts = counted.map((count, i) => count ?? lastShown.get(id)?.[i] ?? null)

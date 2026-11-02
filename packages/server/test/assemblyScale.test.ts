@@ -1,3 +1,5 @@
+import { countTokens, type LocalEncoding } from "../src/importer/tokenizer.ts"
+import type { SlotId, VersionId } from "@rp/shared/chat.ts"
 // Context assembly on long chats (ARCHITECTURE.md §15): the next request over 1,000 and then
 // 4,000 more synthetic messages, all within the model's context, so every one of them is
 // read, scripted, composed and sent. Linear work grows about fourfold; a step that is
@@ -76,9 +78,53 @@ const measure = Effect.gen(function* () {
   // Every message is in the request: nothing was cut by the budget.
   const next = yield* reader.CacheWarmth({ userId, chatId })
   assert.isAtMost(next.historyStart?.depth ?? 0, 1)
-  console.log(
-    `next context: 1,000 messages ${small.toFixed(0)} ms, 5,000 messages ${large.toFixed(0)} ms, ratio ${(large / small).toFixed(1)}`
+  process.stdout.write(
+    `next context display: 1,000 messages ${small.toFixed(0)} ms, 5,000 messages ${large.toFixed(0)} ms, ratio ${(large / small).toFixed(1)}\n`
   )
+  // Measure the unchanged budget assembly itself, then the minimum extra work of replacing
+  // its character estimate with tokenization. Budgeting fragments repeatedly would cost more.
+  const rawTimes: Array<number> = []
+  let texts: ReadonlyArray<string> = []
+  for (let i = 0; i < 3; i++) {
+    const start = performance.now()
+    const result = yield* reader.AssembleContext({
+      userId,
+      chatId,
+      slotId: `${chatId}-s4999` as SlotId,
+      versionId: `${chatId}-v4999` as VersionId,
+      now: Date.now(),
+      timeZone: "UTC",
+      frozen: null
+    })
+    rawTimes.push(performance.now() - start)
+    texts = (
+      JSON.parse(result.snapshot) as { request: { messages: Array<{ content: string; name?: string }> } }
+    ).request.messages.map((m) => m.content + (m.name ?? ""))
+  }
+  const raw = median(rawTimes)
+  process.stdout.write(`budget assembly: 5,000 messages ${raw.toFixed(0)} ms\n`)
+  for (const encoding of [
+    "o200k_base",
+    "llama3",
+    "mistral-v3",
+    "qwen2",
+    "qwen3",
+    "deepseek-v3",
+    "deepseek-v4",
+    "gemma2"
+  ] satisfies Array<LocalEncoding>) {
+    yield* Effect.promise(() => countTokens(encoding, ["warm"]))
+    const times: Array<number> = []
+    for (let i = 0; i < 3; i++) {
+      const start = performance.now()
+      yield* Effect.promise(() => countTokens(encoding, texts))
+      times.push(performance.now() - start)
+    }
+    const overhead = median(times)
+    process.stdout.write(
+      `${encoding}: extra ${overhead.toFixed(0)} ms, minimum budget overhead ${((100 * overhead) / raw).toFixed(1)}%\n`
+    )
+  }
   assert.isBelow(large / small, 10)
 }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 

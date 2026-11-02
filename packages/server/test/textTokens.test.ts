@@ -68,6 +68,33 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
+  it.live(
+    "open models count locally through the bundled format worker on routers and local servers",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* mock((_request, res) => res.writeHead(500).end())
+        const api = yield* client()
+        for (const [kind, model, expected] of [
+          ["openrouter", "meta-llama/llama-3.1-8b-instruct", 3],
+          ["openai-chat", "Qwen/Qwen2.5-7B-Instruct", 3],
+          ["openrouter", "qwen/qwen3-8b", 3],
+          ["openai-chat", "mistralai/Mistral-7B-Instruct-v0.3", 3],
+          ["openrouter", "google/gemma-2-2b-it", 3],
+          ["deepseek", "deepseek-v4-pro", 3],
+          ["deepseek", "deepseek-flash", 3],
+          ["openrouter", "deepseek/deepseek-r1", 3]
+        ] as const) {
+          yield* useModel(api, kind, provider.url, model)
+          const counted = yield* api.CountTokens({ texts: ["Hello world!", ""] })
+          assert.deepStrictEqual(counted.counts, [expected, 0], model)
+          assert.equal(counted.tokenizer.id, "open-model-encodings")
+          assert.isTrue(counted.tokenizer.exact)
+        }
+        assert.lengthOf(provider.requests(), 0)
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig()))),
+    60_000
+  )
+
   it.live("Claude is counted here unless its connection opts in: no text goes to Anthropic by default", () =>
     Effect.gen(function* () {
       const provider = yield* mock(anthropicCount)

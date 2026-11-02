@@ -1,3 +1,5 @@
+import { Formats } from "../importer/Formats.ts"
+import { payloadText } from "./textPayload.ts"
 import { documentedCachePolicy } from "./cachePolicy.ts"
 import { hasImageBlocks, limitImages } from "./images.ts"
 import { imageSample, payloadImages } from "./imageSamples.ts"
@@ -45,7 +47,7 @@ import {
 import type { Cost, LlmRequestId, RequestPurpose, TokenCounts } from "@rp/shared/usage.ts"
 import { createHash, timingSafeEqual } from "node:crypto"
 import { ServerError, StaleWrite } from "@rp/shared/errors.ts"
-import { Cause, Context, Effect, Exit, Layer, Queue, Semaphore, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Option, Queue, Semaphore, Stream } from "effect"
 import { Reader, Writer } from "../db/Database.ts"
 import { Network, type ProxyOverride, type RequestNetwork, RedirectRefused } from "../net/Network.ts"
 import { describeRoute, proxyUrlProblem } from "../net/route.ts"
@@ -56,7 +58,7 @@ import { statedContextLimit } from "./contextLimits.ts"
 import { classify, parseRetryAfter, ProviderError, providerError, RETRYABLE } from "./errors.ts"
 import type { ModelListError } from "./modelLists.ts"
 import { type ProviderKindEntry, ProviderRegistry, type RequestTarget } from "./registry.ts"
-import type { TextCountRequest } from "./textCounters.ts"
+import { TokenCountError, type TextCountRequest } from "./textCounters.ts"
 import { countingModelKey } from "./countingModel.ts"
 import { type Capture, captureUsageHeaders, costOf, emptyCapture, finalCounts } from "./usage.ts"
 
@@ -467,6 +469,7 @@ export const layer = (options: ProvidersOptions = {}) =>
   Layer.effect(
     Providers,
     Effect.gen(function* () {
+      const formats = yield* Effect.serviceOption(Formats)
       const reader = yield* Reader
       const writer = yield* Writer
       const secrets = yield* Secrets
@@ -898,6 +901,7 @@ export const layer = (options: ProvidersOptions = {}) =>
           gate: undefined as ReturnType<typeof stagger.join> | undefined,
           release: undefined as "first-chunk" | "complete" | "timeout" | "leader-ended" | undefined,
           /** The images the final payload sent, for image token calibration. */
+          textPayload: null as ReturnType<typeof payloadText> | null,
           sentImages: null as ReturnType<typeof payloadImages> | null
         }
         /** What the request produced so far, for a close after an interruption or a defect. */
@@ -921,6 +925,48 @@ export const layer = (options: ProvidersOptions = {}) =>
           Effect.gen(function* () {
             const { counts, source } = finalCounts(message, state.capture, context, request.options?.replyTool)
             if (!state.opened) return { counts, cost: null }
+            const tokenFormats = Option.getOrNull(formats)
+            const baseline = state.textPayload
+            const localCounter = registry.textCounters
+              .list()
+              .toReversed()
+              .find(
+                (counter) =>
+                  !counter.remote &&
+                  counter.appliesTo({
+                    kind: prepared.kind.id,
+                    api: prepared.api,
+                    model: model.key,
+                    baseUrl: prepared.baseUrl
+                  })
+              )
+            const textEstimate =
+              baseline && tokenFormats
+                ? yield* Effect.gen(function* () {
+                    const encode: TextCountRequest["encode"] = (encoding, texts) =>
+                      tokenFormats
+                        .countTokens(encoding, texts)
+                        .pipe(Effect.mapError(() => new TokenCountError({ message: "The local tokenizer failed." })))
+                    const counts = yield* localCounter
+                      ? localCounter.count({
+                          model: model.key,
+                          texts: baseline.texts,
+                          encode,
+                          baseUrl: prepared.baseUrl,
+                          apiKey: null,
+                          headers: {},
+                          fetch: (() => {
+                            throw new Error("Calibration cannot contact providers")
+                          }) as typeof globalThis.fetch,
+                          scrub: (s) => s
+                        })
+                      : encode("o200k_base", baseline.texts)
+                    return {
+                      tokens: counts.reduce((n, c) => n + c, baseline.framing),
+                      tokenizer: localCounter?.id ?? "approximate"
+                    }
+                  }).pipe(Effect.orElseSucceed(() => undefined))
+                : undefined
             // A request with images calibrates its model's image cost (ARCHITECTURE §6).
             const sample =
               error === null && source === "reported" && state.sentImages
@@ -972,6 +1018,7 @@ export const layer = (options: ProvidersOptions = {}) =>
                         }
                       : null,
                   counts,
+                  ...(textEstimate ? { textEstimate } : {}),
                   usageSource: source,
                   rawUsage: state.capture.rawUsage,
                   reportedCost: state.capture.reportedCost,
@@ -988,6 +1035,7 @@ export const layer = (options: ProvidersOptions = {}) =>
         const open = (payload: Readonly<Record<string, unknown>>) =>
           Effect.gen(function* () {
             const hasImages = hasImageBlocks(payload)
+            state.textPayload = hasImages ? null : payloadText(payload)
             // Generations open their row before the payload exists; the final payload still says what was sent.
             if (hasImages) state.sentImages = payloadImages(payload)
             if (state.opened) return

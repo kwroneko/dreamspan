@@ -92,7 +92,8 @@ describe("the request inspector", () => {
         run.messages.slice(4, 6).map((m) => m.sources[0]!.slotId),
         [greeting!.slotId, sent!.slotId]
       )
-      assert.strictEqual(run.messages[5]!.tokens, Math.ceil("The road flooded.".length / 4) + 3)
+      // o200k_base counts four content tokens, plus three for message framing.
+      assert.strictEqual(run.messages[5]!.tokens, 7)
       assert.deepStrictEqual(run.model, {
         connection: "Mock",
         model: "mock-model",

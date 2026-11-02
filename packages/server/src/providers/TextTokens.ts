@@ -1,3 +1,4 @@
+import { calibrateText } from "./textCalibration.ts"
 // Token counts for what the editors show (ARCHITECTURE §6 "Text tokens"): with the tokenizer of
 // the model the user's chats generate with (their generation default; a chat binds no other),
 // through the registered text counters, else o200k_base as an approximation, saying which. A
@@ -94,10 +95,19 @@ export class TextTokens extends Context.Service<
             if (Option.isNone(chosen))
               return yield* approximate(texts, "No model is chosen for chats, so there's no model's tokenizer to use.")
             const { connectionId, modelKey, via } = chosen.value
+            const calibrationFor = (tokenizer: string) =>
+              reader
+                .GetTextCalibration({ userId, connectionId, modelKey, tokenizer })
+                .pipe(Effect.orElseSucceed(() => null))
+            const fallback = (note: string) =>
+              Effect.gen(function* () {
+                const raw = yield* approximate(texts, note)
+                return calibrateText(raw, yield* calibrationFor(raw.tokenizer.id))
+              })
             // Counts by each counting connection and by a local encoding are cached apart.
             const model = `${userId}\n${connectionId}\n${modelKey}\n${via ?? "local"}`
             if ((resting.get(model) ?? 0) > Date.now())
-              return yield* approximate(texts, `Counting with ${modelKey}'s tokenizer failed a moment ago.`)
+              return yield* fallback(`Counting with ${modelKey}'s tokenizer failed a moment ago.`)
             const keys = texts.map((text) => `${model}\n${hash(text)}`)
             const missing = [...new Set(texts.filter((_, i) => !cache.has(keys[i]!)))]
             const counted = yield* providers
@@ -116,13 +126,12 @@ export class TextTokens extends Context.Service<
               )
             if (!counted.ok) {
               resting.set(model, Date.now() + RETRY_MS)
-              return yield* approximate(texts, `Counting with ${modelKey}'s tokenizer failed: ${counted.message}`)
+              return yield* fallback(`Counting with ${modelKey}'s tokenizer failed: ${counted.message}`)
             }
             if (counted.result === null && missing.length > 0)
-              return yield* approximate(texts, `There's no tokenizer for ${modelKey} here.`)
+              return yield* fallback(`There's no tokenizer for ${modelKey} here.`)
             if (counted.result !== null && "optIn" in counted.result)
-              return yield* approximate(
-                texts,
+              return yield* fallback(
                 `${modelKey}'s own count (${counted.result.optIn}) is off for this connection, since it sends the text to a provider; the connection's Token counts setting can choose one.`
               )
             if (counted.result) {
@@ -130,14 +139,18 @@ export class TextTokens extends Context.Service<
               lastCounter.set(model, { id: counted.result.id, label: counted.result.label })
             }
             const counter = lastCounter.get(model)
-            return {
-              counts: keys.map((key) => cache.get(key) ?? 0),
-              tokenizer: new TokenizerInfo({
-                id: counter?.id ?? "model",
-                label: counter?.label ?? `${modelKey}'s own tokenizer`,
-                exact: true
-              })
-            }
+            const calibration = via === null ? yield* calibrationFor(counter?.id ?? "model") : null
+            return calibrateText(
+              {
+                counts: keys.map((key) => cache.get(key) ?? 0),
+                tokenizer: new TokenizerInfo({
+                  id: counter?.id ?? "model",
+                  label: counter?.label ?? `${modelKey}'s own tokenizer`,
+                  exact: true
+                })
+              },
+              via !== null ? null : calibration
+            )
           })
       })
     })

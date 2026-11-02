@@ -1,3 +1,4 @@
+import { builtinTextCounters, type TextTokenCounter } from "../providers/textCounters.ts"
 import { builtinSourceDescriptors, type SourceDescriptor } from "./sourceDescriptors.ts"
 import {
   defaultLeafPlanner,
@@ -55,6 +56,7 @@ export interface Assembler {
   readonly macros: MacroRegistry
   readonly projections: ProjectionRegistry
   /** What an image costs per provider and model (ARCHITECTURE §15, image tokens). */
+  readonly textCounters: Registry<TextTokenCounter>
   readonly imageTokens: Registry<ImageTokenRule>
   /** Where regex scripts come from, in the order they run (global, preset, character). */
   readonly scriptSources: Registry<ScriptSource>
@@ -118,6 +120,8 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
   yield* summaryStyles.register(defaultSummaryStyle)
   yield* transforms.register(makeSummaryRequestTransform(summaryInstructions))
   const projections = makeProjectionRegistry()
+  const textCounters = makeRegistry<TextTokenCounter>()
+  for (const counter of builtinTextCounters.filter((c) => !c.remote)) yield* textCounters.register(counter)
   const imageTokens = makeRegistry<ImageTokenRule>()
   for (const rule of builtinImageTokenRules) yield* imageTokens.register(rule)
   const scriptSources = makeRegistry<ScriptSource>()
@@ -138,6 +142,7 @@ export const makeAssembler: Effect.Effect<Assembler, never, Scope.Scope> = Effec
     macros,
     projections,
     imageTokens,
+    textCounters,
     scriptSources,
     rewrites,
     projectionOptions: Effect.suspend(() =>

@@ -3,7 +3,7 @@
 import { TokenizerInfo } from "@rp/shared/generation.ts"
 import { describe, expect, it, vi } from "vitest"
 import type { Caller } from "../src/features/editor/caller.ts"
-import { requestCounts, tokenizerText, tokensText } from "../src/features/editor/tokenCounts.ts"
+import { refreshTokenCounts, requestCounts, tokenizerText, tokensText } from "../src/features/editor/tokenCounts.ts"
 
 // The hook's connections to the app, which a test without a page has none of.
 vi.mock("../src/features/pickers/defaults.ts", () => ({ defaultsAtom: null }))
@@ -41,6 +41,18 @@ describe("token counts", () => {
     requestCounts(call, "m2", ["one two"])
     await vi.advanceTimersByTimeAsync(50)
     expect(sent).toEqual([["one two", "three"], ["one two"]])
+    vi.useRealTimers()
+  })
+
+  it("refreshes cached fields after reported usage changes the model's calibration", async () => {
+    vi.useFakeTimers()
+    const { call, sent } = fakeCaller()
+    requestCounts(call, "calibration-model", ["one two"])
+    await vi.advanceTimersByTimeAsync(50)
+    refreshTokenCounts()
+    requestCounts(call, "calibration-model", ["one two"])
+    await vi.advanceTimersByTimeAsync(50)
+    expect(sent).toEqual([["one two"], ["one two"]])
     vi.useRealTimers()
   })
 

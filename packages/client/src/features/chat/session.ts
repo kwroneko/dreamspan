@@ -1,3 +1,4 @@
+import { refreshTokenCounts } from "../editor/tokenCounts.ts"
 import type { ForkNoteSelection } from "@rp/shared/chatApi.ts"
 // One open chat (CLIENT-FRAMEWORK §5): the loaded window of its path, kept current by its
 // subscription, and the text of versions still generating. The server is the source of
@@ -965,6 +966,7 @@ export class ChatSession {
         return
       }
       case "Version":
+        if (event.version.writer === "model" && event.version.status === "complete") refreshTokenCounts()
         // Another fork's flags or copy aren't this one's (spec/FORK-INDEPENDENCE-DELTA.md §2.2).
         if (event.forkId !== undefined && this.view.forkId !== null && event.forkId !== this.view.forkId) return
       // falls through

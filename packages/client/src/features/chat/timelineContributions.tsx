@@ -1,3 +1,4 @@
+import { tokenizerText } from "../editor/tokenCounts.ts"
 import { useSyncExternalStore, type ReactNode } from "react"
 import { lcmCursor, positionOf } from "./position.ts"
 import type { PathEntry, SlotId } from "@rp/shared/chat.ts"
@@ -82,6 +83,13 @@ export const registerTimelineTransforms = () => [
             {withOrigin(budget.target, targetOrigin(budget.origins))}, reserves{" "}
             {withOrigin(budget.responseReserve, reserveOrigin(budget.origins))} for the reply, and the card, prompts and
             other fixed content take ~{budget.nonHistoryTokens.toLocaleString()}.
+            {budget.countedInput !== undefined && (
+              <>
+                {" "}
+                The next request is about {budget.countedInput.toLocaleString()} tokens.{" "}
+                {budget.tokenizer ? tokenizerText(budget.tokenizer) : ""} The history limit is approximate.
+              </>
+            )}
           </Alert>
         )
       })

@@ -48,7 +48,17 @@ describe("review reproductions", () => {
       assert.isFalse(JSON.stringify(run).includes(key), "GetRunContext must not serialize the key")
       assert.deepStrictEqual(
         Object.keys(run.requests[0]!).sort(),
-        ["id", "status", "startedAt", "firstTokenAt", "endedAt", "counts", "usageSource", "cost"].sort()
+        [
+          "id",
+          "estimatedInput",
+          "status",
+          "startedAt",
+          "firstTokenAt",
+          "endedAt",
+          "counts",
+          "usageSource",
+          "cost"
+        ].sort()
       )
       const ledger = (yield* api.ListLlmRequests({ limit: 10, before: null }))[0]!
       assert.isFalse(JSON.stringify(ledger).includes(key), "persisted provider metadata must be scrubbed")

@@ -79,7 +79,7 @@ const buildBundles = async (bundleDir: string) => {
   // Bundled native dependencies stay external. These throwaway bundles are outside the
   // repository's node_modules ancestry; production bundles live inside it.
   mkdirSync(join(bundleDir, "node_modules"))
-  for (const name of ["sharp", "js-tiktoken"])
+  for (const name of ["sharp", "tiktoken", "llama3-tokenizer-js"])
     symlinkSync(
       fileURLToPath(new URL(`../../../../node_modules/${name}`, import.meta.url)),
       join(bundleDir, `node_modules/${name}`)

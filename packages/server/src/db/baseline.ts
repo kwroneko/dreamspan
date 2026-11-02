@@ -743,6 +743,8 @@ export const baseline: ReadonlyArray<string> = [
     ended_at INTEGER,
     -- Normalized counts (PROVIDERS §9.2). cache_write_long is the subset of cache_write
     -- written with the long TTL; reasoning is the subset of output.
+    estimated_input INTEGER,
+    input_tokenizer TEXT,
     input_uncached INTEGER,
     cache_read INTEGER,
     cache_write INTEGER,
@@ -762,6 +764,7 @@ export const baseline: ReadonlyArray<string> = [
     CHECK ((status = 'running') = (ended_at IS NULL)),
     CHECK ((cost IS NULL) = (cost_currency IS NULL) AND (cost IS NULL) = (cost_formula IS NULL))
   ) STRICT`,
+  `CREATE INDEX llm_requests_text_calibration ON llm_requests(owner_user_id, connection_id, model_key, input_tokenizer, started_at DESC, id DESC) WHERE estimated_input > 0 AND status='complete' AND usage_source='reported' AND input_uncached IS NOT NULL`,
   `CREATE INDEX llm_requests_owner ON llm_requests(owner_user_id, started_at)`,
   // Image token figures (ARCHITECTURE §6): a provider's exact count of one image for one model,
   // by content hash, so an image is counted once; and ledger samples that calibrate models
@@ -814,6 +817,7 @@ export const baseline: ReadonlyArray<string> = [
     WHEN OLD.status <> 'running' AND (
       NEW.status IS NOT OLD.status OR NEW.ended_at IS NOT OLD.ended_at OR NEW.first_token_at IS NOT OLD.first_token_at
       OR NEW.response_model IS NOT OLD.response_model OR NEW.upstream IS NOT OLD.upstream
+      OR NEW.estimated_input IS NOT OLD.estimated_input OR NEW.input_tokenizer IS NOT OLD.input_tokenizer
       OR NEW.input_uncached IS NOT OLD.input_uncached OR NEW.cache_read IS NOT OLD.cache_read
       OR NEW.cache_write IS NOT OLD.cache_write OR NEW.cache_write_long IS NOT OLD.cache_write_long
       OR NEW.output IS NOT OLD.output OR NEW.reasoning IS NOT OLD.reasoning OR NEW.usage_source IS NOT OLD.usage_source
