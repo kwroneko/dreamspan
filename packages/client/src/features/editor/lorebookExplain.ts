@@ -15,6 +15,9 @@ export const EXPLAIN = {
   probability: "Trigger %: the chance it's sent when it matches, while “Use the trigger %” is on.",
   use_probability: "Off, a match always sends it, whatever its trigger %.",
   keys: "Primary keys: any one of them appearing in the scanned messages triggers the entry. One per line; /pattern/flags is a regular expression.",
+  keys_line:
+    "Its primary keys: any one appearing in the chat sends it. Click to edit them, one per line; /pattern/flags is a regular expression.",
+  settings: "Its settings: strategy, position, secondary keys, matching, group, recursion and timing.",
   selective: "Secondary keys: a primary key match also has to pass this filter.",
   selective_logic:
     "How the secondary keys filter a match: AND ANY (one of them too), AND ALL (all of them too), NOT ANY (none of them), NOT ALL (not all of them).",

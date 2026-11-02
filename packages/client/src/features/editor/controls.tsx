@@ -131,6 +131,7 @@ export function TextField({
   mono = false,
   readOnly = false,
   labelHidden = false,
+  fit = false,
   source,
   hint,
   aside,
@@ -149,6 +150,8 @@ export function TextField({
   readOnly?: boolean
   /** The label is for assistive technology only (a prompt's text, named in its block's header). */
   labelHidden?: boolean
+  /** A textarea as tall as its text, from `rows` up, instead of `rows` high: text read in a list. */
+  fit?: boolean
   /** A snippet's own text: its editor offers no sending to a snippet. */
   source?: "snippet" | undefined
   /** Focused as it mounts: a prompt just added, ready to type. */
@@ -251,7 +254,7 @@ export function TextField({
             tools={tools}
             status={status}
             rows={rows}
-            className={`resize-y ${props.className}`}
+            className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${props.className}`}
             onChange={(event) => store.setText(path, event.currentTarget.value)}
           />
         )}

@@ -168,17 +168,29 @@ for (const [width, scheme] of [
     await expect(editor.getByRole("button", { name: /^Keys of Lamp: lamp, lantern/ })).toBeVisible()
     await page.screenshot({ path: join(shots, `panel-${width}-${scheme}.png`), fullPage: false })
 
-    // Expand all: text and keys, the settings folded a level down.
+    // Expand all (owner, 2026-11-02: open entries are for skimming): each shows its title, its
+    // keys on a quiet line under it and its text, and none of its settings.
     await editor.getByRole("button", { name: "Expand all", exact: true }).click()
     await expect(editor.getByRole("textbox", { name: "Entry content" })).toHaveCount(3)
     await expect(editor.getByRole("textbox", { name: "Primary keys" })).toHaveCount(3)
-    await expect(editor.getByRole("switch", { name: "Use secondary keys" })).toHaveCount(0)
-    await editor
-      .locator("summary")
-      .filter({ hasText: /^Settings/ })
-      .first()
-      .click()
-    await expect(editor.getByRole("switch", { name: "Use secondary keys" }).first()).toBeVisible()
+    const lamp = editor.getByRole("group", { name: /^Lorebook entry/ }).filter({
+      has: page.getByRole("textbox", { name: "Title of Lamp" })
+    })
+    await expect(lamp.getByText("lamp, lantern", { exact: true })).toBeVisible()
+    await expect(lamp.getByRole("textbox", { name: "Entry content" })).toBeVisible()
+    await expect(editor.getByRole("region", { name: "Entry settings" })).toHaveCount(0)
+    for (const control of ["Use secondary keys", "Case sensitive", "Group", "Strategy"])
+      await expect(editor.getByLabel(control, { exact: true })).toHaveCount(0)
+    await expect(editor.getByText(/One per line|regular expression/)).toHaveCount(0)
+    // The keys line is edited in place: clicked, it's the box, one key per line.
+    await lamp.getByText("lamp, lantern", { exact: true }).click()
+    await expect(lamp.getByRole("textbox", { name: "Primary keys" })).toBeFocused()
+    await expect(lamp.getByRole("textbox", { name: "Primary keys" })).toHaveValue("lamp\nlantern")
+    await page.keyboard.press("Escape")
+    await expect(lamp.getByText("lamp, lantern", { exact: true })).toBeVisible()
+    await lamp.getByRole("button", { name: "Settings of Lamp" }).click()
+    await expect(lamp.getByRole("switch", { name: "Use secondary keys" })).toBeVisible()
+    await expect(editor.getByRole("region", { name: "Entry settings" })).toHaveCount(1)
     await editor.getByRole("button", { name: "Collapse all", exact: true }).click()
     await expect(editor.getByRole("textbox", { name: "Entry content" })).toHaveCount(0)
 

@@ -31,7 +31,7 @@ export function Block({
 /** The header's row: what leads (a handle, a switch), the name, then the actions at the end. */
 export function BlockHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <header className={`flex min-w-0 items-start gap-0.5 py-0.5 ps-1 ${rowActionInsetClass} ${className}`}>
+    <header className={`flex min-w-0 items-start gap-0.5 py-1 ps-1 ${rowActionInsetClass} ${className}`}>
       {children}
     </header>
   )

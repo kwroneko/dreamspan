@@ -121,10 +121,10 @@ for (const theme of ["light", "dark"] as const)
       await page.emulateMedia({ colorScheme: theme })
       await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
       await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
-      await upload(page, `Tides ${width}`)
+      await upload(page, `Tides ${width} ${theme}`)
       const chatId = await admin((api) =>
         Effect.gen(function* () {
-          const ref = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === `Tides ${width}`)!
+          const ref = (yield* api.ListLibrary({ kind: "lorebook" })).find((r) => r.label === `Tides ${width} ${theme}`)!
           const chat = yield* api.CreateChat({ title: `Lore ${width}` })
           yield* api.ChangeCast({
             chatId: chat.id,
@@ -138,9 +138,9 @@ for (const theme of ["light", "dark"] as const)
       const panel = await openPanel(page, "Lorebooks")
       await panel
         .getByRole("list", { name: "Lorebooks in this chat" })
-        .getByRole("button", { name: new RegExp(`^Tides ${width}`) })
+        .getByRole("button", { name: new RegExp(`^Tides ${width} ${theme}`) })
         .click()
-      const editor = panel.getByRole("region", { name: `Lorebook Tides ${width}` })
+      const editor = panel.getByRole("region", { name: `Lorebook Tides ${width} ${theme}` })
       await expect(editor.getByRole("list", { name: "Entries" })).toBeVisible()
       await check(page, editor, `lorebook-panel-${width}-${theme}`)
     })

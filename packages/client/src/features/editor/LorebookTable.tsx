@@ -31,7 +31,8 @@ import { revealIfHidden } from "../../ui/reveal.ts"
 import { Segmented } from "../../ui/Segmented.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { iconButtonClass, Tooltip } from "../../ui/Tooltip.tsx"
-import { EntryDetails } from "./LorebookEntryDetails.tsx"
+import { EntryDetails, KeysLine } from "./LorebookEntryDetails.tsx"
+import { BlockOptionsToggle } from "../../ui/Block.tsx"
 import { EXPLAIN } from "./lorebookExplain.ts"
 import { applyMassChange, enableAllEdits } from "./lorebookMass.ts"
 import { MassEditDialog } from "./LorebookMassEdit.tsx"
@@ -55,6 +56,9 @@ import {
 import { SearchNavigation, useSearchMatch } from "./searchNavigation.ts"
 import { type EditorStore, useEditorKind, useText, useValue } from "./store.ts"
 
+/** What an opened entry shows with its settings closed. */
+const SHOWN: ReadonlySet<string> = new Set(["comment", "keys", "content"])
+
 /** Below this width the cells wrap under the title, labelled, instead of standing in columns. */
 const WIDE = 760
 
@@ -74,16 +78,20 @@ const scrollParent = (element: HTMLElement | null) => {
 
 const entriesLabel = (count: number) => `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`
 
-/** The title, edited in place, and the keys at a glance; a click on them opens the entry at its keys. */
+/**
+ * The title, edited in place, and the keys at a glance: closed, a click on them opens the entry
+ * at its keys; open, they're edited where they are.
+ */
 function TitleCell({
   store,
   path,
   entry,
   title,
   uid,
+  open,
   onKeys,
   badges
-}: LorebookEntryContext & { uid: number; onKeys: () => void; badges?: ReactNode }) {
+}: LorebookEntryContext & { uid: number; open: boolean; onKeys: () => void; badges?: ReactNode }) {
   const titlePath = [...path, "comment"]
   const text = useText(store, titlePath)
   const match = useSearchMatch(titlePath)
@@ -97,6 +105,11 @@ function TitleCell({
     return () => cancelAnimationFrame(frame)
   }, [match])
   const keys = entry.keys.join(", ")
+  const noKeys = entry.constant
+    ? "No keys · always included"
+    : entry.vectorized
+      ? "No keys · by similarity"
+      : "No keys · never matched"
   return (
     <div className="flex min-w-0 flex-col">
       <Input
@@ -109,24 +122,23 @@ function TitleCell({
         onChange={(event) => store.setText(titlePath, event.currentTarget.value)}
         onBlur={() => void store.save(JSON.stringify(titlePath))}
       />
-      <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-        <Tooltip label="Its primary keys: one appearing in the chat sends it. Click to open the entry at them.">
-          <button
-            type="button"
-            onClick={onKeys}
-            className="max-w-full min-w-0 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
-            aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
-          >
-            {keys ||
-              (entry.constant
-                ? "No keys · always included"
-                : entry.vectorized
-                  ? "No keys · by similarity"
-                  : "No keys · never matched")}
-          </button>
-        </Tooltip>
-        {badges}
-      </div>
+      {open ? (
+        <KeysLine store={store} path={[...path, "keys"]} id={`lore-keys-${uid}`} empty={noKeys} badges={badges} />
+      ) : (
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          <Tooltip label="Its primary keys: one appearing in the chat sends it. Click to open the entry at them.">
+            <button
+              type="button"
+              onClick={onKeys}
+              className="max-w-full min-w-0 truncate rounded-sm px-2 text-left text-xs text-muted outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={`Keys of ${title}: ${keys || "none"}. Open the entry to edit them.`}
+            >
+              {keys || noKeys}
+            </button>
+          </Tooltip>
+          {badges}
+        </div>
+      )}
     </div>
   )
 }
@@ -238,6 +250,8 @@ interface RowProps {
   root: FieldPath
   uid: number
   open: boolean
+  /** Its settings are open. */
+  settings: boolean
   wide: boolean
   /** A compact header (the side panel, a narrow screen): badges, and the columns in Settings. */
   compact: boolean
@@ -250,6 +264,7 @@ interface RowProps {
   selected: boolean
   onSelect: (uid: number, selected: boolean) => void
   onToggle: (uid: number, open: boolean, focus?: "keys") => void
+  onSettings: (uid: number, open: boolean) => void
   onAction: (uid: number, action: LorebookEntryAction) => void
 }
 
@@ -274,6 +289,7 @@ const EntryRow = memo(function EntryRow({
   root,
   uid,
   open,
+  settings,
   wide,
   compact,
   card,
@@ -283,6 +299,7 @@ const EntryRow = memo(function EntryRow({
   selecting,
   selected,
   onSelect,
+  onSettings,
   onToggle,
   onAction
 }: RowProps) {
@@ -294,7 +311,7 @@ const EntryRow = memo(function EntryRow({
   const context: LorebookEntryContext = { store, root, entry, path, title }
   const toggleLabel = open ? `Close ${title}` : `Open ${title}`
   const chevron = (
-    <Tooltip label={open ? "Close the entry" : "Open the entry: its text and keys, and its settings below them"}>
+    <Tooltip label={open ? "Close the entry" : "Open the entry: its text, with its keys to edit"}>
       <button
         type="button"
         aria-label={toggleLabel}
@@ -332,13 +349,24 @@ const EntryRow = memo(function EntryRow({
     <TitleCell
       {...context}
       uid={uid}
+      open={open}
       onKeys={() => onToggle(uid, true, "keys")}
       badges={compact ? <EntryBadges entry={entry} /> : undefined}
     />
   )
   const menu = <RowActions context={context} actions={actions} onPick={(action) => onAction(uid, action)} />
+  // Like a preset prompt's options button: an opened entry's settings, above its text.
+  const settingsToggle = open && (
+    <BlockOptionsToggle
+      open={settings}
+      onToggle={() => onSettings(uid, !settings)}
+      label={`Settings of ${title}`}
+      hint={settings ? "Hide the entry's settings" : EXPLAIN.settings}
+    />
+  )
   return (
     <div
+      {...(open ? { role: "group", "aria-label": `Lorebook entry ${uid}` } : {})}
       className={`border-b border-border py-1.5 ${entry.enabled ? "" : "[&_input]:text-muted"} ${open ? "bg-surface" : ""} ${selected ? "bg-accent/5" : ""}`}
     >
       {!compact ? (
@@ -358,7 +386,10 @@ const EntryRow = memo(function EntryRow({
               <column.cell {...context} />
             </div>
           ))}
-          <div className="flex justify-end">{menu}</div>
+          <div className="flex justify-end gap-0.5">
+            {settingsToggle}
+            {menu}
+          </div>
         </div>
       ) : (
         <div
@@ -369,17 +400,21 @@ const EntryRow = memo(function EntryRow({
           {chevron}
           <span className="pt-1.5">{enabled}</span>
           <div className="min-w-0 flex-1">{titleCell}</div>
-          {menu}
+          <div className="flex shrink-0 gap-0.5">
+            {settingsToggle}
+            {menu}
+          </div>
         </div>
       )}
       {open && (
-        <div className="px-2 pt-3 pb-4 sm:px-3">
+        <div className="px-2 pt-2 pb-2 sm:px-3">
           <EntryDetails
             store={store}
             root={root}
             uid={uid}
             wide={wide && !compact}
             card={card}
+            settings={settings}
             essentials={compact ? <Essentials columns={columns} context={context} /> : undefined}
           />
         </div>
@@ -401,6 +436,7 @@ function Rows({
   searching,
   row,
   opened,
+  settings,
   selected
 }: {
   uids: ReadonlyArray<number>
@@ -410,8 +446,10 @@ function Rows({
   onFocused: () => void
   /** A search visit focuses its own field. */
   searching: boolean
-  row: Omit<RowProps, "uid" | "open" | "selected">
+  row: Omit<RowProps, "uid" | "open" | "settings" | "selected">
   opened: ReadonlySet<number>
+  /** The opened entries whose settings are open. */
+  settings: ReadonlySet<number>
   selected: ReadonlySet<number>
 }) {
   "use no memo"
@@ -466,6 +504,7 @@ function Rows({
             {...row}
             uid={uids[item.index]!}
             open={opened.has(uids[item.index]!)}
+            settings={settings.has(uids[item.index]!)}
             selected={selected.has(uids[item.index]!)}
           />
         </div>
@@ -545,6 +584,15 @@ export function LorebookTable({
   const [enabled, setEnabled] = useState<EnabledFilter>("all")
   const [sortId, setSortId] = useState("order")
   const [opened, setOpened] = useOpenEntries(store.refId, root, added)
+  // Opened entries whose settings are open too: closed again with the page.
+  const [settings, setSettings] = useState<ReadonlySet<number>>(EMPTY)
+  const showSettings = (uid: number, open: boolean) =>
+    setSettings((set) => {
+      const next = new Set(set)
+      if (open) next.add(uid)
+      else next.delete(uid)
+      return next
+    })
   // Entries just added or duplicated lead the table, newest first, until the search, filter
   // or sort changes: a second one doesn't push the first away to its sorted place.
   const [pinned, setPinned] = useState<ReadonlyArray<number>>(added === null ? [] : [added])
@@ -597,6 +645,8 @@ export function LorebookTable({
       setQuery("")
       setEnabled("all")
       setOpened((set) => new Set(set).add(uid))
+      // A match in anything but the title, keys and text is in the entry's settings.
+      if (!SHOWN.has(String(match!.path[root.length + 2]))) showSettings(uid, true)
       setFocus({ uid, at: "title" })
     }
   }
@@ -623,7 +673,7 @@ export function LorebookTable({
   }, [])
   const wide = width === 0 ? !panel : width >= WIDE
   const compact = panel || !wide
-  const template = `${selecting ? "6.25rem" : "4.5rem"} minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 2.25rem`
+  const template = `${selecting ? "6.25rem" : "4.5rem"} minmax(10rem,1fr) ${columns.map((column) => column.width).join(" ")} 4.25rem`
 
   const toggle = (uid: number, open: boolean, at?: "keys") => {
     setOpened((set) => {
@@ -904,9 +954,11 @@ export function LorebookTable({
               selecting,
               onSelect: select,
               onToggle: toggle,
+              onSettings: showSettings,
               onAction: runAction
             }}
             opened={opened}
+            settings={settings}
             selected={selecting ? selected : EMPTY}
           />
         )}
