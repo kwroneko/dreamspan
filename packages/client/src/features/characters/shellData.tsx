@@ -263,6 +263,7 @@ function PersonaBadge() {
     <Tooltip label="A persona: a card you play as">
       <span
         data-persona-badge
+        data-layout-overlay="The persona badge sits over the portrait"
         className="absolute bottom-1 left-1 max-w-[calc(100%-0.5rem)] truncate rounded-sm bg-accent px-1.5 text-[0.6875rem] leading-4 font-medium text-accent-contrast shadow-sm"
       >
         You
