@@ -91,6 +91,12 @@
 }
 
 @theme {
+  /*
+   * `max-w-controls`: a row whose controls belong together (a label and its button, a picker
+   * and its New, a filter bar) stays within this in a column dragged wide, so its ends never
+   * drift apart (owner, 2026-11-02: no "items spreading out to an extreme degree").
+   */
+  --container-controls: 40rem;
   --color-*: initial;
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
@@ -305,6 +311,15 @@ main:has(> [data-fill]) {
  * still wins over these.
  */
 @layer base {
+  /*
+   * Text keeps a readable line, about 80 characters, in a column dragged wide (the chat panel's
+   * tab bodies are marked): explanations and notices stay paragraphs, not one long line. A
+   * paragraph's own width class still wins.
+   */
+  [data-measure] p {
+    max-width: 80ch;
+  }
+
   /*
    * Every enabled control shows the pointer (owner, 2026-11-01): browsers give a <button> the
    * arrow. A disabled one shows the arrow (`Button` and `iconButtonClass` also let the pointer

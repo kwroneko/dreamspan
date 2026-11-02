@@ -354,7 +354,7 @@ export const makeShellReadHandlers = Effect.gen(function* () {
           forkId: record.id,
           preview: s.preview,
           messages: s.messages,
-          chat: { id: row.id as ChatId, title: row.title },
+          chat: { id: row.id as ChatId, title: row.title, createdAt: row.created_at },
           leaf: s.leaf as SlotId | null,
           name: record.name ?? chatName(importState(row.title).title, cast).name,
           chatName: chatName(importState(row.title).title, cast).name,

@@ -301,7 +301,9 @@ export const makeWriteHandlers = (bin: Bin) =>
             targetKind: "version_edit",
             targetId: version.sourceVersionId ?? "",
             content: version.rewrite?.raw ?? row.content,
-            images: toVersion(row).images ?? []
+            images: toVersion(row).images ?? [],
+            // The edit's history goes on with the version its Save made (owner, 2026-11-02).
+            moveTo: row.id
           })
           return toVersion(row)
         }).pipe(transaction("AddVersion")),
@@ -410,7 +412,9 @@ export const makeWriteHandlers = (bin: Bin) =>
                   targetKind: "version_edit",
                   targetId: version.sourceVersionId,
                   content: version.rewrite?.raw ?? row.content,
-                  images: toVersion(row).images ?? []
+                  images: toVersion(row).images ?? [],
+                  // The edit's history goes on with the version its Save made (owner, 2026-11-02).
+                  moveTo: row.id
                 }
               : {
                   targetKind: "scratchpad",
@@ -523,6 +527,8 @@ export const makeWriteHandlers = (bin: Bin) =>
             { id: fork.id, chatId: slot.chat_id },
             { kind: "replace", targetId: original, slotId: row.slot_id, valueId: copy, flag: null }
           )
+          // The edit's history goes on with the copy that now shows its text (owner, 2026-11-02).
+          if (commitDraft) yield* drafts.moveTo(commitDraft.draftId, versionId, copy)
           return toVersion((yield* versionAsShown(sql, fork.id, copy))!)
         }).pipe(transaction("AmendVersion")),
 

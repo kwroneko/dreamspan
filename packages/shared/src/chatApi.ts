@@ -705,9 +705,21 @@ export class ChatApi extends RpcGroup.make(
   Rpc.make("MessageDraftHistory", {
     payload: {
       target: MessageDraftTarget,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 })),
+      /** Pages on to the states before this seq: an edit's history outlives its saves (owner, 2026-11-02). */
+      before: Schema.optionalKey(Schema.Int)
     },
     success: Schema.Array(DraftState),
+    error: Schema.Union([...Errors])
+  }),
+  /**
+   * A message editor's draft, active or resting (`NotFound`: none yet, as for its history): a
+   * reopened edit reads it to list and put back the states from before its last save (owner,
+   * 2026-11-02).
+   */
+  Rpc.make("GetMessageDraft", {
+    payload: { target: MessageDraftTarget },
+    success: Draft,
     error: Schema.Union([...Errors])
   }),
   Rpc.make("RestoreMessageDraft", {
@@ -737,7 +749,7 @@ export class ChatApi extends RpcGroup.make(
     success: Draft,
     error: Schema.Union([...WriteErrors])
   }),
-  /** Closes a message editor unsaved: its text goes to the bin's recovered texts. */
+  /** Closes a message editor unsaved: an edit goes back to the saved text as a state of its history (the text cancelled one step back); a written version's text goes to the bin's recovered texts. */
   Rpc.make("DiscardMessageDraft", {
     payload: { target: MessageDraftTarget, draftId: Schema.String, expectedRowVersion: Schema.Int },
     success: Draft,

@@ -163,6 +163,8 @@ interface ChatProgress {
   /** Messages read, and messages written. */
   index: number
   written: number
+  /** The first message's time, from the first part with one. */
+  firstAt: number | null
   lastAt: number | null
   lastMessageAt: number | null
   userTurns: number
@@ -194,7 +196,7 @@ interface Session extends FolderContext {
   readonly report: Report
   settings: StSettings | null
   summaryMacro: boolean
-  riders: boolean
+  readonly anLorebooks: Set<string>
   personaNames: Map<string, ReadonlyArray<string>>
   /** Characters held, against MAX_HELD_CHARS, and the settings' share of them. */
   held: number
@@ -310,7 +312,7 @@ export class StImports extends Context.Service<
             report: new Report(),
             settings: null,
             summaryMacro: false,
-            riders: false,
+            anLorebooks: new Set(),
             personaNames: new Map(),
             held: 0,
             settingsHeld: 0,
@@ -493,7 +495,6 @@ export class StImports extends Context.Service<
           const persona: StPersona | null = session.settings?.personas.find((p) => p.avatar === file) ?? null
           // At the author's note's top or bottom: where the folder's default author's note is.
           const riding = persona !== null && (persona.position === 2 || persona.position === 3)
-          if (riding) session.riders = true
           const parsed = yield* formats.st.persona(
             bytes,
             file,
@@ -550,7 +551,6 @@ export class StImports extends Context.Service<
                 }
               })
             )
-          session.riders = true
           session.report.count("character_note", imported === null ? "failed" : imported.created ? "added" : "updated")
           return imported !== null && chara.useChara ? imported.entity : null
         })
@@ -600,8 +600,7 @@ export class StImports extends Context.Service<
             session.settings?.textSwitches,
             kind === "lorebook" ? authorNotePlace(session.settings?.defaultAuthorNote ?? null).lore : undefined
           )
-          if (parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries"))
-            session.riders = true
+          const anEntries = parsed.parsed.report.issues.some((issue) => issue.code === "lorebook.author_note_entries")
           // ST applies its global books to every chat: here they go with the preset ST had
           // selected, the books already imported (lorebooks come before presets, §13).
           const selected = kind === "preset" && session.settings?.selectedPreset === name
@@ -620,7 +619,12 @@ export class StImports extends Context.Service<
             undefined,
             globals.map((book) => book.ref)
           )
-          if (imported.entity !== null && kind === "lorebook") session.worlds.set(name, imported.entity.refId)
+          if (imported.entity !== null && kind === "lorebook") {
+            session.worlds.set(name, imported.entity.refId)
+            // Its entries at the author's note's top or bottom: a chat using it had them at its note.
+            if (anEntries) session.anLorebooks.add(imported.entity.refId)
+            else session.anLorebooks.delete(imported.entity.refId)
+          }
           if (imported.entity !== null && globals.length > 0)
             session.globalAttached = { preset: name, books: globals.map((book) => book.world) }
           // Whether ST sent the summary through `{{summary}}` in the preset it used (DESIGN §8 [P]).
@@ -664,11 +668,13 @@ export class StImports extends Context.Service<
             source: progress.path,
             ...(progress.fork === null ? {} : { parentRecordId: progress.fork.parentRecordId }),
             title: progress.title,
-            createdAt: progress.header?.createdAt ?? progress.lastAt ?? Date.now(),
+            // When ST started it: its header's date, else its first message's (never its last's).
+            createdAt: progress.header?.createdAt ?? progress.firstAt ?? progress.lastAt ?? Date.now(),
             chatId: progress.into,
             lease: session.id
           })
           progress.target = target
+          session.report.chat(progress.path, target.chatId)
           // A part 0 sent again in this run goes on from this record, not a second one.
           session.records.set(progress.path, {
             ...target,
@@ -787,12 +793,13 @@ export class StImports extends Context.Service<
               "ST sent the character's own author's note in place of this chat's; both are kept here, at the default author's note's place."
             )
           }
-          if (change.ridersElsewhere) {
+          if (change.ridersElsewhere !== null) {
             report.issue(
               progress.path,
               "warning",
               "st.author_note_riders",
-              "ST put a persona, a character's own author's note or lorebook entries at this chat's author's note. Here they're where ST's default author's note is, the same place in every chat, not at this chat's note."
+              "ST put a persona's description, a character's own author's note or lorebook entries at these chats' own author's note. Here they're where ST's default author's note is, the same place in every chat, so they may land elsewhere in the prompt than in ST.",
+              change.ridersElsewhere
             )
           }
           if (change.summaryTrimmed) {
@@ -979,6 +986,7 @@ export class StImports extends Context.Service<
             : link.card !== null && link.card.file === file.folder && link.card.lastChat === file.name
         // Its state so far: the record's when complete; for a branch not yet finished, its parent's.
         const previous = own?.complete ? own : branch ? parentLive : undefined
+        if (own !== undefined) report.chat(path, own.chatId)
         return {
           path,
           countAs: file.kind,
@@ -1005,6 +1013,7 @@ export class StImports extends Context.Service<
           firstSlot: null,
           index: 0,
           written: 0,
+          firstAt: null,
           lastAt: null,
           lastMessageAt: null,
           userTurns: 0,
@@ -1086,6 +1095,7 @@ export class StImports extends Context.Service<
           progress.summaryChars += summaryChars
           progress.summaries.push(...part.summaries)
           progress.index += part.messages
+          progress.firstAt ??= part.firstAt
           progress.lastAt = part.lastAt
           if (part.lastAt !== null) progress.lastMessageAt = Math.max(progress.lastMessageAt ?? 0, part.lastAt)
           progress.nextPart = request.part + 1

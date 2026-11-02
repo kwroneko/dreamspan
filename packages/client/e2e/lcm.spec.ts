@@ -640,8 +640,11 @@ test.describe("the text of a summary's edit", () => {
     expect(sent.map((payload) => payload.expectedRowVersion)).toEqual([first.rowVersion, first.rowVersion])
     await dialog.getByRole("button", { name: "Save", exact: true }).click()
     await expect(box(dialog)).toHaveCount(0)
-    // The other device's text was one step back, and the revision sends it to the recovered texts.
+    // The other device's text was one step back, and stays there past the revision: a summary
+    // edit's history outlives its saves (owner, 2026-11-02), so it isn't sent to the bin.
+    const states = await admin((api) => api.SummaryDraftHistory({ summaryId, forkId: fixture.forkId, limit: 100 }))
+    expect(states.map((state) => state.length)).toContain(elsewhere.length)
     const recovered = await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))
-    expect(recovered.map((text) => text.content)).toContain(elsewhere)
+    expect(recovered.map((text) => text.content)).not.toContain(elsewhere)
   })
 })

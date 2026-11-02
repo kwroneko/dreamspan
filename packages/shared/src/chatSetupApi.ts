@@ -133,7 +133,7 @@ export class ShellFork extends Schema.Class<ShellFork>("ShellFork")({
   preview: Schema.String,
   messages: Schema.Int,
   /** Only what the rows show; the chat's own record is read when it opens. */
-  chat: Schema.Struct({ id: ChatId, title: Schema.String }),
+  chat: Schema.Struct({ id: ChatId, title: Schema.String, createdAt: Schema.optionalKey(Schema.Number) }),
   leaf: Schema.NullOr(SlotId),
   /** The fork's name, else its chat's. */
   name: Schema.String,
@@ -271,6 +271,8 @@ export class Cast extends Schema.Class<Cast>("Cast")({
   macroNames: Schema.Struct({ user: Schema.String, char: Schema.String }),
   rolesProjection: Schema.NullOr(RolesProjection),
   roleProjections: Schema.Array(RoleProjectionOption),
+  /** Who replies when nobody is picked (`reply.order`, a reply policy's id); absent is the default, natural order. */
+  replyOrder: Schema.optionalKey(Schema.String),
   /** Active and departed cards, including former personas, to retain historical names and portraits. */
   cards: Schema.Array(CastCard)
 }) {}
@@ -315,6 +317,8 @@ export const CastChange = Schema.Union([
   Schema.TaggedStruct("RemoveLorebook", { ref: RefId }),
   /** Lorebook entries only below the history, or where their positions say (`lorebook.below_history`). */
   Schema.TaggedStruct("LoreBelowHistory", { on: Schema.Boolean }),
+  /** Who replies when nobody is picked (`reply.order`): a reply policy's id. */
+  Schema.TaggedStruct("ReplyOrder", { order: Schema.String.check(Schema.isMaxLength(200)) }),
   Schema.TaggedStruct("Note", { entityId: EntityId, active: Schema.Boolean })
 ])
 export type CastChange = typeof CastChange.Type

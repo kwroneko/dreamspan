@@ -266,6 +266,8 @@ export interface StChatPart {
   readonly greeting: string | null
   /** The Summarize extension's summaries (`extra.memory`), by message index in the file. */
   readonly summaries: ReadonlyArray<{ readonly index: number; readonly text: string }>
+  /** The first message's time; null for a part without messages. */
+  readonly firstAt: number | null
   /** The last message's time, carried into the next part for messages without one. */
   readonly lastAt: number | null
 }
@@ -370,6 +372,7 @@ export const parseStChatPart = (
   }
   let header: StChatHeader | null = null
   let lastAt = options.carryAt
+  let firstAt: number | null = null
   let index = options.firstIndex
   let userTurns = 0
   let lastUserSpeaker: string | null = null
@@ -423,6 +426,7 @@ export const parseStChatPart = (
     const mes = text(value.mes) ?? ""
     const sentAt = parseStDate(value.send_date) ?? lastAt ?? 0
     lastAt = sentAt
+    firstAt ??= sentAt
     const swipeInfo = Array.isArray(value.swipe_info) ? value.swipe_info : []
     const reasoningOf = (source: unknown) => stReasoningOf(source).reasoning
     const sectionsOf = (source: unknown) => {
@@ -562,6 +566,7 @@ export const parseStChatPart = (
     speakers: [...speakers.values()],
     greeting,
     summaries,
+    firstAt,
     lastAt
   }
 }

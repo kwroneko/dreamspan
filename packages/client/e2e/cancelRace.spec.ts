@@ -123,7 +123,8 @@ for (const kind of ["message", "summary"] as const) {
     }
     await expect(box).toBeEnabled()
     await box.fill(`The ${kind} text cancelled.`)
-    // Kept by the server before Cancel, so Cancel sends it to the recovered texts.
+    // Kept by the server before Cancel, so Cancel keeps it: one step back in a summary edit's
+    // history, or in the recovered texts for a written version.
     await page.waitForTimeout(1200)
     await cancel.click()
     await expect.poll(() => release !== undefined).toBe(true)

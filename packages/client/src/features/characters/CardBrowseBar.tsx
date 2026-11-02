@@ -37,7 +37,7 @@ export function CardBrowseBar({
   groups?: boolean
 }) {
   return (
-    <div className="flex min-w-0 shrink-0 items-center gap-1">
+    <div className="flex max-w-controls min-w-0 shrink-0 items-center gap-1">
       <div className="min-w-0 flex-1">
         {groups ? (
           <GroupsFilter data={data} browse={browse} onChange={onChange} />

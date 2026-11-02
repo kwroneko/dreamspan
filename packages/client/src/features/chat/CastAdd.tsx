@@ -177,6 +177,7 @@ function AddGrid({
             type="search"
             aria-label="Find a character to add"
             placeholder="Find by name"
+            className="max-w-controls"
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
           />

@@ -47,7 +47,8 @@ const baseOf = (draft: Draft | null): Base => ({
   draftId: draft?.id ?? null,
   rowVersion: draft?.rowVersion ?? null,
   session: draft?.session ?? null,
-  revisionId: draft?.baseRevision ? (draft.baseRevision as LcmSummary["revisionId"]) : null
+  // A resting draft (saved, or cancelled) is typed on afresh from the revision shown.
+  revisionId: draft?.status === "active" && draft.baseRevision ? (draft.baseRevision as LcmSummary["revisionId"]) : null
 })
 
 export class SummaryDraft {
@@ -288,15 +289,25 @@ export class SummaryDraft {
     while (this.local !== null && this.view.error === null) await this.save()
   }
 
-  async history() {
+  /** A page of the edit's states, newest first; `before` pages on past a seq. */
+  async history(before?: number, limit = DraftHistoryPolicy.maxEntries + 1) {
     await this.flush()
     if (this.local !== null) return { ok: false as const, error: this.view.error ?? notSaved }
-    if (this.draft === null) return { ok: true as const, value: [] }
+    if (this.draft === null) {
+      // The edit's draft rests between saves: its states from before them are listed too.
+      const read = await this.session.call((client) =>
+        client("GetSummaryDraft", { forkId: this.forkId, summaryId: this.summary.id })
+      )
+      if (!read.ok) return read
+      this.draft ??= read.value
+      if (this.draft === null) return { ok: true as const, value: [] }
+    }
     return this.session.call((client) =>
       client("SummaryDraftHistory", {
         forkId: this.forkId,
         summaryId: this.summary.id,
-        limit: DraftHistoryPolicy.maxEntries + 1
+        limit,
+        ...(before === undefined ? {} : { before })
       })
     )
   }
@@ -380,7 +391,7 @@ export class SummaryDraft {
   }
 
   /**
-   * Ends the edit unsaved; its text goes to the bin's recovered texts. Text the server
+   * Ends the edit unsaved: the draft goes back to the saved text, the text cancelled one step back in its history (owner, 2026-11-02). Text the server
    * doesn't have yet has nowhere to go: the edit stays open, with its copy.
    */
   async discard(): Promise<Outcome<unknown>> {

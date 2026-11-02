@@ -335,6 +335,8 @@ export const SummaryDetails = Schema.Struct({
   forkId: Schema.NullOr(ForkId),
   jobId: Schema.NullOr(Schema.String),
   attempts: Schema.NullOr(Schema.Int),
+  /** How many summaries it condenses; 0 at level 1. Its Details say "Condensing 5 summaries". */
+  parts: Schema.Int,
   model: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.Number),
   endedAt: Schema.NullOr(Schema.Number),
@@ -501,7 +503,9 @@ export class LcmApi extends RpcGroup.make(
     payload: {
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
       summaryId: SummaryId,
-      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 }))
+      limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: DraftHistoryPolicy.maxEntries + 1 })),
+      /** Pages on to the states before this seq: an edit's history outlives its saves (owner, 2026-11-02). */
+      before: Schema.optionalKey(Schema.Int)
     },
     success: Schema.Array(DraftState),
     error: Schema.Union([NotFound, ServerError])
@@ -516,7 +520,7 @@ export class LcmApi extends RpcGroup.make(
     success: Draft,
     error: Schema.Union([NotFound, StaleWrite, ServerError])
   }),
-  /** Ends the edit unsaved; its text goes to the bin's recovered texts. */
+  /** Ends the edit unsaved: the draft goes back to the saved text as a state of its history, the text cancelled one step back. */
   Rpc.make("DiscardSummaryDraft", {
     payload: {
       forkId: Schema.optionalKey(Schema.NullOr(ForkId)),
