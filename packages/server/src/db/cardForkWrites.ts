@@ -136,6 +136,11 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           sourceHash: null,
           message: "Copied with the card's fork"
         })
+        // Drafts typed before a saved change must keep that base for conflict detection,
+        // including when this note is copied through another card fork later.
+        yield* sql`UPDATE entities SET forked_from_entity_id = ${note.entity_id},
+          forked_from_revision_id = ${note.head_revision_id}, forked_at = ${at}
+          WHERE id = ${copy.entity_id}`
         noteCopies.set(note.entity_id, copy.entity_id as EntityId)
         // Its unsaved text goes with the fork, still unsaved; the original goes back to its
         // last revision, the text one step back in its edit history (owner, 2026-11-02).
@@ -143,7 +148,11 @@ export const makeCardForkWriteHandlers = (steps: LibrarySteps) => {
           userId,
           "note",
           { target: note.id, revision: note.head_revision_id, doc: noteDoc },
-          { target: copy.id, revision: copy.head_revision_id }
+          {
+            target: copy.id,
+            revision: copy.head_revision_id,
+            base: (typed) => (typed === null || typed === note.head_revision_id ? copy.head_revision_id : typed)
+          }
         )
         yield* sql`INSERT INTO entity_tags (entity_id, tag)
                      SELECT ${copy.entity_id}, tag FROM entity_tags WHERE entity_id = ${note.entity_id}`

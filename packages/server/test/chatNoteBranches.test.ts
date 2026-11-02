@@ -44,6 +44,44 @@ const save = (api: Api, refId: RefId, at: ChatNotePosition) =>
   })
 
 describe("a chat's own note on its branches", () => {
+  it.live("edits at the display end when an inserted message follows the structural tip", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const chat = yield* api.CreateChat({ title: "Trailing insertion" })
+      const forkId = chat.currentForkId!
+      const first = yield* posted(
+        api.SendMessage({ chatId: chat.id, forkId, parentSlotId: null, branch: false, content: "One." })
+      )
+      const note = yield* api.CreateChatNote({ chatId: chat.id, forkId, title: "Weather" })
+      const inserted = yield* api.InsertMessage({
+        chatId: chat.id,
+        forkId,
+        anchor: first.entry.slotId,
+        expectedRowVersion: first.entry.rowVersion,
+        body: { _tag: "Write", speaker: null, content: "Inserted after one." }
+      })
+      const position = { chatId: chat.id, forkId, slotId: first.entry.slotId }
+      yield* type(api, note.id, position, "Fog at the display end.")
+      yield* save(api, note.id, position)
+      const before = yield* api.ListChatNotes(position)
+      assert.strictEqual(before.find((n) => n.ref.id === note.id)?.doc.content, "")
+      const after = yield* api.ListChatNotes({ ...position, slotId: inserted.entry.slotId })
+      assert.strictEqual(after.find((n) => n.ref.id === note.id)?.doc.content, "Fog at the display end.")
+      assert.strictEqual(
+        (yield* api.OpenEditor({ refId: note.id, chatNote: position })).doc.content,
+        "Fog at the display end."
+      )
+      // A stale tab can still edit the current state after its named structural tip is deleted.
+      yield* api.DeleteMessage({ slotId: first.entry.slotId, forkId })
+      yield* type(api, note.id, position, "Sun at the display end.")
+      yield* save(api, note.id, position)
+      assert.strictEqual(
+        (yield* api.OpenEditor({ refId: note.id, chatNote: position })).doc.content,
+        "Sun at the display end."
+      )
+    }).pipe(Effect.scoped, withServer(testConfig()))
+  )
+
   it.live("keeps unsaved text per branch, says another branch differs, and History says where", () =>
     Effect.gen(function* () {
       const api = yield* client()
