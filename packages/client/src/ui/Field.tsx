@@ -17,6 +17,8 @@ const control =
 export function Field({
   label,
   description,
+  about,
+  aboutLabel,
   error,
   children,
   className = "",
@@ -25,7 +27,11 @@ export function Field({
   label: ReactNode
   /** The label names the control for assistive technology only: what's around it already says. */
   labelHidden?: boolean
+  /** Visible state or guidance that must stay beside the control. */
   description?: ReactNode
+  /** Help for choosing a value, beside the label. */
+  about?: ReactNode
+  aboutLabel?: string
   /** Shown under the control, and marks it invalid. */
   error?: string | null | undefined
   children: ReactNode
@@ -33,7 +39,15 @@ export function Field({
 }) {
   return (
     <BaseField.Root invalid={error ? true : undefined} className={`flex min-w-0 flex-col gap-1.5 ${className}`}>
-      <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
+      {about ? (
+        <div className={labelHidden ? "sr-only" : "flex items-center gap-1"}>
+          <BaseField.Label className="text-sm font-medium text-text">{label}</BaseField.Label>
+          <AboutHint heading={aboutLabel ?? (typeof label === "string" ? label : "this field")}>{about}</AboutHint>
+        </div>
+      ) : (
+        <BaseField.Label className={labelHidden ? "sr-only" : "text-sm font-medium text-text"}>{label}</BaseField.Label>
+      )}
+      {about && <BaseField.Description hidden>{about}</BaseField.Description>}
       {children}
       {description && <BaseField.Description className="text-sm text-muted">{description}</BaseField.Description>}
       {error && (
@@ -237,12 +251,14 @@ export function Fieldset({
   legend,
   description,
   about,
+  aboutLabel,
   children,
   className = ""
 }: {
   legend: ReactNode
   description?: ReactNode
   about?: ReactNode
+  aboutLabel?: string
   children: ReactNode
   className?: string
 }) {
@@ -252,7 +268,7 @@ export function Fieldset({
       {about ? (
         <div className="flex items-center gap-1">
           {head}
-          <AboutHint heading={typeof legend === "string" ? legend : "this group"}>{about}</AboutHint>
+          <AboutHint heading={aboutLabel ?? (typeof legend === "string" ? legend : "this group")}>{about}</AboutHint>
         </div>
       ) : (
         head

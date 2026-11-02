@@ -14,8 +14,8 @@ test.afterAll(async () => {
 test("refresh, hide, edit and add models", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Models test")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("Models test")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Left empty, the key is optional for this kind: no key is sent.
   await page.getByRole("button", { name: "Create connection" }).click()
 
@@ -39,9 +39,9 @@ test("refresh, hide, edit and add models", async ({ page }) => {
   const dialog = page.getByRole("dialog")
   await dialog.getByLabel("Display name").fill("My large model")
   // The provider's limits are read-only until the pencil opens your own value.
-  await expect(dialog.getByLabel("Your longest reply (tokens)")).toHaveCount(0)
+  await expect(dialog.getByLabel("Your longest reply (tokens)", { exact: true })).toHaveCount(0)
   await dialog.getByRole("button", { name: "Set the longest reply yourself" }).click()
-  await dialog.getByLabel("Your longest reply (tokens)").fill("8000")
+  await dialog.getByLabel("Your longest reply (tokens)", { exact: true }).fill("8000")
   await dialog.getByRole("button", { name: "Save" }).click()
   await expect(dialog).toBeHidden()
   await expect(models.locator("li", { hasText: "My large model" })).toContainText("Output 8k*")
@@ -60,8 +60,8 @@ test("model generation settings take typed decimals and keep the reply length ap
 }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Settings test")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("Settings test")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
 
@@ -87,21 +87,21 @@ test("model generation settings take typed decimals and keep the reply length ap
   await expect(dialog.getByLabel("Temperature")).toHaveValue("0.7")
   await expect(dialog.getByLabel("Top P")).toHaveValue("")
   await expect(dialog.getByLabel("Reply length (tokens)")).toHaveValue("1200")
-  await expect(dialog.getByLabel("Your longest reply (tokens)")).toHaveCount(0)
-  await expect(dialog.getByLabel("Advanced model settings (JSON)")).toHaveValue(/"temperature": 0.7/)
+  await expect(dialog.getByLabel("Your longest reply (tokens)", { exact: true })).toHaveCount(0)
+  await expect(dialog.getByLabel("Advanced model settings (JSON)", { exact: true })).toHaveValue(/"temperature": 0.7/)
 })
 
 test("the model's form keeps the provider's limits apart from your settings for the model", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Limits test")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("Limits test")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // Creating it fetches the models.
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
   await page.getByRole("button", { name: "Edit fake-large" }).click()
   const dialog = page.getByRole("dialog")
-  const limits = dialog.getByRole("group", { name: "Model limits (from the provider)" })
+  const limits = dialog.getByRole("group", { name: "Model limits", exact: true })
   // Read-only, with where each comes from; nothing to type until the pencil.
   await expect(limits).toContainText("Context window")
   await expect(limits).toContainText("131,072 tokens")
@@ -109,7 +109,11 @@ test("the model's form keeps the provider's limits apart from your settings for 
   await expect(limits).toContainText("Longest reply")
   await expect(limits.getByRole("textbox")).toHaveCount(0)
   await limits.getByRole("button", { name: "Set the context window yourself" }).click()
-  await expect(limits.getByLabel("Your context window (tokens)")).toBeFocused()
+  await expect(limits.getByLabel("Your context window (tokens)", { exact: true })).toBeFocused()
+  await expect(limits.getByLabel("Your context window (tokens)", { exact: true })).toHaveAccessibleDescription(
+    "Use this limit instead of the reported one. Empty uses the reported limit."
+  )
+  await expect(limits.getByRole("button", { name: "About Your context window (tokens)", exact: true })).toBeVisible()
   await limits.getByRole("button", { name: "Use what’s reported" }).click()
   await expect(limits.getByRole("textbox")).toHaveCount(0)
   // What it can do, and your settings for it, are apart from the limits.
@@ -117,9 +121,7 @@ test("the model's form keeps the provider's limits apart from your settings for 
   await expect(can.getByText("Prefill", { exact: true })).toBeVisible()
   await expect(dialog).not.toContainText("no provider information")
   // Each capability's automatic choice names what the provider says.
-  await expect(can.getByRole("combobox").first()).toHaveText(
-    /^(As the provider says: (yes|no)|Not known: the provider doesn't say)/
-  )
+  await expect(can.getByRole("combobox").first()).toHaveText(/^(Provider: (yes|no)|Unknown)/)
   const settings = dialog.getByRole("group", { name: "Your settings for this model" })
   await expect(settings.getByLabel("Context to send (tokens)")).toHaveAttribute("placeholder", "All of its window")
   await expect(settings.getByLabel("Reply length (tokens)")).toBeVisible()

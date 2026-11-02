@@ -111,7 +111,7 @@ export function SaveRevision({ store, onSaved }: { store: EditorStore; onSaved?:
           open
           onOpenChange={(open) => !open && !pending && setConflicts(null)}
           title="Changed meanwhile"
-          description="These fields changed in the saved version since you started editing them. Pick what each should be, then it saves."
+          description="Someone changed these fields while you were editing. Choose which text to keep before saving."
         >
           <ul aria-label="Changed meanwhile" className="flex flex-col gap-3">
             {conflicts.list.map((conflict) => (

@@ -2,11 +2,12 @@
 // drag (and each key press); `onValueCommitted` fires once the pointer lets go, or after a key,
 // so a caller can show a value live and save it once.
 import { Slider as BaseSlider } from "@base-ui/react/slider"
-import type { ReactNode } from "react"
+import { useId, type ReactNode } from "react"
+import { AboutHint } from "./AboutHint.tsx"
 
 export function Slider({
   label,
-  description,
+  about,
   value,
   min,
   max,
@@ -18,7 +19,7 @@ export function Slider({
   onValueCommitted
 }: {
   label: string
-  description?: ReactNode
+  about?: ReactNode
   value: number
   min: number
   max: number
@@ -30,6 +31,7 @@ export function Slider({
   onValueChange: (value: number) => void
   onValueCommitted: (value: number) => void
 }) {
+  const aboutId = useId()
   return (
     <BaseSlider.Root
       value={value}
@@ -44,19 +46,27 @@ export function Slider({
       className="flex w-full max-w-xl flex-col gap-2 data-disabled:opacity-50"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <BaseSlider.Label className="text-sm font-medium text-text">{label}</BaseSlider.Label>
+        <span className="flex items-center gap-1">
+          <BaseSlider.Label className="text-sm font-medium text-text">{label}</BaseSlider.Label>
+          {about && <AboutHint heading={label}>{about}</AboutHint>}
+        </span>
         <span className="text-sm text-muted tabular-nums">{valueText(value)}</span>
       </div>
       <BaseSlider.Control className="flex h-6 w-full touch-none items-center select-none">
         <BaseSlider.Track className="h-1.5 w-full rounded-full bg-surface-raised ring-1 ring-border">
           <BaseSlider.Indicator className="rounded-full bg-accent" />
           <BaseSlider.Thumb
+            aria-describedby={about ? aboutId : undefined}
             getAriaValueText={(_formatted, current) => valueText(current)}
             className="size-5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
           />
         </BaseSlider.Track>
       </BaseSlider.Control>
-      {description && <p className="text-sm text-muted">{description}</p>}
+      {about && (
+        <span id={aboutId} hidden>
+          {about}
+        </span>
+      )}
     </BaseSlider.Root>
   )
 }

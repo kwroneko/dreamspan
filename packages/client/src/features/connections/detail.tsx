@@ -135,7 +135,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
         </Field>
         <Field
           label="Base URL"
-          description="Leave empty for the provider's own address. A key goes only to addresses it was allowed for."
+          about="Connect to this address instead of the provider’s default. Empty uses the default. Keys go only to allowed addresses."
           error={shown(problems.baseUrl)}
         >
           <Input
@@ -148,14 +148,14 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           />
         </Field>
         <Field
-          label="Lock a prompt preset"
-          description="Switching to this connection selects this preset. You can still switch the preset afterward."
+          label="Select a prompt preset"
+          about="Switching to this connection selects this preset. You can still switch the preset afterward."
         >
           <Select
             items={[
               {
                 value: "none",
-                label: "No lock",
+                label: "Keep current preset",
                 description: "Switching to this connection leaves the preset as it is."
               },
               ...selectablePresets(presets.live, presets.archived, values.preset)
@@ -165,7 +165,11 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           />
         </Field>
         <div className="grid gap-5 sm:grid-cols-2">
-          <Field label="Concurrent requests" description="Empty: no limit." error={shown(problems.maxConcurrent)}>
+          <Field
+            label="Concurrent requests"
+            about="Limit how many requests can run at once. Others wait. Empty means no limit."
+            error={shown(problems.maxConcurrent)}
+          >
             <Input
               value={values.maxConcurrent}
               onValueChange={(maxConcurrent) => edit({ maxConcurrent })}
@@ -174,7 +178,7 @@ export function SettingsSection({ connection, kinds }: ConnectionSectionProps) {
           </Field>
           <Field
             label="Cache lifetime (seconds)"
-            description="Empty: the model's default."
+            about="How long the provider keeps a prompt ready for cheaper reuse. Empty uses the model’s default."
             error={shown(problems.cacheTtlS)}
           >
             <Input value={values.cacheTtlS} onValueChange={(cacheTtlS) => edit({ cacheTtlS })} inputMode="numeric" />
@@ -363,7 +367,7 @@ export function KeySection(props: ConnectionSectionProps) {
             {connection.hasKey && (
               <Button
                 variant="ghost"
-                hint="The connection sends no key afterwards. You confirm first."
+                hint="Send requests without a key. You’ll confirm first."
                 onClick={() => setDialog("remove")}
               >
                 Remove key
@@ -420,7 +424,7 @@ export function KeySection(props: ConnectionSectionProps) {
         open={dialog === "remove"}
         onOpenChange={close}
         title="Remove the key?"
-        description="The connection sends no key afterwards. A key typed for this connection alone is deleted; a saved key stays saved."
+        description="This connection will send requests without a key. A key used only here is deleted; a shared key stays available."
         confirmLabel="Remove key"
         pending={remove.pending}
         onConfirm={async () => {
@@ -642,7 +646,7 @@ export function RouteSection({ connection }: ConnectionSectionProps) {
             label="Proxy URL"
             description={
               connection.proxyMode === "custom"
-                ? "A proxy is set. It's never shown, since it may hold a password: enter it again to change it."
+                ? "A proxy is set. Enter its URL again to change it; any password stays hidden."
                 : "For example socks5://user:password@host:1080."
             }
           >
@@ -672,7 +676,7 @@ export function TestSection({ connection }: ConnectionSectionProps) {
     <Card>
       <CardHeader
         title="Check the connection"
-        about="Check the connection works: it fetches the model list and reports the route taken."
+        about="See whether the connection works and which models it offers."
         actions={
           <Button
             pending={action.pending}

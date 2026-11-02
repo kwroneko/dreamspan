@@ -110,7 +110,7 @@ test("dialogs work from the keyboard and give focus back", async ({ page }) => {
   await page.keyboard.press("Enter")
   const dialog = page.getByRole("dialog", { name: "New user" })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByLabel("Handle")).toBeFocused()
+  await expect(dialog.getByLabel("Handle", { exact: true })).toBeFocused()
   await page.keyboard.press("Escape")
   await expect(dialog).toBeHidden()
   await expect(trigger).toBeFocused()

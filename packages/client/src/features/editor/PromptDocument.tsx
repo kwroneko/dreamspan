@@ -259,11 +259,12 @@ function PromptOptions({ store, path, prompt }: { store: EditorStore; path: Fiel
       </div>
       {/* ST's generation types (ST's Triggers), beside the condition (DESIGN §2.2). */}
       <TriggersField store={store} path={[...path, "injection_trigger"]} label="Generation types" items={TRIGGERS} />
-      <Tooltip label="A character card's own system prompt or post-history instructions won't take this prompt's place">
-        <span className="self-start">
-          <SwitchField store={store} path={[...path, "forbid_overrides"]} label="A card can't replace it" />
-        </span>
-      </Tooltip>
+      <SwitchField
+        store={store}
+        path={[...path, "forbid_overrides"]}
+        label="A card can't replace it"
+        about="Keep this prompt even when a character card supplies its own system prompt or post-history instructions."
+      />
     </div>
   )
 }

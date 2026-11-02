@@ -115,7 +115,7 @@ function FamilyDialog({ entityId, onClose }: CardSurfaceContext & { onClose: () 
       open
       onOpenChange={(open) => !open && onClose()}
       title="Forks"
-      description="Every card in this family. Each card is independent; editing one leaves the others as they are."
+      description="Edit each card independently. Changes to one leave the others as they are."
     >
       <AsyncView atom={atom} loading="Loading the family…">
         {(family) => <FamilyTree family={family} entityId={entityId} />}
@@ -378,7 +378,7 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
       open
       onOpenChange={(open) => !open && !action.pending && onClose()}
       title="Mark as a fork of…"
-      description="Records the parent only. Neither card’s content changes. Unlink removes the relationship."
+      description="Link this card to a parent without changing either card’s text. You can unlink them later."
     >
       <Input
         aria-label="Find a parent card"
@@ -448,7 +448,7 @@ function CompareDialog({ family, member, onClose }: { family: CardFamily; member
       open
       onOpenChange={(open) => !open && onClose()}
       title={member.parentEntityId ? "Compare with parent" : "Compare with family"}
-      description="Read-only comparison of saved cards. Drafts are not included. Removed text is from the selected card; added text is from this card."
+      description="Compare the last saved versions; drafts are left out. Removed text is from the selected card, added text from this card."
     >
       <Field label="Compare this card with">
         <Select

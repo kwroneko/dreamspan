@@ -39,8 +39,8 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   await steps.getByRole("link", { name: "Connect a model" }).click()
   await expect(page).toHaveURL(/\/settings\/connections\/new$/)
 
-  await page.getByLabel("Name").fill("First run")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("First run")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   // The kind takes no key: left empty, none is sent.
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Found 2 models.")).toBeVisible()
@@ -64,9 +64,9 @@ test("the empty home leads to a connection, whose first model becomes the defaul
   // A second connection leaves the chosen default alone. Its name, left empty, is the server's.
   const before = await admin((api) => api.GetGenerationDefaults())
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   const host = new URL(provider.baseUrl).host
-  await expect(page.getByLabel("Name")).toHaveAttribute("placeholder", host)
+  await expect(page.getByLabel("Name", { exact: true })).toHaveAttribute("placeholder", host)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: host, exact: true })).toBeVisible()
   await expect(page.getByText("Found 2 models.")).toBeVisible()

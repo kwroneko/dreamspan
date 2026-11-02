@@ -130,7 +130,7 @@ function ChatCardForkDialog({
       open
       onOpenChange={(open) => !open && !action.pending && onClose()}
       title="Fork for this chat"
-      description={`Makes an independent copy of ${card.name} and its notes. Unsaved changes to them move to the copy, but the names, which you set here; the original goes back to its last revision. This branch uses the copy; existing branches keep their cards. Editing the copy changes every chat that uses it.`}
+      description={`Use an independent copy of ${card.name} and its notes in this branch. Unsaved changes move to the copy; the original returns to its last save. Set the copy’s names below. Other branches keep their cards.`}
     >
       <form
         className="flex flex-col gap-4"
@@ -176,13 +176,10 @@ function ChatCardForkDialog({
         <Field label="Display name">
           <Input required value={name} onChange={(event) => setName(event.currentTarget.value)} />
         </Field>
-        <Field
-          label="Version (shown as subtitle)"
-          description="Change the version or display name to tell this fork apart."
-        >
+        <Field label="Version (shown as subtitle)" about="Change the version or display name to tell this fork apart.">
           <Input autoFocus value={version} onChange={(event) => setVersion(event.currentTarget.value)} />
         </Field>
-        <Field label="In-character name" description="Used in prompts and {{char}}. Empty uses the display name.">
+        <Field label="In-character name" about="Used in prompts and {{char}}. Empty uses the display name.">
           <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
         </Field>
         <p className="text-xs text-muted">

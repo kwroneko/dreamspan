@@ -237,8 +237,11 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   const details = page.getByRole("group", { name: "Message details" })
   for (const name of ["Date and time", "Model icon", "Model name", "Message number", "Generation time", "Token count"])
     await expect(details.getByRole("switch", { name })).toBeChecked()
-  await details.getByRole("switch", { name: "Model icon" }).hover()
-  await expect(tip(page, "Turn off to hide")).toBeVisible()
+  await expect(details.getByRole("switch", { name: "Model icon", exact: true })).toHaveAccessibleDescription(
+    "The mark of the lab whose model wrote a reply, before the model's name."
+  )
+  await details.getByRole("button", { name: "About Model icon", exact: true }).hover()
+  await expect(tip(page, "The mark of the lab")).toBeVisible()
   await shoot(page, "05-settings-1440")
   for (const name of ["Date and time", "Model icon", "Message number", "Generation time", "Token count"]) {
     await details.getByRole("switch", { name }).click()

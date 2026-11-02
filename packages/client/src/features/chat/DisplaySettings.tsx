@@ -182,7 +182,7 @@ export function DisplaySettings() {
           checked={viewer.prefs.outputMacros}
           disabled={!viewer.ready || viewer.pending}
           onCheckedChange={(outputMacros) => void viewer.change({ outputMacros })}
-          description="Resolve macros such as {{user}} in finished model output. Human messages stay as written."
+          about="Show names and other values in place of macros such as {{user}} in completed replies. Your messages stay as written."
         >
           Expand macros in model output
         </Switch>
@@ -190,7 +190,7 @@ export function DisplaySettings() {
           checked={viewer.prefs.displayRegex}
           disabled={!viewer.ready || viewer.pending}
           onCheckedChange={(displayRegex) => void viewer.change({ displayRegex })}
-          description="On unless you turn it off. Runs display-only scripts after macros: your global scripts, then the current preset's, then the message's character's. A preset's or a card's scripts run only once you allow them in its editor. Rules can apply to human and model messages; prompt-only scripts and scripts that rewrite saved messages aren't run here."
+          about="Apply regex scripts to how messages look. Preset and card scripts need your approval first. Scripts that change prompts or saved messages have their own controls."
         >
           Use display regex scripts
         </Switch>

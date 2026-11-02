@@ -87,7 +87,8 @@ function TokensInput({
   onCommit,
   disabled,
   invalid,
-  optional = false
+  optional = false,
+  about
 }: {
   label: string
   value: number | null
@@ -95,6 +96,7 @@ function TokensInput({
   disabled: boolean
   invalid: boolean
   optional?: boolean
+  about?: string
 }) {
   const [text, setText] = useState(value === null ? "" : String(value))
   const [problem, setProblem] = useState<string | null>(null)
@@ -118,7 +120,7 @@ function TokensInput({
     setProblem(await onCommit(n))
   }
   return (
-    <Field label={label} error={problem} className="w-36">
+    <Field label={label} about={about} error={problem} className="w-36">
       <Input
         inputMode="numeric"
         value={text}
@@ -345,7 +347,7 @@ export function LcmFields({
           checked={resolved.withNotes}
           disabled={disabled}
           onCheckedChange={(withNotes) => void choose({ withNotes })}
-          description="Off, a summary request sends none of the chat's notes: they can tell of events after the messages it summarizes."
+          about="Send the chat’s notes when summarizing too. Leave off if they describe events after the messages being summarized."
         >
           Include notes in summary requests
         </Switch>
@@ -423,16 +425,14 @@ export function LcmFields({
           <div className="flex flex-col gap-1">
             <TokensInput
               label="Chunk size"
+              about="Choose how many tokens of messages one summary covers. Empty chooses automatically."
               value={resolved.leafInput}
               optional
               disabled={disabled}
               invalid={fit.some((m) => m.field === "leafInput")}
               onCommit={(value) => write({ leafInput: value })}
             />
-            <p className="text-sm text-muted">
-              Tokens of messages one summary covers. Empty is automatic: half the room between the recent target and
-              maximum, at most 4,000 (now {tokens(chunk)}).
-            </p>
+            <p className="text-sm text-muted">Chunk size now: {tokens(chunk)} tokens.</p>
             <Origin
               scope={scope}
               from={resolved.from.leafInput ?? "builtin"}
@@ -446,14 +446,14 @@ export function LcmFields({
           <div className="flex flex-col gap-1">
             <TokensInput
               label="Summary length"
+              about="Choose the length to ask for, in tokens. The instruction uses an approximate word count through {{words}}."
               value={resolved.leafTarget}
               disabled={disabled}
               invalid={false}
               onCommit={(value) => write({ leafTarget: value })}
             />
             <p className="text-sm text-muted">
-              Tokens per summary. The instruction asks for it in words, about 0.75 a token: its {"{{words}}"} is{" "}
-              {tokens(summaryWords(resolved.leafTarget))} now.
+              {"{{words}}"} now: {tokens(summaryWords(resolved.leafTarget))}.
             </p>
             <Origin
               scope={scope}

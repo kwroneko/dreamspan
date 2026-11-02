@@ -44,25 +44,25 @@ export const END_OF_REQUEST: ReadonlyArray<EndOfRequestText> = [
   {
     identifier: GROUP_NUDGE,
     label: "When a character speaks",
-    hint: "Sent last when the model writes as a card you don't play.",
+    hint: "Tell the model how to write a character you don’t play.",
     content: TURN_TEXT
   },
   {
     identifier: IMPERSONATION_PROMPT,
     label: "When your card speaks",
-    hint: "Sent last instead when the model writes as a card you play.",
+    hint: "Tell the model how to write a character you play.",
     content: TURN_TEXT
   },
   {
     identifier: CONTINUE_NUDGE,
     label: "When you continue a reply",
-    hint: "Sent last instead when Continue writes on from a reply and the model doesn't take a prefill. The reply so far goes just before it, as the model's own message.",
+    hint: "Ask the model to carry on from the reply so far, when it can’t use a prefill.",
     content: CONTINUE_TEXT
   },
   {
     identifier: DIRECTION_PROMPT,
     label: "When you give guidance",
-    hint: "Sent on a new line after the turn text when you give guidance; {{direction}} is your guidance's text.",
+    hint: "Guide what happens next. {{direction}} is replaced with the guidance you enter.",
     content: DIRECTION_TEXT
   }
 ]

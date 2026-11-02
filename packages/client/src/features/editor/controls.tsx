@@ -7,11 +7,11 @@ import { type ReactNode, useCallback, useEffect, useRef, useState, useSyncExtern
 import { Button, buttonClass } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, Input, Textarea } from "../../ui/Field.tsx"
+import { Field, Fieldset, Input, Textarea } from "../../ui/Field.tsx"
 import { Select, type SelectItem } from "../../ui/Select.tsx"
 import { chromeButton } from "../../ui/FieldFrame.tsx"
 import { Alert, Badge } from "../../ui/Surface.tsx"
-import { IconButton, Tooltip } from "../../ui/Tooltip.tsx"
+import { IconButton } from "../../ui/Tooltip.tsx"
 import { scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { ReplayNotice } from "./ReplayNotice.tsx"
 import { CardTextEditor } from "./CardTextEditor.tsx"
@@ -20,29 +20,13 @@ import { draftLabel } from "./fields.ts"
 import { type EditorStore, useDirty, useEditorKind, useEditorState, useHasHistory, useText, useValue } from "./store.ts"
 
 /**
- * A field's label; `hint` says what the field is for, on hover. A setting's shows "edited" while
+ * A field's label. A setting shows "edited" while
  * it has changes; a text field shows that in its box's strip instead (`FieldStatus`).
  */
-function FieldLabel({
-  store,
-  field,
-  label,
-  hint
-}: {
-  store?: EditorStore
-  field?: string
-  label: string
-  hint?: ReactNode
-}) {
+function FieldLabel({ store, field, label }: { store?: EditorStore; field?: string; label: string }) {
   return (
     <span className="flex min-w-0 flex-wrap items-center gap-2">
-      {hint ? (
-        <Tooltip label={hint}>
-          <span className="cursor-help underline decoration-border decoration-dotted underline-offset-4">{label}</span>
-        </Tooltip>
-      ) : (
-        <span>{label}</span>
-      )}
+      <span>{label}</span>
       {store && field !== undefined && <DirtyBadge store={store} field={field} />}
     </span>
   )
@@ -127,6 +111,7 @@ export function TextField({
   path,
   label,
   rows,
+  about,
   description,
   mono = false,
   readOnly = false,
@@ -141,8 +126,9 @@ export function TextField({
   path: FieldPath
   label: string
   rows?: number
+  about?: ReactNode
   description?: ReactNode
-  /** What the field is for, on hover over its label. */
+  /** Help beside the label; alias retained for card text fields. */
   hint?: ReactNode
   /** At the start of the strip inside the box, after "edited": the field's token count, say. */
   aside?: ReactNode
@@ -217,9 +203,11 @@ export function TextField({
         />
       )}
       <Field
-        label={labelHidden ? label : <FieldLabel label={label} hint={hint} />}
-        labelHidden={labelHidden}
+        label={labelHidden ? label : <FieldLabel label={label} />}
         description={description}
+        labelHidden={labelHidden}
+        about={about ?? hint}
+        aboutLabel={label}
       >
         {rows === undefined ? (
           <Input
@@ -331,12 +319,12 @@ export function NumberField({
   integer = false,
   nullable = false,
   optional = false,
-  description
+  about
 }: {
   store: EditorStore
   path: FieldPath
   label: string
-  description?: ReactNode
+  about?: ReactNode
   step?: string
   min?: number
   max?: number
@@ -366,7 +354,7 @@ export function NumberField({
   }
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
+      <Field label={<FieldLabel store={store} field={field} label={label} />} about={about} aboutLabel={label}>
         <Input
           type="number"
           inputMode="decimal"
@@ -390,14 +378,14 @@ export function SwitchField({
   store,
   path,
   label,
-  description,
+  about,
   hint,
   checkbox = false
 }: {
   store: EditorStore
   path: FieldPath
   label: string
-  description?: ReactNode
+  about?: ReactNode
   /** What switching it does, on hover and focus (explain): when the label doesn't say. */
   hint?: string
   checkbox?: boolean
@@ -408,7 +396,8 @@ export function SwitchField({
     <Control
       checked={value}
       onCheckedChange={(checked) => store.setValue(path, checked)}
-      description={description}
+      about={about}
+      aboutLabel={label}
       hint={hint}
     >
       {label}
@@ -453,14 +442,14 @@ export function SelectField<Value extends string>({
   store,
   path,
   label,
-  description,
+  about,
   items,
   fallback
 }: {
   store: EditorStore
   path: FieldPath
   label: string
-  description?: ReactNode
+  about?: ReactNode
   items: ReadonlyArray<SelectItem<Value>>
   /** What an absent value means (a prompt's condition, from its ST triggers). */
   fallback?: Value
@@ -468,7 +457,7 @@ export function SelectField<Value extends string>({
   const value = useValue<Value>(store, path)
   const field = valueField(path)
   return (
-    <Field label={<FieldLabel store={store} field={field} label={label} />} description={description}>
+    <Field label={<FieldLabel store={store} field={field} label={label} />} about={about} aboutLabel={label}>
       <Select items={items} value={value ?? fallback ?? null} onValueChange={(next) => store.setValue(path, next)} />
     </Field>
   )
@@ -492,10 +481,12 @@ export function TriggersField({
   const value = useValue<ReadonlyArray<string> | undefined>(store, path) ?? []
   const field = valueField(path)
   return (
-    <fieldset className="flex min-w-0 flex-col gap-1.5">
-      <legend className="mb-1.5 text-sm font-medium text-text">
-        <FieldLabel store={store} field={field} label={label} />
-      </legend>
+    <Fieldset
+      legend={<FieldLabel store={store} field={field} label={label} />}
+      aboutLabel={label}
+      about="Choose which kinds of reply include this text. None selected means all kinds. New version includes swipes and regenerations; Summary is a summary request."
+      className="gap-1.5"
+    >
       <div className="flex flex-wrap gap-x-4 gap-y-1.5">
         {items.map((item) => (
           <Checkbox
@@ -514,10 +505,9 @@ export function TriggersField({
         ))}
       </div>
       <p className="text-xs text-muted">
-        {value.length === 0 ? "Sent for every type." : "Sent only for the types ticked."} A new version is a swipe or a
-        regenerate; a summary is quiet.
+        {value.length === 0 ? "Sent for every type." : "Sent only for the types ticked."}
       </p>
-    </fieldset>
+    </Fieldset>
   )
 }
 

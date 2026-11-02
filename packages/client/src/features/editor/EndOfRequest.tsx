@@ -24,9 +24,9 @@ export function EndOfRequest({ store }: { store: EditorStore }) {
               store={store}
               path={["prompts", `identifier=${text.identifier}`, "content"]}
               label={text.label}
+              about={text.hint}
               rows={2}
             />
-            <p className="text-xs text-muted">{text.hint}</p>
           </section>
         ))}
       </div>

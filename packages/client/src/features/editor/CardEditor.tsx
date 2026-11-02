@@ -168,8 +168,7 @@ function Tags({ store }: { store: EditorStore }) {
     setTag("")
   }
   return (
-    <Fieldset legend="Tags">
-      <p className="text-sm text-muted">{HINTS.tags}</p>
+    <Fieldset legend="Tags" about={HINTS.tags}>
       {/* The chips, then a short field the width of what's typed with a + at their end (owner,
           2026-11-02): Enter or + adds. */}
       <ul aria-label="Tags" className="flex flex-wrap items-center gap-2">
@@ -241,7 +240,7 @@ function Talkativeness({ store }: { store: EditorStore }) {
   return (
     <Slider
       label="Talkativeness in group chats"
-      description="Their chance of replying when the next speaker is picked for you: someone named in the message replies first, then each by this chance. 50% when the card doesn't say."
+      about="Choose how often they reply in a group. A character named in the message answers first; otherwise this chance applies. Default: 50%."
       value={dragged ?? value}
       min={0}
       max={1}

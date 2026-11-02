@@ -323,7 +323,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
       <div className="flex flex-wrap gap-2">
         <Button
           pending={open.pending}
-          hint="Opens the whole text, to copy what you need."
+          hint="Read the full text and copy what you need."
           onClick={async () => {
             const result = await open.run((client) => client("GetRecoveredText", { id: text.id }))
             if (result.ok) setFull(result.value.content)
@@ -346,7 +346,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
             }
           }}
           title={`Recovered from ${source}`}
-          description="Copy what you need: it isn't put back anywhere by itself."
+          description="Copy any text you want to keep. This doesn’t restore it to its original place."
         >
           <Textarea textActions aria-label="Recovered text" readOnly rows={10} value={full} />
           <DialogActions>
@@ -369,7 +369,7 @@ function TextRow({ text, onGone }: { text: RecoveredText; onGone: (text: Recover
         open={confirming}
         onOpenChange={setConfirming}
         title="Delete this text for good?"
-        description="It was kept because it would otherwise have been lost. This can't be undone."
+        description="This recovered text will be deleted permanently. This can’t be undone."
         confirmLabel="Delete for good"
         pending={remove.pending}
         onConfirm={async () => {
@@ -405,7 +405,7 @@ function RecoveredTexts({ first }: { first: ReadonlyArray<RecoveredText> }) {
   if (shown.length === 0) {
     return (
       <EmptyState title="No recovered text">
-        <p>Text you wiped while writing, then sent or saved, and drafts you discarded, are kept here.</p>
+        <p>Find discarded drafts and text removed while writing here.</p>
       </EmptyState>
     )
   }

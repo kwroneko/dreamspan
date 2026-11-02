@@ -76,8 +76,7 @@ export function MessageDetailSettings() {
                 { messageDetails: { [detail.id]: next } }
               )
             }
-            description={detail.description}
-            hint={`${on ? "Turn off to hide" : "Turn on to show"} it on every message, on all your devices.`}
+            about={detail.description}
           >
             {detail.label}
           </Switch>

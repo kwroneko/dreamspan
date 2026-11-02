@@ -123,9 +123,7 @@ export function ChatDefaultsPage() {
                   </Link>
                   .
                 </>
-              ) : (
-                "The model that writes replies."
-              )
+              ) : undefined
             }
           >
             <Select
@@ -137,7 +135,7 @@ export function ChatDefaultsPage() {
           </Field>
           <Field
             label="Default preset"
-            description="Without one, the built-in prompt preset is used. Switching connections may select a locked preset."
+            about="Choose how prompts are written. Empty uses the built-in preset. A connection may select its own preset."
           >
             <Select
               items={[
@@ -151,7 +149,7 @@ export function ChatDefaultsPage() {
           </Field>
           <Field
             label="Refusal judge"
-            description="A model that reads replies and summaries and says whether they are refusals. Without one, only the provider's own refusals are caught."
+            about="Detect refusals in replies and summaries with this model. None catches only refusals reported by the provider."
           >
             <Select
               items={items}
@@ -220,7 +218,7 @@ export function SummaryDefaults({
     <Card>
       <CardHeader title="Summaries" />
       <section aria-label="Models for summaries" className="flex flex-col gap-4">
-        <Field label="Fallback summarizer" description="Tried once when a summary keeps failing on its own model.">
+        <Field label="Fallback summarizer" about="Tried once when a summary keeps failing on its own model.">
           <Select
             items={items}
             value={defaults ? choice(defaults.lcm?.fallback) : null}
@@ -232,13 +230,13 @@ export function SummaryDefaults({
           checked={account.enabled}
           disabled={!defaults}
           onCheckedChange={(enabled) => void writeLcm({ enabled })}
-          description="Imported chats start with summaries off, whatever this says."
+          about="Keep the story in context as new chats grow. Imported chats start with summaries off."
         >
           New chats summarize older messages
         </Switch>
         <Field
           label="Summarization instruction"
-          description="What new chats ask for when summarizing. {{words}} is the summary's length; empty uses the built-in instruction."
+          about="What new chats ask for when summarizing. {{words}} is the summary's length; empty uses the built-in instruction."
         >
           <Textarea
             textActions
@@ -261,7 +259,7 @@ export function SummaryDefaults({
           ) : (
             unsaved && (
               <span role="status" className="text-sm text-muted">
-                Not saved yet: kept as a server draft until you save it.
+                Not saved yet. Your draft is kept.
               </span>
             )
           )}

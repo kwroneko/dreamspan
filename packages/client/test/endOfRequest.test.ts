@@ -17,8 +17,14 @@ vi.mock("../src/features/editor/controls.tsx", () => ({
   NumberField: () => null,
   SelectField: () => null,
   SwitchField: () => null,
-  TextField: ({ store, path, label }: { store: EditorStore; path: FieldPath; label: string }) =>
-    createElement("label", { "data-path": path.join("/") }, label, createElement("textarea", null, store.text(path)))
+  TextField: ({ store, path, label, about }: { store: EditorStore; path: FieldPath; label: string; about?: string }) =>
+    createElement(
+      "label",
+      { "data-path": path.join("/") },
+      label,
+      createElement("textarea", null, store.text(path)),
+      createElement("span", { hidden: true }, about)
+    )
 }))
 
 // Server rendering has no subscriptions: the hooks read the store directly.
@@ -87,7 +93,7 @@ const defaults = [
 ]
 
 describe("the End of request section", () => {
-  it("shows the four texts, labelled, each with when it's sent, and nothing to move, delete or condition", () => {
+  it("shows the four labelled texts with help, and nothing to move, delete or condition", () => {
     const html = renderToStaticMarkup(createElement(EndOfRequest, { store: storeOf(defaults) }))
     expect(html).toContain("End of request")
     const fields = [...html.matchAll(/data-path="([^"]+)">([^<]+)</g)].map((m) => [m[1], m[2]])
@@ -98,12 +104,10 @@ describe("the End of request section", () => {
       ["prompts/identifier=directionPrompt/content", "When you give guidance"]
     ])
     expect(html).toContain("[As {{speaker}}.]")
-    expect(html).toContain("Sent last when the model writes as a card you don&#x27;t play.")
-    expect(html).toContain("Sent last instead when the model writes as a card you play.")
-    expect(html).toContain(
-      "Sent last instead when Continue writes on from a reply and the model doesn&#x27;t take a prefill."
-    )
-    expect(html).toContain("Sent on a new line after the turn text when you give guidance")
+    expect(html).toContain("Tell the model how to write a character you don’t play.")
+    expect(html).toContain("Tell the model how to write a character you play.")
+    expect(html).toContain("Ask the model to carry on from the reply so far, when it can’t use a prefill.")
+    expect(html).toContain("Guide what happens next.")
     for (const control of ["Delete", "Condition", "Generation types", 'role="switch"', "Drag"])
       expect(html).not.toContain(control)
   })

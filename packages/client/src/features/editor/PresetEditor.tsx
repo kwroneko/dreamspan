@@ -35,11 +35,8 @@ function JoinWrapper({ store, which }: { store: EditorStore; which: "card_join_p
       label={which === "card_join_prefix" ? "Before each character's part" : "After each character's part"}
       rows={2}
       mono
-      description={
-        stored === undefined
-          ? `Not set: ${JSON.stringify(fallback)} is used. {{char}} is the character, <FIELDNAME> the field.`
-          : "{{char}} is the character, <FIELDNAME> the field. Empty: nothing."
-      }
+      about="{{char}} is the character’s name; <FIELDNAME> is the name of the part, such as Description. Empty adds nothing."
+      description={stored === undefined ? `Default: ${JSON.stringify(fallback)}` : undefined}
     />
   )
 }
@@ -102,20 +99,24 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
       <Card>
         <CardHeader title="Text and context" />
         <div className="flex flex-col gap-3">
-          <SwitchField store={store} path={["pin_examples"]} label="Pin example dialogues" />
-          <p className="text-sm text-muted">
-            Give examples room before chat history. Off: history takes priority. Examples still need to fit the context
-            limit.
-          </p>
-          <SwitchField store={store} path={["strip_examples"]} label="Strip example dialogues" />
-          <p className="text-sm text-muted">
-            Send no example dialogues, including lorebook examples. This takes priority over pinning.
-          </p>
-          <SwitchField store={store} path={["collapse_newlines"]} label="Collapse blank lines in character fields" />
-          <p className="text-sm text-muted">
-            Replace repeated newlines with one after expanding character fields. Saved messages and preset prompts keep
-            their blank lines.
-          </p>
+          <SwitchField
+            store={store}
+            path={["pin_examples"]}
+            label="Pin example dialogues"
+            about="Give examples room before chat history. Off gives history priority. Examples must still fit the context limit."
+          />
+          <SwitchField
+            store={store}
+            path={["strip_examples"]}
+            label="Strip example dialogues"
+            about="Leave out all example dialogues, including lorebook examples, even when pinned."
+          />
+          <SwitchField
+            store={store}
+            path={["collapse_newlines"]}
+            label="Collapse blank lines in character fields"
+            about="Remove extra blank lines from character descriptions sent to the model. Messages and preset prompts keep their blank lines."
+          />
         </div>
       </Card>
       <Card>
@@ -134,7 +135,7 @@ export function PresetSettings({ store, call }: { store: EditorStore; call: Call
             store={store}
             path={["prefill", "continue_postfix"]}
             label="After a continued message"
-            description="For a model that takes no prefill: what goes between the reply so far and what Continue writes, unless the reply already ends in a space or a line break."
+            about="For a model that takes no prefill: what goes between the reply so far and what Continue writes, unless the reply already ends in a space or a line break."
             items={POSTFIXES}
           />
         </div>

@@ -2,7 +2,7 @@
 // trigger. An alert dialog asks for a decision, so it doesn't close on an outside click.
 import { AlertDialog as BaseAlertDialog } from "@base-ui/react/alert-dialog"
 import { Dialog as BaseDialog } from "@base-ui/react/dialog"
-import type { ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { Button } from "./Button.tsx"
 
 const backdrop =
@@ -32,13 +32,34 @@ export function Dialog({
   initialFocus?: (() => HTMLElement | null) | undefined
   children: ReactNode
 }) {
+  const content = useRef<HTMLDivElement>(null)
+  const focusOnOpen = () => {
+    if (initialFocus) return initialFocus() ?? true
+    const root = content.current
+    // Adding help beside the first field must not take its initial focus. Explicit
+    // autofocus and dialogs whose first control isn't help keep Base UI's defaults.
+    if (!root || (document.activeElement !== root && root.contains(document.activeElement))) return true
+    const controls = [
+      ...root.querySelectorAll<HTMLElement>("button, input, textarea, select, a[href], [tabindex]")
+    ].filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.matches(":disabled") &&
+        !element.closest("[hidden], [inert]") &&
+        element.getClientRects().length > 0
+    )
+    return controls[0]?.hasAttribute("data-about-hint")
+      ? (controls.find((element) => !element.hasAttribute("data-about-hint")) ?? true)
+      : true
+  }
   return (
     <BaseDialog.Root open={open} onOpenChange={(next) => onOpenChange(next)}>
       <BaseDialog.Portal>
         <BaseDialog.Backdrop className={backdrop} />
         <BaseDialog.Popup
+          ref={content}
           finalFocus={finalFocus}
-          {...(initialFocus ? { initialFocus: () => initialFocus() ?? true } : {})}
+          initialFocus={focusOnOpen}
           className={wide ? `${popup} sm:max-w-5xl` : popup}
         >
           <div className="flex flex-col gap-1">

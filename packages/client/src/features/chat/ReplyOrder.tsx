@@ -33,7 +33,7 @@ export function ReplyOrderSection({ session }: { session: ChatSession }) {
     <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
       <Field
         label="Who replies"
-        description="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
+        about="Who replies to what you send when you haven't picked anyone under Next, with two or more characters here."
         className="w-full sm:w-72"
       >
         <Select items={items} value={current} onValueChange={(order) => void choose(order)} />
@@ -69,7 +69,7 @@ export function OneReplySection({ session }: { session: ChatSession }) {
         checked={on}
         disabled={pending !== null}
         onCheckedChange={(next) => void change(next)}
-        description="Each message you send, or Reply now, gets one reply, so you can read or edit it before the next. Off: everyone Who replies picks answers, one after another."
+        about="Each message you send, or Reply now, gets one reply, so you can read or edit it before the next. Off: everyone Who replies picks answers, one after another."
       >
         One reply at a time
       </Switch>
@@ -93,7 +93,7 @@ export function PendingReplyFrom({ pending }: { pending: PendingChat }) {
   const value = (repliers.find((item) => item.card.entityId === state.replier) ?? repliers[0]!).card.entityId
   return (
     <section aria-label="Who replies" className="flex flex-col gap-2 border-t border-border pt-3">
-      <Field label="Reply from" description="Who answers the first message you send." className="w-full sm:w-72">
+      <Field label="Reply from" about="Who answers the first message you send." className="w-full sm:w-72">
         <Select
           items={repliers.map(({ card }) => ({
             value: card.entityId as string,

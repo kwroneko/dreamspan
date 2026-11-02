@@ -15,6 +15,7 @@ export function AboutHint({ heading, children }: { heading: string; children: Re
       <BaseTooltip.Trigger
         render={
           <BaseButton
+            data-about-hint=""
             aria-label={`About ${heading}`}
             aria-describedby={id}
             // A tap opens it too, where nothing hovers; a tap elsewhere closes it.

@@ -81,7 +81,7 @@ function ValueInput({
   return (
     <Field
       label="New value"
-      description={[
+      about={[
         input.min !== undefined && input.max !== undefined ? `From ${input.min} to ${input.max}.` : "",
         input.nullable ? "Empty: not set, so the default applies." : ""
       ]
@@ -150,9 +150,9 @@ export function MassEditDialog({
       open
       onOpenChange={(open) => !open && onClose()}
       title={`Change for ${entries.length} selected ${entries.length === 1 ? "entry" : "entries"}`}
-      description="Sets one setting on every selected entry; their other settings stay as they are. It's an unsaved change like any edit: Save keeps it, Revert undoes it."
+      description="Change one setting for every selected entry. Save keeps the change; Revert undoes it."
     >
-      <Field label="Setting" description={setting.description}>
+      <Field label="Setting" about={setting.description}>
         <NativeSelect
           ariaLabel="Setting"
           items={settings.map((s) => ({ value: s.id, label: s.label, description: s.description }))}

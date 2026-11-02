@@ -26,7 +26,7 @@ export function RevisionsDialog({
       open
       onOpenChange={(open) => !open && onClose()}
       title={title}
-      description="Restoring makes a new revision with that content: the revisions after it stay."
+      description="Restore an earlier version. Later saves stay in History."
     >
       <CardRevisionBrowser store={store} call={call} settingLines={settingLines} />
       <DialogActions>

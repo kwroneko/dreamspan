@@ -51,15 +51,12 @@ function OwnPasswordForm() {
       {asksCurrent && (
         <Field
           label="Current password"
-          description={session.via === "session" ? undefined : "Leave empty if you don't have one yet."}
+          about={session.via === "session" ? undefined : "Leave empty if you don't have one yet."}
         >
           <PasswordInput name="current" autoComplete="current-password" />
         </Field>
       )}
-      <Field
-        label="New password"
-        description="At least 8 characters. Every session of yours ends, so you log in again."
-      >
+      <Field label="New password" about="Use at least 8 characters. You’ll need to log in again on every device.">
         <PasswordInput name="next" autoComplete="new-password" onEmptyChange={setNextEmpty} />
       </Field>
       <ErrorAlert error={action.error} title="The password wasn't changed" />
@@ -103,12 +100,12 @@ const roleItems = [
   {
     value: "user" as const,
     label: "User",
-    description: "Their own characters, chats and settings, and nobody else’s."
+    description: "Can use their own characters, chats and settings."
   },
   {
     value: "admin" as const,
     label: "Admin",
-    description: "Also creates and disables accounts, sets passwords and changes the server’s network settings."
+    description: "Can also manage accounts, passwords and the server’s network settings."
   }
 ]
 
@@ -130,16 +127,16 @@ function CreateUserDialog({ onOpenChange }: { onOpenChange: (open: boolean) => v
   return (
     <Dialog open onOpenChange={onOpenChange} title="New user" description="They log in with this handle and password.">
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="Handle" description="Letters, digits, '.', '_' and '-'.">
+        <Field label="Handle" about="Letters, digits, '.', '_' and '-'.">
           <Input value={handle} onValueChange={setHandle} autoCapitalize="none" spellCheck={false} autoComplete="off" />
         </Field>
-        <Field label="Display name" description="Optional.">
+        <Field label="Display name (optional)">
           <Input value={displayName} onValueChange={setDisplayName} autoComplete="off" />
         </Field>
         <Field label="Role">
           <Select items={roleItems} value={role} onValueChange={setRole} />
         </Field>
-        <Field label="Password" description="At least 8 characters.">
+        <Field label="Password" about="At least 8 characters.">
           <PasswordInput name="password" autoComplete="new-password" onEmptyChange={setPasswordEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="No user created" />
@@ -171,10 +168,10 @@ function SetPasswordDialog({ user, onOpenChange }: { user: UserAccount; onOpenCh
       open
       onOpenChange={onOpenChange}
       title={`Set ${user.displayName}'s password`}
-      description="Their sessions end, so they log in again with the new one."
+      description="They’ll need to log in again on every device with the new password."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="New password" description="At least 8 characters.">
+        <Field label="New password" about="At least 8 characters.">
           <PasswordInput name="password" autoComplete="new-password" onEmptyChange={setPasswordEmpty} />
         </Field>
         <ErrorAlert error={action.error} title="The password wasn't set" />
@@ -245,7 +242,7 @@ function UserRow({ user, self }: { user: UserAccount; self: UserId }) {
           open
           onOpenChange={close}
           title={`Disable ${user.displayName}?`}
-          description="Their sessions end and they can't log in until enabled again. Their data stays."
+          description="They’ll be logged out on every device and can’t log in until enabled again. Their data stays."
           confirmLabel="Disable"
           pending={toggle.pending}
           onConfirm={() => void setDisabled(true)}

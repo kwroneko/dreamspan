@@ -26,7 +26,11 @@ function CapacityField({ field, label, value }: { field: keyof BinLimits; label:
         if (valid) void action.run((client) => client("ChangeBinLimit", { key: field, value: number }), ["bin.limits"])
       }}
     >
-      <Field label={label} className="min-w-0 flex-1">
+      <Field
+        label={label}
+        about="Limit how much this section keeps. Older eligible items are permanently removed when new items need room. Saving a limit removes nothing immediately."
+        className="min-w-0 flex-1"
+      >
         <Input
           type="number"
           min={1}
@@ -49,10 +53,6 @@ export function BinCapacity() {
   return (
     <details className="rounded-md border border-border p-3">
       <summary className="cursor-pointer font-medium">Bin capacity</summary>
-      <p className="my-3 text-sm text-muted">
-        Each section has its own limits. Older eligible entries are permanently removed when new entries need room.
-        Saving a limit removes nothing now.
-      </p>
       <AsyncView atom={limitsAtom} loading="Reading capacities…">
         {(limits) => (
           <div className="grid min-w-0 gap-3 sm:grid-cols-2">

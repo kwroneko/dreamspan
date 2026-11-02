@@ -41,13 +41,14 @@ const SUBSTITUTIONS: ReadonlyArray<{
   {
     value: "raw",
     label: "Expanded",
-    description: "Macros become their values before the pattern runs, so a value's regex characters act as regex."
+    description:
+      "Match the values of macros such as {{char}}. Regex symbols in those values act as part of the pattern."
   },
   {
     value: "escaped",
     label: "Expanded and escaped",
     description:
-      "Macros become their values, matched as plain text. Only what's shown runs it: the prompt and saved messages skip it."
+      "Match macro values as plain text. Works only for display; prompts and saved messages skip these scripts."
   }
 ]
 
@@ -165,19 +166,13 @@ function ScriptCheck({
 }) {
   if (binding.kind === "store")
     return (
-      <SwitchField
-        store={binding.store}
-        path={[...binding.at, field]}
-        label={label}
-        description={description}
-        checkbox
-      />
+      <SwitchField store={binding.store} path={[...binding.at, field]} label={label} about={description} checkbox />
     )
   return (
     <Checkbox
       checked={binding.script[field]}
       onCheckedChange={(checked) => binding.change({ [field]: checked })}
-      description={description}
+      about={description}
     >
       {label}
     </Checkbox>
@@ -185,7 +180,8 @@ function ScriptCheck({
 }
 
 /** What a script's depths count, said under each. */
-const DEPTH_NOTE = "0 is the newest message. Depths limit what's shown and the prompt, not saved messages."
+const DEPTH_NOTE =
+  "Limit the script to messages this far back: 0 is the newest. Empty means any depth. This affects display and prompts; rewriting saved messages ignores depth."
 
 function LocalDepth({
   binding,
@@ -199,7 +195,7 @@ function LocalDepth({
   const value = binding.script[field]
   const [typed, setTyped] = useState<string | null>(null)
   return (
-    <Field label={label} description={DEPTH_NOTE}>
+    <Field label={label} about={DEPTH_NOTE}>
       <Input
         type="number"
         inputMode="numeric"
@@ -222,7 +218,7 @@ function ScriptDepth({ binding, field, label }: { binding: ScriptBinding; field:
       store={binding.store}
       path={[...binding.at, field]}
       label={label}
-      description={DEPTH_NOTE}
+      about={DEPTH_NOTE}
       nullable
       integer
     />
@@ -268,7 +264,7 @@ function PlacementChecks({
         {PLACEMENTS.map(([value, label, description]) => (
           <Checkbox
             key={value}
-            description={description}
+            about={description}
             checked={placement.includes(value)}
             onCheckedChange={(checked) =>
               onChange(
@@ -305,7 +301,7 @@ const effect = (script: RegexScript) =>
       ? "Changes only what's shown; the saved message and the prompt keep its text."
       : script.prompt_only
         ? "Changes only the prompt sent to the model; the saved message keeps its text."
-        : "Rewrites the message itself as it's saved (and while a reply streams); its original text can still be shown and restored."
+        : "Rewrites messages, including streaming replies. You can still view and restore the original text."
 
 /** A short label of the same, for the script's row. */
 const effectBadge = (script: RegexScript) =>
@@ -351,7 +347,7 @@ function TryIt({ script }: { script: RegexScript }) {
       <div className="flex flex-col gap-2 border-t border-border p-3">
         <Field
           label="Sample text"
-          description="The script alone, as on a reply, whatever its options; {{user}} and {{char}} read “User” and “Character”."
+          about="Preview what this script changes in a reply. The test ignores its on/off state, message types and depth limits. {{user}} is “User” and {{char}} is “Character”."
         >
           <Textarea
             rows={3}
@@ -402,11 +398,11 @@ function ScriptFields({ binding, script }: { binding: ScriptBinding; script: Reg
         binding={binding}
         field="run_on_edit"
         label="Run on edits"
-        description="With neither box above ticked, it also rewrites a message's new text when you edit it."
+        description="Apply the script when you edit a message too, if both display and prompt options are off."
       />
       <div className="grid gap-3 sm:grid-cols-2">
-        <ScriptDepth binding={binding} field="min_depth" label="From depth (empty: any)" />
-        <ScriptDepth binding={binding} field="max_depth" label="To depth (empty: any)" />
+        <ScriptDepth binding={binding} field="min_depth" label="From depth" />
+        <ScriptDepth binding={binding} field="max_depth" label="To depth" />
       </div>
       <TryIt script={script} />
     </div>
@@ -586,7 +582,7 @@ export function DocumentRegexScripts({
         open={confirming}
         onOpenChange={setConfirming}
         title={`Allow ${saved.length === 1 ? "this script" : `these ${saved.length} scripts`} to run?`}
-        description="They'll rewrite text in the prompt, in messages as they're saved and on screen as their patterns say. Unsaved changes to them are allowed too once saved."
+        description="Allow these scripts to change prompts, messages or their display, according to their settings. Later saved edits to the scripts are allowed too."
         confirmLabel="Allow them"
         pending={pending}
         onConfirm={() => void setApproval(true)}
