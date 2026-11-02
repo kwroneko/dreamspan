@@ -3,7 +3,7 @@
 // settings, and `groups/*.json` for group chats. Read from ST's public source
 // (`personas.js`, `world-info.js`, `authors-note.js`, `extensions/memory`, `global.d.ts`).
 // Only what the importer maps is read; the rest of `settings.json` is dropped unread.
-import { literalPattern, type ReplySectionSettings } from "@rp/shared/replySections.ts"
+import { type ReplySectionSettings } from "@rp/shared/replySections.ts"
 import { CARD_SCHEMA_VERSION, type CardDoc } from "@rp/shared/docs/card.ts"
 import type { ReportBuilder } from "@rp/shared/importReport.ts"
 import { Predicate } from "effect"
@@ -53,7 +53,7 @@ export interface StSettings {
     readonly pin_examples?: boolean
     readonly strip_examples?: boolean
     readonly collapse_newlines?: boolean
-    /** ST's reasoning formatting (spec/REPLY-SECTIONS.md), its literal tags as patterns. */
+    /** ST's reasoning formatting (spec/REPLY-SECTIONS.md), its tags literal, as written. */
     readonly reply_sections?: ReplySectionSettings
   }
   readonly selectedPreset: string | null
@@ -112,7 +112,8 @@ const numberOr = (value: unknown, fallback: number) =>
 
 /**
  * ST's reasoning formatting (`power_user.reasoning`) as a preset's reply-section setting:
- * Auto-parse is the switch, its prefix and suffix one pair matched literally and with case,
+ * Auto-parse is the switch, its prefix and suffix one literal pair (never a regex: ST has
+ * none there) matched with case,
  * as ST's `startsWith` and `includes` do; Add to prompts sends back the last `max_additions`.
  */
 const replySectionsFrom = (reasoning: Record<string, unknown>): ReplySectionSettings => {
@@ -121,10 +122,7 @@ const replySectionsFrom = (reasoning: Record<string, unknown>): ReplySectionSett
   const additions = Math.trunc(numberOr(reasoning.max_additions, 1))
   return {
     enabled: reasoning.auto_parse === true && prefix !== "" && suffix !== "",
-    pairs:
-      prefix !== "" && suffix !== ""
-        ? [{ open: literalPattern(prefix), close: literalPattern(suffix), case_sensitive: true }]
-        : [],
+    pairs: prefix !== "" && suffix !== "" ? [{ open: prefix, close: suffix, case_sensitive: true }] : [],
     send_back: reasoning.add_to_prompts === true ? Math.min(1000, Math.max(0, additions)) : 0
   }
 }

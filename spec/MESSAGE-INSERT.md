@@ -196,7 +196,7 @@ It's a client feature, `features/chat/insertMessage/`, registered as a message-s
   - **Speaker**: the existing `SpeakerSwitcher.tsx`, listing the cast (any cast member, the user's played cards included). It defaults to the composer's current speaker (who the user writes as) when the anchor is a character's message, else to the character who spoke last before the anchor. That's a convenience only; the user picks.
   - **The text field**: the composer's editor, with an `insert` draft (§3.1), so nothing typed is lost (§3.10).
   - **Generate as ⟨speaker⟩** (the model writes the turn) and **Insert** (writes the text as the speaker). With text in the field, Generate uses it as the direction, as the composer's Generate X does.
-  - **Cancel** keeps the draft. **Discard** clears it.
+  - **Cancel** closes it and sends the typed text to the bin's recovered texts, like every other editor's Cancel (DESIGN §3.1 **[D]**, owner 2026-11-02; this replaces "Cancel keeps the draft, Discard clears it"). There's no separate Discard.
 - **What it tells you before you commit:**
   - The cache line, from `CacheWarmth` for a change at the anchor: "The model will re-read N messages on the next reply (cache: ~X tokens)".
   - "Before the model's history start: the next reply won't see it", when the anchor is before the stepped start.

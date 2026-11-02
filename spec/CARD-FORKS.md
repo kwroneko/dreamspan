@@ -21,7 +21,7 @@ The display name and version together must not match an existing card's (DESIGN 
 
 **4. Finding every fork of a card.** The card panel has a **Forks** section: the whole family as a tree, from the card nobody forked down to every fork of a fork. Each entry shows display name, subtitle, when it was last used and how many chats use it, and opens in one click. The tree is the same from any member.
 
-**5. Telling forks apart elsewhere.** Every place that lists cards shows the display name with the subtitle: the grid, the speaker switcher's tabs, the cast, search results, pickers. Search matches display name, subtitle and in-character name. Forks are separate tiles in the grid.
+**5. Telling forks apart elsewhere.** Every place that lists cards shows the display name with the subtitle: the grid (**[D]** for home, owner reconfirmed 2026-11-02: the card version under the name; only the Archive tab shows other content; DESIGN §4), the speaker switcher's tabs, the cast, search results, pickers. Search matches display name, subtitle and in-character name. Forks are separate tiles in the grid.
 
 **6. Chats of a fork.** Opening a fork lists exactly the chats that use it (CHATS.md), so finding "the chat with that version" is opening that version.
 

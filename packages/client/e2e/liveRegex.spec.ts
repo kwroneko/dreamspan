@@ -185,7 +185,9 @@ for (const width of [1440, 390])
         const thinking = reply.querySelector('[role="region"][aria-label="Thinking in the reply"]')
         return { all: reply.textContent ?? "", thinking: thinking?.textContent ?? null }
       })
-      expect(now.all).toContain("Thinking in the reply…")
+      // The body has started, so the thinking is done ("Thinking…" only before it).
+      expect(now.all).toContain("Thinking in the reply·")
+      expect(now.all).not.toContain("Thinking…")
       expect(now.thinking).toContain("[hidden]")
       for (const word of ["secret", "PRIVATE", "<cot"]) expect(now.all).not.toContain(word)
       if (process.env.SCREENSHOT_DIR)

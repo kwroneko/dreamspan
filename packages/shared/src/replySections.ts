@@ -27,11 +27,17 @@ export const ReplySections = Schema.Struct({
 })
 export type ReplySections = typeof ReplySections.Type
 
-/** One opening/closing pattern pair; matched case-insensitively unless `case_sensitive`. */
+/**
+ * One opening/closing tag pair. The tags are plain text matched exactly, as SillyTavern's
+ * reasoning prefix and suffix are (owner, 2026-11-02), unless `regex` opts the pair into
+ * regular expressions; matched case-insensitively unless `case_sensitive`.
+ */
 export const SectionPair = Schema.Struct({
   open: Schema.String,
   close: Schema.String,
-  case_sensitive: Schema.optionalKey(Schema.Boolean)
+  case_sensitive: Schema.optionalKey(Schema.Boolean),
+  /** Both tags are regular expressions (the assembler's linear-time engine); absent: literal text. */
+  regex: Schema.optionalKey(Schema.Boolean)
 })
 export type SectionPair = typeof SectionPair.Type
 
@@ -44,12 +50,15 @@ export const ReplySectionSettings = Schema.Struct({
 })
 export type ReplySectionSettings = typeof ReplySectionSettings.Type
 
-/** Either spelling opens, either closes: models mix `<think>` and `<thinking>` up. */
-export const DEFAULT_SECTION_PAIR: SectionPair = { open: "<think(?:ing)?>", close: "</think(?:ing)?>" }
+/** Both spellings models use, each closed by its own: literal text, in any case. */
+export const DEFAULT_SECTION_PAIRS: ReadonlyArray<SectionPair> = [
+  { open: "<think>", close: "</think>" },
+  { open: "<thinking>", close: "</thinking>" }
+]
 
 export const DEFAULT_REPLY_SECTIONS: ReplySectionSettings = {
   enabled: true,
-  pairs: [DEFAULT_SECTION_PAIR],
+  pairs: DEFAULT_SECTION_PAIRS,
   send_back: 0
 }
 
@@ -57,7 +66,7 @@ export const DEFAULT_REPLY_SECTIONS: ReplySectionSettings = {
 export const replySectionsOf = (doc: { readonly reply_sections?: ReplySectionSettings | undefined }) =>
   doc.reply_sections ?? DEFAULT_REPLY_SECTIONS
 
-/** A literal tag (SillyTavern's prefix or suffix) as a pattern matching just it. */
+/** A literal tag as a pattern matching just it (how the parser compiles a pair that isn't a regex). */
 export const literalPattern = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")
 
 const sectionText = (section: ReplySection) => section.lead + section.open + section.text + (section.close ?? "")

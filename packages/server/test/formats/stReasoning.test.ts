@@ -7,7 +7,7 @@ import { ReportBuilder } from "@rp/shared/importReport.ts"
 import { originalReply } from "@rp/shared/replySections.ts"
 import { parseStChatPart, stReasoningExtra, type StMessage } from "../../src/formats/stChat.ts"
 import { parseStSettings } from "../../src/formats/stData.ts"
-import { compilePairs } from "../../src/chat/replySections.ts"
+import { compilePairs, parseReply } from "../../src/chat/replySections.ts"
 
 const lines = (...values: ReadonlyArray<unknown>) =>
   new TextEncoder().encode(values.map((v) => JSON.stringify(v)).join("\n"))
@@ -77,11 +77,15 @@ describe("ST reasoning", () => {
     expect(mapped).toEqual({
       reply_sections: {
         enabled: true,
-        pairs: [{ open: "<\\|plan\\|>\n", close: "\n<\\|/plan\\|>", case_sensitive: true }],
+        // As written, never a regex (ST has none there): no `regex` switch.
+        pairs: [{ open: "<|plan|>\n", close: "\n<|/plan|>", case_sensitive: true }],
         send_back: 3
       }
     })
     expect(compilePairs(mapped!.reply_sections!)).toHaveLength(1)
+    const parse = parseReply(compilePairs(mapped!.reply_sections!), undefined, null)
+    const out = [...parse.push("<|plan|>\nPlan.\n<|/plan|>\nBody."), ...parse.end()]
+    expect(out.filter((chunk) => typeof chunk === "string").join("")).toBe("Body.")
     expect(settings({ auto_parse: false, prefix: "<think>", suffix: "</think>" })!.reply_sections).toEqual({
       enabled: false,
       pairs: [{ open: "<think>", close: "</think>", case_sensitive: true }],
