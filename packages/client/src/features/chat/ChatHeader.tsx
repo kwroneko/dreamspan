@@ -152,12 +152,8 @@ function ChatTitle({
               className="group/title flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-focus"
             >
               <span className="truncate">{shown}</span>
-              {/* A narrow header (a phone, or a narrow chat column) has ⋯ Rename instead: the name needs the room. */}
-              <Icon
-                name="edit"
-                size={14}
-                className="shrink-0 text-muted group-hover/title:text-accent @max-[40rem]/header:hidden"
-              />
+              {/* A phone has ⋯ Rename instead: the name needs the room. */}
+              <Icon name="edit" size={14} className="shrink-0 text-muted group-hover/title:text-accent max-sm:hidden" />
             </button>
           </Tooltip>
         </h1>
@@ -354,11 +350,7 @@ function ChatHeaderFrame({
   const navigate = useNavigate()
   return (
     <TooltipProvider>
-      {/* Narrow by the chat column's own width, not the screen's: below 40rem it takes the phone's
-          layout, leaving out the faces, the pin and the rename pencil (the side panel has the cast,
-          the chat lists the pin, ⋯ has Rename), and the branch control gives up room before the
-          name does. */}
-      <header className="@container/header flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-2 sm:gap-3 sm:px-4">
+      <header className="flex min-h-13 w-full min-w-0 shrink-0 items-center gap-2 border-b border-border px-2 py-2 sm:gap-3 sm:px-4">
         {/* The desktop's hidden sidebar comes back from here. */}
         <SlotOutlet slot={sidebarToggle} props={{ place: "header" }} />
         <Tooltip label="All chats">
@@ -382,12 +374,12 @@ function ChatHeaderFrame({
           </button>
         </Tooltip>
         {loading ? (
-          <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none @max-[40rem]/header:hidden" />
+          <span className="size-9 shrink-0 animate-pulse rounded-full bg-surface-raised motion-reduce:animate-none max-sm:hidden" />
         ) : (
           characters.length > 0 && (
             <div
               data-layout-audit-ignore="overlap: Header portraits intentionally form a stack"
-              className="flex shrink-0 -space-x-2 @max-[40rem]/header:hidden"
+              className="flex shrink-0 -space-x-2 max-sm:hidden"
             >
               {characters.slice(0, 4).map((c) => (
                 <Tooltip key={c.entityId} label={`Opens ${c.label}'s card in the side panel.`} side="bottom">
@@ -414,7 +406,7 @@ function ChatHeaderFrame({
             </div>
           )
         )}
-        <div className="flex min-w-24 flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex min-w-0 items-center gap-2">{title}</div>
           {about !== null && (
             <p className="truncate text-xs text-muted" title={about}>
@@ -422,8 +414,7 @@ function ChatHeaderFrame({
             </p>
           )}
         </div>
-        {/* Only the branch control shrinks, cutting its name short; the buttons keep their size. */}
-        {actions && <div className="flex min-w-0 items-center gap-0.5 *:shrink-0 sm:gap-1">{actions}</div>}
+        {actions && <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">{actions}</div>}
       </header>
     </TooltipProvider>
   )

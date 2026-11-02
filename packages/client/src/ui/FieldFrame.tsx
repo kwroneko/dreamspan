@@ -48,7 +48,7 @@ export function FieldFrame({
           data-field-chrome
           className={
             side === "bottom"
-              ? "flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-2 max-sm:h-9"
+              ? "flex h-7 shrink-0 items-center justify-end gap-0.5 overflow-hidden px-1 max-sm:h-9"
               : "flex h-full w-[5.5rem] shrink-0 items-center justify-end gap-0.5 overflow-hidden pr-1"
           }
         >

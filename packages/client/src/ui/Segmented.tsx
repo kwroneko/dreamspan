@@ -64,8 +64,7 @@ export function Segmented<Value extends string>({
         ) : null
       )}
       {chosen && (
-        // It wraps at the row's width rather than widen the column past the screen (w-0 min-w-full).
-        <p aria-hidden="true" className={`hidden w-0 min-w-full text-xs text-muted ${inlineExplanationClass}`}>
+        <p aria-hidden="true" className={`hidden text-xs text-muted ${inlineExplanationClass}`}>
           {chosen}
         </p>
       )}

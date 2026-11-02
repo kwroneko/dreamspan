@@ -196,7 +196,6 @@ function Tags({ store }: { store: EditorStore }) {
         ))}
         <li
           data-new-tag
-          data-layout-audit-ignore="inset: The new tag's field and + are part of their compact chip"
           className="flex items-center gap-0.5 rounded-full border border-dashed border-border py-0.5 pr-0.5 pl-3 text-sm focus-within:border-focus"
         >
           <input
@@ -591,7 +590,6 @@ export function CardEditor({
         wrap={layout === "panel"}
         end={saveControls}
         rowClassName={saveControls ? "sticky -top-4 z-10 -mx-4 -mt-2 items-start! bg-surface px-4 pt-2" : ""}
-        rowOverlay={saveControls ? "Sticky tabs and save row cover the fields scrolling under them" : undefined}
         tabs={tabs.map((entry) => ({
           value: entry.id,
           label: entry.label,

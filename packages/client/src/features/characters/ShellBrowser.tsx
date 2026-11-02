@@ -128,7 +128,7 @@ export function GroupTile({ fork }: { fork: ShellFork }) {
           {fork.branches > 1 && <span className="mt-auto text-xs text-muted">{fork.branches} branches</span>}
         </span>
       </button>
-      <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-2 top-2">
+      <span data-layout-overlay="Pin action sits over the group portrait" className="absolute right-1 top-1">
         <PinButton fork={fork} className="tile-toggle bg-surface" />
       </span>
     </div>
@@ -199,7 +199,7 @@ export function ForkRow({
   const opensHere = perFork && fork.current && fork.branches > 1
   return (
     <div
-      className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-2 ps-2 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
+      className={`flex w-full max-w-controls min-w-0 items-center gap-1 rounded-md border py-1 ps-1 ${rowActionInsetClass} hover:bg-surface-raised ${here ? "border-accent bg-surface-raised" : "border-border"}`}
     >
       <Tooltip
         label={
