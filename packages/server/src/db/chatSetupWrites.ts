@@ -430,8 +430,10 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
           const draftForkId = fork.id
           // A turn added at the fork's tip is a new user action: the round already there, waiting
           // or stopped, ends (DESIGN §2.3). A branch elsewhere leaves it be.
-          if (parentSlotId === fork.tip_slot_id)
-            yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1`
+          const endedRound =
+            parentSlotId === fork.tip_slot_id
+              ? yield* sql`DELETE FROM queued_messages WHERE chat_id = ${chatId} AND fork_id = ${fork.id} AND round = 1 RETURNING id`
+              : []
           for (const id of round ?? []) yield* graph.checkSpeaker(userId, id)
           yield* graph.checkImages(userId, images ?? [])
           yield* composerImages(sql).consume(userId, chatId, commitDraft?.draftId, imageDraftIds ?? [], images ?? [])
@@ -530,7 +532,11 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             yield* queueRound(chatId, result.slotId, result.forkId, round ?? [], next!.n, Date.now())
             return { _tag: "Posted" as const, result, queue: yield* chatQueue(sql, chatId) }
           }
-          return { _tag: "Posted" as const, result }
+          return {
+            _tag: "Posted" as const,
+            result,
+            ...(endedRound.length > 0 ? { queue: yield* chatQueue(sql, chatId) } : {})
+          }
         }).pipe(transaction("SendOrQueue")),
 
       EditQueued: ({ userId, queuedId, content, speakerEntityId, expectedRowVersion, draft, rewrite }) =>

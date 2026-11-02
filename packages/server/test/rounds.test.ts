@@ -102,6 +102,43 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  it.live("a new message ending a held round publishes the empty queue to other tabs", () =>
+    Effect.gen(function* () {
+      const api = yield* client()
+      const { chat, sent, mira, tobin, describe } = yield* setup(api)
+      const events: Array<import("@rp/shared/chatApi.ts").ChatEvent> = []
+      yield* api.SubscribeChat({ chatId: chat.id }).pipe(
+        Stream.runForEach((batch) => Effect.sync(() => events.push(...batch))),
+        Effect.forkScoped
+      )
+      yield* eventually(() => events.length > 0)
+      const first = yield* posted(
+        api.Generate({
+          chatId: chat.id,
+          parentSlotId: sent.slotId,
+          branch: false,
+          speakerEntityId: mira,
+          round: [tobin]
+        })
+      )
+      yield* gate(first.entry.version.id)
+      yield* api.StopGeneration({ versionId: first.entry.version.id })
+      yield* pathBecomes(api, chat.id, describe, ["you: m0", "Mira (stopped)"])
+      yield* eventually(() => events.some((e) => e._tag === "Queue" && e.queue.some((q) => q.round?.held)))
+      yield* posted(
+        api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: first.entry.slotId,
+          branch: false,
+          content: "No reply this time",
+          reply: false
+        })
+      )
+      assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+      yield* eventually(() => events.some((e) => e._tag === "Queue" && e.queue.length === 0), 1000)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+  )
+
   it.live("a second tab continuing an already running round receives the current queue", () =>
     Effect.gen(function* () {
       const api = yield* client()
