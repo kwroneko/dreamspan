@@ -367,8 +367,10 @@ it.live("open chats are told when summaries change", () =>
     const seen = (tag: ChatEvent["_tag"]) => events.filter((e) => e._tag === tag).length
     assert.strictEqual(seen("Lcm"), 0)
     yield* api.SetSummaryRerun({ chatId: chat.id, target: { _tag: "Summary", summaryId: summary.id }, requested: true })
-    yield* eventually(() => seen("Lcm") === 1)
+    // The rerun request can also start a summary job whose failure (no summarizer model) adds Lcm events of its own.
+    yield* eventually(() => seen("Lcm") >= 1)
+    const before = seen("Lcm")
     yield* api.SetLcmEnabled({ chatId: chat.id, enabled: false })
-    yield* eventually(() => seen("Lcm") === 2 && seen("State") === 1)
+    yield* eventually(() => seen("Lcm") > before && seen("State") === 1)
   }).pipe(Effect.scoped, Effect.provide(serverLayer(config)))
 )
