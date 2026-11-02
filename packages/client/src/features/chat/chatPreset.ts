@@ -2,8 +2,9 @@
 // a chat without one yet (a chat with no messages has none), the account's selected preset.
 // The Prompt preset tab edits it; the Lorebooks tab lists the books it sends.
 import type { RefId } from "@rp/shared/library.ts"
-import { useEffect, useState } from "react"
-import { useCaller } from "../editor/caller.ts"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import { defaultsAtom, useRefreshOnContext } from "../pickers/defaults.ts"
 import type { ChatSession, ChatView } from "./session.ts"
 
 /**
@@ -11,22 +12,10 @@ import type { ChatSession, ChatView } from "./session.ts"
  * chat without messages has none, so the tab would otherwise wait for a first message.
  */
 function useSelectedPreset(session: ChatSession) {
-  const call = useCaller()
-  const [selected, setSelected] = useState<{ readonly ref: RefId | null } | null>(null)
-  useEffect(() => {
-    let live = true
-    const refresh = () =>
-      void call((client) => client("GetGenerationDefaults", undefined)).then((result) => {
-        if (live && result.ok) setSelected({ ref: result.value.preset })
-      })
-    const unsubscribe = session.subscribeContext(refresh)
-    refresh()
-    return () => {
-      live = false
-      unsubscribe()
-    }
-  }, [session, call])
-  return selected
+  // The pickers' read, shared: a read of its own here was one more at every chat open (night/tabperf).
+  const result = useAtomValue(defaultsAtom)
+  useRefreshOnContext(session, defaultsAtom)
+  return AsyncResult.isSuccess(result) ? { ref: result.value.preset as RefId | null } : null
 }
 
 /** The preset's ref (undefined while loading), and whether it's ST's built-in default (no ref). */

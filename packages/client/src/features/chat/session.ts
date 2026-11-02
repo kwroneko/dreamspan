@@ -52,6 +52,8 @@ import { beforeReply, chatStateChanged } from "./replyHooks.ts"
 const PAGE = 60
 /** At most this many slots stay loaded; the far end is dropped, and read again when needed. */
 const MAX_LOADED = 500
+/** How long after a change to the chat the lists of chats read again: one read for a burst of changes. */
+const CHATS_REREAD_MS = 1000
 
 /** Whether this version is held behind a cold-prefix writer. */
 export const waitingCache = Atom.family((_id: VersionId) => Atom.make(false))
@@ -390,15 +392,35 @@ export class ChatSession {
     if (known !== undefined) return known === "loading" ? undefined : known
     this.positionCasts.set(key, "loading")
     const forkId = this.view.forkId
-    void this.call((client) => client("GetCast", { chatId: this.chatId, slotId, forkId: this.view.forkId })).then(
-      (result) => {
-        if (this.disposed || this.view.forkId !== forkId) return
-        if (result.ok) this.positionCasts.set(key, result.value)
-        else this.positionCasts.delete(key)
-        for (const listener of this.positionListeners) listener()
-      }
-    )
+    if (this.castBatch === null || this.castBatch.forkId !== forkId) {
+      const batch = { forkId, slots: [] as Array<SlotId | null> }
+      this.castBatch = batch
+      // The rows on screen ask as they render: one request for all of them (night/tabperf: a
+      // chat opened with a GetCast per message, 22 on a page, each reading the cards again).
+      setTimeout(() => {
+        if (this.castBatch === batch) this.castBatch = null
+        void this.readCasts(batch.forkId, batch.slots)
+      }, 0)
+    }
+    this.castBatch.slots.push(slotId)
     return undefined
+  }
+
+  /** Positions waiting for their cast, asked for together. */
+  private castBatch: { readonly forkId: ForkId | null; readonly slots: Array<SlotId | null> } | null = null
+
+  private async readCasts(forkId: ForkId | null, slots: ReadonlyArray<SlotId | null>) {
+    for (let start = 0; start < slots.length; start += 200) {
+      const page = slots.slice(start, start + 200)
+      const result = await this.call((client) => client("GetCasts", { chatId: this.chatId, slotIds: page, forkId }))
+      if (this.disposed || this.view.forkId !== forkId) return
+      page.forEach((slotId, i) => {
+        const key = slotId ?? ""
+        if (result.ok && result.value[i]) this.positionCasts.set(key, result.value[i])
+        else this.positionCasts.delete(key)
+      })
+      for (const listener of this.positionListeners) listener()
+    }
   }
 
   private forgetPositions() {
@@ -489,6 +511,19 @@ export class ChatSession {
     })
   }
 
+  private chatsTimer: ReturnType<typeof setTimeout> | null = null
+  private chatsInvalidate: (() => void) | null = null
+
+  /** Has the lists of chats read again a second after the first change since they last were. */
+  private chatsChanged(services: Context.Context<Reactivity.Reactivity>) {
+    this.chatsInvalidate = () => {
+      this.chatsTimer = null
+      this.chatsInvalidate = null
+      Context.get(services, Reactivity.Reactivity).invalidateUnsafe(["chats"])
+    }
+    this.chatsTimer ??= setTimeout(() => this.chatsInvalidate?.(), CHATS_REREAD_MS)
+  }
+
   /**
    * Subscribes, and opens the chat on the first Hello: subscribing before reading means
    * no change can fall between the two (chatApi.ts).
@@ -506,16 +541,17 @@ export class ChatSession {
                 Reactivity.Reactivity
               ).invalidateUnsafe([`chat-notes:${this.chatId}`])
             }
+            // The lists of chats (the left panel's, at 0.1 to 0.5 s a read at the owner's scale)
+            // read again once the chat has changed, at most once a second, and not for the Hello
+            // that opens it: the lists were just read, and opening a chat changes none of them.
+            const opening = this.hellos === 0 && batch.every((event) => event._tag === "Hello")
             if (
+              !opening &&
               batch.some((event) =>
                 ["Hello", "Chat", "Slot", "Version", "State", "Reload", "Deleted"].includes(event._tag)
               )
-            ) {
-              Context.get(
-                services as unknown as Context.Context<Reactivity.Reactivity>,
-                Reactivity.Reactivity
-              ).invalidateUnsafe(["chats"])
-            }
+            )
+              this.chatsChanged(services as unknown as Context.Context<Reactivity.Reactivity>)
             this.receive(batch, anchor)
           })
         )

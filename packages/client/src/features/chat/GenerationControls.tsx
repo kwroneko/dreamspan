@@ -2,7 +2,7 @@
 import { BUILTIN_PRESET_LABEL, type GenerationDefaults } from "@rp/shared/generation.ts"
 import type { Model } from "@rp/shared/providers.ts"
 import { Link } from "@tanstack/react-router"
-import { useAtomRefresh, useAtomValue } from "@effect/atom-react"
+import { useAtomValue } from "@effect/atom-react"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState } from "react"
 import { useAction } from "../../actions.tsx"
@@ -15,14 +15,13 @@ import { ModelPickerPopover } from "../pickers/ModelPicker.tsx"
 import { PresetPickerPopover } from "../pickers/PresetPicker.tsx"
 import { useModelSelection } from "../pickers/modelSelection.ts"
 import { usePresetSelection } from "../pickers/presetSelection.ts"
-import { defaultsAtom } from "../pickers/defaults.ts"
+import { defaultsAtom, useRefreshOnContext } from "../pickers/defaults.ts"
 
 /** The account's selections, as the pickers read them (refreshed when the chat's context changes). */
 function useSelections(session: ChatSession) {
   const action = useAction()
   const result = useAtomValue(defaultsAtom)
-  const refresh = useAtomRefresh(defaultsAtom)
-  useEffect(() => session.subscribeContext(refresh), [session, refresh])
+  useRefreshOnContext(session, defaultsAtom)
   const defaults: GenerationDefaults | null = AsyncResult.isSuccess(result) ? result.value : null
   return { action, defaults }
 }

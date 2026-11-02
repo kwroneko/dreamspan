@@ -1842,6 +1842,16 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
         yield* refused(actor.api.GetCast({ chatId: actor.chat.chatId, slotId: owner.chat.slotId }), "NotFound")
       })
   },
+  GetCasts: {
+    probe: (actor, owner) =>
+      Effect.gen(function* () {
+        yield* refused(actor.api.GetCasts({ chatId: owner.chat.chatId, slotIds: [null] }), "NotFound")
+        yield* refused(
+          actor.api.GetCasts({ chatId: actor.chat.chatId, slotIds: [null, owner.chat.slotId] }),
+          "NotFound"
+        )
+      })
+  },
   ListChatCards: {
     probe: (actor, owner) =>
       Effect.gen(function* () {

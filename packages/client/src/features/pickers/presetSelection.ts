@@ -10,7 +10,7 @@ import { allOf, useAction } from "../../actions.tsx"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { AppClient } from "../../rpc.ts"
 import type { ChatSession } from "../chat/session.ts"
-import { defaultsAtom } from "./defaults.ts"
+import { defaultsAtom, useRefreshOnContext } from "./defaults.ts"
 
 const presetsAtom = allOf({
   live: AppClient.query("ListLibrary", { kind: "preset" }, { reactivityKeys: ["library"] }),
@@ -44,17 +44,10 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
   const presets = useAtomValue(presetsAtom)
   const defaults = useAtomValue(defaultsAtom)
   const refreshPresets = useAtomRefresh(presetsAtom)
-  const refreshDefaults = useAtomRefresh(defaultsAtom)
   // Another tab or device can change either; the chat says when its next context changed.
   useEffect(() => onLibraryChange(refreshPresets), [refreshPresets])
-  useEffect(
-    () =>
-      session?.subscribeContext(() => {
-        refreshDefaults()
-        refreshPresets()
-      }),
-    [session, refreshDefaults, refreshPresets]
-  )
+  useRefreshOnContext(session, defaultsAtom)
+  useRefreshOnContext(session, presetsAtom)
   const lists = AsyncResult.isSuccess(presets) ? presets.value : null
   const chosen = AsyncResult.isSuccess(defaults) ? defaults.value.preset : undefined
   const live = lists?.live ?? []
