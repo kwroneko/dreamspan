@@ -1,14 +1,19 @@
 // Whether a card's own prompt is used (DESIGN §5.0): in place of the Main Prompt or the
 // post-history prompt of the preset chats use now, unless that prompt forbids it. Read on the
 // server without assembling a context.
-import type { CardPromptUse } from "@rp/shared/chatSetupApi.ts"
-import { useEffect, useState } from "react"
+import { useAtomValue } from "@effect/atom-react"
+import { AsyncResult } from "effect/reactivity"
+import { AppClient } from "../../rpc.ts"
 import type { Caller } from "./caller.ts"
 import { type EditorStore, useText } from "./store.ts"
 
+const promptUse = AppClient.query("GetCardPromptUse", undefined, {
+  reactivityKeys: ["settings", "library"],
+  timeToLive: "400 millis"
+})
+
 export function PromptUseNote({
   store,
-  call,
   field
 }: {
   store: EditorStore
@@ -16,16 +21,8 @@ export function PromptUseNote({
   field: "system_prompt" | "post_history_instructions"
 }) {
   const text = useText(store, [field])
-  const [use, setUse] = useState<CardPromptUse | null>(null)
-  useEffect(() => {
-    let live = true
-    void call((client) => client("GetCardPromptUse", undefined)).then(
-      (result) => live && setUse(result.ok ? result.value : null)
-    )
-    return () => {
-      live = false
-    }
-  }, [call])
+  const result = useAtomValue(promptUse)
+  const use = AsyncResult.isSuccess(result) ? result.value : null
   if (!use) return null
   const target = field === "system_prompt" ? use.main : use.jailbreak
   const prompt = `${use.preset}'s ${target.name}`

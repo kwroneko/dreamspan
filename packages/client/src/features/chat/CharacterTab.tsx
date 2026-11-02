@@ -1,3 +1,4 @@
+import { useChatCards } from "./chatCards.ts"
 // A character's tab in the chat's panel, as ST's character panel: every field the full editor
 // has, in the same tabs (`CardEditor`, `layout: "panel"`), edited right here with the editor's
 // store and field histories (ARCHITECTURE §14.6), each long field openable large over the
@@ -7,15 +8,13 @@
 // and what else is registered (`chatCardActions`). The persona's tab is the same card editor
 // (DESIGN §2.2: a persona is a card), with Switch persona. Card data and actions stay in their
 // feature; the panel host only sees its descriptor.
-import { useAtomValue } from "@effect/atom-react"
 import type { CastCard, EntityId } from "@rp/shared/chat.ts"
 import type { ChatCard } from "@rp/shared/chatSetupApi.ts"
 import type { RefId } from "@rp/shared/library.ts"
 import { Link } from "@tanstack/react-router"
 import { AsyncResult } from "effect/reactivity"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
-import { AppClient } from "../../rpc.ts"
 import { useSession } from "../../session.ts"
 import { Avatar } from "../../ui/Avatar.tsx"
 import { buttonClass } from "../../ui/Button.tsx"
@@ -77,17 +76,8 @@ function ChatCharacterPanel({ session, view, entityId }: { session: ChatSession;
       : undefined
   const live = card !== undefined && !card.inBin
   const persona = view.cast?.playedByMe.includes(entityId) ?? false
-  const query = useMemo(
-    () =>
-      AppClient.query(
-        "ListChatCards",
-        { chatId: session.id, slotId: view.leafSlotId, forkId: view.forkId, entityIds: live ? [entityId] : [] },
-        { reactivityKeys: ["library", `chat-cards:${session.id}`] }
-      ),
-    [session.id, view.leafSlotId, view.forkId, entityId, live]
-  )
-  const result = useAtomValue(query)
-  const info = AsyncResult.isSuccess(result) ? result.value[0] : undefined
+  const result = useChatCards(session)
+  const info = AsyncResult.isSuccess(result) ? result.value.find((item) => item.entityId === entityId) : undefined
   if (!card)
     return (
       <p className="text-sm text-muted">

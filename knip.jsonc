@@ -5,6 +5,8 @@
   "includeEntryExports": true,
   // Stand-ins for dependencies' imports, reached through Vite aliases, not imports.
   "ignore": ["packages/client/src/stubs/**"],
+  // Host diagnostics for the opt-in paired performance benchmark; supplied by the OS.
+  "ignoreBinaries": ["uptime"],
   "workspaces": {
     ".": {
       // Throwaway experiments, kept for their findings and not part of the build.

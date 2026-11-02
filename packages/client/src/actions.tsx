@@ -198,10 +198,21 @@ export function useAtomRevalidated<A, E>(atom: Atom.Atom<AsyncResult.AsyncResult
   const result = useAtomValue(atom)
   const [kept] = useState(() => AsyncResult.isSuccess(registry.get(atom)))
   useEffect(() => {
-    if (kept) registry.refresh(atom)
+    let active = revalidatedReaders.get(registry)
+    if (!active) revalidatedReaders.set(registry, (active = new WeakMap()))
+    const readers = active.get(atom) ?? 0
+    active.set(atom, readers + 1)
+    // Joining another mounted reader needs no second refresh. Writes still invalidate
+    // the query, and the first reader after an absence revalidates the retained result.
+    if (readers === 0 && kept && !registry.get(atom).waiting) registry.refresh(atom)
+    return () => {
+      active.set(atom, (active.get(atom) ?? 1) - 1)
+    }
   }, [kept, registry, atom])
   return result
 }
+
+const revalidatedReaders = new WeakMap<AtomRegistry.AtomRegistry, WeakMap<object, number>>()
 
 export function AsyncView<A, E>({
   atom,

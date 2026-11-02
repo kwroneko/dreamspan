@@ -32,6 +32,7 @@ export class SnippetWorkspace {
   private stores = new Map<RefId, EditorStore>()
   private openPanel: (() => void) | null = null
   private generation = 0
+  private pendingRefresh: Promise<void> | null = null
   private call: Caller
   private user: string
   constructor(call: Caller, user: string) {
@@ -76,8 +77,19 @@ export class SnippetWorkspace {
     return store
   }
 
-  refresh = async () => {
-    const generation = ++this.generation
+  refresh = (): Promise<void> => {
+    ++this.generation
+    // A provider remount clears and then restores its chat in the same React commit.
+    // Read the final scope once; a later write still starts a new read, even in flight.
+    if (this.pendingRefresh !== null) return this.pendingRefresh
+    this.pendingRefresh = Promise.resolve().then(() => {
+      this.pendingRefresh = null
+      return this.read(this.generation)
+    })
+    return this.pendingRefresh
+  }
+
+  private async read(generation: number) {
     const result = await this.call((api) => api("ListSnippets", { chatId: this.state.chatId }))
     if (generation !== this.generation) return
     if (!result.ok) return this.update({ error: result.error.message })

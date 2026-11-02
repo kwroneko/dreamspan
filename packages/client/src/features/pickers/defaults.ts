@@ -1,12 +1,15 @@
 // The account's selections (GenerationDefaults), which every chat's next reply uses: read once
 // for every picker, and read again when a write names "settings".
 import { RegistryContext } from "@effect/atom-react"
-import type { Atom } from "effect/reactivity"
+import { AsyncResult, type Atom } from "effect/reactivity"
 import { useContext, useEffect } from "react"
 import { AppClient } from "../../rpc.ts"
 import type { ChatSession } from "../chat/session.ts"
 
-export const defaultsAtom = AppClient.query("GetGenerationDefaults", undefined, { reactivityKeys: ["settings"] })
+export const defaultsAtom = AppClient.query("GetGenerationDefaults", undefined, {
+  reactivityKeys: ["settings"],
+  timeToLive: "400 millis"
+})
 
 /** Reads asked for in this turn of the event loop, sent once at its end. */
 const asked = new Set<Atom.Atom<unknown>>()
@@ -18,16 +21,17 @@ const asked = new Set<Atom.Atom<unknown>>()
  */
 export function useRefreshOnContext(session: ChatSession | null, atom: Atom.Atom<unknown>) {
   const registry = useContext(RegistryContext)
-  useEffect(
-    () =>
-      session?.subscribeContext(() => {
-        if (asked.has(atom)) return
-        asked.add(atom)
-        queueMicrotask(() => {
-          asked.delete(atom)
-          registry.refresh(atom)
-        })
-      }),
-    [session, atom, registry]
-  )
+  useEffect(() => {
+    return session?.subscribeContext((initialSnapshot) => {
+      const value = registry.get(atom) as AsyncResult.AsyncResult<unknown, unknown>
+      if (initialSnapshot && (!AsyncResult.isSuccess(value) || value.waiting || value.timestamp >= session.startedAt))
+        return
+      if (asked.has(atom)) return
+      asked.add(atom)
+      queueMicrotask(() => {
+        asked.delete(atom)
+        registry.refresh(atom)
+      })
+    })
+  }, [session, atom, registry])
 }

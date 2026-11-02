@@ -1,3 +1,4 @@
+import { libraryListAtom } from "../library/queries.ts"
 // A chat's notes (DESIGN §4.1): its own, made here, then each cast card's (the cards the user
 // plays included: a persona note is a card's note), as blocks (`NoteList`): each with its switch,
 // turned on or off from the latest message on, on this branch (§3.4). What's typed is used as it's
@@ -56,7 +57,7 @@ function SummaryMacroLine({
 
 const titleOf = (note: ChatNote) => (note.doc["title"] as string | undefined) || note.ref.label
 
-const cardRefs = AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] })
+const cardRefs = libraryListAtom("card")
 
 /** Where a note is added: the chat's own, or a card's (by its library entry). */
 type Group = { readonly card: null } | { readonly card: EntityId; readonly name: string }

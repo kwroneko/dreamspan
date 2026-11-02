@@ -1,3 +1,4 @@
+import { libraryListAtom } from "../library/queries.ts"
 // The account's prompt preset and the presets to choose from, as every preset picker reads
 // them: the composer's chip and the Prompt preset tab share these queries, so a choice or an
 // archive made in one shows in the other at once.
@@ -8,14 +9,12 @@ import { AsyncResult } from "effect/reactivity"
 import { useEffect, useState } from "react"
 import { allOf, useAction } from "../../actions.tsx"
 import { onLibraryChange } from "../../libraryChanges.ts"
-import { AppClient } from "../../rpc.ts"
 import type { ChatSession } from "../chat/session.ts"
 import { defaultsAtom, useRefreshOnContext } from "./defaults.ts"
 
-const presetsAtom = allOf({
-  live: AppClient.query("ListLibrary", { kind: "preset" }, { reactivityKeys: ["library"] }),
-  archived: AppClient.query("ListLibrary", { kind: "preset", archived: true }, { reactivityKeys: ["library"] })
-})
+const livePresets = libraryListAtom("preset")
+const archivedPresets = libraryListAtom("preset", true)
+const presetsAtom = allOf({ live: livePresets, archived: archivedPresets })
 
 /** The built-in preset's value in a picker: the account has none of its own chosen. */
 export const BUILTIN = "builtin"
@@ -47,7 +46,8 @@ export function usePresetSelection(session: ChatSession | null): PresetSelection
   // Another tab or device can change either; the chat says when its next context changed.
   useEffect(() => onLibraryChange(refreshPresets), [refreshPresets])
   useRefreshOnContext(session, defaultsAtom)
-  useRefreshOnContext(session, presetsAtom)
+  useRefreshOnContext(session, livePresets)
+  useRefreshOnContext(session, archivedPresets)
   const lists = AsyncResult.isSuccess(presets) ? presets.value : null
   const chosen = AsyncResult.isSuccess(defaults) ? defaults.value.preset : undefined
   const live = lists?.live ?? []

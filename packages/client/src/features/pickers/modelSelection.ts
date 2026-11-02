@@ -8,7 +8,10 @@ import { type ModelChoice, modelValue, parseModelValue, useModelChoiceList } fro
 import type { ChatSession } from "../chat/session.ts"
 import { defaultsAtom, useRefreshOnContext } from "./defaults.ts"
 
-const modelUseAtom = AppClient.query("ListModelUse", undefined, { reactivityKeys: ["models", "settings"] })
+const modelUseAtom = AppClient.query("ListModelUse", undefined, {
+  reactivityKeys: ["models", "settings"],
+  timeToLive: "400 millis"
+})
 
 export interface ModelSelection {
   /** False until the account's choice and the model lists are read. */
@@ -33,6 +36,7 @@ export function useModelSelection(session: ChatSession | null): ModelSelection {
   const use = useAtomValue(modelUseAtom)
   const refreshUse = useAtomRefresh(modelUseAtom)
   useRefreshOnContext(session, defaultsAtom)
+  useRefreshOnContext(session, modelUseAtom)
   const chosen = AsyncResult.isSuccess(defaults) ? defaults.value.model : undefined
   const value = chosen ? modelValue(chosen.connection, chosen.model) : null
   const { choices, loaded } = useModelChoiceList(true, value)

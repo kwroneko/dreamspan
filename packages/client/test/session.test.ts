@@ -566,4 +566,30 @@ describe("ChatSession", () => {
     receive(event)
     expect(changed).toHaveBeenCalledTimes(2)
   })
+
+  it("distinguishes the first local context snapshot from a server change", async () => {
+    const registry = AtomRegistry.make()
+    const s = new ChatSession(chatId, null, registry, "synthetic-user")
+    const internals = s as unknown as {
+      view: typeof s extends { snapshot: () => infer V } ? V : never
+      call: () => Promise<unknown>
+      refreshContext: () => Promise<void>
+      apply: (event: ChatEvent, anchor: null) => void
+      scheduleLcm: () => void
+    }
+    internals.view = { ...s.snapshot(), loading: false }
+    internals.scheduleLcm = () => {}
+    const context = { leafSlotId: null, warmth: null, historyStart: null, summarizedThrough: null }
+    internals.call = async () => ({ ok: true, value: context })
+    const changed = vi.fn()
+    s.subscribeContext(changed)
+    await internals.refreshContext()
+    expect(changed).toHaveBeenLastCalledWith(true)
+    internals.apply({ _tag: "Cache", ...context }, null)
+    expect(changed).toHaveBeenLastCalledWith(false)
+    await internals.refreshContext()
+    expect(changed.mock.calls).toEqual([[true], [false], [false]])
+    s.dispose()
+    registry.dispose()
+  })
 })

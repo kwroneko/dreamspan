@@ -21,6 +21,7 @@ import { SquareIconButton, ToggleIconButton, Tooltip } from "../../ui/Tooltip.ts
 import { mediaUrl } from "../../ui/mediaImage.ts"
 import { Composer, type AttachmentInput } from "./Composer.tsx"
 import type { ComposerSource } from "./composerDraft.ts"
+import { composerWorkspace } from "./composerWorkspace.ts"
 import type { ChatSession } from "./session.ts"
 import type { MessageDraft } from "./messageDraft.ts"
 import { messageEditorTools } from "./editorHistory.tsx"
@@ -250,6 +251,9 @@ function EditorImages({ draft, images }: { draft: MessageDraft; base: string; im
 }
 
 function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { scope: string }) {
+  const user = useSession().user.id
+  const draft = composerWorkspace(session, user).draft
+  const resolvedDraftId = useSyncExternalStore(draft.subscribe, () => draft.draftIdFor(view.forkId))
   const [entries, setEntries] = useState<readonly ImageDraftEntry[]>([])
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -308,19 +312,16 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
   }
 
   useEffect(() => {
+    if (resolvedDraftId === null) return
     let live = true
     void enqueue(async () => {
       try {
         const stored = await readImages(scope)
-        const opened = await session.call((client) =>
-          client("OpenComposer", { chatId: session.chatId, forkId: view.forkId })
-        )
-        if (!opened.ok) throw new Error(opened.error.message)
-        draftId.current = opened.value.id
+        draftId.current = resolvedDraftId
         const remote = await session.call((client) =>
           client("GetComposerImages", {
             chatId: session.chatId,
-            draftId: opened.value.id,
+            draftId: resolvedDraftId,
             ids: stored.map((entry) => entry.id)
           })
         )
@@ -359,7 +360,7 @@ function ImageScope({ children, scope, session, view }: ChatSurfaceProps & { sco
     }
     // The keyed provider owns one fork; opening it replays its durable upload queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [resolvedDraftId])
   const add = (files: File[]) => {
     if (!ready) {
       setError("Wait for the chat to load before attaching images.")

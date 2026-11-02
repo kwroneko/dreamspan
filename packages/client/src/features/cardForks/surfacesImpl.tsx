@@ -1,3 +1,4 @@
+import { libraryListAtom } from "../library/queries.ts"
 import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import type { CardFamily, FamilyMember, RefId } from "@rp/shared/library.ts"
@@ -366,8 +367,8 @@ function ParentDialog({ entityId, onClose }: { entityId: EntityId; onClose: () =
   const atom = useMemo(
     () =>
       allOf({
-        live: AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] }),
-        archived: AppClient.query("ListLibrary", { kind: "card", archived: true }, { reactivityKeys: ["library"] })
+        live: libraryListAtom("card"),
+        archived: libraryListAtom("card", true)
       }),
     []
   )

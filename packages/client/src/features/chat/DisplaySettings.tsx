@@ -15,6 +15,7 @@ import { useViewPrefs } from "../../ui/viewPrefs.ts"
 import { useSession } from "../../session.ts"
 import { onLibraryChange } from "../../libraryChanges.ts"
 import { globalRegexAtom } from "../regex/data.ts"
+import { useRefreshOnContext } from "../pickers/defaults.ts"
 import { approvedScripts, CardScripts } from "./displayScripts.ts"
 import type { ChatSurfaceProps } from "./presentation.tsx"
 import type { ChatSession } from "./session.ts"
@@ -76,6 +77,7 @@ function ScriptDisplay({
   const global = globalQuery(JSON.stringify([userId, on]))
   const globalResult = useAtomValue(global)
   const refreshGlobal = useAtomRefresh(global)
+  useRefreshOnContext(on ? session : null, global)
   const cards = useMemo(
     () =>
       on
@@ -97,7 +99,11 @@ function ScriptDisplay({
       refreshGlobal()
       cards?.refresh()
     }
-    const stopContext = session.subscribeContext(all)
+    const stopContext = session.subscribeContext((initialSnapshot) => {
+      if (initialSnapshot) return
+      if (refId) refresh()
+      cards?.refresh()
+    })
     const stopLibrary = onLibraryChange(all)
     return () => {
       stopContext()
@@ -116,7 +122,7 @@ function ScriptDisplay({
 }
 export function DisplayProvider({ session, view, children }: ChatSurfaceProps) {
   const viewer = useViewPrefs()
-  const on = viewer.prefs.displayRegex
+  const on = viewer.prefs.displayRegex && view.history !== null
   const refId = on ? (view.history?.preset?.ref ?? null) : null
   const chatId = view.chat?.id
   const key = `${view.forkId}:${view.leafSlotId}`

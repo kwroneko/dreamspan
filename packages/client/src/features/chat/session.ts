@@ -207,6 +207,9 @@ export class ChatSession {
     return this.chatId
   }
 
+  /** Queries completed since this session began already cover its initial snapshot. */
+  readonly startedAt = Date.now()
+
   constructor(
     chatId: ChatId,
     requestedFork: ForkId | null,
@@ -233,10 +236,10 @@ export class ChatSession {
     }
   }
 
-  private readonly contextListeners = new Set<() => void>()
+  private readonly contextListeners = new Set<(initialSnapshot: boolean) => void>()
 
   /** Context notifications also invalidate prospective defaults hidden by chat bindings. */
-  readonly subscribeContext = (listener: () => void) => {
+  readonly subscribeContext = (listener: (initialSnapshot: boolean) => void) => {
     this.contextListeners.add(listener)
     return () => {
       this.contextListeners.delete(listener)
@@ -357,7 +360,9 @@ export class ChatSession {
       leafSlotId !== this.view.leafSlotId
     )
       return
-    this.apply({ _tag: "Cache", ...result.value }, null)
+    // Cold queries already read for this opening; retained queries still revalidate.
+    // Actual server Cache events always announce a change, including the first one.
+    this.apply({ _tag: "Cache", ...result.value }, null, this.view.history === null)
   }
 
   /** Bumped by every cast read, so an older reply is dropped. */
@@ -669,6 +674,7 @@ export class ChatSession {
         this.call((client) => client("GetChat", { chatId: this.chatId }))
       ])
       if (window === null || this.disposed || generation !== this.generation) return
+      const previousLeaf = this.view.leafSlotId
       this.update({
         chat: chat.ok ? chat.value : this.view.chat,
         forkId: window.forkId,
@@ -682,7 +688,8 @@ export class ChatSession {
         error: null
       })
       for (const entry of window.entries) this.track(entry.version)
-      void this.refreshCast()
+      // update already read the cast for a moved tip.
+      if (previousLeaf === window.leafSlotId) void this.refreshCast()
       // A leaf read starts the context read (update); a chat with no messages has none to change.
       if (window.leafSlotId === null) void this.refreshContext()
       void this.refreshQueue()
@@ -942,7 +949,8 @@ export class ChatSession {
 
   private apply(
     event: Exclude<ChatEvent, { readonly _tag: "Delta" | "Reasoning" | "Section" }>,
-    anchor: SlotId | null
+    anchor: SlotId | null,
+    initialContext = false
   ) {
     switch (event._tag) {
       case "Hello": {
@@ -999,10 +1007,10 @@ export class ChatSession {
         this.registry.set(waitingCache(event.versionId), event.waiting)
         return
       case "Cache": {
-        for (const listener of this.contextListeners) listener()
+        for (const listener of this.contextListeners) listener(initialContext)
         // An edit, a swipe, a delete or a hide can make a summary stale; the estimate follows
         // every such change, so the layer is read again with it.
-        this.scheduleLcm()
+        if (!initialContext || this.lcmReads === 0) this.scheduleLcm()
         if (event.leafSlotId !== this.view.leafSlotId || (event.forkId != null && event.forkId !== this.view.forkId)) {
           void this.refreshContext()
           return

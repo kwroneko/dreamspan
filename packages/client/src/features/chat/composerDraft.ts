@@ -129,6 +129,11 @@ export class ComposerDraft {
 
   readonly snapshot = () => this.state
 
+  /** Attachments use the text composer's resolved draft, never open a second one. */
+  draftIdFor(fork: ForkId | null): string | null {
+    return this.ready && this.requested === fork ? (this.base?.id ?? null) : null
+  }
+
   private emit() {
     const { text, ready, restored, conflict, recovered, error } = this
     const draftId = ready ? (this.base?.id ?? null) : null

@@ -1,3 +1,4 @@
+import { libraryListAtom } from "../library/queries.ts"
 // What a card's actions need of its library entry (`ChatCardInfo`), in a chat not made yet:
 // a saved chat reads it with `ListChatCards`, which needs the chat; before the first send it
 // comes from the library's lists, each card at its latest revision.
@@ -5,11 +6,10 @@ import { useAtomValue } from "@effect/atom-react"
 import type { EntityId } from "@rp/shared/chat.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useCallback } from "react"
-import { AppClient } from "../../rpc.ts"
 import { shellAtom } from "../characters/shellData.tsx"
 import type { ChatCardInfo } from "./CardForkDialogs.tsx"
 
-const refsAtom = AppClient.query("ListLibrary", { kind: "card" }, { reactivityKeys: ["library"] })
+const refsAtom = libraryListAtom("card")
 
 /** A lookup from a card to its entry: the characters' from the shell, a persona's from the library. */
 export function usePendingCardInfo(): (entityId: EntityId) => ChatCardInfo | undefined {
