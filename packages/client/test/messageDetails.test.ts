@@ -102,7 +102,7 @@ describe("model marks", () => {
     expect(mark("deepseek", "")).toBe("deepseek")
   })
 
-  it("draws the labs Simple Icons has with their logos, the rest with our own, in the text colour", () => {
+  it("draws every lab with its logo, from Simple Icons or LobeHub, in the text colour", () => {
     dispose = registerModelMarks()
     const sources = Object.fromEntries(
       modelMarks.list().map((entry) => {
@@ -115,14 +115,14 @@ describe("model marks", () => {
     )
     expect(sources).toEqual({
       anthropic: "simple-icons",
-      openai: "drawn",
+      openai: "lobehub",
       google: "simple-icons",
       deepseek: "simple-icons",
       mistral: "simple-icons",
       meta: "simple-icons",
-      xai: "drawn",
+      xai: "lobehub",
       qwen: "simple-icons",
-      cohere: "drawn",
+      cohere: "lobehub",
       moonshot: "simple-icons",
       openrouter: "simple-icons"
     })

@@ -23,9 +23,16 @@ export const formatWhen = (at: number, now = Date.now()) => {
   return dayFormat.format(date)
 }
 
-/** A chat's title as people read it: "The Lantern Inn, started Apr 3, 2026", never ST's file name. */
-export const readableChatTitle = (title: string) => {
-  const name = chatName(importState(title).title, [])
+/**
+ * A chat's title as people read it: "The Lantern Inn, started Apr 3, 2026", never ST's file name.
+ * With the chat's `createdAt`, the date is when it started rather than its ST file name's date.
+ */
+export const readableChatTitle = (
+  title: string,
+  createdAt: number | null = null,
+  cast: ReadonlyArray<{ readonly name: string }> = []
+) => {
+  const name = chatName(importState(title).title, cast, createdAt)
   return name.started ? `${name.name}, started ${formatDay(name.started)}` : name.name
 }
 

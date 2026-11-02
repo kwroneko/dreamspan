@@ -49,6 +49,7 @@ export const unreadChatPart = (
     speakers: [],
     greeting: null,
     summaries: [],
+    firstAt: null,
     lastAt: carryAt
   })
 

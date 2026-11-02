@@ -88,8 +88,8 @@ export interface FolderContext {
   readonly personaNames: ReadonlyMap<string, ReadonlyArray<string>>
   /** Lorebooks by name. */
   readonly worlds: ReadonlyMap<string, RefId>
-  /** Something the import placed where ST's default author's note is: a persona, a card's own note, lore. */
-  readonly riders?: boolean
+  /** Lorebooks with entries at the author's note's top or bottom, by ref: placed where ST's default author's note is. */
+  readonly anLorebooks?: ReadonlySet<string>
   /** An enabled prompt of the preset ST used holds `{{summary}}`, so ST sent the summary through it. */
   readonly summaryMacro?: boolean
 }
@@ -108,6 +108,8 @@ export interface ChatState {
   readonly summary: string | null
   /** Character Author's Notes a group chat switched off, as ST ignores them there. */
   readonly characterNotesOff?: ReadonlyArray<string>
+  /** A group chat's reply order (`reply.order`); absent is the default, natural order. */
+  readonly replyOrder?: string
 }
 
 /** Where ST put an extension prompt (`extension_prompt_types`), as a note's placement. */
@@ -126,13 +128,22 @@ const placementOf = (position: number, depth: number, role: number): NoteDoc["pl
  * (in the chat at depth 4 as the system) without one. A note goes there, at its depth and role
  * or beside the main prompt where the author's note was; a lorebook entry, which has no place
  * beside the main prompt, at its depth and role. Personas, characters' own author's notes and
- * lorebooks are the library's, used by every chat, so each has one place: chats whose own
- * author's note was elsewhere get an info line (`st.author_note_riders`).
+ * lorebooks are the library's, used by every chat, so each has one place: a chat that had one
+ * of them at its own author's note, while that note was elsewhere, gets a warning
+ * (`st.author_note_riders`, `ridersElsewhere`).
  */
 export const authorNotePlace = (note: StAuthorNote | null) => ({
   note: placementOf(note === null || note.position === -1 ? 1 : note.position, note?.depth ?? 4, note?.role ?? 0),
   lore: { depth: noteDepth(note?.depth ?? 4), role: stRole(note?.role ?? 0) }
 })
+
+/** A note's placement in words, for the report: "depth 2 as system", "after the main prompt as user". */
+const placeText = (placement: NoteDoc["placement"]): string =>
+  placement.mode === "depth"
+    ? `depth ${placement.depth} as ${placement.role}`
+    : placement.mode === "section"
+      ? `${placement.section === "before_main_prompt" ? "before" : "after"} the main prompt as ${placement.role}`
+      : "not sent"
 
 /** A card greeting as a pattern: `{{char}}` filled in, `{{user}}` matching any name. */
 const greetingMatches = (greeting: string, cardName: string, chatGreeting: string) => {
@@ -474,6 +485,11 @@ export const chatStateChange = (
   for (const [name, value] of mapped.vars) {
     if (previous?.vars[name] !== state.vars[name]) events.push({ key: "var.set", value: { name, value } })
   }
+  // The group's reply strategy, for its chats (ST's `activation_strategy`): only when it isn't
+  // the default, or changed since the last import.
+  const replyOrder = file.link.group?.replyOrder ?? "natural"
+  if (replyOrder !== "natural") state.replyOrder = replyOrder
+  if (replyOrder !== (previous?.replyOrder ?? "natural")) events.push({ key: "reply.order", value: replyOrder })
   // ST applies a card's own author's note only in one-to-one chats: a group chat has it off.
   const byEntity = new Map([...folder.cards.values()].map((card) => [card.entityId as string, card]))
   const characterNotesOff = file.link.group
@@ -509,12 +525,45 @@ export const chatStateChange = (
   const chara = file.link.group ? null : (file.link.card?.file ?? null)
   const replacing = folder.settings?.characterNotes.find((n) => n.card === chara && n.useChara && n.position === 0)
   const replacedAuthorNote = replacing !== undefined && (file.header?.authorNote?.content.trim() ?? "") !== ""
-  // What ST put at this chat's own author's note went where the default one is.
+  // What ST put at this chat's own author's note went where the default one is. Only what
+  // rode on this chat's note counts (ST's `setFloatingPrompt`, `addPersonaDescriptionExtensionPrompt`,
+  // `checkWorldInfo`): nothing while the note is off (frequency 0), the persona played here when
+  // it's placed at the note, the card's own note in a one-to-one chat where ST applies it, and the
+  // books this chat uses (its own, its cards', ST's global ones) with entries at the note.
+  const defaultPlace = authorNotePlace(folder.settings?.defaultAuthorNote ?? null)
+  const due = disabled === undefined || disabled > 0
+  const personaName = (entity: string) => {
+    for (const [avatar, id] of folder.personas) {
+      if (id === entity) return folder.settings?.personas.find((p) => p.avatar === avatar)?.name ?? avatar
+    }
+    return ""
+  }
+  const bookName = (ref: string) => {
+    for (const [name, id] of folder.worlds) if (id === ref) return name
+    return ""
+  }
+  const globalRefs = (folder.settings?.globalWorlds ?? []).flatMap((name) => {
+    const ref = folder.worlds.get(name)
+    return ref === undefined ? [] : [ref]
+  })
+  const riding =
+    !due || authorNote === null
+      ? []
+      : [
+          ...mapped.played.flatMap((entity) =>
+            folder.personaNotes?.has(entity) ? [`the persona ${shownText(personaName(entity))}'s description`] : []
+          ),
+          ...(!file.link.group && (file.link.card?.characterNote ?? null) !== null
+            ? [`${shownText(file.link.card!.name)}'s own author's note`]
+            : []),
+          ...[...new Set([...mapped.lorebooks, ...globalRefs])].flatMap((ref) =>
+            folder.anLorebooks?.has(ref) ? [`the lorebook “${shownText(bookName(ref))}”'s entries at the note`] : []
+          )
+        ]
   const ridersElsewhere =
-    folder.riders === true &&
-    authorNote !== null &&
-    JSON.stringify(authorNote.placement) !==
-      JSON.stringify(authorNotePlace(folder.settings?.defaultAuthorNote ?? null).note)
+    riding.length > 0 && JSON.stringify(authorNote!.placement) !== JSON.stringify(defaultPlace.note)
+      ? `${riding.join("; ")}. This chat's note: ${placeText(authorNote!.placement)}; the default's: ${placeText(defaultPlace.note)}.`
+      : null
   const notes: Array<StImportNote> = []
   const removedNotes: Array<StImportNote["kind"]> = []
   if (authorNote !== null && state.authorNote !== previous?.authorNote) notes.push(authorNote)
