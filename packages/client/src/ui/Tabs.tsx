@@ -13,7 +13,8 @@ export function Tabs<Value extends string>({
   keepMounted = false,
   wrap = false,
   end,
-  rowClassName = ""
+  rowClassName = "",
+  rowOverlay
 }: {
   tabs: ReadonlyArray<{
     readonly value: Value
@@ -31,20 +32,20 @@ export function Tabs<Value extends string>({
   fill?: boolean | undefined
   /** Hidden panels stay mounted, keeping their state: text being typed, say. */
   keepMounted?: boolean | undefined
-  /** The tabs wrap onto a second row rather than running out of a narrow column. */
+  /** Tighter tabs, for a narrow column. Every row of tabs wraps rather than run out of its column. */
   wrap?: boolean | undefined
   /** Beside the tabs, at the end of their row: a close button, say. */
   end?: ReactNode
   /** The row of tabs and `end`, placed by its user: kept in sight while scrolling, say. */
   rowClassName?: string
+  /** Why the row may cover what scrolls under it (a sticky row), for the layout audit. */
+  rowOverlay?: string | undefined
 }) {
   const list = (
     <BaseTabs.List
       aria-label={label}
       className={
-        fill
-          ? "flex min-w-0 flex-1 flex-wrap gap-0.5"
-          : `flex gap-1 border-b border-border ${wrap ? "flex-wrap gap-y-0" : ""}`
+        fill ? "flex min-w-0 flex-1 flex-wrap gap-0.5" : "flex min-w-0 flex-wrap gap-x-1 border-b border-border"
       }
     >
       {tabs.map((tab) => {
@@ -81,7 +82,10 @@ export function Tabs<Value extends string>({
       className={`flex min-h-0 flex-col ${fill ? "flex-1" : "gap-2"}`}
     >
       {fill || end ? (
-        <div className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""} ${rowClassName}`}>
+        <div
+          data-layout-overlay={rowOverlay}
+          className={`flex items-end gap-1 ${fill ? "border-b border-border px-2" : ""} ${rowClassName}`}
+        >
           {list}
           {end}
         </div>

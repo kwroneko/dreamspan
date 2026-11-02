@@ -6,8 +6,8 @@
 import type { ComponentProps, ReactNode } from "react"
 import { Button } from "./Button.tsx"
 import { Icon } from "./Icon.tsx"
-import { IconButton, Tooltip } from "./Tooltip.tsx"
 import { rowActionInsetClass } from "./rowSpacing.ts"
+import { IconButton, Tooltip } from "./Tooltip.tsx"
 
 /** The block: a bordered card; `dashed` for a slim row standing for something else (a marker). */
 export function Block({
@@ -31,7 +31,7 @@ export function Block({
 /** The header's row: what leads (a handle, a switch), the name, then the actions at the end. */
 export function BlockHeader({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <header className={`flex min-w-0 items-start gap-0.5 py-1 ps-1 ${rowActionInsetClass} ${className}`}>
+    <header className={`flex min-w-0 items-start gap-0.5 py-2 ps-2 ${rowActionInsetClass} ${className}`}>
       {children}
     </header>
   )

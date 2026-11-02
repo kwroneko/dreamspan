@@ -125,17 +125,18 @@ for (const width of [1440, 1024, 390])
         for (const control of groups[0]!.controls.slice(1)) expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
         for (const control of groups[1]!.controls.filter((control) => control.label !== primaryLabel || width === 390))
           expect(Math.abs(control.width - 36)).toBeLessThanOrEqual(1)
-        // Both groups in the box share their centre; the pickers have the same outer inset.
+        // Both groups in the box share their centre; the pickers have the same outer inset: the audit's 8 px
+        // inside the 1 px border.
         expect(Math.abs(groups[0]!.controls[0]!.centre - groups[1]!.controls[0]!.centre)).toBeLessThanOrEqual(1)
-        expect(Math.abs(groups[0]!.controls[0]!.x - frame.x - 5)).toBeLessThanOrEqual(1)
+        expect(Math.abs(groups[0]!.controls[0]!.x - frame.x - 9)).toBeLessThanOrEqual(1)
         const last = groups[1]!.controls.at(-1)!
-        expect(Math.abs(frame.x + frame.width - last.x - last.width - 5)).toBeLessThanOrEqual(1)
-        expect(Math.abs(groups[2]!.controls[0]!.x - frame.x - 5)).toBeLessThanOrEqual(1)
+        expect(Math.abs(frame.x + frame.width - last.x - last.width - 9)).toBeLessThanOrEqual(1)
+        expect(Math.abs(groups[2]!.controls[0]!.x - frame.x - 9)).toBeLessThanOrEqual(1)
         expect(
           await strip.evaluate(
             (el) => parseFloat(getComputedStyle(el).paddingRight) + parseFloat(getComputedStyle(el).borderRightWidth)
           )
-        ).toBe(5)
+        ).toBe(9)
         expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
       }
       for (const on of [false, true]) {

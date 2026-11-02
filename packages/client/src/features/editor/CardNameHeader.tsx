@@ -243,7 +243,7 @@ export function CardNameHeader({
         </Tooltip>
       </InlineRename>
       {after && (
-        <span className="col-start-3 row-start-1 flex items-center pl-1 peer-data-renaming/title:hidden">{after}</span>
+        <span className="col-start-3 row-start-1 flex items-center peer-data-renaming/title:hidden">{after}</span>
       )}
       <InlineRename
         value={version}

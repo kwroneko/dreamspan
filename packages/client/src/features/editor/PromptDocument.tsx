@@ -498,7 +498,7 @@ function PromptBlock({
           {/* Wide (owner, 2026-11-02): the chips, count and actions follow the name instead of
               sitting at the far end of a wide row, and a closed prompt's first line fills the rest. */}
           {!column && (
-            <span className="flex shrink-0 flex-wrap items-center gap-1">
+            <span className="flex max-w-full min-w-0 flex-wrap items-center gap-1">
               {!prompt.marker && <SendBadges prompt={prompt} />}
               <TokenCount prompt={prompt} content={content} context={context} />
               {summary}
