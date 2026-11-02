@@ -43,8 +43,18 @@ export function Field({
   )
 }
 
-export function Input({ className = "", ...props }: ComponentProps<typeof BaseInput>) {
-  return <BaseInput className={`h-9 ${control} ${className}`} {...props} />
+/** Single-line values are controls; prose belongs in a full-width Textarea or CodeEditor. */
+export function Input({
+  className = "",
+  fullWidth = false,
+  ...props
+}: ComponentProps<typeof BaseInput> & {
+  /** Opt in only when a single-line field genuinely needs the editor's whole width. */
+  fullWidth?: boolean
+}) {
+  const numeric = props.type === "number" || props.inputMode === "numeric" || props.inputMode === "decimal"
+  const width = fullWidth ? "max-w-none" : numeric ? "max-w-32" : "max-w-controls"
+  return <BaseInput className={`h-9 ${control} ${width} ${className}`} {...props} />
 }
 
 /** Whether CSS can mask a text field. Asked at render, so a test can stand in for an old browser. */
@@ -74,7 +84,7 @@ export function SecretInput({
   className?: string
 }) {
   return (
-    <BaseInput
+    <Input
       name={name}
       type={masked && !cssMasks() ? "password" : "text"}
       autoComplete="off"
@@ -87,7 +97,7 @@ export function SecretInput({
       data-bwignore=""
       data-form-type="other"
       onValueChange={(value) => onEmptyChange?.(value.trim() === "")}
-      className={`h-9 ${control} ${masked ? "[-webkit-text-security:disc]" : ""} ${className}`}
+      className={`${masked ? "[-webkit-text-security:disc]" : ""} ${className}`}
     />
   )
 }
@@ -103,12 +113,11 @@ export function PasswordInput({
   onEmptyChange?: (empty: boolean) => void
 }) {
   return (
-    <BaseInput
+    <Input
       name={name}
       type="password"
       autoComplete={autoComplete}
       onValueChange={(value) => onEmptyChange?.(value === "")}
-      className={`h-9 ${control}`}
     />
   )
 }
