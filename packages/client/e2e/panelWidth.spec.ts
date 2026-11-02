@@ -338,7 +338,7 @@ const wideControls = (scope: Locator, max: number, selector = GROUPED) =>
 /**
  * What stays a control's width however wide the panel: buttons (but a disclosure's heading,
  * which spans its section, and the preset's dashed Add a prompt bar under its list), dropdowns
- * and switches. Text fields and editors take the whole width.
+ * and switches. Multi-line fields and editors take the whole width.
  */
 const GROUPED =
   'button:not([aria-expanded]):not([aria-label="Add a prompt at the end"]), select, [role=combobox]:not(input), [role=switch]'
@@ -452,7 +452,7 @@ test("a panel dragged to 1700 px uses its width: fields and grids widen, groups 
     expect.soft(await wideControls(body, GROUP), tab).toEqual([])
     expect.soft(await longLines(body), tab).toEqual([])
   }
-  // The card's fields: the whole width, no empty band beside them.
+  // The card's prose: the whole width, no empty band beside it.
   const mira = await openTab(page, "Mira")
   const description = mira.getByRole("textbox", { name: "Description", exact: true })
   await expect(description).toBeVisible()
@@ -545,3 +545,60 @@ for (const theme of ["light", "dark"] as const)
       await noSideScroll(page)
     }
   })
+
+// Short values stay control-sized even when their editor or side panel is wide.
+for (const theme of ["light", "dark"] as const)
+  for (const viewport of [2560, 1440, 390])
+    test(`short fields stay capped and prose keeps its width (${viewport}px, ${theme})`, async ({ page }) => {
+      test.setTimeout(180_000)
+      await open(page, viewport, viewport === 390 ? 844 : 1200, theme)
+      const capture = async (name: string, field: Locator) => {
+        await expect(field).toBeVisible()
+        await field.scrollIntoViewIfNeeded()
+        expect(await width(field), name).toBeLessThanOrEqual(GROUP)
+        const tooWide = await page
+          .locator("input:visible")
+          .evaluateAll((nodes) => nodes.filter((n) => n.getBoundingClientRect().width > 640.5).map((n) => n.outerHTML))
+        expect(tooWide, name).toEqual([])
+        await shoot(page, `fieldwidth-${name}-${viewport}-${theme}`)
+        await noSideScroll(page)
+      }
+      const chat = await openPanel(page, "This chat")
+      if (viewport >= 1440) {
+        const grip = handle(page, "Resize chat panel")
+        await drag(page, grip, -1000)
+        expect(await now(grip)).toBeGreaterThan(viewport === 2560 ? 1400 : 640)
+      }
+      await chat.getByText("Advanced: names in prompts", { exact: true }).click()
+      await capture("names", chat.getByRole("textbox", { name: "Your name in prompts" }))
+
+      const card = await openTab(page, "Mira")
+      const description = card.getByRole("textbox", { name: "Description", exact: true })
+      await expect(description).toBeVisible()
+      if (viewport === 2560) expect(await width(description)).toBeGreaterThan(1300)
+      await card.getByRole("tab", { name: "Metadata", exact: true }).click()
+      await capture("card-panel", card.getByRole("textbox", { name: "Creator", exact: true }))
+
+      const refs = await admin((api) => api.ListLibrary({ kind: "card" }))
+      await page.goto(`${server().url}/library/${refs.find((r) => r.label === "Mira")!.id}`)
+      await page.getByRole("tab", { name: "Metadata", exact: true }).click()
+      await capture("card-editor", page.getByRole("textbox", { name: "Creator", exact: true }))
+
+      for (const [kind, label] of [
+        ["preset", "Harbor preset"],
+        ["lorebook", "Harbor lore"]
+      ] as const) {
+        const entries = await admin((api) => api.ListLibrary({ kind }))
+        await page.goto(`${server().url}/library/${entries.find((r) => r.label === label)!.id}`)
+        await page.getByRole("button", { name: `Rename ${label}`, exact: true }).click()
+        await capture(`${kind}-editor`, page.getByRole("textbox", { name: `New name for ${label}`, exact: true }))
+        await page.getByRole("button", { name: "Cancel renaming", exact: true }).click()
+      }
+
+      const connections = await admin((api) => api.ListConnections())
+      await page.goto(`${server().url}/settings/connections/${connections[0]!.id}`)
+      await capture("connection", page.getByRole("textbox", { name: "Name", exact: true }))
+      expect(await width(page.getByRole("textbox", { name: "Concurrent requests", exact: true }))).toBeLessThanOrEqual(
+        128
+      )
+    })

@@ -3,6 +3,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import type { HistoryHit, HistoryRecord, HistorySearch, HistoryCursor } from "@rp/shared/historyApi.ts"
 import type { SlotId } from "@rp/shared/chat.ts"
 import { Button } from "../../ui/Button.tsx"
+import { Input } from "../../ui/Field.tsx"
 import { showToast } from "../../ui/Toast.tsx"
 import { Tooltip } from "../../ui/Tooltip.tsx"
 import type { ChatSession, ChatView } from "./session.ts"
@@ -254,9 +255,9 @@ export function HistoryPanel({
         <fieldset key={i} className="flex flex-col gap-2">
           <label>
             Find {i ? i + 1 : ""}
-            <input
+            <Input
               aria-label={i ? `Find ${i + 1}` : "Find"}
-              className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1.5 font-mono"
+              className="mt-1 font-mono"
               value={pair.find}
               onChange={(e) =>
                 setSearch({
@@ -274,9 +275,9 @@ export function HistoryPanel({
           </label>
           <label>
             Replace with
-            <input
+            <Input
               aria-label={i ? `Replace with ${i + 1}` : "Replace with"}
-              className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1.5 font-mono"
+              className="mt-1 font-mono"
               value={pair.replace}
               onChange={(e) =>
                 setSearch({
