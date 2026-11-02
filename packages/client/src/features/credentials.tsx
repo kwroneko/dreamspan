@@ -54,7 +54,7 @@ export function AllowHostDialog({
       title={
         shown ? `Allow “${credential.name}” for ${origin ?? shown}?` : `Allow “${credential.name}” for another address`
       }
-      description="Type the key again to prove it's you. Only allow an address you set up yourself: anyone it points to receives the key."
+      description="Allow this address to receive the key by entering it again. Only allow addresses you trust."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         {shown === null && (
@@ -179,15 +179,15 @@ function ReplaceKeyDialog({
       open
       onOpenChange={onOpenChange}
       title={`Replace the key of “${credential.name}”`}
-      description="A new key starts with no allowed addresses. Tick each address it may be sent to."
+      description="Choose which addresses may receive the replacement key. No addresses are allowed until you select them."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <Field label="New key" description="It's never shown again.">
+        <Field label="New key" about="It's never shown again.">
           <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <Fieldset
           legend="Send the new key to"
-          description="Addresses marked new weren't allowed for the old key. Make sure you set each of them up yourself."
+          about="New addresses weren’t allowed for the old key. Only allow addresses you trust to receive it."
         >
           {candidates.length === 0 && <p className="text-sm text-muted">No addresses yet. Add one below.</p>}
           {candidates.map((candidate) => (
@@ -284,12 +284,12 @@ function CreateCredentialDialog({ onOpenChange }: { onOpenChange: (open: boolean
         <Field label="Name">
           <Input value={name} onValueChange={setName} autoComplete="off" />
         </Field>
-        <Field label="Key" description="It's never shown again.">
+        <Field label="Key" about="It's never shown again.">
           <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
         </Field>
         <Field
           label="Addresses it may be sent to"
-          description="One URL per line. Only the scheme, host and port count."
+          about="Allow the key to be sent to these addresses. Enter one URL per line; permission covers all paths on that host and port."
           error={bad.length > 0 ? `Not a URL: ${bad.join(", ")}` : null}
         >
           <Textarea value={urls} onChange={(event) => setUrls(event.target.value)} spellCheck={false} />

@@ -60,7 +60,7 @@ export function ChatWidthSetting() {
           if (width !== viewer.prefs.chatWidth) void viewer.change({ chatWidth: width })
           setPreview(null)
         }}
-        description={`The widest the messages and the composer get, on every screen you use; a narrower window or an open side panel fills its width. Default ${CHAT_WIDTH.default} px; all the way right fills the window.`}
+        about={`Set the maximum width of messages and the composer. Full width uses all available room. Default: ${CHAT_WIDTH.default} px.`}
       />
       {/* Back to the default in one click. */}
       {value !== CHAT_WIDTH.default && (

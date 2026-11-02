@@ -2,11 +2,13 @@
 // whole row is the click target. `description` shows under the label; a checkbox's or a
 // switch's `hint` says what turning it on or off does: a tooltip on hover and focus, under
 // the label on touch screens and narrow windows, and its description for screen readers.
+// Settings use `about` for help in the existing ? button, outside the clickable label.
 import { Checkbox as BaseCheckbox } from "@base-ui/react/checkbox"
 import { Radio as BaseRadio } from "@base-ui/react/radio"
 import { RadioGroup as BaseRadioGroup } from "@base-ui/react/radio-group"
 import { Switch as BaseSwitch } from "@base-ui/react/switch"
 import { type ReactElement, type ReactNode, useId } from "react"
+import { AboutHint } from "./AboutHint.tsx"
 import { inlineExplanationClass } from "./Explanation.tsx"
 import { Tooltip } from "./Tooltip.tsx"
 
@@ -46,23 +48,29 @@ export function Checkbox({
   onCheckedChange,
   children,
   description,
+  about,
+  aboutLabel,
   hint
 }: {
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
+  about?: ReactNode
+  aboutLabel?: string
   /** What ticking it does, when the label doesn't say. */
   hint?: string | undefined
 }) {
   const id = useId()
-  return withHint(
-    hint,
+  const aboutId = useId()
+  const row = (
     <label className="flex items-start gap-2.5">
       <BaseCheckbox.Root
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
-        {...(hint ? { "aria-describedby": id } : {})}
+        {...(hint || about
+          ? { "aria-describedby": [hint ? id : null, about ? aboutId : null].filter(Boolean).join(" ") }
+          : {})}
         className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-border bg-surface text-accent-contrast data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseCheckbox.Indicator className="flex data-unchecked:hidden">
@@ -76,6 +84,22 @@ export function Checkbox({
       </ChoiceLabel>
     </label>
   )
+  return withHint(
+    hint,
+    about ? (
+      <div className="flex items-start gap-1">
+        {row}
+        <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
+          {about}
+        </AboutHint>
+        <span id={aboutId} hidden>
+          {about}
+        </span>
+      </div>
+    ) : (
+      row
+    )
+  )
 }
 
 export function Switch({
@@ -83,6 +107,8 @@ export function Switch({
   onCheckedChange,
   children,
   description,
+  about,
+  aboutLabel,
   hint,
   describedBy,
   labelHidden = false,
@@ -92,6 +118,8 @@ export function Switch({
   onCheckedChange: (checked: boolean) => void
   children: ReactNode
   description?: ReactNode
+  about?: ReactNode
+  aboutLabel?: string
   /** What switching it on or off does, when the label doesn't say. */
   hint?: string | undefined
   /** An explanation shown elsewhere (a row's own line), read as its description. */
@@ -101,14 +129,16 @@ export function Switch({
   disabled?: boolean
 }) {
   const id = useId()
-  return withHint(
-    hint,
+  const aboutId = useId()
+  const row = (
     <label className="flex items-start gap-3">
       <BaseSwitch.Root
         disabled={disabled}
         checked={checked}
         onCheckedChange={(next) => onCheckedChange(next)}
-        {...(hint ? { "aria-describedby": id } : describedBy ? { "aria-describedby": describedBy } : {})}
+        {...(hint || about || describedBy
+          ? { "aria-describedby": [hint ? id : null, about ? aboutId : null, describedBy].filter(Boolean).join(" ") }
+          : {})}
         className={`mt-0.5 flex h-5 w-9 shrink-0 rounded-full border border-border bg-surface-raised p-0.5 transition-colors data-checked:border-accent data-checked:bg-accent data-disabled:opacity-50 ${focusRing}`}
       >
         <BaseSwitch.Thumb className="size-3.5 rounded-full bg-muted shadow-xs transition-[translate,background-color] data-checked:translate-x-4 data-checked:bg-accent-contrast motion-reduce:transition-none" />
@@ -117,6 +147,22 @@ export function Switch({
         {children}
       </ChoiceLabel>
     </label>
+  )
+  return withHint(
+    hint,
+    about ? (
+      <div className="flex items-start gap-1">
+        {row}
+        <AboutHint heading={aboutLabel ?? (typeof children === "string" ? children.trim() : "this setting")}>
+          {about}
+        </AboutHint>
+        <span id={aboutId} hidden>
+          {about}
+        </span>
+      </div>
+    ) : (
+      row
+    )
   )
 }
 

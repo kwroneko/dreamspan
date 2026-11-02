@@ -51,7 +51,7 @@ function PairRow({
       <div className="grid gap-2 sm:grid-cols-2">
         <Field
           label="Opening tag"
-          description={
+          about={
             regex ? "Where a section starts: a regular expression." : "Where a section starts, exactly as written."
           }
           error={tagError(pair.open, regex)}
@@ -66,7 +66,7 @@ function PairRow({
         </Field>
         <Field
           label="Closing tag"
-          description={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
+          about={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
           error={tagError(pair.close, regex)}
         >
           <Textarea
@@ -81,7 +81,7 @@ function PairRow({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Checkbox
-            hint="On: the tags match only in the case written. Off: any case, so <THINK> too."
+            about="On: the tags match only in the case written. Off: any case, so <THINK> too."
             checked={pair.case_sensitive === true}
             onCheckedChange={(checked) => {
               const { case_sensitive: _, ...rest } = pair
@@ -91,7 +91,7 @@ function PairRow({
             Match case
           </Checkbox>
           <Checkbox
-            hint="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included."
+            about="On: both tags are regular expressions, so <think(?:ing)?> matches either spelling (no lookaheads or backreferences). Off: they match exactly as written, symbols like | . * [ included."
             checked={regex}
             onCheckedChange={(checked) => {
               const { regex: _, ...rest } = pair
@@ -124,26 +124,15 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
     change({ pairs: settings.pairs.map((other, i) => (i === index ? pair : other)) })
   return (
     <Card>
-      <CardHeader
-        title="Thinking at the start of a reply"
-        about="Fold a reply's thinking away when a preset asks the model to think in tags: it shows in a folded panel above the reply."
-      />
+      <CardHeader title="Thinking at the start of a reply" />
       <div className="flex flex-col gap-4" data-preset-section="reply-sections">
         <Switch
           checked={settings.enabled}
-          hint="On: thinking in these tags at a reply's start goes to its own panel. Off: it stays in the reply text."
+          about="Keep tagged thinking separate from the reply. Only tags at the start count; tags later in the reply stay as written. Several thinking sections at the start all move. Off keeps thinking in the reply text."
           onCheckedChange={(enabled) => change({ enabled })}
         >
           Move tagged thinking into its own panel
         </Switch>
-        <p className="text-sm text-muted">
-          Only at the very start of the reply, after any blank space; several in a row are all moved. Tags later in the
-          reply stay where they are. Each tag is matched exactly as written, unless its pair is set to be treated as a
-          regex. The default pairs are <code className="font-mono">&lt;think&gt;</code> and{" "}
-          <code className="font-mono">&lt;thinking&gt;</code>, each closed by its own closing tag. While a reply is
-          being written, everything after a complete opening tag shows in the thinking panel until the closing tag
-          arrives.
-        </p>
         <ul className="flex flex-col gap-2">
           {settings.pairs.map((pair, index) => (
             <PairRow
@@ -174,7 +163,7 @@ export function ReplySectionsSettings({ store }: { store: EditorStore }) {
         </div>
         <Field
           label="Send thinking back for the last replies"
-          description="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
+          about="How many of the most recent replies with thinking send it back to the model, in its tags. 0: never; the model sees only the reply text."
         >
           <Input
             type="number"

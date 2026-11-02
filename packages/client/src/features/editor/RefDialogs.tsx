@@ -92,8 +92,8 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
       title={ref.kind === "card" ? "Fork card" : "Make a variant"}
       description={
         ref.kind === "card"
-          ? `Creates an independent card and copies its notes from “${ref.label}”. Unsaved changes to them move to the fork, but the names, which you set here; “${ref.label}” goes back to its last revision. Parent edits never reach it.`
-          : `A named variant follows “${ref.label}”: its changes stay in the variant, and updates to “${ref.label}” still reach it.`
+          ? `Make an independent copy of “${ref.label}” and its notes. Unsaved changes move to the copy; the original returns to its last save. Set the copy’s names below.`
+          : `Make a variant of “${ref.label}” with its own changes. It still receives updates to the original.`
       }
     >
       <UserDraftStatus draft={durable} />
@@ -103,7 +103,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
         </Field>
         <Field
           label={ref.kind === "card" ? "Version (shown as subtitle)" : "Subtitle (optional)"}
-          description={ref.kind === "card" ? "Change the version or display name to tell this fork apart." : undefined}
+          about={ref.kind === "card" ? "Change the version or display name to tell this fork apart." : undefined}
         >
           <Input
             autoFocus={ref.kind === "card"}
@@ -112,7 +112,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
           />
         </Field>
         {ref.kind === "card" && (
-          <Field label="In-character name" description="Used in prompts and {{char}}. Empty uses the display name.">
+          <Field label="In-character name" about="Used in prompts and {{char}}. Empty uses the display name.">
             <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
           </Field>
         )}
@@ -120,7 +120,7 @@ export function ForkDialog({ store, onClose }: { store: EditorStore; onClose: ()
           <Checkbox
             checked={moveDrafts}
             onCheckedChange={setMoveDrafts}
-            description="They leave this one and become the variant's unsaved changes."
+            about="Move the unsaved changes to the new variant. This one returns to its last save."
           >
             Take my unsaved changes to the variant
           </Checkbox>

@@ -58,10 +58,7 @@ export function TokenCountingSection({ connection, kinds }: ConnectionSectionPro
   const chosen = via ? byId.get(via) : undefined
   return (
     <Card>
-      <CardHeader
-        title="Token counts"
-        description="How token counts are made while this connection's model is the one chats use."
-      />
+      <CardHeader title="Token counts" about="Choose how to count tokens for this connection’s models." />
       <Field label="Count with" description={chosen ? sends(chosen, connection, kinds) : LOCAL_TEXT}>
         <Select
           items={items}

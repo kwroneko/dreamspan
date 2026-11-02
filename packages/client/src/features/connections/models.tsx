@@ -11,7 +11,7 @@ import { AsyncView, ErrorAlert, useAction } from "../../actions.tsx"
 import { Button } from "../../ui/Button.tsx"
 import { Switch } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
-import { Field, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
+import { Field, Fieldset, focusFirstInvalid, Input, Textarea } from "../../ui/Field.tsx"
 import { Select } from "../../ui/Select.tsx"
 import { Alert, Badge, Card, CardHeader, EmptyState } from "../../ui/Surface.tsx"
 import { IconButton } from "../../ui/Tooltip.tsx"
@@ -88,14 +88,11 @@ const triOf = (value: boolean | undefined): Tri => (value === undefined ? "auto"
 const triItems = (upstream: boolean | undefined) => [
   {
     value: "auto" as const,
-    label:
-      upstream === undefined
-        ? "Not known: the provider doesn't say"
-        : `As the provider says: ${upstream ? "yes" : "no"}`,
+    label: upstream === undefined ? "Unknown" : `Provider: ${upstream ? "yes" : "no"}`,
     description:
       upstream === undefined
         ? "Treated as no until the provider reports it or you choose."
-        : "Follows what the provider reports, also after a refresh changes it."
+        : "Use what the provider reports, including later updates."
   },
   { value: "yes" as const, label: "Yes" },
   { value: "no" as const, label: "No" }
@@ -111,32 +108,31 @@ const prefillItems = (upstream: ModelOverrides["prefill"]) => [
     value: "auto" as const,
     label:
       upstream === undefined
-        ? "Not known: the provider doesn't say"
+        ? "Unknown"
         : upstream === "assistant"
-          ? "As the provider says: yes"
+          ? "Provider: yes"
           : upstream === "tool_schema"
-            ? "As the provider says: yes, the OpenAI way"
-            : "As the provider says: no",
+            ? "Provider: yes, the OpenAI way"
+            : "Provider: no",
     description:
       upstream === undefined
         ? "No prefill is sent, and Continue stays off until you choose."
-        : "Follows what the provider reports, also after a refresh changes it."
+        : "Use what the provider reports, including later updates."
   },
   {
     value: "assistant" as const,
     label: "Yes",
-    description: "The reply’s start is sent as a last assistant message, which the model carries on from."
+    description: "Start replies with the preset’s prefill, and let Continue pick up where a reply stopped."
   },
   {
     value: "none" as const,
     label: "No",
-    description:
-      "The preset’s prefill is left out; Continue sends the text as the model’s own last message and asks it to go on."
+    description: "Leave out the preset’s prefill. Continue asks the model to go on from the reply so far."
   },
   {
     value: "tool_schema" as const,
     label: "Yes, the OpenAI way",
-    description: "Lets OpenAI’s models start the reply with the prefill, though their APIs take none."
+    description: "Start OpenAI replies with the preset’s prefill."
   }
 ]
 
@@ -237,7 +233,7 @@ function Limit({
         <div className="flex flex-col gap-2 border-l-2 border-border pl-3">
           <Field
             label={`Your ${label.toLowerCase()} (tokens)`}
-            description="It wins over what's reported. Empty: what's reported."
+            about="Use this limit instead of the reported one. Empty uses the reported limit."
             error={problem}
           >
             <Input
@@ -267,13 +263,16 @@ function Limit({
 }
 
 /** A headed part of the form: what's reported, what it can do, your settings. A fieldset, named by its title. */
-function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+function Section({ title, about, children }: { title: string; about?: string; children: ReactNode }) {
   return (
-    <fieldset className="flex min-w-0 flex-col gap-3 pt-2">
-      <legend className="text-base font-semibold text-text">{title}</legend>
-      <p className="-mt-2 text-sm text-muted">{description}</p>
+    <Fieldset
+      legend={<span className="text-base font-semibold">{title}</span>}
+      aboutLabel={title}
+      about={about}
+      className="gap-3 pt-2"
+    >
       {children}
-    </fieldset>
+    </Fieldset>
   )
 }
 
@@ -430,10 +429,7 @@ export function ModelSettingsEditor({
       <Field label="Display name">
         <Input value={name} onValueChange={setName} placeholder={model.upstream.name ?? model.key} />
       </Field>
-      <Section
-        title="Model limits (from the provider)"
-        description="The most this model takes and writes, as reported. Set one yourself only if that's wrong."
-      >
+      <Section title="Model limits" about="Set how much the model can read and write if the reported limits are wrong.">
         <Limit
           label="Context window"
           field="context"
@@ -481,31 +477,28 @@ export function ModelSettingsEditor({
           <ErrorAlert error={forget.error} />
         </Alert>
       )}
-      <Section title="What it can do" description="As the provider says, unless you choose otherwise.">
+      <Section title="What it can do">
         {/* Two columns only where there's room for the choices (a dialog, not the chat's panel). */}
         <div className="@container">
           <div className="grid gap-4 @lg:grid-cols-2">
-            <Field
-              label="Vision"
-              description="Whether it can see images. When it can’t, a chat’s images aren’t sent to it."
-            >
+            <Field label="Vision" about="Let the model see images. No leaves images out of its requests.">
               <Select items={triItems(model.upstream.vision)} value={vision} onValueChange={setVision} />
             </Field>
             <Field
               label="Reasoning"
-              description="Whether it thinks before replying. Yes turns its thinking on, with its provider's settings such as the reasoning effort."
+              about="Let the model think before replying. Reasoning effort controls how much thinking to ask for."
             >
               <Select items={triItems(model.upstream.reasoning)} value={reasoning} onValueChange={setReasoning} />
             </Field>
             <Field
               label="Tools"
-              description="Whether it can call tools. Nothing here asks a model to call one yet, so this changes nothing."
+              about="Mark whether the model can call tools. Tool use isn’t available yet, so this has no effect."
             >
               <Select items={triItems(model.upstream.tools)} value={tools} onValueChange={setTools} />
             </Field>
             <Field
               label="Prefill"
-              description="Whether it carries on from text put at the start of its reply, as the preset's prefill and Continue use. Choose Yes if you know it can."
+              about="Let replies start with text you supply, for the preset’s prefill and Continue. Choose Yes only if the model supports it."
             >
               <Select items={prefillItems(model.upstream.prefill)} value={prefill} onValueChange={setPrefill} />
             </Field>
@@ -514,7 +507,7 @@ export function ModelSettingsEditor({
       </Section>
       <Section
         title="Your settings for this model"
-        description="Used in every chat that uses this model. Empty: the default shown. How much of the window to fill and how long a reply may be stay within its limits above."
+        about="Choose how much context to send and how replies are written. Empty uses the default shown; context and reply length stay within the model’s limits."
       >
         {/* Numbers: two a row in a narrow panel, more as it widens, none wider than it needs. */}
         <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3">
@@ -558,7 +551,7 @@ export function ModelSettingsEditor({
       </Section>
       <Field
         label="Advanced model settings (JSON)"
-        description='Stop strings, logit bias, streaming, cache retention, provider routing and wire roles. Example: {"stop":["END"],"squash":true,"names_behavior":"content","cacheRetention":"long"}'
+        about='Control stopping, word preferences, streaming, prompt reuse, routing and message roles. Example: {"stop":["END"],"squash":true,"names_behavior":"content","cacheRetention":"long"}'
       >
         <Textarea
           className="min-h-40 w-full rounded-md border border-border bg-surface p-2 font-mono text-sm text-text"
@@ -567,12 +560,10 @@ export function ModelSettingsEditor({
         />
       </Field>
       <details>
-        <summary className="cursor-pointer text-sm text-muted">
-          Advanced capabilities: images, wire compatibility, cache and sampling
-        </summary>
+        <summary className="cursor-pointer text-sm text-muted">Advanced capabilities</summary>
         <Field
           label="Capability overrides (JSON)"
-          description='For example: {"maxImages":8,"midChatSystem":true,"cacheTtlS":300,"cacheBreakpoints":"explicit","compat":{"supportsSystemRole":false}}. The controls above take precedence for their fields.'
+          about='For example: {"maxImages":8,"midChatSystem":true,"cacheTtlS":300,"cacheBreakpoints":"explicit","compat":{"supportsSystemRole":false}}. For settings shown above, use those controls instead.'
         >
           <Textarea
             className="min-h-40 w-full rounded-md border border-border bg-surface p-2 font-mono text-sm text-text"
@@ -653,7 +644,6 @@ function EditModelDialog({
       open
       onOpenChange={onOpenChange}
       title={`Edit ${model.key}`}
-      description="Model settings apply everywhere this connection and model are used."
       initialFocus={
         focus ? () => document.querySelector<HTMLElement>(`[role="dialog"] [data-model-field="${focus}"]`) : undefined
       }
@@ -696,12 +686,7 @@ export function ModelSettingsDialog({
   }, [connectionId, modelId]) // eslint-disable-line react-hooks/exhaustive-deps
   // One dialog throughout: the form replaces the loading line, and focuses its field when it mounts.
   return (
-    <Dialog
-      open
-      onOpenChange={onOpenChange}
-      title={model ? `Edit ${model.key}` : "Model settings"}
-      description="Model settings apply everywhere this connection and model are used."
-    >
+    <Dialog open onOpenChange={onOpenChange} title={model ? `Edit ${model.key}` : "Model settings"}>
       {model ? (
         <ModelSettingsEditor model={model} focus={focus} onSaved={() => onOpenChange(false)} />
       ) : load.error ? (

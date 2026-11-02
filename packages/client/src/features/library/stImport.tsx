@@ -233,7 +233,7 @@ function Counts({ report }: { report: StImportReport }) {
       ))}
     </ul>
   ) : (
-    <p className="text-sm text-muted">Nothing new: everything was imported as it is before.</p>
+    <p className="text-sm text-muted">Nothing new or changed to import.</p>
   )
 }
 
@@ -367,10 +367,7 @@ function ReportActions({
       <ErrorAlert error={action.error} />
       {report.links.length > 0 && (
         <Card>
-          <CardHeader
-            title="Chats to link"
-            description="The import couldn't tell which card these chats are with. Choose one and they're imported with it."
-          />
+          <CardHeader title="Chats to link" about="Choose a card for chats the import couldn’t match." />
           {linkNote && <p className="mb-3 text-sm text-muted">{linkNote}</p>}
           <ul aria-label="Chats to link" className="flex flex-col divide-y divide-border">
             {report.links.map((choice) => (
@@ -383,7 +380,7 @@ function ReportActions({
         <Card>
           <CardHeader
             title="Hidden from the start"
-            about="These chats have messages hidden from their first message on, as ST's manual summarizing leaves them. They stay hidden unless you un-hide them."
+            about="These chats start with hidden messages, often from manual summarizing in ST. Un-hide them to include them in the context again."
           />
           <ul aria-label="Hidden runs" className="flex flex-col divide-y divide-border">
             {report.hiddenRuns.map((run) => (
@@ -490,9 +487,9 @@ function RunningJob({ job }: { job: StImportJob }) {
       </div>
       <p className="mt-3 text-sm">
         {job.mode === "path"
-          ? "This import runs on the server. It keeps going if you leave this page or close the tab, and you can follow it here from any device."
+          ? "You can close this tab. The import keeps going; follow its progress here from any device."
           : sending
-            ? "The files are sent from this tab: keep it open until the import is done. Other pages of the app are fine."
+            ? "Keep this tab open until the import finishes. You can use other pages of the app."
             : "Its files are sent from the tab that started it. If that tab was closed, the import ends as stopped 10 minutes after its last file arrived."}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -508,7 +505,7 @@ function RunningJob({ job }: { job: StImportJob }) {
         >
           Cancel the import
         </Button>
-        <p className="mt-1 text-xs text-muted">It stops after the file it's on; what's in stays.</p>
+        <p className="mt-1 text-xs text-muted">Stop after the current file. What’s already imported stays.</p>
       </div>
       <ErrorAlert error={action.error} />
     </Card>
@@ -853,7 +850,7 @@ function StartSection({ open }: StImportSectionProps) {
       <Card>
         <CardHeader
           title="SillyTavern data folder"
-          description="ST's data folder, ST itself, or one user's folder inside data. Its cards, personas, lorebooks, chat-completion presets, groups and chats are imported; nothing else is read. Importing the same folder again adds only what's new."
+          about="Import characters, personas, lorebooks, chat-completion presets, groups and chats from a SillyTavern folder. Choose the installation, data folder or one user’s folder. Re-import to add new and changed content."
         />
         {admin && (
           <>
@@ -947,11 +944,9 @@ function StartSection({ open }: StImportSectionProps) {
               />
             )}
             {chosen?._tag === "Path" ? (
-              <p className="text-sm text-muted">The server reads the folder and imports it, whatever this tab does.</p>
+              <p className="text-sm text-muted">You can close this tab after starting the import.</p>
             ) : (
-              <p className="text-sm text-muted">
-                The files are sent from this tab: keep it open until the import is done.
-              </p>
+              <p className="text-sm text-muted">Keep this tab open until the import finishes.</p>
             )}
             <div className="flex flex-wrap items-center gap-3">
               <Button

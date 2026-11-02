@@ -148,7 +148,7 @@ export function ImportPage() {
           <Card className="flex flex-col">
             <CardHeader
               title="Import a SillyTavern folder"
-              description="Everything from ST at once: characters, personas, chats and group chats, groups, lorebooks and chat-completion presets. Importing the same folder again adds only what's new."
+              about="Import characters, personas, chats, groups, lorebooks and chat-completion presets from SillyTavern. Re-import to add new and changed content."
             />
             <Link to="/import/st" className={`${buttonClass("primary")} mt-auto self-start`}>
               Choose the folder
@@ -158,10 +158,10 @@ export function ImportPage() {
         <Card className="flex flex-col">
           <CardHeader
             title={into ? `Update “${intoLabel ?? "this entry"}”` : "Import files"}
-            description={
+            about={
               into
                 ? "Pick its new version. Your own edits are merged with it; anything that conflicts is left as it was."
-                : "Character cards (PNG, JSON or CHARX), World Info files and prompt presets (their prompts, order, prefill and regex scripts). Model and connection settings are imported on their own screens."
+                : "Import character cards (PNG, JSON or CHARX), lorebooks and prompt presets. Import model and connection settings in Settings → Connections."
             }
           />
           <FileDrop

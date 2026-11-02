@@ -185,7 +185,7 @@ function NotificationSettings() {
           <Switch
             checked={on}
             onCheckedChange={(next) => void toggle(next)}
-            description="In this browser only. It asks for the browser's permission when you turn it on."
+            about="In this browser only. It asks for the browser's permission when you turn it on."
           >
             System notifications as well
           </Switch>

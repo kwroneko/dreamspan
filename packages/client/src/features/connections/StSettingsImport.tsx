@@ -22,7 +22,7 @@ export function StSettingsImporter({
     <div className="flex flex-col gap-3">
       <Field
         label={`Import ${surface} settings from an ST preset JSON`}
-        description="Only this part is applied. Review the report before importing."
+        about="Only this part is applied. Review the report before importing."
       >
         <Input
           type="file"

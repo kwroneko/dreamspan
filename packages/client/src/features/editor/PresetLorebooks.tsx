@@ -64,7 +64,7 @@ export function PresetLorebooks({
                     checked={book.enabled}
                     disabled={!ref}
                     onCheckedChange={(next) => store.switchLorebook(book.id, next)}
-                    hint="Off, the preset keeps the book but doesn't send it, in every chat using it. Used as you switch it; Save cuts a revision."
+                    about="Include this book in chats using the preset. Off keeps the book in the preset without sending it."
                     description={ref?.subtitle || undefined}
                   >
                     {name}

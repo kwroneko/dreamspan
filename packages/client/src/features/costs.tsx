@@ -7,6 +7,7 @@ import { AppClient } from "../rpc.ts"
 import { routes } from "../routes.tsx"
 import { Button } from "../ui/Button.tsx"
 import { Field, Input } from "../ui/Field.tsx"
+import { AboutHint } from "../ui/AboutHint.tsx"
 import { Select } from "../ui/Select.tsx"
 import { Alert, Card, CardHeader } from "../ui/Surface.tsx"
 import { useUserDraft, UserDraftStatus } from "./editor/userDraft.tsx"
@@ -122,7 +123,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
               <Field label="Name">
                 <Input required maxLength={160} value={rule.name} onValueChange={(name) => update(index, { name })} />
               </Field>
-              <Field label="Model" description="Exact provider model ID.">
+              <Field label="Model" about="Exact provider model ID.">
                 <Input
                   required
                   maxLength={160}
@@ -130,7 +131,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                   onValueChange={(model) => update(index, { model })}
                 />
               </Field>
-              <Field label="Provider kind" description="Optional, for example openrouter. Blank matches any.">
+              <Field label="Provider kind" about="Optional, for example openrouter. Blank matches any.">
                 <Input
                   maxLength={160}
                   value={rule.kind ?? ""}
@@ -152,7 +153,7 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                   }
                 />
               </Field>
-              <Field label="Upstream" description="Optional exact route reported by the provider.">
+              <Field label="Upstream" about="Optional exact route reported by the provider.">
                 <Input
                   maxLength={160}
                   value={rule.upstream ?? ""}
@@ -168,14 +169,17 @@ function CostForm({ settings, connections }: { settings: CostSettings; connectio
                 />
               </Field>
             </div>
-            <p className="text-sm text-muted">Base rates, per million tokens. Output includes reasoning tokens.</p>
+            <div className="flex items-center gap-1 text-sm text-muted">
+              <span>Base rates</span>
+              <AboutHint heading="Base rates">Prices per million tokens. Output includes reasoning.</AboutHint>
+            </div>
             <Rates rates={rule.rates} change={(rates) => update(index, { rates })} />
             {rule.tiers.map((tier, ti) => (
               <fieldset key={ti} className="flex min-w-0 flex-col gap-3 rounded-md border border-border p-3">
                 <legend className="px-1 text-sm">Context tier {ti + 1}</legend>
                 <Field
                   label="Total input above"
-                  description="Uncached input + cache reads + cache writes. The highest exceeded threshold prices the whole request."
+                  about="Uncached input + cache reads + cache writes. The highest exceeded threshold prices the whole request."
                 >
                   <Input
                     type="number"

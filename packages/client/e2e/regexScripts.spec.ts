@@ -144,7 +144,7 @@ for (const width of [1440, 390])
       await expect(on).not.toBeChecked()
       await on.click()
       await expect(on).toBeChecked()
-      await expect(item.getByText(/^Rewrites the message itself as it's saved/)).toBeVisible()
+      await expect(item.getByText(/^Rewrites messages, including streaming replies/)).toBeVisible()
       await item.getByRole("checkbox", { name: "What's shown", exact: true }).click()
       await expect(
         item.getByText("Changes only what's shown; the saved message and the prompt keep its text.")

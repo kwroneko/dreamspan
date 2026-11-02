@@ -21,11 +21,11 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
 
   await page.getByRole("button", { name: "Save a key" }).click()
   let dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Name").fill("Shared gateway key")
-  await dialog.getByLabel("Key").fill("sk-shared-secret-9876")
-  await dialog.getByLabel("Addresses it may be sent to").fill(`${provider.baseUrl}\nnot a url`)
+  await dialog.getByLabel("Name", { exact: true }).fill("Shared gateway key")
+  await dialog.getByLabel("Key", { exact: true }).fill("sk-shared-secret-9876")
+  await dialog.getByLabel("Addresses it may be sent to", { exact: true }).fill(`${provider.baseUrl}\nnot a url`)
   await expect(dialog.getByText("Not a URL: not a url")).toBeVisible()
-  await dialog.getByLabel("Addresses it may be sent to").fill(provider.baseUrl)
+  await dialog.getByLabel("Addresses it may be sent to", { exact: true }).fill(provider.baseUrl)
   await dialog.getByRole("button", { name: "Save key" }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByText("Key ending in 9876")).toBeVisible()
@@ -33,14 +33,14 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
   await expect(page.locator("body")).not.toContainText("sk-shared-secret")
 
   await page.getByRole("button", { name: "Rename" }).click()
-  await page.getByRole("dialog").getByLabel("Name").fill("Gateway key")
+  await page.getByRole("dialog").getByLabel("Name", { exact: true }).fill("Gateway key")
   await page.getByRole("dialog").getByRole("button", { name: "Rename" }).click()
   await expect(page.getByText("Gateway key", { exact: true })).toBeVisible()
 
   // A connection uses it, so replacing the key offers the connection's address.
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Uses the saved key")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("Uses the saved key")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByRole("button", { name: "Use a saved key instead" }).click()
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("saved as “Gateway key”")).toBeVisible()
@@ -49,7 +49,7 @@ test("save, rename, allow, replace and delete a key, which never comes back out"
   await page.getByRole("button", { name: "Allow an address" }).click()
   dialog = page.getByRole("dialog")
   await dialog.getByLabel("Address").fill("https://second.example/v1")
-  await dialog.getByLabel("Key").fill("sk-shared-secret-9876")
+  await dialog.getByLabel("Key", { exact: true }).fill("sk-shared-secret-9876")
   await dialog.getByRole("button", { name: "Allow" }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByRole("list", { name: "Addresses Gateway key may be sent to" })).toContainText(
@@ -93,8 +93,8 @@ test("replacing a key without its connections' address warns first, and the conn
 }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.goto(`${server().url}/settings/connections/new`)
-  await page.getByLabel("Name").fill("Strandable")
-  await page.getByLabel("Base URL").fill(provider.baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill("Strandable")
+  await page.getByLabel("Base URL", { exact: true }).fill(provider.baseUrl)
   await page.getByLabel("API key", { exact: true }).fill("sk-strandable-key-0001")
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name: "Strandable", level: 1 })).toBeVisible()

@@ -14,7 +14,7 @@ function CompletionSoundSettings() {
         setSound(next)
         if (next) activateSound()
       }}
-      description="In this browser only, for replies that finish elsewhere. After opening or reloading the app, interact with it once to allow audio. Blocked sounds are skipped."
+      about="Hear when a reply finishes in another chat. Applies in this browser; click or type once after opening the app to allow sound."
     >
       Completion sound
     </Switch>

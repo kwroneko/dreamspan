@@ -55,7 +55,7 @@ export function NewPresetDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="New prompt preset"
-      description="It starts as a copy of the built-in default preset: its prompts in order, and its settings. Cards cannot replace its prompts unless you allow it."
+      description="Start with the built-in preset’s prompts and settings. Character cards can replace its prompts only if you allow it."
     >
       <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-4">
         <Field label="Name">

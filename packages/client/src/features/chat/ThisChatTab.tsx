@@ -219,12 +219,8 @@ export function SummariesSwitch({ session }: { session: ChatSession }) {
               reread()
             })
         }}
-        description={
-          <>
-            Keeps the story in the context as the chat grows. See them and their settings in{" "}
-            <PanelLink panel="summaries">Summaries</PanelLink>.
-          </>
-        }
+        about="Keep the story in context as the chat grows."
+        description={<PanelLink panel="summaries">Summaries</PanelLink>}
       >
         Summarize older messages
       </Switch>

@@ -54,7 +54,7 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   const field = page.getByLabel("Summarization instruction", { exact: true })
   await expect(field).toBeEnabled()
   await field.fill("A long unsaved instruction draft must remain reachable.")
-  await expect(page.getByText("Not saved yet: kept as a server draft until you save it.")).toBeVisible()
+  await expect(page.getByText("Not saved yet. Your draft is kept.")).toBeVisible()
   // Through the Settings navigation: the Chats page links to Connections in its text too.
   const nav = page.getByRole("navigation", { name: "Settings" })
   await nav.getByRole("link", { name: "Connections", exact: true }).click()
@@ -64,7 +64,7 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   await page.reload()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
   // A server draft since 4d72162: after a reload it's the same unsaved draft, not a browser copy.
-  await expect(page.getByText("Not saved yet: kept as a server draft until you save it.")).toBeVisible()
+  await expect(page.getByText("Not saved yet. Your draft is kept.")).toBeVisible()
   // Saved, the browser's copy goes: the field shows the saved text, with nothing pending.
   await page.getByRole("button", { name: "Save summarization instruction" }).click()
   await expect(page.getByRole("status").filter({ hasText: "Saved." })).toBeVisible()
@@ -73,7 +73,7 @@ test("an unsaved summarization instruction survives leaving Settings → Chats a
   )
   await page.reload()
   await expect(field).toHaveValue("A long unsaved instruction draft must remain reachable.")
-  await expect(page.getByText(/kept as a server draft/)).toHaveCount(0)
+  await expect(page.getByText(/Not saved yet/)).toHaveCount(0)
 })
 
 test("switching tabs saves text typed while a summary draft save was in flight", async ({ page }) => {

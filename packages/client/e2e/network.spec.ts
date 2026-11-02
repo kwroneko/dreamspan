@@ -19,7 +19,7 @@ test("an admin sets the proxy, which shows without its password; bad settings ar
   await expect(alert).toContainText("Requiring the proxy needs a proxy to be set")
 
   await page.getByRole("radio", { name: "Set a proxy" }).click()
-  await page.getByLabel("Proxy URL").fill("socks5://vpnuser:proxy-secret@vpn.example:1080")
+  await page.getByLabel("Proxy URL", { exact: true }).fill("socks5://vpnuser:proxy-secret@vpn.example:1080")
   await page.getByLabel("Bypass list", { exact: true }).fill("intranet.example")
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByText("Saved.")).toBeVisible()

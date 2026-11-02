@@ -95,21 +95,21 @@ function NetworkForm({ settings }: { settings: NetworkSettings }) {
           ]}
         />
         {values.proxy === "replace" && (
-          <Field label="Proxy URL" description="HTTP, HTTPS or SOCKS5, for example socks5://user:password@vpn:1080.">
+          <Field label="Proxy URL" about="HTTP, HTTPS or SOCKS5, for example socks5://user:password@vpn:1080.">
             <SecretInput name="proxyUrl" masked={false} />
           </Field>
         )}
       </Fieldset>
       <Field
         label="Bypass list"
-        description="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
+        about="Hosts that go direct, one per line: names, *.domain suffixes, IPs and CIDR ranges. Local networks are on it by default."
       >
         <Textarea value={values.bypass} onChange={(event) => edit({ bypass: event.target.value })} spellCheck={false} />
       </Field>
       <Switch
         checked={values.forceProxy}
         onCheckedChange={(forceProxy) => edit({ forceProxy })}
-        description="Other users' connections can't go direct or through their own proxy. The bypass list still applies."
+        about="Other users' connections can't go direct or through their own proxy. The bypass list still applies."
       >
         Require the proxy for everyone else
       </Switch>

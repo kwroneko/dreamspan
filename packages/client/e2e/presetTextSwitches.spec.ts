@@ -31,6 +31,24 @@ for (const width of [1440, 390])
         "Strip example dialogues",
         "Collapse blank lines in character fields"
       ] as const
+      const pin = page.getByRole("switch", { name: names[0], exact: true })
+      const help =
+        "Give examples room before chat history. Off gives history priority. Examples must still fit the context limit."
+      await expect(pin).toHaveAccessibleDescription(help)
+      const popup = page.getByText(help, { exact: true }).filter({ visible: true })
+      await expect(popup).toHaveCount(0)
+      // Help is available on touch and to the keyboard, without switching the setting.
+      const about = page.getByRole("button", { name: `About ${names[0]}`, exact: true })
+      await about.click()
+      await expect(popup).toBeVisible()
+      await expect(pin).not.toBeChecked()
+      await page.mouse.move(0, 0)
+      await pin.focus()
+      await expect(popup).toHaveCount(0)
+      await page.keyboard.press("Tab")
+      await expect(about).toBeFocused()
+      await expect(popup).toBeVisible()
+      await pin.focus()
       for (const name of names) {
         const control = page.getByRole("switch", { name, exact: true })
         await expect(control).not.toBeChecked()

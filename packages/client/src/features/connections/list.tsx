@@ -211,12 +211,12 @@ function NewConnectionForm({
             onValueChange={setKindId}
           />
         </Field>
-        <Field label="Name" description="Optional: left empty, it's named as shown." error={shown(problems.name)}>
+        <Field label="Name" about="Empty uses the name shown in the box." error={shown(problems.name)}>
           <Input value={name} onValueChange={setName} placeholder={defaultName} autoComplete="off" />
         </Field>
         <Field
           label="Base URL"
-          description="Leave empty for the provider's own address. The whole API moves with it."
+          about="Connect to this address instead of the provider’s default. Empty uses the default."
           error={shown(problems.baseUrl)}
         >
           <Input
@@ -240,7 +240,7 @@ function NewConnectionForm({
               <SecretInput name="apiKey" onEmptyChange={setKeyEmpty} />
             </Field>
           ) : (
-            <Field label="API key" description="A saved key is sent only to the addresses it was allowed for.">
+            <Field label="API key" about="A saved key is sent only to the addresses it was allowed for.">
               <Select
                 items={credentials.map((credential) => ({
                   value: credential.id,
@@ -266,7 +266,7 @@ function NewConnectionForm({
         </div>
         <Field
           label="Concurrent requests"
-          description="At most this many requests at once; more wait their turn. Empty: no limit."
+          about="Limit how many requests can run at once. Others wait. Empty means no limit."
           error={shown(problems.maxConcurrent)}
         >
           <Input value={maxConcurrent} onValueChange={setMaxConcurrent} inputMode="numeric" className="sm:max-w-32" />

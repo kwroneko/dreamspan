@@ -19,8 +19,8 @@ test.afterAll(async () => {
 const createConnection = async (page: Page, name: string, baseUrl: string, key: string) => {
   await page.goto(`${server().url}/settings/connections`)
   await page.getByRole("link", { name: "New connection" }).click()
-  await page.getByLabel("Name").fill(name)
-  await page.getByLabel("Base URL").fill(baseUrl)
+  await page.getByLabel("Name", { exact: true }).fill(name)
+  await page.getByLabel("Base URL", { exact: true }).fill(baseUrl)
   await page.getByLabel("API key", { exact: true }).fill(key)
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible()
@@ -38,13 +38,13 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
 
   // The form explains what's missing before anything is sent.
   await page.getByRole("link", { name: "New connection" }).click()
-  await page.getByLabel("Base URL").fill("localhost port 5001")
+  await page.getByLabel("Base URL", { exact: true }).fill("localhost port 5001")
   await page.getByRole("button", { name: "Create connection" }).click()
   await expect(page.getByText("Enter a full URL, such as http://localhost:8000/v1.")).toBeVisible()
   // Focus goes to the first invalid field, and its description carries the error.
-  await expect(page.getByLabel("Base URL")).toBeFocused()
-  await expect(page.getByLabel("Base URL")).toHaveAccessibleDescription(/Enter a full URL/)
-  await page.getByLabel("Base URL").fill("")
+  await expect(page.getByLabel("Base URL", { exact: true })).toBeFocused()
+  await expect(page.getByLabel("Base URL", { exact: true })).toHaveAccessibleDescription(/Enter a full URL/)
+  await page.getByLabel("Base URL", { exact: true }).fill("")
 
   await createConnection(page, "Local fake", provider.baseUrl, "sk-fake-key-123456")
   await expect(page.getByText("Key ending in 3456")).toBeVisible()
@@ -54,7 +54,7 @@ test("create, check, edit, route and delete a connection", async ({ page }) => {
   await expect(page.getByText(/Route: direct/)).toBeVisible()
   expect(provider.keys).toContain("sk-fake-key-123456")
 
-  await page.getByLabel("Name").fill("Local fake renamed")
+  await page.getByLabel("Name", { exact: true }).fill("Local fake renamed")
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Local fake renamed", level: 1 })).toBeVisible()
 
@@ -87,20 +87,20 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
   await second.goto(page.url())
 
   // The other tab renames it while this one edits the concurrency.
-  await page.getByLabel("Concurrent requests").fill("3")
-  await second.getByLabel("Name").fill("Renamed in the other tab")
+  await page.getByLabel("Concurrent requests", { exact: true }).fill("3")
+  await second.getByLabel("Name", { exact: true }).fill("Renamed in the other tab")
   await second.getByRole("button", { name: "Save", exact: true }).click()
   await expect(second.getByRole("heading", { name: "Renamed in the other tab", level: 1 })).toBeVisible()
 
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect(page.getByRole("alert")).toContainText("changed since you opened it")
   await page.getByRole("button", { name: "Load the latest" }).click()
-  await expect(page.getByLabel("Name")).toHaveValue("Renamed in the other tab")
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Renamed in the other tab")
   // The second tab may have opened the shared draft after concurrency was typed and
   // saved that visible value too. Make a fresh change after loading the latest version.
-  await page.getByLabel("Concurrent requests").fill("4")
+  await page.getByLabel("Concurrent requests", { exact: true }).fill("4")
   await page.getByRole("button", { name: "Save", exact: true }).click()
-  await expect(page.getByLabel("Concurrent requests")).toHaveValue("4")
+  await expect(page.getByLabel("Concurrent requests", { exact: true })).toHaveValue("4")
   await expect(page.getByRole("alert")).toHaveCount(0)
 
   // The field already held 4 before Save: wait for the write before reloading another tab.
@@ -117,12 +117,12 @@ test("two tabs: a change made in the other is loaded, and the next try succeeds"
 
   // A key typed against an address the other tab has since changed: refused, then reloaded.
   await second.reload()
-  await second.getByLabel("Name").fill("Renamed again")
+  await second.getByLabel("Name", { exact: true }).fill("Renamed again")
   await second.getByRole("button", { name: "Save", exact: true }).click()
   await expect(second.getByRole("heading", { name: "Renamed again", level: 1 })).toBeVisible()
   await page.getByRole("button", { name: "Enter a new key" }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Key").fill("sk-two-tabs-key-222333")
+  await dialog.getByLabel("Key", { exact: true }).fill("sk-two-tabs-key-222333")
   await dialog.getByRole("button", { name: "Save key" }).click()
   await expect(dialog.getByRole("alert")).toContainText("changed since you opened it")
   // Only possible with the reloaded row version.
@@ -153,12 +153,12 @@ test("a key or header typed for one address isn't sent to the one another sessio
 
   await page.getByRole("button", { name: "Enter a new key" }).click()
   let dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Key").fill("sk-repointed-victim-0002")
+  await dialog.getByLabel("Key", { exact: true }).fill("sk-repointed-victim-0002")
   await repoint("Re-pointed", other.baseUrl)
   await dialog.getByRole("button", { name: "Save key" }).click()
   await expect(dialog.getByRole("alert")).toContainText("changed since you opened it")
   await expect(dialog.getByRole("status")).toContainText(`The address changed from ${from} to ${to}`)
-  await expect(dialog.getByLabel("Key")).toHaveValue("")
+  await expect(dialog.getByLabel("Key", { exact: true })).toHaveValue("")
   await expect(dialog.getByRole("button", { name: "Save key" })).toBeDisabled()
   await dialog.getByRole("button", { name: "Cancel" }).click()
   await page.getByRole("button", { name: "Check", exact: true }).click()
@@ -183,7 +183,7 @@ test("a key or header typed for one address isn't sent to the one another sessio
 test("a key isn't sent to a new address until it's typed again", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await createConnection(page, "Bound", provider.baseUrl, "sk-bound-key-abcdef")
-  await page.getByLabel("Base URL").fill(other.baseUrl)
+  await page.getByLabel("Base URL", { exact: true }).fill(other.baseUrl)
   await page.getByRole("button", { name: "Save", exact: true }).click()
 
   const origin = new URL(other.baseUrl).origin
@@ -194,10 +194,10 @@ test("a key isn't sent to a new address until it's typed again", async ({ page }
 
   await page.getByRole("button", { name: "Allow it" }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByLabel("Key").fill("not-the-key")
+  await dialog.getByLabel("Key", { exact: true }).fill("not-the-key")
   await dialog.getByRole("button", { name: "Allow" }).click()
   await expect(dialog.getByRole("alert")).toContainText("That isn't this credential's key")
-  await dialog.getByLabel("Key").fill("sk-bound-key-abcdef")
+  await dialog.getByLabel("Key", { exact: true }).fill("sk-bound-key-abcdef")
   await dialog.getByRole("button", { name: "Allow" }).click()
   await expect(dialog).toBeHidden()
   await expect(page.getByText(`This key isn't allowed for ${origin}`)).toBeHidden()
@@ -235,8 +235,8 @@ test("another user never sees someone's connections", async ({ browser }) => {
   await alice.goto(`${server().url}/settings/connections`)
   await expect(alice.getByText("Alice's private gateway")).toBeVisible()
   await alice.getByRole("button", { name: "Log out" }).click()
-  await alice.getByLabel("Handle").fill("bob")
-  await alice.getByLabel("Password").fill("bob-password-1")
+  await alice.getByLabel("Handle", { exact: true }).fill("bob")
+  await alice.getByLabel("Password", { exact: true }).fill("bob-password-1")
   await alice.getByRole("button", { name: "Log in" }).click()
   await alice.getByRole("link", { name: "Settings" }).click()
   await expect(alice.getByText("No connections yet")).toBeVisible()
