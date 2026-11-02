@@ -7,6 +7,7 @@ import { resolve } from "node:path"
 import { expect, test } from "@playwright/test"
 import { Effect } from "effect"
 import { asUser } from "./support/rpc.ts"
+import { saveRevision } from "./support/saveRevision.ts"
 import { ADMIN, apiLogin, serverPerFile, withAdmin } from "./support/server.ts"
 
 const server = serverPerFile({
@@ -142,5 +143,18 @@ for (const width of [1440, 390])
       expect((await sendBack.boundingBox())!.width).toBeLessThan(150)
       await sendBack.scrollIntoViewIfNeeded()
       await shot("reply-sections-editor-send-back")
+
+      // Literal ST-style tags can contain real line breaks. Editing must keep those bytes,
+      // including when a field is read back from the server after saving and reloading.
+      await opening.first().fill("<|plan|>\n\n")
+      await closing.first().fill("\n\n<|/plan|>")
+      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
+      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      await saveRevision(page)
+      await page.reload()
+      await expect(opening.first()).toHaveValue("<|plan|>\n\n")
+      await expect(closing.first()).toHaveValue("\n\n<|/plan|>")
+      await opening.first().scrollIntoViewIfNeeded()
+      await shot("reply-sections-editor-multiline")
     })
   }

@@ -13,7 +13,7 @@ import {
 import { Button } from "../../ui/Button.tsx"
 import { Checkbox, Switch } from "../../ui/Choice.tsx"
 import { useState } from "react"
-import { Field, Input } from "../../ui/Field.tsx"
+import { Field, Input, Textarea } from "../../ui/Field.tsx"
 import { Card, CardHeader } from "../../ui/Surface.tsx"
 import { type EditorStore, useValue } from "./store.ts"
 
@@ -56,7 +56,8 @@ function PairRow({
           }
           error={tagError(pair.open, regex)}
         >
-          <Input
+          <Textarea
+            rows={2}
             value={pair.open}
             spellCheck={false}
             className="font-mono"
@@ -68,7 +69,8 @@ function PairRow({
           description={regex ? "Where it ends: a regular expression." : "Where it ends, exactly as written."}
           error={tagError(pair.close, regex)}
         >
-          <Input
+          <Textarea
+            rows={2}
             value={pair.close}
             spellCheck={false}
             className="font-mono"
