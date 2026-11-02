@@ -255,7 +255,7 @@ export function ForkRow({
                   chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
                     new Date(fork.createdAt)
                 )}{" "}
-                · {fork.messages} messages
+                · {fork.messages.toLocaleString()} {fork.messages === 1 ? "message" : "messages"}
               </span>
             )}
             {fork.preview && (
@@ -321,7 +321,8 @@ export function OpenChatBranches() {
       aria-label="Branches of the open chat"
       className="flex max-h-[45%] min-h-0 shrink-0 flex-col gap-1 border-t border-border pt-2"
     >
-      <div className="flex max-w-controls min-w-0 items-center gap-1">
+      {/* The same 8 px gutters as the list above (layoutlint), so these rows line up with its rows. */}
+      <div className="flex max-w-controls min-w-0 items-center gap-1 px-2">
         <Tooltip label={expanded ? "Hides the open chat's branches." : "Shows the open chat's branches here."}>
           <button
             type="button"
@@ -343,7 +344,7 @@ export function OpenChatBranches() {
         />
       </div>
       {expanded && (
-        <div className="-mr-1 flex min-h-0 flex-col gap-1 overflow-y-auto pr-1.5 [scrollbar-gutter:stable]">
+        <div className="flex min-h-0 flex-col gap-1 overflow-y-auto px-2 [scrollbar-gutter:stable]">
           {rows.map((f) => (
             <ForkRow key={f.forkId} fork={f} perFork branchOnly here={shown ? f.forkId === shown : f.current} />
           ))}

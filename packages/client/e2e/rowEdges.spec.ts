@@ -130,12 +130,18 @@ async function measure(action: Locator, row: Locator, primary: Locator, text?: L
   // Blocks lead with switches/handles. Compare their content padding, without
   // counting those accessories as empty space at the edge.
   const blockHeader = await row.evaluate((el) => el.tagName === "HEADER" || el.hasAttribute("data-entry-header"))
+  // Rows led by a control (a block's header: prompts, notes, snippets; sidebar, branch and
+  // version rows) have the layout audit's 8 px on both sides, from the row's edge to the box of
+  // its first and of its last control (layoutlint, layoutfixes); the leading control's own
+  // padding isn't edge space the action must match. Rows led by text (presets, lorebook entry
+  // titles) match the text's inset.
+  const header = await row.evaluate((el) => el.tagName === "HEADER")
   const rowPadding = await row.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
   const leftInset = textBox
     ? textBox.x - rowBox!.x
     : blockHeader
-      ? rowPadding + padding
-      : primaryBox!.x - rowBox!.x + padding
+      ? rowPadding + (header ? 0 : padding)
+      : primaryBox!.x - rowBox!.x
   const geometry = await action.evaluate((el) => {
     let scroll = el.parentElement!
     let fallback: HTMLElement | null = null

@@ -376,7 +376,7 @@ const EntryRow = memo(function EntryRow({
       {!compact ? (
         <div
           data-entry-header
-          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`grid items-start gap-2 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
           style={{ gridTemplateColumns: template }}
         >
           <div className="mt-0.5 flex items-center gap-1">
@@ -398,7 +398,7 @@ const EntryRow = memo(function EntryRow({
       ) : (
         <div
           data-entry-header
-          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:0.75rem]`}
+          className={`flex items-start gap-1 ps-2 ${rowActionInsetClass} [--row-action-inset:1rem]`}
         >
           {select}
           {chevron}
