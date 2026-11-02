@@ -105,12 +105,12 @@ for (const [width, height] of [
       // Under Main: a card's prompt can replace it, whether or not one does.
       await expect(overlay.locator('[data-prompt="main"]')).toContainText("A card's own prompt can replace it")
 
-      // "At depth N" lists each note once, with its depth.
+      // "Notes inside the chat" lists each note once, with its depth.
       await expect(overlay.getByText("Tide table", { exact: false })).toHaveCount(1)
       await expect(overlay.getByText("Tide table (depth 2)")).toBeVisible()
       await expect(overlay.getByText("Pilot's log")).toBeVisible()
       await expect(overlay.getByText("Harbor rules")).toBeVisible()
-      await expect(overlay.getByText("Tail starts", { exact: true })).toHaveCount(1)
+      await expect(overlay.getByText("After the chat: sent last", { exact: true })).toHaveCount(1)
       await expect(overlay.getByText("Tail rule")).toHaveCount(1)
       await page.screenshot({ path: join(shots, `overlay-slots-${width}-${theme}.png`) })
 
@@ -143,11 +143,11 @@ test("with Chat History last the tail still starts after it", async ({ page }) =
   const chatId = await setUp(page, "History last", true)
   const overlay = await open(page, chatId)
   await expect(overlay.getByRole("button", { name: "Search", exact: true })).toBeVisible()
-  await expect(overlay.getByText("Tail starts", { exact: true })).toHaveCount(1)
+  await expect(overlay.getByText("After the chat: sent last", { exact: true })).toHaveCount(1)
   await expect(overlay.getByText("Tail rule")).toHaveCount(1)
   // After Chat History's block, before the end of the document.
   const history = (await overlay.locator('[data-prompt="chatHistory"]').boundingBox())!
-  const tail = (await overlay.getByText("Tail starts", { exact: true }).boundingBox())!
+  const tail = (await overlay.getByText("After the chat: sent last", { exact: true }).boundingBox())!
   expect(tail.y).toBeGreaterThan(history.y)
 })
 

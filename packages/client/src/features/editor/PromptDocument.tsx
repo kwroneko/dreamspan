@@ -37,6 +37,7 @@ import { NumberField, SelectField, SwitchField, TextField, TriggersField } from 
 import { SearchNavigation, scrollToSearchField, useSearchMatch } from "./searchNavigation.ts"
 import { summaryBadge } from "./summaryBadge.ts"
 import { PRESET_LOREBOOKS_FOCUS, PresetLorebooks } from "./PresetLorebooks.tsx"
+import { AfterChatLine, AT_START, BEFORE_CHAT, ChatStartsLine, placeReuseLines, ReuseLine } from "./promptLines.tsx"
 import { type EditorStore, useText, useValue } from "./store.ts"
 import { presetEditorWarnings } from "./presetSections.ts"
 import { promptLabel } from "./promptLabel.ts"
@@ -727,32 +728,49 @@ export function PromptDocument({
       : ""
     // The column names only the places that hold a note.
     if (column && notes === "") return null
+    // A row like the prompts' (dashed: it stands for what fills it), its icon in their handle's
+    // column; one with no note is slimmer and muted, so the empty places don't outweigh the prompts.
+    const empty = notes === ""
     return (
-      <div className="my-1 border-l-2 border-border px-2 py-0.5 text-xs text-muted">
-        <strong>{label}</strong>:{" "}
-        {context === undefined ? "no chat open" : context === null ? "context unavailable" : notes || "no active notes"}
-      </div>
+      <Block
+        dashed
+        data-note-slot={label}
+        className={`my-1 flex items-center gap-2 ps-1 pe-2 text-sm ${empty ? "min-h-8 text-muted" : "min-h-10 py-1"}`}
+      >
+        <span className="flex size-8 shrink-0 items-center justify-center text-muted" aria-hidden="true">
+          <Icon name="note" size={empty ? 14 : 16} />
+        </span>
+        <span className="min-w-0 flex-1 break-words">
+          <span className={empty ? "" : "font-medium"}>{label}</span>
+          <span className="text-muted">
+            :{" "}
+            {context === undefined
+              ? "no chat open"
+              : context === null
+                ? "context unavailable"
+                : notes || "no active notes"}
+          </span>
+        </span>
+      </Block>
     )
   }
   const history = order.findIndex((e) => e.identifier === "chatHistory")
   const afterHistory = order[history + 1]?.identifier === "newestMessage" ? history + 2 : history + 1
-  const divider = (text: string) => (
-    <p className="my-1 border-y border-border py-0.5 text-xs font-medium text-accent">{text}</p>
-  )
   const tailStarts = (
     <>
-      {divider("Tail starts")}
-      {slot("Start of tail notes", (p) => p.mode === "section" && p.section === "tail_start")}
+      <AfterChatLine />
+      {slot("Notes after the chat", (p) => p.mode === "section" && p.section === "tail_start")}
     </>
   )
-  const cacheEnds = (identifier: string) =>
-    context?.cacheAfter
-      .filter((b) => b.identifier === identifier)
-      .map((b) => (
-        <p key={b.reason} className="my-1 border-y border-accent py-0.5 text-xs text-accent">
-          Cached part ends · {b.reason}
-        </p>
-      ))
+  const reuse = placeReuseLines(
+    context?.cacheAfter ?? [],
+    order.map((e) => e.identifier)
+  )
+  const reuseAlone = ![...reuse.values()].includes("every")
+  const reuseLine = (place: string) => {
+    const kind = reuse.get(place)
+    return kind && <ReuseLine kind={kind} alone={reuseAlone} />
+  }
   const newestAfterTail = order.findIndex((e) => e.identifier === "newestMessage") > history + 1
   const anyOpen = order.some((e) => isOpen(opened, e.identifier))
   const small = column ? "h-7 px-2" : ""
@@ -791,8 +809,8 @@ export function PromptDocument({
   )
   const list = (
     <div className="@container min-w-0 flex-1">
-      {slot("Start of context notes", (p) => p.mode === "section" && p.section === "context_start")}
-      {cacheEnds("context_start")}
+      {slot("Notes at the very start", (p) => p.mode === "section" && p.section === "context_start")}
+      {reuseLine(AT_START)}
       {!column && <div className="flex justify-center">{insert(0, "Insert prompt at start", "h-6 w-full")}</div>}
       <SortableList
         items={order}
@@ -806,19 +824,20 @@ export function PromptDocument({
           return (
             <>
               {entry.identifier === "charDescription" &&
-                slot("With definitions", (p) => p.mode === "section" && p.section === "card")}
+                slot("Notes with the definitions", (p) => p.mode === "section" && p.section === "card")}
               {entry.identifier === "chatHistory" && (
                 <>
-                  {divider("History starts")}
-                  {slot("At depth N", (p) => p.mode === "depth")}
+                  {reuseLine(BEFORE_CHAT)}
+                  <ChatStartsLine />
+                  {slot("Notes inside the chat", (p) => p.mode === "depth")}
                 </>
               )}
               {history >= 0 && index === afterHistory && tailStarts}
               {entry.identifier === "newestMessage" &&
                 newestAfterTail &&
-                slot("End of tail notes", (p) => p.mode === "section" && p.section === "tail_end")}
+                slot("Notes at the very end", (p) => p.mode === "section" && p.section === "tail_end")}
               {entry.identifier === "main" &&
-                slot("Before main prompt", (p) => p.mode === "section" && p.section === "before_main_prompt")}
+                slot("Notes before the main prompt", (p) => p.mode === "section" && p.section === "before_main_prompt")}
               <div className={column ? "py-0.5" : ""}>
                 <PromptBlock
                   store={store}
@@ -847,13 +866,13 @@ export function PromptDocument({
                 />
               </div>
               {entry.identifier === "main" &&
-                slot("After main prompt", (p) => p.mode === "section" && p.section === "after_main_prompt")}
+                slot("Notes after the main prompt", (p) => p.mode === "section" && p.section === "after_main_prompt")}
               {entry.identifier === "newestMessage" &&
                 slot(
-                  "After newest message / depth 0",
+                  "Notes after the newest message",
                   (p) => p.mode === "tail" || (p.mode === "depth" && p.depth === 0)
                 )}
-              {cacheEnds(entry.identifier)}
+              {reuseLine(entry.identifier)}
               {!column && (
                 <div className="flex justify-center">
                   {insert(index + 1, `Insert prompt after ${names.get(entry.identifier)}`, "h-6 w-full text-muted")}
@@ -864,7 +883,7 @@ export function PromptDocument({
         }}
       </SortableList>
       {history >= 0 && afterHistory >= order.length && tailStarts}
-      {!newestAfterTail && slot("End of tail notes", (p) => p.mode === "section" && p.section === "tail_end")}
+      {!newestAfterTail && slot("Notes at the very end", (p) => p.mode === "section" && p.section === "tail_end")}
       {column && (
         <div className="pt-2">
           {insert(
