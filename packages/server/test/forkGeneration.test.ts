@@ -115,10 +115,13 @@ describe("generation in a fork", () => {
       }
       // Its summaries are planned in the main fork too, not in B, current by now.
       yield* eventually(() => planned.slice(mark).some((p) => p.when === "after"))
-      assert.deepStrictEqual(planned.slice(mark - 1), [
+      // Under load the previous turn's "after" plan can land late, and this swipe's "before" after the mark.
+      const recent = planned.slice(mark - 1)
+      assert.deepStrictEqual(recent.slice(-2), [
         { when: "before", forkId: main },
         { when: "after", forkId: main }
       ])
+      assert.isTrue(recent.every((p) => p.forkId === main))
     }).pipe(Effect.scoped, Effect.provide(serverLayer(config, undefined, summaries)))
   })
 })
