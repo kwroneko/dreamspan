@@ -303,7 +303,7 @@ export const register = () => [
     label: "Send selection to snippet",
     shortLabel: "Selection to snippet",
     description: "Adds the selected text to the end of the snippet open last in Snippets, or to a new one.",
-    icon: "snippet",
+    icon: "snippetSelection",
     editor: "selection",
     shortcut: "s",
     available: ({ text, source }) => source !== "snippet" && text.length > 0 && canSend(),

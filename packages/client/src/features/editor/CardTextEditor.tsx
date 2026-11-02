@@ -1,5 +1,5 @@
 import { type FieldPath, getAt } from "@rp/shared/editing.ts"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { ErrorAlert } from "../../actions.tsx"
 import type { AppError } from "../../errors.ts"
 import { CodeEditor } from "../../ui/CodeEditor.tsx"
@@ -19,6 +19,10 @@ export function CardTextEditor({
   mono,
   readOnly,
   source,
+  tools,
+  status,
+  expand,
+  autoFocus,
   onChange,
   onBlur
 }: {
@@ -34,6 +38,13 @@ export function CardTextEditor({
   readOnly?: boolean | undefined
   /** A snippet's own text: it offers no sending to a snippet. */
   source?: "snippet" | undefined
+  /** The field's own controls and status, in the strip inside its box (`ui/FieldFrame`). */
+  tools?: ReactNode
+  status?: ReactNode
+  /** False: no Open large (the large box itself). */
+  expand?: boolean | undefined
+  /** Focused when it opens, the caret at the end. */
+  autoFocus?: boolean | undefined
   onChange: (value: string) => void
   onBlur?: (() => void) | undefined
 }) {
@@ -77,6 +88,10 @@ export function CardTextEditor({
         textActions={!mono}
         readOnly={readOnly}
         source={source}
+        tools={tools}
+        status={status}
+        expand={expand}
+        autoFocus={autoFocus}
         onChange={onChange}
         onBlur={onBlur}
       />

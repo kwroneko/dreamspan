@@ -37,7 +37,8 @@ export function EditHistory({
   load,
   read,
   restore,
-  disabled = false
+  disabled = false,
+  className = ""
 }: {
   /** The box's name: "Description". */
   label: string
@@ -48,6 +49,7 @@ export function EditHistory({
   /** Puts that state in the box as the newest one. */
   restore: (seq: number) => Promise<Loaded<unknown>>
   disabled?: boolean
+  className?: string
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -57,6 +59,7 @@ export function EditHistory({
         hint="Edit history: every earlier state of this text, from any device. Picking one puts it back as the newest state; nothing is lost."
         icon="history"
         disabled={disabled}
+        className={className}
         onClick={() => setOpen(true)}
       />
       {open && (
@@ -82,8 +85,15 @@ function EditHistoryDialog({
   const [states, setStates] = useState<ReadonlyArray<EditState> | null>(null)
   const [more, setMore] = useState(false)
   const [selected, setSelected] = useState<EditState | null>(null)
+  // The text read last. Picking another state keeps it on screen until that one's text is read,
+  // then swaps it in place: no "Loading" in between, which collapsed the pane and grew it back
+  // on every pick (the flash, owner 2026-11-02). Texts read once are kept for this dialog.
   const [shown, setRead] = useState<{ readonly seq: number; readonly text: string } | null>(null)
-  const text = selected !== null && shown?.seq === selected.seq ? shown.text : null
+  // A new map on each read, so what renders from it renders again.
+  const [texts, setTexts] = useState<ReadonlyMap<number, string>>(() => new Map())
+  // The picked state's text, once read; what the pane shows meanwhile.
+  const text = (selected === null ? undefined : texts.get(selected.seq)) ?? null
+  const displayed = text ?? shown?.text ?? null
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   useEffect(() => {
@@ -100,17 +110,17 @@ function EditHistoryDialog({
     }
   }, [load])
   useEffect(() => {
-    if (selected === null) return
+    if (selected === null || texts.has(selected.seq)) return
     let live = true
     void read(selected.seq).then((result) => {
-      if (!live) return
-      if (result.ok) setRead({ seq: selected.seq, text: result.value })
-      else setError(result.error.message)
+      if (!result.ok) return live && setError(result.error.message)
+      setTexts((known) => new Map(known).set(selected.seq, result.value))
+      if (live) setRead({ seq: selected.seq, text: result.value })
     })
     return () => {
       live = false
     }
-  }, [read, selected])
+  }, [read, selected, texts])
   const earlier = async () => {
     if (!states?.length) return
     setPending(true)
@@ -167,14 +177,15 @@ function EditHistoryDialog({
           <div className="flex min-w-0 flex-col gap-2">
             {selected === null ? (
               <p className="text-sm text-muted">Pick a state to read its text.</p>
-            ) : text === null ? (
+            ) : displayed === null ? (
               <p className="text-sm text-muted">Loading its text…</p>
             ) : (
               <pre
                 aria-label="Text of the state"
+                aria-busy={text === null || undefined}
                 className="max-h-[40dvh] min-h-24 overflow-auto rounded-md border border-border bg-canvas p-2 font-sans text-sm whitespace-pre-wrap [overflow-wrap:anywhere] sm:max-h-[55dvh]"
               >
-                {text === "" ? <span className="text-muted">(empty)</span> : text}
+                {displayed === "" ? <span className="text-muted">(empty)</span> : displayed}
               </pre>
             )}
           </div>

@@ -81,14 +81,12 @@ function CardField({
   field,
   label,
   rows,
-  layout,
   tokens = false
 }: {
   store: EditorStore
   field: keyof typeof HINTS
   label: string
   rows?: number
-  layout: CardTabProps["layout"]
   tokens?: boolean
 }) {
   return (
@@ -99,7 +97,6 @@ function CardField({
       hint={HINTS[field]}
       aside={tokens ? <FieldTokens store={store} path={[field]} /> : undefined}
       {...(rows === undefined ? {} : { rows })}
-      expandable={layout === "panel"}
     />
   )
 }
@@ -354,29 +351,15 @@ function DefinitionTab({ store, call, layout }: CardTabProps) {
   const panel = layout === "panel"
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <CardField store={store} field="description" label="Description" rows={panel ? 8 : 12} layout={layout} tokens />
+      <CardField store={store} field="description" label="Description" rows={panel ? 8 : 12} tokens />
       <div className={columns(layout)}>
-        <CardField store={store} field="personality" label="Personality" rows={panel ? 3 : 4} layout={layout} tokens />
-        <CardField store={store} field="scenario" label="Scenario" rows={panel ? 3 : 4} layout={layout} tokens />
+        <CardField store={store} field="personality" label="Personality" rows={panel ? 3 : 4} tokens />
+        <CardField store={store} field="scenario" label="Scenario" rows={panel ? 3 : 4} tokens />
       </div>
-      <CardField
-        store={store}
-        field="mes_example"
-        label="Example messages"
-        rows={panel ? 5 : 6}
-        layout={layout}
-        tokens
-      />
+      <CardField store={store} field="mes_example" label="Example messages" rows={panel ? 5 : 6} tokens />
       <div className={columns(layout)}>
         <div className="flex min-w-0 flex-col gap-1">
-          <CardField
-            store={store}
-            field="system_prompt"
-            label="System prompt"
-            rows={panel ? 3 : 4}
-            layout={layout}
-            tokens
-          />
+          <CardField store={store} field="system_prompt" label="System prompt" rows={panel ? 3 : 4} tokens />
           <PromptUseNote store={store} call={call} field="system_prompt" />
         </div>
         <div className="flex min-w-0 flex-col gap-1">
@@ -385,7 +368,6 @@ function DefinitionTab({ store, call, layout }: CardTabProps) {
             field="post_history_instructions"
             label="Post-history instructions"
             rows={panel ? 3 : 4}
-            layout={layout}
             tokens
           />
           <PromptUseNote store={store} call={call} field="post_history_instructions" />
@@ -398,14 +380,7 @@ function DefinitionTab({ store, call, layout }: CardTabProps) {
 function GreetingsTab({ store, layout }: CardTabProps) {
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      <CardField
-        store={store}
-        field="first_mes"
-        label="First message"
-        rows={layout === "panel" ? 5 : 6}
-        layout={layout}
-        tokens
-      />
+      <CardField store={store} field="first_mes" label="First message" rows={layout === "panel" ? 5 : 6} tokens />
       <Greetings
         store={store}
         path={["alternate_greetings"]}
@@ -429,7 +404,7 @@ function MetadataTab({ store, call, layout }: CardTabProps) {
   const doc = useWorkingDoc(store)
   const about = (
     <>
-      <CardField store={store} field="creator_notes" label="Creator's notes" rows={4} layout={layout} />
+      <CardField store={store} field="creator_notes" label="Creator's notes" rows={4} />
       <Tags store={store} />
       <div className={columns(layout)}>
         <TextField store={store} path={["creator"]} label="Creator" hint={HINTS.creator} />

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react"
+import { lazy, type ReactNode, Suspense } from "react"
 
 export interface CodeEditorProps {
   value: string
@@ -17,6 +17,12 @@ export interface CodeEditorProps {
   source?: "snippet" | undefined
   /** False: no text actions under it, for text that isn't prose (a pattern, a template's markers). */
   textActions?: boolean | undefined
+  /** The field's own controls, in the strip inside its bottom border after the text actions (`FieldFrame`). */
+  tools?: ReactNode
+  /** At the strip's start: "edited", the token count. */
+  status?: ReactNode
+  /** False: no Open large in the strip. Prose that can be edited has it (owner, 2026-11-02). */
+  expand?: boolean | undefined
   /** The change markers in the gutter only once the text differs from `base`: a plain text box until then. */
   quietMarkers?: boolean | undefined
   rows?: number | undefined
