@@ -4,6 +4,7 @@
 import { Slider as BaseSlider } from "@base-ui/react/slider"
 import { useId, type ReactNode } from "react"
 import { AboutHint } from "./AboutHint.tsx"
+import { Tooltip } from "./Tooltip.tsx"
 
 export function Slider({
   label,
@@ -68,6 +69,62 @@ export function Slider({
           {about}
         </span>
       )}
+    </BaseSlider.Root>
+  )
+}
+
+/**
+ * A small slider for a toolbar: no label row (`label` is its accessible name), its hover
+ * explanation `hint`, and its value shown by the caller beside it.
+ */
+export function ToolbarSlider({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  step,
+  valueText,
+  disabled = false,
+  className = "",
+  onValueChange
+}: {
+  label: string
+  hint: ReactNode
+  value: number
+  min: number
+  max: number
+  step: number
+  valueText: (value: number) => string
+  disabled?: boolean
+  className?: string
+  onValueChange: (value: number) => void
+}) {
+  return (
+    <BaseSlider.Root
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      thumbAlignment="edge"
+      onValueChange={(next) => onValueChange(next)}
+      data-toolbar-slider
+      className={`flex items-center data-disabled:opacity-50 ${className}`}
+    >
+      <Tooltip label={hint}>
+        <BaseSlider.Control className="flex h-8 w-full touch-none items-center select-none">
+          <BaseSlider.Track className="h-1 w-full rounded-full bg-surface-raised ring-1 ring-border">
+            <BaseSlider.Indicator className="rounded-full bg-accent" />
+            <BaseSlider.Thumb
+              data-layout-overlay="Slider thumb rides over its track and fill"
+              aria-label={label}
+              getAriaValueText={(_formatted, current) => valueText(current)}
+              className="size-3.5 rounded-full border border-border bg-surface shadow-sm outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-focus"
+            />
+          </BaseSlider.Track>
+        </BaseSlider.Control>
+      </Tooltip>
     </BaseSlider.Root>
   )
 }

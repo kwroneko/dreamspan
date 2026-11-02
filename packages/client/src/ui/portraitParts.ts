@@ -37,7 +37,12 @@ export interface CutoutChooserProps {
   readonly error: string | null
   readonly onSave: (crop: AvatarCrop) => void
   readonly onCancel: () => void
+  /** Replace picture: a new image chosen in the dialog, whose cutout is chosen next. Absent: no replacing here. */
+  readonly onReplace?: ((file: File) => void) | undefined
 }
+
+/** The image files a picture can be. */
+export const PICTURE_ACCEPT = "image/png,image/jpeg,image/gif,image/webp"
 
 export interface CutoutChooser {
   readonly id: string

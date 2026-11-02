@@ -320,7 +320,7 @@ test("the persona's tab is a full card", async ({ page }) => {
   const { persona, chat } = await seed(page, "Wren")
   await page.goto(`${server().url}/chats/${chat.id}?panel=card:${persona.entityId}`)
   const tab = cardTab(page)
-  await expect(tab.getByText("You play", { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(tab.getByText("You", { exact: true })).toBeVisible({ timeout: 30_000 })
   await expect(tab.getByRole("textbox", { name: "Personality", exact: true })).toBeVisible()
   const greetings = await subTab(tab, "Greetings")
   await expect(greetings.getByRole("textbox", { name: "First message", exact: true })).toBeVisible()

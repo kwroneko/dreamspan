@@ -157,16 +157,16 @@ for (const width of [1440, 390])
           expect(await cast.evaluate((strip) => strip.scrollWidth <= strip.clientWidth + 1)).toBeTruthy()
         await page.waitForTimeout(300)
         await shoot(page, `panel-${label}-${tag}`)
-        // The tab's portrait changes the picture (§14.5c); a card with one has View full image
-        // beside it, which opens the whole image (beside the chat, or over it on a phone), the
-        // panel kept. One without a picture has nothing to view.
+        // The tab's portrait opens the whole image (beside the chat, or over it on a phone), the
+        // panel kept; the Picture button over it changes it (§14.5c). One without a picture has
+        // nothing to view.
         const panel = page.getByRole("tabpanel", { name, exact: true })
-        await expect(panel.getByRole("button", { name: `Change ${name}'s picture`, exact: true })).toBeVisible()
+        await expect(panel.getByRole("button", { name: "Picture", exact: true })).toBeVisible()
         if (label === "group") {
-          await expect(panel.getByRole("button", { name: "View full image", exact: true })).toHaveCount(0)
+          await expect(panel.getByRole("button", { name: `View ${name}'s picture`, exact: true })).toHaveCount(0)
           continue
         }
-        await panel.getByRole("button", { name: "View full image", exact: true }).click()
+        await panel.getByRole("button", { name: `View ${name}'s picture`, exact: true }).click()
         const lightbox = portraitView(page, name)
         await expect(lightbox).toBeVisible()
         await expect(lightbox.getByRole("img", { name: `${name}'s full portrait` })).toBeVisible()

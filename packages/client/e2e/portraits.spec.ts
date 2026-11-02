@@ -108,7 +108,7 @@ for (const width of [1440, 390]) {
     // In a chat, the card's tab has the Cast row's actions, the full editor among them (f55e4e7).
     const card = page.getByRole("tabpanel", { name: "Mira", exact: true })
     await expect(card.getByRole("button", { name: "Open Mira in the full editor", exact: true })).toBeVisible()
-    await card.getByRole("button", { name: "View full image", exact: true }).click()
+    await card.getByRole("button", { name: "View Mira's picture", exact: true }).click()
     await expect(page.getByRole("img", { name: "Mira's full portrait" })).toBeVisible()
     await closePortrait(page)
     // The portrait closes alone: the panel (a sheet on a phone) stays where it was.

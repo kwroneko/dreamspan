@@ -1,8 +1,8 @@
 // A card's header at the top of its tab in the chat's panel and of the full editor
 // (CardNameHeader.tsx `CardHeader`, DESIGN §4, owner 2026-11-02): the portrait as tall as the
-// names beside it, stacked from the top; "You play" a badge on the portrait, so a persona's
-// header has the same shape as any character's; Adjust cutout and View full image over the
-// picture, reachable by keyboard. Screenshots of each case at the panel's minimum, default
+// names beside it, stacked from the top; "You" a badge on the portrait, so a persona's
+// header has the same shape as any character's; one Picture button over the picture's
+// lower-right corner, reachable by keyboard. Screenshots of each case at the panel's minimum, default
 // and a wide width, on a phone, light and dark. Every card here is made up.
 import { mkdirSync } from "node:fs"
 import { join } from "node:path"
@@ -198,8 +198,8 @@ for (const scheme of ["light", "dark"] as const)
         expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
         await expectInlineNames(panel)
         heights.push(whole.height)
-        // "You play" is on the persona's portrait, and only there.
-        const badge = header.locator("[data-card-header-portrait]").getByText("You play", { exact: true })
+        // "You" is on the persona's portrait, and only there.
+        const badge = header.locator("[data-card-header-portrait]").getByText("You", { exact: true })
         await expect.soft(badge).toHaveCount(name === PERSONA ? 1 : 0)
       }
       // A persona's header is the same shape as a character's.
@@ -212,35 +212,34 @@ test("the picture's controls are over it, and reached by keyboard", async ({ pag
   const panel = await open(page, NAMED)
   const portrait = panel.locator("[data-card-header-portrait]")
   const area = await box(portrait)
-  const change = panel.getByRole("button", { name: `Change ${NAMED}'s picture`, exact: true })
-  for (const name of ["Adjust cutout", "View full image"]) {
-    const control = panel.getByRole("button", { name, exact: true })
-    const at = await box(control)
-    // On the picture, not under it.
-    expect(at.y).toBeGreaterThanOrEqual(area.y)
-    expect(at.y + at.height).toBeLessThanOrEqual(area.y + area.height + 0.5)
-    expect(at.x + at.width).toBeLessThanOrEqual(area.x + area.width + 0.5)
-  }
-  // Faint until the picture is hovered or a control has the keyboard's focus.
-  const adjust = panel.getByRole("button", { name: "Adjust cutout", exact: true })
+  const view = panel.getByRole("button", { name: `View ${NAMED}'s picture`, exact: true })
+  // One button over the picture, in its lower-right corner, and nothing else (no camera over it).
+  await expect(portrait.locator("[data-portrait-controls] button")).toHaveCount(1)
+  const picture = panel.getByRole("button", { name: "Picture", exact: true })
+  const at = await box(picture)
+  expect(at.y + at.height).toBeLessThanOrEqual(area.y + area.height + 0.5)
+  expect(at.y + at.height).toBeGreaterThan(area.y + area.height - 12)
+  expect(at.x + at.width).toBeLessThanOrEqual(area.x + area.width + 0.5)
+  expect(at.x + at.width).toBeGreaterThan(area.x + area.width - 12)
+  // Faint until the picture is hovered or the button has the keyboard's focus.
   const opacity = (locator: Locator) =>
     locator.evaluate((element) => Number(getComputedStyle(element.closest("[data-portrait-controls]")!).opacity))
   await page.mouse.move(0, 0)
-  await expect.poll(() => opacity(adjust)).toBeLessThan(1)
-  await change.focus()
+  await expect.poll(() => opacity(picture)).toBeLessThan(1)
+  await view.focus()
   await page.keyboard.press("Tab")
-  await expect(adjust).toBeFocused()
-  await expect.poll(() => opacity(adjust)).toBe(1)
-  await page.keyboard.press("Tab")
-  await expect(panel.getByRole("button", { name: "View full image", exact: true })).toBeFocused()
+  await expect(picture).toBeFocused()
+  await expect.poll(() => opacity(picture)).toBe(1)
   await page.keyboard.press("Shift+Tab")
-  await page.keyboard.press("Shift+Tab")
-  await expect(change).toBeFocused()
-  await change.hover()
-  await expect.poll(() => opacity(adjust)).toBe(1)
-  // Each keeps its explanation.
-  await adjust.hover()
-  await expect(page.getByText("Adjust cutout: which part of the picture small portraits show")).toBeVisible()
+  await expect(view).toBeFocused()
+  await view.hover()
+  await expect.poll(() => opacity(picture)).toBe(1)
+  await expect(page.getByText("View the whole picture", { exact: true })).toBeVisible()
+  // It keeps its explanation.
+  await picture.hover()
+  await expect(
+    page.getByText("Picture: adjust the cutout small portraits show, or replace the picture", { exact: true })
+  ).toBeVisible()
 })
 
 test("the full editor's header is the same", async ({ page }) => {
@@ -259,18 +258,19 @@ test("the full editor's header is the same", async ({ page }) => {
         const { portrait, first } = await measure(page.locator("main"))
         expect.soft(Math.abs(portrait.y - first.y), `${name}: top`).toBeLessThanOrEqual(1)
         await expectInlineNames(page.locator("main"))
-        // The same picture controls over it as in a character tab (View full image only over a chat).
+        // The same Picture button over it as in a character tab, with or without a picture.
         const over = page.locator("[data-card-header-portrait]")
-        await expect(over.getByRole("button", { name: "Adjust cutout", exact: true })).toHaveCount(
+        await expect(over.getByRole("button", { name: "Picture", exact: true })).toHaveCount(1)
+        await expect(over.getByRole("button", { name: `View ${name}'s picture`, exact: true })).toHaveCount(
           name === NAMED ? 1 : 0
         )
-        // Metadata's Picture: one large portrait, its own drop target, with Replace and Adjust
-        // cutout over it, or an Add a picture box of the same size; the tags beside it.
+        // Metadata's Picture: one large portrait, its own drop target, with the Picture button
+        // over it, or an Add a picture box of the same size; the tags beside it.
         const metadata = await cardFieldsTab(page, "Metadata")
         const picture = metadata.getByRole("region", { name: "Picture" })
         if (name === NAMED) {
-          await expect(picture.getByRole("button", { name: "Replace the picture", exact: true })).toBeAttached()
-          await expect(picture.getByRole("button", { name: "Adjust cutout", exact: true })).toBeAttached()
+          await expect(picture.getByRole("button", { name: "Picture", exact: true })).toBeAttached()
+          await expect(picture.locator("[data-portrait-controls] button")).toHaveCount(1)
         } else await expect(picture.getByRole("button", { name: "Add a picture", exact: true })).toBeVisible()
         await page.mouse.move(0, 0)
         await page.waitForTimeout(200)

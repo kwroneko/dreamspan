@@ -202,6 +202,12 @@ const paths = {
   crop: ["M6 2v14a2 2 0 0 0 2 2h14", "M18 22V8a2 2 0 0 0-2-2H2"],
   /** One portrait's frame: only one image open at a time (the portrait column's toggle). */
   "one-image": ["M7 2h10a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z", "M12 8v8", "m10 10 2-2"],
+  /** A picture: the portrait's Picture button. */
+  image: [
+    "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z",
+    "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+    "m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"
+  ],
   camera: [
     "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
     "M12 16a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"
