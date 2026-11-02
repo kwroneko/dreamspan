@@ -102,6 +102,70 @@ const roundOf = (api: Api, chatId: Chat["id"]) =>
   )
 
 describe("rounds", () => {
+  for (const kind of ["message", "generate"] as const) {
+    it.live(`withdrawing a queued ${kind} cancels its round without touching another queued action`, () =>
+      Effect.gen(function* () {
+        const api = yield* client()
+        const { chat, sent, mira, tobin, wren, describe } = yield* setup(api)
+        const first = yield* posted(
+          api.Generate({ chatId: chat.id, parentSlotId: sent.slotId, branch: false, speakerEntityId: mira })
+        )
+        const queued = yield* kind === "message"
+          ? api.SendMessage({
+              chatId: chat.id,
+              parentSlotId: first.entry.slotId,
+              branch: false,
+              content: "withdraw me",
+              replySpeakerEntityId: tobin,
+              round: [wren]
+            })
+          : api.Generate({
+              chatId: chat.id,
+              parentSlotId: first.entry.slotId,
+              branch: false,
+              speakerEntityId: tobin,
+              round: [wren]
+            })
+        if (queued._tag !== "Queued") return assert.fail("expected a queued action")
+        yield* api.WithdrawQueued({ queuedId: queued.queued.id, expectedRowVersion: queued.queued.rowVersion })
+        assert.deepStrictEqual(yield* api.ListQueued({ chatId: chat.id }), [])
+        // A later action has its own round: withdrawing an earlier action must keep that one.
+        const earlier = yield* api.Generate({
+          chatId: chat.id,
+          parentSlotId: first.entry.slotId,
+          branch: false,
+          speakerEntityId: tobin
+        })
+        if (earlier._tag !== "Queued") return assert.fail("expected an earlier queued action")
+        yield* api.SendMessage({
+          chatId: chat.id,
+          parentSlotId: first.entry.slotId,
+          branch: false,
+          content: "keep me",
+          replySpeakerEntityId: tobin,
+          round: [wren]
+        })
+        yield* api.WithdrawQueued({ queuedId: earlier.queued.id, expectedRowVersion: earlier.queued.rowVersion })
+        assert.deepStrictEqual(yield* roundOf(api, chat.id), [{ speaker: wren, held: false }])
+        yield* release(first.entry.version.id)
+        const entries = yield* pathBecomes(api, chat.id, describe, [
+          "you: m0",
+          "Mira (complete)",
+          "you: keep me",
+          "Tobin (generating)"
+        ])
+        yield* release(entries[3]!.version.id)
+        yield* pathBecomes(api, chat.id, describe, [
+          "you: m0",
+          "Mira (complete)",
+          "you: keep me",
+          "Tobin (complete)",
+          "Wren (generating)"
+        ])
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), gated)))
+    )
+  }
+
   it.live("a new message ending a held round publishes the empty queue to other tabs", () =>
     Effect.gen(function* () {
       const api = yield* client()

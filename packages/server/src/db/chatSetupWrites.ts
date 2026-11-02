@@ -581,6 +581,18 @@ export const makeChatSetupWriteHandlers = (bin: Bin) =>
             })
           }
           yield* bin.recoverQueued(userId, [row])
+          // A queued action owns the round entries immediately following it in this fork's
+          // queue. Withdrawing it cancels those replies, but keeps a later action's round.
+          if (row.round === 0) {
+            const [next] = yield* sql<{ seq: number | null }>`
+              SELECT min(seq) AS seq FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 0 AND seq > ${row.seq}`
+            yield* sql`DELETE FROM queued_messages
+              WHERE chat_id = ${row.chat_id} AND reply_slot_id = ${row.reply_slot_id}
+                AND fork_id IS ${row.fork_id} AND round = 1 AND seq > ${row.seq}
+                AND seq < ${next?.seq ?? Number.MAX_SAFE_INTEGER}`
+          }
           yield* sql`DELETE FROM queued_messages WHERE id = ${queuedId}`
           return { queued: toQueued(row), queue: yield* chatQueue(sql, row.chat_id) }
         }).pipe(transaction("WithdrawQueued")),
