@@ -247,7 +247,10 @@ export function ForkRow({
             {details && (
               <span data-chat-meta className="text-xs text-muted [overflow-wrap:anywhere]">
                 started{" "}
-                {formatDay(chatName(importState(fork.chat.title).title, fork.cast).started ?? new Date(fork.createdAt))}{" "}
+                {formatDay(
+                  chatName(importState(fork.chat.title).title, fork.cast, fork.chat.createdAt ?? null).started ??
+                    new Date(fork.createdAt)
+                )}{" "}
                 · {fork.messages} messages
               </span>
             )}

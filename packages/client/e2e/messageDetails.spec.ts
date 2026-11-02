@@ -77,19 +77,19 @@ const portrait = (message: Locator) => message.locator("[data-portrait-details]"
 const tip = (page: Page, text: string | RegExp) => page.getByText(text).filter({ visible: true }).last()
 
 /**
- * A lab's mark in a header: the logo from Simple Icons or our own drawing, named for its lab,
- * monochrome in the header's muted text colour (filled, or stroked for a drawing).
+ * A lab's mark in a header: the logo from Simple Icons or LobeHub, named for its lab, filled
+ * monochrome in the header's muted text colour.
  */
-const expectMark = async (head: Locator, id: string, lab: string, source: "simple-icons" | "drawn") => {
+const expectMark = async (head: Locator, id: string, lab: string, source: "simple-icons" | "lobehub") => {
   const mark = head.locator(`[data-model-mark="${id}"]`)
   await expect(mark).toBeVisible()
   await expect(head.getByRole("img", { name: `${lab} model` })).toBeVisible()
   await expect(mark.locator("svg")).toHaveAttribute("data-mark-source", source)
   const paint = await mark.evaluate((span) => {
     const svg = getComputedStyle(span.querySelector("svg")!)
-    return { color: getComputedStyle(span).color, fill: svg.fill, stroke: svg.stroke }
+    return { color: getComputedStyle(span).color, fill: svg.fill }
   })
-  expect(source === "simple-icons" ? paint.fill : paint.stroke).toBe(paint.color)
+  expect(paint.fill).toBe(paint.color)
 }
 
 const themes = async (page: Page, each: (width: number, theme: string) => Promise<void>) => {
@@ -195,14 +195,14 @@ test("a message shows its model with its lab's mark, its date and time, and its 
   await reply.getByRole("button", { name: "Previous version" }).click()
   await expect(reply).toContainText("We go over, not around.")
   // OpenAI isn't in Simple Icons: our own drawing.
-  await expectMark(head, "openai", "OpenAI", "drawn")
+  await expectMark(head, "openai", "OpenAI", "lobehub")
   await expect(head).toContainText("OpenAI · gpt-4o")
   await expect(portrait(reply)).toHaveText(/#3\s*12\.0s\s*380t/)
   await shoot(page, "02-swiped-1440")
 
   await themes(page, async (width, theme) => {
     const shown = lastReply(page)
-    await expectMark(shown.locator("header"), "openai", "OpenAI", "drawn")
+    await expectMark(shown.locator("header"), "openai", "OpenAI", "lobehub")
     await expect(portrait(shown)).toBeVisible()
     // Under the portrait, never wider than it.
     const column = (await portrait(shown).boundingBox())!

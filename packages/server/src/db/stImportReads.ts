@@ -6,6 +6,8 @@ import { StCount, StImportJob, type StImportStatus } from "@rp/shared/stImportAp
 import { Effect } from "effect"
 import { SqlClient } from "effect/sql"
 import { NotFound, type ReadOps, ST_CHAT_RECORD } from "./ops.ts"
+import { computeForkSummaries } from "./forkSummaries.ts"
+import type { ForkRow } from "./rows.ts"
 import { query } from "./tx.ts"
 
 /** An import job's row, as the import page lists it (st_import_jobs). */
@@ -81,15 +83,34 @@ export const makeStImportReadHandlers = Effect.gen(function* () {
         }
       }).pipe(query("GetStImportJob")),
     StImportLatestChat: ({ userId }) =>
-      Effect.map(
-        sql<{ id: string; title: string }>`
-          SELECT c.id, c.title FROM jobs j
+      Effect.gen(function* () {
+        const [row] = yield* sql<{ id: string; title: string; created_at: number; current_fork_id: string | null }>`
+          SELECT c.id, c.title, c.created_at, c.current_fork_id FROM jobs j
           JOIN chats c ON c.id = json_extract(j.payload_json, '$.chatId') AND c.owner_user_id = ${userId}
           WHERE j.owner_user_id = ${userId} AND j.kind = ${ST_CHAT_RECORD} AND c.deleted_at IS NULL
             AND c.status = 'active'
-          ORDER BY c.last_message_at DESC, c.id DESC LIMIT 1`,
-        ([row]) => (row === undefined ? null : { chatId: row.id as ChatId, title: row.title })
-      ).pipe(query("StImportLatestChat")),
+          ORDER BY c.last_message_at DESC, c.id DESC LIMIT 1`
+        if (row === undefined) return null
+        // Its characters in its current fork, as the shell names it (the cast less who you play).
+        const forks = yield* sql<ForkRow>`SELECT * FROM forks WHERE id = ${row.current_fork_id}`
+        const [summary] = yield* computeForkSummaries(sql, forks)
+        const cast = summary?.cast ?? []
+        const labels =
+          cast.length === 0
+            ? []
+            : yield* sql<{ entity_id: string; label: string }>`SELECT entity_id, label FROM entity_refs
+                WHERE ref_kind = 'upstream' AND ${sql.in("entity_id", cast)}`
+        const byId = new Map(labels.map((ref) => [ref.entity_id, ref.label]))
+        return {
+          chatId: row.id as ChatId,
+          title: row.title,
+          createdAt: row.created_at,
+          names: cast.flatMap((id) => {
+            const label = byId.get(id)
+            return label === undefined ? [] : [label]
+          })
+        }
+      }).pipe(query("StImportLatestChat")),
     StImportSources: ({ userId }) =>
       Effect.gen(function* () {
         const records = yield* sql<{ id: string; status: string; payload_json: string; deleted_at: number | null }>`
