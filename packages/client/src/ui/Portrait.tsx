@@ -9,7 +9,9 @@ import { initials } from "./Avatar.tsx"
 import { ImageViewer, type NaturalSize, type Zoom } from "./ImageViewer.tsx"
 import { useImagePrefs } from "./imagePrefs.ts"
 import { mediaUrl } from "./mediaImage.ts"
+import { close, even, keepOnly, replace, show, split, type Stack, toggle } from "./portraitStack.ts"
 import { IconButton } from "./Tooltip.tsx"
+import { useViewPrefs } from "./viewPrefs.ts"
 
 export interface Portrait {
   readonly id: string
@@ -17,24 +19,36 @@ export interface Portrait {
   readonly mediaId: string | null
 }
 interface PortraitViewer {
-  /** A portrait's click: shows it, or closes it when it's the one shown (as ST's zoomed avatar). */
+  /**
+   * A portrait's click: closes it when it's open (as ST's zoomed avatar); else opens it on top
+   * of the others, or in place of them with "Only keep one image open at a time" (`single`).
+   */
   readonly open: (portrait: Portrait) => void
-  /** Shows a portrait, the one shown or not. */
+  /** Opens a portrait as a click would, but never closes it. */
   readonly show: (portrait: Portrait) => void
-  /** Shows `portrait` in place of the one with id `from`, when that one is shown (a card swapped for another). */
+  /** Shows `portrait` in place of the one with id `from`, when that one is open (a card swapped for another). */
   readonly replace: (from: string, portrait: Portrait) => void
-  readonly close: () => void
-  /** The one shown, as `current` reads it now: its name and image follow the card's. */
-  readonly shown: Portrait | null
+  /** Closes one, by id; without one, the top one. */
+  readonly close: (id?: string) => void
+  /** The ones open, top first, as `current` reads them now: their names and images follow the cards'. */
+  readonly shown: Stack<Portrait>
+  /** Moves the boundary below `index` (portraitStack.ts `split`), or evens the two either side of it. */
+  readonly split: (index: number, upper: number, total: number, min: number) => void
+  readonly even: (index: number) => void
+  /** "Only keep one image open at a time" (`DisplayPrefs.singlePortrait`): the account's choice. */
+  readonly single: boolean
+  /** Turns it on, keeping only `keep` open, or off, back to stacking. */
+  readonly setSingle: (on: boolean, keep: string) => void
 }
 const Context = createContext<PortraitViewer | null>(null)
 
 /**
  * Where avatars marked `preview` open their whole image: a click on one, from any of them.
- * `inline` says a host shows it beside the page (the chat's column); otherwise it's a
- * full-screen viewer over the page. `current` reads a portrait's name and image as they are
- * now (the chat's cast), so an edited card's shows without reopening it; without it, or when
- * it doesn't know the portrait, the one clicked shows as it was.
+ * `inline` says a host shows them beside the page (the chat's column, several stacked);
+ * otherwise it's one full-screen viewer over the page, a click replacing it. `current` reads a
+ * portrait's name and image as they are now (the chat's cast), so an edited card's shows
+ * without reopening it; without it, or when it doesn't know the portrait, the one clicked
+ * shows as it was.
  */
 export function PortraitProvider({
   inline,
@@ -45,19 +59,31 @@ export function PortraitProvider({
   current?: (portrait: Portrait) => Portrait | null
   children: ReactNode
 }) {
-  const [clicked, setShown] = useState<Portrait | null>(null)
-  const shown = clicked && (current?.(clicked) ?? clicked)
+  const [stack, setStack] = useState<Stack<Portrait>>([])
+  const prefs = useViewPrefs()
+  const single = prefs.prefs.singlePortrait
+  // A phone has room for one: a click there always replaces it.
+  const replaces = single || !inline
+  const shown = stack.map((entry) => ({ ...entry, portrait: current?.(entry.portrait) ?? entry.portrait }))
   const viewer: PortraitViewer = {
-    open: (portrait) => setShown((current) => (current?.id === portrait.id ? null : portrait)),
-    show: setShown,
-    replace: (from, portrait) => setShown((current) => (current?.id === from ? portrait : current)),
-    close: () => setShown(null),
-    shown
+    open: (portrait) => setStack((stack) => toggle(stack, portrait, replaces)),
+    show: (portrait) => setStack((stack) => show(stack, portrait, replaces)),
+    replace: (from, portrait) => setStack((stack) => replace(stack, from, portrait)),
+    close: (id) => setStack((stack) => (id === undefined ? stack.slice(1) : close(stack, id))),
+    shown,
+    split: (index, upper, total, min) => setStack((stack) => split(stack, index, upper, total, min)),
+    even: (index) => setStack((stack) => even(stack, index)),
+    single,
+    setSingle: (on, keep) => {
+      if (on) setStack((stack) => keepOnly(stack, keep))
+      prefs.change({ singlePortrait: on })
+    }
   }
+  const top = shown[0]?.portrait
   return (
     <Context value={viewer}>
       {children}
-      {shown && !inline && <PortraitScreen portrait={shown} onClose={() => setShown(null)} />}
+      {top && !inline && <PortraitScreen portrait={top} onClose={() => viewer.close(top.id)} />}
     </Context>
   )
 }
@@ -104,14 +130,14 @@ export function PortraitView({
   const [scale, setScale] = useState<{ value: number; natural: NaturalSize | null } | null>(null)
   const visible = portrait.mediaId !== null && mode === "show"
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="@container flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
         {title(portrait.name)}
         {visible && (
           <>
             {scale?.natural && (
               <span
-                className="shrink-0 px-1 text-xs text-muted tabular-nums"
+                className="shrink-0 px-1 text-xs text-muted tabular-nums @max-[17rem]:hidden"
                 title={`${scale.natural.width} × ${scale.natural.height} pixels, shown at ${Math.round(scale.value * 100)}%`}
               >
                 {Math.round(scale.value * 100)}%

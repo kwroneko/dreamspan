@@ -184,11 +184,13 @@ export function ChatSidePanel({
   const all = usePanelTabs(content.view, tab)
   const tools = all.filter((t) => (t.descriptor.placement ?? "tools") === "tools")
   const cast = all.filter((t) => t.descriptor.placement === "cast")
-  // While a portrait is shown, a character's chip shows theirs too: the strip's portraits switch it.
+  // While a portrait is shown, a character's chip opens theirs too, as a click on their portrait
+  // would (on top of the others, or in place of them with one kept at a time); a chip never
+  // closes one, since its click is first the tab's.
   const portraits = usePortraitViewer()
   const pick = (value: PanelTab) => {
     const avatar = cast.find((t) => t.value === value)?.avatar
-    if (portraits?.shown && avatar && portraits.shown.id !== avatar.id) portraits.show(avatar)
+    if (portraits && portraits.shown.length > 0 && avatar) portraits.show(avatar)
     onTab(value)
   }
   const nav = (

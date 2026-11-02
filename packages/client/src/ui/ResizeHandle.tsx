@@ -104,11 +104,15 @@ export function useInnerPanelWidth(
 }
 
 const HINT = "Drag to resize, or use the arrow keys (Shift for bigger steps), Home and End. Double-click resets."
+const SPLIT_HINT =
+  "Drag to share the height between these two images, or use the up and down arrow keys (Shift for bigger steps), Home and End. Double-click makes them equal."
 
 /**
  * The grip on a column's edge: drag it, or focus it and use the arrow keys (10 px, Shift
  * 40 px), Home (the minimum) and End (as wide as the room allows); a double-click returns to
- * the default.
+ * the default. `axis` "y" is a boundary between two stacked boxes (the portrait column's
+ * viewers): the grip lies along the bottom of the one above, dragged up and down, its value
+ * that one's height, with the up and down arrows.
  */
 export function ResizeHandle({
   label,
@@ -116,6 +120,7 @@ export function ResizeHandle({
   min,
   max,
   direction,
+  axis = "x",
   onChange,
   onReset
 }: {
@@ -124,34 +129,41 @@ export function ResizeHandle({
   min: number
   max: number
   direction: 1 | -1
+  axis?: "x" | "y"
   onChange: (width: number) => void
   onReset: () => void
 }) {
-  const drag = useRef<{ x: number; width: number } | null>(null)
+  const drag = useRef<{ at: number; width: number } | null>(null)
+  const vertical = axis === "y"
+  const at = (event: { clientX: number; clientY: number }) => (vertical ? event.clientY : event.clientX)
+  const [less, more] = vertical ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"]
+  const hint = vertical ? SPLIT_HINT : HINT
   return (
-    <Tooltip label={HINT} side={direction === 1 ? "right" : "left"}>
+    <Tooltip label={hint} side={vertical ? "bottom" : direction === 1 ? "right" : "left"}>
       <div
         role="separator"
         aria-label={label}
-        aria-orientation="vertical"
+        aria-orientation={vertical ? "horizontal" : "vertical"}
         aria-valuemin={Math.round(min)}
         aria-valuemax={Math.round(max)}
         aria-valuenow={Math.round(width)}
         aria-valuetext={`${Math.round(width)} pixels`}
-        aria-description={HINT}
+        aria-description={hint}
         tabIndex={0}
         data-resize-handle
-        className="absolute inset-y-0 z-10 w-2 cursor-col-resize touch-none outline-none hover:bg-accent/20 focus-visible:bg-accent/20 focus-visible:ring-2 focus-visible:ring-focus"
-        style={direction === 1 ? { right: -4 } : { left: -4 }}
+        className={`absolute z-10 touch-none outline-none hover:bg-accent/20 focus-visible:bg-accent/20 focus-visible:ring-2 focus-visible:ring-focus ${
+          vertical ? "inset-x-0 h-2 cursor-row-resize" : "inset-y-0 w-2 cursor-col-resize"
+        }`}
+        style={vertical ? { bottom: -4 } : direction === 1 ? { right: -4 } : { left: -4 }}
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.preventDefault()
           event.currentTarget.focus()
-          drag.current = { x: event.clientX, width }
+          drag.current = { at: at(event), width }
           event.currentTarget.setPointerCapture(event.pointerId)
         }}
         onPointerMove={(event) => {
-          if (drag.current) onChange(drag.current.width + (event.clientX - drag.current.x) * direction)
+          if (drag.current) onChange(drag.current.width + (at(event) - drag.current.at) * direction)
         }}
         onPointerUp={(event) => {
           drag.current = null
@@ -166,9 +178,9 @@ export function ResizeHandle({
         onDoubleClick={onReset}
         onKeyDown={(event) => {
           const step = event.shiftKey ? 40 : 10
-          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+          if (event.key === less || event.key === more) {
             event.preventDefault()
-            onChange(width + (event.key === "ArrowRight" ? step : -step) * direction)
+            onChange(width + (event.key === more ? step : -step) * direction)
           } else if (event.key === "Home") {
             event.preventDefault()
             onChange(min)
@@ -180,7 +192,9 @@ export function ResizeHandle({
       >
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-0.5 h-10 w-1 -translate-y-1/2 rounded-full bg-border"
+          className={`pointer-events-none absolute rounded-full bg-border ${
+            vertical ? "top-0.5 left-1/2 h-1 w-10 -translate-x-1/2" : "top-1/2 left-0.5 h-10 w-1 -translate-y-1/2"
+          }`}
         />
       </div>
     </Tooltip>
