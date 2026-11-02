@@ -106,6 +106,11 @@ const displayFields = {
   /** How model lists sort (the composer's picker and the Model tab's). */
   modelSort: Schema.Literals(["name", "used"]),
   /**
+   * "Only keep one image open at a time" (owner, 2026-11-02): a portrait's click replaces the
+   * one beside the chat instead of opening on top of it.
+   */
+  singlePortrait: Schema.Boolean,
+  /**
    * Which message actions show as buttons on a message, by action id: the user's choices
    * over each action's default. An id no action has is kept and ignored.
    */
@@ -134,6 +139,7 @@ export const DisplayPrefsChange = Schema.Struct({
   chatWidth: Schema.optionalKey(displayFields.chatWidth),
   presetSort: Schema.optionalKey(displayFields.presetSort),
   modelSort: Schema.optionalKey(displayFields.modelSort),
+  singlePortrait: Schema.optionalKey(displayFields.singlePortrait),
   /** Merged by id with what's stored, so a write names only the choices it changes. */
   messageToolbar: Schema.optionalKey(displayFields.messageToolbar),
   /** Merged by id with what's stored, as the message toolbar's are. */
@@ -156,6 +162,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   chatWidth: CHAT_WIDTH.default,
   presetSort: "name",
   modelSort: "name",
+  singlePortrait: false,
   messageToolbar: {},
   messageDetails: {}
 }

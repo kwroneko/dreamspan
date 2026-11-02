@@ -104,6 +104,14 @@ const expectActual = async (page: Page, region: Locator, name: string) => {
   return actual
 }
 
+const SINGLE = "Only keep one image open at a time"
+/** Sets a viewer's "Only keep one image open at a time" toggle. */
+const setSingle = async (viewer: Locator, on: boolean) => {
+  const toggle = viewer.getByRole("button", { name: SINGLE, exact: true })
+  if ((await toggle.getAttribute("aria-pressed")) !== String(on)) await toggle.click()
+  await expect(toggle).toHaveAttribute("aria-pressed", String(on))
+}
+
 test("a portrait opens beside the chat at 1440: every kind of portrait, every shape, the chat usable", async ({
   page
 }) => {
@@ -117,6 +125,8 @@ test("a portrait opens beside the chat at 1440: every kind of portrait, every sh
   await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
   await expect(column("Tall")).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
+  // One image at a time: another portrait's click replaces it (the stack has its own test).
+  await setSingle(column("Tall"), true)
   const tall = await expectFitted(page, "Tall")
   expect(tall.height).toBeGreaterThan(780)
 
@@ -239,6 +249,153 @@ test("the column follows its card's name when another version is swapped in; Esc
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect(page.locator("[data-portrait-column]")).toHaveCount(0)
+})
+
+test("portraits stack in the column at 1440: one on top of another, closed one by one, the boundary dragged, one at a time again", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openChat(page)
+  const column = (name: string) => page.getByRole("complementary", { name: `${name}'s portrait`, exact: true })
+  const viewers = page.locator("[data-portrait-column] [data-portrait-viewer]")
+  const order = () => viewers.evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")))
+  const heights = () =>
+    viewers.evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().height)))
+  const hide = page.getByRole("button", { name: "Close the panel" })
+  if (await hide.isVisible()) await hide.click()
+
+  // Stacking is the default; the earlier test left one at a time on, so turn it off.
+  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await setSingle(column("Tall"), false)
+  await expectFitted(page, "Tall")
+  await shoot(page, "stack-1")
+
+  // Another portrait opens above, splitting the column; each image fitted to its own viewer.
+  const cast = await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Wide's portrait" }).click()
+  await expect(viewers).toHaveCount(2)
+  expect(await order()).toEqual(["Wide's portrait", "Tall's portrait"])
+  const [top, bottom] = await heights()
+  expect(Math.abs(top! - bottom!)).toBeLessThan(3)
+  await expectFitted(page, "Wide")
+  await expectFitted(page, "Tall")
+  // A click on one that's open closes only it.
+  await cast.getByRole("button", { name: "View Wide's portrait" }).click()
+  await expect(viewers).toHaveCount(1)
+  await cast.getByRole("button", { name: "View Wide's portrait" }).click()
+  await expect(viewers).toHaveCount(2)
+  await page.getByRole("button", { name: "Close the panel" }).click()
+  await shoot(page, "stack-2")
+  // A narrower window: the column gives way, the two still stacked.
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await expect(viewers).toHaveCount(2)
+  expect((await page.locator("[data-chat-main]").boundingBox())!.width).toBeGreaterThanOrEqual(439)
+  await expectFitted(page, "Wide")
+  await shoot(page, "stack-2-1024")
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Four: the cast strip's chips open theirs too, on top.
+  await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Standard's portrait" }).click()
+  await page.getByRole("tab", { name: "Huge" }).click()
+  await expect(viewers).toHaveCount(4)
+  expect(await order()).toEqual(["Huge's portrait", "Standard's portrait", "Wide's portrait", "Tall's portrait"])
+  for (const name of ["Huge", "Standard", "Wide", "Tall"]) await expectFitted(page, name)
+  await page.getByRole("button", { name: "Close the panel" }).click()
+  await shoot(page, "stack-4")
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await shoot(page, "stack-4-1024")
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // The boundary between two drags by pointer, changing only those two (each about 225 px of
+  // its 180 px minimum here).
+  const boundary = page.getByRole("separator", { name: "Resize Standard's and Wide's portraits", exact: true })
+  await expect(boundary).toHaveAttribute("aria-orientation", "horizontal")
+  const before = await heights()
+  const grip = (await boundary.boundingBox())!
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2 + 30, { steps: 5 })
+  await page.mouse.up()
+  await expect.poll(async () => (await heights())[1]! - before[1]!).toBeGreaterThan(25)
+  const dragged = await heights()
+  expect(dragged[0]).toBe(before[0])
+  expect(dragged[3]).toBe(before[3])
+  expect(Math.abs(dragged[1]! + dragged[2]! - before[1]! - before[2]!)).toBeLessThan(3)
+  // And by keyboard: arrows, Home (the minimum), End, and a double-click evens the two.
+  await boundary.focus()
+  const now = async () => Number(await boundary.getAttribute("aria-valuenow"))
+  const start = await now()
+  await page.keyboard.press("ArrowDown")
+  await expect.poll(now).toBe(start + 10)
+  await page.keyboard.press("Shift+ArrowUp")
+  await expect.poll(now).toBe(start - 30)
+  await page.keyboard.press("Home")
+  await expect.poll(now).toBe(180)
+  await page.keyboard.press("End")
+  await expect
+    .poll(async () => Math.abs((await now()) - Number(await boundary.getAttribute("aria-valuemax"))))
+    .toBeLessThanOrEqual(1)
+  expect((await heights())[2]).toBeLessThanOrEqual(181)
+  await boundary.dblclick()
+  await expect.poll(async () => Math.abs((await heights())[1]! - (await heights())[2]!)).toBeLessThan(3)
+  await boundary.hover()
+  await expect(page.getByText(/^Drag to share the height between these two images/)).toBeVisible()
+
+  // Past what fits at their minimum height, the column scrolls.
+  await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Phone's portrait" }).click()
+  await cast.getByRole("button", { name: "View Small's portrait" }).click()
+  await expect(viewers).toHaveCount(6)
+  await page.getByRole("button", { name: "Close the panel" }).click()
+  const list = page.locator("[data-portrait-column] > div.overflow-y-auto")
+  expect(await list.evaluate((node) => node.scrollHeight > node.clientHeight + 1)).toBe(true)
+  for (const height of await heights()) expect(height).toBeGreaterThanOrEqual(179)
+  await shoot(page, "stack-6")
+
+  // Closed one by one: Close, and Escape the top one.
+  await column("Phone").getByRole("button", { name: "Close the portrait", exact: true }).click()
+  await expect(viewers).toHaveCount(5)
+  await page.keyboard.press("Escape")
+  await expect(viewers).toHaveCount(4)
+  expect(await order()).toEqual(["Huge's portrait", "Standard's portrait", "Wide's portrait", "Tall's portrait"])
+
+  // One at a time: the toggle keeps that one, closes the others, and a click then replaces it.
+  await expect(column("Wide").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false"
+  )
+  await column("Wide").getByRole("button", { name: SINGLE, exact: true }).hover()
+  await expect(page.getByText(/^Only keep one image open at a time\. Closes the other images/)).toBeVisible()
+  await setSingle(column("Wide"), true)
+  await expect(viewers).toHaveCount(1)
+  await expect(column("Wide")).toBeVisible()
+  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await expect(viewers).toHaveCount(1)
+  await expect(column("Tall")).toBeVisible()
+
+  // The account's choice: after a reload, still one at a time.
+  await page.reload()
+  await page.locator("article[data-slot]").first().getByRole("button", { name: "View Tall's portrait" }).click()
+  await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  )
+  await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Standard's portrait" }).click()
+  await expect(viewers).toHaveCount(1)
+  await expect(column("Standard")).toBeVisible()
+  // Off again: back to stacking, after a reload too.
+  await setSingle(column("Standard"), false)
+  await page.reload()
+  await openPanel(page, "Cast")
+  await cast.getByRole("button", { name: "View Standard's portrait" }).click()
+  await cast.getByRole("button", { name: "View Tall's portrait" }).click()
+  await expect(viewers).toHaveCount(2)
+  await expect(column("Tall").getByRole("button", { name: SINGLE, exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "false"
+  )
 })
 
 test("a portrait opens full-screen at 390: fit and 100% differ, it pans and pinches", async ({ page }) => {
