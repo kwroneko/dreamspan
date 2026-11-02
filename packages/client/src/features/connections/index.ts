@@ -12,6 +12,7 @@ import {
 import { DefaultModelSection } from "./defaultModel.tsx"
 import { ConnectionsPage, NewConnectionPage } from "./list.tsx"
 import { ModelsSection } from "./models.tsx"
+import { TokenCountingSection } from "./tokenCounting.tsx"
 
 export const register = () => {
   routes.register({
@@ -45,5 +46,7 @@ export const register = () => {
   connectionSections.register({ id: "models", order: 40, component: ModelsSection })
   connectionSections.register({ id: "headers", order: 50, component: HeadersSection })
   connectionSections.register({ id: "route", order: 60, component: RouteSection })
+  // Counting the editors' text with the provider, off unless opted in (owner, 2026-11-02).
+  connectionSections.register({ id: "token-counting", order: 70, component: TokenCountingSection })
   connectionSections.register({ id: "delete", order: 100, component: DeleteSection })
 }

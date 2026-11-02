@@ -1,6 +1,6 @@
 // Token counts with the chat model's own tokenizer (owner, 2026-11-02; ARCHITECTURE §6 "Text
 // tokens"): OpenAI's models counted locally in the format worker, Claude through Anthropic's
-// counting endpoint (a mock here), cached per model and text, and an approximation that says so
+// counting endpoint (a mock here) only once its connection opts in, cached per model and text, and an approximation that says so
 // when there's no model, no tokenizer for it, or its count fails. Synthetic text only.
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
@@ -23,6 +23,7 @@ const useModel = (api: Api, kind: string, baseUrl: string, key: string) =>
     yield* api.SetGenerationDefaults({
       defaults: { ...defaults, model: { connection: connection.id, model: model.id } }
     })
+    return connection.id
   })
 
 const mock = (handler: (request: Recorded, res: ServerResponse) => void) =>
@@ -66,11 +67,35 @@ describe("text token counts", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
   )
 
-  it.live("Claude through Anthropic's counting endpoint, each text once, framing taken out", () =>
+  it.live("Claude is counted here unless its connection opts in: no text goes to Anthropic by default", () =>
     Effect.gen(function* () {
       const provider = yield* mock(anthropicCount)
       const api = yield* client()
-      yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      assert.deepStrictEqual(yield* api.GetTokenCounting(), [])
+      const local = yield* api.CountTokens({ texts: ["Hello world"] })
+      assert.deepStrictEqual(local.counts, [2])
+      assert.isFalse(local.tokenizer.exact)
+      assert.include(local.tokenizer.label, "o200k_base")
+      assert.include(local.tokenizer.note ?? "", "is off for this connection")
+      assert.lengthOf(provider.requests(), 0)
+      // Opted in, and out again.
+      assert.deepStrictEqual(yield* api.SetTokenCounting({ connectionId, enabled: true }), [connectionId])
+      assert.isTrue((yield* api.CountTokens({ texts: ["one two"] })).tokenizer.exact)
+      assert.isAbove(provider.requests().length, 0)
+      yield* api.SetTokenCounting({ connectionId, enabled: false })
+      const asked = provider.requests().length
+      assert.isFalse((yield* api.CountTokens({ texts: ["three four"] })).tokenizer.exact)
+      assert.lengthOf(provider.requests(), asked)
+    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+  )
+
+  it.live("Claude through Anthropic's counting endpoint once opted in, each text once, framing taken out", () =>
+    Effect.gen(function* () {
+      const provider = yield* mock(anthropicCount)
+      const api = yield* client()
+      const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      yield* api.SetTokenCounting({ connectionId, enabled: true })
       const counted = yield* api.CountTokens({ texts: ["one two three", "", "four"] })
       // A text's count less a one-token text's, plus one: the framing drops out.
       assert.deepStrictEqual(counted.counts, [3, 0, 1])
@@ -93,7 +118,8 @@ describe("text token counts", () => {
     Effect.gen(function* () {
       const provider = yield* mock((_request, res) => res.writeHead(429).end("slow down"))
       const api = yield* client()
-      yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      const connectionId = yield* useModel(api, "anthropic", provider.url, "claude-synthetic")
+      yield* api.SetTokenCounting({ connectionId, enabled: true })
       const failed = yield* api.CountTokens({ texts: ["Hello world"] })
       assert.deepStrictEqual(failed.counts, [2])
       assert.isFalse(failed.tokenizer.exact)

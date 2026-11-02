@@ -9,6 +9,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { COUNT_TOKENS_CHARS, COUNT_TOKENS_TEXTS, type TokenizerInfo } from "@rp/shared/generation.ts"
 import { AsyncResult } from "effect/reactivity"
 import { useEffect, useId, useState, useSyncExternalStore } from "react"
+import { AppClient } from "../../rpc.ts"
 import { defaultsAtom } from "../pickers/defaults.ts"
 import { type Caller, useCaller } from "./caller.ts"
 
@@ -84,10 +85,16 @@ const subscribe = (listener: () => void) => {
 }
 
 /** The chat model, as the cache's key: counts follow it when it changes. */
+/** The connections whose provider may count (`GetTokenCounting`): their counts are cached apart. */
+const countingAtom = AppClient.query("GetTokenCounting", undefined, { reactivityKeys: ["settings"] })
+
+/** The chat model, and whether its provider counts, as the cache's key: counts follow both. */
 const useModelKey = () => {
   const defaults = useAtomValue(defaultsAtom)
+  const counting = useAtomValue(countingAtom)
   const model = AsyncResult.isSuccess(defaults) ? defaults.value.model : null
-  return model ? `${model.connection}/${model.model}` : "none"
+  const provider = AsyncResult.isSuccess(counting) && model !== null && counting.value.includes(model.connection)
+  return model ? `${model.connection}/${model.model}/${provider ? "provider" : "local"}` : "none"
 }
 
 export interface TokenCounts {

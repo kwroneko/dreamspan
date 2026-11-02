@@ -8,6 +8,7 @@ import { requestCounts, tokenizerText, tokensText } from "../src/features/editor
 // The hook's connections to the app, which a test without a page has none of.
 vi.mock("../src/features/pickers/defaults.ts", () => ({ defaultsAtom: null }))
 vi.mock("../src/features/editor/caller.ts", () => ({ useCaller: () => null }))
+vi.mock("../src/rpc.ts", () => ({ AppClient: { query: () => null } }))
 
 const exact = new TokenizerInfo({ id: "openai-encodings", label: "gpt-4o's own tokenizer (o200k_base)", exact: true })
 

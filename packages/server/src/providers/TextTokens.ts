@@ -1,6 +1,8 @@
 // Token counts for what the editors show (ARCHITECTURE §6 "Text tokens"): with the tokenizer of
-// the model the user's chats generate with (their generation default; a chat binds no other), through the
-// registered text counters, else o200k_base as an approximation, saying which. Counts are
+// the model the user's chats generate with (their generation default; a chat binds no other),
+// through the registered text counters, else o200k_base as an approximation, saying which. A
+// provider's counting endpoint is asked only for a connection the user opted in (owner,
+// 2026-11-02: the text would go to that provider; `db/tokenCounting.ts`). Counts are
 // cached per model and text, so typing re-counts only the field typed in. Never part of a send:
 // the context budget keeps the assembler's estimate (§15 "Token counts").
 import { createHash } from "node:crypto"
@@ -79,7 +81,8 @@ export class TextTokens extends Context.Service<
           const defaults = yield* reader.GetGenerationDefaults({ userId })
           if (defaults.model === null) return Option.none()
           const model = yield* reader.GetModel({ userId, modelId: defaults.model.model })
-          return Option.some({ connectionId: defaults.model.connection, modelKey: model.key })
+          const optedIn = (yield* reader.GetTokenCounting({ userId })).includes(defaults.model.connection)
+          return Option.some({ connectionId: defaults.model.connection, modelKey: model.key, optedIn })
         }).pipe(Effect.orElseSucceed(() => Option.none()))
 
       return TextTokens.of({
@@ -88,14 +91,15 @@ export class TextTokens extends Context.Service<
             const chosen = yield* chosenModel(userId)
             if (Option.isNone(chosen))
               return yield* approximate(texts, "No model is chosen for chats, so there's no model's tokenizer to use.")
-            const { connectionId, modelKey } = chosen.value
-            const model = `${userId}\n${connectionId}\n${modelKey}`
+            const { connectionId, modelKey, optedIn } = chosen.value
+            // Counts by the provider and by a local encoding are cached apart.
+            const model = `${userId}\n${connectionId}\n${modelKey}\n${optedIn ? "provider" : "local"}`
             if ((resting.get(model) ?? 0) > Date.now())
               return yield* approximate(texts, `Counting with ${modelKey}'s tokenizer failed a moment ago.`)
             const keys = texts.map((text) => `${model}\n${hash(text)}`)
             const missing = [...new Set(texts.filter((_, i) => !cache.has(keys[i]!)))]
             const counted = yield* providers
-              .countTextTokens({ userId, connectionId, modelKey, texts: missing, encode })
+              .countTextTokens({ userId, connectionId, modelKey, texts: missing, encode, remote: optedIn })
               .pipe(
                 (effect) => (missing.length === 0 ? Effect.succeed(null) : effect),
                 Effect.timeout(REMOTE_TIMEOUT),
@@ -114,6 +118,11 @@ export class TextTokens extends Context.Service<
             }
             if (counted.result === null && missing.length > 0)
               return yield* approximate(texts, `There's no tokenizer for ${modelKey} here.`)
+            if (counted.result !== null && "optIn" in counted.result)
+              return yield* approximate(
+                texts,
+                `${modelKey}'s own count (${counted.result.optIn}) is off for this connection, since it sends the text to the provider; its settings can turn it on.`
+              )
             if (counted.result) {
               for (const [i, text] of missing.entries()) remember(`${model}\n${hash(text)}`, counted.result.counts[i]!)
               lastCounter.set(model, { id: counted.result.id, label: counted.result.label })

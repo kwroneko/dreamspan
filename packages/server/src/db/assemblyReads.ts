@@ -32,6 +32,7 @@ import { displayThrough } from "./displayPath.ts"
 import { readDefaults, readGlobalRegex } from "./generationSettings.ts"
 import { readCardPromptUse, readLorebookPresets } from "./lorebookSettings.ts"
 import { makeDisplayPrefsReadHandlers } from "./displayPrefs.ts"
+import { makeTokenCountingReadHandlers } from "./tokenCounting.ts"
 import type { ReadOps } from "./ops.ts"
 import { usedEntries } from "./usedEntries.ts"
 import { query } from "./tx.ts"
@@ -47,6 +48,7 @@ export const makeAssemblyReadHandlers = Effect.gen(function* () {
   const live = new Map<string, { readonly prepared: PreparedRewrite; used: number }>()
   const handlers = {
     ...(yield* makeDisplayPrefsReadHandlers),
+    ...(yield* makeTokenCountingReadHandlers),
     RoleProjections: () => assembler.projectionOptions,
     AssembleContext: ({ userId, chatId, slotId, versionId, forkId, now, timeZone, frozen, partialBatch, model }) =>
       Effect.suspend(() => {

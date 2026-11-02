@@ -214,8 +214,11 @@ test("token counts expand {{char}} and {{user}} first, as ST does", async ({ pag
   await settled()
   const plain = await counts.nth(2).textContent()
   expect(plain).toMatch(/^~\d+ tokens$/)
+  // The macros expand to that same text: nothing new to count, so the count never even waits.
   await scenario.fill("{{char}} waits by {{user}}'s pier, then by the long harbour wall.")
-  await settled()
+  await expectTextBox(scenario, "{{char}} waits by {{user}}'s pier, then by the long harbour wall.")
+  await page.waitForTimeout(150)
+  expect(await counts.nth(2).getAttribute("aria-busy")).toBeNull()
   await expect(counts.nth(2)).toHaveText(plain!)
   await counts.nth(2).hover()
   await expect(page.getByText(/^Counted with macros as they become/).last()).toBeVisible()
@@ -307,4 +310,41 @@ for (const width of [1440, 390])
       await bar.getByRole("button", { name: "Revert", exact: true }).click()
       await expect(bar).toHaveCount(0)
       await expect(page.getByRole("textbox", { name: "Prompt: New prompt", exact: true })).toHaveCount(0)
+    })
+
+for (const width of [1440, 390])
+  for (const theme of ["light", "dark"] as const)
+    test(`a connection's provider counting is off until opted in, and says it sends the text (${width}, ${theme})`, async ({
+      page
+    }) => {
+      test.setTimeout(90_000)
+      await page.setViewportSize({ width, height: 900 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript((value) => localStorage.setItem("rp.theme", value), theme)
+      await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
+      const connection = await admin((api) =>
+        api.CreateConnection({
+          kind: "anthropic",
+          settings: {
+            name: `Counting ${width} ${theme}`,
+            baseUrl: "http://127.0.0.1:9",
+            compat: {},
+            cacheTtlS: null,
+            maxConcurrent: null,
+            presetOverrideRefId: null
+          }
+        })
+      )
+      await page.goto(`${server().url}/settings/connections/${connection.id}`)
+      const counting = page.getByRole("switch", { name: /^Count with the provider/ })
+      await expect(counting).not.toBeChecked({ timeout: 30_000 })
+      await expect(counting).toHaveAccessibleDescription(/is sent to this provider's token-counting endpoint/)
+      await counting.scrollIntoViewIfNeeded()
+      await shoot(page, `connection-counting-${width}-${theme}`)
+      await counting.click()
+      await expect(counting).toBeChecked()
+      expect(await admin((api) => api.GetTokenCounting())).toContain(connection.id)
+      await counting.click()
+      await expect(counting).not.toBeChecked()
+      expect(await admin((api) => api.GetTokenCounting())).not.toContain(connection.id)
     })

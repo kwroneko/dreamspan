@@ -4,12 +4,16 @@
 // endpoints: tried newest registration first, the first that applies counts.
 // - OpenAI's models (any host: api.openai.com, OpenRouter's `openai/…`): their own BPE
 //   encodings, counted locally (js-tiktoken in the format worker's interactive lane).
-// - Anthropic POST /v1/messages/count_tokens, Gemini POST models/{model}:countTokens, OpenAI
+// - Only for a connection the user opted in (owner, 2026-11-02: "this isn't a good idea to do
+//   behind the user's back, especially given varying retention policies"; `remote` counters):
+//   Anthropic POST /v1/messages/count_tokens, Gemini POST models/{model}:countTokens, OpenAI
 //   POST /v1/responses/input_tokens for an OpenAI model the encodings don't know: the model's
 //   own count, one request per text. A one-message count includes the message's framing, so a
 //   text's tokens are its count less a one-token text's count, plus one.
-// Where none applies (DeepSeek, OpenRouter's other models, a plugin's kind without a counter)
-// or a count fails, the caller falls back to o200k_base and says so (TextTokens.ts).
+// Where none applies (DeepSeek, OpenRouter's other models, a plugin's kind without a counter),
+// a provider's counter isn't opted in, or a count fails, the caller falls back to o200k_base and
+// says so (TextTokens.ts). Anthropic's old public Claude tokenizer isn't used: it undercounts
+// current models by 30–50% (owner, 2026-11-02).
 import { Effect } from "effect"
 import type { LocalEncoding } from "../importer/tokenizer.ts"
 import { countField, joinUrl, postJson, TokenCountError } from "./imageCounters.ts"
