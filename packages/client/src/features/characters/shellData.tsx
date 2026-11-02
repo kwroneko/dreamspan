@@ -97,7 +97,7 @@ export function useGroupCount() {
 }
 
 type Scope = { entity: EntityId | null; chat: string | null }
-type SidebarSearch = { character?: string; forks?: string; side?: string }
+type SidebarSearch = { character?: string | undefined; forks?: string | undefined; side?: string | undefined }
 
 /** The search params for a scope, to merge into a navigation that should keep or set it. */
 export const scopeSearch = (scope: Scope) => ({
@@ -118,7 +118,13 @@ export function ShellNavigation({ children }: { children: ReactNode }) {
  * with other search params: the middle stays as it is (UX-REWORK §3).
  */
 export function useShellNavigation() {
-  const search = useSearch({ strict: false }) as SidebarSearch
+  // Only these three: the whole search would re-render every row of the left panel whenever
+  // another param moves, the chat panel's tab with each switch (night/tabperf).
+  const search: SidebarSearch = {
+    character: useSearch({ strict: false, select: (s: SidebarSearch) => s.character }),
+    forks: useSearch({ strict: false, select: (s: SidebarSearch) => s.forks }),
+    side: useSearch({ strict: false, select: (s: SidebarSearch) => s.side })
+  }
   const navigate = useNavigate()
   const { selection, picked } = useContext(Picks)!
   const scope: Scope = { entity: (search.character as EntityId | undefined) ?? null, chat: search.forks ?? null }

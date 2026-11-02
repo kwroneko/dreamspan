@@ -45,6 +45,15 @@ export const budgets = {
   serverRoundTripP99Ms: 100,
   /** Deltas that arrived past the text a client had: none, ever. */
   gaps: 0,
+  /**
+   * Switching the chat panel's tabs (night/tabperf): message rows re-rendered by a switch (none:
+   * the tab is the panel's business), tabs that showed "Loading the …" while their code came
+   * (none: it's loaded once the panel opens), and from the click to the tab's content shown,
+   * the slowest tab's first visit (measured 50 to 180 ms; 400 to 550 ms before, every time).
+   */
+  rowRendersPerTabSwitch: 0,
+  tabCodeWaits: 0,
+  tabShownMs: 1500,
   /** From navigation to an editor ready, for a 50 KB card or a 100-prompt preset. */
   editorOpenMs: 8000
 }

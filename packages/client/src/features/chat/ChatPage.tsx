@@ -451,9 +451,16 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
     if (panel !== null && panel !== urlPanel)
       void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, panel }), replace: true })
   }, [navigate, urlPanel, panel])
+  // What a call reads when it's made, so `show` stays the same function from tab to tab and as
+  // the chat updates: the message rows, the composer and the header take it, and a new one
+  // re-rendered every row on each tab switch (night/tabperf).
+  const latest = useRef({ view, urlPanel, panel })
+  useLayoutEffect(() => {
+    latest.current = { view, urlPanel, panel }
+  })
   const show = useCallback(
     (next: PanelTab | null) => {
-      if (next !== null && !isPanelTab(next, view)) return
+      if (next !== null && !isPanelTab(next, latest.current.view)) return
       rememberPanel(userId, next)
       setRemembered({ userId, tab: next })
       void navigate({
@@ -461,12 +468,17 @@ function usePanel(urlPanel: PanelTab | null, view: ChatView) {
         search: ({ panel: _gone, ...prev }: Record<string, unknown>) =>
           next === null ? prev : { ...prev, panel: next },
         // On a phone, opening the sheet is a step in the history, so Back closes it.
-        replace: wide || next === null || urlPanel !== null
+        replace: wide || next === null || latest.current.urlPanel !== null
       })
     },
-    [navigate, wide, urlPanel, userId, view]
+    [navigate, wide, userId]
   )
-  return { panel, show, wide, userId }
+  /** Search params that keep the panel's tab: the one shown when the call is made. */
+  const withPanel = useCallback((search: Record<string, string>) => {
+    const shown = latest.current.panel
+    return shown === null ? search : { ...search, panel: shown }
+  }, [])
+  return { panel, show, withPanel, wide, userId }
 }
 
 function ChatSurface({
@@ -482,12 +494,7 @@ function ChatSurface({
 }) {
   const view = useSyncExternalStore(session.subscribe, session.snapshot)
   const navigate = useNavigate()
-  const { panel, show, wide, userId } = usePanel(urlPanel, view)
-  /** Search params that keep the panel's tab. */
-  const withPanel = useCallback(
-    (search: Record<string, string>) => (panel === null ? search : { ...search, panel }),
-    [panel]
-  )
+  const { panel, show, withPanel, wide, userId } = usePanel(urlPanel, view)
   const shown = useRef({ fork, slot })
   // Another message or fork of the open chat moves the window; a URL catching up with
   // where the window already is doesn't.
