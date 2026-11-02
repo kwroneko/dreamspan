@@ -8,6 +8,8 @@
 
 **Built 2026-11-02:** ST folder source revision and arrival dates (§1.4) are implemented and obsolete as implementation proposals; see ARCHITECTURE.md §13. Their [P] status records implementation choices, not owner confirmation.
 
+**Built 2026-11-02 (castpresence):** Version-backed chat participation (§3.5) is implemented and obsolete as an implementation proposal; see ARCHITECTURE.md §3.8. Its [P] status records the implementation choice, not owner confirmation.
+
 **Status**: Draft, 2026-10-09. U12 user cost overrides (§9) are built (2026-10-28); that entry is obsolete as an implementation plan, see ARCHITECTURE.md §6. U20 ST preset text/context switches built 2026-10-28; the implemented requirements are obsolete as plans here, see ARCHITECTURE.md §9 and §15. Length-cutoff failures (§3.1, U08) and prompt-binding controls (§5.3, U09) are built (2026-10-28); those design entries are obsolete as implementation plans, see ARCHITECTURE.md §12 and §15. U02/U05 authored-setting and pending-text draft protection is also built (2026-10-28), documented in ARCHITECTURE.md §3.10; that implementation record supersedes those surfaces here. Composer backlog U03/U06/U07 built 2026-10-28: queue edit drafts and recovery (§6.2), pending cast speaker/guidance parity (§2.2), and version-only Stop (§3.1) are implemented; those requirements are now documented in ARCHITECTURE.md §12. U18’s card-rename Save and chat-fork history offers are built (ARCHITECTURE §3.13); those portions of §4 and §10.3 are obsolete as proposals. Embedded-card lorebook authoring (U19) is built; its implementation record is in ARCHITECTURE.md §14. The corresponding authoring gap under §1.1 is obsolete. Each item is marked:
 - **[D] Decided**: the owner stated it or explicitly confirmed it.
 - **[P] Proposed**: suggested during planning, not yet confirmed.
@@ -264,6 +266,8 @@ Snippets and shared named notes: **implemented, obsolete as a proposal** (2026-1
 - **[O]** **Overtaken**: The blanket scope option is superseded by §10.3’s owner decision; named shared notes (§4.1) have explicit identity and global text sharing (ARCHITECTURE §14). Earlier wording: “That option assumes the note has a stable, recognizable identity, which may not be clear to the user.”
 
 ### 3.5 Presence
+- **[D]** (owner, 2026-11-02) "Does adding and removing a character to a chat right away leave any permanent connection? I would say that a character is not *truly* added to a chat until a message or swipe is generated with that character being connected. If there's any kind of 'was in chat X' connection/feature, it should not consider a character that was added and removed right away. This is a design principle."
+- **[P]** (castpresence, 2026-11-02) Keep join/leave events as current and historical cast state; record historical participation with authored message versions. Each version pins its cast, with its speaker also counted, rather than deriving past participation from today's events. A historical swipe counts the cast actually used at its position; a tip-only join does not change an earlier swipe. A branch without a new version inherits cast state without inventing participation. Retained versions keep their evidence across selection changes and cast undo; purged versions cease to count. **Built; obsolete as an implementation proposal** (ARCHITECTURE §3.8).
 - **[D]** Characters can be marked present or absent per branch. Presence can be set:
   - manually (like muting in ST)
   - by a tool call

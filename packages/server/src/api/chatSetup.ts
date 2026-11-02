@@ -124,12 +124,17 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
       )
       const idsOf = ({ events, state }: (typeof positions)[number]) => castIds(events, state)
       // One read of the cards for each set of version bindings among the positions.
-      const groups = new Map<string, { bindings: ReturnType<typeof bindingsOf>; ids: Set<string> }>()
+      const groups = new Map<
+        string,
+        { bindings: ReturnType<typeof bindingsOf>; ids: Set<string>; active: Set<EntityId> }
+      >()
       for (const position of positions) {
         const bindings = bindingsOf(position.state)
         const key = JSON.stringify(bindings)
-        const group = groups.get(key) ?? { bindings, ids: new Set<string>() }
+        const group = groups.get(key) ?? { bindings, ids: new Set<string>(), active: new Set<EntityId>() }
         for (const id of idsOf(position)) group.ids.add(id)
+        for (const id of [...position.state.participants, ...position.state.playedByMe])
+          group.active.add(id as EntityId)
         groups.set(key, group)
       }
       const read = new Map<string, ReadonlyArray<CastCard>>()
@@ -139,7 +144,11 @@ export const makeChatSetupHandlers = Effect.gen(function* () {
           yield* reader.CastCards({
             userId: user,
             entityIds: [...group.ids] as Array<Cast["participants"][number]>,
-            chat: { chatId, bindings: group.bindings }
+            chat: {
+              chatId,
+              bindings: group.bindings,
+              history: { forkId: forkId ?? null, slotId: slotIds[0] ?? null, active: [...group.active] }
+            }
           })
         )
       const roleProjections = yield* reader.RoleProjections()

@@ -516,12 +516,13 @@ describe("chat setup", () => {
       const switched = yield* change({ _tag: "Persona", entityId: bo })
       assert.deepStrictEqual(switched.playedByMe, [bo])
       assert.deepStrictEqual(switched.participants, [miraId, bo])
-      assert.include(
+      // No version was written while Ana was connected: she leaves no historical metadata.
+      assert.notInclude(
         switched.cards.map((card) => card.entityId),
         ana
       )
       const reloaded = yield* api.GetCast({ chatId: started.chat.id, slotId: at })
-      assert.include(
+      assert.notInclude(
         reloaded.cards.map((card) => card.entityId),
         ana
       )

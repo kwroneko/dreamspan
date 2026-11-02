@@ -719,12 +719,10 @@ export const makeReadHandlers = Effect.gen(function* () {
               OR (${ranked} * (last_message_at IS NOT NULL), coalesce(last_message_at, created_at), id)
                 < (${ranked * (before?.empty === true ? 0 : 1)}, ${before?.at ?? null}, ${before?.id ?? null}))
             AND (${entityId ?? null} IS NULL OR id IN (
-              SELECT s.chat_id FROM state_events s WHERE json_extract(s.value_json, '$.entity') = ${entityId ?? null}
-                AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL))
+              SELECT s.chat_id FROM card_chat_membership s WHERE s.entity_id = ${entityId ?? null}))
             AND (${pattern} IS NULL OR title LIKE ${pattern} ESCAPE '\\' OR id IN (
-              SELECT s.chat_id FROM state_events s
-              WHERE s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
-                AND json_extract(s.value_json, '$.entity') IN (
+              SELECT s.chat_id FROM card_chat_membership s
+              WHERE s.entity_id IN (
                   SELECT r.entity_id FROM entity_refs r
                   JOIN entities e ON e.id = r.entity_id
                   LEFT JOIN card_summaries cs ON cs.revision_id = r.head_revision_id
@@ -736,6 +734,8 @@ export const makeReadHandlers = Effect.gen(function* () {
               SELECT s.chat_id FROM state_events s
               JOIN card_summaries cs ON cs.revision_id = json_extract(s.value_json, '$.revision')
               WHERE s.key = 'card.binding'
+                AND EXISTS (SELECT 1 FROM card_chat_membership m WHERE m.chat_id = s.chat_id
+                  AND m.entity_id = json_extract(s.value_json, '$.entity'))
                 AND (json_extract(cs.fields, '$[0]') LIKE ${pattern} ESCAPE '\\'
                   OR json_extract(cs.fields, '$[2]') LIKE ${pattern} ESCAPE '\\'
                   OR json_extract(cs.fields, '$[1]') LIKE ${pattern} ESCAPE '\\')))

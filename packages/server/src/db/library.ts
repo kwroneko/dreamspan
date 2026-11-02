@@ -196,20 +196,21 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
 
   /**
    * The chats a change to this ref reaches: those whose state names it, those with an
-   * override following it, and, for the entity's upstream, those the card joined. A chat
-   * counts even if the card left it since: better to say too many than too few.
+   * override following it, and, for cards, those with recorded version participation.
+   * A card still counts after leaving, but a temporary cast change never counts.
    */
-  const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "ref_kind" | "entity_id">) =>
-    sql<{ n: number }>`
+  const usedByChats = (userId: UserId, ref: Pick<RefRow, "id" | "ref_kind" | "entity_id" | "kind">) =>
+    (ref.kind === "card"
+      ? sql<{ n: number }>`SELECT count(*) AS n FROM card_chat_membership m CROSS JOIN chats c ON c.id = m.chat_id
+          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
+      : sql<{ n: number }>`
       SELECT count(*) AS n FROM chats c
       WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND (
         EXISTS (SELECT 1 FROM state_events s WHERE s.chat_id = c.id
-          AND s.key IN ('card.binding', 'preset.binding', 'lorebook.attach')
+          AND s.key IN ('preset.binding', 'lorebook.attach')
           AND json_extract(s.value_json, '$.ref') = ${ref.id})
-        OR EXISTS (SELECT 1 FROM entity_refs o WHERE o.chat_id = c.id AND o.follows_ref_id = ${ref.id})
-        OR (${ref.ref_kind === "upstream" ? 1 : 0} AND EXISTS (SELECT 1 FROM state_events s
-          WHERE s.chat_id = c.id AND s.key IN ('participant.join', 'card.swap')
-            AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})))`.pipe(Effect.map(([row]) => row!.n))
+        OR EXISTS (SELECT 1 FROM entity_refs o WHERE o.chat_id = c.id AND o.follows_ref_id = ${ref.id}))`
+    ).pipe(Effect.map(([row]) => row!.n))
 
   /**
    * A live card's single upstream ref. Null when it isn't the user's live card.
@@ -302,9 +303,8 @@ export const makeLibraryQueries = (sql: SqlClient.SqlClient) => {
           e.forked_in_chat_id AS chat, e.forked_at, e.archived_at, e.deleted_at, e.purged_at,
           r.id AS ref_id, r.label, r.subtitle, (SELECT id FROM root) AS root,
           (SELECT json_object('chats', count(DISTINCT c.id), 'last', max(c.last_message_at))
-            FROM state_events s JOIN chats c ON c.id = s.chat_id
-            WHERE json_extract(s.value_json, '$.entity') = +e.id
-              AND s.key IN ('participant.join', 'card.swap') AND s.superseded_by_changeset IS NULL
+            FROM card_chat_membership s CROSS JOIN chats c ON c.id = s.chat_id
+            WHERE s.entity_id = +e.id
               AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL) AS used
         FROM family JOIN entities e ON e.id = family.id
         LEFT JOIN entity_refs r ON r.id = (

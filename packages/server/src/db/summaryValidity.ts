@@ -64,6 +64,15 @@ const statements: ReadonlyArray<string> = [
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version AFTER UPDATE OF slot_id, speaker_entity_id, content, origin,
     source_version_id, created_at, deleted_at, purged_at, fork_id ON main.versions
     BEGIN ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")} ${touch(SLOT, slotChat("NEW.slot_id"), "NEW.slot_id")} END`,
+  // Initial import snapshots arrive together, after thousands of positions may have been
+  // written. Treat that as one chat-wide invalidation rather than proving reachability
+  // from every position. Normal generations retain the per-position invalidation.
+  `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_cast AFTER UPDATE OF cast_json ON main.versions
+    WHEN NEW.cast_json IS NOT OLD.cast_json BEGIN
+      INSERT INTO shell_touches (kind, chat_id, ref)
+        VALUES (CASE WHEN OLD.cast_json IS NULL THEN '${CHAT}' ELSE '${SLOT}' END,
+          ${slotChat("NEW.slot_id")}, NEW.slot_id);
+    END`,
   `CREATE TEMP TRIGGER IF NOT EXISTS shell_touch_version_delete AFTER DELETE ON main.versions
     BEGIN ${touch(SLOT, slotChat("OLD.slot_id"), "OLD.slot_id")} END`,
   ...(["insert", "update", "delete"] as const).flatMap((op) => {

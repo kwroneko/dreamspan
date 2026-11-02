@@ -2854,7 +2854,19 @@ export class ReadOps extends RpcGroup.make(
     payload: {
       userId: UserId,
       entityIds: Schema.Array(EntityId),
-      chat: Schema.optionalKey(Schema.Struct({ chatId: ChatId, bindings: CardBindings }))
+      chat: Schema.optionalKey(
+        Schema.Struct({
+          chatId: ChatId,
+          bindings: CardBindings,
+          history: Schema.optionalKey(
+            Schema.Struct({
+              forkId: Schema.NullOr(ForkId),
+              slotId: Schema.NullOr(SlotId),
+              active: Schema.Array(EntityId)
+            })
+          )
+        })
+      )
     },
     success: Schema.Array(CastCard),
     error: StorageError

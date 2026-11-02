@@ -30,7 +30,7 @@ import type { UserId } from "@rp/shared/domain.ts"
 import { validateDoc } from "@rp/shared/editing.ts"
 import { uuidv7 } from "@rp/shared/id.ts"
 import { unfinishedTitle } from "@rp/shared/stImportApi.ts"
-import type { StateEventData } from "@rp/shared/state.ts"
+import { foldState, type StateEventData } from "@rp/shared/state.ts"
 import { Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { docHash, searchText } from "./documents.ts"
@@ -892,6 +892,15 @@ export const makeStImportWriteHandlers = Effect.fnUntraced(function* () {
         for (const event of input.events)
           if (!stateTargets(event).some((target) => localTargets.has(target)))
             yield* insertEvent(userId, chatId, input.position, event, fileFork.id)
+        // ST records a file's cast separately from its versions. Pin that imported cast
+        // once; a later re-import or a local cast change must not rewrite old participation.
+        const importedCast = foldState(input.events.map((data) => ({ scope: null, data }))).participants
+        yield* sql`${pathSegments(sql, chatId, input.end, null)}
+          UPDATE versions SET cast_json = ${JSON.stringify(importedCast)}
+          WHERE origin = 'imported' AND cast_json IS NULL AND slot_id IN (
+            SELECT s.id FROM segments g CROSS JOIN slots s
+            WHERE s.chat_id = ${chatId} AND s.chain_id = g.chain_id AND s.depth BETWEEN g.lo AND g.hi
+          )`
         // Advance only this file's fork, preserving a continuation made locally.
         if (
           fileFork.deleted_at === null &&

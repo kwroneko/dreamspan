@@ -18,9 +18,10 @@ import type { ForkRow } from "./rows.ts"
 import { shellEventsQuery, shellPlainForksQuery, shellSlotsQuery, shellTreeQuery } from "./shellQueries.ts"
 import { withoutPurged } from "./stateRefs.ts"
 import { settleSummaries } from "./summaryValidity.ts"
+import { slotParticipantsSql } from "./participation.ts"
 
 /** Bumped whenever the computation changes, so summaries stored by an older build are recomputed. */
-export const FORK_SUMMARY_FORMAT = 2
+export const FORK_SUMMARY_FORMAT = 3
 
 /**
  * What the shell shows of a fork: ids only, the cast with every card, binned or not, and the
@@ -61,6 +62,7 @@ type Slot = {
   at: number
   depth: number
   preview: string
+  participants: string
 }
 type Event = FoldableEvent & { fork_id: string; chat_id: string; slot_id: string | null }
 
@@ -173,6 +175,7 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
               SELECT ${record.id} AS fork_id, s.id, s.chat_id, s.parent_slot_id, s.created_at, s.depth,
                 CASE WHEN ${slotDeletedIn(sql, record.id, "s")} THEN 1 END AS deleted_at,
                 v.speaker_entity_id AS speaker, substr(v.content, 1, 160) AS preview,
+                ${sql.literal(slotParticipantsSql("s"))} AS participants,
                 CASE WHEN v.origin IN ('edited', 'changeset') THEN s.created_at ELSE v.created_at END AS at
               FROM slots s JOIN versions v ON v.id = ${shownIn(sql, record.id, "s")}
               WHERE ${sql.in("s.id", ids)}`
@@ -203,13 +206,7 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
         positional.set(key, list)
       }
       let state = foldState(positional.get("") ?? [])
-      const joined = new Set([
-        ...state.participants,
-        ...foldState(branch, state).participants,
-        ...applicable.flatMap(({ data }) =>
-          data.key === "participant.join" || data.key === "card.swap" ? [data.value.entity] : []
-        )
-      ])
+      const joined = new Set<string>()
       const activity = new Map<string, { entityId: EntityId; at: number; slot: string }>()
       let endpoint: Slot | undefined
       let messages = 0
@@ -217,7 +214,6 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
       // the same one: it changes only at messages with events, so a long path folds them once.
       let foldedFrom: typeof state | undefined
       let played = new Set<string>()
-      let withOwn: ReadonlyArray<string> = []
       // What it shares: its parent's path while that's live, else the history up to its base.
       const parent = record.parent_fork_id === null ? undefined : parentPaths.get(record.parent_fork_id)
       const baseDepth = base?.depth
@@ -231,6 +227,9 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
               : null
       let split: ForkSummary["split"] = null
       for (const s of path) {
+        // Every retained swipe at this position counts, even one no longer selected.
+        // Cast events at the endpoint describe the next turn, never the preceding one.
+        for (const id of JSON.parse(s.participants) as Array<string>) joined.add(id)
         if (s.deleted_at !== null) continue
         if (shared !== null && split === null && !shared(s)) split = { at: s.created_at, after: messages }
         messages++
@@ -246,10 +245,8 @@ export const computeForkSummaries = (sql: SqlClient.SqlClient, records: Readonly
             here = foldState([event], here)
             for (const id of here.playedByMe) played.add(id)
           }
-          withOwn = here.participants
         }
         const playedByMe = s.speaker !== null && played.has(s.speaker)
-        for (const id of withOwn) joined.add(id)
         if (s.speaker !== null && !playedByMe)
           activity.set(s.speaker, { entityId: s.speaker as EntityId, at: s.at, slot: s.id })
       }

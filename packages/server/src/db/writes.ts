@@ -1,4 +1,5 @@
 import { displayEndOf } from "./displayPath.ts"
+import { castAt } from "./participation.ts"
 import { canonicalJson } from "@rp/shared/editing.ts"
 import { previewForkNotes } from "./forkNotes.ts"
 import { ForkNotesChanged } from "@rp/shared/chatApi.ts"
@@ -290,7 +291,11 @@ export const makeWriteHandlers = (bin: Bin) =>
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const row = yield* insertVersion(slotId, next!.n, version, at)
+          const [position] = yield* sql<{
+            parent_slot_id: string | null
+          }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
+          const cast = yield* castAt(sql, slot.chat_id, position!.parent_slot_id, fork.id)
+          const row = yield* insertVersion(slotId, next!.n, version, at, undefined, cast)
           if (select) {
             yield* recordHistoryReduction(sql, slotId, row.content, null, fork.id)
             yield* writeSelect(sql, { id: fork.id, chatId: slot.chat_id }, slotId, row.id)
@@ -393,7 +398,11 @@ export const makeWriteHandlers = (bin: Bin) =>
           const [next] = yield* sql<{
             n: number
           }>`SELECT coalesce(max(ordinal), -1) + 1 AS n FROM versions WHERE slot_id = ${slotId}`
-          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now())
+          const [position] = yield* sql<{
+            parent_slot_id: string | null
+          }>`SELECT parent_slot_id FROM slots WHERE id = ${slotId}`
+          const cast = yield* castAt(sql, slot.chat_id, position!.parent_slot_id, fork.id)
+          const inserted = yield* insertVersion(slotId, next!.n, version, Date.now(), undefined, cast)
           // The model chosen for it shows from the start; its rollout records the same one.
           if (model)
             yield* sql`UPDATE versions SET connection_id = ${model.connection}, model_id = ${model.model}

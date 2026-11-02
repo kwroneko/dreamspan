@@ -110,10 +110,8 @@ export const makeImportReadHandlers = Effect.gen(function* () {
         // Where each chat the card is in stands now (its active leaf): bound to a fixed
         // revision there, it keeps it; otherwise it reads the card's latest.
         const chats = yield* sql<{ id: string; leaf: string | null }>`
-          SELECT c.id, c.active_leaf_slot_id AS leaf FROM chats c
-          WHERE c.owner_user_id = ${userId} AND c.deleted_at IS NULL AND EXISTS (
-            SELECT 1 FROM state_events s WHERE s.chat_id = c.id AND s.key IN ('participant.join', 'card.swap')
-              AND json_extract(s.value_json, '$.entity') = ${ref.entity_id})`
+          SELECT c.id, c.active_leaf_slot_id AS leaf FROM card_chat_membership m CROSS JOIN chats c ON c.id = m.chat_id
+          WHERE m.entity_id = ${ref.entity_id} AND c.owner_user_id = ${userId} AND c.deleted_at IS NULL`
         let pinned = 0
         for (const chat of chats) {
           const state = yield* chatStateAt(sql, chat.id as ChatId, chat.leaf)

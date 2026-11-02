@@ -7,7 +7,7 @@
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { assert, describe, it } from "@effect/vitest"
-import type { Chat } from "@rp/shared/chat.ts"
+import { type Chat, NewVersion } from "@rp/shared/chat.ts"
 import { chatCursor } from "@rp/shared/chatApi.ts"
 import type { CardDoc } from "@rp/shared/docs/card.ts"
 import type { UserId } from "@rp/shared/domain.ts"
@@ -110,7 +110,7 @@ describe("card usage", () => {
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
-  it.live("continues the chat with the latest message, not a newer chat without messages", () =>
+  it.live("continues a used chat and excludes casts with no authored version", () =>
     Effect.gen(function* () {
       const api = yield* client()
       const mira = yield* card(api, "Mira", { name: "Mira", first_mes: "Hi." })
@@ -133,15 +133,11 @@ describe("card usage", () => {
         [used.chat.id]
       )
       const second = yield* api.ListChats({ limit: 1, before: chatCursor(first[0]!), entityId: mira })
-      assert.deepStrictEqual(
-        second.map((chat) => chat.id),
-        [empty.id]
-      )
-      assert.lengthOf(yield* api.ListChats({ limit: 1, before: chatCursor(second[0]!), entityId: mira }), 0)
+      assert.lengthOf(second, 0)
       // The whole list stays by last message, else creation: the new chat first.
       assert.strictEqual((yield* api.ListChats({ limit: 1, before: null }))[0]!.id, empty.id)
 
-      // With none of its chats messaged, the latest made is the one to continue.
+      // Cast configuration alone establishes no historical connection.
       const ana = yield* card(api, "Ana", { name: "Ana", first_mes: "Hi." })
       const older = yield* api.CreateChat({ title: "Older" })
       yield* Effect.sleep("5 millis")
@@ -149,7 +145,9 @@ describe("card usage", () => {
       for (const chat of [older, newer]) {
         yield* api.ChangeCast({ chatId: chat.id, slotId: null, change: { _tag: "Join", entityId: ana } })
       }
-      assert.strictEqual((yield* api.ListCardUsage()).find((c) => c.entityId === ana)!.latestChatId, newer.id)
+      const unused = (yield* api.ListCardUsage()).find((c) => c.entityId === ana)!
+      assert.strictEqual(unused.chats, 0)
+      assert.isNull(unused.latestChatId)
     }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig(), Generator.none)))
   )
 
@@ -164,6 +162,21 @@ describe("card usage", () => {
       }
       const plain = yield* api.CreateChat({ title: "Unrelated" })
       yield* api.ChangeCast({ chatId: made[0]!, slotId: null, change: { _tag: "Join", entityId: mira } })
+      yield* (yield* Writer).AppendMessage({
+        userId: (yield* api.Whoami()).id as UserId,
+        chatId: made[0]!,
+        parentSlotId: null,
+        branch: false,
+        commitDraft: null,
+        version: new NewVersion({
+          speakerEntityId: null,
+          writer: "human",
+          content: "A turn.",
+          status: "complete",
+          macroMode: "verbatim",
+          origin: "user_written"
+        })
+      })
       // By title, with LIKE's wildcards taken as text, in pages of two.
       const found: Array<Chat["id"]> = []
       let before: ReturnType<typeof chatCursor> | null = null
@@ -173,7 +186,7 @@ describe("card usage", () => {
         if (page.length < 2) break
         before = chatCursor(page.at(-1)!)
       }
-      assert.deepStrictEqual(found, [...made].reverse())
+      assert.deepStrictEqual(found, [made[0], ...made.slice(1).reverse()])
       assert.lengthOf(yield* api.ListChats({ limit: 50, before: null, search: "100x" }), 0)
       // By the label or the in-chat name of a card in it, any case.
       for (const search of ["HARBOR", "mirabel"]) {
@@ -267,6 +280,23 @@ describe("card usage", () => {
               'import', ?
             FROM n JOIN (SELECT 0 AS k UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4) k
             WHERE k.k <> 2 OR i % 3 = 0`,
+          params: [now]
+        },
+        {
+          sql: `INSERT INTO lanes (id, chat_id, name, created_at)
+            SELECT 'lane-' || id, id, 'main', ? FROM chats`,
+          params: [now]
+        },
+        {
+          sql: `INSERT INTO versions (id, slot_id, ordinal, status, writer, macro_mode, origin, cast_json, created_at, updated_at)
+            SELECT 'version-' || c.id, 'slot-' || c.id, 0, 'complete', 'human', 'verbatim', 'imported',
+              (SELECT json_group_array(DISTINCT json_extract(e.value_json, '$.entity')) FROM state_events e
+                WHERE e.chat_id = c.id AND e.key = 'participant.join'), ?, ? FROM chats c`,
+          params: [now, now]
+        },
+        {
+          sql: `INSERT INTO slots (id, chat_id, lane_id, depth, selected_version_id, created_at)
+            SELECT 'slot-' || id, id, 'lane-' || id, 0, 'version-' || id, ? FROM chats`,
           params: [now]
         }
       ])
