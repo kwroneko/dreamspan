@@ -92,7 +92,6 @@ export function CardTextEditor({
         tools={tools}
         status={status}
         expand={expand}
-        autoFocus={autoFocus}
         onChange={onChange}
         onBlur={onBlur}
       />

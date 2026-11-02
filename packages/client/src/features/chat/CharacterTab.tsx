@@ -209,7 +209,11 @@ function CardPanel({
       >
         {state.snapshot ? (
           <>
-            <CardNameHeader store={store} call={call} current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }} />
+            <CardNameHeader
+              store={store}
+              call={call}
+              current={session === null ? undefined : { chatId: session.id, forkId: view.forkId }}
+            />
             <CardTokens store={store} />
           </>
         ) : (
