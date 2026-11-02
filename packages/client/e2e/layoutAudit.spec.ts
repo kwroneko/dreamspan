@@ -103,6 +103,8 @@ test("the detector catches geometry defects and respects documented intent", asy
 
 const work = process.env.LAYOUT_AUDIT_WORK ?? mkdtempSync(join(tmpdir(), "rp-layout-audit-"))
 const selected = new RegExp(process.env.LAYOUT_AUDIT_SURFACES ?? ".*")
+// Surfaces to keep a whole-window screenshot of, for before-and-after evidence (shots/ in the work folder).
+const shots = process.env.LAYOUT_AUDIT_SHOTS ? new RegExp(process.env.LAYOUT_AUDIT_SHOTS) : null
 
 // Inspect content below the fold as well as the initial viewport. Message history
 // and editable field interiors have separate tests; don't page a 188k-message timeline.
@@ -355,6 +357,10 @@ test.describe("synthetic library and every app surface", () => {
             findings.push({ surface: surface + suffix, violations })
             writeFileSync(join(work, `findings-${width}-${theme}.json`), JSON.stringify(findings, null, 2))
           }
+          if (shots?.test(surface))
+            await page.screenshot({
+              path: join(work, "shots", `${width}-${theme}-${surface.replace(/\W+/g, "-")}.png`)
+            })
           await inspect()
           await sampleScrollEnds(page, inspect)
         }

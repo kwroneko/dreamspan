@@ -31,7 +31,7 @@ export function Tabs<Value extends string>({
   fill?: boolean | undefined
   /** Hidden panels stay mounted, keeping their state: text being typed, say. */
   keepMounted?: boolean | undefined
-  /** The tabs wrap onto a second row rather than running out of a narrow column. */
+  /** Tighter tabs, for a narrow column. Every row of tabs wraps rather than run out of its column. */
   wrap?: boolean | undefined
   /** Beside the tabs, at the end of their row: a close button, say. */
   end?: ReactNode
@@ -42,9 +42,7 @@ export function Tabs<Value extends string>({
     <BaseTabs.List
       aria-label={label}
       className={
-        fill
-          ? "flex min-w-0 flex-1 flex-wrap gap-0.5"
-          : `flex gap-1 border-b border-border ${wrap ? "flex-wrap gap-y-0" : ""}`
+        fill ? "flex min-w-0 flex-1 flex-wrap gap-0.5" : "flex min-w-0 flex-wrap gap-x-1 border-b border-border"
       }
     >
       {tabs.map((tab) => {
