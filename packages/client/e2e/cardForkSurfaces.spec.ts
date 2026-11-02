@@ -166,8 +166,7 @@ test("chat provenance and deleted family members remain visible", async ({ page 
         entityId: parent.entityId,
         name: "Harbor child",
         nickname: "",
-        characterVersion: "storm",
-        moveDrafts: false
+        characterVersion: "storm"
       })
       return { parent, child, chat }
     })
@@ -210,8 +209,7 @@ test("the parent picker finds archived cards by their in-character name", async 
         refId: source.id,
         name: "Library title",
         nickname: "Captain Searchable",
-        characterVersion: "old",
-        moveDrafts: false
+        characterVersion: "old"
       })
       const child = yield* api.CreateCard({ label: "Picker child", name: "Picker child" })
       return { parent, child }
@@ -262,8 +260,7 @@ test("family comparison reads both current saved heads and excludes drafts", asy
         refId: parent.id,
         name: "Saved comparison",
         nickname: "",
-        characterVersion: "child",
-        moveDrafts: false
+        characterVersion: "child"
       })
       yield* saveDescription(parent.id, "The parent’s later saved premise.", true)
       yield* saveDescription(parent.id, "PARENT DRAFT EXCLUDED", false)

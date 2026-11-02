@@ -12,8 +12,11 @@ import { onForkPath } from "./forks.ts"
 import { NotFound } from "./ops.ts"
 import { stateEventRowsThrough } from "./stateRead.ts"
 import { sharedNote } from "./sharedNotes.ts"
+import { entityDraftTarget } from "@rp/shared/drafts.ts"
+import { textField } from "@rp/shared/editing.ts"
 
 const decodeEvent = Schema.decodeUnknownSync(FoldableEvent)
+const CONTENT = textField(["content"])
 
 export const previewForkNotes = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
@@ -78,8 +81,14 @@ export const previewForkNotes = Effect.fnUntraced(function* (
   const cards = [
     ...new Set([...thenState.participants, ...thenState.playedByMe, ...nowState.participants, ...nowState.playedByMe])
   ]
-  const rows = yield* sql<{ entity: EntityId; revision: string; doc_json: string; card_name: string | null }>`
-    SELECT e.id AS entity, r.head_revision_id AS revision, h.doc_json,
+  const rows = yield* sql<{
+    entity: EntityId
+    ref: string
+    revision: string
+    doc_json: string
+    card_name: string | null
+  }>`
+    SELECT e.id AS entity, r.id AS ref, r.head_revision_id AS revision, h.doc_json,
       (SELECT label FROM entity_refs WHERE entity_id = json_extract(h.doc_json, '$.owner.card')
         AND ref_kind = 'upstream') AS card_name
     FROM entities e JOIN entity_refs r ON r.entity_id = e.id AND r.ref_kind = 'upstream'
@@ -101,21 +110,34 @@ export const previewForkNotes = Effect.fnUntraced(function* (
       const doc = bound ? (JSON.parse(bound.doc_json) as Doc) : head
       const linked = typeof doc.link === "string" ? yield* sharedNote(sql, userId, doc.link) : null
       return {
-        revision,
-        content: linked?.content ?? (typeof doc.content === "string" ? doc.content : ""),
-        enabled: switches.get(row.entity) ?? (card && doc.on_by_default === true)
+        state: {
+          revision,
+          content: linked?.content ?? (typeof doc.content === "string" ? doc.content : ""),
+          enabled: switches.get(row.entity) ?? (card && doc.on_by_default === true)
+        },
+        linked: linked !== null
       }
     })
     const then = yield* snapshot(thenState, thenSwitches)
     const now = yield* snapshot(nowState, nowSwitches)
-    if (then.revision === now.revision && then.enabled === now.enabled) continue
+    if (then.state.revision === now.state.revision && then.state.enabled === now.state.enabled) continue
+    // A chat note's unsaved text at the latest message is the latest state (carryDrafts.ts).
+    // A card note's text is the card's, the same on every branch; a linked note's is shared.
+    const [typed] =
+      card || now.linked
+        ? []
+        : yield* sql<{ content: string }>`SELECT content FROM drafts WHERE user_id = ${userId}
+            AND target_kind = 'entity_field' AND target_id = ${entityDraftTarget(row.ref, fork.id)}
+            AND field = ${CONTENT} AND status = 'active'`
+    const unsaved = typed !== undefined && typed.content !== now.state.content ? { unsaved: typed.content } : {}
     result.push({
       note: row.entity,
       title: typeof head.title === "string" && head.title ? head.title : "Untitled note",
       card,
       owner: card ? (row.card_name ?? "Character note") : "This chat",
-      then,
-      now
+      then: then.state,
+      now: now.state,
+      ...unsaved
     })
   }
   return result

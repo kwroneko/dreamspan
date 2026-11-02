@@ -12,7 +12,7 @@ import { SqlClient } from "effect/sql"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
 import { isMediaPath } from "./media.ts"
-import { noteAt, otherBranches, slotMessage } from "./noteAt.ts"
+import { noteAt, noteHere, otherBranches } from "./noteAt.ts"
 import { NotFound, type ReadOps } from "./ops.ts"
 import { linkCounts, linkedNote, sharedNote } from "./sharedNotes.ts"
 import { query } from "./tx.ts"
@@ -40,7 +40,7 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
     OpenEditor: ({ userId, refId, chatNote }) =>
       Effect.gen(function* () {
         const owned = yield* lib.ownedRef(userId, refId)
-        const resolved = chatNote ? yield* noteAt(sql, lib, userId, owned, chatNote) : null
+        const resolved = chatNote ? yield* noteHere(sql, lib, userId, owned, chatNote) : null
         const ref = resolved?.ref ?? owned
         const usedByChats = yield* lib.usedByChats(userId, { ...ref, id: refId })
         // A chat's own note's drafts are its branch's (owner, 2026-11-01).
@@ -65,8 +65,6 @@ export const makeEditorReadHandlers = Effect.gen(function* () {
             ? {
                 chatNote: {
                   scope: resolved.scope,
-                  message: yield* slotMessage(sql, chatNote.slotId),
-                  latest: resolved.latest,
                   otherBranches: yield* otherBranches(sql, lib, userId, owned, chatNote.chatId, resolved)
                 }
               }

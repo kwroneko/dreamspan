@@ -1311,8 +1311,7 @@ const OPS: ReadonlyArray<Op> = [
                   refId: page.ref,
                   name: `Fork ${w.refs.length}`,
                   nickname: "",
-                  characterVersion: "",
-                  moveDrafts: true
+                  characterVersion: ""
                 }
               : { refId: page.ref, label: "Variant", subtitle: "", moveDrafts: true }
           )

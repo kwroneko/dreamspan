@@ -10,10 +10,10 @@ import { useMemo, useState } from "react"
 import { ErrorAlert, useAction } from "../../actions.tsx"
 import { AppClient } from "../../rpc.ts"
 import { Button } from "../../ui/Button.tsx"
-import { Checkbox } from "../../ui/Choice.tsx"
 import { Dialog, DialogActions } from "../../ui/Dialog.tsx"
 import { Field, Input } from "../../ui/Field.tsx"
 import { useCardNameCheck } from "../editor/cardNameCheck.ts"
+import { flushOpenEditors, refreshOpenEditors } from "../editor/openEditors.ts"
 import { usePresetWorkspace } from "../editor/PresetWorkspace.tsx"
 import { usePortraitViewer } from "../../ui/Portrait.tsx"
 import type { ChatSession } from "./session.ts"
@@ -113,7 +113,6 @@ function ChatCardForkDialog({
   const setName = (name: string) => durable.setText(JSON.stringify({ ...names, name }))
   const setNickname = (nickname: string) => durable.setText(JSON.stringify({ ...names, nickname }))
   const setVersion = (version: string) => durable.setText(JSON.stringify({ ...names, version }))
-  const [moveDrafts, setMoveDrafts] = useState(false)
   const clash = useCardNameCheck(name.trim(), version.trim())
   const action = useAction()
   const navigate = useNavigate()
@@ -127,15 +126,17 @@ function ChatCardForkDialog({
       open
       onOpenChange={(open) => !open && !action.pending && onClose()}
       title="Fork for this chat"
-      description={`Makes an independent copy of ${card.name} and its notes. This branch uses the copy; existing branches keep their cards. Editing the copy changes every chat that uses it.`}
+      description={`Makes an independent copy of ${card.name} and its notes. Unsaved changes to them move to the copy, but the names, which you set here; the original goes back to its last revision. This branch uses the copy; existing branches keep their cards. Editing the copy changes every chat that uses it.`}
     >
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault()
           if (clash || !name.trim() || action.pending) return
-          void durable.commit(durable.text, () =>
-            action
+          // What's typed in its notes reaches the server first: the copies take it (carryDrafts.ts).
+          void durable.commit(durable.text, async () => {
+            await flushOpenEditors().catch(() => undefined)
+            return action
               .run(
                 (client) =>
                   client("ForkCardForChat", {
@@ -144,13 +145,14 @@ function ChatCardForkDialog({
                     entityId: card.entityId,
                     name: name.trim(),
                     nickname: nickname.trim(),
-                    characterVersion: version.trim(),
-                    moveDrafts
+                    characterVersion: version.trim()
                   }),
                 ["library", "chats", `chat-cards:${session.id}`, `chat-notes:${session.id}`]
               )
               .then((result) => {
                 if (result.ok) {
+                  // Its notes' unsaved text moved to the copies: open editors read again.
+                  void refreshOpenEditors()
                   const change: CardSaved = {
                     entityId: result.value.entityId,
                     oldName: card.modelName ?? card.name,
@@ -163,7 +165,7 @@ function ChatCardForkDialog({
                 }
                 return result.ok
               })
-          )
+          })
         }}
       >
         <UserDraftStatus draft={durable} />
@@ -179,13 +181,6 @@ function ChatCardForkDialog({
         <Field label="In-character name" description="Used in prompts and {{char}}. Empty uses the display name.">
           <Input value={nickname} onChange={(event) => setNickname(event.currentTarget.value)} />
         </Field>
-        <Checkbox
-          checked={moveDrafts}
-          onCheckedChange={setMoveDrafts}
-          description="They move from the original to the copy, all but its names, which you set here."
-        >
-          Bring the editor’s unsaved changes
-        </Checkbox>
         <p className="text-xs text-muted">
           The original is used by {info.usedByChats} {info.usedByChats === 1 ? "chat" : "chats"}.
         </p>

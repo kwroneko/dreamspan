@@ -72,10 +72,8 @@ const BRANCH_EXPLANATION =
 function BranchLine({ store }: { store: EditorStore }) {
   const [open, setOpen] = useState(false)
   const at = useEditorState(store).snapshot?.chatNote
-  if (!at || (at.latest && !at.otherBranches)) return null
-  const text = !at.latest
-    ? `Changes apply from message ${at.message ?? 1} on; later messages keep the current text`
-    : "Other branches have their own version"
+  if (!at?.otherBranches) return null
+  const text = "Other branches have their own version"
   return (
     <p className="flex items-center gap-1 px-2 pb-1 pl-10 text-xs text-muted">
       <span>{text}</span>

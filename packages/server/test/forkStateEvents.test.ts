@@ -34,8 +34,7 @@ const setup = Effect.gen(function* () {
     refId: parent.ref.id,
     name: "Mira progressed",
     nickname: "Mira",
-    characterVersion: "2",
-    moveDrafts: false
+    characterVersion: "2"
   })
   // Different definition, through a normal document revision (synthetic data only).
   yield* writer.EditRef({
@@ -220,8 +219,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: parent.refId,
         name: "Mira new",
         nickname: "Mira",
-        characterVersion: "swapped",
-        moveDrafts: false
+        characterVersion: "swapped"
       })
       yield* writer.EditRef({
         userId,
@@ -498,8 +496,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: card.id,
         name: "Third card",
         nickname: "Mira",
-        characterVersion: "3",
-        moveDrafts: false
+        characterVersion: "3"
       })
       yield* add(main, b.slotId, { key: "presence.set", value: { entity: parent.entityId, present: false } })
       yield* swap(main)

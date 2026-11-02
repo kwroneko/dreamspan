@@ -13,14 +13,22 @@ import { noteHistory } from "./noteHistory.ts"
 import { NotFound } from "./ops.ts"
 import { displayEvents, displayThrough } from "./displayPath.ts"
 
+/**
+ * A chat's own note as its branch has it at `position`: the revision bound there. `latest`
+ * reads it at the branch's latest message instead, whatever message the position names: where a
+ * note is edited, since an edit is tied to the chat's current state (owner, 2026-11-02, via the
+ * coordinator: "When you edit a note, the edits are inherently tied to the current chat state").
+ */
 export const noteAt = Effect.fnUntraced(function* (
   sql: SqlClient.SqlClient,
   lib: ReturnType<typeof makeLibraryQueries>,
   userId: UserId,
   ref: RefRow,
-  position: ChatNotePosition
+  position: ChatNotePosition,
+  latest = false
 ) {
-  const { chatId, slotId } = position
+  const { chatId } = position
+  let slotId = position.slotId
   const [chat] = yield* sql<{
     id: string
   }>`SELECT id FROM chats WHERE id = ${chatId} AND owner_user_id = ${userId} AND deleted_at IS NULL`
@@ -38,6 +46,8 @@ export const noteAt = Effect.fnUntraced(function* (
   if (ref.kind !== "note" || (head.owner as { chat?: string } | undefined)?.chat !== chatId) {
     return yield* new NotFound({ entity: "note", id: ref.id })
   }
+  const [tip] = yield* sql<{ tip: SlotId | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork}`
+  if (latest) slotId = tip?.tip ?? null
   // In a fork with insertions, the binding nearest before the slot in display order.
   const shown = yield* displayThrough(sql, chatId, fork, slotId)
   const [binding] = shown
@@ -79,20 +89,18 @@ export const noteAt = Effect.fnUntraced(function* (
     doc = found?.doc ?? { ...current, content: "" }
     selected = found?.revision ?? revision.id
   }
-  const [tip] = yield* sql<{ tip: string | null }>`SELECT tip_slot_id AS tip FROM forks WHERE id = ${fork}`
-  // Its drafts are this branch's: the fork's, or at an earlier message than its latest, that message's.
-  const latest = slotId === null || slotId === (tip?.tip ?? null)
-  const scope = latest ? fork : `${fork}@${slotId}`
-  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: tip?.tip ?? null, latest, scope }
+  // Its unsaved text is its branch's (the drafts' scope).
+  return { ref: { ...ref, head_revision_id: selected }, doc, fork, tip: tip?.tip ?? null, scope: fork }
 })
 
-/** A slot's message number (its depth, from 1); null before the first message. */
-export const slotMessage = (sql: SqlClient.SqlClient, slotId: string | null) =>
-  slotId === null
-    ? Effect.succeed(null)
-    : sql<{ depth: number }>`SELECT depth FROM slots WHERE id = ${slotId}`.pipe(
-        Effect.map(([row]) => (row ? row.depth + 1 : null))
-      )
+/** A chat's own note where it's edited: at its branch's latest message (`noteAt`). */
+export const noteHere = (
+  sql: SqlClient.SqlClient,
+  lib: ReturnType<typeof makeLibraryQueries>,
+  userId: UserId,
+  ref: RefRow,
+  position: ChatNotePosition
+) => noteAt(sql, lib, userId, ref, position, true)
 
 /**
  * Whether another live branch (fork) of the chat has a version of the note of its own: unsaved

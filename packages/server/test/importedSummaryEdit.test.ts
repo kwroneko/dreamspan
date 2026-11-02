@@ -20,126 +20,137 @@ const line = (name: string, mes: string, minute: number, extra = {}) => ({
   extra
 })
 
-it.each([0, 1])("corrects an imported summary at older leaf %i without changing the library import", async (index) => {
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const api = yield* client()
-      const reader = yield* Reader
-      const writer = yield* Writer
-      const userId = (yield* api.Whoami()).id
-      const { importId } = yield* api.StartStImport({ unsupported: [] })
-      yield* sendStFile(
-        importId,
-        "settings.json",
-        encode({
-          extension_settings: {
-            memory: { position: 0, role: 1, depth: 2, template: "[{{summary}}]" },
-            disabledExtensions: []
-          }
-        })
-      )
-      yield* sendStFile(
-        importId,
-        "characters/Mira_new.png",
-        stFolder("ST/data/default-user/").get("ST/data/default-user/characters/Mira_new.png")!
-      )
-      const imported = yield* sendStFile(
-        importId,
-        "chats/Mira_new/review.jsonl",
-        jsonl(
-          { user_name: "Sam", character_name: "Mira", chat_metadata: {} },
-          line("Mira", "Greeting", 0),
-          line("Sam", "Earlier summary point", 1, { memory: "EARLY SUMMARY" }),
-          line("Mira", "Later summary point", 2, { memory: "LATE SUMMARY" }),
-          line("Sam", "End", 3)
+it.each([0, 1])(
+  "an imported summary opened at older leaf %i is corrected at the latest message, the library import unchanged",
+  async (index) => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const api = yield* client()
+        const reader = yield* Reader
+        const writer = yield* Writer
+        const userId = (yield* api.Whoami()).id
+        const { importId } = yield* api.StartStImport({ unsupported: [] })
+        yield* sendStFile(
+          importId,
+          "settings.json",
+          encode({
+            extension_settings: {
+              memory: { position: 0, role: 1, depth: 2, template: "[{{summary}}]" },
+              disabledExtensions: []
+            }
+          })
         )
-      )
-      expect(imported.outcome).toBe("added")
-      const [chat] = yield* api.ListChats({ limit: 10, before: null })
-      const chatId = chat!.id
-      const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
-      const leaf = path.entries[index]!.slotId
-      const note = (yield* api.ListChatNotes({ chatId, slotId: leaf })).find((n) => n.doc.kind === "imported_summary")!
-      const expected = index === 1 ? "EARLY SUMMARY" : ""
-      expect(note.doc.content).toBe(expected)
-      expect(note.doc.template).toBe("[{{summary}}]")
-      expect(note.doc.placement).toEqual({ mode: "section", section: "after_main_prompt", role: "user" })
-      const targetAt = (parentSlotId: SlotId) =>
-        writer.AppendMessage({
-          userId,
-          chatId,
-          parentSlotId,
-          branch: true,
-          version: new NewVersion({
-            speakerEntityId: null,
-            writer: "model",
-            content: "",
-            status: "generating",
-            macroMode: "verbatim",
-            origin: "generated"
-          }),
-          commitDraft: null
-        })
-      const target = yield* targetAt(leaf)
-      const assemble = (at: typeof target) =>
-        reader
-          .AssembleContext({
+        yield* sendStFile(
+          importId,
+          "characters/Mira_new.png",
+          stFolder("ST/data/default-user/").get("ST/data/default-user/characters/Mira_new.png")!
+        )
+        const imported = yield* sendStFile(
+          importId,
+          "chats/Mira_new/review.jsonl",
+          jsonl(
+            { user_name: "Sam", character_name: "Mira", chat_metadata: {} },
+            line("Mira", "Greeting", 0),
+            line("Sam", "Earlier summary point", 1, { memory: "EARLY SUMMARY" }),
+            line("Mira", "Later summary point", 2, { memory: "LATE SUMMARY" }),
+            line("Sam", "End", 3)
+          )
+        )
+        expect(imported.outcome).toBe("added")
+        const [chat] = yield* api.ListChats({ limit: 10, before: null })
+        const chatId = chat!.id
+        const path = yield* api.ReadPath({ chatId, leafSlotId: null, range: { _tag: "Bottom" }, limit: 20 })
+        const leaf = path.entries[index]!.slotId
+        const note = (yield* api.ListChatNotes({ chatId, slotId: leaf })).find(
+          (n) => n.doc.kind === "imported_summary"
+        )!
+        const expected = index === 1 ? "EARLY SUMMARY" : ""
+        expect(note.doc.content).toBe(expected)
+        expect(note.doc.template).toBe("[{{summary}}]")
+        expect(note.doc.placement).toEqual({ mode: "section", section: "after_main_prompt", role: "user" })
+        const main = chat!.currentForkId!
+        const tip = path.entries.at(-1)!.slotId
+        const targetAt = (parentSlotId: SlotId, branch: boolean) =>
+          writer.AppendMessage({
             userId,
             chatId,
-            slotId: at.slotId,
-            versionId: at.version.id,
-            now: 0,
-            timeZone: "UTC",
-            frozen: null
+            forkId: main,
+            parentSlotId,
+            branch,
+            version: new NewVersion({
+              speakerEntityId: null,
+              writer: "model",
+              content: "",
+              status: "generating",
+              macroMode: "verbatim",
+              origin: "generated"
+            }),
+            commitDraft: null
           })
-          .pipe(Effect.map(({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot))
-      const prior = yield* assemble(target)
-      expect(JSON.stringify(prior.request)).not.toContain("LATE SUMMARY")
-      if (expected) expect(JSON.stringify(prior.request)).toContain(expected)
-      else expect(JSON.stringify(prior.request)).not.toContain("SUMMARY")
+        const assemble = (at: { readonly slotId: SlotId; readonly version: { readonly id: never } }) =>
+          reader
+            .AssembleContext({
+              userId,
+              chatId,
+              slotId: at.slotId,
+              versionId: at.version.id,
+              now: 0,
+              timeZone: "UTC",
+              frozen: null
+            })
+            .pipe(Effect.map(({ snapshot }) => JSON.parse(snapshot) as ContextSnapshot))
 
-      const chatNote = { chatId, slotId: leaf }
-      const refId = note.ref.id
-      const field = textField(["content"])
-      const opened = yield* api.OpenEditor({ refId, chatNote })
-      expect(opened.doc.content).toBe(expected)
-      expect(opened.doc.template).toBe("[{{summary}}]")
-      const draft = yield* api.SaveEditorDraft({
-        refId,
-        field,
-        scope: opened.chatNote!.scope,
-        draftId: null,
-        content: "CORRECTED SUMMARY",
-        expectedRowVersion: null,
-        expectedSession: null,
-        baseRevisionId: opened.ref.headRevisionId
-      })
-      yield* api.CommitEditorDrafts({
-        refId,
-        chatNote,
-        expectedRowVersion: opened.ref.rowVersion,
-        fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
-        message: null
-      })
-      const assembled = yield* assemble(target)
-      expect(JSON.stringify(assembled.request)).toContain("[CORRECTED SUMMARY]")
-      const saved = yield* api.OpenEditor({ refId, chatNote })
-      expect(saved.doc.content).toBe("CORRECTED SUMMARY")
-      expect(saved.doc.template).toBe("[{{summary}}]")
-      expect((yield* api.ListChatNotes({ chatId, slotId: leaf })).find((n) => n.ref.id === refId)?.doc.content).toBe(
-        "CORRECTED SUMMARY"
-      )
-      expect(saved.doc).not.toHaveProperty("source_slot_id")
-      const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(assembled) })
-      expect(rebuilt._tag).toBe("Rebuilt")
-      if (rebuilt._tag === "Rebuilt") expect(JSON.parse(rebuilt.snapshot)).toEqual(assembled)
-      if (index === 1) {
-        // The ancestor is outside the edit's binding.
-        expect(
-          (yield* api.OpenEditor({ refId, chatNote: { chatId, slotId: path.entries[0]!.slotId } })).doc.content
-        ).toBe("")
-      }
-      expect((yield* api.OpenEditor({ refId })).doc.content).toBe("LATE SUMMARY")
-    }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
-  )
-})
+        // Opened through the older message's position (only the API names one), the editor edits
+        // the chat's current state (owner, 2026-11-02): the latest summary, corrected from there on.
+        const chatNote = { chatId, forkId: main, slotId: leaf }
+        const refId = note.ref.id
+        const field = textField(["content"])
+        const opened = yield* api.OpenEditor({ refId, chatNote })
+        expect(opened.doc.content).toBe("LATE SUMMARY")
+        expect(opened.doc.template).toBe("[{{summary}}]")
+        const draft = yield* api.SaveEditorDraft({
+          refId,
+          field,
+          scope: opened.chatNote!.scope,
+          draftId: null,
+          content: "CORRECTED SUMMARY",
+          expectedRowVersion: null,
+          expectedSession: null,
+          baseRevisionId: opened.ref.headRevisionId
+        })
+        yield* api.CommitEditorDrafts({
+          refId,
+          chatNote,
+          expectedRowVersion: opened.ref.rowVersion,
+          fields: [{ field, draftId: draft.id, expectedRowVersion: draft.rowVersion }],
+          message: null
+        })
+        const saved = yield* api.OpenEditor({ refId, chatNote })
+        expect(saved.doc.content).toBe("CORRECTED SUMMARY")
+        expect(saved.doc.template).toBe("[{{summary}}]")
+        expect(saved.doc).not.toHaveProperty("source_slot_id")
+        // The older message keeps what it had; the latest has the correction.
+        const listed = (slotId: SlotId) =>
+          Effect.map(
+            api.ListChatNotes({ chatId, forkId: main, slotId }),
+            (notes) => notes.find((n) => n.ref.id === refId)?.doc.content
+          )
+        expect(yield* listed(leaf)).toBe(expected)
+        expect(yield* listed(tip)).toBe("CORRECTED SUMMARY")
+
+        // A reply at the older message is assembled as it was; one after the latest takes the correction.
+        const earlier = yield* assemble((yield* targetAt(leaf, true)) as never)
+        expect(JSON.stringify(earlier.request)).not.toContain("CORRECTED")
+        if (expected) expect(JSON.stringify(earlier.request)).toContain(expected)
+        else expect(JSON.stringify(earlier.request)).not.toContain("SUMMARY")
+        const assembled = yield* assemble((yield* targetAt(tip, false)) as never)
+        expect(JSON.stringify(assembled.request)).toContain("[CORRECTED SUMMARY]")
+        const rebuilt = yield* reader.RebuildContext({ userId, snapshot: JSON.stringify(assembled) })
+        expect(rebuilt._tag).toBe("Rebuilt")
+        if (rebuilt._tag === "Rebuilt") expect(JSON.parse(rebuilt.snapshot)).toEqual(assembled)
+        // The library's import is unchanged.
+        expect((yield* api.OpenEditor({ refId })).doc.content).toBe("LATE SUMMARY")
+      }).pipe(Effect.scoped, Effect.provide(serverLayer(testConfig())))
+    )
+  }
+)

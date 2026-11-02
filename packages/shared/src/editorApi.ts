@@ -73,10 +73,6 @@ export class EditorSnapshot extends Schema.Class<EditorSnapshot>("EditorSnapshot
   chatNote: Schema.optionalKey(
     Schema.Struct({
       scope: Schema.String,
-      /** The position's message number (null before the first message). */
-      message: Schema.NullOr(Schema.Int),
-      /** The position is the branch's latest message: a change applies from there on. */
-      latest: Schema.Boolean,
       /** Another branch of the chat has a version of its own (another revision, or unsaved text). */
       otherBranches: Schema.Boolean
     })
@@ -309,16 +305,15 @@ export class EditorApi extends RpcGroup.make(
   // --- Card forks (spec/CARD-FORKS-DELTA.md §2): each fork is a card of its own.
   /**
    * A new card from this card ref's head, with the three names given (display name, in-character
-   * name, version), its tags and notes copied, optionally taking the ref's unsaved drafts but
-   * its names. `EditRefused` for a display name and version another card has.
+   * name, version), its tags and notes copied, taking the unsaved text of the ref (but its
+   * names) and of its notes, the original going back to its last revision (owner, 2026-11-02). `EditRefused` for a display name and version another card has.
    */
   Rpc.make("ForkCard", {
     payload: {
       refId: RefId,
       name: Schema.String.check(Schema.isMinLength(1)),
       nickname: Schema.String,
-      characterVersion: Schema.String,
-      moveDrafts: Schema.Boolean
+      characterVersion: Schema.String
     },
     success: LibraryRef,
     error: Schema.Union([...Writes])

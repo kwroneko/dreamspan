@@ -66,15 +66,14 @@ const commit = (api: Api, refId: RefId, only?: ReadonlyArray<string>) =>
     })
   })
 
-const fork = (api: Api, refId: RefId, characterVersion: string, moveDrafts = false, name?: string) =>
+const fork = (api: Api, refId: RefId, characterVersion: string, name?: string) =>
   Effect.gen(function* () {
     const parent = yield* api.OpenEditor({ refId })
     return yield* api.ForkCard({
       refId,
       name: name ?? parent.ref.label,
       nickname: typeof parent.doc.nickname === "string" ? parent.doc.nickname : "",
-      characterVersion,
-      moveDrafts
+      characterVersion
     })
   })
 
@@ -86,7 +85,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const name = "N".repeat(301)
       const nickname = "I".repeat(601)
       const characterVersion = "V".repeat(601)
-      const fork = yield* api.ForkCard({ refId: parent.ref.id, name, nickname, characterVersion, moveDrafts: false })
+      const fork = yield* api.ForkCard({ refId: parent.ref.id, name, nickname, characterVersion })
       const opened = yield* api.OpenEditor({ refId: fork.id })
       assert.strictEqual(opened.doc.name, name)
       assert.strictEqual(opened.doc.nickname, nickname)
@@ -160,8 +159,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: parent.ref.id,
         name: "Mira",
         nickname: "Captain Vey",
-        characterVersion: "noir",
-        moveDrafts: false
+        characterVersion: "noir"
       })
       assert.notStrictEqual(forked.entityId, parent.entityId)
       assert.deepStrictEqual(
@@ -333,13 +331,13 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const writer = yield* Writer
       const userId = yield* me(api)
       const a = yield* card(api, "Root")
-      const b = yield* fork(api, a.ref.id, "b", false)
-      const c = yield* fork(api, b.id, "c", false)
-      const d = yield* fork(api, a.ref.id, "d", false)
-      const e = yield* fork(api, c.id, "e", false)
+      const b = yield* fork(api, a.ref.id, "b")
+      const c = yield* fork(api, b.id, "c")
+      const d = yield* fork(api, a.ref.id, "d")
+      const e = yield* fork(api, c.id, "e")
       // Another family, which never shows up in this one.
       const other = yield* card(api, "Stranger")
-      yield* fork(api, other.ref.id, "x", false)
+      yield* fork(api, other.ref.id, "x")
 
       const ids = [a.entityId, b.entityId, c.entityId, d.entityId, e.entityId]
       const from = (entityId: EntityId) => api.CardFamily({ entityId })
@@ -533,8 +531,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: parent.ref.id,
         name: "Lio",
         nickname: "Chef Lio",
-        characterVersion: "2",
-        moveDrafts: true
+        characterVersion: "2"
       })
       const active = (refId: RefId) =>
         Effect.map(api.OpenEditor({ refId }), (opened) =>
@@ -593,14 +590,17 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
         refId: parent.ref.id,
         name: "Wren",
         nickname: "",
-        characterVersion: "2",
-        moveDrafts: true
+        characterVersion: "2"
       })
       const moved = (yield* api.OpenEditor({ refId: forked.id })).drafts.find(
         (d) => d.key.field === textField(["personality"])
       )!
-      assert.strictEqual(moved.id, typed.id)
+      // The fork's own draft now, with the text and its base; the parent went back to its revision.
+      assert.notStrictEqual(moved.id, typed.id)
+      assert.strictEqual(moved.content, "Shy, then bold.")
       assert.strictEqual(moved.baseRevision, start)
+      const left = (yield* api.OpenEditor({ refId: parent.ref.id })).drafts.find((d) => d.id === typed.id)!
+      assert.notStrictEqual(left.status, "active")
       // The editor's save dialog compares a draft with the revision it started from.
       const base = yield* api.GetRevision({ refId: forked.id, revisionId: start })
       assert.strictEqual(base.personality, "Shy.")
@@ -646,10 +646,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       const binned = yield* card(api, "Nell", { character_version: "binned" })
       yield* writer.DeleteEntity({ userId, entityId: binned.entityId })
       const attempt = (characterVersion: string, name = "Nell") =>
-        outcome(
-          api.ForkCard({ refId: parent.ref.id, name, nickname: "", characterVersion, moveDrafts: false }),
-          (ref) => ref.subtitle
-        )
+        outcome(api.ForkCard({ refId: parent.ref.id, name, nickname: "", characterVersion }), (ref) => ref.subtitle)
       // The parent's own pair, and an archived card's.
       assert.strictEqual(yield* attempt("1.0"), "EditRefused")
       assert.strictEqual(yield* attempt("archived"), "EditRefused")
@@ -680,7 +677,7 @@ layer(serverLayer(config), { excludeTestServices: true, timeout: "120 seconds" }
       })
       assert.strictEqual(
         yield* outcome(
-          api.ForkCard({ refId: preset.ref.id, name: "P", nickname: "", characterVersion: "", moveDrafts: false }),
+          api.ForkCard({ refId: preset.ref.id, name: "P", nickname: "", characterVersion: "" }),
           () => "allowed"
         ),
         "EditRefused"

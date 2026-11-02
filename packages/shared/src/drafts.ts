@@ -30,7 +30,7 @@ export class DraftKey extends Schema.Class<DraftKey>("DraftKey")({
 
 /**
  * A library field's draft target: its ref, or for a chat's own note the ref and the branch it's
- * edited in (`scope`: the fork, and `@slot` for an earlier message than the fork's latest), so
+ * edited in (`scope`: the fork), so
  * each branch keeps its own unsaved text (owner, 2026-11-01: the note is tied to its branch).
  */
 export const entityDraftTarget = (refId: string, scope?: string | null) =>
@@ -39,14 +39,7 @@ export const entityDraftTarget = (refId: string, scope?: string | null) =>
 /** The ref a library field's draft target names, and its branch scope (null: none). */
 export const parseDraftTarget = (targetId: string) => {
   const at = targetId.indexOf("/")
-  if (at < 0) return { refId: targetId, fork: null, slot: null }
-  const scope = targetId.slice(at + 1)
-  const pin = scope.indexOf("@")
-  return {
-    refId: targetId.slice(0, at),
-    fork: pin < 0 ? scope : scope.slice(0, pin),
-    slot: pin < 0 ? null : scope.slice(pin + 1)
-  }
+  return at < 0 ? { refId: targetId, fork: null } : { refId: targetId.slice(0, at), fork: targetId.slice(at + 1) }
 }
 
 /**

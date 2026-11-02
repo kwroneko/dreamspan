@@ -81,6 +81,7 @@ export const makeWriteHandlers = (bin: Bin) =>
       ownedVersion,
       ownedFork,
       createFork,
+      carryChatNoteDrafts,
       placeAsShown,
       chatIn,
       checkSpeaker,
@@ -116,7 +117,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         WHERE s.id = ${key.targetId} AND c.owner_user_id = ${userId} AND s.deleted_at IS NULL AND c.deleted_at IS NULL`,
       entity_field: (userId, key) => {
         const target = parseDraftTarget(key.targetId)
-        // A chat's own note's branch: a fork of its chat, and a message of that chat.
+        // A chat's own note's branch: a fork of its chat.
         return target.fork === null
           ? sql`SELECT count(*) AS n FROM entity_refs r JOIN entities e ON e.id = r.entity_id
         WHERE r.id = ${key.targetId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL`
@@ -125,8 +126,7 @@ export const makeWriteHandlers = (bin: Bin) =>
         JOIN forks f ON f.id = ${target.fork} AND f.chat_id = json_extract(h.doc_json, '$.owner.chat')
         JOIN chats c ON c.id = f.chat_id AND c.owner_user_id = ${userId}
         WHERE r.id = ${target.refId} AND e.owner_user_id = ${userId} AND e.deleted_at IS NULL AND e.kind = 'note'
-          AND f.deleted_at IS NULL AND c.deleted_at IS NULL
-          AND (${target.slot} IS NULL OR EXISTS (SELECT 1 FROM slots s WHERE s.id = ${target.slot} AND s.chat_id = c.id))`
+          AND f.deleted_at IS NULL AND c.deleted_at IS NULL`
       },
       // The chat owns an edit even after its queue entry posts or is withdrawn.
       queue_edit: (userId, key) => sql`SELECT count(*) AS n FROM chats c
@@ -702,6 +702,12 @@ export const makeWriteHandlers = (bin: Bin) =>
                 fork.id as ForkId
               )
           }
+          // The unsaved note text typed on the source goes with the branch, for each note it
+          // starts with the version of (owner, 2026-11-02): the choices above are made first.
+          const kept = comparison.filter(
+            (row) => (notes?.choices.find((choice) => choice.note === row.note)?.choice ?? "then") === "then"
+          )
+          yield* carryChatNoteDrafts(userId, chatId, from, fork, new Set(kept.map((row) => row.note)))
           const [chat] = yield* sql<ChatRow>`SELECT * FROM chats WHERE id = ${chatId}`
           return { fork: yield* forkOut(fork.id), chat: toChat(chat!) }
         }).pipe(transaction("CreateFork")),

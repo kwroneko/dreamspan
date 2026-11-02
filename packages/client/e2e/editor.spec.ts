@@ -257,7 +257,8 @@ test("forking a card is one action, and takes the unsaved changes along", async 
   await page.getByRole("button", { name: "Fork", exact: true }).click()
   const dialog = page.getByRole("dialog", { name: "Fork card" })
   await dialog.getByRole("textbox", { name: "Display name", exact: true }).fill("Noir Wren")
-  await expect(dialog.getByRole("checkbox", { name: "Take my unsaved changes to the fork" })).toBeChecked()
+  // Nothing to choose: a card's fork always takes them (owner, 2026-11-02).
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0)
   await dialog.getByRole("button", { name: "Fork card" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Noir Wren" })).toBeVisible()
   await expect(page.getByText("variant", { exact: true })).toHaveCount(0)
@@ -266,6 +267,12 @@ test("forking a card is one action, and takes the unsaved changes along", async 
   await expect(page.getByRole("heading", { level: 1, name: "Wren" })).toBeVisible()
   await expectTextBox(field(page, "Description"), "A keeper.")
   await expect(state(page)).toHaveText(/^Saved as revision \d+$/)
+  // The original's edit history keeps the moved text: one pick puts it back.
+  await page.getByRole("button", { name: "Edit history of Description" }).click()
+  const history = page.getByRole("dialog", { name: "Edit history: Description" })
+  await expect(history.getByLabel("Text of the state")).toHaveText("A keeper in the rain.")
+  await history.getByRole("button", { name: "Put this text in the box" }).click()
+  await expectTextBox(field(page, "Description"), "A keeper in the rain.")
 })
 
 test("a preset's prompts reorder by dragging and by keyboard, and toggle", async ({ page }) => {

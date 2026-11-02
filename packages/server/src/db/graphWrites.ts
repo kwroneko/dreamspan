@@ -11,6 +11,7 @@ import { Effect } from "effect"
 import type { SqlClient } from "effect/sql"
 import type { Bin } from "./bin.ts"
 import type { CommitDraft } from "./drafts.ts"
+import { makeDraftCarry } from "./carryDrafts.ts"
 import { AppendResult, LeafMoved, NotFound, StaleWrite } from "./ops.ts"
 import { forkThrough, onForkPath } from "./forks.ts"
 import { hiddenAtFork, pathPieces, slotPlace } from "./displayPath.ts"
@@ -36,6 +37,7 @@ import {
 import { checkStateReferences, withoutPurged } from "./stateRefs.ts"
 
 export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"]) => {
+  const { carryChatNoteDrafts } = makeDraftCarry(sql, drafts)
   /** Fails with NotFound unless `query` counts exactly one row. */
   const found = <E>(query: Effect.Effect<ReadonlyArray<{ readonly n: number }>, E>, entity: string, id: string) =>
     Effect.flatMap(query, ([row]) => (row?.n === 1 ? Effect.void : Effect.fail(new NotFound({ entity, id }))))
@@ -395,7 +397,12 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
         // At a fork's own tip it just continues. Elsewhere it makes a fork, checked above: a
         // parent no live fork's path holds (below a deleted branch) still takes a branch, as
         // it did before forks.
-        fork = from.tip_slot_id === parentSlotId ? from : yield* createFork(chatId, from, parentSlotId, at, true)
+        if (from.tip_slot_id === parentSlotId) fork = from
+        else {
+          fork = yield* createFork(chatId, from, parentSlotId, at, true)
+          // The branch takes the unsaved note text typed on the one it's made from.
+          yield* carryChatNoteDrafts(userId, chatId, from, fork)
+        }
       } else if (parentSlotId !== fork.tip_slot_id) {
         return yield* new LeafMoved({ chatId, activeLeafSlotId: fork.tip_slot_id })
       }
@@ -493,6 +500,7 @@ export const makeGraphWrites = (sql: SqlClient.SqlClient, drafts: Bin["drafts"])
     ownedVersion,
     ownedFork,
     createFork,
+    carryChatNoteDrafts,
     placeAsShown,
     chatIn,
     checkImages,

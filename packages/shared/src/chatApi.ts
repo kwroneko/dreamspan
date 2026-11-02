@@ -273,7 +273,13 @@ export const ForkNote = Schema.Struct({
   owner: Schema.String,
   card: Schema.Boolean,
   then: ForkNoteState,
-  now: ForkNoteState
+  now: ForkNoteState,
+  /**
+   * A chat note's unsaved text on the branch forked from, when it differs from `now`: the
+   * latest state, so "As it is now" takes it to the new branch, still unsaved, and "As it was
+   * then" leaves it where it was typed (owner, 2026-11-02, and DESIGN §4.1).
+   */
+  unsaved: Schema.optionalKey(Schema.String)
 })
 export type ForkNote = typeof ForkNote.Type
 export const ForkNoteSelection = Schema.Struct({

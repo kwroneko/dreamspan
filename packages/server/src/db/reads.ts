@@ -45,7 +45,7 @@ import {
 import { pathSegments } from "./pathSegments.ts"
 import { makeDraftStore } from "./drafts.ts"
 import { makeLibraryQueries, toLibraryRef } from "./library.ts"
-import { noteAt, noteChangedAt } from "./noteAt.ts"
+import { noteChangedAt, noteHere } from "./noteAt.ts"
 import { NotFound, ReadOps, RefOperationRefused, StorageError } from "./ops.ts"
 import {
   versionExtras,
@@ -606,7 +606,7 @@ export const makeReadHandlers = Effect.gen(function* () {
         const head = yield* lib.loadDoc(ref.head_revision_id)
         const resolved =
           chatNote && (head.owner as { chat?: string } | undefined)?.chat === chatNote.chatId
-            ? yield* noteAt(sql, lib, userId, ref, chatNote)
+            ? yield* noteHere(sql, lib, userId, ref, chatNote)
             : null
         let start: string | null = resolved?.ref.head_revision_id ?? ref.head_revision_id
         if (before !== undefined) {

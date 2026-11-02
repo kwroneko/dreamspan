@@ -134,23 +134,20 @@ export const seedLibrary = async (page: Page, server: TestServer) => {
         refId: aria.id,
         name: "Aria Vance",
         nickname: "Aria",
-        characterVersion: "Stormbound rewrite",
-        moveDrafts: false
+        characterVersion: "Stormbound rewrite"
       })
       yield* api.ForkCard({
         refId: fork.id,
         name: "Aria Vance",
         nickname: "Aria",
-        characterVersion: "Stormbound, epilogue",
-        moveDrafts: false
+        characterVersion: "Stormbound, epilogue"
       })
       const long = cards.find((c) => c.label === LONG)!
       yield* api.ForkCard({
         refId: long.id,
         name: LONG,
         nickname: "Seraphina",
-        characterVersion: "Court intrigue",
-        moveDrafts: false
+        characterVersion: "Court intrigue"
       })
     })
   )

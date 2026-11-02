@@ -159,8 +159,7 @@ test("root comparison names the family and descendant comparison names the paren
         refId: root.id,
         name: "Synthetic comparison child",
         nickname: "Child",
-        characterVersion: "v2",
-        moveDrafts: false
+        characterVersion: "v2"
       })
       return { root, child }
     })

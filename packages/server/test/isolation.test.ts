@@ -2339,8 +2339,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
             refId: owner.editor.cardRefId,
             name: "Taken",
             nickname: "",
-            characterVersion: "",
-            moveDrafts: true
+            characterVersion: ""
           }),
           "NotFound"
         )
@@ -2352,7 +2351,7 @@ const matrix: { readonly [Tag in Rpc.Tag<RpcGroup.Rpcs<typeof AppApi>>]: Entry }
   ForkCardForChat: {
     probe: (actor, owner) =>
       Effect.gen(function* () {
-        const names = { name: "Taken for chat", nickname: "", characterVersion: "", moveDrafts: true }
+        const names = { name: "Taken for chat", nickname: "", characterVersion: "" }
         yield* refused(
           actor.api.ForkCardForChat({
             ...names,

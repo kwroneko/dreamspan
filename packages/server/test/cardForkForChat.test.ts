@@ -62,8 +62,7 @@ const setup = Effect.gen(function* () {
       entityId: parent.entityId,
       name: "Pilot",
       nickname: "Captain",
-      characterVersion: version,
-      moveDrafts: false
+      characterVersion: version
     })
   const cast = (forkId: ForkId, slotId = d.slotId) => api.GetCast({ chatId: chat.id, forkId, slotId })
   return { api, writer, reader, userId, parent, chat, main, other, a, b, c, d, fork, cast, append }
