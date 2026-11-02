@@ -285,10 +285,12 @@ export const placeAuthorNoteEntries = (
   issues: ReportBuilder
 ): Array<Candidate> => {
   let moved = 0
+  let riders = 0
   const placed = candidates.map(({ id, entry }): Candidate => {
     const { position } = entry
     if (position !== "an_top" && position !== "an_bottom") return { id, entry: { ...entry, position } }
     moved++
+    if (entry.enabled && entry.content !== "") riders++
     return { id, entry: { ...entry, position: "at_depth", depth: place.depth, role: place.role } }
   })
   if (moved > 0)
@@ -296,6 +298,15 @@ export const placeAuthorNoteEntries = (
       "info",
       "lorebook.author_note_entries",
       `${moved === 1 ? "An entry" : `${moved} entries`} ST placed before or after the author's note ${moved === 1 ? "is" : "are"} at depth ${place.depth} as ${place.role} here, where ST's default author's note is.`,
+      path
+    )
+  // The folder import distinguishes text that could ride on a chat's note from disabled or
+  // empty entries. Keep the all-entries signal above for placement-sensitive reimport hashes.
+  if (riders > 0)
+    issues.add(
+      "info",
+      "lorebook.author_note_riders",
+      `${riders} enabled, non-empty entries can contribute text at the author's note.`,
       path
     )
   return placed
