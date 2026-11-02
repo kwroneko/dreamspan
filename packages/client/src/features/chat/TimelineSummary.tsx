@@ -337,7 +337,7 @@ export function TimelineSummary({
           ) : (
             <>
               {before !== null && (
-                <Tooltip label="Reads the 100 messages before these, still inside this summary.">
+                <Tooltip label="Show the 100 messages before these, inside this summary.">
                   <Button className="self-center" pending={pending} onClick={() => void page("earlier")}>
                     Earlier messages
                   </Button>
@@ -347,7 +347,7 @@ export function TimelineSummary({
                 <div key={entry.slotId}>{renderMessage(entry)}</div>
               ))}
               {after !== null && (
-                <Tooltip label="Reads the 100 messages after these, still inside this summary.">
+                <Tooltip label="Show the 100 messages after these, inside this summary.">
                   <Button className="self-center" pending={pending} onClick={() => void page("later")}>
                     Later messages
                   </Button>

@@ -124,7 +124,7 @@ for (const [name, viewport] of [
           const [a, b] = await Promise.all(switches.map((s) => s.boundingBox()))
           expect(Math.abs(a!.y - b!.y)).toBeLessThan(4)
         }
-        await hint(page, panel.getByText("Coverage rail", { exact: true }), /one lane per level/)
+        await hint(page, panel.getByText("Coverage rail", { exact: true }), /which summary covers each message/)
         await noSideways(page)
       })
 

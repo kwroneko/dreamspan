@@ -118,7 +118,7 @@ export function MessageDirection({ entry, session }: { entry: PathEntry; session
       <p className="min-w-0 flex-1 pt-1.5 wrap-break-word">
         <span className="font-medium">Guidance:</span> {version.direction}
       </p>
-      <Tooltip label="Puts this guidance in the composer to change it: sending writes a new version of this reply with it. This version and its guidance stay as they are.">
+      <Tooltip label="Change this guidance in the composer and write a new version with it. This version stays.">
         <Button
           variant="ghost"
           className="h-7! shrink-0 px-2! text-xs"
@@ -150,7 +150,7 @@ function GuidanceEditBar({ session }: ComposerControlContext) {
       </span>
       <IconButton
         label="Close: back to new messages"
-        hint="Close: the composer writes new messages again, with the text it had before. The new versions made stay."
+        hint="Back to writing new messages, with the text you had before."
         icon="close"
         onClick={() => guidanceEditor(session).close()}
       />
@@ -168,7 +168,7 @@ export const registerGuidanceEdit = () => [
     describe: viewOf(({ session, entry }) => ({
       label: "New version with guidance…",
       icon: "guidance",
-      hint: "Write guidance in the composer for a new version of this reply: sending writes the new version, and this one stays as it is.",
+      hint: "Guide a new version of this reply from the composer; this one stays.",
       onSelect: () => editGuidance(session, entry)
     }))
   }),

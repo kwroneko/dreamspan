@@ -191,7 +191,7 @@ function ChatTitle({
                 {
                   value: "chat",
                   label: "Only this chat",
-                  description: `It leaves “${group.group.name}” and appears under its new name on Characters. Chats with the same name and characters share a tile.`
+                  description: `Rename just this chat: it leaves “${group.group.name}” and shows under its new name.`
                 },
                 {
                   value: "group",

@@ -77,7 +77,7 @@ function OriginalText({ session, entry, report, closeDialog }: MessageActionProp
       wide
       onOpenChange={(open) => !open && closeDialog()}
       title="The original text"
-      description="As it was before regex scripts changed it. It's never sent to a model; restoring it adds it as a new version of the message, which scripts don't change."
+      description="The text before your regex scripts changed it. Restore it to add it as a new version, which scripts leave alone."
     >
       <ErrorAlert error={error} />
       {raw === null && error === null && <p className="text-sm text-muted">Loading…</p>}
@@ -137,7 +137,7 @@ export const registerRewrites = () => [
     describe: viewOf(({ openDialog }) => ({
       label: "Show the original text",
       icon: "original",
-      hint: "The text as the model wrote it, before scripts changed it, with a way to restore it as a new version.",
+      hint: "See the text as the model wrote it, before scripts changed it, and restore it.",
       onSelect: () => openDialog("message.original-text")
     })),
     dialog: OriginalText

@@ -152,7 +152,7 @@ function Row({
           <PinButton fork={fork} className="tile-toggle" />
         </span>
       )}
-      <Tooltip label="Moves the chat, with all its branches, to the bin, with Undo.">
+      <Tooltip label="Delete the chat and all its branches. You can undo it.">
         <button
           type="button"
           onClick={onDelete}

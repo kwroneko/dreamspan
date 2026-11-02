@@ -120,7 +120,7 @@ function useCardStore(refId: RefId) {
 /** "New chat with <name>": only them, from their greeting (owner, 2026-11-01: a button, not under More). */
 function NewChat({ card }: { card: CastCard }) {
   return (
-    <Tooltip label="Starts a chat with only them, from their greeting. It's saved when you first send.">
+    <Tooltip label="Start a chat with only them, at their greeting.">
       <Link
         to="/cards/$entityId/chat"
         params={{ entityId: card.entityId }}

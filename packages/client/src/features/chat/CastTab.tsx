@@ -70,11 +70,7 @@ function MemberMore({
         >
           Write as {name}
         </Button>
-        <Button
-          variant="ghost"
-          hint="Opens their card's fields in this panel."
-          onClick={() => showPanel(`card:${card.entityId}`)}
-        >
+        <Button variant="ghost" hint="Edit their card here." onClick={() => showPanel(`card:${card.entityId}`)}>
           Edit the card here
         </Button>
         <ChatCardActions session={session} card={card} info={info} />

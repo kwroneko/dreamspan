@@ -55,7 +55,7 @@ export const registerReasoningActions = () => [
 function CollapseAll({ first }: ReasoningActionProps) {
   if (!first) return null
   return (
-    <Tooltip label="Closes every reasoning and thinking block in the chat.">
+    <Tooltip label="Fold every reasoning and thinking block in the chat.">
       <button type="button" className={actionClass} onClick={collapseAllReasoning}>
         Collapse all
       </button>
@@ -76,7 +76,7 @@ function ShowAsReplyText({ version, kind, streaming, session }: ReasoningActionP
     if (!result.ok) showToast({ title: "Couldn't show the thinking as reply text", description: result.error.message })
   }
   return (
-    <Tooltip label="Puts this thinking back in the reply's text as a new version; this one stays among its versions.">
+    <Tooltip label="Make this thinking part of the reply's text, as a new version; this one stays.">
       <button type="button" className={actionClass} disabled={busy} onClick={() => void run()}>
         Show as reply text
       </button>

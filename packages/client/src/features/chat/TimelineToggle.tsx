@@ -7,7 +7,7 @@ export function TimelineToggle() {
   const viewer = useViewPrefs()
   return (
     <div className="text-sm">
-      <Tooltip label="Shows the summaries the model reads in place of the older messages. Each opens to its messages. For every chat.">
+      <Tooltip label="Show the summaries the model reads in place of older messages; each opens to its messages. In every chat.">
         <span className="inline-flex">
           <Switch
             checked={viewer.prefs.timeline === "summaries"}

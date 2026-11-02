@@ -150,7 +150,7 @@ function BranchesButton({ fork, entity = null }: { fork: ShellFork; entity?: Ent
   const { setScope } = useShellNavigation()
   if (fork.branches < 2) return null
   return (
-    <Tooltip label={`Lists this chat's ${fork.branches} branches here, without opening one.`}>
+    <Tooltip label={`Show this chat's ${fork.branches} branches`}>
       <button
         type="button"
         aria-label={`${fork.branches} branches of ${fork.chatName}: list them`}
@@ -336,7 +336,7 @@ export function OpenChatBranches() {
         </Tooltip>
         <IconButton
           label="List these branches in the panel"
-          hint="Shows these branches as the panel's list, with a way back to all chats."
+          hint="Show these branches in the sidebar"
           icon="expand"
           onClick={() => setScope({ entity: null, chat: chatId })}
         />

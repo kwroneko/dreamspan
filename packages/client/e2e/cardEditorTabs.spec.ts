@@ -130,9 +130,7 @@ for (const width of [1440, 390])
       await expect(tab.getByRole("button", { name: /^More for/ })).toHaveCount(0)
       if (width === 1440) {
         await tab.getByRole("link", { name: `New chat with ${name}`, exact: true }).hover()
-        await expect(
-          page.getByText("Starts a chat with only them, from their greeting.", { exact: false })
-        ).toBeVisible()
+        await expect(page.getByText("Start a chat with only them, at their greeting.", { exact: false })).toBeVisible()
       }
       await page.waitForTimeout(300)
       await shoot(page, `panel-definition-${width}-${theme}`)

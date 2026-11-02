@@ -86,7 +86,7 @@ function Instruction({
           <Button
             variant="ghost"
             disabled={disabled || pending}
-            hint="Drops this chat's own instruction: it follows the default for all your chats again."
+            hint="Go back to your default instruction."
             onClick={() => void draft.discard(() => save({ tail: null }))}
           >
             Use account default

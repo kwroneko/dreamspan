@@ -142,7 +142,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
         wide
         onOpenChange={(open) => !open && !pending && closeDialog()}
         title="Branch from here"
-        description="Choose which notes this branch starts with. Each choice includes the note’s text and on/off state."
+        description="Choose which notes this branch starts with: each as it was then, or as it is now."
       >
         <ErrorAlert error={error ?? action.error} />
         {notes === null ? (
@@ -193,15 +193,12 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
                     Then: {note.then.enabled ? "on" : "off"} · Now: {note.now.enabled ? "on" : "off"}
                   </p>
                   {buttons ? (
-                    <Button
-                      onClick={() => setDiff(note)}
-                      hint="Shows the two versions side by side, with the choice beside them."
-                    >
+                    <Button onClick={() => setDiff(note)} hint="Compare the two versions side by side.">
                       Compare {note.title}
                     </Button>
                   ) : (
                     <details>
-                      <Tooltip label="Shows the note as it was then and as it is now, side by side.">
+                      <Tooltip label="Compare the note then and now, side by side.">
                         <summary className="cursor-pointer text-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus">
                           Compare text and switches
                         </summary>
@@ -225,7 +222,7 @@ export function ForkNotesDialog({ session, entry, report, closeDialog }: Message
             disabled={notes === null || action.pending}
             pending={pending}
             onClick={() => void branch()}
-            hint="Makes the branch with these notes and opens it at this message. Unsaved note text goes with each note taken as it is now."
+            hint="Make the branch with these notes and open it at this message."
           >
             Create branch
           </Button>

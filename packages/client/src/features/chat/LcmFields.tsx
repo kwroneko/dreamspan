@@ -321,7 +321,7 @@ export function LcmFields({
             {
               value: "preset",
               label: "The full preset",
-              description: "The chat as the model sees it, the instruction after it. It reads the chat's cache."
+              description: "The chat as the model sees it, then the instruction: cheaper, as it reads the chat's cache."
             },
             {
               value: "raw",
@@ -396,7 +396,7 @@ export function LcmFields({
             {
               value: "after-reply",
               label: "Right after a reply",
-              description: "While the cache is warm: the summary request reads the reply's cache before it expires."
+              description: "Right after a reply, while its cache is still cheap to read."
             },
             {
               value: "next-reply",
