@@ -202,7 +202,8 @@ test("a reply's context opens from the reply, with its sources and the cache bre
   await expect(messages.getByText("Cache breakpoint: the end of the history the next request repeats")).toBeVisible()
   await expect(page.getByText("fake-small on Local model server (openai-chat)")).toBeVisible()
   // What the provider reported: 100 tokens read from its cache, 6 written.
-  await expect(page.getByRole("row", { name: /complete/ })).toContainText("100")
+  // The attempt reads "1: finished" since smallfixes3.
+  await expect(page.getByRole("row", { name: /^1: finished/ })).toContainText("100")
   // A short context opens with every turn's text showing, each part in a box naming its source.
   const card = messages.getByRole("region", { name: "Card “Mira”: description" })
   await expect(card.getByText("Mira keeps the harbor ledger.", { exact: true })).toBeVisible()

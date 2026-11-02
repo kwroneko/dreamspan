@@ -150,9 +150,12 @@ for (const width of [1440, 390]) {
         await row.getByRole("button", { name: "Cancel", exact: true }).click()
         await expect(box).toHaveCount(0)
         await expect(row.locator(".markdown")).toHaveText("ST edited again")
-        expect(
-          (await admin((api) => api.ListRecoveredTexts({ limit: 100, before: null }))).map((t) => t.content)
-        ).toContain(pending)
+        // Since smallfixes3, Cancel keeps the cancelled text one step back in the edit's history
+        // rather than sending it to the bin.
+        const states = await admin((api) =>
+          api.MessageDraftHistory({ target: { _tag: "Edit", versionId: target.version.id }, limit: 100 })
+        )
+        expect(states.map((s) => s.length)).toContain(pending.length)
       }
     })
   }

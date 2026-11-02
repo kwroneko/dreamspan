@@ -44,7 +44,12 @@ test.beforeAll(async ({ browser }) => {
       .filter({ hasText: "The Lantern Inn" })
       .filter({ hasText: "380 messages" })
     chatId = (await link.getAttribute("href"))!.split("/").at(-1)! as ChatId
-    const other = page.getByRole("main").getByRole("link").filter({ hasText: "420 messages" })
+    // Karen Holt's 420-message chat: since fe174be2 its row counts the branch it opens on (355).
+    const other = page
+      .getByRole("main")
+      .getByRole("link")
+      .filter({ hasText: "Karen Holt" })
+      .filter({ hasText: "355 messages" })
     otherId = (await other.getAttribute("href"))!.split("/").at(-1)! as ChatId
     // A model with a large window, as the owner's: the default pairs fit it.
     await admin((api) =>

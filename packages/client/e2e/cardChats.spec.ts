@@ -25,6 +25,11 @@ let scale: EntityId
 let aria: EntityId
 let used: ChatId
 let group: ChatId
+let groupCreatedAt: number
+
+/** How the app writes the day a chat started: its `createdAt`, not its ST file name's stamp (importreport). */
+const startedDay = (createdAt: number) =>
+  new Intl.DateTimeFormat("en-US", { day: "numeric", month: "short", year: "numeric" }).format(new Date(createdAt))
 
 test.beforeAll(async () => {
   const card = (label: string) => admin((api) => api.CreateCard({ label, name: label }))
@@ -88,11 +93,11 @@ test.beforeAll(async () => {
   const empty = await admin((api) => api.CreateChat({ title: "Opened, never written in" }))
   await admin((api) => api.ChangeCast({ chatId: empty.id, slotId: null, change: { _tag: "Join", entityId: aria } }))
   // A group chat imported from ST: a long name, three characters.
-  group = (
-    await admin((api) =>
-      api.CreateChat({ title: "The Lantern Inn at the End of the Long Road: 2024-4-6@21h03m12s345ms" })
-    )
-  ).id
+  const groupChat = await admin((api) =>
+    api.CreateChat({ title: "The Lantern Inn at the End of the Long Road: 2024-4-6@21h03m12s345ms" })
+  )
+  group = groupChat.id
+  groupCreatedAt = groupChat.createdAt
   for (const entityId of [aria, bren, cass]) {
     await admin((api) => api.ChangeCast({ chatId: group, slotId: null, change: { _tag: "Join", entityId } }))
   }
@@ -186,7 +191,7 @@ test("on a phone, a group chat's row shows when it started and its length in ful
   await page.goto(`${server().url}/cards/${aria}`)
   const row = chatLinks(page).filter({ hasText: "The Lantern Inn" })
   const meta = row.locator("[data-chat-meta]")
-  await expect(meta).toHaveText("started Apr 6, 2024 · 0 messages")
+  await expect(meta).toHaveText(`started ${startedDay(groupCreatedAt)} · 0 messages`)
   const fits = await meta.evaluate((element) => {
     const box = element.getBoundingClientRect()
     const link = element.closest("a,button")!.getBoundingClientRect()
@@ -198,15 +203,24 @@ test("on a phone, a group chat's row shows when it started and its length in ful
   await context.close()
 })
 
-test("a clipped name shows in full on hover", async ({ page }) => {
+test("a long name shows in full, wrapped rather than clipped", async ({ page }) => {
   await apiLogin(page.request, server(), ADMIN.handle, ADMIN.password)
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(`${server().url}/cards/${aria}`)
+  // Since the branch list (fe174be2) the name wraps with no line clamp, so nothing needs a tooltip.
   const name = chatLinks(page)
     .filter({ hasText: "The Lantern Inn" })
     .getByText(/^The Lantern Inn/)
-  await name.hover()
-  await expect(name).toHaveAttribute("title", "The Lantern Inn at the End of the Long Road")
+  await expect(name).toHaveText("The Lantern Inn at the End of the Long Road")
+  const clipped = await name.evaluate((element) => {
+    const line = element.parentElement!
+    return (
+      getComputedStyle(line).webkitLineClamp !== "none" ||
+      line.scrollWidth > line.clientWidth ||
+      line.scrollHeight > line.clientHeight
+    )
+  })
+  expect(clipped).toBe(false)
 })
 
 test("a definition folded anew when the window narrows offers Show more, and stays open", async ({ page }) => {
