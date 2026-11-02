@@ -107,6 +107,7 @@ export function TextField({
   readOnly = false,
   expandable = false,
   labelHidden = false,
+  fit = false,
   source,
   hint,
   aside
@@ -126,6 +127,8 @@ export function TextField({
   expandable?: boolean
   /** The label is for assistive technology only (a prompt's text, named in its block's header). */
   labelHidden?: boolean
+  /** A textarea as tall as its text, from `rows` up, instead of `rows` high: text read in a list. */
+  fit?: boolean
   /** A snippet's own text: its editor offers no sending to a snippet. */
   source?: "snippet" | undefined
 }) {
@@ -165,7 +168,7 @@ export function TextField({
           label={`Open ${label} large`}
           hint={`Opens ${label} large over the page, to write in a bigger box; it's the same text.`}
           icon="expand"
-          className="absolute -top-1.5 right-0 size-7!"
+          className={`absolute right-0 size-7! ${labelHidden ? "top-0.5 z-10" : "-top-1.5"}`}
           onClick={() => setLarge(true)}
         />
       )}
@@ -198,7 +201,7 @@ export function TextField({
             // Prose has them; a pattern (mono) doesn't.
             textActions={!mono}
             rows={rows}
-            className={`resize-y ${props.className}`}
+            className={`resize-y ${fit ? "max-h-[min(60vh,32rem)] min-h-0! field-sizing-content" : ""} ${labelHidden && expandable ? "pe-9" : ""} ${props.className}`}
             onChange={(event) => store.setText(path, event.currentTarget.value)}
           />
         )}
