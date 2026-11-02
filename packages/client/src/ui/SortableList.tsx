@@ -43,8 +43,13 @@ export function SortableList<Item>({
   const handles = useRef(new Map<string, HTMLButtonElement>())
   const [drag, setDrag] = useState<Drag | null>(null)
   const hint = useId()
-  /** While dragging: the pointer's height and the container that scrolls under it. */
-  const pointer = useRef<{ y: number; scroller: HTMLElement | null } | null>(null)
+  /**
+   * While dragging: the pointer's height, where it was pressed, and the container that scrolls
+   * under it. An edge scrolls the list only once the pointer has moved towards it: a handle
+   * pressed near the top doesn't scroll the list away under a pointer that hasn't moved, or
+   * that is dragging down.
+   */
+  const pointer = useRef<{ y: number; from: number; scroller: HTMLElement | null } | null>(null)
 
   /** The index a pointer at `y` would drop at, from the rows' middles. */
   const target = (y: number) => {
@@ -69,7 +74,8 @@ export function SortableList<Item>({
             : held.y > box.bottom - 72
               ? Math.ceil((held.y - (box.bottom - 72)) / 4)
               : 0
-        if (speed !== 0) {
+        const towards = speed < 0 ? held.y < held.from - 4 : held.y > held.from + 4
+        if (speed !== 0 && towards) {
           const before = held.scroller.scrollTop
           held.scroller.scrollTop += speed
           if (held.scroller.scrollTop !== before) setDrag((current) => current && { ...current, to: target(held.y) })
@@ -105,7 +111,11 @@ export function SortableList<Item>({
         onPointerDown={(event) => {
           if (event.button !== 0) return
           event.currentTarget.setPointerCapture(event.pointerId)
-          pointer.current = { y: event.clientY, scroller: scrollerOf(event.currentTarget) }
+          pointer.current = {
+            y: event.clientY,
+            from: event.clientY,
+            scroller: scrollerOf(event.currentTarget)
+          }
           setDrag({ from: index, to: index })
         }}
         onPointerMove={(event) => {
